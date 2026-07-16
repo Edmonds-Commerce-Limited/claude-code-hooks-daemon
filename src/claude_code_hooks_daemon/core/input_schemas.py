@@ -16,6 +16,13 @@ References:
 
 from typing import Any, Final
 
+from claude_code_hooks_daemon.constants.events import wired_event_metas
+
+# StatusLine carries dual-naming: EventID.json_key is "StatusLine" but its schema
+# (and EventType/settings) key is "Status". Centralised here for the auto-fill.
+_STATUS_LINE_JSON_KEY: Final[str] = "StatusLine"
+_STATUS_SCHEMA_KEY: Final[str] = "Status"
+
 # =============================================================================
 # Common Base Fields
 # =============================================================================
@@ -284,6 +291,35 @@ INPUT_SCHEMAS: Final[dict[str, dict[str, Any]]] = {
     "SubagentStop": SUBAGENT_STOP_INPUT_SCHEMA,
     "Status": STATUS_LINE_INPUT_SCHEMA,
 }
+
+
+def _permissive_input_schema(event_name: str) -> dict[str, Any]:
+    """A fail-open input schema for a wired event with no bespoke schema.
+
+    Newly-wired events (Plan 00170) have no built-in handler, so the daemon's
+    only behaviour is passthrough (empty chain -> allow). Strict field validation
+    would add no value and risks rejecting a real event whose exact shape we have
+    not captured yet, so this schema simply requires the event name and accepts
+    any additional fields.
+    """
+    return {
+        "type": "object",
+        "required": ["hook_event_name"],
+        "properties": {
+            **_BASE_PROPERTIES,
+            "hook_event_name": {"const": event_name},
+        },
+        "additionalProperties": True,
+    }
+
+
+# Auto-fill: every WIRED event must have an input schema (the completeness gate
+# asserts this). Bespoke schemas above win; any wired event lacking one gets a
+# permissive fail-open schema. At the 11-event baseline this adds nothing; each
+# Plan 00170 wiring flip picks up a schema here with no manual edit.
+for _meta in wired_event_metas():
+    _schema_key = _STATUS_SCHEMA_KEY if _meta.json_key == _STATUS_LINE_JSON_KEY else _meta.json_key
+    INPUT_SCHEMAS.setdefault(_schema_key, _permissive_input_schema(_schema_key))
 
 
 def get_input_schema(event_name: str) -> dict[str, Any] | None:

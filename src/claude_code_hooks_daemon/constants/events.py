@@ -371,6 +371,28 @@ class EventID:
     )
 
 
+def all_event_metas() -> tuple[EventIDMeta, ...]:
+    """Return every :class:`EventIDMeta` declared on :class:`EventID`.
+
+    Order follows declaration order because a class ``__dict__`` (``vars``) is
+    insertion-ordered on Python 3.7+. This is the single reflection point the
+    rest of the codebase builds on (config validation, schema registries,
+    hook-registration, the completeness gate) so those surfaces can never drift
+    from the catalogue.
+    """
+    return tuple(v for v in vars(EventID).values() if isinstance(v, EventIDMeta))
+
+
+def wired_event_metas() -> tuple[EventIDMeta, ...]:
+    """Return the events the daemon wires end-to-end today (``wired=True``).
+
+    Catalogued-but-not-yet-wired events (Plan 00170 burn-down) are excluded so
+    derived requirement sets never demand a forwarder / settings entry / schema
+    for a hook that deliberately does not exist yet.
+    """
+    return tuple(m for m in all_event_metas() if m.wired)
+
+
 # Type-safe event key literal (for mypy/type checking)
 EventKey = Literal[
     "pre_tool_use",

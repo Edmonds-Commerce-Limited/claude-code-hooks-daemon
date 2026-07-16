@@ -10,6 +10,13 @@ References:
 
 from typing import Any, Final
 
+from claude_code_hooks_daemon.constants.events import wired_event_metas
+
+# StatusLine carries dual-naming: EventID.json_key is "StatusLine" but its schema
+# (and EventType/settings) key is "Status". Centralised here for the auto-fill.
+_STATUS_LINE_JSON_KEY: Final[str] = "StatusLine"
+_STATUS_SCHEMA_KEY: Final[str] = "Status"
+
 # =============================================================================
 # PreToolUse Hook Response Schema
 # =============================================================================
@@ -237,6 +244,29 @@ RESPONSE_SCHEMAS: Final[dict[str, dict[str, Any]]] = {
     "Notification": NOTIFICATION_SCHEMA,
     "Status": STATUS_SCHEMA,
 }
+
+
+def _permissive_response_schema() -> dict[str, Any]:
+    """A fail-open response schema for a wired event with no bespoke schema.
+
+    Newly-wired events (Plan 00170) ship no built-in handler, so the daemon only
+    ever emits a passthrough response (``{}`` for an empty chain, or an advisory
+    ``systemMessage`` / ``hookSpecificOutput`` if a client attaches a handler).
+    Accept any object rather than constraining a contract we do not yet exercise.
+    """
+    return {
+        "type": "object",
+        "additionalProperties": True,
+    }
+
+
+# Auto-fill: every WIRED event must have a response schema, and get_response_schema
+# RAISES on an unknown event. Bespoke schemas above win; any wired event lacking
+# one gets a permissive fail-open schema. At the 11-event baseline this adds
+# nothing; each Plan 00170 wiring flip picks up a schema here with no manual edit.
+for _meta in wired_event_metas():
+    _schema_key = _STATUS_SCHEMA_KEY if _meta.json_key == _STATUS_LINE_JSON_KEY else _meta.json_key
+    RESPONSE_SCHEMAS.setdefault(_schema_key, _permissive_response_schema())
 
 
 def get_response_schema(event_name: str) -> dict[str, Any]:

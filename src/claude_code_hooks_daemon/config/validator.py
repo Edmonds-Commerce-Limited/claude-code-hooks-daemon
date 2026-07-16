@@ -18,7 +18,7 @@ import re
 from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.config.models import LogLevel
-from claude_code_hooks_daemon.constants import ConfigKey, EventID, ValidationLimit
+from claude_code_hooks_daemon.constants import ConfigKey, ValidationLimit, wired_event_metas
 from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
 
 logger = logging.getLogger(__name__)
@@ -34,19 +34,11 @@ class ConfigValidator:
     """Exhaustive configuration validator."""
 
     # Valid hook event types (11 total) - derived from EventID constants
-    VALID_EVENT_TYPES: ClassVar[set[str]] = {
-        EventID.PRE_TOOL_USE.config_key,
-        EventID.POST_TOOL_USE.config_key,
-        EventID.PERMISSION_REQUEST.config_key,
-        EventID.NOTIFICATION.config_key,
-        EventID.USER_PROMPT_SUBMIT.config_key,
-        EventID.SESSION_START.config_key,
-        EventID.SESSION_END.config_key,
-        EventID.STOP.config_key,
-        EventID.SUBAGENT_STOP.config_key,
-        EventID.PRE_COMPACT.config_key,
-        EventID.STATUS_LINE.config_key,
-    }
+    # Derived from the WIRED EventID entries (constants/events.py) so a client
+    # project may declare a ``handlers.<event>`` section for any event the daemon
+    # wires — including events wired by Plan 00170 for which we ship no built-in
+    # handler. Newly-wired events are accepted automatically; no edit here.
+    VALID_EVENT_TYPES: ClassVar[set[str]] = {meta.config_key for meta in wired_event_metas()}
 
     # Valid log levels - derived from the LogLevel enum (single source of truth)
     # so this set can never drift from the Pydantic schema / ConfigSchema.

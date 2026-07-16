@@ -52,18 +52,15 @@ def generate_fresh_hook_scripts() -> dict[str, str]:
         tmp_hooks_dir = Path(tmpdir) / "hooks"
         tmp_hooks_dir.mkdir()
 
-        # Create all standard forwarder scripts
+        # Create all standard forwarder scripts. Derived from the wired-event
+        # settings map (bash_key <- json_key) so this dogfooding check auto-covers
+        # every event the daemon wires — including Plan 00170 events wired with no
+        # built-in handler. StatusLine is excluded here (custom status-line script,
+        # generated separately below).
+        from claude_code_hooks_daemon.utils.hook_registration import HOOK_EVENTS_IN_SETTINGS
+
         daemon_hooks = {
-            "pre-tool-use": "PreToolUse",
-            "post-tool-use": "PostToolUse",
-            "session-start": "SessionStart",
-            "permission-request": "PermissionRequest",
-            "notification": "Notification",
-            "user-prompt-submit": "UserPromptSubmit",
-            "stop": "Stop",
-            "subagent-stop": "SubagentStop",
-            "pre-compact": "PreCompact",
-            "session-end": "SessionEnd",
+            bash_key: json_key for json_key, bash_key in HOOK_EVENTS_IN_SETTINGS.items()
         }
 
         scripts = {}

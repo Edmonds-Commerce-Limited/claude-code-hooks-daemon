@@ -15,7 +15,7 @@ Validates:
 
 from __future__ import annotations
 
-from claude_code_hooks_daemon.constants.events import EventID, EventIDMeta
+from claude_code_hooks_daemon.constants.events import wired_event_metas
 
 # ---------------------------------------------------------------------------
 # Single source of truth: expected hook events in settings.json
@@ -44,12 +44,11 @@ def _build_hook_events_map() -> dict[str, str]:
     Returns:
         Dict mapping PascalCase json_key to kebab-case bash_key
     """
-    result: dict[str, str] = {}
-    for name in dir(EventID):
-        attr = getattr(EventID, name)
-        if isinstance(attr, EventIDMeta) and attr.wired and attr.json_key != _STATUS_LINE_JSON_KEY:
-            result[attr.json_key] = attr.bash_key
-    return result
+    return {
+        meta.json_key: meta.bash_key
+        for meta in wired_event_metas()
+        if meta.json_key != _STATUS_LINE_JSON_KEY
+    }
 
 
 HOOK_EVENTS_IN_SETTINGS: dict[str, str] = _build_hook_events_map()

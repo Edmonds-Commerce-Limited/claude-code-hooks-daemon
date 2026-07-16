@@ -36,7 +36,13 @@ Design Principles:
 """
 
 from claude_code_hooks_daemon.constants.config import ConfigKey
-from claude_code_hooks_daemon.constants.events import EventID, EventIDMeta, EventKey
+from claude_code_hooks_daemon.constants.events import (
+    EventID,
+    EventIDMeta,
+    EventKey,
+    all_event_metas,
+    wired_event_metas,
+)
 from claude_code_hooks_daemon.constants.formatting import FormatLimit
 from claude_code_hooks_daemon.constants.handlers import HandlerID, HandlerIDMeta, HandlerKey
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
@@ -64,6 +70,8 @@ __all__ = [
     "EventID",
     "EventIDMeta",
     "EventKey",
+    "all_event_metas",
+    "wired_event_metas",
     # Formatting limit constants
     "FormatLimit",
     # Handler constants

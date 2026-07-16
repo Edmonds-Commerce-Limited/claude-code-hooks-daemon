@@ -18,27 +18,17 @@ from pydantic import (
     model_validator,
 )
 
-from claude_code_hooks_daemon.constants import EventID
+from claude_code_hooks_daemon.constants import wired_event_metas
 
 logger = logging.getLogger(__name__)
 
 # Single source of truth for the hook event-type config keys handled by the
-# daemon, derived from EventID (constants/events.py). Used by HandlersConfig's
-# dependency-validation loop so the iterated event list cannot drift from the
-# declared event-type fields (Finding #30, DRY-SSoT).
-_EVENT_TYPE_CONFIG_KEYS: tuple[str, ...] = (
-    EventID.PRE_TOOL_USE.config_key,
-    EventID.POST_TOOL_USE.config_key,
-    EventID.SESSION_START.config_key,
-    EventID.SESSION_END.config_key,
-    EventID.PRE_COMPACT.config_key,
-    EventID.USER_PROMPT_SUBMIT.config_key,
-    EventID.PERMISSION_REQUEST.config_key,
-    EventID.NOTIFICATION.config_key,
-    EventID.STOP.config_key,
-    EventID.SUBAGENT_STOP.config_key,
-    EventID.STATUS_LINE.config_key,
-)
+# daemon, derived from the WIRED EventID entries (constants/events.py). Used by
+# HandlersConfig's dependency-validation loop so the iterated event list cannot
+# drift from the declared event-type fields (Finding #30, DRY-SSoT). Deriving
+# from wired_event_metas() means a newly-wired event (Plan 00170) is accepted as
+# a config section automatically — no edit here.
+_EVENT_TYPE_CONFIG_KEYS: tuple[str, ...] = tuple(meta.config_key for meta in wired_event_metas())
 
 
 class LogLevel(StrEnum):
