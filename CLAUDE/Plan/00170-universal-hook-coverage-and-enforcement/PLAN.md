@@ -214,9 +214,9 @@ new registrations.
   `wired` so unwired events do not leak into the settings-registration
   requirement. (`response_contract`/`spec_version` deferred — not needed for the
   passthrough increment.)
-- [ ] ⬜ **Task 1.2**: Decide the forwarder strategy (per-event generated vs single
-  parameterised dispatcher) — investigate settings command-arg support first
-  (Decision 1).
+- [x] ✅ **Task 1.2**: Forwarder strategy decided (Decision 1): per-event scripts
+  from the existing generic `install.py` template; all 20 unwired events use the
+  generic (non-exit-code) forwarder; install-side lists to derive from `EventID`.
 
 ### Phase 2: Completeness enforcement gate (TDD)
 
@@ -262,11 +262,28 @@ new registrations.
 
 ### Decision 1: Forwarder strategy — per-event vs single dispatcher
 
-**Context**: 21 new near-identical forwarders is a DRY smell.
+**Context**: 20 new near-identical forwarders is a DRY smell.
 **Options**: (A) generate per-event scripts from a template keyed by the registry;
 (B) one parameterised `dispatch <Event>` script if settings commands accept an arg.
-**Decision**: TBD — resolve in Task 1.2 after verifying Claude Code settings
-command-arg support and forwarder-generation in the installer.
+**Decision**: **Option A — per-event scripts, generated from the registry.**
+`install.py:create_forwarder_script` already generates them from ONE generic
+template (`send_request_stdin "<Event>"`); only Stop/SubagentStop use a distinct
+exit-code-translation template. All 20 unwired events use the **generic** template
+(they block via JSON `hookSpecificOutput`, not exit-code-2, and zero-handler
+passthrough is `allow`→`{}` regardless — verified: empty chain → `HookResult.allow()`,
+`chain.py:263`). The DRY win is to make the install-side lists (`daemon_hooks`,
+`create_settings_json` hooks block, `create_project_handler_structure`, the
+`_VALID_EVENT_TYPES` list in the config validator, the `_EVENT_TYPE_CONFIG_KEYS`
+tuple in the config models) **derive from `EventID` wired events** so flipping
+`wired=True` + generating the forwarder file + adding schemas is the whole
+per-event change. A single
+parameterised dispatcher (Option B) is rejected: Claude Code registers one command
+per event and per-event scripts keep the byte-match dogfooding test simple.
+
+**Phase-3 blast-radius note**: flipping an event to `wired=True` also requires its
+entry in the LIVE `.claude/settings.json` (the completeness gate enforces it), and
+that forwarder then fires in the running session — so the wiring batch must be done
+carefully with a daemon restart + live probe per batch, forward-only events first.
 
 ## Success Criteria
 
