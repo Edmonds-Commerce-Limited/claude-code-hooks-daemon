@@ -1493,11 +1493,17 @@ class CompactStateMachine:
 
 # All supervisor-injected PROMPTS carry this bot prefix (with an emoji) so they
 # are visibly machine-generated in the transcript and never mistaken for
-# something the human typed.
-_BOT_PREFIX = "🤖 [ccy-supervisor]"
-_DRY_RUN_COMPACT_MARKER = (
-    f"{_BOT_PREFIX} compact suggestion fired (dry-run — not a real /compact, not human input)"
-)
+# something the human typed. The full prefix appends the local wall-clock time
+# the message was injected (see `_format_bot_prefix`) so a human scrolling back
+# through a long session can see WHEN each supervisor action happened -- the
+# `]` closes the bracket AFTER the timestamp: `🤖 [ccy-supervisor 2026-07-16 14:30:05]`.
+_BOT_PREFIX = "🤖 [ccy-supervisor"
+# Local time (not UTC): the marker is read by a human scrolling their own
+# terminal history, for whom local time is the natural "when" reference.
+_BOT_PREFIX_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+# Message BODIES (without the timestamped prefix, which is prepended at inject
+# time by `_resolve_payload`). Kept as the single source of truth for the text.
+_DRY_RUN_COMPACT_BODY = "compact suggestion fired (dry-run — not a real /compact, not human input)"
 # The armed compact is a real `/compact`, but `/compact` accepts freeform custom
 # instructions as its argument -- so the bot chrome rides along AS those
 # instructions. The slash command is still the first token (recognised
@@ -1505,8 +1511,8 @@ _DRY_RUN_COMPACT_MARKER = (
 # for a human `/compact`), and the instruction text tells the post-compact
 # session it was an AUTOMATED compaction that must resume -- reinforcing the
 # `continue` keystroke the supervisor injects once compaction ends.
-_ARMED_COMPACT_PAYLOAD = (
-    f"/compact {_BOT_PREFIX} automated compaction — NOT human-initiated. "
+_ARMED_COMPACT_BODY = (
+    "automated compaction — NOT human-initiated. "
     "After compacting, immediately resume and continue the work that was in progress."
 )
 # `continue` is harmless -- it only nudges the agent to resume -- so it is
@@ -1514,15 +1520,28 @@ _ARMED_COMPACT_PAYLOAD = (
 # not resuming would defeat the purpose, and (unlike /compact) a stray
 # `continue` cannot destroy context. It keeps the bot prefix so a post-compact
 # resume is clearly the supervisor's doing, not a human message.
-_CONTINUE_PAYLOAD = f"{_BOT_PREFIX} continue"
+_CONTINUE_BODY = "continue"
 # The real ESC byte injected (armed) to interrupt the current turn so a QUEUED
 # `/compact` runs. It is an interrupt KEY, not a line: injected raw with NO
 # trailing Enter. ESC is harmless (it only interrupts), but it DOES affect the
 # session, so in dry-run a visible marker is shown instead of a real ESC.
 _ESC_PAYLOAD = "\x1b"
-_DRY_RUN_ESCAPE_MARKER = (
-    f"{_BOT_PREFIX} would send [esc] to flush a queued /compact " "(dry-run — no real ESC sent)"
-)
+_DRY_RUN_ESCAPE_BODY = "would send [esc] to flush a queued /compact (dry-run — no real ESC sent)"
+
+
+def _format_bot_prefix(now_wall: float | None = None) -> str:
+    """Return the bot prefix stamped with the tick's local wall-clock time.
+
+    ``now_wall`` is the tick's epoch-seconds wall clock (``time.time()``), so the
+    stamp is deterministic and matches the decision that triggered the injection.
+    When omitted the current local time is used. Local time (not UTC) is used
+    deliberately: the marker is read by a human scrolling their own terminal
+    history, for whom local time is the natural "when did this happen" reference.
+    """
+    moment = datetime.now() if now_wall is None else datetime.fromtimestamp(now_wall)
+    return f"{_BOT_PREFIX} {moment.strftime(_BOT_PREFIX_TIME_FORMAT)}]"
+
+
 _INJECT_SUBMIT = "\r"
 # The submit (Enter) is written SEPARATELY from the payload, after this pause.
 # Injecting `payload + \r` in a single burst leaves the trailing carriage
@@ -1544,19 +1563,31 @@ _DEFAULT_IDLE_FLOOR_SECONDS = 2.0
 _DEFAULT_WORK_SETTLE_SECONDS = 3.0
 
 
-def _resolve_payload(decision: Decision, *, dry_run: bool) -> str | None:
+def _resolve_payload(
+    decision: Decision, *, dry_run: bool, now_wall: float | None = None
+) -> str | None:
     """Return the keystroke payload for a decision, or None for NOOP.
 
     In dry-run mode the payload is a harmless, visible MARKER string so the
     injection path can be exercised end-to-end without triggering a real
     compaction. Armed mode injects the real slash-command / prompt.
+
+    Every visible payload embeds the tick's local wall-clock time (via
+    ``_format_bot_prefix(now_wall)``) so the human can see WHEN the supervisor
+    acted when scrolling back. The raw ESC (armed) is exempt -- it is an
+    interrupt key, not a human-readable line.
     """
+    prefix = _format_bot_prefix(now_wall)
     if decision is Decision.WOULD_COMPACT:
-        return _DRY_RUN_COMPACT_MARKER if dry_run else _ARMED_COMPACT_PAYLOAD
+        if dry_run:
+            return f"{prefix} {_DRY_RUN_COMPACT_BODY}"
+        # `/compact` MUST stay the FIRST token so it is recognised as the slash
+        # command; the timestamped bot chrome rides along as its instruction arg.
+        return f"/compact {prefix} {_ARMED_COMPACT_BODY}"
     if decision is Decision.WOULD_CONTINUE:
-        return _CONTINUE_PAYLOAD
+        return f"{prefix} {_CONTINUE_BODY}"
     if decision is Decision.WOULD_ESCAPE:
-        return _DRY_RUN_ESCAPE_MARKER if dry_run else _ESC_PAYLOAD
+        return f"{prefix} {_DRY_RUN_ESCAPE_BODY}" if dry_run else _ESC_PAYLOAD
     return None
 
 
@@ -1746,7 +1777,7 @@ def decide_once(
         work_idle=facts.work_idle,
         foreground_ambiguous=foreground_ambiguous,
     )
-    payload = _resolve_payload(evaluation.decision, dry_run=dry_run)
+    payload = _resolve_payload(evaluation.decision, dry_run=dry_run, now_wall=facts.now_wall)
     # The raw ESC is an interrupt key, not a line -- inject it WITHOUT a trailing
     # Enter. Every other payload (compact / continue / markers) is a line.
     submit = not (evaluation.decision is Decision.WOULD_ESCAPE and not dry_run)

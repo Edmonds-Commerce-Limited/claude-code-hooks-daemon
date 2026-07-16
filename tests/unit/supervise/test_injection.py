@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from tests.unit.supervise._load import load_supervisor_module
@@ -24,9 +25,14 @@ CompactStateMachine = _mod.CompactStateMachine
 InputActivity = _mod.InputActivity
 DecisionLog = _mod.DecisionLog
 
-_DRY_COMPACT = _mod._DRY_RUN_COMPACT_MARKER
-_CONTINUE = _mod._CONTINUE_PAYLOAD
+# A fixed tick wall-clock so timestamped payloads are deterministic in tests.
+_FIXED_NOW = 1_700_000_000.0
 _BOT_PREFIX = _mod._BOT_PREFIX
+
+
+def _expected_stamp(now_wall: float) -> str:
+    """The local-time stamp the supervisor embeds for a given tick wall clock."""
+    return datetime.fromtimestamp(now_wall).strftime(_mod._BOT_PREFIX_TIME_FORMAT)
 
 
 class TestResolvePayload:
@@ -35,34 +41,93 @@ class TestResolvePayload:
         assert _mod._resolve_payload(Decision.NOOP, dry_run=False) is None
 
     def test_dry_run_compact_is_marker(self) -> None:
-        assert _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=True) == _DRY_COMPACT
+        payload = _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=True, now_wall=_FIXED_NOW)
+        assert payload is not None
+        assert _BOT_PREFIX in payload
+        assert _mod._DRY_RUN_COMPACT_BODY in payload
 
     def test_dry_run_continue_is_real_continue(self) -> None:
         # continue is harmless -> injected for real even in dry-run.
-        payload = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True)
-        assert payload == _CONTINUE
+        payload = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True, now_wall=_FIXED_NOW)
+        assert payload is not None
         assert "continue" in payload
+        assert _BOT_PREFIX in payload
 
     def test_armed_compact_carries_bot_chrome(self) -> None:
         # `/compact` must stay the FIRST token (so it is recognised as the slash
         # command), but its freeform-instruction argument carries the bot chrome
         # so the compaction is visibly supervisor-initiated, never mistaken for a
         # human `/compact`.
-        payload = _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=False)
+        payload = _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=False, now_wall=_FIXED_NOW)
         assert payload is not None
         assert payload.startswith("/compact ")
         assert _BOT_PREFIX in payload
         assert "🤖" in payload
 
     def test_armed_continue_matches_dry_run(self) -> None:
-        assert _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=False) == _CONTINUE
+        # `continue` is identical armed vs dry-run for the same tick.
+        armed = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=False, now_wall=_FIXED_NOW)
+        dry = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True, now_wall=_FIXED_NOW)
+        assert armed == dry
 
     def test_injected_prompts_carry_bot_marker(self) -> None:
         # The user must be able to tell supervisor messages from their own typing.
-        assert _BOT_PREFIX in _DRY_COMPACT
-        assert "🤖" in _DRY_COMPACT
-        assert _BOT_PREFIX in _CONTINUE
-        assert "🤖" in _CONTINUE
+        compact = _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=True, now_wall=_FIXED_NOW)
+        cont = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True, now_wall=_FIXED_NOW)
+        assert compact is not None and cont is not None
+        assert _BOT_PREFIX in compact
+        assert "🤖" in compact
+        assert _BOT_PREFIX in cont
+        assert "🤖" in cont
+
+
+class TestTimestampedPayloads:
+    """Plan: supervisor-injected messages embed the tick wall-clock time.
+
+    Every visible supervisor message must carry the local date/time it was
+    injected, so a human scrolling back through the transcript can see WHEN each
+    action happened without correlating against the decision log.
+    """
+
+    def test_prefix_embeds_local_wall_clock_stamp(self) -> None:
+        prefix = _mod._format_bot_prefix(_FIXED_NOW)
+        assert prefix.startswith(_BOT_PREFIX)
+        assert prefix.endswith("]")
+        assert _expected_stamp(_FIXED_NOW) in prefix
+
+    def test_dry_compact_payload_is_timestamped(self) -> None:
+        payload = _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=True, now_wall=_FIXED_NOW)
+        assert payload is not None
+        assert _expected_stamp(_FIXED_NOW) in payload
+
+    def test_armed_compact_payload_is_timestamped(self) -> None:
+        payload = _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=False, now_wall=_FIXED_NOW)
+        assert payload is not None
+        assert _expected_stamp(_FIXED_NOW) in payload
+
+    def test_continue_payload_is_timestamped(self) -> None:
+        payload = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True, now_wall=_FIXED_NOW)
+        assert payload is not None
+        assert _expected_stamp(_FIXED_NOW) in payload
+
+    def test_dry_escape_payload_is_timestamped(self) -> None:
+        payload = _mod._resolve_payload(Decision.WOULD_ESCAPE, dry_run=True, now_wall=_FIXED_NOW)
+        assert payload is not None
+        assert _expected_stamp(_FIXED_NOW) in payload
+
+    def test_stamp_tracks_the_tick_wall_clock(self) -> None:
+        # A later tick embeds a later timestamp -> the two payloads differ.
+        early = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True, now_wall=_FIXED_NOW)
+        later = _mod._resolve_payload(
+            Decision.WOULD_CONTINUE, dry_run=True, now_wall=_FIXED_NOW + 3600.0
+        )
+        assert early != later
+
+    def test_omitted_now_falls_back_to_current_time(self) -> None:
+        # No explicit tick clock -> still a well-formed timestamped prefix.
+        prefix = _mod._format_bot_prefix()
+        assert prefix.startswith(_BOT_PREFIX)
+        assert prefix.endswith("]")
 
 
 class TestResolveEscapePayload:
@@ -73,7 +138,7 @@ class TestResolveEscapePayload:
         assert _mod._resolve_payload(Decision.WOULD_ESCAPE, dry_run=False) == "\x1b"
 
     def test_dry_run_escape_is_visible_marker(self) -> None:
-        payload = _mod._resolve_payload(Decision.WOULD_ESCAPE, dry_run=True)
+        payload = _mod._resolve_payload(Decision.WOULD_ESCAPE, dry_run=True, now_wall=_FIXED_NOW)
         assert payload is not None
         assert payload != "\x1b"
         assert _BOT_PREFIX in payload
@@ -162,7 +227,8 @@ class TestPollOnce:
             freshness_seconds=30.0,
         )
         assert ev.decision is Decision.WOULD_COMPACT
-        assert b"".join(written) == (_DRY_COMPACT + "\r").encode("utf-8")
+        expected = _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=True, now_wall=1000.0)
+        assert b"".join(written) == (expected + "\r").encode("utf-8")
 
     def test_not_red_no_injection(self, tmp_path: Path) -> None:
         self._sidecar(tmp_path / "sc", red=False)
@@ -491,7 +557,8 @@ class TestPollOnceCompaction:
             compaction_signal_ttl_seconds=120.0,
         )
         assert ev.decision is Decision.WOULD_CONTINUE
-        assert b"".join(written) == (_CONTINUE + "\r").encode("utf-8")
+        expected = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True, now_wall=1000.0)
+        assert b"".join(written) == (expected + "\r").encode("utf-8")
 
     def test_signal_overrides_green_sidecar(self, tmp_path: Path) -> None:
         sc = tmp_path / "sc"
@@ -516,7 +583,8 @@ class TestPollOnceCompaction:
             compaction_signal_ttl_seconds=120.0,
         )
         assert ev.decision is Decision.WOULD_CONTINUE
-        assert b"".join(written) == (_CONTINUE + "\r").encode("utf-8")
+        expected = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True, now_wall=1000.0)
+        assert b"".join(written) == (expected + "\r").encode("utf-8")
 
     def test_resume_consumes_signal_file(self, tmp_path: Path) -> None:
         # After a resume fires, the signal file is deleted so it cannot re-fire
