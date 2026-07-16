@@ -118,17 +118,20 @@ exactly which gate blocked."
 At-a-glance visibility that the safety net is on — complements the Phase 1
 observability. Self-contained status-line handler; needs NO supervisor change.
 
-- [ ] ⬜ **Task 4.1**: TDD a new `supervisor_indicator` status-line handler that
+- [x] ✅ **Task 4.1**: TDD a new `supervisor_indicator` status-line handler that
   reads `{daemon_untracked}/supervise/supervisor-status.json` → `pid`, checks
   liveness (`os.kill(pid, 0)`; EPERM == alive) and reads `/proc/<pid>/cmdline`
   as a pid-reuse guard (`claude-supervise` substring) + armed detection
-  (`--arm`). Renders `🛡️🟢` (active+armed), `🛡️🟡` (active+dry-run), `🛡️🟠`
-  (not active). Fail-safe: any error → NOT_ACTIVE, never breaks the line.
-  Detection contract verified live 2026-07-16.
-- [ ] ⬜ **Task 4.2**: Priority 13 (adjacent to the context section:
-  model_context=10, context_sidecar=12); OFF by default (opt-in — non-ccy
-  clients would otherwise see a permanent orange icon); enabled in THIS repo.
-  Register HandlerID/Priority, export, config + example config, regenerate docs.
+  (`--arm`). Renders a top hat 🎩 with a state-coloured ANSI **background**
+  (green armed / yellow dry-run / orange down) and NO segment when no
+  supervisor is configured. Immutable (pid, armed) identity is MEMOISED; a
+  crash still flips to orange via the per-render liveness probe. Fail-safe: any
+  error → no segment, never breaks the line. 100% coverage.
+- [x] ✅ **Task 4.2**: Priority 13 (adjacent to the context section:
+  model_context=10, context_sidecar=12); ON by default (safe — renders nothing
+  when no supervisor status file exists); enabled in THIS repo. Registered
+  HandlerID/Priority, export, config + example config, regenerated docs;
+  daemon restarted RUNNING and live-dogfooded (`\033[42m 🎩 \033[0m`).
 
 ### Phase 5: Verify
 
