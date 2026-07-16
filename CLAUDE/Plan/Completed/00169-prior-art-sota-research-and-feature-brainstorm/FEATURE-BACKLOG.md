@@ -216,6 +216,14 @@ plan. Recommendations for what to graduate first are in §"Graduation".
 
 ## Graduation — what to spin into plans first
 
+**Already graduated**: the *hook-coverage substrate* underneath the "newer
+hook-spec capabilities we underuse" finding (§1 of RESEARCH-FINDINGS.md) became
+[**Plan 00170: Universal Hook Coverage + Hook-Support Enforcement**](../../00170-universal-hook-coverage-and-enforcement/PLAN.md)
+— the user flagged missing hook coverage as fundamental (only 10 of 31 documented
+events wired). Several backlog features here (F3 StopFailure, F6 PostCompact, F11
+SubagentStart budget, F19 InstructionsLoaded audit, F20 ConfigChange guard) become
+*handler* follow-ups once 00170 wires their underlying events.
+
 Recommended first wave (high value / on-brand / tractable, mostly S–M):
 
 1. **F1 Secret blocker + redaction** — closes the top security gap; small.
