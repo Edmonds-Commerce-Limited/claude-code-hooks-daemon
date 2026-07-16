@@ -31,16 +31,25 @@ This plan also separates the **daemon-upgrade notifier** from the developer
 **daemon health stats**. Today the `📦 vX → vY` upgrade arrow is rendered inside
 `daemon_stats.py` (lines 112-134), so the only way to see the upgrade prompt is
 to enable the full health line (uptime/memory/log-level/errors/blocks). We
-extract the upgrade indicator into its own always-on `upgrade_notifier` status
-handler and disable `daemon_stats` in this repo's config, keeping the useful
-upgrade prompt while dropping the noisy diagnostics.
+extract the upgrade indicator into its own **on-by-default** `upgrade_notifier`
+status handler so the valuable upgrade prompt reaches every client while the
+noisy developer diagnostics stay off. `daemon_stats` already defaults off
+(`get_default_enabled() == False`); the client-facing work is the **rollout
+messaging** — the upgrade advisory must strongly recommend that any client that
+has explicitly enabled `daemon_stats` now turn it off, since the upgrade prompt
+no longer depends on it. **This repo is the one exception**: as the daemon's own
+development repo it keeps `daemon_stats` enabled (the health line is useful
+here).
 
-Two secondary questions from the same investigation are answered inline and
-folded into scope where cheap: (a) **cron tasks** — Claude Code provides **no**
-scheduled-cron information to the status line, and nothing daemon-side is
-reachable either, so there is nothing to surface (Non-Goal); (b) **unused input
-fields** — several documented Status-input JSON fields are currently ignored and
-are catalogued below for opportunistic use.
+Two secondary questions from the same investigation are answered inline: (a)
+**cron tasks** — Claude Code's Status **input JSON** carries no scheduled-cron
+information, but the harness DOES persist self-wake / scheduled-task state on
+disk (`~/.claude/jobs/<id>/state.json` records `inFlight.kinds: [session_cron]`
+and `selfWake: true`; `CronList` is the live per-session API). So a "crons
+scheduled" indicator is **feasible** by reading that on-disk store — reframed
+from impossible to a documented future enhancement; (b) **unused input fields**
+— several documented Status-input JSON fields are currently ignored and are
+catalogued below for opportunistic use.
 
 ## Goals
 
@@ -49,14 +58,18 @@ are catalogued below for opportunistic use.
 - Forward `COLUMNS`/`LINES` from the wrapper environment into the Status payload
   and validate them in the Status input schema.
 - Extract the upgrade-available indicator into a dedicated, on-by-default
-  `upgrade_notifier` status handler.
-- Disable `daemon_stats` in this repo while preserving the upgrade prompt.
+  `upgrade_notifier` status handler so every client keeps the upgrade prompt.
+- Ship client rollout messaging (config-changes + post-upgrade guidance) that
+  strongly recommends disabling `daemon_stats` where a client enabled it; keep
+  `daemon_stats` enabled in THIS repo only (dev-repo exception).
 - Document the answers to the cron question and the unused-field inventory.
 
 ## Non-Goals
 
-- Surfacing scheduled cron/background-agent tasks in the status line — Claude
-  Code does not provide this data and no daemon-side source exists.
+- Actually surfacing a cron indicator in the status line now — the data is not
+  in the Status input JSON. It IS persisted on disk (`~/.claude/jobs/*/state.json`,
+  `session_cron` / `selfWake`; `CronList` live API), so it is feasible as a
+  FUTURE enhancement, but out of scope for this plan.
 - Reworking `usage_tracking` (noted separately as needing rework); wiring the
   newly-available `rate_limits` field into it is out of scope here.
 - Changing the segment ORDER or the per-segment content of existing handlers.
@@ -124,15 +137,26 @@ this plan forwards explicitly.
   (lines 112-134) so health stats and the upgrade prompt no longer overlap;
   update `daemon_stats` tests accordingly.
 
-### Phase 4: Config, docs, and verification
+### Phase 4: Client rollout messaging
 
-- [ ] ⬜ **Task 4.1**: Disable `daemon_stats` and enable `upgrade_notifier` in
-  `.claude/hooks-daemon.yaml`; regenerate `.claude/HOOKS-DAEMON.md`.
-- [ ] ⬜ **Task 4.2**: Update `handlers/status_line/CLAUDE.md` and
-  `CLAUDE/Architecture/StatusLine.md` for the new handler, the wrap
-  behaviour, and the forwarded width fields; record the cron answer and the
-  unused-field inventory in the architecture doc.
-- [ ] ⬜ **Task 4.3**: Run `./scripts/qa/run_all.sh`, restart the daemon, and
+- [ ] ⬜ **Task 4.1**: Add a `CLAUDE/UPGRADES/UNRELEASED/config-changes/v{X.Y.Z}.yaml`
+  entry recording `upgrade_notifier` (added, on by default) AND a
+  `recommended: true` note that clients disable `daemon_stats` if they enabled
+  it, so the upgrade advisory actively promotes the change.
+- [ ] ⬜ **Task 4.2**: Add post-upgrade guidance (and a `truth-changes/` entry if
+  a documented truth changed) telling upgrading projects the upgrade prompt is
+  now its own handler and `daemon_stats` can be turned off.
+- [ ] ⬜ **Task 4.3**: Keep `daemon_stats` ENABLED in THIS repo's
+  `.claude/hooks-daemon.yaml` (dev-repo exception) and confirm `upgrade_notifier`
+  is enabled; regenerate `.claude/HOOKS-DAEMON.md`.
+
+### Phase 5: Docs and verification
+
+- [ ] ⬜ **Task 5.1**: Update `handlers/status_line/CLAUDE.md` and
+  `CLAUDE/Architecture/StatusLine.md` for the new handler, the wrap behaviour,
+  and the forwarded width fields; record the cron answer (on-disk feasibility)
+  and the unused-field inventory in the architecture doc.
+- [ ] ⬜ **Task 5.2**: Run `./scripts/qa/run_all.sh`, restart the daemon, and
   verify `Status: RUNNING`; dogfood the wrapped status line and the
   upgrade-notifier separation.
 
@@ -168,20 +192,25 @@ width. Truncation was rejected because it reintroduces the same data loss.
 environment and already rewrites the Status payload, so it is the single correct
 injection point. **Date**: 2026-07-16
 
-### Decision 3: Extract the upgrade notifier rather than gate `daemon_stats`
+### Decision 3: Extract the upgrade notifier; make IT on-by-default, not daemon_stats
 
-**Context**: The upgrade arrow is entangled with developer health stats.
-**Decision**: Give the upgrade prompt its own on-by-default handler (SRP) so it
-survives disabling `daemon_stats`, matching the code comment that already calls
-the upgrade notifier a "SEPARATE handler". **Date**: 2026-07-16
+**Context**: The upgrade arrow is entangled with developer health stats, and the
+valuable part (upgrade prompt) must reach every client while the diagnostics
+must not.
+**Decision**: Give the upgrade prompt its own **on-by-default** `upgrade_notifier`
+handler (SRP), matching the code comment that already calls the upgrade notifier
+a "SEPARATE handler". `daemon_stats` stays off-by-default for clients (unchanged
+default) and enabled only in THIS dev repo. Rollout messaging then nudges any
+client that enabled `daemon_stats` to disable it. **Date**: 2026-07-16
 
 ## Success Criteria
 
 - [ ] On a narrow terminal the status line wraps and no segment is lost.
 - [ ] On a wide terminal the status line renders on a single row (unchanged).
 - [ ] `COLUMNS`/`LINES` reach a status handler and are schema-validated.
-- [ ] `upgrade_notifier` shows `📦 vX → vY` with `daemon_stats` disabled.
-- [ ] Developer health stats no longer appear in this repo's status line.
+- [ ] `upgrade_notifier` shows `📦 vX → vY` on by default, with `daemon_stats` off.
+- [ ] Upgrade advisory recommends clients disable `daemon_stats` if enabled.
+- [ ] `daemon_stats` remains enabled in THIS repo (dev-repo exception).
 - [ ] Full QA passes and the daemon restarts to `RUNNING`.
 
 ## Risks & Mitigations
