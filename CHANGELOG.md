@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.43.0] - 2026-07-16
+
+This is a **minor release** adding two new status-line handlers
+(`supervisor_indicator` and `upgrade_notifier`), width-aware status-line
+wrapping, timestamped supervisor-injected messages, and universal hook-event
+coverage/wiring across the daemon's lifecycle, task, team, and MCP events
+(Plan 00170).
+
+### Added
+
+- **`upgrade_notifier` status-line handler (new, on by default).** Extracted
+  from `daemon_stats` (Plan 00167), it shows a "📦 vX → vY" segment whenever a
+  newer daemon version is available, reading the same
+  `version_check_cache.json` the SessionStart `version_check` handler writes.
+  It renders nothing unless an upgrade is genuinely available for the version
+  currently running (and ignores a stale cache written before an in-place
+  upgrade), so it is safe on by default. Priority 32, right after
+  `daemon_stats`' 30.
+- **`supervisor_indicator` status-line handler (new).** Shows whether the ccy
+  PTY supervisor is actively overseeing the current session, using
+  process-grounded detection that survives a missing status file.
+- **Width-aware status-line wrapping.** The status line now transports the
+  terminal width and wraps segments intelligently instead of truncating or
+  overflowing (Plan 00167 Phase 2).
+- **Timestamped supervisor-injected messages.** Messages the supervisor
+  injects into a Claude PTY are now prefixed with a local date/time stamp.
+- **Universal hook-event coverage.** All lifecycle, task, team, and MCP hook
+  events are now wired end-to-end with a completeness gate enforcing full
+  coverage (`EXPECTED_UNWIRED` reduced to empty); a canonical hook-event
+  catalogue and DRY per-event wiring recipe were added to make future event
+  additions turn-key (Plan 00170).
+
+### Changed
+
+- **`daemon_stats` no longer renders the upgrade arrow.** The "📦 vX → vY"
+  indicator moved to the new `upgrade_notifier` handler; `daemon_stats` now
+  shows only the developer health line (uptime, memory, log level, error/block
+  counts). Its own default (off) is unchanged. If you enabled `daemon_stats`
+  solely for the upgrade arrow, you can now turn it back off — see
+  `CLAUDE/UPGRADES/config-changes/v3.43.0.yaml`.
+- **Deduped NOOP-reason logging** in the supervisor for improved
+  observability (Plan 00168 Phase 1).
+
+### Fixed
+
+- **`supervisor_indicator` survives a missing status file** via
+  process-grounded detection rather than relying solely on a status file that
+  may not yet exist.
+- Ruff `TC002`/`TC003` findings ignored to absorb 0.14 toolchain drift (30
+  findings across 24 files) without churning unrelated type-checking imports.
+- A time-bomb test in `plan_qa_edit`'s journal checks that hardcoded a date
+  was fixed to derive dates dynamically.
+
 ## [3.42.0] - 2026-07-15
 
 This is a **minor release** adding a status-line worktree indicator (a tree icon
