@@ -166,6 +166,12 @@ ignore = [
     "SIM117",  # nested with statements (readability preference)
     "ARG002",  # unused method arguments (valid for interface compliance)
     "TC001",  # type-checking imports (causes circular import issues)
+    "TC002",  # move third-party import into TYPE_CHECKING block (stylistic; newly
+    "TC003",  # move stdlib import into TYPE_CHECKING block (stylistic)
+    # TC002/TC003: ruff 0.14 began enforcing these across the tree (30 findings /
+    # 24 files) where prior toolchains did not. They only ask that type-only
+    # imports be shuffled into `if TYPE_CHECKING:` blocks -- no runtime effect --
+    # so, consistent with the existing TC001 ignore, we do not enforce the churn.
     "PTH123",  # open() vs Path.open() (open() is fine for /dev/null and simple cases)
     "E402",  # module import not at top (false positive from sys.path manipulation)
     "RUF043",  # pytest match patterns (false positive - pytest handles regex escaping)
