@@ -974,7 +974,9 @@ class HooksDaemon:
                 hook_input.get("stop_hook_active") or hook_input.get("stopHookActive")
             )
             response_dict: dict[str, Any] = hook_result.to_json(
-                event, stop_hook_active=stop_hook_active
+                event,
+                stop_hook_active=stop_hook_active,
+                terminal_columns=hook_input.get("terminal_columns"),
             )
             if request_id:
                 response_dict["request_id"] = request_id

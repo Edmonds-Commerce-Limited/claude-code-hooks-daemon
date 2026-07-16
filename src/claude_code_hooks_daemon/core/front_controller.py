@@ -191,7 +191,11 @@ class FrontController:
         stop_hook_active = bool(
             hook_input.get("stop_hook_active") or hook_input.get("stopHookActive")
         )
-        output = result.to_json(self.event_name, stop_hook_active=stop_hook_active)
+        output = result.to_json(
+            self.event_name,
+            stop_hook_active=stop_hook_active,
+            terminal_columns=hook_input.get("terminal_columns"),
+        )
         json.dump(output, sys.stdout)
         sys.exit(0)
 

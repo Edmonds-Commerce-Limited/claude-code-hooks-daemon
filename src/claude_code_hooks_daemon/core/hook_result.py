@@ -4,6 +4,8 @@ This module provides the Pydantic model for representing hook results
 with full type safety, validation, and proper response formatting.
 """
 
+import re
+import unicodedata
 from enum import StrEnum
 from typing import Any, Self
 
@@ -33,6 +35,62 @@ _DENY_CONTINUATION_SUFFIX = (
 _STATUS_SEGMENT_SEPARATOR = "|"
 # Fallback text when no status segment produced any content.
 _STATUS_DEFAULT_TEXT = "Claude"
+# Rendered separator between two adjacent status segments (a space-padded pipe).
+_STATUS_JOIN = f" {_STATUS_SEGMENT_SEPARATOR} "
+# One terminal row per newline: Claude Code renders multi-line statusLine output.
+_STATUS_ROW_SEPARATOR = "\n"
+# Matches ANSI SGR/CSI escape sequences so colour codes are excluded from the
+# DISPLAYED width when wrapping (they occupy zero visible columns).
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _display_width(text: str) -> int:
+    """Approximate the terminal column width of a rendered status fragment.
+
+    ANSI colour escapes are stripped (zero visible width); East-Asian wide and
+    fullwidth code points (most emoji) count as two columns; combining marks and
+    format code points (the ZWJ / emoji variation selector) count as zero. This
+    is a dependency-free heuristic accurate to within ~1 column — good enough
+    because wrapping only ever breaks at whole-segment boundaries, never
+    mid-segment.
+    """
+    stripped = _ANSI_ESCAPE_RE.sub("", text)
+    width = 0
+    for ch in stripped:
+        if unicodedata.combining(ch) or unicodedata.category(ch) == "Cf":
+            continue
+        width += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return width
+
+
+def _wrap_status_parts(parts: list[str], columns: int) -> str:
+    """Pack status segments into rows no wider than ``columns`` (Plan 00167).
+
+    Greedy first-fit at ``' | '`` boundaries: each row grows until the next
+    segment would exceed the width, then a new row starts. A single segment
+    wider than ``columns`` occupies its own row (it cannot be split). Rows are
+    joined with a newline, which Claude Code renders as separate terminal rows,
+    so no right-hand segment is lost on a narrow screen.
+    """
+    sep_width = _display_width(_STATUS_JOIN)
+    rows: list[str] = []
+    current: list[str] = []
+    current_width = 0
+    for part in parts:
+        part_width = _display_width(part)
+        if not current:
+            current = [part]
+            current_width = part_width
+        elif current_width + sep_width + part_width <= columns:
+            current.append(part)
+            current_width += sep_width + part_width
+        else:
+            rows.append(_STATUS_JOIN.join(current))
+            current = [part]
+            current_width = part_width
+    if current:
+        rows.append(_STATUS_JOIN.join(current))
+    return _STATUS_ROW_SEPARATOR.join(rows)
 
 
 class HookResult(BaseModel):
@@ -138,7 +196,13 @@ class HookResult(BaseModel):
         )
         return self
 
-    def to_json(self, event_name: str, *, stop_hook_active: bool = False) -> dict[str, Any]:
+    def to_json(
+        self,
+        event_name: str,
+        *,
+        stop_hook_active: bool = False,
+        terminal_columns: int | None = None,
+    ) -> dict[str, Any]:
         """Convert to Claude Code hook JSON format.
 
         Different event types require different response structures:
@@ -181,8 +245,15 @@ class HookResult(BaseModel):
                     normalised = normalised[: -len(sep)].strip()
                 if normalised:
                     parts.append(normalised)
-            text = f" {sep} ".join(parts) if parts else _STATUS_DEFAULT_TEXT
-            return {"text": text}
+            if not parts:
+                return {"text": _STATUS_DEFAULT_TEXT}
+            # Plan 00167: when Claude Code forwards the real terminal width
+            # (init.sh -> terminal_columns), wrap at ' | ' segment boundaries so
+            # no segment runs off a narrow screen. No/invalid width -> the
+            # single-line join (backwards-compatible with older clients).
+            if isinstance(terminal_columns, int) and terminal_columns > 0:
+                return {"text": _wrap_status_parts(parts, terminal_columns)}
+            return {"text": _STATUS_JOIN.join(parts)}
 
         # Silent allow with no context - valid for all events
         if self.decision == Decision.ALLOW and not self.context and not self.guidance:

@@ -115,15 +115,26 @@ this plan forwards explicitly.
 
 ### Phase 2: Wrap the assembled status line
 
-- [ ] ⬜ **Task 2.1**: Write failing tests for a width-aware wrap of the joined
+- [x] ✅ **Task 2.1**: Write failing tests for a width-aware wrap of the joined
   Status text: split at `" | "` segment boundaries into rows each no wider
   than the terminal width; no width available ⇒ current single-line output
-  (backwards-compatible); a single oversize segment occupies its own row.
-- [ ] ⬜ **Task 2.2**: Implement the wrap in the `Status` branch of
+  (backwards-compatible); a single oversize segment occupies its own row. DONE
+  — `TestHookResultStatusWrapping` (10 cases incl. ANSI-not-counted, ZWJ
+  zero-width, never-split-mid-segment).
+- [x] ✅ **Task 2.2**: Implement the wrap in the `Status` branch of
   `hook_result.py` (or an extracted helper), reading the forwarded width
-  from the hook input; account for emoji display width where practical.
-- [ ] ⬜ **Task 2.3**: Confirm multi-line rendering in a live Claude Code
-  session at several terminal widths (wide = one line, narrow = wrapped).
+  from the hook input; account for emoji display width where practical. DONE —
+  `_wrap_status_parts` (greedy first-fit at `|` boundaries) + `_display_width`
+  (ANSI-stripped; East-Asian wide = 2 cols; combining/format = 0; ±1 tolerance).
+  `to_json` gains `terminal_columns`, threaded from all three call sites
+  (`controller.py`, `server.py`, `front_controller.py`). Width absent/invalid ⇒
+  single-line join (backwards-compatible).
+- [x] ✅ **Task 2.3**: Confirm multi-line rendering in a live Claude Code
+  session at several terminal widths (wide = one line, narrow = wrapped). DONE —
+  live probe of `.claude/hooks/status-line`: `COLUMNS=36` wraps to 5 rows at
+  segment boundaries (no segment lost), `COLUMNS=200` stays one line. This also
+  confirmed the full transport path (Phase 1 `terminal_columns` → schema →
+  `HookInput` → `to_json`) works end-to-end.
 
 ### Phase 3: Extract the upgrade notifier
 

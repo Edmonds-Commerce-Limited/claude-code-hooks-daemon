@@ -754,7 +754,13 @@ class DaemonController:
         stop_hook_active = bool(
             hook_input_dict.get("stop_hook_active") or hook_input_dict.get("stopHookActive")
         )
-        return result.result.to_json(event.event_type.value, stop_hook_active=stop_hook_active)
+        # Plan 00167: forward the terminal width (init.sh injects it for Status)
+        # so the Status renderer can wrap onto multiple rows on a narrow screen.
+        return result.result.to_json(
+            event.event_type.value,
+            stop_hook_active=stop_hook_active,
+            terminal_columns=hook_input_dict.get("terminal_columns"),
+        )
 
     def get_stats(self) -> DaemonStats:
         """Get daemon statistics.

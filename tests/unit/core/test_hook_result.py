@@ -850,6 +850,88 @@ class TestHookResultStatusFormat:
         assert "reason" not in output
 
 
+class TestHookResultStatusWrapping:
+    """Plan 00167 Phase 2: width-aware wrapping of the Status line.
+
+    Claude Code renders one terminal row per '\\n'. When a terminal width is
+    forwarded (init.sh -> terminal_columns), the joined status line is wrapped
+    at ' | ' SEGMENT boundaries into rows no wider than the terminal, so no
+    right-hand segment is lost on a narrow screen. No width -> the current
+    single-line output (backwards-compatible).
+    """
+
+    def test_no_width_is_single_line(self):
+        result = HookResult(decision=Decision.ALLOW, context=["AAA", "BBB", "CCC"])
+        assert result.to_json("Status")["text"] == "AAA | BBB | CCC"
+
+    def test_none_width_is_single_line(self):
+        result = HookResult(decision=Decision.ALLOW, context=["AAA", "BBB", "CCC"])
+        assert result.to_json("Status", terminal_columns=None)["text"] == "AAA | BBB | CCC"
+
+    def test_wide_width_stays_single_line(self):
+        result = HookResult(decision=Decision.ALLOW, context=["AAA", "BBB", "CCC"])
+        out = result.to_json("Status", terminal_columns=200)
+        assert out["text"] == "AAA | BBB | CCC"
+        assert "\n" not in out["text"]
+
+    def test_narrow_width_wraps_at_segment_boundary(self):
+        # Full line "AAA | BBB | CCC" is 15 cols. At width 9, "AAA | BBB" (9)
+        # fits; adding " | CCC" would overflow -> CCC drops to its own row.
+        result = HookResult(decision=Decision.ALLOW, context=["AAA", "BBB", "CCC"])
+        out = result.to_json("Status", terminal_columns=9)
+        assert out["text"] == "AAA | BBB\nCCC"
+
+    def test_each_row_within_width(self):
+        parts = ["seg1", "seg2", "seg3", "seg4", "seg5"]
+        result = HookResult(decision=Decision.ALLOW, context=parts)
+        out = result.to_json("Status", terminal_columns=12)
+        for row in out["text"].split("\n"):
+            assert len(row) <= 12
+
+    def test_oversize_segment_gets_its_own_row(self):
+        # A single segment wider than the terminal cannot be split -> own row.
+        result = HookResult(
+            decision=Decision.ALLOW, context=["short", "AVERYLONGSEGMENTXX", "tail"]
+        )
+        out = result.to_json("Status", terminal_columns=8)
+        rows = out["text"].split("\n")
+        assert "AVERYLONGSEGMENTXX" in rows
+
+    def test_wrapping_never_splits_mid_segment(self):
+        # Wrapping only ever turns a ' | ' boundary into a newline -- it never
+        # breaks inside a segment (even one with an INTERNAL ' | ', like
+        # model_context). So swapping newlines back to ' | ' must exactly
+        # reconstruct the single-line join.
+        parts = ["📁 repo", "🤖 Opus | ◔ 5%", "👤 user", "🌳 main"]
+        result = HookResult(decision=Decision.ALLOW, context=parts)
+        out = result.to_json("Status", terminal_columns=15)
+        assert "\n" in out["text"]  # it actually wrapped at this width
+        assert out["text"].replace("\n", " | ") == " | ".join(parts)
+
+    def test_ansi_colour_codes_are_not_counted_in_width(self):
+        # A segment wrapped in ANSI colour escapes has a small VISIBLE width; the
+        # invisible escape bytes must not force a wrap.
+        coloured = "\x1b[42m ok \x1b[0m"  # visible width 4, raw len 13
+        result = HookResult(decision=Decision.ALLOW, context=[coloured, "BBB"])
+        # Visible "ok" segment (4) + ' | ' (3) + "BBB" (3) = 10 <= 12: one line.
+        out = result.to_json("Status", terminal_columns=12)
+        assert "\n" not in out["text"]
+
+    def test_empty_context_returns_default_even_with_width(self):
+        result = HookResult(decision=Decision.ALLOW)
+        assert result.to_json("Status", terminal_columns=10)["text"] == "Claude"
+
+    def test_zwj_and_zero_width_chars_do_not_inflate_width(self):
+        # A ZWJ emoji sequence (👨‍💻 = 👨 + U+200D + 💻) must not have its
+        # zero-width joiner counted, so it wraps at segment boundaries like any
+        # other segment rather than over-counting and wrapping prematurely.
+        parts = ["👨‍💻 dev", "BBB", "CCC"]
+        result = HookResult(decision=Decision.ALLOW, context=parts)
+        out = result.to_json("Status", terminal_columns=200)
+        assert "\n" not in out["text"]
+        assert out["text"] == "👨‍💻 dev | BBB | CCC"
+
+
 class TestHookResultToResponseDict:
     """Tests for to_response_dict and its docstring/signature consistency."""
 
