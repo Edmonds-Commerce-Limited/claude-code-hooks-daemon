@@ -230,8 +230,17 @@ new registrations.
 
 ### Phase 3: Zero-handler passthrough + wiring
 
-- [ ] ⬜ **Task 3.1**: Router returns the correct do-nothing response per event
-  contract when no handler matches (fail-open). TDD per contract type.
+- [x] ✅ **Task 3.0**: DRY derivation foundation (commit `276a1245`). Centralised
+  EventID reflection (`all_event_metas`/`wired_event_metas`); config
+  `VALID_EVENT_TYPES` + `_EVENT_TYPE_CONFIG_KEYS`, `HOOK_EVENTS_IN_SETTINGS`,
+  and the dogfooding `daemon_hooks` all derive from the wired set;
+  `INPUT_SCHEMAS`/`RESPONSE_SCHEMAS` auto-fill a permissive fail-open schema for
+  any wired event lacking a bespoke one. Zero behaviour change at wired=10, so
+  each subsequent `wired=True` flip is forwarder + settings + EventType only.
+- [x] ✅ **Task 3.1**: Zero-handler passthrough already correct — an empty chain
+  returns `HookResult.allow()` (`chain.py:263`) and the permissive response
+  schema accepts `{}`; no per-contract router change needed. Locked by the
+  completeness gate's schema-presence assertions.
 - [ ] ⬜ **Task 3.2**: Wire the **forward-only** batch (§G) — forwarders, installer,
   settings, schemas. Completeness gate goes GREEN for those.
 - [ ] ⬜ **Task 3.3**: Wire the **blocking** batch (§G) with safe defaults +
