@@ -190,6 +190,29 @@ Key code paths (source of truth is the monolithic tracked
   path (press Ctrl+Z → guard posts) takes effect only on the next ccy relaunch
   (running supervisor has the old code), so that half re-verifies on relaunch.
 
+### Phase 5: Signal-level guard (belt-and-braces) — added mid-plan per user
+
+The byte strip only covers Ctrl+Z while the outer terminal is in RAW mode. If a
+stop/quit SIGNAL is actually delivered (a race before `tty.setraw`, non-tty
+stdin, `kill -TSTP`/`-QUIT`, or shell job control) the session would still
+freeze/core-dump. Mechanism note: Ctrl+Z→SIGTSTP is done by the kernel **tty
+line discipline** (ISIG/VSUSP), not the terminal emulator — so a signal-level
+guard is the robust catch-all.
+
+- [x] ✅ **Task 5.1**: RED — `TestInputSignalGuards` (5 tests) in
+  `test_input_ctrlz_guard.py`: installs swallowing handlers for SIGTSTP+SIGQUIT,
+  SIG_IGN for SIGTTIN/SIGTTOU, leaves SIGINT untouched; handlers post the
+  correct notice and return None (never stop). Signals saved/restored per test.
+- [x] ✅ **Task 5.2**: GREEN — `install_input_signal_guards(post_notice)` +
+  `_CTRL_BACKSLASH_NOTICE_TEXT`. SIGINT (Ctrl+C) deliberately left working.
+  Wired in `supervise()` PARENT branch (after fork, so child `claude` never
+  inherits) with a LOCK-FREE `write_status_message` notice writer (signal
+  handlers must not take the poster's lock). Prior dispositions saved via
+  `_INPUT_GUARD_SIGNALS` and restored in `finally` (tests call `supervise()`
+  in-process — leaked stop handlers would break their job control).
+- [x] ✅ **Task 5.3**: Module docstring intro documents the key/signal guarding.
+  331 supervise tests pass; mypy clean.
+
 ## Technical Decisions
 
 ### Decision 1: Atomic-replace with pid+tid temp names (thread/process safe)

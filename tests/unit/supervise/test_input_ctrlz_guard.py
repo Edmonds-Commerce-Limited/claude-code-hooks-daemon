@@ -19,17 +19,33 @@ Two layers are tested:
 from __future__ import annotations
 
 import os
+import signal
 import socket
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+
+import pytest
 
 from tests.unit.supervise._load import load_supervisor_module
 
 _mod = load_supervisor_module()
 InputActivity = _mod.InputActivity
 strip_suspend = _mod.strip_suspend
+install_input_signal_guards = _mod.install_input_signal_guards
+_CTRL_Z_NOTICE_TEXT = _mod._CTRL_Z_NOTICE_TEXT
+_CTRL_BACKSLASH_NOTICE_TEXT = _mod._CTRL_BACKSLASH_NOTICE_TEXT
 
 _SUSPEND = b"\x1a"
+
+# Signals the guard touches; saved/restored around each guard test so installing
+# real handlers cannot leak into the rest of the pytest process.
+_GUARDED_SIGNALS = (
+    signal.SIGTSTP,
+    signal.SIGQUIT,
+    signal.SIGTTIN,
+    signal.SIGTTOU,
+    signal.SIGINT,
+)
 
 
 class TestStripSuspend:
@@ -146,3 +162,59 @@ class TestForwardIoDropsSuspend:
 
         assert self._drive(b"hello", on_suspend=_cb) == b"hello"
         assert calls["count"] == 0
+
+
+class TestInputSignalGuards:
+    """Belt-and-braces: swallow stop/quit SIGNALS if they reach the supervisor.
+
+    The byte strip only covers Ctrl+Z while the outer terminal is in raw mode.
+    If a stop/quit signal is actually delivered (a race before ``setraw``, a
+    non-tty stdin, ``kill -TSTP``/``-QUIT``, or shell job control), the guard
+    must swallow it so the session never freezes or core-dumps — while leaving
+    the legitimate SIGINT (Ctrl+C) untouched.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _restore_signals(self) -> Iterator[None]:
+        saved = {sig: signal.getsignal(sig) for sig in _GUARDED_SIGNALS}
+        try:
+            yield
+        finally:
+            for sig, handler in saved.items():
+                signal.signal(sig, handler)
+
+    def test_installs_swallowing_handlers_for_stop_and_quit(self) -> None:
+        install_input_signal_guards(lambda _text: None)
+        # A real callable handler (not default / ignore) for the stop + quit sigs.
+        assert callable(signal.getsignal(signal.SIGTSTP))
+        assert signal.getsignal(signal.SIGTSTP) not in (signal.SIG_DFL, signal.SIG_IGN)
+        assert callable(signal.getsignal(signal.SIGQUIT))
+        assert signal.getsignal(signal.SIGQUIT) not in (signal.SIG_DFL, signal.SIG_IGN)
+
+    def test_ignores_background_tty_stop_signals(self) -> None:
+        install_input_signal_guards(lambda _text: None)
+        assert signal.getsignal(signal.SIGTTIN) == signal.SIG_IGN
+        assert signal.getsignal(signal.SIGTTOU) == signal.SIG_IGN
+
+    def test_leaves_sigint_untouched(self) -> None:
+        before = signal.getsignal(signal.SIGINT)
+        install_input_signal_guards(lambda _text: None)
+        # Ctrl+C is a legitimate interrupt in Claude's TUI — never swallowed.
+        assert signal.getsignal(signal.SIGINT) == before
+
+    def test_stop_handler_posts_notice_and_does_not_stop(self) -> None:
+        posted: list[str] = []
+        install_input_signal_guards(posted.append)
+        handler = signal.getsignal(signal.SIGTSTP)
+        assert callable(handler)
+        # Invoking the handler must NOT raise/stop; it posts the Ctrl+Z notice.
+        assert handler(signal.SIGTSTP, None) is None
+        assert posted == [_CTRL_Z_NOTICE_TEXT]
+
+    def test_quit_handler_posts_notice_and_does_not_exit(self) -> None:
+        posted: list[str] = []
+        install_input_signal_guards(posted.append)
+        handler = signal.getsignal(signal.SIGQUIT)
+        assert callable(handler)
+        assert handler(signal.SIGQUIT, None) is None
+        assert posted == [_CTRL_BACKSLASH_NOTICE_TEXT]

@@ -14,6 +14,13 @@ session. In DRY-RUN (default) that injection is a harmless VISIBLE MARKER,
 proving the mechanism end-to-end without a real compaction; with ``--arm`` it
 injects the real ``/compact`` (and ``continue``).
 
+It also GUARDS the session against accidental terminal control keys that would
+otherwise freeze or kill it: Ctrl+Z (SUSP) is stripped from the forwarded input
+(``strip_suspend``) AND, belt-and-braces, the stop/quit SIGNALS are swallowed if
+ever delivered (``install_input_signal_guards``: SIGTSTP + SIGQUIT, plus ignored
+SIGTTIN/SIGTTOU). Ctrl+C (SIGINT) is deliberately left working. Each swallow
+surfaces a transient status-line notice via the message channel below.
+
 Usage:
     claude-supervise.py [--dry-run | --arm] [--log PATH] -- <child argv...>
 
@@ -1063,8 +1070,17 @@ _STATUS_MESSAGE_TTL_SECONDS = 10.0
 # Minimum monotonic gap between writes from one poster, so a key-mash (a burst of
 # Ctrl+Z) rewrites the file at most once per interval instead of thrashing it.
 _STATUS_MESSAGE_MIN_INTERVAL_SECONDS = 1.0
-# Text shown when a Ctrl+Z (SUSP) keystroke is swallowed by the input guard.
+# Text shown when a Ctrl+Z (SUSP) keystroke/signal is swallowed by the guard.
 _CTRL_Z_NOTICE_TEXT = "⛔ Ctrl+Z ignored — use /exit to quit"
+# Text shown when a Ctrl+\ (QUIT) SIGNAL is swallowed by the guard. Ctrl+\ almost
+# never intentional — a fat-finger next to Enter that would otherwise SIGQUIT
+# (and possibly core-dump) the session.
+_CTRL_BACKSLASH_NOTICE_TEXT = "⛔ Ctrl+\\ ignored — use /exit to quit"
+# The signals install_input_signal_guards manages — SIGINT (Ctrl+C) is
+# deliberately EXCLUDED. Kept as one tuple so supervise() can save+restore
+# exactly this set around the forwarding loop (must stay in sync with the
+# signals install_input_signal_guards touches).
+_INPUT_GUARD_SIGNALS = (signal.SIGTSTP, signal.SIGQUIT, signal.SIGTTIN, signal.SIGTTOU)
 
 
 def _status_message_path(untracked_dir: Path) -> Path:
@@ -1152,6 +1168,50 @@ class StatusMessagePoster:
             self._last_monotonic = now_mono
             expires_at = self._wall_clock() + self._ttl_seconds
         return write_status_message(self._untracked_dir, text=text, expires_at=expires_at)
+
+
+def install_input_signal_guards(post_notice: Callable[[str], object]) -> None:
+    """Make the supervisor un-suspendable / un-quittable by accidental keys.
+
+    Belt-and-braces to the byte-level ``strip_suspend``: the byte strip only
+    covers Ctrl+Z while the outer terminal is in RAW mode. If a stop/quit SIGNAL
+    is actually delivered — a race in the window before ``tty.setraw`` runs, a
+    non-tty stdin, ``kill -TSTP``/``-QUIT``, or shell job control — the process
+    would still freeze or core-dump. These handlers swallow those signals so the
+    session survives, surfacing a transient notice via ``post_notice`` instead:
+
+    - ``SIGTSTP`` (Ctrl+Z / VSUSP): suspend — swallowed, notice posted.
+    - ``SIGQUIT`` (Ctrl+\\ / VQUIT): quit + possible core dump — swallowed,
+      notice posted. Almost never an intentional keystroke.
+    - ``SIGTTIN`` / ``SIGTTOU``: a backgrounded process touching the tty is
+      stopped by these — ignored so terminal ops never wedge the supervisor.
+
+    ``SIGINT`` (Ctrl+C / VINTR) is DELIBERATELY LEFT ALONE — it is the
+    legitimate, expected interrupt in Claude's TUI; swallowing it would break
+    real usage.
+
+    THREAD SAFETY: ``post_notice`` runs inside a signal handler, which CPython
+    dispatches on the main thread between bytecodes. Pass a lock-free writer
+    (e.g. ``write_status_message`` directly, NOT a ``StatusMessagePoster`` whose
+    ``threading.Lock`` the interrupted main thread might already hold) to avoid
+    a self-deadlock.
+
+    Must be called from the PARENT after ``pty.fork`` so the child ``claude``
+    (already forked with default dispositions) never inherits these handlers.
+    """
+
+    def _swallow_stop(_signum: int, _frame: FrameType | None) -> None:
+        # Suspend swallowed: post the notice and return WITHOUT stopping.
+        post_notice(_CTRL_Z_NOTICE_TEXT)
+
+    def _swallow_quit(_signum: int, _frame: FrameType | None) -> None:
+        # Quit swallowed: post the notice and return WITHOUT exiting/core-dumping.
+        post_notice(_CTRL_BACKSLASH_NOTICE_TEXT)
+
+    signal.signal(signal.SIGTSTP, _swallow_stop)
+    signal.signal(signal.SIGQUIT, _swallow_quit)
+    signal.signal(signal.SIGTTIN, signal.SIG_IGN)
+    signal.signal(signal.SIGTTOU, signal.SIG_IGN)
 
 
 def load_freshest_sidecar(
@@ -2639,6 +2699,25 @@ def supervise(
 
     previous_handler = signal.signal(signal.SIGWINCH, _on_winch)
 
+    # Belt-and-braces to the byte-level Ctrl+Z strip: swallow stop/quit SIGNALS
+    # if they ever reach the supervisor (race before setraw, non-tty stdin, `kill
+    # -TSTP`, job control) so the session can never freeze or core-dump. Uses a
+    # LOCK-FREE writer (not the poster) because it runs inside a signal handler
+    # (see install_input_signal_guards). Installed here in the PARENT, after the
+    # fork, so the child never inherits these dispositions.
+    def _post_signal_notice(notice: str) -> None:
+        write_status_message(
+            sidecar_dir.parent,
+            text=notice,
+            expires_at=time.time() + _STATUS_MESSAGE_TTL_SECONDS,
+        )
+
+    # Save prior dispositions so they are restored on exit (supervise() is called
+    # in-process by tests; leaked stop/quit handlers would break their job
+    # control). getsignal returns the typeshed _HANDLER union — inferred locally.
+    prev_signal_guards = {sig: signal.getsignal(sig) for sig in _INPUT_GUARD_SIGNALS}
+    install_input_signal_guards(_post_signal_notice)
+
     try:
         _forward_io(
             stdin_fd,
@@ -2650,6 +2729,8 @@ def supervise(
             on_suspend=lambda: status_message_poster.post(_CTRL_Z_NOTICE_TEXT),
         )
     finally:
+        for guarded_signal, prior_handler in prev_signal_guards.items():
+            signal.signal(guarded_signal, prior_handler)
         signal.signal(signal.SIGWINCH, previous_handler)
         if old_termios is not None:
             termios.tcsetattr(stdin_fd, termios.TCSAFLUSH, old_termios)
