@@ -181,7 +181,12 @@ Key code paths (source of truth is the monolithic tracked
 
 - [x] ✅ **Task 4.1**: `generate-docs` refreshed `.claude/HOOKS-DAEMON.md`
   (Status now 15 handlers; `status_message` at priority 16).
-- [ ] ⬜ **Task 4.2**: `./scripts/qa/run_all.sh` (or `llm_qa.py all`) green.
+- [x] ✅ **Task 4.2**: `llm_qa.py all` → **13/13 PASSED** (10316 tests, 0 failed,
+  95.3% coverage). Fixed 4 gate issues surfaced on the first run: added
+  `status_message` to `.claude/hooks-daemon.yaml.example` (example-config
+  completeness test); named the test's `timeout=` literal (magic-timeout);
+  added `status_message._read_message` to `error_hiding_exclusions.json` (same
+  fail-silent contract as `supervisor_indicator._read_status`); black-formatted.
 - [x] ✅ **Task 4.3**: Daemon restarted RUNNING (PID 21954), no load errors.
   No `__version__` bump, so the supervisor-version-lockstep test stays green.
 - [x] ✅ **Task 4.4 (reader side)**: Live dogfood of the READER — wrote a message

@@ -24,8 +24,7 @@ _PATH_PATCH = (
     "StatusMessageHandler._message_file_path"
 )
 _NOW_PATCH = (
-    "claude_code_hooks_daemon.handlers.status_line.status_message."
-    "StatusMessageHandler._now"
+    "claude_code_hooks_daemon.handlers.status_line.status_message." "StatusMessageHandler._now"
 )
 _READ_PATCH = (
     "claude_code_hooks_daemon.handlers.status_line.status_message."

@@ -36,6 +36,9 @@ _CTRL_Z_NOTICE_TEXT = _mod._CTRL_Z_NOTICE_TEXT
 _CTRL_BACKSLASH_NOTICE_TEXT = _mod._CTRL_BACKSLASH_NOTICE_TEXT
 
 _SUSPEND = b"\x1a"
+# Bound on the socketpair recv + thread join so a hung _forward_io never wedges
+# the test run (named to satisfy the magic-timeout QA rule).
+_IO_TIMEOUT_SECONDS = 2.0
 
 # Signals the guard touches; saved/restored around each guard test so installing
 # real handlers cannot leak into the rest of the pytest process.
@@ -99,7 +102,7 @@ class TestForwardIoDropsSuspend:
         """
         stdin_r, stdin_w = os.pipe()
         master_side, child_side = socket.socketpair()
-        child_side.settimeout(2.0)
+        child_side.settimeout(_IO_TIMEOUT_SECONDS)
         forwarded = bytearray()
 
         def run() -> None:
@@ -123,14 +126,14 @@ class TestForwardIoDropsSuspend:
             while len(forwarded) < len(expected):
                 try:
                     chunk = child_side.recv(64)
-                except socket.timeout:
+                except TimeoutError:
                     break
                 if not chunk:
                     break
                 forwarded += chunk
         finally:
             child_side.close()  # EOF on master -> _forward_io returns
-            thread.join(timeout=2.0)
+            thread.join(timeout=_IO_TIMEOUT_SECONDS)
             os.close(stdin_r)
             os.close(stdin_w)
             master_side.close()
