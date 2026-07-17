@@ -10,6 +10,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00172: Close the HandlersConfig ↔ wired-events coverage gap](00172-handlerconfig-wired-events-coverage-gap/PLAN.md) - Not Started (follow-up from the `status_line` config-drop fix audit: `HandlersConfig` declares only 11 of 31 wired events, so `_build_handler_config_mapping` would silently drop config for any of the 20 Plan-00170 wired events that later gains built-in handlers — the same failure mode, re-armed. Also fixes `PluginConfig.event_type`'s parallel omission and hardens the drift tests to cross-check `wired_event_metas()` instead of mirroring hand-maintained lists. Latent today; guardrail-completeness work)
 
+- [00173: Supervisor Ctrl+Z guard + status-line message channel](00173-supervisor-ctrlz-guard-and-status-message/PLAN.md) - In Progress (neutralise the Ctrl+Z-suspends-Claude footgun (upstream anthropics/claude-code#43596) by stripping the `0x1a` SUSP byte from the supervisor's forwarded stdin so it never reaches Claude's PTY. Adds a general, reusable supervisor→status-line transient message channel (atomically-written TTL-bounded JSON file + new fail-silent `status_message` status handler; Ctrl+Z "ignored" notice is its first consumer). Elevates thread safety to a first-class, documented concern across all supervisor + status-line code — entry-point header comments + architecture-doc sections — because those files are written concurrently by the supervisor host, its `--worker`, the daemon, and multiple sessions sharing one daemon)
+
 ### Status Line / Agent View
 
 - [00158: Agent Thread Navigation & Status Line](00158-agent-thread-navigation-statusline/PLAN.md) - In Progress (Phase 1 research/dogfood complete; implementation Phases 2–4 not started)
