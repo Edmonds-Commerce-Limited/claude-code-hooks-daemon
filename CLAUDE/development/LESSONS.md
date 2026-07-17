@@ -100,6 +100,32 @@ change, reviewed as such) or when a refactor moved a seam the test patched
 (e.g. a handler that doesn't support 5-digit plan numbers), the handler is
 wrong — fix it with TDD, do not relax the test.
 
+## Fix defects you find — don't just report them
+
+When you discover a bug, inconsistency, or defect while doing other work —
+including one you are tempted to downgrade to a "minor note" — **fix it in the
+same pass**, then report that it is fixed. Surfacing a defect and moving on
+leaves it to rot and quietly erodes trust in "done". "Done" means fixed and
+verified, not catalogued. This is the same principle as the dogfooding mandate
+([CLAUDE.md](../../CLAUDE.md) "Dogfooding Bug Fixes") and Plan 00157's "never
+drop a finding" ([RELEASING.md](RELEASING.md)) — a finding is either fixed now
+or captured as a tracked MUST-FIX plan item, never left as prose.
+
+**Why:** v3.43.1 shipped with a stale `v3.43.0` header in the generated
+`.claude/HOOKS-DAEMON.md`. The release summary flagged it as a "minor
+non-blocking note" instead of fixing it — the user (rightly) pushed back with
+"don't just report errors, fix them". Both the header and the root cause (the
+release flow never regenerated the doc) were then fixed in minutes. Reporting
+it cost a round-trip and shipped a wrong-versioned artifact; fixing it first
+would have cost nothing.
+
+**Apply:** when about to write "note:", "caveat:", "one minor thing:", or
+"non-blocking:" about a defect in your own work, stop and ask "can I fix this
+right now?" If yes, fix it and report the fix. If it is genuinely out of scope
+or too large for this pass, capture it as a tracked plan item with file:line
+and remediation — never as a disappearing sentence in a summary. Prefer fixing
+the root cause too, so the class of defect cannot recur.
+
 ## Working in this repo: expect silent stops after Edits
 
 In `/workspace` (the daemon's own repo) the Stop hook occasionally delivers as
