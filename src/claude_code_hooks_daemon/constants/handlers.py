@@ -437,6 +437,11 @@ class HandlerID:
         config_key="supervisor_indicator",
         display_name="status-supervisor-indicator",
     )
+    STATUS_MESSAGE = HandlerIDMeta(
+        class_name="StatusMessageHandler",
+        config_key="status_message",
+        display_name="status-message",
+    )
     USAGE_TRACKING = HandlerIDMeta(
         class_name="UsageTrackingHandler",
         config_key="usage_tracking",

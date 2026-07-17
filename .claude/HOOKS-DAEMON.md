@@ -125,7 +125,7 @@
 | 10 | subagent_completion_logger | NON-TERMINAL | Log subagent completion events to a JSONL file |
 | 20 | remind_prompt_library | ADVISORY | Remind to capture successful prompts to the library |
 
-### Status (14 handlers)
+### Status (15 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
@@ -135,6 +135,7 @@
 | 12 | context_sidecar | NON-TERMINAL | Write an observe-only context-state sidecar for the PTY supervisor |
 | 13 | supervisor_indicator | NON-TERMINAL | Show whether the ccy PTY supervisor is overseeing the session |
 | 14 | current_time | NON-TERMINAL | Display current local time in status line (24-hour format, no seconds) |
+| 16 | status_message | NON-TERMINAL | Render a transient supervisor message from the shared message file |
 | 20 | git_branch | NON-TERMINAL | Show current git branch with magicmonty-style status icons if in a git repo |
 | 25 | git_repo_name | NON-TERMINAL | Show git repository name at start of status line |
 | 25 | working_directory | NON-TERMINAL | Display working directory when it differs from project root |

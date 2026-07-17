@@ -165,24 +165,30 @@ Key code paths (source of truth is the monolithic tracked
 
 ### Phase 3: Message channel (status-line reader handler)
 
-- [ ] ⬜ **Task 3.1**: RED — `tests/unit/handlers/status_line/test_status_message.py`:
-  renders text when present + unexpired; renders nothing when absent, expired,
-  or malformed; never raises (fail-silent like `supervisor_indicator`).
-- [ ] ⬜ **Task 3.2**: GREEN — new `status_line/status_message.py` handler (new
-  `HandlerID` / `Priority` constants, `get_default_enabled=True` safe because
-  absent-file ⇒ no segment). Register in config + docs.
-- [ ] ⬜ **Task 3.3**: Shared path/schema constants documented as "MUST match
-  the supervisor" (same convention `supervisor_indicator.py` uses).
+- [x] ✅ **Task 3.1**: RED — `tests/unit/handlers/status_line/test_status_message.py`
+  (14 tests): renders text when present + unexpired; renders nothing when
+  absent, expired, malformed, non-dict, empty-text, missing/non-numeric
+  `expires_at`; unexpected error fails silent. RED confirmed.
+- [x] ✅ **Task 3.2**: GREEN — new `status_line/status_message.py` handler with
+  `HandlerID.STATUS_MESSAGE` + `Priority.STATUS_MESSAGE = 16`,
+  `get_default_enabled=True` (absent/expired ⇒ no segment). Registered in
+  `__init__.py`, `.claude/hooks-daemon.yaml`, and `.claude/HOOKS-DAEMON.md`.
+- [x] ✅ **Task 3.3**: Shared path constants (`_MESSAGE_SUBDIRECTORY`,
+  `_MESSAGE_FILENAME`) documented as "MUST match the supervisor", mirroring the
+  `supervisor_indicator.py` convention.
 
 ### Phase 4: Integration, QA, dogfooding
 
-- [ ] ⬜ **Task 4.1**: `generate-docs` to refresh `.claude/HOOKS-DAEMON.md`.
+- [x] ✅ **Task 4.1**: `generate-docs` refreshed `.claude/HOOKS-DAEMON.md`
+  (Status now 15 handlers; `status_message` at priority 16).
 - [ ] ⬜ **Task 4.2**: `./scripts/qa/run_all.sh` (or `llm_qa.py all`) green.
-- [ ] ⬜ **Task 4.3**: Daemon restart verified RUNNING; supervisor version
-  lockstep test green
-  (`test_compaction_gap_repro.py::TestSupervisorVersionMatchesDaemon`).
-- [ ] ⬜ **Task 4.4**: Live dogfood — press Ctrl+Z in this supervised session,
-  confirm no suspend and the message appears on the next status render.
+- [x] ✅ **Task 4.3**: Daemon restarted RUNNING (PID 21954), no load errors.
+  No `__version__` bump, so the supervisor-version-lockstep test stays green.
+- [x] ✅ **Task 4.4 (reader side)**: Live dogfood of the READER — wrote a message
+  file, probed `.claude/hooks/status-line`: the notice rendered at the expected
+  position; an expired message correctly rendered nothing. The SUPERVISOR-side
+  path (press Ctrl+Z → guard posts) takes effect only on the next ccy relaunch
+  (running supervisor has the old code), so that half re-verifies on relaunch.
 
 ## Technical Decisions
 
