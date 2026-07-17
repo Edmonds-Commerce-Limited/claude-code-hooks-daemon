@@ -12,6 +12,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Status Line / Agent View
 
+- [00174: Status-Line Artefact + Per-Segment Cadence Redesign](00174-status-line-artefact-cadence-redesign/PLAN.md) - In Progress (design brainstorm → looped audit/refine; NOT yet implementation-ready. Explores making the status line a persistent per-segment "artefact" (on-disk cached state store) so the render just assembles cached values cheaply, decoupling three fused cadences: render repaint (cheap, so a fast `statusLine.refreshInterval` is affordable), per-segment update (container/user near-static, time per-minute, git seconds), and event-driven push (Ctrl+Z writes instantly — Plan 00173's message file is the proto-version). Central constraints being stress-tested: payload-derived segments (model/context/effort) MUST stay live-per-render and can't be timer-cached; the daemon is not an always-on scheduler; and a shared daemon (Plan 00127) means per-session data must never leak into a shared artefact. Follow-up from Plan 00173's inherent notice-lag; coordinates with Plan 00158's refreshInterval work)
+
 - [00158: Agent Thread Navigation & Status Line](00158-agent-thread-navigation-statusline/PLAN.md) - In Progress (Phase 1 research/dogfood complete; implementation Phases 2–4 not started)
 
   - Documents the dogfood-verified Claude Code contract for the main `statusLine` and the newer `subagentStatusLine` surfaces; root-causes the "no status line / whose data?" symptoms under Agent View (arrow-key thread navigation)
@@ -1049,9 +1051,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 173 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
+- **Total Plans Created**: 174 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
 - **Completed**: 140 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 26 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 27 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
