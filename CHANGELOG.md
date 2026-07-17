@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.44.0] - 2026-07-17
+
+This is a **minor release** adding a Ctrl+Z suspend guard to the ccy PTY
+supervisor plus a general supervisor-to-status-line message channel, and
+lowering the default status-line refresh interval for snappier idle-updated
+segments.
+
+### Added
+
+- **Ctrl+Z (SUSP) guard in the ccy PTY supervisor.** The supervisor
+  (`.claude/ccy/claude-supervise.py`) now strips the Ctrl+Z SUSP byte
+  (`0x1a`) from stdin before forwarding it to Claude's PTY, so it can never
+  suspend the Claude process — closing the upstream footgun where Ctrl+Z
+  suspends Claude Code with no easy way back
+  (anthropics/claude-code#43596). A belt-and-braces signal guard also
+  swallows `SIGTSTP`/`SIGQUIT` (and sets `SIG_IGN` on `SIGTTIN`/`SIGTTOU`)
+  if such a signal is ever actually delivered to the supervisor process.
+  `SIGINT`/Ctrl+C is deliberately left working so the session can still be
+  interrupted normally.
+- **General supervisor→status-line transient message channel.** A
+  thread-safe, lock-guarded, rate-limited poster writes an atomically
+  replaced, TTL-bounded JSON message (with a severity `level`) that the
+  status line reads and renders. The first consumer is the Ctrl+Z-ignored
+  notice ("use /exit to quit"), rendered attached to the supervisor's own
+  top-hat segment as a single status segment — no second top hat — with
+  warning-level messages painted black-on-orange for legibility.
+- Thread safety is now documented as a first-class concern across the
+  supervisor and status-line code (Plan 00173 Phase 0).
+
+### Changed
+
+- **Status-line `refreshInterval` default lowered from 10 to 1** (Claude
+  Code's documented minimum) in the daemon's authoritative
+  `.claude/settings.json` template, which `install_version.sh` and
+  `upgrade_version.sh` copy verbatim into every client project on both
+  fresh installs and upgrades. Idle-updated status-line segments (the new
+  Ctrl+Z notice, the clock, the multithread indicator) now refresh within
+  ~1s instead of trailing up to ~10s. Root cause: Claude Code only
+  re-invokes the status command on discrete events (Ctrl+Z is not one)
+  plus this optional timer, and the daemon's status render is ~39ms and
+  git-cached, so a 1s timer adds negligible overhead. This is a
+  `settings.json` template default, not a `hooks-daemon.yaml` key, and
+  rolls out automatically via the existing template-overwrite mechanism.
+
+### Removed
+
+- **Standalone `status_message` status-line handler.** Folded into the
+  `supervisor_indicator` handler so the Ctrl+Z-ignored notice renders as
+  one attached segment on the supervisor's existing top hat instead of a
+  second, independent top hat. This is an internal handler consolidation,
+  not a loss of user-facing capability — the notice still renders,
+  attached to the supervisor indicator.
+
 ## [3.43.1] - 2026-07-17
 
 This is a **patch release** fixing a status-line configuration bug and a
