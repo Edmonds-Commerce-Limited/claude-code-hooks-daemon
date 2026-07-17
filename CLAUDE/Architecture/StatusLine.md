@@ -302,6 +302,23 @@ Under normal conditions, the full status line handler chain completes in **10-60
 
 ---
 
+## Concurrency & Thread Safety (FIRST-CLASS CONCERN)
+
+Status-line code is **inherently concurrent** — treat thread/process safety as a design constraint, not an afterthought:
+
+- `handle()` runs on **every** render, and **multiple Claude sessions can share one daemon** (Plan 00127), so any shared on-disk file has concurrent readers/writers across processes.
+- Several status files are also written by the **ccy PTY supervisor** — a *separate* process plus its `--worker` subprocess. `context_sidecar` writes a sidecar the supervisor reads; `status_message` reads the `supervise/status-message.json` the supervisor writes (Plan 00173).
+
+Three non-negotiable rules (already honoured by `context_sidecar.py`, `thread_registry.py`, `status_message.py` — mirror them in any new element):
+
+1. **Writes are atomic-replace only.** Write to a private temp file (`.{name}.{pid}[.{tid}].tmp`), then `os.replace()` (atomic on POSIX). Never write a shared file in place; a reader must only ever see a **complete** file. Last writer wins. Skip stray `.*.tmp` files when scanning a directory.
+2. **Reads are fail-silent and defensive.** A missing / malformed / partial / foreign-schema file yields **no segment**, never an exception — a broken status line is worse than a missing element. Wrap the `handle()` body so any unexpected error returns `HookResult(context=[])`.
+3. **In-process shared mutable state is lock-guarded.** State touched from more than one thread (e.g. a poster's rate-limit counter) uses a `threading.Lock` around the check-and-update. Per-instance caches (e.g. `supervisor_indicator`'s memoised pid) are per-process — never assume you are the sole writer of a shared *file*.
+
+The paired **writer-side** guidance lives at the top of `.claude/ccy/claude-supervise.py`; the package-level checklist is in `src/claude_code_hooks_daemon/handlers/status_line/CLAUDE.md`.
+
+---
+
 ## Adding New Status Line Elements
 
 ### Step 1: Create Handler

@@ -19,6 +19,41 @@ This directory contains all handlers for the `status_line` hook event type. Thes
 
 > This table lists the core informational elements. Several more status handlers exist (`supervisor_indicator`, `multithread_indicator`, `current_time`, `working_directory`, `startup_cleanup`, `context_sidecar`, …) — see `.claude/HOOKS-DAEMON.md` for the full live-config list. The assembled line is **width-aware**: when Claude Code forwards the terminal width (`terminal_columns`, via the `init.sh` transport), `hook_result.py` wraps the segments onto multiple rows at `|` boundaries so nothing is lost on a narrow screen (Plan 00167).
 
+## Thread Safety / Concurrency (FIRST-CLASS CONCERN)
+
+**Read this before adding or changing any status-line handler that touches a
+file or shared in-memory state.** Status-line code is inherently concurrent:
+
+- `handle()` runs on **every** status render, and **multiple Claude sessions
+  can share one daemon** (Plan 00127) — so shared on-disk files have concurrent
+  readers/writers across processes.
+- Several files here are also written by the **ccy PTY supervisor**, a
+  *separate* process (and its `--worker` subprocess) — e.g. `context_sidecar`
+  writes a sidecar the supervisor reads, and `status_message` **reads** the
+  message file the supervisor **writes**.
+
+Non-negotiable rules (already followed by `context_sidecar.py`,
+`thread_registry.py`, `status_message.py` — match them):
+
+1. **Writes are atomic-replace only.** Write to a private temp file
+   (`.{name}.{pid}[.{tid}].tmp`) then `os.replace()` (atomic on POSIX) — never
+   write a shared file in place. A reader then always sees a **complete** file,
+   never a partial one; last writer wins. Skip stray `.*.tmp` files when
+   scanning a directory (see `thread_registry.py`).
+2. **Reads are fail-silent and defensive.** A missing / malformed / partial /
+   foreign-schema file must yield "no segment", **never** raise — a broken
+   status line is worse than a missing element. Wrap `handle()` bodies so any
+   unexpected error returns `HookResult(context=[])` (see `daemon_stats.py`,
+   `supervisor_indicator.py`, `status_message.py`).
+3. **In-memory caches are per-process and must tolerate concurrent peers.** A
+   handler instance's caches (e.g. `supervisor_indicator`'s memoised pid) live
+   in one daemon process; never assume you are the only writer of a shared
+   *file*, and guard any state shared across threads with a `threading.Lock`.
+
+The paired writer-side guidance lives at the top of
+`.claude/ccy/claude-supervise.py` and in
+[CLAUDE/Architecture/StatusLine.md](/CLAUDE/Architecture/StatusLine.md).
+
 ## Supporting Modules
 
 | File                    | Description                                                                       |

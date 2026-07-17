@@ -16,6 +16,39 @@ injects the real ``/compact`` (and ``continue``).
 
 Usage:
     claude-supervise.py [--dry-run | --arm] [--log PATH] -- <child argv...>
+
+THREAD / PROCESS SAFETY (FIRST-CLASS CONCERN — read before touching shared
+state or any file under the ``supervise/`` runtime dir).
+
+The supervisor does NOT run in isolation. Every file it writes under the daemon
+untracked dir (``supervise/``: the status file, the message file, sidecars,
+signal files) is concurrently accessed by OTHER processes and threads:
+
+  * the supervisor HOST process (the select loop),
+  * the ``--worker`` decision SUBPROCESS (a separate pid),
+  * the DAEMON (a different process entirely) reading these files on every
+    status-line render,
+  * MULTIPLE Claude sessions that may share one daemon (Plan 00127).
+
+Non-negotiable rules for anything in this area:
+
+  1. WRITES ARE ATOMIC-REPLACE ONLY. Write to a PRIVATE temp file, then
+     ``os.replace`` (atomic rename on POSIX) — never write a shared file in
+     place. A reader therefore always sees either the old or the new COMPLETE
+     file, never a partial one. Temp names carry the pid (and, where more than
+     one thread may write, the thread id) so concurrent writers never share a
+     temp path. See ``write_supervisor_status`` and ``write_status_message``
+     for the canonical form; last writer wins.
+  2. READS ARE FAIL-SILENT AND DEFENSIVE. A missing / malformed / partial /
+     foreign-schema file yields "no result", never an exception — a bad file
+     must never wedge the supervisor or break the status line.
+  3. IN-PROCESS SHARED MUTABLE STATE IS LOCK-GUARDED. Any state touched from
+     more than one thread (e.g. a poster's rate-limit counter) uses a
+     ``threading.Lock`` around the check-and-update. See ``StatusMessagePoster``.
+
+The paired daemon-side reader guidance lives in
+``src/claude_code_hooks_daemon/handlers/status_line/CLAUDE.md`` and
+``CLAUDE/Architecture/StatusLine.md``.
 """
 
 from __future__ import annotations
