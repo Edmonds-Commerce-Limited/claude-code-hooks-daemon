@@ -10,8 +10,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Status Line / Agent View
 
-- [00171: supervisor_indicator /proc-scan negative caching](00171-supervisor-indicator-proc-scan-negative-caching/PLAN.md) - Not Started (fast follow-up capturing the v3.43.0 release code-review findings, all non-blocking: the on-by-default `supervisor_indicator` walks all of `/proc` on every status-line render for projects with no ccy supervisor because memoisation only kicks in once a supervisor is found — add time-throttled negative caching + fix the "cheap per-render probe" docstring; plus two cosmetic nits (stale `EventKey` literal in `core/event.py`, duplicated `_STATUS_*_KEY` constants across the schema modules). Tracked per Plan 00157 "never drop a finding")
-
 - [00158: Agent Thread Navigation & Status Line](00158-agent-thread-navigation-statusline/PLAN.md) - In Progress (Phase 1 research/dogfood complete; implementation Phases 2–4 not started)
 
   - Documents the dogfood-verified Claude Code contract for the main `statusLine` and the newer `subagentStatusLine` surfaces; root-causes the "no status line / whose data?" symptoms under Agent View (arrow-key thread navigation)
@@ -143,6 +141,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00171: supervisor_indicator /proc-scan negative caching](Completed/00171-supervisor-indicator-proc-scan-negative-caching/PLAN.md) - Complete (fast follow-up closing the three non-blocking v3.43.0 release code-review findings per Plan 00157 "never drop a finding". Phase 1: the on-by-default `supervisor_indicator` walked all of `/proc` on every status-line render for non-ccy projects because memoisation only kicked in once a supervisor was found — added time-throttled negative caching (`_NEGATIVE_CACHE_TTL_SECONDS`, monotonic-clock deadline; cleared on any positive resolution or dropped stale positive cache so a replacement/newly-started supervisor is still detected within one TTL) plus a corrected module docstring. Phase 2 cosmetic nits: completed the stale 11-entry `EventKey` literal to the full 31-event catalogue in `constants/events.py` and pinned it against `all_event_metas()` with a new drift-guard test; de-duplicated the StatusLine dual-naming constants (`STATUS_LINE_JSON_KEY`/`STATUS_SCHEMA_KEY`) into `constants/events.py`, consumed by both schema modules. 11 new tests; QA 13/13, daemon restart + live status-line render verified. Delivery in the `Plan 00171: Complete` commit)
 
 - [00169: Prior-Art / SOTA Research and Feature Brainstorm](Completed/00169-prior-art-sota-research-and-feature-brainstorm/PLAN.md) - Complete (pre-release research + ideation pass — no code shipped. Fanned five parallel research agents across community Claude Code hooks, adjacent agentic-CLI guardrails (Codex/Gemini/Aider/opencode/Cursor/Windsurf/Cline/Roo), SOTA policy/sandbox engines + secret/supply-chain + LLM-I/O guardrails, agent observability/telemetry (OTEL GenAI + Claude Code native OTEL + Phoenix/Langfuse/ccusage), and context/memory/checkpoint/orchestration. Delivered three tracked docs: `RESEARCH-FINDINGS.md` (deduped, fully sourced), `GAP-ANALYSIS.md` (have/partial/missing vs our handler set — ~30 misses concentrated in secrets/sandboxing, observability-from-our-own-events, checkpoint/rewind, context hygiene), `FEATURE-BACKLOG.md` (27 ranked briefs, novelty-marked). Convergent signal: secret/`.env` protection is the #1 gap; OS sandboxing (bubblewrap/Seatbelt) is the leap from blocklist→deny-by-default; the hook layer is a uniquely rich observability vantage (guardrail-block analytics only we can build); we're ahead of upstream on auto-resume. Recommended first graduation wave: F1 secret-blocker+redaction, F2 guardrail-block analytics+scorecard, F3 StopFailure recovery, F4 updatedInput auto-fix, F5 protect-tests; flagship bet F8 OS-sandbox mode. Delivery `92f3936b` + completion commit)
 
@@ -1046,8 +1046,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 171 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
-- **Completed**: 138 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 26 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 139 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 25 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation

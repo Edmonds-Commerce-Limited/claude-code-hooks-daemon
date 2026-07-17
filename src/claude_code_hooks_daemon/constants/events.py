@@ -17,7 +17,7 @@ Usage:
 """
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Final, Literal
 
 
 @dataclass(frozen=True)
@@ -354,6 +354,14 @@ class EventID:
     )
 
 
+# StatusLine dual-naming — the single source of truth shared by the input and
+# response schema builders. Its catalogue json_key is "StatusLine", but its
+# schema / EventType / settings key is "Status"; both schema modules used to
+# define their own private copies of this pair (Plan 00171 de-dup).
+STATUS_LINE_JSON_KEY: Final[str] = EventID.STATUS_LINE.json_key
+STATUS_SCHEMA_KEY: Final[str] = "Status"
+
+
 def all_event_metas() -> tuple[EventIDMeta, ...]:
     """Return every :class:`EventIDMeta` declared on :class:`EventID`.
 
@@ -376,8 +384,15 @@ def wired_event_metas() -> tuple[EventIDMeta, ...]:
     return tuple(m for m in all_event_metas() if m.wired)
 
 
-# Type-safe event key literal (for mypy/type checking)
+# Type-safe event key literal (for mypy/type checking).
+#
+# This MUST list the ``config_key`` of every event in the ``EventID`` catalogue
+# above, in the same declaration order. A ``Literal`` cannot be built from
+# ``all_event_metas()`` at type-check time (mypy needs static members), so the
+# two are kept in lockstep by ``test_event_key_literal_matches_catalogue`` —
+# adding an event to ``EventID`` without extending this literal fails that test.
 EventKey = Literal[
+    # Wired-from-the-start events.
     "pre_tool_use",
     "post_tool_use",
     "session_start",
@@ -389,4 +404,25 @@ EventKey = Literal[
     "notification",
     "permission_request",
     "status_line",
+    # Plan 00170 catalogued events.
+    "setup",
+    "user_prompt_expansion",
+    "permission_denied",
+    "post_tool_use_failure",
+    "post_tool_batch",
+    "message_display",
+    "subagent_start",
+    "task_created",
+    "task_completed",
+    "stop_failure",
+    "teammate_idle",
+    "instructions_loaded",
+    "config_change",
+    "cwd_changed",
+    "file_changed",
+    "worktree_create",
+    "worktree_remove",
+    "post_compact",
+    "elicitation",
+    "elicitation_result",
 ]

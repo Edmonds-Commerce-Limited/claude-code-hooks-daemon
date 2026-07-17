@@ -24,12 +24,27 @@ still running (``claude-supervise.py --arm``), which used to make the icon
 vanish even though the safety net was on. Resolution therefore: (1) trust the
 status file when it names a live supervisor pid, else (2) scan ``/proc`` for a
 live ``claude-supervise`` process, else (3) fall back to orange/none based on
-whether a status file is present at all. The resolved (pid, armed) identity is
-IMMUTABLE for the lifetime of a supervisor process, so it is MEMOISED: later
-renders do only a cheap ``os.kill(pid, 0)`` liveness probe instead of the
-status-file read or the ``/proc`` scan. A crash still flips to orange because
-the liveness probe runs every render; when the cached supervisor dies the cache
-is dropped and the next render re-resolves (picking up a replacement).
+whether a status file is present at all.
+
+Two caches keep the per-render cost low, because ``handle`` runs on EVERY
+status-line render:
+
+- POSITIVE cache: the resolved (pid, armed) identity is IMMUTABLE for the
+  lifetime of a supervisor process, so once a supervisor is found it is
+  MEMOISED — later renders do only a cheap ``os.kill(pid, 0)`` liveness probe
+  instead of the status-file read or the ``/proc`` scan. A crash still flips to
+  orange because the liveness probe runs every render; when the cached
+  supervisor dies the cache is dropped and the next render re-resolves (picking
+  up a replacement).
+- NEGATIVE cache: the common case is a project that never runs the supervisor,
+  where full resolution walks all of ``/proc`` reading every pid's cmdline and
+  finds nothing. That "no live supervisor" outcome (NOT_ACTIVE or
+  NOT_CONFIGURED) is throttled with a short TTL
+  (``_NEGATIVE_CACHE_TTL_SECONDS``) so repeated renders reuse it instead of
+  re-walking ``/proc`` every time; a newly-started supervisor is still picked up
+  within a bounded delay of one TTL. Any positive resolution clears the negative
+  cache, and a positive cache going stale (supervisor died) also invalidates it
+  so the replacement scan is not suppressed.
 
 ANY unexpected failure fails safe to NO segment — this handler must never raise
 and never break the status line (mirrors the fail-silent pattern used by
@@ -40,6 +55,7 @@ import errno
 import json
 import logging
 import os
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -66,6 +82,14 @@ _SUPERVISOR_ARM_FLAG = "--arm"
 # carry the cmdline marker; when scanning /proc we prefer the HOST (whose pid is
 # stable) and fall back to the worker only if the host is not matched.
 _SUPERVISOR_WORKER_FLAG = "--worker"
+
+# TTL (seconds) for the negative cache: a "no live supervisor found" resolution
+# is reused for this long before the expensive /proc walk is repeated, so a
+# non-ccy project does not re-scan every process on every status-line render. A
+# newly-started supervisor is still detected within one TTL of appearing. Kept
+# short so the orange "supervisor down" alarm and the green "came back" flip stay
+# responsive; ``time.monotonic`` backs it so a wall-clock change cannot wedge it.
+_NEGATIVE_CACHE_TTL_SECONDS = 5.0
 
 # The top hat — the "Fat Controller" overseeing/directing the session. A single
 # glyph; state is carried by the ANSI BACKGROUND colour behind it (foreground
@@ -118,6 +142,12 @@ class SupervisorIndicatorHandler(Handler):
         # then only re-checks pid liveness. Dropped when the cached pid dies.
         self._cached_pid: int | None = None
         self._cached_armed: bool | None = None
+        # Negative cache: a "no live supervisor" resolution (NOT_ACTIVE or
+        # NOT_CONFIGURED) is reused until this monotonic deadline, so a non-ccy
+        # project does not re-walk /proc on every render. Cleared on any positive
+        # resolution and when a stale positive cache is dropped.
+        self._negative_cache_state: _SupervisorState | None = None
+        self._negative_cache_until: float | None = None
 
     def get_default_enabled(self) -> bool:
         """On by default.
@@ -150,6 +180,10 @@ class SupervisorIndicatorHandler(Handler):
             return HookResult(context=[])
         return HookResult(context=[f"| {background} {_ICON} {_ANSI_RESET}"])
 
+    def _now(self) -> float:
+        """Monotonic clock reading (indirected for deterministic testing)."""
+        return time.monotonic()
+
     def _detect_state(self) -> _SupervisorState:
         """Detect the supervisor state, using the memoised identity fast path."""
         # Fast path: a previously-resolved supervisor. Only the cheap liveness
@@ -161,14 +195,24 @@ class SupervisorIndicatorHandler(Handler):
                     if self._cached_armed
                     else _SupervisorState.ACTIVE_DRYRUN
                 )
-            # Cached supervisor died — drop the cache and re-resolve below so a
-            # replacement supervisor (new pid) is picked up.
+            # Cached supervisor died — drop the caches and re-resolve below so a
+            # replacement supervisor (new pid) is picked up immediately (the
+            # negative cache must not suppress that replacement scan).
             self._cached_pid = None
             self._cached_armed = None
+            self._negative_cache_state = None
+            self._negative_cache_until = None
 
-        return self._resolve_state()
+        # Negative fast path: a recent "no live supervisor" outcome is reused
+        # within its TTL so non-ccy projects do not re-walk /proc every render.
+        now = self._now()
+        if self._negative_cache_until is not None and now < self._negative_cache_until:
+            assert self._negative_cache_state is not None
+            return self._negative_cache_state
 
-    def _resolve_state(self) -> _SupervisorState:
+        return self._resolve_state(now)
+
+    def _resolve_state(self, now: float) -> _SupervisorState:
         """Full resolution, memoising the identity on success.
 
         Ground truth is "is an armed supervisor PROCESS running", not "does a
@@ -201,12 +245,20 @@ class SupervisorIndicatorHandler(Handler):
 
         # 3. Nothing live. Orange alarm if a supervisor was configured (status
         #    file present) but is down; otherwise render nothing (never configured).
-        return _SupervisorState.NOT_ACTIVE if status_present else _SupervisorState.NOT_CONFIGURED
+        state = _SupervisorState.NOT_ACTIVE if status_present else _SupervisorState.NOT_CONFIGURED
+        # Throttle this negative outcome so the /proc walk is not repeated on
+        # every render until the TTL elapses.
+        self._negative_cache_state = state
+        self._negative_cache_until = now + _NEGATIVE_CACHE_TTL_SECONDS
+        return state
 
     def _activate(self, pid: int, armed: bool) -> _SupervisorState:
         """Memoise a resolved supervisor identity and return its active state."""
         self._cached_pid = pid
         self._cached_armed = armed
+        # A positive resolution invalidates any pending negative throttle.
+        self._negative_cache_state = None
+        self._negative_cache_until = None
         return _SupervisorState.ACTIVE_ARMED if armed else _SupervisorState.ACTIVE_DRYRUN
 
     def _scan_for_supervisor(self) -> tuple[int, bool] | None:

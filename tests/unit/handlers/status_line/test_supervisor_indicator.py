@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.handlers.status_line.supervisor_indicator import (
     _BG_ORANGE,
     _BG_YELLOW,
     _ICON,
+    _NEGATIVE_CACHE_TTL_SECONDS,
     SupervisorIndicatorHandler,
 )
 
@@ -36,6 +37,10 @@ _CMDLINE_PATCH = (
 _SCAN_PATCH = (
     "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator."
     "SupervisorIndicatorHandler._scan_for_supervisor"
+)
+_NOW_PATCH = (
+    "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator."
+    "SupervisorIndicatorHandler._now"
 )
 
 
@@ -417,6 +422,100 @@ class TestSupervisorIndicatorMemoisation:
             after = handler.handle({})
         assert _BG_ORANGE in after.context[0]  # crash -> orange
         assert handler._cached_pid is None  # cache dropped
+
+
+class TestSupervisorIndicatorNegativeCaching:
+    """A "no live supervisor" resolution is throttled so the expensive /proc scan
+    is not repeated on every render for projects that never run the supervisor.
+    """
+
+    def test_negative_resolution_not_rescanned_within_window(self, tmp_path: Path) -> None:
+        # No status file + no process -> NOT_CONFIGURED. The scan must run once,
+        # then be skipped on the next render while inside the throttle window.
+        missing = tmp_path / "nope.json"
+        handler = SupervisorIndicatorHandler()
+        with (
+            patch(_STATUS_PATH_PATCH, return_value=missing),
+            patch(_SCAN_PATCH, return_value=None) as scan_mock,
+            patch(_NOW_PATCH, return_value=1000.0),
+        ):
+            first = handler.handle({})
+            assert scan_mock.call_count == 1
+            second = handler.handle({})
+            assert scan_mock.call_count == 1  # NOT re-walked within the window
+        assert first.context == []
+        assert second.context == []
+
+    def test_not_active_resolution_also_throttled(self, tmp_path: Path) -> None:
+        # Status file present but pid dead + no process -> NOT_ACTIVE (orange).
+        # That negative resolution is throttled the same way.
+        status_file = _write_status(tmp_path, pid=99999)
+        handler = SupervisorIndicatorHandler()
+        with (
+            patch(_STATUS_PATH_PATCH, return_value=status_file),
+            patch(_KILL_PATCH, side_effect=OSError(errno.ESRCH, "No such process")),
+            patch(_SCAN_PATCH, return_value=None) as scan_mock,
+            patch(_NOW_PATCH, return_value=1000.0),
+        ):
+            first = handler.handle({})
+            second = handler.handle({})
+            assert scan_mock.call_count == 1
+        assert _BG_ORANGE in first.context[0]
+        assert _BG_ORANGE in second.context[0]
+
+    def test_negative_cache_expires_and_rescans_after_ttl(self, tmp_path: Path) -> None:
+        missing = tmp_path / "nope.json"
+        handler = SupervisorIndicatorHandler()
+        clock = {"t": 1000.0}
+        with (
+            patch(_STATUS_PATH_PATCH, return_value=missing),
+            patch(_SCAN_PATCH, return_value=None) as scan_mock,
+            patch(_NOW_PATCH, side_effect=lambda: clock["t"]),
+        ):
+            handler.handle({})
+            assert scan_mock.call_count == 1
+            clock["t"] = 1000.0 + _NEGATIVE_CACHE_TTL_SECONDS + 1.0
+            handler.handle({})
+            assert scan_mock.call_count == 2  # window elapsed -> re-walked
+
+    def test_supervisor_appearing_after_ttl_is_detected_green(self, tmp_path: Path) -> None:
+        # First render: nothing live -> negative cached. After the TTL a live
+        # armed supervisor appears and must be picked up (green) on re-scan.
+        missing = tmp_path / "nope.json"
+        handler = SupervisorIndicatorHandler()
+        clock = {"t": 1000.0}
+        scan_result: dict[str, tuple[int, bool] | None] = {"value": None}
+        with (
+            patch(_STATUS_PATH_PATCH, return_value=missing),
+            patch(_SCAN_PATCH, side_effect=lambda: scan_result["value"]),
+            patch(_KILL_PATCH, return_value=None),
+            patch(_NOW_PATCH, side_effect=lambda: clock["t"]),
+        ):
+            first = handler.handle({})
+            assert first.context == []
+            scan_result["value"] = (4321, True)
+            clock["t"] = 1000.0 + _NEGATIVE_CACHE_TTL_SECONDS + 1.0
+            second = handler.handle({})
+        assert _BG_GREEN in second.context[0]
+        assert handler._cached_pid == 4321
+
+    def test_positive_resolution_clears_negative_cache(self, tmp_path: Path) -> None:
+        # A live supervisor found on the FIRST render must not leave a negative
+        # cache behind; the positive (pid) fast path takes over on later renders.
+        missing = tmp_path / "nope.json"
+        handler = SupervisorIndicatorHandler()
+        with (
+            patch(_STATUS_PATH_PATCH, return_value=missing),
+            patch(_SCAN_PATCH, return_value=(4321, True)) as scan_mock,
+            patch(_KILL_PATCH, return_value=None),
+            patch(_NOW_PATCH, return_value=1000.0),
+        ):
+            handler.handle({})
+            assert scan_mock.call_count == 1
+            second = handler.handle({})  # pid fast path, no scan
+            assert scan_mock.call_count == 1
+        assert _BG_GREEN in second.context[0]
+        assert handler._negative_cache_until is None
 
 
 class TestSupervisorIndicatorHelpers:

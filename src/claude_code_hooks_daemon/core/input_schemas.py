@@ -16,12 +16,11 @@ References:
 
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants.events import wired_event_metas
-
-# StatusLine carries dual-naming: EventID.json_key is "StatusLine" but its schema
-# (and EventType/settings) key is "Status". Centralised here for the auto-fill.
-_STATUS_LINE_JSON_KEY: Final[str] = "StatusLine"
-_STATUS_SCHEMA_KEY: Final[str] = "Status"
+from claude_code_hooks_daemon.constants.events import (
+    STATUS_LINE_JSON_KEY,
+    STATUS_SCHEMA_KEY,
+    wired_event_metas,
+)
 
 # =============================================================================
 # Common Base Fields
@@ -318,7 +317,7 @@ def _permissive_input_schema(event_name: str) -> dict[str, Any]:
 # permissive fail-open schema. At the 11-event baseline this adds nothing; each
 # Plan 00170 wiring flip picks up a schema here with no manual edit.
 for _meta in wired_event_metas():
-    _schema_key = _STATUS_SCHEMA_KEY if _meta.json_key == _STATUS_LINE_JSON_KEY else _meta.json_key
+    _schema_key = STATUS_SCHEMA_KEY if _meta.json_key == STATUS_LINE_JSON_KEY else _meta.json_key
     INPUT_SCHEMAS.setdefault(_schema_key, _permissive_input_schema(_schema_key))
 
 

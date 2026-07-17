@@ -1,6 +1,6 @@
 # Plan 00171: supervisor indicator proc scan negative caching
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-07-16
 **Owner**: joseph
 **Priority**: Medium
@@ -36,7 +36,7 @@ cosmetic cleanups.
 
 ### Phase 1: supervisor_indicator /proc-scan negative caching (MUST-FIX)
 
-- [ ] ⬜ **Task 1.1**: Reproduce the cost with a failing test
+- [x] ✅ **Task 1.1**: Reproduce the cost with a failing test
   - File: `src/claude_code_hooks_daemon/handlers/status_line/supervisor_indicator.py`
   - Symptom: when no supervisor is configured, `_cached_pid` is never populated
     (memoisation only happens in `_activate`, reached only when a supervisor IS
@@ -44,32 +44,34 @@ cosmetic cleanups.
     walks all of `/proc` reading every pid's `cmdline` on **every** render.
     Severity: LOW (fail-safe, bounded by process count) but affects an
     on-by-default handler on every status-line render.
-  - [ ] ⬜ Failing test: `_scan_for_supervisor` is NOT re-invoked on every render
-    once a "no supervisor" resolution was made within the throttle window.
-- [ ] ⬜ **Task 1.2**: Implement time-throttled negative caching
-  - Cache a "no live supervisor found" resolution with a short TTL so repeated
-    renders in quick succession do not re-walk `/proc`, while a newly-started
-    supervisor is still picked up within a bounded delay.
-  - Preserve the observed-bug fix: a supervisor alive with a missing status file
-    must still be detected on the next scan after the TTL.
-- [ ] ⬜ **Task 1.3**: Correct the module docstring (lines ~27-32) — the fast
-  path (cheap `os.kill` liveness probe) applies only AFTER a supervisor has
-  been resolved; document the negative-cache throttle for the no-supervisor
-  case.
+  - [x] ✅ Failing test: `_scan_for_supervisor` is NOT re-invoked on every render
+    once a "no supervisor" resolution was made within the throttle window
+    (`TestSupervisorIndicatorNegativeCaching`, 5 new tests).
+- [x] ✅ **Task 1.2**: Implement time-throttled negative caching
+  - `_negative_cache_state` + `_negative_cache_until` (monotonic deadline,
+    `_NEGATIVE_CACHE_TTL_SECONDS = 5.0`) reused within the window; any positive
+    resolution and a dropped stale positive cache both clear it, so a
+    replacement/newly-started supervisor is picked up within one TTL.
+- [x] ✅ **Task 1.3**: Corrected the module docstring — documents the positive
+  (`os.kill` liveness) fast path AND the new negative-cache throttle.
 
 ### Phase 2: Cosmetic cleanups (non-blocking nits)
 
-- [ ] ⬜ **Task 2.1**: `core/event.py` — reconcile the stale 11-entry `EventKey`
-  literal with the canonical hook-event catalogue introduced in Plan 00170.
-- [ ] ⬜ **Task 2.2**: De-duplicate the `_STATUS_*_KEY` constants duplicated
-  across `core/input_schemas.py` / `core/response_schemas.py` into a single
-  source of truth.
+- [x] ✅ **Task 2.1**: `constants/events.py` — completed the stale 11-entry
+  `EventKey` literal to the full 31-event catalogue (declaration order) and
+  pinned it against `all_event_metas()` with a drift-guard test
+  (`tests/unit/constants/test_events.py`).
+- [x] ✅ **Task 2.2**: De-duplicated the StatusLine dual-naming constants into
+  `constants/events.py` (`STATUS_LINE_JSON_KEY` / `STATUS_SCHEMA_KEY`);
+  `core/input_schemas.py` and `core/response_schemas.py` now import them.
 
 ### Phase 3: Verify
 
-- [ ] ⬜ Run QA: `./scripts/qa/llm_qa.py all` (all checks pass, 95% coverage)
-- [ ] ⬜ Restart daemon and verify RUNNING
-- [ ] ⬜ Live-verify the status line still shows the correct top-hat states
+- [x] ✅ Run QA: `./scripts/qa/llm_qa.py all` — 13/13 PASSED (10267 tests, 0
+  failed, 95.3% coverage, smoke 3/3)
+- [x] ✅ Restart daemon and verify RUNNING (PID 193495, new code loaded)
+- [x] ✅ Live-verify the status line: green top-hat still renders under the live
+  ccy supervisor; `daemon_stats` health-only; `upgrade_notifier` silent
 
 ## Success Criteria
 
@@ -82,3 +84,9 @@ cosmetic cleanups.
 ## Delivery & Milestones
 
 <!-- Record delivery commit hashes here as work lands. -->
+
+- All three findings landed in a single follow-up commit (see the closing
+  commit for `Plan 00171: Complete`). Phase 1 negative caching +
+  `TestSupervisorIndicatorNegativeCaching` (5 tests); Phase 2 `EventKey`
+  catalogue reconciliation + `tests/unit/constants/test_events.py` (6 tests) and
+  StatusLine dual-naming de-dup into `constants/events.py`.
