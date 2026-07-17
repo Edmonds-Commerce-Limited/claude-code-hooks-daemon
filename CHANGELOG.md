@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.43.1] - 2026-07-17
+
+This is a **patch release** fixing a status-line configuration bug and a
+supervisor-indicator performance issue introduced in v3.43.0.
+
+### Fixed
+
+- **`status_line` handler `enabled: false` flag was silently ignored.**
+  `_build_initialised_controller` (`daemon/cli.py`) built the
+  `register_all` handler-config mapping from a hand-maintained event-type
+  list that omitted `status_line`, so every status-line handler fell back
+  to `enabled: True` regardless of config. This is user-facing: the
+  v3.43.0 release notes instructed users to set
+  `handlers.status_line.daemon_stats.enabled: false`, but that setting had
+  no effect until this fix. Fixed by deriving the event-type set from
+  `HandlersConfig.model_fields` (single source of truth) at both the
+  mapping builder and the `cmd_config` summary printer, and extracting a
+  `_build_handler_config_mapping` helper. New regression tests added in
+  `tests/unit/daemon/test_cli_handler_config_mapping.py`.
+- **`supervisor_indicator` status-line handler scanned all of `/proc` on
+  every render for non-ccy projects.** Added time-throttled negative
+  caching so the `/proc` scan is skipped on repeat renders when no ccy
+  supervisor is present, eliminating unnecessary per-render cost
+  (Plan 00171).
+- Completed the `EventKey` literal to the full 31-event catalogue in
+  `constants/events.py` with a drift-guard test, and de-duplicated
+  StatusLine dual-naming constants (Plan 00171 catalogue nits).
+
 ## [3.43.0] - 2026-07-16
 
 This is a **minor release** adding two new status-line handlers
