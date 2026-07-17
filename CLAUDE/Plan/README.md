@@ -90,6 +90,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Infrastructure / Bootstrap
 
+- [00176: settings.json merge — preserve client customizations on upgrade](00176-settings-json-merge-preserve-on-upgrade/PLAN.md) - Not Started (surfaced from Plan 00175: the installer/upgrader deploy the daemon's own `.claude/settings.json` by **verbatim copy** — fresh install backs up then overwrites (`install_version.sh:357-363`), and EVERY upgrade overwrites again (`upgrade_version.sh:663-665` Step 9) with NO merge (the `config_preserve.sh` three-way merge covers only `hooks-daemon.yaml`). So any client customization — an extra hook, a custom `statusLine`, a `permissions` block, a deliberate `refreshInterval` — is clobbered on every upgrade. Designs a structured JSON three-way merge at parity with the YAML preservation: the daemon stays authoritative for the Plan 00170 wired-hook forwarder set + ships recommended defaults, while client-owned keys and deliberate overrides survive, with an **agent-assisted diff** fallback that fails safe (preserve, never destroy) on ambiguity. Design authored; refine + build pending)
+
 - [00110: Python Interpreter Discovery — DRY Consolidation & Latest-Always Policy](00110-python-discovery-dry-consolidation/PLAN.md) - Not Started
 
   - Field report from host host-a (`untracked/hooks-daemon-upgrade-python-version.md`): skill `install.sh` aborted on default `python3` (3.9.21) and suggested hardcoded `python3.11` despite `python3.13`/`python3.14` being on PATH
@@ -1053,9 +1055,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 175 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
+- **Total Plans Created**: 176 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
 - **Completed**: 140 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 28 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 29 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
