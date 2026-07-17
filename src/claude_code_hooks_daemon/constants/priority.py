@@ -154,9 +154,6 @@ class Priority:
     SUPERVISOR_INDICATOR = 13  # ccy PTY supervisor armed/dryrun/inactive shield (opt-in)
     CURRENT_TIME = 14
     USAGE_TRACKING = 15
-    STATUS_MESSAGE = (
-        16  # transient supervisor->status-line notice (e.g. Ctrl+Z ignored); silent when none
-    )
     WORKING_DIRECTORY = 25
     STARTUP_CLEANUP = 28  # Between working_directory (25) and daemon_stats (30)
 

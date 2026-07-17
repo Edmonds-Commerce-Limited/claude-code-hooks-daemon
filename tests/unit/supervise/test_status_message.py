@@ -28,6 +28,8 @@ write_status_message = _mod.write_status_message
 StatusMessagePoster = _mod.StatusMessagePoster
 _LOG_SUBDIRECTORY = _mod._LOG_SUBDIRECTORY
 _STATUS_MESSAGE_FILENAME = _mod._STATUS_MESSAGE_FILENAME
+_STATUS_LEVEL_INFO = _mod._STATUS_LEVEL_INFO
+_STATUS_LEVEL_WARNING = _mod._STATUS_LEVEL_WARNING
 
 
 def _message_path(untracked: Path) -> Path:
@@ -42,7 +44,16 @@ class TestWriteStatusMessage:
         assert path == _message_path(tmp_path)
         assert path is not None
         data = json.loads(path.read_text())
-        assert data == {"text": "hello", "expires_at": 1234.5}
+        # Level defaults to "info" when the caller does not specify one.
+        assert data == {"text": "hello", "expires_at": 1234.5, "level": _STATUS_LEVEL_INFO}
+
+    def test_writes_explicit_warning_level(self, tmp_path: Path) -> None:
+        path = write_status_message(
+            tmp_path, text="ctrl+z", expires_at=9.0, level=_STATUS_LEVEL_WARNING
+        )
+        assert path is not None
+        data = json.loads(path.read_text())
+        assert data == {"text": "ctrl+z", "expires_at": 9.0, "level": _STATUS_LEVEL_WARNING}
 
     def test_creates_supervise_subdir(self, tmp_path: Path) -> None:
         write_status_message(tmp_path, text="x", expires_at=1.0)
@@ -52,7 +63,7 @@ class TestWriteStatusMessage:
         write_status_message(tmp_path, text="first", expires_at=1.0)
         write_status_message(tmp_path, text="second", expires_at=2.0)
         data = json.loads(_message_path(tmp_path).read_text())
-        assert data == {"text": "second", "expires_at": 2.0}
+        assert data == {"text": "second", "expires_at": 2.0, "level": _STATUS_LEVEL_INFO}
 
     def test_leaves_no_temp_file_behind(self, tmp_path: Path) -> None:
         write_status_message(tmp_path, text="x", expires_at=1.0)
@@ -81,7 +92,20 @@ class TestStatusMessagePoster:
         path = poster.post("notice")
         assert path is not None
         data = json.loads(path.read_text())
-        assert data == {"text": "notice", "expires_at": 110.0}
+        assert data == {"text": "notice", "expires_at": 110.0, "level": _STATUS_LEVEL_INFO}
+
+    def test_post_forwards_warning_level(self, tmp_path: Path) -> None:
+        poster = StatusMessagePoster(
+            tmp_path,
+            ttl_seconds=10.0,
+            min_interval_seconds=1.0,
+            wall_clock=lambda: 100.0,
+            monotonic=lambda: 0.0,
+        )
+        path = poster.post("ctrl+z", level=_STATUS_LEVEL_WARNING)
+        assert path is not None
+        data = json.loads(path.read_text())
+        assert data == {"text": "ctrl+z", "expires_at": 110.0, "level": _STATUS_LEVEL_WARNING}
 
     def test_second_post_within_interval_is_suppressed(self, tmp_path: Path) -> None:
         clock = {"mono": 0.0}

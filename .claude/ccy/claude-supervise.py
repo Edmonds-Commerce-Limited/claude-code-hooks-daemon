@@ -1070,6 +1070,13 @@ _STATUS_MESSAGE_TTL_SECONDS = 10.0
 # Minimum monotonic gap between writes from one poster, so a key-mash (a burst of
 # Ctrl+Z) rewrites the file at most once per interval instead of thrashing it.
 _STATUS_MESSAGE_MIN_INTERVAL_SECONDS = 1.0
+# Severity levels a posted message can carry. The status-line reader maps
+# "warning" to an orange background (attached to the supervisor's top hat) and
+# treats anything else (including a missing level) as plain info. Kept as named
+# constants — the string values are the on-disk contract shared with the daemon
+# handler (``status_message.py``), so they MUST stay in lockstep.
+_STATUS_LEVEL_INFO = "info"
+_STATUS_LEVEL_WARNING = "warning"
 # Text shown when a Ctrl+Z (SUSP) keystroke/signal is swallowed by the guard.
 _CTRL_Z_NOTICE_TEXT = "⛔ Ctrl+Z ignored — use /exit to quit"
 # Text shown when a Ctrl+\ (QUIT) SIGNAL is swallowed by the guard. Ctrl+\ almost
@@ -1088,7 +1095,13 @@ def _status_message_path(untracked_dir: Path) -> Path:
     return untracked_dir / _LOG_SUBDIRECTORY / _STATUS_MESSAGE_FILENAME
 
 
-def write_status_message(untracked_dir: Path, *, text: str, expires_at: float) -> Path | None:
+def write_status_message(
+    untracked_dir: Path,
+    *,
+    text: str,
+    expires_at: float,
+    level: str = _STATUS_LEVEL_INFO,
+) -> Path | None:
     """Atomically write a transient supervisor message for the status line.
 
     THREAD/PROCESS SAFETY: the message file is read by the daemon (a separate
@@ -1099,6 +1112,10 @@ def write_status_message(untracked_dir: Path, *, text: str, expires_at: float) -
     a reader therefore always sees either the old or the new COMPLETE file, never
     a partial one. Last writer wins.
 
+    ``level`` (``_STATUS_LEVEL_INFO`` / ``_STATUS_LEVEL_WARNING``) rides along in
+    the payload so the reader can colour warning-level notices (orange
+    background on the supervisor's top hat) distinctly from plain info.
+
     Best-effort: a write failure is reported to stderr and returns None rather
     than disturbing the supervised session.
 
@@ -1106,7 +1123,7 @@ def write_status_message(untracked_dir: Path, *, text: str, expires_at: float) -
         The message file path on success, or None on failure.
     """
     message_path = _status_message_path(untracked_dir)
-    payload = {"text": text, "expires_at": expires_at}
+    payload = {"text": text, "expires_at": expires_at, "level": level}
     try:
         message_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = (
@@ -1150,13 +1167,15 @@ class StatusMessagePoster:
         self._lock = threading.Lock()
         self._last_monotonic: float | None = None
 
-    def post(self, text: str) -> Path | None:
+    def post(self, text: str, *, level: str = _STATUS_LEVEL_INFO) -> Path | None:
         """Write ``text`` as the current status message, honouring the rate limit.
 
-        Returns the written path, or None when the post is suppressed by the
-        rate limit or the write fails. Thread-safe: the rate-limit
-        check-and-update runs under the lock so concurrent posters cannot both
-        pass within one interval.
+        ``level`` selects the severity (``_STATUS_LEVEL_WARNING`` renders on an
+        orange background attached to the supervisor's top hat; the default is
+        plain info). Returns the written path, or None when the post is
+        suppressed by the rate limit or the write fails. Thread-safe: the
+        rate-limit check-and-update runs under the lock so concurrent posters
+        cannot both pass within one interval.
         """
         now_mono = self._monotonic()
         with self._lock:
@@ -1167,7 +1186,9 @@ class StatusMessagePoster:
                 return None
             self._last_monotonic = now_mono
             expires_at = self._wall_clock() + self._ttl_seconds
-        return write_status_message(self._untracked_dir, text=text, expires_at=expires_at)
+        return write_status_message(
+            self._untracked_dir, text=text, expires_at=expires_at, level=level
+        )
 
 
 def install_input_signal_guards(post_notice: Callable[[str], object]) -> None:
@@ -2710,6 +2731,7 @@ def supervise(
             sidecar_dir.parent,
             text=notice,
             expires_at=time.time() + _STATUS_MESSAGE_TTL_SECONDS,
+            level=_STATUS_LEVEL_WARNING,
         )
 
     # Save prior dispositions so they are restored on exit (supervise() is called
@@ -2726,7 +2748,9 @@ def supervise(
             poll_seconds=poll_seconds,
             on_poll=_on_poll,
             output_activity=output_activity,
-            on_suspend=lambda: status_message_poster.post(_CTRL_Z_NOTICE_TEXT),
+            on_suspend=lambda: status_message_poster.post(
+                _CTRL_Z_NOTICE_TEXT, level=_STATUS_LEVEL_WARNING
+            ),
         )
     finally:
         for guarded_signal, prior_handler in prev_signal_guards.items():

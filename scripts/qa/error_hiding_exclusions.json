@@ -363,10 +363,16 @@
       "reason": "Supervisor indicator cmdline reader: returns None when /proc/{pid}/cmdline is unreadable (process gone between listing and read, or permission). None means the pid is not confirmable as the supervisor, so the caller skips it. Status line handlers are fail-open by design. Already logged at debug level."
     },
     {
-      "file": "handlers/status_line/status_message.py",
+      "file": "handlers/status_line/supervisor_indicator.py",
       "function": "_read_message",
       "rule": "return-none-on-error",
-      "reason": "Status message reader: returns None when the supervisor-written message file is missing or unparseable (OSError/ValueError). None means 'no message to show', so the caller renders no segment. Status line handlers are fail-open by design — a bad/partial file (written concurrently by a separate process) must never crash the render. Same contract as supervisor_indicator._read_status. Already logged at debug level."
+      "reason": "Supervisor indicator transient-message reader: returns None when the supervisor-written message file is missing or unparseable (OSError/ValueError). None means 'no message to show', so the top hat renders without an attached notice. Status line handlers are fail-open by design — a bad/partial file (written concurrently by a separate process) must never crash the render. Same contract as supervisor_indicator._read_status. Already logged at debug level."
+    },
+    {
+      "file": "handlers/status_line/supervisor_indicator.py",
+      "function": "_safe_active_message",
+      "rule": "return-none-on-error",
+      "reason": "Supervisor indicator transient-message fail-silent wrapper: returns None on ANY error resolving the current message (broad catch) so a bad message file can never break the status-line render — the top hat then renders without an attached notice. Identical fail-open contract to the handler's handle() body and the other supervisor_indicator readers (_read_status, _scan_for_supervisor). Already logged at debug level."
     },
     {
       "file": "handlers/stop/auto_continue_stop.py",

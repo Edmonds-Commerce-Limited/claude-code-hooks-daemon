@@ -307,9 +307,9 @@ Under normal conditions, the full status line handler chain completes in **10-60
 Status-line code is **inherently concurrent** — treat thread/process safety as a design constraint, not an afterthought:
 
 - `handle()` runs on **every** render, and **multiple Claude sessions can share one daemon** (Plan 00127), so any shared on-disk file has concurrent readers/writers across processes.
-- Several status files are also written by the **ccy PTY supervisor** — a *separate* process plus its `--worker` subprocess. `context_sidecar` writes a sidecar the supervisor reads; `status_message` reads the `supervise/status-message.json` the supervisor writes (Plan 00173).
+- Several status files are also written by the **ccy PTY supervisor** — a *separate* process plus its `--worker` subprocess. `context_sidecar` writes a sidecar the supervisor reads; `supervisor_indicator` reads the `supervise/status-message.json` the supervisor writes and renders it ATTACHED to the top hat (Plan 00173).
 
-Three non-negotiable rules (already honoured by `context_sidecar.py`, `thread_registry.py`, `status_message.py` — mirror them in any new element):
+Three non-negotiable rules (already honoured by `context_sidecar.py`, `thread_registry.py`, `supervisor_indicator.py` — mirror them in any new element):
 
 1. **Writes are atomic-replace only.** Write to a private temp file (`.{name}.{pid}[.{tid}].tmp`), then `os.replace()` (atomic on POSIX). Never write a shared file in place; a reader must only ever see a **complete** file. Last writer wins. Skip stray `.*.tmp` files when scanning a directory.
 2. **Reads are fail-silent and defensive.** A missing / malformed / partial / foreign-schema file yields **no segment**, never an exception — a broken status line is worse than a missing element. Wrap the `handle()` body so any unexpected error returns `HookResult(context=[])`.

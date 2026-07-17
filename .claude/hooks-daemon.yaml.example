@@ -387,11 +387,6 @@ handlers:
       enabled: true
       priority: 13
 
-    status_message:  # Transient supervisor->status-line notice (e.g. "⛔ Ctrl+Z ignored"); TTL-bounded
-      # On by default; renders NOTHING when no message file exists or it expired.
-      enabled: true
-      priority: 16
-
     git_branch:     # Shows current git branch if in repo
       enabled: true
       priority: 20

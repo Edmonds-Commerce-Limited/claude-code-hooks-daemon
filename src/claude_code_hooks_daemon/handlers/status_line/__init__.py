@@ -22,9 +22,6 @@ from claude_code_hooks_daemon.handlers.status_line.model_context import ModelCon
 from claude_code_hooks_daemon.handlers.status_line.multithread_indicator import (
     MultithreadIndicatorHandler,
 )
-from claude_code_hooks_daemon.handlers.status_line.status_message import (
-    StatusMessageHandler,
-)
 from claude_code_hooks_daemon.handlers.status_line.supervisor_indicator import (
     SupervisorIndicatorHandler,
 )
@@ -48,7 +45,6 @@ __all__ = [
     "GitRepoNameHandler",
     "ModelContextHandler",
     "MultithreadIndicatorHandler",
-    "StatusMessageHandler",
     "SupervisorIndicatorHandler",
     "UpgradeNotifierHandler",
     "UsageTrackingHandler",

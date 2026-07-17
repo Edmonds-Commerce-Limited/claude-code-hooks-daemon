@@ -122,16 +122,16 @@ Key code paths (source of truth is the monolithic tracked
 
 ### Phase 0: Thread safety as a first-class concern (docs + audit)
 
-- [ ] ⬜ **Task 0.1**: Audit the supervisor and every `status_line` handler for
+- [x] ✅ **Task 0.1**: Audit the supervisor and every `status_line` handler for
   shared on-disk/in-memory state accessed by concurrent processes/threads;
   record findings (safe vs. needs-fix) in this plan. Fix any GENUINE race
   found; otherwise document why current handling is already safe.
-- [ ] ⬜ **Task 0.2**: Add a concise "Thread Safety" header comment to the
+- [x] ✅ **Task 0.2**: Add a concise "Thread Safety" header comment to the
   supervisor entry point (`.claude/ccy/claude-supervise.py`) and to the
   `status_line` package (`handlers/status_line/CLAUDE.md` + a short module note),
   stating the Concurrency Model rules above (atomic-replace, fail-silent reads,
   lock-guarded shared state).
-- [ ] ⬜ **Task 0.3**: Add a "Thread Safety / Concurrency" section to the
+- [x] ✅ **Task 0.3**: Add a "Thread Safety / Concurrency" section to the
   status-line architecture doc (`CLAUDE/Architecture/StatusLine.md`) and a
   supervisor equivalent, as the single source of truth future changes cite.
 
@@ -163,7 +163,12 @@ Key code paths (source of truth is the monolithic tracked
   `supervise()` to `poster.post(_CTRL_Z_NOTICE_TEXT)`. 2 wiring tests added to
   the Ctrl+Z guard suite. 326 supervise tests pass; mypy clean.
 
-### Phase 3: Message channel (status-line reader handler)
+### Phase 3: Message channel (status-line reader handler) — SUPERSEDED by Phase 6
+
+> **Superseded**: the standalone `StatusMessageHandler` and its
+> `tests/unit/handlers/status_line/test_status_message.py` below were REMOVED in
+> Phase 6 (they produced a second, detached top hat). The reader logic now lives
+> in `supervisor_indicator`. History kept for context.
 
 - [x] ✅ **Task 3.1**: RED — `tests/unit/handlers/status_line/test_status_message.py`
   (14 tests): renders text when present + unexpired; renders nothing when
@@ -217,6 +222,37 @@ guard is the robust catch-all.
   in-process — leaked stop handlers would break their job control).
 - [x] ✅ **Task 5.3**: Module docstring intro documents the key/signal guarding.
   331 supervise tests pass; mypy clean.
+
+### Phase 6: Attach the message to the supervisor top hat (user-driven, mid-plan)
+
+Live user feedback after relaunch: the Phase 3 standalone `status_message`
+handler rendered its OWN top hat as a SEPARATE status section (two top hats;
+the clock sat between them) and its grey-on-orange text was illegible. The
+requirement is ONE top hat — the supervisor's own — whose background changes
+colour with the message text immediately ADJACENT on the same background. Two
+separate `|` segments can never read as one block, so the render must move into
+the handler that owns the top hat. **This supersedes Phase 3's standalone
+handler.**
+
+- [x] ✅ **Task 6.1**: Add a severity `level` to the channel — supervisor
+  `write_status_message` / `StatusMessagePoster.post` take `level`
+  (`_STATUS_LEVEL_INFO` default / `_STATUS_LEVEL_WARNING`); both Ctrl+Z and
+  Ctrl+\\ callers post `warning`. Payload gains `"level"`; a missing level reads
+  as non-warning (backward-safe).
+- [x] ✅ **Task 6.2**: `supervisor_indicator.handle()` reads
+  `supervise/status-message.json` and, while a message is live, renders the top
+  hat + text as ONE segment on a shared background — warning ⇒ orange overriding
+  the state colour, else the state colour; text forced black (`_FG_BLACK`) for
+  legibility. Expiry via a new wall-clock `_wall_now` (not the monotonic
+  negative-cache clock). 8 message-render tests + an autouse ambient-message
+  isolation fixture.
+- [x] ✅ **Task 6.3**: DELETE the standalone `status_message` handler and all
+  registrations (`__init__`, `HandlerID.STATUS_MESSAGE`,
+  `Priority.STATUS_MESSAGE`, both yaml + yaml.example, error_hiding exclusion
+  repointed to `supervisor_indicator._read_message`, `test_status_message.py`).
+  Status handlers 15 → 14; `HOOKS-DAEMON.md` regenerated. Daemon restarted
+  RUNNING; LIVE probe shows one orange+black top-hat block in the supervisor
+  section (no second top hat).
 
 ## Technical Decisions
 

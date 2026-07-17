@@ -460,12 +460,6 @@ handlers:
       enabled: true
       priority: 13
 
-    status_message:  # Transient supervisor->status-line notice (e.g. "⛔ Ctrl+Z ignored"); TTL-bounded
-      # On by default (renders nothing when no message file / expired message).
-      # First consumer: the supervisor's Ctrl+Z input guard (Plan 00173).
-      enabled: true
-      priority: 16
-
     git_branch:     # Shows current git branch if in repo
       enabled: true
       priority: 20

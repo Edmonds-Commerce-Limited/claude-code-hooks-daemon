@@ -13,6 +13,14 @@ Emoji glyphs ignore ANSI *foreground* colour, so the state colour is carried
 via the ANSI *background* (which does render behind the glyph) — one icon, no
 second glyph.
 
+This handler also renders TRANSIENT supervisor messages (the Ctrl+Z "ignored"
+notice and future ones, Plan 00173): the supervisor's ``StatusMessagePoster``
+writes a TTL-bounded ``supervise/status-message.json`` and, while one is live,
+this handler paints the top hat AND the message text as ONE attached segment on
+a shared background (warning level = orange, black text for legibility) — never
+a separate status section with a second top hat. When the message expires the
+plain state top hat returns.
+
 The "not configured" state renders NOTHING so the handler is safe to enable by
 default: a project that never runs the ccy supervisor shows no icon, while a
 project whose supervisor died (a status file left behind, no live process) gets
@@ -103,6 +111,21 @@ _BG_GREEN = "\033[42m"
 _BG_YELLOW = "\033[43m"
 _BG_ORANGE = "\033[48;5;208m"
 _ANSI_RESET = "\033[0m"
+# Black foreground for message TEXT rendered on a coloured background. The top
+# hat is an emoji (foreground colour does not tint it) but the adjacent message
+# text does, and the terminal's default dim-grey foreground is illegible on
+# orange — so message text is forced to black (matches ``model_context``'s
+# black-on-orange context tier).
+_FG_BLACK = "\033[30m"
+
+# Transient supervisor -> status-line message channel. The supervisor's
+# ``StatusMessagePoster`` writes ``supervise/status-message.json`` (same
+# ``_STATUS_SUBDIRECTORY``); this handler renders it ATTACHED to the top hat so a
+# notice is one visual unit with the supervisor, not a separate status section.
+# The filename/level string are the on-disk contract shared with the supervisor
+# (``_STATUS_MESSAGE_FILENAME`` / ``_STATUS_LEVEL_WARNING``) and MUST match.
+_MESSAGE_FILENAME = "status-message.json"
+_MESSAGE_LEVEL_WARNING = "warning"
 
 
 class _SupervisorState(Enum):
@@ -165,20 +188,98 @@ class SupervisorIndicatorHandler(Handler):
         return True
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Return the supervisor-indicator segment, failing safe on any error."""
+        """Return the supervisor-indicator segment, failing safe on any error.
+
+        A transient supervisor message (Ctrl+Z notice, etc.) is rendered
+        ATTACHED to the top hat — one segment, one top hat, the message text
+        immediately adjacent on the same background — so it reads as the
+        supervisor speaking, never a separate status section. A warning-level
+        message paints the whole block orange; otherwise the message rides the
+        current state background. When there is no message the plain state top
+        hat renders as before.
+        """
+        message = self._safe_active_message()
+
         try:
             state = self._detect_state()
         except Exception as e:
             # Fail silent: a false orange alarm would be more misleading than
             # simply omitting the segment on an unexpected error.
             logger.debug("Failed to detect supervisor state: %s", e)
-            return HookResult(context=[])
+            state = None
 
-        background = _STATE_BACKGROUND.get(state)
+        background = _STATE_BACKGROUND.get(state) if state is not None else None
+
+        if message is not None:
+            text, level = message
+            # Warning paints the whole top-hat block orange; other levels ride
+            # the current state colour (falling back to orange if unknown). Text
+            # is forced black so it is legible on any of these backgrounds.
+            msg_bg = _BG_ORANGE if level == _MESSAGE_LEVEL_WARNING else (background or _BG_ORANGE)
+            return HookResult(context=[f"| {msg_bg}{_FG_BLACK} {_ICON} {text} {_ANSI_RESET}"])
+
         if background is None:
-            # NOT_CONFIGURED — no supervisor status file, render nothing.
+            # NOT_CONFIGURED and no message — no supervisor status file, render nothing.
             return HookResult(context=[])
         return HookResult(context=[f"| {background} {_ICON} {_ANSI_RESET}"])
+
+    def _safe_active_message(self) -> tuple[str, str] | None:
+        """Return ``(text, level)`` for the current unexpired message, or None.
+
+        Fail-silent wrapper: any error (missing/malformed/unreadable file) yields
+        None so a bad message file can never break the status line.
+        """
+        try:
+            return self._active_message()
+        except Exception as e:
+            logger.debug("Failed to read supervisor status message: %s", e)
+            return None
+
+    def _active_message(self) -> tuple[str, str] | None:
+        """Resolve the current transient message as ``(text, level)`` or None.
+
+        None when the message file is absent, malformed, empty-text, missing/
+        non-numeric ``expires_at``, or already expired. Expiry is checked against
+        the WALL clock because the supervisor writes ``expires_at`` as
+        ``time.time() + ttl`` — both sides must use the same clock (NOT the
+        monotonic clock used for the negative-cache TTL).
+        """
+        message = self._read_message(self._message_file_path())
+        if message is None:
+            return None
+        text = message.get("text")
+        expires_at = message.get("expires_at")
+        level = message.get("level")
+        if not isinstance(text, str) or not text.strip():
+            return None
+        # bool is a subclass of int — exclude it so a stray `true` is not a time.
+        if isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)):
+            return None
+        if self._wall_now() >= expires_at:
+            return None
+        level_str = level if isinstance(level, str) else ""
+        return text.strip(), level_str
+
+    def _wall_now(self) -> float:
+        """Wall-clock epoch seconds (indirected for deterministic testing)."""
+        return time.time()
+
+    def _message_file_path(self) -> Path:
+        """Return the path to the supervisor's transient message file."""
+        return ProjectContext.daemon_untracked_dir() / _STATUS_SUBDIRECTORY / _MESSAGE_FILENAME
+
+    def _read_message(self, path: Path) -> dict[str, Any] | None:
+        """Read and parse the transient message file, or None if unusable."""
+        if not path.exists():
+            return None
+        try:
+            data: Any = json.loads(path.read_text())
+        except (OSError, ValueError) as e:
+            logger.debug("Failed to read status message file %s: %s", path, e)
+            return None
+        if not isinstance(data, dict):
+            return None
+        return data
 
     def _now(self) -> float:
         """Monotonic clock reading (indirected for deterministic testing)."""

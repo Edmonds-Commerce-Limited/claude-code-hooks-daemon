@@ -29,11 +29,12 @@ file or shared in-memory state.** Status-line code is inherently concurrent:
   readers/writers across processes.
 - Several files here are also written by the **ccy PTY supervisor**, a
   *separate* process (and its `--worker` subprocess) — e.g. `context_sidecar`
-  writes a sidecar the supervisor reads, and `status_message` **reads** the
-  message file the supervisor **writes**.
+  writes a sidecar the supervisor reads, and `supervisor_indicator` **reads**
+  the transient message file the supervisor **writes** (rendering it attached to
+  the top hat).
 
 Non-negotiable rules (already followed by `context_sidecar.py`,
-`thread_registry.py`, `status_message.py` — match them):
+`thread_registry.py`, `supervisor_indicator.py` — match them):
 
 1. **Writes are atomic-replace only.** Write to a private temp file
    (`.{name}.{pid}[.{tid}].tmp`) then `os.replace()` (atomic on POSIX) — never
@@ -44,7 +45,7 @@ Non-negotiable rules (already followed by `context_sidecar.py`,
    foreign-schema file must yield "no segment", **never** raise — a broken
    status line is worse than a missing element. Wrap `handle()` bodies so any
    unexpected error returns `HookResult(context=[])` (see `daemon_stats.py`,
-   `supervisor_indicator.py`, `status_message.py`).
+   `supervisor_indicator.py`).
 3. **In-memory caches are per-process and must tolerate concurrent peers.** A
    handler instance's caches (e.g. `supervisor_indicator`'s memoised pid) live
    in one daemon process; never assume you are the only writer of a shared

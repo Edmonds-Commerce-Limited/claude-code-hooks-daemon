@@ -17,12 +17,16 @@ import pytest
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.handlers.status_line.supervisor_indicator import (
+    _ANSI_RESET,
     _BG_GREEN,
     _BG_ORANGE,
     _BG_YELLOW,
+    _FG_BLACK,
     _ICON,
+    _MESSAGE_LEVEL_WARNING,
     _NEGATIVE_CACHE_TTL_SECONDS,
     SupervisorIndicatorHandler,
+    _SupervisorState,
 )
 
 _STATUS_PATH_PATCH = (
@@ -42,12 +46,46 @@ _NOW_PATCH = (
     "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator."
     "SupervisorIndicatorHandler._now"
 )
+_MESSAGE_PATH_PATCH = (
+    "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator."
+    "SupervisorIndicatorHandler._message_file_path"
+)
+_WALL_NOW_PATCH = (
+    "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator."
+    "SupervisorIndicatorHandler._wall_now"
+)
+_DETECT_PATCH = (
+    "claude_code_hooks_daemon.handlers.status_line.supervisor_indicator."
+    "SupervisorIndicatorHandler._detect_state"
+)
+
+
+def _write_message(tmp_path: Path, text: str, expires_at: float, level: str) -> Path:
+    message_file = tmp_path / "status-message.json"
+    message_file.write_text(json.dumps({"text": text, "expires_at": expires_at, "level": level}))
+    return message_file
 
 
 def _write_status(tmp_path: Path, pid: int) -> Path:
     status_file = tmp_path / "supervisor-status.json"
     status_file.write_text(json.dumps({"pid": pid, "version": "3.41.0"}))
     return status_file
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_message(tmp_path: Path) -> Iterator[None]:
+    """Isolate every test from any REAL supervisor message file.
+
+    ``handle()`` now reads ``daemon_untracked_dir()/supervise/status-message.json``
+    to render an attached notice; in a dogfooding checkout a live supervisor may
+    have just written one (with a short TTL), which would non-deterministically
+    perturb the plain-top-hat assertions. Point the message reader at a
+    guaranteed-absent path by default; the message tests override this with their
+    own ``patch(_MESSAGE_PATH_PATCH, ...)`` context.
+    """
+    missing = tmp_path / "no-such-message.json"
+    with patch(_MESSAGE_PATH_PATCH, return_value=missing):
+        yield
 
 
 class TestSupervisorIndicatorInit:
@@ -545,3 +583,146 @@ class TestSupervisorIndicatorHelpers:
     def test_read_cmdline_returns_none_for_nonexistent_pid(self) -> None:
         handler = SupervisorIndicatorHandler()
         assert handler._read_cmdline(999999999) is None
+
+
+class TestSupervisorIndicatorMessage:
+    """A transient supervisor message renders ATTACHED to the top hat.
+
+    One segment, one top hat, the message text immediately adjacent on the same
+    background (never a separate status section with a second top hat). A
+    warning paints the whole block orange with black text for legibility; other
+    levels ride the current state background; text is always black.
+    """
+
+    def _handle_with_message(
+        self,
+        tmp_path: Path,
+        *,
+        text: str,
+        expires_at: float,
+        level: str,
+        wall_now: float,
+        state: _SupervisorState,
+    ) -> str | None:
+        msg = _write_message(tmp_path, text, expires_at, level)
+        handler = SupervisorIndicatorHandler()
+        with (
+            patch(_MESSAGE_PATH_PATCH, return_value=msg),
+            patch(_WALL_NOW_PATCH, return_value=wall_now),
+            patch(_DETECT_PATCH, return_value=state),
+        ):
+            result = handler.handle({})
+        return result.context[0] if result.context else None
+
+    def test_warning_attaches_to_single_tophat_orange_black(self, tmp_path: Path) -> None:
+        segment = self._handle_with_message(
+            tmp_path,
+            text="⛔ Ctrl+Z ignored — use /exit to quit",
+            expires_at=100.0,
+            level=_MESSAGE_LEVEL_WARNING,
+            wall_now=95.0,
+            state=_SupervisorState.ACTIVE_ARMED,
+        )
+        assert segment is not None
+        # Exactly ONE top hat, message adjacent, orange background, black text.
+        assert segment.count(_ICON) == 1
+        assert "Ctrl+Z ignored" in segment
+        assert _BG_ORANGE in segment
+        assert _FG_BLACK in segment
+        assert segment.endswith(_ANSI_RESET)
+        # Warning overrides the active-armed green background entirely.
+        assert _BG_GREEN not in segment
+        # Top hat comes before the message text (attached, hat first).
+        assert segment.index(_ICON) < segment.index("Ctrl+Z ignored")
+
+    def test_info_level_rides_state_background_black_text(self, tmp_path: Path) -> None:
+        segment = self._handle_with_message(
+            tmp_path,
+            text="heads up",
+            expires_at=100.0,
+            level="info",
+            wall_now=95.0,
+            state=_SupervisorState.ACTIVE_ARMED,
+        )
+        assert segment is not None
+        assert "heads up" in segment
+        assert segment.count(_ICON) == 1
+        # Non-warning rides the current state colour (green here), not orange.
+        assert _BG_GREEN in segment
+        assert _BG_ORANGE not in segment
+        assert _FG_BLACK in segment
+
+    def test_expired_message_falls_back_to_plain_state_tophat(self, tmp_path: Path) -> None:
+        segment = self._handle_with_message(
+            tmp_path,
+            text="stale",
+            expires_at=100.0,
+            level=_MESSAGE_LEVEL_WARNING,
+            wall_now=250.0,  # past expiry
+            state=_SupervisorState.ACTIVE_ARMED,
+        )
+        # No message text; plain green top hat as if no message existed.
+        assert segment == f"| {_BG_GREEN} {_ICON} {_ANSI_RESET}"
+
+    def test_message_shows_even_when_state_not_configured(self, tmp_path: Path) -> None:
+        # A message implies the supervisor was present; render the notice even if
+        # state resolution says NOT_CONFIGURED (no status file this instant).
+        segment = self._handle_with_message(
+            tmp_path,
+            text="notice",
+            expires_at=100.0,
+            level=_MESSAGE_LEVEL_WARNING,
+            wall_now=95.0,
+            state=_SupervisorState.NOT_CONFIGURED,
+        )
+        assert segment is not None
+        assert _ICON in segment
+        assert "notice" in segment
+        assert _BG_ORANGE in segment
+
+    def test_absent_message_renders_plain_tophat(self, tmp_path: Path) -> None:
+        missing = tmp_path / "status-message.json"
+        handler = SupervisorIndicatorHandler()
+        with (
+            patch(_MESSAGE_PATH_PATCH, return_value=missing),
+            patch(_DETECT_PATCH, return_value=_SupervisorState.ACTIVE_ARMED),
+        ):
+            result = handler.handle({})
+        assert result.context == [f"| {_BG_GREEN} {_ICON} {_ANSI_RESET}"]
+
+    def test_malformed_message_ignored_plain_tophat(self, tmp_path: Path) -> None:
+        bad = tmp_path / "status-message.json"
+        bad.write_text("{not valid json")
+        handler = SupervisorIndicatorHandler()
+        with (
+            patch(_MESSAGE_PATH_PATCH, return_value=bad),
+            patch(_DETECT_PATCH, return_value=_SupervisorState.ACTIVE_ARMED),
+        ):
+            result = handler.handle({})
+        assert result.context == [f"| {_BG_GREEN} {_ICON} {_ANSI_RESET}"]
+
+    def test_message_renders_even_if_state_detection_raises(self, tmp_path: Path) -> None:
+        # State detection failing must not suppress a live warning notice; the
+        # background falls back to orange for a warning level.
+        msg = _write_message(tmp_path, "still shown", 100.0, _MESSAGE_LEVEL_WARNING)
+        handler = SupervisorIndicatorHandler()
+        with (
+            patch(_MESSAGE_PATH_PATCH, return_value=msg),
+            patch(_WALL_NOW_PATCH, return_value=95.0),
+            patch(_DETECT_PATCH, side_effect=RuntimeError("boom")),
+        ):
+            result = handler.handle({})
+        assert len(result.context) == 1
+        assert "still shown" in result.context[0]
+        assert _BG_ORANGE in result.context[0]
+
+    def test_empty_text_message_ignored_plain_tophat(self, tmp_path: Path) -> None:
+        segment = self._handle_with_message(
+            tmp_path,
+            text="   ",
+            expires_at=100.0,
+            level=_MESSAGE_LEVEL_WARNING,
+            wall_now=95.0,
+            state=_SupervisorState.ACTIVE_ARMED,
+        )
+        assert segment == f"| {_BG_GREEN} {_ICON} {_ANSI_RESET}"
