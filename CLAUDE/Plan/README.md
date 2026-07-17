@@ -8,6 +8,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00170: Universal Hook Coverage + Hook-Support Enforcement](00170-universal-hook-coverage-and-enforcement/PLAN.md) - In Progress (fundamental: intercepting hook events is the daemon's raison d'être, yet only **10 of the 30** documented Claude Code hook events are wired — 20 are silently unwired, so a client project cannot even attach a handler to them. Establishes the invariant "**wire every hook event unconditionally**; deciding whether to ship a built-in handler is a separate per-event triage". Deliverables: a canonical `EventID` registry of ALL events (metadata: can_block, response_contract, category, spec_version); a completeness TDD/QA gate that FAILS if any event lacks forwarder/installer/settings/router/schema/passthrough (+ orphan check); zero-handler fail-open passthrough wiring for all 21 missing events; drift detection (runtime unknown-event logger + version-pinned spec audit + coverage-degraded alert) + an `add-hook-event` scaffolder. Graduated from Plan 00169's hook-coverage finding; feeds follow-up feature plans F3/F6/F11/F19/F20. Authored + brainstormed; implementation not started)
 
+- [00172: Close the HandlersConfig ↔ wired-events coverage gap](00172-handlerconfig-wired-events-coverage-gap/PLAN.md) - Not Started (follow-up from the `status_line` config-drop fix audit: `HandlersConfig` declares only 11 of 31 wired events, so `_build_handler_config_mapping` would silently drop config for any of the 20 Plan-00170 wired events that later gains built-in handlers — the same failure mode, re-armed. Also fixes `PluginConfig.event_type`'s parallel omission and hardens the drift tests to cross-check `wired_event_metas()` instead of mirroring hand-maintained lists. Latent today; guardrail-completeness work)
+
 ### Status Line / Agent View
 
 - [00158: Agent Thread Navigation & Status Line](00158-agent-thread-navigation-statusline/PLAN.md) - In Progress (Phase 1 research/dogfood complete; implementation Phases 2–4 not started)
@@ -1045,9 +1047,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 171 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
+- **Total Plans Created**: 172 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
 - **Completed**: 139 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 25 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 26 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation

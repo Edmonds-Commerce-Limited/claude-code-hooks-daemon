@@ -1141,30 +1141,31 @@ def cmd_config(args: argparse.Namespace) -> int:
         print(f"  log_buffer_size: {config.daemon.log_buffer_size}")
         print(f"  request_timeout_seconds: {config.daemon.request_timeout_seconds}")
 
+        from claude_code_hooks_daemon.config.models import HandlerConfig, HandlersConfig
+
         print("\n[Handlers]")
-        for event_type in [
-            "pre_tool_use",
-            "post_tool_use",
-            "session_start",
-            "session_end",
-            "pre_compact",
-            "user_prompt_submit",
-            "permission_request",
-            "notification",
-            "stop",
-            "subagent_stop",
-        ]:
+        # Derive the event-type list from the model class's own fields (SSoT) so
+        # a group like status_line can never be silently dropped from the summary
+        # (which previously hid the effective enabled/disabled state of every
+        # status-line handler from introspection). Referencing the class rather
+        # than ``type(config.handlers)`` keeps this working regardless of how the
+        # config was constructed.
+        for event_type in HandlersConfig.model_fields:
             handlers = getattr(config.handlers, event_type, {})
-            if handlers:
-                print(f"  {event_type}:")
-                for name, handler_config in handlers.items():
-                    enabled = "enabled" if handler_config.enabled else "disabled"
-                    priority = (
-                        f"priority={handler_config.priority}"
-                        if handler_config.priority
-                        else "default"
-                    )
-                    print(f"    {name}: {enabled}, {priority}")
+            if not isinstance(handlers, dict) or not handlers:
+                continue
+            print(f"  {event_type}:")
+            for name, handler_config in handlers.items():
+                # Tag-filter keys (enable_tags / disable_tags) are lists, not
+                # HandlerConfig — surface them without the enabled/priority shape.
+                if not isinstance(handler_config, HandlerConfig):
+                    print(f"    {name}: {handler_config}")
+                    continue
+                enabled = "enabled" if handler_config.enabled else "disabled"
+                priority = (
+                    f"priority={handler_config.priority}" if handler_config.priority else "default"
+                )
+                print(f"    {name}: {enabled}, {priority}")
 
         if config.plugins.paths or config.plugins.plugins:
             print("\n[Plugins]")
@@ -1898,6 +1899,50 @@ def cmd_generate_docs(args: argparse.Namespace) -> int:
         return 1
 
 
+def _build_handler_config_mapping(config: Config) -> dict[str, dict[str, Any]]:
+    """Build the per-event handler_config mapping passed to ``register_all``.
+
+    Derived from every field on the ``HandlersConfig`` model rather than a
+    hand-maintained list inlined here, so any event type the model declares —
+    ``status_line`` included, whose omission from the old inline list was the
+    original bug — is covered automatically. A missing event type here makes
+    ``register_all`` fall back to ``enabled=True`` for every handler in that
+    group, which is exactly what made ``handlers.status_line.<name>.enabled:
+    false`` inert.
+
+    Caveat (not a total guarantee): the coverage is only as complete as
+    ``HandlersConfig``'s own fields, which today declare a subset of all wired
+    events (the ones with built-in handler directories). An event that gains
+    built-in handlers without a matching ``HandlersConfig`` field would still
+    be dropped here — ``test_cli_handler_config_mapping`` guards that case by
+    asserting every on-disk handler directory appears in this mapping. See
+    Plan 00172 for closing the model-vs-wired-events gap wholesale.
+
+    Each event's values are ``HandlerConfig`` instances (coerced by the model);
+    they are dumped to plain dicts because the registry reads them with
+    ``dict.get(...)``. Tag-filter keys (``enable_tags`` / ``disable_tags``) are
+    preserved as-is (lists), not dumped.
+
+    Args:
+        config: Loaded daemon configuration.
+
+    Returns:
+        Mapping of event-type config key -> {handler_key -> settings dict}.
+    """
+    from claude_code_hooks_daemon.config.models import HandlerConfig, HandlersConfig
+
+    mapping: dict[str, dict[str, Any]] = {}
+    for event_key in HandlersConfig.model_fields:
+        event_config = getattr(config.handlers, event_key, {})
+        if not isinstance(event_config, dict):
+            continue
+        mapping[event_key] = {
+            handler_key: (value.model_dump() if isinstance(value, HandlerConfig) else value)
+            for handler_key, value in event_config.items()
+        }
+    return mapping
+
+
 def _build_initialised_controller(config: Config, project_path: Path) -> "DaemonController":
     """Build and fully initialise a DaemonController from a loaded config.
 
@@ -1917,22 +1962,7 @@ def _build_initialised_controller(config: Config, project_path: Path) -> "Daemon
     from claude_code_hooks_daemon.daemon.controller import DaemonController
 
     controller = DaemonController()
-    handler_config = {
-        "pre_tool_use": {k: v.model_dump() for k, v in config.handlers.pre_tool_use.items()},
-        "post_tool_use": {k: v.model_dump() for k, v in config.handlers.post_tool_use.items()},
-        "session_start": {k: v.model_dump() for k, v in config.handlers.session_start.items()},
-        "session_end": {k: v.model_dump() for k, v in config.handlers.session_end.items()},
-        "pre_compact": {k: v.model_dump() for k, v in config.handlers.pre_compact.items()},
-        "user_prompt_submit": {
-            k: v.model_dump() for k, v in config.handlers.user_prompt_submit.items()
-        },
-        "permission_request": {
-            k: v.model_dump() for k, v in config.handlers.permission_request.items()
-        },
-        "notification": {k: v.model_dump() for k, v in config.handlers.notification.items()},
-        "stop": {k: v.model_dump() for k, v in config.handlers.stop.items()},
-        "subagent_stop": {k: v.model_dump() for k, v in config.handlers.subagent_stop.items()},
-    }
+    handler_config = _build_handler_config_mapping(config)
     controller.initialise(
         handler_config,
         workspace_root=project_path,
