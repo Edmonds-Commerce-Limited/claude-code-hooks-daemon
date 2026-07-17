@@ -1743,12 +1743,12 @@ _DRY_RUN_COMPACT_BODY = "compact suggestion fired (dry-run — not a real /compa
 # The armed compact is a real `/compact`, but `/compact` accepts freeform custom
 # instructions as its argument -- so the bot chrome rides along AS those
 # instructions. The slash command is still the first token (recognised
-# normally), the compaction summary is now visibly bot-initiated (never mistaken
-# for a human `/compact`), and the instruction text tells the post-compact
-# session it was an AUTOMATED compaction that must resume -- reinforcing the
-# `continue` keystroke the supervisor injects once compaction ends.
+# normally) and the timestamped `🤖 [ccy-supervisor ...]` prefix marks it for a
+# human reading scrollback. The instruction itself is purely ACTIONABLE -- just
+# "resume and continue" -- with no provenance framing: the agent should act on
+# what it is told regardless of who initiated it (reinforced by the `continue`
+# keystroke the supervisor injects once compaction ends).
 _ARMED_COMPACT_BODY = (
-    "automated compaction — NOT human-initiated. "
     "After compacting, immediately resume and continue the work that was in progress."
 )
 # `continue` is harmless -- it only nudges the agent to resume -- so it is

@@ -64,6 +64,16 @@ class TestResolvePayload:
         assert _BOT_PREFIX in payload
         assert "🤖" in payload
 
+    def test_armed_compact_instruction_is_actionable_not_provenance(self) -> None:
+        # The instruction the post-compact session acts on must be the actionable
+        # "resume and continue" — NOT provenance framing about who initiated it.
+        # The agent should just do what it is told, regardless of source.
+        payload = _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=False, now_wall=_FIXED_NOW)
+        assert payload is not None
+        assert "resume" in payload.lower()
+        assert "human-initiated" not in payload
+        assert "NOT human" not in payload
+
     def test_armed_continue_matches_dry_run(self) -> None:
         # `continue` is identical armed vs dry-run for the same tick.
         armed = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=False, now_wall=_FIXED_NOW)
