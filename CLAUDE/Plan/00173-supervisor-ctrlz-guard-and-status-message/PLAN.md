@@ -151,15 +151,17 @@ Key code paths (source of truth is the monolithic tracked
 
 ### Phase 2: Message channel (supervisor writer — thread-safe)
 
-- [ ] ⬜ **Task 2.1**: RED — tests for a `StatusMessage` writer: writes
-  `supervise/status-message.json` as `{"text": str, "expires_at": <epoch>}`
-  atomically (temp `.{name}.{pid}.{tid}.tmp` + replace); overwrites prior
-  message; tolerates unwritable dir (fail-safe, returns None); concurrent
-  writers never corrupt the file (last-writer-wins).
-- [ ] ⬜ **Task 2.2**: GREEN — implement the writer with named TTL constant and
-  a `threading.Lock` around rate-limit state; wire the Ctrl+Z guard to post
-  "Ctrl+Z ignored — use /exit to leave" (rate-limited so a key-mash does not
-  thrash the file).
+- [x] ✅ **Task 2.1**: RED — `tests/unit/supervise/test_status_message.py` (9
+  tests) for the `write_status_message` writer + `StatusMessagePoster`: atomic
+  write (temp `.{name}.{pid}.{tid}.tmp` + replace, no leftover temp), overwrites
+  prior message, unwritable dir returns None (never raises), and a concurrent
+  8-thread burst lets exactly ONE post through (lock-guarded rate limit) with a
+  complete parseable file.
+- [x] ✅ **Task 2.2**: GREEN — added `write_status_message` + `StatusMessagePoster`
+  (named TTL/interval constants, `threading.Lock` around rate-limit state, file
+  write outside the lock) and an `on_suspend` callback on `_forward_io` wired in
+  `supervise()` to `poster.post(_CTRL_Z_NOTICE_TEXT)`. 2 wiring tests added to
+  the Ctrl+Z guard suite. 326 supervise tests pass; mypy clean.
 
 ### Phase 3: Message channel (status-line reader handler)
 

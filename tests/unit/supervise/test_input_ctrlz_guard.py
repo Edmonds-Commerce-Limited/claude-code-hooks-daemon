@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import socket
 import threading
+from collections.abc import Callable
 
 from tests.unit.supervise._load import load_supervisor_module
 
@@ -66,7 +67,12 @@ class TestStripSuspend:
 class TestForwardIoDropsSuspend:
     """``_forward_io`` must never forward a ``0x1a`` byte to the child."""
 
-    def _drive(self, stdin_payload: bytes) -> bytes:
+    def _drive(
+        self,
+        stdin_payload: bytes,
+        *,
+        on_suspend: Callable[[], object] | None = None,
+    ) -> bytes:
         """Run ``_forward_io`` over pipes and return the bytes it forwarded.
 
         stdin is a pipe we write ``stdin_payload`` into; the child (master) side
@@ -82,7 +88,12 @@ class TestForwardIoDropsSuspend:
 
         def run() -> None:
             try:
-                _mod._forward_io(stdin_r, master_side.fileno(), InputActivity())
+                _mod._forward_io(
+                    stdin_r,
+                    master_side.fileno(),
+                    InputActivity(),
+                    on_suspend=on_suspend,
+                )
             except OSError:
                 # Expected once the fds are torn down at the end.
                 pass
@@ -117,3 +128,21 @@ class TestForwardIoDropsSuspend:
 
     def test_plain_input_passes_through_unchanged(self) -> None:
         assert self._drive(b"hello") == b"hello"
+
+    def test_on_suspend_fires_when_a_suspend_byte_is_dropped(self) -> None:
+        calls = {"count": 0}
+
+        def _cb() -> None:
+            calls["count"] += 1
+
+        assert self._drive(b"a\x1ab", on_suspend=_cb) == b"ab"
+        assert calls["count"] == 1
+
+    def test_on_suspend_not_fired_for_plain_input(self) -> None:
+        calls = {"count": 0}
+
+        def _cb() -> None:
+            calls["count"] += 1
+
+        assert self._drive(b"hello", on_suspend=_cb) == b"hello"
+        assert calls["count"] == 0

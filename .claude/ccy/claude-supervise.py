@@ -1001,6 +1001,126 @@ def remove_supervisor_status(untracked_dir: Path) -> None:
         sys.stderr.write(f"claude-supervise: could not remove status file: {exc}\n")
 
 
+# ---------------------------------------------------------------------------
+# Supervisor -> status-line transient message channel (GENERAL, reusable).
+#
+# The supervisor writes a small TTL-bounded JSON message file that the daemon's
+# status-line handler reads and renders, auto-omitting it once expired. The
+# Ctrl+Z "ignored" notice is merely the FIRST consumer; future supervisor
+# events (compact fired, worker restart, arm/disarm, ...) can post through the
+# same channel.
+#
+# THREAD/PROCESS SAFETY (first-class concern — see the top-of-file note): this
+# file is read by the daemon (a SEPARATE process) on every status render and
+# may be written by more than one supervisor thread/process. Every writer here
+# obeys the same rules as `write_supervisor_status`: write to a PRIVATE temp
+# file (named with BOTH pid and thread id so concurrent writers never share a
+# temp path), then `os.replace` (atomic on POSIX) swaps it in — a reader always
+# sees either the old or the new COMPLETE file, never a partial. Last writer
+# wins. In-process rate-limit state is guarded by a `threading.Lock`.
+# ---------------------------------------------------------------------------
+
+_STATUS_MESSAGE_FILENAME = "status-message.json"
+# How long a posted supervisor message stays live. The status line re-renders on
+# Claude Code Status events (~per turn / periodic), NOT on keypress, so the TTL
+# must outlast the gap to the next render for the message to be seen, while
+# staying short enough that a stale notice clears promptly. A few status renders'
+# worth of seconds is the pragmatic middle ground.
+_STATUS_MESSAGE_TTL_SECONDS = 10.0
+# Minimum monotonic gap between writes from one poster, so a key-mash (a burst of
+# Ctrl+Z) rewrites the file at most once per interval instead of thrashing it.
+_STATUS_MESSAGE_MIN_INTERVAL_SECONDS = 1.0
+# Text shown when a Ctrl+Z (SUSP) keystroke is swallowed by the input guard.
+_CTRL_Z_NOTICE_TEXT = "⛔ Ctrl+Z ignored — use /exit to quit"
+
+
+def _status_message_path(untracked_dir: Path) -> Path:
+    """Path to the supervisor->status-line message file (shared 'supervise' dir)."""
+    return untracked_dir / _LOG_SUBDIRECTORY / _STATUS_MESSAGE_FILENAME
+
+
+def write_status_message(untracked_dir: Path, *, text: str, expires_at: float) -> Path | None:
+    """Atomically write a transient supervisor message for the status line.
+
+    THREAD/PROCESS SAFETY: the message file is read by the daemon (a separate
+    process) on every status render and may be written by more than one
+    supervisor thread/process. The write goes to a PRIVATE temp file named with
+    BOTH pid and thread id (``.{name}.{pid}.{tid}.tmp``) so concurrent writers
+    never share a temp path, then ``os.replace`` (atomic on POSIX) swaps it in —
+    a reader therefore always sees either the old or the new COMPLETE file, never
+    a partial one. Last writer wins.
+
+    Best-effort: a write failure is reported to stderr and returns None rather
+    than disturbing the supervised session.
+
+    Returns:
+        The message file path on success, or None on failure.
+    """
+    message_path = _status_message_path(untracked_dir)
+    payload = {"text": text, "expires_at": expires_at}
+    try:
+        message_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = (
+            message_path.parent
+            / f".{_STATUS_MESSAGE_FILENAME}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
+        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+        tmp_path.replace(message_path)
+    except OSError as exc:
+        sys.stderr.write(f"claude-supervise: could not write status message: {exc}\n")
+        return None
+    return message_path
+
+
+class StatusMessagePoster:
+    """Thread-safe, rate-limited writer for transient status-line messages.
+
+    A GENERAL supervisor->status-line channel; the Ctrl+Z guard is merely its
+    first consumer. The rate-limit state (``_last_monotonic``) is shared mutable
+    state that concurrent supervisor threads may touch, so the check-and-update
+    is done under a ``threading.Lock`` — two threads posting at the same instant
+    can never both slip past the interval. The file write itself is atomic (see
+    ``write_status_message``) and is performed OUTSIDE the lock so I/O never
+    serialises other posters' rate-limit checks.
+    """
+
+    def __init__(
+        self,
+        untracked_dir: Path,
+        *,
+        ttl_seconds: float = _STATUS_MESSAGE_TTL_SECONDS,
+        min_interval_seconds: float = _STATUS_MESSAGE_MIN_INTERVAL_SECONDS,
+        wall_clock: Callable[[], float] = time.time,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._untracked_dir = untracked_dir
+        self._ttl_seconds = ttl_seconds
+        self._min_interval_seconds = min_interval_seconds
+        self._wall_clock = wall_clock
+        self._monotonic = monotonic
+        self._lock = threading.Lock()
+        self._last_monotonic: float | None = None
+
+    def post(self, text: str) -> Path | None:
+        """Write ``text`` as the current status message, honouring the rate limit.
+
+        Returns the written path, or None when the post is suppressed by the
+        rate limit or the write fails. Thread-safe: the rate-limit
+        check-and-update runs under the lock so concurrent posters cannot both
+        pass within one interval.
+        """
+        now_mono = self._monotonic()
+        with self._lock:
+            if (
+                self._last_monotonic is not None
+                and now_mono - self._last_monotonic < self._min_interval_seconds
+            ):
+                return None
+            self._last_monotonic = now_mono
+            expires_at = self._wall_clock() + self._ttl_seconds
+        return write_status_message(self._untracked_dir, text=text, expires_at=expires_at)
+
+
 def load_freshest_sidecar(
     directory: Path,
     *,
@@ -2220,6 +2340,7 @@ def _forward_io(
     poll_seconds: float | None = None,
     on_poll: Callable[[], None] | None = None,
     output_activity: OutputActivity | None = None,
+    on_suspend: Callable[[], object] | None = None,
 ) -> None:
     """Select loop: forward stdin -> master, master -> stdout.
 
@@ -2283,6 +2404,11 @@ def _forward_io(
                 # forwards nothing, but must NOT be mistaken for EOF (that is the
                 # empty-read branch below) — so this stays inside `if data:`.
                 forwarded = strip_suspend(data)
+                if forwarded != data and on_suspend is not None:
+                    # At least one suspend byte was swallowed — surface a
+                    # transient status-line notice so the user learns why their
+                    # Ctrl+Z did nothing. Best-effort: never let it break I/O.
+                    on_suspend()
                 if forwarded:
                     activity.record(forwarded)
                     os.write(master_fd, forwarded)
@@ -2364,6 +2490,11 @@ def supervise(
     policy = policy if policy is not None else CompactPolicy()
     machine = CompactStateMachine(policy)
     mode = "dry-run (injects marker)" if dry_run else "ARMED (injects /compact)"
+    # Transient supervisor->status-line message channel (GENERAL; the Ctrl+Z
+    # input guard is its first consumer). Co-located with the sidecar dir's
+    # PARENT — the daemon untracked dir — so the daemon's status handler reads
+    # the very same file. Thread-safe + rate-limited (see StatusMessagePoster).
+    status_message_poster = StatusMessagePoster(sidecar_dir.parent)
 
     if log is not None:
         log.write(
@@ -2483,6 +2614,7 @@ def supervise(
             poll_seconds=poll_seconds,
             on_poll=_on_poll,
             output_activity=output_activity,
+            on_suspend=lambda: status_message_poster.post(_CTRL_Z_NOTICE_TEXT),
         )
     finally:
         signal.signal(signal.SIGWINCH, previous_handler)
