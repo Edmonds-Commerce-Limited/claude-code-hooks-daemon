@@ -137,17 +137,17 @@ Key code paths (source of truth is the monolithic tracked
 
 ### Phase 1: Supervisor input guard (drop Ctrl+Z)
 
-- [ ] ⬜ **Task 1.1**: RED — add `tests/unit/supervise/test_input_ctrlz_guard.py`
+- [x] ✅ **Task 1.1**: RED — added `tests/unit/supervise/test_input_ctrlz_guard.py`
   asserting a stdin chunk containing `0x1a` has that byte removed before it
   reaches `master_fd` (surrounding bytes survive; multiple/embedded `0x1a`; a
-  chunk that is only `0x1a`).
-- [ ] ⬜ **Task 1.2**: GREEN — add a pure `strip_suspend(data: bytes) -> bytes`
-  helper (named constant `_SUSPEND_BYTE = 0x1a`) and apply it in `_forward_io`
-  between the stdin read and the `master_fd` write; feed the stripped bytes
-  onward; keep `activity.record` semantics sane.
-- [ ] ⬜ **Task 1.3**: Verify no regression to the input-line-guard model
-  (`test_input_line_guard.py` still green) — Ctrl+Z is neither content nor a
-  submit.
+  chunk that is only `0x1a`). 12 tests, RED confirmed.
+- [x] ✅ **Task 1.2**: GREEN — added the pure `strip_suspend(data: bytes) -> bytes`
+  helper (named constant `_SUSPEND_BYTE = 0x1A`) and applied it in `_forward_io`
+  between the stdin read and the `master_fd` write; a chunk that was only suspend
+  bytes forwards nothing but is not mistaken for EOF. mypy clean.
+- [x] ✅ **Task 1.3**: Verified no regression to the input-line-guard model
+  (`test_input_line_guard.py` still green, 71 passed total) — Ctrl+Z is neither
+  content nor a submit.
 
 ### Phase 2: Message channel (supervisor writer — thread-safe)
 

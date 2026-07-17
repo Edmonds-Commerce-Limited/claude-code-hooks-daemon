@@ -218,6 +218,29 @@ _LINE_WHITESPACE_BYTES = frozenset({0x20, 0x09})
 # top (Claude Code aborts the duplicate). Covers `/compact` and `/compact <args>`.
 _COMPACT_COMMAND_PREFIX = "/compact"
 
+# Ctrl+Z (SUSP, 0x1a): universal "undo" muscle memory, but a terminal turns it
+# into SIGTSTP (suspend). Under the supervisor the outer terminal is raw so it
+# arrives as this byte rather than a signal (see `_forward_io`); the input guard
+# strips it from the forwarded stream so Ctrl+Z can never reach the child PTY or
+# suspend the session — it becomes an inert, ignored keystroke (upstream
+# anthropics/claude-code#43596). 0x1a has no legitimate meaning in the input box.
+_SUSPEND_BYTE = 0x1A
+
+
+def strip_suspend(data: bytes) -> bytes:
+    """Return ``data`` with every Ctrl+Z (SUSP, ``0x1a``) byte removed.
+
+    The supervisor forwards operator stdin to the child byte-for-byte; this
+    filter drops the suspend byte so Ctrl+Z can never reach the child PTY or
+    suspend the session. ``0x1a`` has no legitimate meaning in Claude's input
+    line, so removing it is safe. Returns ``data`` unchanged (the same object)
+    when no suspend byte is present — the overwhelming common case on the hot
+    input-forwarding path, so the filter allocates nothing in the fast path.
+    """
+    if _SUSPEND_BYTE not in data:
+        return data
+    return bytes(byte for byte in data if byte != _SUSPEND_BYTE)
+
 
 # ANSI control-sequence parser states. Terminal-GENERATED sequences (focus
 # events ESC[I / ESC[O, cursor-position and device-attribute reports, mouse
@@ -2255,8 +2278,14 @@ def _forward_io(
         if stdin_open and stdin_fd in readable:
             data = os.read(stdin_fd, _READ_CHUNK_SIZE)
             if data:
-                activity.record(data)
-                os.write(master_fd, data)
+                # Drop Ctrl+Z (SUSP) before it reaches the child so it can never
+                # suspend the session. A chunk that was ONLY suspend bytes
+                # forwards nothing, but must NOT be mistaken for EOF (that is the
+                # empty-read branch below) — so this stays inside `if data:`.
+                forwarded = strip_suspend(data)
+                if forwarded:
+                    activity.record(forwarded)
+                    os.write(master_fd, forwarded)
             else:
                 # stdin EOF: stop watching it so poll timeouts can fire.
                 stdin_open = False
