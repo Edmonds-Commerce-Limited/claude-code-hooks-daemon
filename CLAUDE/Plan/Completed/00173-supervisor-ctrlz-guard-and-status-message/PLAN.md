@@ -1,6 +1,6 @@
 # Plan 00173: Supervisor Ctrl+Z Guard and Status-Line Message Channel
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-17
 **Owner**: joseph
 **Priority**: Medium
@@ -270,12 +270,13 @@ semantics (newest notice replaces older). No cross-process lock needed; a
 
 ## Success Criteria
 
-- [ ] Ctrl+Z under the supervisor is dropped; no suspend; regression test proves it.
-- [ ] Message file is atomically written, TTL-bounded; reader fails silent on
+- [x] Ctrl+Z under the supervisor is dropped; no suspend; regression test proves it.
+- [x] Message file is atomically written, TTL-bounded; reader fails silent on
   absent/expired/malformed and never breaks the status line.
-- [ ] Ctrl+Z guard posts a self-expiring notice via the channel.
-- [ ] Thread safety documented in entry-point headers + architecture docs.
-- [ ] All QA checks pass; daemon restarts RUNNING; 95%+ coverage on new code.
+- [x] Ctrl+Z guard posts a self-expiring notice via the channel (rendered
+  ATTACHED to the supervisor top hat — Phase 6).
+- [x] Thread safety documented in entry-point headers + architecture docs.
+- [x] All QA checks pass; daemon restarts RUNNING; 95%+ coverage on new code.
 
 ## Dependencies
 
@@ -289,6 +290,13 @@ semantics (newest notice replaces older). No cross-process lock needed; a
 - Plan created; scope confirmed with user: general message channel (Ctrl+Z is
   first consumer), thread-safe message files, thread safety made a first-class
   documented concern across all supervisor + status-line code.
+- Phases 1–5 (Ctrl+Z byte strip + signal guard, thread-safe TTL message
+  channel, standalone reader handler, thread-safety docs) delivered in
+  `6767c901`/`7e295ee1`/`58683673`/`3d3c9446`/`63ac94af`/`b666f55f`.
+- Phase 6 delivered in `607080d6`: message rendered ATTACHED to the supervisor
+  top hat (one section, black-on-orange warning), standalone handler removed.
+  User-accepted live ("we have properly fixed the ctrl+z problem"). Notice lag
+  is inherent to the status-line render cadence (documented Non-Goal).
 
 ## Notes & Updates
 
