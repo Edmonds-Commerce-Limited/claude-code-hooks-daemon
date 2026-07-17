@@ -100,6 +100,8 @@ Updates version in: `pyproject.toml`, `version.py`, `README.md` (badge), `CLAUDE
 
 Also updates README.md stats: test count badge+body, handler count, event type count from `.claude/HOOKS-DAEMON.md`.
 
+**Regenerate `.claude/HOOKS-DAEMON.md` after the version bump**: run `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`. This tracked, generated doc embeds the daemon version in its header (`> Generated on YYYY-MM-DD (vX.Y.Z) …`), so without regenerating it the header ships stale one version behind (v3.43.1 shipped with a v3.43.0 header before this step existed). Stage `.claude/HOOKS-DAEMON.md` with the release commit (add it to the Step 13 `git add` list).
+
 **Re-lock `uv.lock` after the `pyproject.toml` version bump** (self-install mode tracks `uv.lock`): run `uv lock`. The dependency QA check runs `uv lock --check` and will FAIL the Step 8 gate with a lockfile-out-of-date error until the lock is regenerated. Stage `uv.lock` with the release commit.
 
 ### 4. Changelog Generation
@@ -415,6 +417,7 @@ may not exist on the host.
 
 ```bash
 git add pyproject.toml version.py README.md CLAUDE.md CHANGELOG.md RELEASES/vX.Y.Z.md \
+  .claude/HOOKS-DAEMON.md uv.lock .claude/ccy/claude-supervise.py \
   CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/ \
   CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/
 git commit -m "Release vX.Y.Z: [Title]
