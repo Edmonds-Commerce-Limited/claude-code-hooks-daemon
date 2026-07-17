@@ -75,6 +75,22 @@ Observation 1, confidence ~72%):
 - [ ] ⬜ **Task 1.4**: Run QA (`./scripts/qa/llm_qa.py all`), restart the daemon,
   verify RUNNING.
 
+### Phase 2: Supervisor `supervise()` stdin_fd type narrowing (v3.44.0 review)
+
+- [ ] ⬜ **Task 2.1**: In `.claude/ccy/claude-supervise.py`, `supervise()`
+  resolves `stdin_fd: int | None` at ~line 2602
+  (`stdin_fd = stdin_fd if stdin_fd is not None else sys.stdin.fileno()`), but
+  because the resolved value is captured by the `_on_winch` closure (~line 2656)
+  Pyright discards the narrowing and reports `int | None` at every deref
+  (~2647/2650/2652/2653/2656/2745/2760). Runtime-safe (line 2602 guarantees an
+  int; live-tested) and OUTSIDE the mypy QA gate, so it never blocked. Remediation:
+  assign the resolved fd to a fresh non-optional local
+  (`resolved_stdin_fd: int = ...`) and use it at every subsequent site so the
+  closure captures a non-None-typed variable. Optionally drop the unreachable
+  `os._exit(127)` after `os.execvp` (~line 2642). Verify with the
+  `tests/unit/supervise/` suite (claude-supervise.py is a standalone script, not
+  daemon-loaded).
+
 ## Success Criteria
 
 - [ ] All four writers use a per-writer-unique temp filename.
@@ -89,3 +105,13 @@ Observation 1, confidence ~72%):
   "Never drop a finding"). The finding is low-severity and non-blocking; it did
   not gate the v3.39.0 release. Delivered as a follow-up so the review loop is
   closed rather than lost to scrollback.
+
+### 2026-07-17
+
+- Added Phase 2 capturing a v3.44.0 release code-review finding (RELEASING.md
+  "Never drop a finding"): Pyright `stdin_fd: int | None` false-positives in the
+  supervisor's `supervise()`, surfaced when the release bumped the supervisor
+  `__version__`. Cosmetic (runtime-safe via the line-2602 guard, live-tested,
+  outside the mypy QA gate) — v3.44.0 shipped without it. Fix is a trivial
+  non-optional-local rename, deferred as low-priority hardening alongside the
+  tmp-naming work.
