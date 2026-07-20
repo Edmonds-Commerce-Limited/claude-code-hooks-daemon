@@ -1,0 +1,57 @@
+version: "3.46.0"
+date: "2026-07-20"
+
+breaking: false
+
+config_changes:
+  added:
+    - key: handlers.session_start.git_upstream_checker.options.mode
+      description: >
+        Controls how the new git_upstream_checker SessionStart handler
+        reacts when the branch is behind its upstream: "warn" (default)
+        strongly advises running `git pull`; "agent-pull" instructs the
+        agent to pull as its first action; "auto-pull" runs
+        `git pull --ff-only` automatically on a clean, non-diverged tree
+        (degrading to a warning if it cannot fast-forward).
+      example_yaml: |
+        handlers:
+          session_start:
+            git_upstream_checker:
+              enabled: true
+              options:
+                mode: agent-pull
+      migration_note: >
+        The handler ships on by default in "warn" mode (advisory only, no
+        behavior change to your workflow). Set mode to "agent-pull" or
+        "auto-pull" to have sessions automatically stay in sync with
+        upstream.
+      recommended: true
+      dormant: false
+      recommended_value: agent-pull
+
+    - key: handlers.session_start.git_upstream_checker.options.auto_fetch
+      description: >
+        Whether the handler performs an additive `git fetch --all
+        --no-prune` at session start before computing ahead/behind status.
+        Defaults to true. The fetch never prunes remote-tracking refs or
+        deletes branches, regardless of the client's `fetch.prune` git
+        config.
+      example_yaml: |
+        handlers:
+          session_start:
+            git_upstream_checker:
+              enabled: true
+              options:
+                auto_fetch: true
+      migration_note: >
+        Leave enabled unless you have a strong reason to skip the fetch
+        (e.g. a metered/offline environment) — the fetch is additive and
+        safe by design.
+      recommended: false
+      dormant: false
+
+  renamed: []
+
+  removed: []
+
+  changed: []

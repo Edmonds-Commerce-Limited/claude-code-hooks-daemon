@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.46.0] - 2026-07-20
+
+This is a **minor release** adding a git-upstream-awareness SessionStart
+handler and fixing a long-session bug in the ccy PTY supervisor's compaction
+injection cap (Plans 00178, 00179, 00180).
+
+### Added
+
+- **`git_upstream_checker` SessionStart handler** (priority 56, advisory,
+  on by default in `warn` mode). On each new session it runs a full git
+  fetch, computes ahead/behind vs `@{upstream}`, and applies a configurable
+  `mode`: `warn` (default — strongly advises `git pull`), `agent-pull`
+  (injects a directive so the agent pulls first), or `auto-pull`
+  (deterministic `git pull --ff-only` on a clean, non-diverged tree,
+  degrading to a warning otherwise). New config options:
+  `handlers.session_start.git_upstream_checker.options.mode` and
+  `.auto_fetch`.
+- **`utils/git_sync.py`** — new 100%-covered module factoring out the git
+  fetch/ahead-behind mechanism shared by the handler.
+- **Gone-branch cleanup advisory.** When local branches track a remote
+  branch that has been deleted, the handler lists them (classified merged =
+  safe for `git branch -d` vs not-merged = has unique commits, ask the
+  human) and instructs the agent to clean up safely.
+
+### Changed
+
+- **Session-start fetch is now additive.** `git_upstream_checker` runs
+  `git fetch --all --no-prune` (explicit `--no-prune`, holding even under
+  `fetch.prune=true`) — it never automatically prunes or deletes remote-
+  tracking refs or branches.
+
+### Fixed
+
+- **ccy supervisor injection cap was a lifetime cap, not a consecutive-
+  failure fuse.** `CompactStateMachine._injections` in
+  `.claude/ccy/claude-supervise.py` was cumulative across the whole
+  session and capped at 20, so a long-running session's PTY supervisor
+  silently stopped driving `/compact` at CRITICAL context after 20
+  compactions. The counter now resets on the confirmed-compaction
+  transition, restoring its intended purpose as a consecutive-failed-
+  injection fuse.
+
 ## [3.45.0] - 2026-07-20
 
 This is a **minor release** fixing a false "daemon not running" Stop-hook

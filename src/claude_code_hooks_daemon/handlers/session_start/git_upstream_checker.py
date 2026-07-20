@@ -304,8 +304,9 @@ class GitUpstreamCheckerHandler(Handler):
                 title="git upstream checker - fetches and advises pull when behind",
                 command='echo "test"',
                 description=(
-                    "On a new session the handler runs a full git fetch --all --prune and, when "
-                    "the branch is behind upstream, advises (or performs, per mode) a git pull."
+                    "On a new session the handler runs an additive git fetch --all --no-prune "
+                    "and, when the branch is behind upstream, advises (or performs, per mode) a "
+                    "git pull."
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"git pull|behind|auto-pulled"],
