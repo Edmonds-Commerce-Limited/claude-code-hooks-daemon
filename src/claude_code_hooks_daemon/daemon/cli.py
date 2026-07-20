@@ -1598,6 +1598,118 @@ def _stale_venv_advisory(project_root: Path) -> str | None:
     )
 
 
+# Known accumulating writers under the daemon untracked dir (Plan 00181). Each
+# entry is (display_name, path-relative-to-untracked, is_dir). These are the
+# paths the retention work in this plan bounds; the disk-usage report sums them
+# so the operator can see accumulation and what a prune would reclaim.
+_DISK_USAGE_WRITERS: tuple[tuple[str, str, bool], ...] = (
+    ("transcripts", "transcripts", True),
+    ("thread-registry", "thread-registry", True),
+    ("context-sidecar", "context-sidecar", True),
+    ("payload-capture", "payload-capture", True),
+    ("logs/hooks", "logs/hooks", True),
+    ("supervise/decision.log", "supervise/decision.log", False),
+    ("hook-errors.log", "hook-errors.log", False),
+)
+_HOOK_ERROR_BACKUP_GLOB = "hook-errors.log.*"
+
+
+def _collect_disk_usage(project_root: Path) -> list[dict[str, Any]]:
+    """Report per-writer accumulation under the daemon untracked dir.
+
+    Pure reporting (Plan 00181 Task 5.1) — never deletes anything. Each row is
+    ``{name, path, size_bytes, reclaimable_bytes}``. Missing paths report size 0
+    rather than raising, so the report is robust on a fresh project. Sizes for
+    the auto-reaped writers are informational (they are bounded automatically);
+    ``reclaimable_bytes`` is populated for the operator-actionable items —
+    rotated ``hook-errors.log.*`` backups and stale/legacy venvs.
+    """
+    untracked = _daemon_untracked_dir(project_root)
+    rows: list[dict[str, Any]] = []
+
+    for name, rel, is_dir in _DISK_USAGE_WRITERS:
+        target = untracked / rel
+        if is_dir:
+            size = _directory_size_bytes(target) if target.is_dir() else 0
+        else:
+            size = target.stat().st_size if target.is_file() else 0
+        rows.append({"name": name, "path": str(target), "size_bytes": size, "reclaimable_bytes": 0})
+
+    # Rotated hook-errors.log backups are fully reclaimable (the live log is the
+    # only one that matters); they are already count/age-bounded on rotation.
+    backups = sorted(untracked.glob(_HOOK_ERROR_BACKUP_GLOB)) if untracked.is_dir() else []
+    backup_size = 0
+    for backup in backups:
+        if backup.is_file():
+            backup_size += backup.stat().st_size
+    rows.append(
+        {
+            "name": "hook-errors.log.* backups",
+            "path": str(untracked),
+            "size_bytes": backup_size,
+            "reclaimable_bytes": backup_size,
+        }
+    )
+
+    # Venvs: total footprint plus what `prune-venvs` would reclaim (stale/legacy,
+    # never the current fingerprint). This is the biggest single number.
+    entries = _enumerate_venvs(project_root)
+    current_stamp = ""
+    for entry in entries:
+        if entry["is_current"]:
+            current_stamp = entry["stamped_version"]
+            break
+    reclaimable = _reclaimable_venv_entries(entries, current_stamp)
+    rows.append(
+        {
+            "name": "venvs",
+            "path": str(untracked),
+            "size_bytes": sum(entry["size_bytes"] for entry in entries),
+            "reclaimable_bytes": sum(entry["size_bytes"] for entry in reclaimable),
+        }
+    )
+
+    return rows
+
+
+def cmd_disk_usage(args: argparse.Namespace) -> int:
+    """Report daemon untracked/ disk accumulation and reclaimable space.
+
+    Read-only (Plan 00181 Task 5.1): never deletes. ``--json`` emits the raw
+    rows; otherwise a human table with per-writer sizes, a reclaimable column,
+    and TOTAL / TOTAL-reclaimable footers, pointing at the guarded prune paths.
+    """
+    project_root = Path(get_project_path(getattr(args, "project_root", None)))
+    rows = _collect_disk_usage(project_root)
+
+    if getattr(args, "json", False):
+        print(json.dumps(rows, indent=2))
+        return 0
+
+    total = sum(row["size_bytes"] for row in rows)
+    total_reclaimable = sum(row["reclaimable_bytes"] for row in rows)
+
+    print(f"Daemon untracked/ disk usage — {_daemon_untracked_dir(project_root)}")
+    print()
+    print(f"{'Writer':<28} {'Size':>12} {'Reclaimable':>14}")
+    print("-" * 56)
+    for row in rows:
+        reclaimable = _human_bytes(row["reclaimable_bytes"]) if row["reclaimable_bytes"] else "-"
+        print(f"{row['name']:<28} {_human_bytes(row['size_bytes']):>12} {reclaimable:>14}")
+    print("-" * 56)
+    print(f"{'TOTAL':<28} {_human_bytes(total):>12} {_human_bytes(total_reclaimable):>14}")
+    print()
+    print(
+        "Auto-reaped writers (transcripts, thread-registry, context-sidecar, "
+        "payload-capture, logs, decision.log) are bounded on daemon start."
+    )
+    print(
+        "Reclaim venvs with `prune-venvs --stale --force` (legacy: `--legacy`) — "
+        "the daemon never deletes venvs automatically."
+    )
+    return 0
+
+
 def cmd_list_venvs(args: argparse.Namespace) -> int:
     """List all Plan 00099 fingerprint-keyed venvs (plus any legacy venv).
 
@@ -3443,6 +3555,16 @@ def main() -> int:
         "--json", action="store_true", help="Emit JSON instead of a human-readable table"
     )
     parser_list_venvs.set_defaults(func=cmd_list_venvs)
+
+    # disk-usage command (Plan 00181 Task 5.1) — read-only accumulation report
+    parser_disk_usage = subparsers.add_parser(
+        "disk-usage",
+        help="Report daemon untracked/ disk accumulation and reclaimable space (Plan 00181)",
+    )
+    parser_disk_usage.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of a human-readable table"
+    )
+    parser_disk_usage.set_defaults(func=cmd_disk_usage)
 
     # prune-venvs command (Plan 00099)
     parser_prune_venvs = subparsers.add_parser(

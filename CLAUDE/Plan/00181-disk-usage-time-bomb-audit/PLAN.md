@@ -159,8 +159,13 @@ the root cause; a single shared utility is the proper fix.
 
 ### Phase 5: Diagnostic + verification
 
-- [ ] ⬜ **Task 5.1**: Add a `disk-usage` CLI subcommand that reports per-writer
-  accumulation and what a prune would reclaim (dry-run by default).
+- [x] ✅ **Task 5.1**: Added the `disk-usage` CLI subcommand — a pure read-only
+  report (never deletes) of per-writer accumulation under the daemon untracked
+  dir plus what a prune would reclaim. `_collect_disk_usage` (testable, missing
+  paths → 0) + `cmd_disk_usage` (`--json` or a human table with TOTAL /
+  reclaimable footers). 6 TDD tests. LIVE on this project it reports 411.7 MB
+  total / 170.8 MB reclaimable (transcripts 64 MB now capped, venvs 341.6 MB
+  with the 170.8 MB legacy venv reclaimable).
 - [ ] ⬜ **Task 5.2**: Full QA (`./scripts/qa/run_all.sh`), daemon restart
   verification, acceptance coverage for the new reapers.
 
