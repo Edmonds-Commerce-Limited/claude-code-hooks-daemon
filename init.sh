@@ -948,11 +948,12 @@ def emit_error_json(event_name, error_type, error_details):
         ]
     context = chr(10).join(context_lines)
 
-    # Stop/SubagentStop: top-level decision only (deny to show error). Fail
-    # CLOSED regardless of cause, but keep the reason honest: a malformed payload
-    # failed to parse client-side and never reached the socket, so 'daemon not
-    # running' is wrong for that case (Plan 00157 review follow-up) — mirror the
-    # error_type branch used for context_lines above.
+    # Stop/SubagentStop: top-level decision only. Fail CLOSED (block) for a
+    # genuinely-down daemon, but keep the reason honest and carve out the two
+    # cases where the daemon is NOT down: a malformed payload failed to parse
+    # client-side and never reached the socket (Plan 00157), and a read-side
+    # socket_timeout reached a live-but-slow daemon (Plan 00177) — that one fails
+    # OPEN. Mirror the error_type branches used for context_lines above.
     if event_name in ('Stop', 'SubagentStop'):
         if error_type == 'socket_timeout':
             # Read-side timeout: the daemon was reached and is ALIVE, a handler
