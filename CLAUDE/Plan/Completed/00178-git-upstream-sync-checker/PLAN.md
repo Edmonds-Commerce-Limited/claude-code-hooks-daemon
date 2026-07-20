@@ -1,6 +1,6 @@
 # Plan 00178: git upstream sync checker
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-20
 **Owner**: joseph
 **Priority**: Medium
@@ -128,6 +128,7 @@ also do work on new sessions. Downstream projects can disable or change mode.
 
 - Plan created; recovery cron dffb57b7 (hourly :37, non-durable).
 - Phase 1 (git_sync utility) delivered `49ff3430`.
-- Phases 2–5 (handler + wiring + QA + live verify) delivered in the following
-  commit; QA 13/13 (10383 tests, 95.3% cov), daemon RUNNING, all modes verified
-  end-to-end against real git.
+- Phases 2–5 (handler + wiring + QA + live verify) delivered `440c1a65`;
+  QA 13/13 (10383 tests, 95.3% cov), daemon RUNNING, all modes verified
+  end-to-end against real git. (Daemon auto-regenerated CLAUDE.md guidance in
+  `cb1c29f4`.)
