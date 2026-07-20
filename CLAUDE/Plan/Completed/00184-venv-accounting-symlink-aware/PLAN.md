@@ -1,6 +1,6 @@
 # Plan 00184: venv accounting is symlink-aware and protects the live venv
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-20
 **Owner**: joseph
 **Priority**: High
@@ -85,9 +85,11 @@ In `daemon/cli.py`:
 
 ## Success Criteria
 
-- [ ] A symlinked venv aliasing the live target is never double-counted, never
-  flagged reclaimable, never pruned
-- [ ] Existing venv tests still pass; all QA green; daemon RUNNING
+- [x] ✅ A symlinked venv aliasing the live target is never double-counted, never
+  flagged reclaimable, never pruned (incident-accurate regression suite
+  `test_cli_venv_symlink_accounting.py`)
+- [x] ✅ Existing venv tests still pass; all QA green; daemon RUNNING (13/13,
+  10468 tests, 95.2% cov, daemon PID 1258396)
 
 ## Notes & Updates
 
@@ -97,4 +99,6 @@ In `daemon/cli.py`:
 
 ## Delivery & Milestones
 
-<!-- commit hashes recorded as tasks land -->
+- Phase 1 (symlink-aware accounting + resolver-active protection + prune guard +
+  regression suite) delivered at `776f9c6b`
+- Shipped in release v3.47.0 at `799ecd83`

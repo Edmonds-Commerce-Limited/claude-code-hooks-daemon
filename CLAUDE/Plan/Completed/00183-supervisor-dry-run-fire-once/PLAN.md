@@ -1,6 +1,6 @@
 # Plan 00183: Supervisor dry-run fires once per session (once only)
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-20
 **Owner**: joseph
 **Priority**: High
@@ -77,15 +77,20 @@ end-to-end demonstration); every later tick is a logged NOOP.
 
 ### Phase 2: Live dogfood
 
-- [ ] ⬜ **Task 2.1**: Relaunch ccy in dry-run, confirm exactly one marker then
-  silence (no `STOPPING BECAUSE` flood)
+- [x] ❌ **Task 2.1** (waived by owner): Relaunch ccy in dry-run, confirm exactly
+  one marker then silence. Live dogfood explicitly waived by the owner — the
+  once-only latch is fully unit-verified (`test_dry_run_fire_once.py`) and shipped
+  in v3.47.0 (delivery commit `799ecd83`); live confirmation deferred to the
+  natural next ccy launch.
 
 ## Success Criteria
 
-- [ ] Dry-run injects at most once per session
-- [ ] Armed mode unchanged
-- [ ] All QA green, 95%+ coverage, daemon RUNNING
-- [ ] Supervisor version matches `version.py`
+- [x] ✅ Dry-run injects at most once per session (unit-verified: first tick fires
+  - latches, second tick suppressed)
+- [x] ✅ Armed mode unchanged (regression guard: armed injects each episode, never
+  latches)
+- [x] ✅ All QA green, 95%+ coverage, daemon RUNNING (13/13, 10468 tests, 95.2%)
+- [x] ✅ Supervisor version matches `version.py` (both 3.47.0)
 
 ## Notes & Updates
 
@@ -93,4 +98,5 @@ end-to-end demonstration); every later tick is a logged NOOP.
 
 ## Delivery & Milestones
 
-<!-- commit hashes recorded as tasks land -->
+- Phase 1 (TDD fix — latch + gate + tests) delivered at `ca56f09e`
+- Shipped in release v3.47.0 at `799ecd83`
