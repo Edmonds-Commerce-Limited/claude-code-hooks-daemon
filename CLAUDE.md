@@ -1247,15 +1247,19 @@ It also detects a **stale running supervisor** (Plan 00164): when a daemon upgra
 
 When you see this alert, fix the listed item(s) and commit the ccy files so the supervisor works for everyone.
 
-## git_upstream_checker — full fetch + pull policy on session start
+## git_upstream_checker — additive fetch + pull/cleanup advice on session start
 
-On each new session the daemon runs a full `git fetch --all --prune` and, if your branch is behind its upstream, acts on the configured `mode`:
+On each new session the daemon runs an **additive** `git fetch --all` (never `--prune` — it never removes anything automatically) and then:
+
+**If your branch is behind its upstream**, acts on the configured `mode`:
 
 - `warn` (default): strongly advises you to run `git pull`.
 - `agent-pull`: instructs you to run `git pull` as your first action.
 - `auto-pull`: the daemon runs `git pull --ff-only` for you on a clean, non-diverged tree; if it cannot fast-forward (dirty tree or diverged history) it degrades to a warning and you pull manually.
 
-It is silent when up to date, not in a git repo, on a detached HEAD, or when the branch has no upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
+**If local branches track a remote branch that was deleted**, it lists them (marked merged = safe vs not-merged = has unique commits) and asks you to clean up AFTER checking: `git branch -d <name>` for merged branches, ask the human for the rest, and optionally `git fetch --prune` the stale remote-tracking refs. The daemon never prunes or deletes a branch itself; never use `git branch -D`.
+
+It is silent when up to date with no gone branches, not in a git repo, on a detached HEAD, or without an upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
 
 ## idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
 
