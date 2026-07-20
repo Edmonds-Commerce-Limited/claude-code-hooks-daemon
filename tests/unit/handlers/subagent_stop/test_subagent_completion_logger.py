@@ -55,6 +55,16 @@ class TestSubagentCompletionLoggerHandler:
         hook_input = {"subagent_name": "test-agent"}
         assert handler.matches(hook_input) is True
 
+    def test_handle_caps_log_file_when_over_budget(self, handler, tmp_path):
+        """Plan 00181: the append-only JSONL is bounded, not grown forever."""
+        handler._max_log_bytes = 200  # tiny cap for the test
+        hook_input = {"subagent_name": "x", "payload": "y" * 60}
+        for _ in range(60):
+            handler.handle(hook_input)
+        log_file = tmp_path / "logs" / "hooks" / "subagent_completions.jsonl"
+        assert log_file.exists()
+        assert log_file.stat().st_size <= handler._max_log_bytes
+
     @patch("pathlib.Path.open", new_callable=mock_open)
     @patch("pathlib.Path.mkdir")
     def test_handle_creates_log_directory(self, mock_mkdir, mock_file, handler, mock_datetime):

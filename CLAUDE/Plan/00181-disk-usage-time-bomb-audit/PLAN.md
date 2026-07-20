@@ -99,9 +99,13 @@ the root cause; a single shared utility is the proper fix.
 
 ### Phase 2: Bound the append-only writers
 
-- [ ] ⬜ **Task 2.1**: Apply the size-cap helper to `hook-errors.log`,
-  `stop-events.jsonl`, `notifications.jsonl`, `subagent_completions.jsonl`
-  (tests first per writer).
+- [x] ✅ **Task 2.1**: Size-cap applied to all four daemon append-only writers:
+  `hook-errors.log` rotation backups (bound by count+age via `prune_directory`
+  in `front_controller.log_error_to_file`), and `stop-events.jsonl`
+  (`auto_continue_stop`), `notifications.jsonl` (`notification_logger`),
+  `subagent_completions.jsonl` (`subagent_completion_logger`) each front-capped
+  via `cap_log_file` with `retain_bytes` hysteresis. Tests first per writer
+  (real-fs cap assertions). Full suite green (10433 passed, 95.2% coverage).
 - [ ] ⬜ **Task 2.2**: Apply the size-cap helper to the supervisor
   `decision.log` in `claude-supervise.py` (respecting the version-lockstep
   test) and any supervisor worker logs.

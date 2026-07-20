@@ -10,6 +10,13 @@ logger = logging.getLogger(__name__)
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.retention import cap_log_file
+
+# Plan 00181: this append-only JSONL had no bound (4.6 MB observed, never
+# rotated). Cap it after each write; on breach keep the newest half so a busy
+# session does not rewrite the whole file on every append. Config-overridable
+# via ``options.max_log_bytes`` (registry injects it as ``self._max_log_bytes``).
+_DEFAULT_MAX_LOG_BYTES = 5 * 1024 * 1024
 
 
 class SubagentCompletionLoggerHandler(Handler):
@@ -27,6 +34,8 @@ class SubagentCompletionLoggerHandler(Handler):
             terminal=False,
             tags=[HandlerTag.LOGGING, HandlerTag.WORKFLOW, HandlerTag.NON_TERMINAL],
         )
+        # Plan 00181 retention budget (config-overridable via options.*).
+        self._max_log_bytes = _DEFAULT_MAX_LOG_BYTES
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:
         """Match all subagent stop events.
@@ -64,6 +73,11 @@ class SubagentCompletionLoggerHandler(Handler):
             log_file = log_dir / "subagent_completions.jsonl"
             with log_file.open("a") as f:
                 f.write(json.dumps(log_entry) + "\n")
+
+            # Plan 00181: bound the append-only log (keep newest half on breach).
+            cap_log_file(
+                log_file, max_bytes=self._max_log_bytes, retain_bytes=self._max_log_bytes // 2
+            )
 
         except RuntimeError as e:
             # ProjectContext not initialised — happens in the default-config /

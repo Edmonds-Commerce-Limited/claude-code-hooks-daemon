@@ -7,13 +7,35 @@ preventing the need for user input and enabling true YOLO mode automation.
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 from claude_code_hooks_daemon.core import Decision, HookResult
+from claude_code_hooks_daemon.handlers.stop import auto_continue_stop
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     AutoContinueStopHandler,
 )
+
+
+class TestStopEventsLogRetention:
+    """Plan 00181: stop-events.jsonl is bounded, not grown forever."""
+
+    def test_log_stop_event_caps_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(auto_continue_stop, "_STOP_EVENTS_MAX_BYTES", 300)
+        handler = AutoContinueStopHandler()
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=tmp_path,
+        ):
+            for _ in range(80):
+                handler._log_stop_event({"stop_hook_active": False}, Decision.DENY, "reason " * 10)
+        log_path = tmp_path / "stop-events.jsonl"
+        assert log_path.exists()
+        assert log_path.stat().st_size <= 300
 
 
 class TestAutoContinueStopHandlerInit:

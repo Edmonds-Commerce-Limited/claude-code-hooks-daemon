@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.core.transcript_reader import (
     TranscriptMessage,
     TranscriptReader,
 )
+from claude_code_hooks_daemon.utils.retention import cap_log_file
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     has_recent_stop_hook_block,
@@ -49,6 +50,11 @@ from claude_code_hooks_daemon.utils.stop_hook_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Plan 00181: stop-events.jsonl is append-only and was never bounded (644 KB
+# observed). Cap it after each write; on breach keep the newest half so a busy
+# session does not rewrite the whole file on every append.
+_STOP_EVENTS_MAX_BYTES = 2 * 1024 * 1024
 
 # Reason constants — named, no magic strings
 _CONFIRMATION_CONTINUE_REASON = (
@@ -695,6 +701,12 @@ class AutoContinueStopHandler(Handler):
             }
             with log_path.open("a") as f:
                 f.write(json.dumps(entry) + "\n")
+            # Plan 00181: bound the append-only log (keep newest half on breach).
+            cap_log_file(
+                log_path,
+                max_bytes=_STOP_EVENTS_MAX_BYTES,
+                retain_bytes=_STOP_EVENTS_MAX_BYTES // 2,
+            )
         except (RuntimeError, OSError) as e:
             logger.debug("_log_stop_event: non-critical write failure: %s", e)
 

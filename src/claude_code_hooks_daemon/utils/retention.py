@@ -29,16 +29,21 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def cap_log_file(path: Path, *, max_bytes: int) -> bool:
+def cap_log_file(path: Path, *, max_bytes: int, retain_bytes: int | None = None) -> bool:
     """Front-truncate an append-only line log so it stays within ``max_bytes``.
 
-    Keeps the most recent whole lines that fit in ``max_bytes`` by seeking to the
-    tail and dropping the (partial) first line. Returns ``True`` when it trimmed,
-    ``False`` when the file was already within budget, missing, or could not be
-    read/written. A single line longer than ``max_bytes`` degrades to keeping the
-    last ``max_bytes`` bytes (documented edge behaviour) rather than emptying the
-    file.
+    When the file exceeds ``max_bytes`` it is rewritten to keep the most recent
+    whole lines fitting in ``retain_bytes`` (default ``max_bytes``), by seeking to
+    the tail and dropping the partial first line. Pass ``retain_bytes`` **below**
+    ``max_bytes`` to leave headroom so a frequently-appended log is not rewritten
+    on every single write once it reaches the ceiling (hysteresis).
+
+    Returns ``True`` when it trimmed, ``False`` when the file was already within
+    budget, missing, or could not be read/written. A single line longer than the
+    retain budget degrades to keeping the last ``retain_bytes`` bytes (documented
+    edge behaviour) rather than emptying the file.
     """
+    retain = max_bytes if retain_bytes is None else retain_bytes
     try:
         size = path.stat().st_size
     except FileNotFoundError:
@@ -50,7 +55,7 @@ def cap_log_file(path: Path, *, max_bytes: int) -> bool:
         return False
     try:
         with path.open("rb") as handle:
-            handle.seek(size - max_bytes)
+            handle.seek(max(0, size - retain))
             tail = handle.read()
         newline = tail.find(b"\n")
         kept = tail[newline + 1 :] if newline != -1 else tail

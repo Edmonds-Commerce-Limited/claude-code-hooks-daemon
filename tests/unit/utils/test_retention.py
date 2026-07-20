@@ -60,6 +60,25 @@ class TestCapLogFile:
         assert cap_log_file(f, max_bytes=10) is True
         assert f.stat().st_size <= 10
 
+    def test_retain_bytes_hysteresis_trims_below_ceiling(self, tmp_path: Path) -> None:
+        # 20 lines "lineNN\n" (7 bytes each = 140 bytes). Ceiling 60, but retain
+        # only 20 -> after the trim the file sits well UNDER the ceiling, so a
+        # frequently-appended log is not rewritten on every subsequent write.
+        f = _write(tmp_path / "log.jsonl", "".join(f"line{i:02d}\n" for i in range(20)))
+        assert cap_log_file(f, max_bytes=60, retain_bytes=20) is True
+        assert f.stat().st_size <= 20  # trimmed to retain, not to the ceiling
+        out = f.read_text(encoding="utf-8")
+        assert out.endswith("line19\n")
+        for line in out.splitlines():
+            assert line.startswith("line")
+
+    def test_within_ceiling_not_trimmed_despite_small_retain(self, tmp_path: Path) -> None:
+        # Trimming only triggers on breaching max_bytes; a small retain_bytes must
+        # not cause a trim while the file is still under the ceiling.
+        f = _write(tmp_path / "log.jsonl", "a\nb\nc\n")  # 6 bytes
+        assert cap_log_file(f, max_bytes=100, retain_bytes=2) is False
+        assert f.read_text(encoding="utf-8") == "a\nb\nc\n"
+
 
 # ── prune_directory ──────────────────────────────────────────────────────────
 

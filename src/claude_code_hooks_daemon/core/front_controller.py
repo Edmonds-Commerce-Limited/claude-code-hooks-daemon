@@ -16,6 +16,15 @@ from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.router import inject_config_key_footer
 from claude_code_hooks_daemon.core.utils import get_workspace_root
+from claude_code_hooks_daemon.utils.retention import prune_directory
+
+# hook-errors.log rotates to a timestamped backup when it exceeds this size.
+_HOOK_ERROR_LOG_MAX_BYTES = 1_000_000
+# Plan 00181: those rotation backups (hook-errors.log.<ts>) previously
+# accumulated forever. Bound them by count and age after each rotation.
+_HOOK_ERROR_LOG_BACKUP_GLOB = "hook-errors.log.*"
+_HOOK_ERROR_LOG_MAX_BACKUPS = 5
+_HOOK_ERROR_LOG_MAX_BACKUP_AGE_SECONDS = 14 * 86400
 
 
 class FrontController:
@@ -226,9 +235,18 @@ def log_error_to_file(
         log_dir.mkdir(exist_ok=True)
 
         # Rotate log if too large (>1MB)
-        if log_file.exists() and log_file.stat().st_size > 1_000_000:
+        if log_file.exists() and log_file.stat().st_size > _HOOK_ERROR_LOG_MAX_BYTES:
             backup = log_dir / f"hook-errors.log.{datetime.now().strftime('%Y%m%d-%H%M%S')}"
             log_file.rename(backup)
+            # Plan 00181: bound the accumulated rotation backups (previously they
+            # grew forever, one per 1MB rollover).
+            prune_directory(
+                log_dir,
+                pattern=_HOOK_ERROR_LOG_BACKUP_GLOB,
+                max_count=_HOOK_ERROR_LOG_MAX_BACKUPS,
+                max_age_seconds=_HOOK_ERROR_LOG_MAX_BACKUP_AGE_SECONDS,
+                now=datetime.now().timestamp(),
+            )
 
         # Format error entry
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

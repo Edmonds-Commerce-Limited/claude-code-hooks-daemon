@@ -822,3 +822,35 @@ class TestGetWorkspaceRoot:
         """Should return Path object."""
         root = get_workspace_root()
         assert isinstance(root, Path)
+
+
+class TestHookErrorLogBackupRetention:
+    """Plan 00181: hook-errors.log rotation backups are bounded, not infinite."""
+
+    def test_rotation_prunes_old_backups(self, tmp_path):
+        import os
+        import time
+
+        untracked = tmp_path / "untracked"
+        untracked.mkdir()
+        # A current log over the 1MB rotation threshold so rotation fires.
+        (untracked / "hook-errors.log").write_bytes(b"x" * 1_100_000)
+        # Eight pre-existing backups with RECENT, ordered mtimes (so the count
+        # criterion binds rather than age).
+        base = time.time() - 100.0
+        for i in range(8):
+            backup = untracked / f"hook-errors.log.bk{i}"
+            backup.write_text("old")
+            os.utime(backup, (base + i, base + i))
+
+        with patch(
+            "claude_code_hooks_daemon.core.front_controller.get_workspace_root",
+            return_value=tmp_path,
+        ):
+            log_error_to_file("PreToolUse", ValueError("boom"), {"k": "v"})
+
+        backups = list(untracked.glob("hook-errors.log.*"))
+        # Rotation renamed the >1MB log to a new backup; pruning kept the newest 5.
+        assert len(backups) == 5
+        # The live log was recreated with the new error entry.
+        assert (untracked / "hook-errors.log").exists()
