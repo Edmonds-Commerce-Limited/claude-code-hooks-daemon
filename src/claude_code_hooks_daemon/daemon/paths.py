@@ -1483,6 +1483,72 @@ def cleanup_stale_daemon_files(project_dir: Path | str, max_age_days: int = 7) -
     return removed
 
 
+# Per-session runtime subdirectories under the daemon untracked dir. Each
+# accumulates one file per session id (thread-registry, context-sidecar) or per
+# hook event (payload-capture); the writers never delete their own files
+# (thread_registry/context_sidecar only SKIP stale entries at read time, they
+# do not unlink them), so a dead session's file leaks forever without this
+# sweep. The names mirror the writer modules' own subdir constants
+# (thread_registry._REGISTRY_SUBDIR, context_sidecar._SIDECAR_SUBDIR,
+# payload_capture._DEFAULT_SUBDIR) and are duplicated here as a plain tuple so
+# this low-level module never imports handler code (avoiding an import cycle).
+_SESSION_RUNTIME_SUBDIRS = ("thread-registry", "context-sidecar", "payload-capture")
+
+
+def cleanup_stale_session_dirs(
+    project_dir: Path | str, max_age_days: int = 7, now: float | None = None
+) -> int:
+    """Age out per-session runtime files under the untracked dir.
+
+    ``thread-registry/`` and ``context-sidecar/`` accumulate one JSON file per
+    session that their writers never delete (they only skip stale entries at
+    read time); ``payload-capture/`` holds per-event capture files. A file
+    untouched for ``max_age_days`` belongs to a dead session and is removed.
+    Reuses the shared ``prune_directory`` retention primitive (Plan 00181) so
+    all age-based pruning logic lives in one place. Missing subdirs are a no-op.
+
+    Args:
+        project_dir: Path to project directory.
+        max_age_days: Files older than this many days are removed (default 7).
+        now: Epoch time to compare mtimes against (defaults to the wall clock;
+            injectable for tests).
+
+    Returns:
+        Total number of stale session runtime files removed.
+    """
+    # Deferred import (mirrors the Plan 00103 tomllib deferral enforced by
+    # test_paths_import_under_310): paths.py is bootstrap-critical and is
+    # imported at module top by the standalone `python3 paths.py resolve-venv`
+    # wrapper path. A TOP-LEVEL `from ...utils.retention import ...` would drag
+    # the whole `utils/__init__` eager chain into paths.py's module load,
+    # creating an import-order-sensitive partial-initialisation failure under
+    # coverage's eager full-import. Importing here (call time) keeps module
+    # load light and the full package graph is always initialised by then.
+    from claude_code_hooks_daemon.utils.retention import prune_directory
+
+    project_path = Path(project_dir).resolve()
+    untracked_dir = _get_untracked_dir(project_path)
+
+    if not untracked_dir.is_dir():
+        return 0
+
+    current = time.time() if now is None else now
+    max_age_seconds = max_age_days * 86400
+    removed = 0
+    for subdir_name in _SESSION_RUNTIME_SUBDIRS:
+        subdir = untracked_dir / subdir_name
+        removed += len(prune_directory(subdir, max_age_seconds=max_age_seconds, now=current))
+
+    if removed:
+        logger.info(
+            "Cleaned up %d stale session runtime file(s) (older than %d days)",
+            removed,
+            max_age_days,
+        )
+
+    return removed
+
+
 def touch_daemon_files_in_dir(untracked_dir: Path) -> None:
     """Touch the current daemon's runtime files in a known untracked directory.
 

@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from claude_code_hooks_daemon.daemon.paths import (
     cleanup_stale_daemon_files,
+    cleanup_stale_session_dirs,
     touch_daemon_files,
     touch_daemon_files_in_dir,
     write_cleanup_status,
@@ -298,3 +299,103 @@ class TestWriteCleanupStatus:
             patch.object(Path, "write_text", side_effect=OSError("disk full")),
         ):
             write_cleanup_status(tmp_path, 3)  # Should not raise
+
+
+class TestCleanupStaleSessionDirs:
+    """Tests for cleanup_stale_session_dirs() (Plan 00181 Task 3.2).
+
+    thread-registry/ and context-sidecar/ accumulate one JSON file per session
+    that their writers never delete (they only skip stale entries at read time);
+    payload-capture/ holds per-event capture files. A file untouched for
+    max_age_days belongs to a dead session and must be aged out here.
+    """
+
+    _SUBDIRS = ("thread-registry", "context-sidecar", "payload-capture")
+
+    def test_returns_zero_when_untracked_dir_missing(self, tmp_path: Path) -> None:
+        nonexistent = tmp_path / "nonexistent"
+        with patch(
+            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
+            return_value=nonexistent,
+        ):
+            assert cleanup_stale_session_dirs(tmp_path) == 0
+
+    def test_returns_zero_when_subdirs_absent(self, tmp_path: Path) -> None:
+        """Untracked dir exists but the per-session subdirs were never created."""
+        with patch(
+            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
+            return_value=tmp_path,
+        ):
+            assert cleanup_stale_session_dirs(tmp_path) == 0
+
+    def test_removes_old_files_in_each_subdir(self, tmp_path: Path) -> None:
+        """One aged file per subdir is removed; the count is the total."""
+        for name in self._SUBDIRS:
+            subdir = tmp_path / name
+            subdir.mkdir()
+            stale = subdir / "dead-session.json"
+            stale.write_text("stale")
+            _make_old(stale)
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
+            return_value=tmp_path,
+        ):
+            removed = cleanup_stale_session_dirs(tmp_path, max_age_days=7)
+
+        assert removed == 3
+        for name in self._SUBDIRS:
+            assert not (tmp_path / name / "dead-session.json").exists()
+
+    def test_preserves_fresh_files(self, tmp_path: Path) -> None:
+        """A recently-touched (live-session) file is never removed."""
+        subdir = tmp_path / "thread-registry"
+        subdir.mkdir()
+        fresh = subdir / "live-session.json"
+        fresh.write_text("fresh")  # mtime is now
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
+            return_value=tmp_path,
+        ):
+            removed = cleanup_stale_session_dirs(tmp_path, max_age_days=7)
+
+        assert removed == 0
+        assert fresh.exists()
+
+    def test_removes_only_aged_files_mixed(self, tmp_path: Path) -> None:
+        """In one subdir, aged files go and fresh ones stay."""
+        subdir = tmp_path / "context-sidecar"
+        subdir.mkdir()
+        dead = subdir / "dead.json"
+        dead.write_text("x")
+        _make_old(dead)
+        live = subdir / "live.json"
+        live.write_text("y")
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
+            return_value=tmp_path,
+        ):
+            removed = cleanup_stale_session_dirs(tmp_path, max_age_days=7)
+
+        assert removed == 1
+        assert not dead.exists()
+        assert live.exists()
+
+    def test_now_override_controls_cutoff(self, tmp_path: Path) -> None:
+        """An injected ``now`` far in the future ages out even a fresh file."""
+        subdir = tmp_path / "payload-capture"
+        subdir.mkdir()
+        capture = subdir / "Stop.jsonl"
+        capture.write_text("event")  # mtime is now
+
+        future = time.time() + (30 * 86400)  # 30 days ahead
+        with patch(
+            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
+            return_value=tmp_path,
+        ):
+            removed = cleanup_stale_session_dirs(tmp_path, max_age_days=7, now=future)
+
+        assert removed == 1
+        assert not capture.exists()

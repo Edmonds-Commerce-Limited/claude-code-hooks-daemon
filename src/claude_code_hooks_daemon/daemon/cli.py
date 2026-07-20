@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     cleanup_pid_file,
     cleanup_socket,
     cleanup_stale_daemon_files,
+    cleanup_stale_session_dirs,
     get_pid_path,
     get_socket_path,
     get_venv_path,
@@ -409,9 +410,14 @@ def cmd_start(args: argparse.Namespace) -> int:
     # Remove stale runtime files from dead containers (age-based, not hostname-based)
     stale_days = config.daemon.stale_file_days
     stale_daemon = cleanup_stale_daemon_files(project_path, max_age_days=stale_days)
-    write_cleanup_status(project_path, stale_daemon)
-    if stale_daemon > 0:
-        print(f"Cleaned up {stale_daemon} stale file(s) older than {stale_days} days")
+    # Plan 00181 Task 3.2: also age out the per-session runtime subdirs
+    # (thread-registry/, context-sidecar/, payload-capture/) whose writers never
+    # delete their own dead-session files, so they leak one file per session.
+    stale_sessions = cleanup_stale_session_dirs(project_path, max_age_days=stale_days)
+    stale_total = stale_daemon + stale_sessions
+    write_cleanup_status(project_path, stale_total)
+    if stale_total > 0:
+        print(f"Cleaned up {stale_total} stale file(s) older than {stale_days} days")
 
     # Daemonise process (fork and detach from terminal)
     try:

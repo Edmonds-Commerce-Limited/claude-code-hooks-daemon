@@ -135,3 +135,31 @@ mid-task after a successful Edit. **Continue without stopping.** Always
 `tool_use_error`; recover by Read → retry Edit, never stop silently. Large-file
 Edits (notably `daemon/cli.py`) can trigger a `"Separator is found, but chunk is longer than limit"` PostToolUse error that swallows advisory context — a known
 repo-specific trigger, not a reason to halt.
+
+## Never add a top-level cross-package import to `daemon/paths.py`
+
+`daemon/paths.py` is **bootstrap-critical**: it is imported at module top by the
+standalone `python3 paths.py resolve-venv` wrapper on the *system* Python
+(possibly 3.9, before any venv exists). It must stay import-light — new
+dependencies belong in **function-local** imports, never at module top.
+`test_paths_import_under_310` already enforces this for `tomllib` (Plan 00103
+deferred it into `_load_toml_or_raise`); the rule generalises to *every*
+non-stdlib import.
+
+**Why:** Plan 00181 Task 3.2 added a top-level
+`from ...utils.retention import prune_directory` to paths.py. Unit tests passed
+and `pytest tests/unit/daemon/` passed in isolation, but the full QA suite
+(run under `coverage --cov=src --cov=.claude/ccy`) failed **25 tests** — and the
+failures did NOT reproduce under a plain `pytest tests/` (they looked flaky).
+The discriminating variable was coverage's eager full-module import pulling the
+whole `utils/__init__` chain into paths.py's module load in a
+collection-order-sensitive way. Moving the single import into the body of
+`cleanup_stale_session_dirs` took the exact coverage harness from *25 failed* to
+*10443 passed, 0 failed* with no other change.
+
+**Apply:** When a `daemon/paths.py` function needs a package-internal helper,
+import it **inside the function**, with a comment pointing at this rule. Treat a
+green `pytest tests/unit/daemon/` as necessary-but-not-sufficient: a
+coverage-only, order-dependent failure is invisible to isolated runs — always
+clear the full `./scripts/qa/llm_qa.py all` gate (which runs under coverage)
+before declaring a paths.py change done.

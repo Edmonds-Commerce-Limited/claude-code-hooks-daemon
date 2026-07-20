@@ -122,8 +122,15 @@ the root cause; a single shared utility is the proper fix.
   drops anything older than `max_archive_age_days` (default 14); the just-written
   archive is always newest so it survives. Config-overridable. 2 handler tests
   (count + age). Bounds the observed 57 MB offender.
-- [ ] ⬜ **Task 3.2**: Add a recursive, subdir-aware stale sweep for
-  `thread-registry/`, `context-sidecar/`, `payload-capture/`.
+- [x] ✅ **Task 3.2**: `paths.cleanup_stale_session_dirs` ages out the three
+  per-session runtime subdirs (`thread-registry/`, `context-sidecar/`,
+  `payload-capture/`) via the shared `prune_directory` primitive. Root cause:
+  `thread_registry`/`context_sidecar` only SKIP stale entries at read time —
+  they never unlink dead-session `{session_id}.json`, so one file leaks per
+  session forever. Wired into the daemon start path alongside
+  `cleanup_stale_daemon_files` (count folded into the cleanup-status total). 6
+  TDD tests (per-subdir removal, fresh-preserved, mixed, now-override, missing
+  dir/subdir no-ops). Daemon restart verified RUNNING.
 
 ### Phase 4: Close the reaper-invocation gaps
 
