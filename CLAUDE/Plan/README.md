@@ -116,6 +116,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Stop-Quality Stack (dependency chain)
 
+- [00177: Stop hook false "daemon not running" on long sessions](00177-stop-hook-transcript-timeout-false-daemon-down/PLAN.md) - In Progress (downstream field report, verified upstream at v3.44.0: on a huge transcript the Stop hook's `auto_continue_stop` parses the whole file up to ~9× per dispatch, blowing the client's flat 30 s socket timeout; the `socket.timeout` is then misreported as "Hooks daemon not running - protection not active", steering operators to needlessly restart a healthy daemon. Two fixes: (A) `init.sh` gives a read-side `socket_timeout` an honest "daemon is ALIVE — do NOT restart" outcome + fail-open on Stop, distinct from genuine-down; (B) a bounded tail-read `TranscriptReader.load_tail()` wired into the Stop hot path so a Stop dispatch is milliseconds regardless of transcript size, without touching the delicate freshness logic)
+
 - [00085: Reminder Pseudo-Event System with Adaptive Triggers](00085-reminder-pseudo-event-system/PLAN.md) - Dormant (8-phase build deferred to a future release window)
 
   - 8 phases — AdaptiveTrigger, config parsing, dispatcher, WorkflowReminderSetup, handler, constants/registration, config, verification
