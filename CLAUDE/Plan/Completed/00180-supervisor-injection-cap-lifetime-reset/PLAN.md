@@ -89,3 +89,4 @@ fuse (a permanently-wedged session would inject forever).
 - Plan created. Reuses live recovery cron `dffb57b7` (hourly, non-durable).
 - Diagnosis evidence: `untracked/ec-mark-supervisor/decision.log` (operator-supplied
   from the affected session); root cause at `claude-supervise.py:1661-1668`.
+- Delivered (fix + tests + born-complete archival) in `54e0fcd7`.
