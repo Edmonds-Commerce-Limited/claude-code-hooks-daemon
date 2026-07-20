@@ -1,6 +1,6 @@
 # Plan 00179: git upstream — drop auto-prune, add gone-branch advisory
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-20
 **Owner**: joseph
 **Priority**: High
@@ -52,29 +52,34 @@ This plan makes two changes:
 
 ### Phase 1: git_sync — drop prune + gone-branch detection (TDD)
 
-- [ ] ⬜ **Task 1.1**: Update tests: rename `fetch_all_prune` → `fetch_all`
+- [x] ✅ **Task 1.1**: Update tests: rename `fetch_all_prune` → `fetch_all`
   (asserts NO `--prune`); add tests for `default_branch`, `gone_branches`
   (deleted-on-remote local branch, merged vs not-merged, none, offline/fail-silent).
-- [ ] ⬜ **Task 1.2**: Implement in `utils/git_sync.py`: `fetch_all` (no prune),
+- [x] ✅ **Task 1.2**: Implement in `utils/git_sync.py`: `fetch_all` (no prune),
   `default_branch`, `GoneBranch` dataclass, `gone_branches` (dry-run prune
   detection + merged classification). Fail-silent throughout.
 
 ### Phase 2: Handler advisory (TDD)
 
-- [ ] ⬜ **Task 2.1**: Update handler tests: fetch call is `fetch_all`; add a
+- [x] ✅ **Task 2.1**: Update handler tests: fetch call is `fetch_all`; add a
   gone-branch advisory section (merged ⇒ `git branch -d`; not-merged ⇒ ask
   human); gone detection gated behind `auto_fetch`; behind + gone combine;
   silent when neither.
-- [ ] ⬜ **Task 2.2**: Implement in `git_upstream_checker.py`: call `fetch_all`,
+- [x] ✅ **Task 2.2**: Implement in `git_upstream_checker.py`: call `fetch_all`,
   append gone-branch advisory; update `get_claude_md()` guidance.
 
 ### Phase 3: QA, docs, dogfood
 
-- [ ] ⬜ **Task 3.1**: Update error_hiding exclusions for any new fail-silent fns.
-- [ ] ⬜ **Task 3.2**: `./scripts/qa/llm_qa.py all` green (95%+).
-- [ ] ⬜ **Task 3.3**: Daemon restart RUNNING; regenerate `.claude/HOOKS-DAEMON.md`.
-- [ ] ⬜ **Task 3.4**: Live end-to-end: delete a remote branch, confirm additive
+- [x] ✅ **Task 3.1**: Update error_hiding exclusions for any new fail-silent fns.
+  (No new exclusions needed — the new helpers use `if result is None` guards,
+  not try/except; existing `_run_git`/`upstream_status` exclusions still cover it.)
+- [x] ✅ **Task 3.2**: `./scripts/qa/llm_qa.py all` green (95%+). — 13/13,
+  10401 tests, 95.3% coverage.
+- [x] ✅ **Task 3.3**: Daemon restart RUNNING; regenerate `.claude/HOOKS-DAEMON.md`
+  (no diff — handler `description` text unchanged).
+- [x] ✅ **Task 3.4**: Live end-to-end: delete a remote branch, confirm additive
   fetch + gone-branch advisory (merged & not-merged) with no auto-deletion.
+  Live-verified: `--no-prune` bug caught and fixed; both cases surface correctly.
 
 ## Technical Decisions
 
@@ -99,13 +104,19 @@ blocked by `destructive_git`.
 
 ## Success Criteria
 
-- [ ] No `--prune` in the automatic fetch.
-- [ ] Gone branches surfaced with correct merged/not-merged classification.
-- [ ] Advisory never triggers deletion; recommends `-d` (safe) or ask-human.
-- [ ] QA green, daemon RUNNING, dogfooded, docs regenerated.
+- [x] No `--prune` in the automatic fetch (explicit `--no-prune` so it holds
+  even under `fetch.prune = true`).
+- [x] Gone branches surfaced with correct merged/not-merged classification.
+- [x] Advisory never triggers deletion; recommends `-d` (safe) or ask-human.
+- [x] QA green, daemon RUNNING, dogfooded, docs regenerated.
 
 ## Delivery & Milestones
 
 <!-- Curated milestones + delivery commit hashes only. -->
 
 - Plan created; reuses live recovery cron `dffb57b7` (hourly :37, non-durable).
+- Phase 1 (git_sync additive fetch + gone-branch detection) delivered `c3752b1f`.
+- Phase 2/3 (handler gone-branch advisory + explicit `--no-prune` fetch fix)
+  delivered `0f8bb4fc`. The `--no-prune` fix was a live dogfooding catch:
+  `fetch.prune = true` in git config made a bare `git fetch --all` prune anyway,
+  wiping the stale refs `gone_branches` needs.
