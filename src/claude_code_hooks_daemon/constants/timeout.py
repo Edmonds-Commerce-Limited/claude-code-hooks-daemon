@@ -53,6 +53,8 @@ class Timeout:
     GIT_STATUS_SHORT = 0.5  # 0.5 seconds (quick git status check)
     GIT_CONTEXT = 5  # 5 seconds (git context gathering)
     GIT_FETCH_BACKGROUND = 30  # 30 seconds (background git fetch in status line)
+    GIT_FETCH_SESSION = 30  # 30 seconds (full fetch --all --prune on session start)
+    GIT_PULL_SESSION = 30  # 30 seconds (git pull --ff-only in auto-pull mode)
     VALIDATION_CHECK = 5  # 5 seconds (installation validation subprocess)
     VERSION_CHECK = 5  # 5 seconds (git ls-remote for version check)
 
