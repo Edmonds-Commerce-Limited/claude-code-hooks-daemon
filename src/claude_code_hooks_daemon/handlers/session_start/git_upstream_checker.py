@@ -1,19 +1,27 @@
-"""GitUpstreamCheckerHandler - fetch + pull policy on session start (Plan 00178).
+"""GitUpstreamCheckerHandler - fetch + pull policy on session start (Plan 00178/00179).
 
-On new sessions (not resumes) this handler runs a full ``git fetch --all
---prune`` and, when the current branch is **behind** its upstream, acts
-according to a configurable ``mode``:
+On new sessions (not resumes) this handler runs an **additive** ``git fetch
+--all`` (never ``--prune`` — Plan 00179: the session-start path never mutates
+anything lossy automatically) and then does two independent things:
 
-- ``warn`` (default) — inject a strong advisory recommending ``git pull``.
-- ``agent-pull`` — inject a directive telling the agent to run ``git pull``
-  itself as its first action.
-- ``auto-pull`` — the daemon runs ``git pull --ff-only`` (only on a clean,
-  non-diverged tree) and reports the outcome; otherwise it degrades to a warning
-  so the operator resolves the situation deliberately.
+1. **Behind upstream** — when the current branch is behind its upstream, acts on
+   a configurable ``mode``:
+   - ``warn`` (default) — inject a strong advisory recommending ``git pull``.
+   - ``agent-pull`` — inject a directive telling the agent to run ``git pull``
+     itself as its first action.
+   - ``auto-pull`` — the daemon runs ``git pull --ff-only`` (only on a clean,
+     non-diverged tree) and reports the outcome; otherwise it degrades to a
+     warning so the operator resolves the situation deliberately.
+
+2. **Gone branches** — detects (non-destructively) local branches whose upstream
+   was deleted on the remote, classifies each merged/not-merged, and advises the
+   agent to clean up safely (``git branch -d`` for merged, ask the human for the
+   rest) and optionally ``git fetch --prune`` the stale remote-tracking refs
+   AFTER reviewing. The daemon never prunes or deletes a branch itself.
 
 The git mechanism lives in :mod:`claude_code_hooks_daemon.utils.git_sync`; this
 handler owns only policy. It is advisory (non-terminal) and stays silent when up
-to date, not a git repo, detached, or the branch has no upstream.
+to date with no gone branches, not a git repo, detached, or without an upstream.
 """
 
 import logging
@@ -39,6 +47,9 @@ _VALID_MODES = frozenset({_MODE_WARN, _MODE_AGENT_PULL, _MODE_AUTO_PULL})
 _DEFAULT_MODE = _MODE_WARN
 
 _ICON = "⬇️"
+_GONE_ICON = "🧹"
+_MERGED_MARK = "✓"
+_UNMERGED_MARK = "⚠"
 _RESUME_TRANSCRIPT_MIN_BYTES = 100
 _FAST_FORWARD_DETAIL = "fast-forwarded"
 
@@ -104,25 +115,36 @@ class GitUpstreamCheckerHandler(Handler):
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         root = self._get_project_root()
 
+        gones: list[git_sync.GoneBranch] = []
         if self._auto_fetch:
-            # Full fetch so ahead/behind is measured against fresh remote refs.
-            # Fail-silent: offline still reports staleness from existing refs.
-            git_sync.fetch_all_prune(root)
+            # Additive fetch (never prunes) so ahead/behind is measured against
+            # fresh remote refs. Fail-silent: offline still reports staleness
+            # from existing refs. Gone-branch detection is a network dry-run
+            # probe, so it too is gated behind auto_fetch.
+            git_sync.fetch_all(root)
+            gones = git_sync.gone_branches(root)
 
         status = git_sync.upstream_status(root)
-        if status is None or status.behind == 0:
-            # Silent when up to date / not a repo / detached / no upstream.
-            return HookResult(decision=Decision.ALLOW, context=[])
 
+        context: list[str] = []
+        if status is not None and status.behind > 0:
+            context = self._behind_context(root, status)
+
+        if gones:
+            gone_ctx = self._gone_branch_context(gones)
+            context = context + [""] + gone_ctx if context else gone_ctx
+
+        # Silent when up to date with no gone branches (or not a repo / detached).
+        return HookResult(decision=Decision.ALLOW, context=context)
+
+    def _behind_context(self, root: Path, status: git_sync.UpstreamStatus) -> list[str]:
+        """Dispatch the behind-upstream advisory according to the configured mode."""
         mode = self._resolve_mode()
         if mode == _MODE_AUTO_PULL:
-            context = self._auto_pull(root, status)
-        elif mode == _MODE_AGENT_PULL:
-            context = self._agent_pull_context(status)
-        else:
-            context = self._warn_context(status)
-
-        return HookResult(decision=Decision.ALLOW, context=context)
+            return self._auto_pull(root, status)
+        if mode == _MODE_AGENT_PULL:
+            return self._agent_pull_context(status)
+        return self._warn_context(status)
 
     # ------------------------------------------------------------------
     # Message builders
@@ -211,22 +233,62 @@ class GitUpstreamCheckerHandler(Handler):
         lines.append(f"Run `git pull` manually to resolve. (mode: {_MODE_AUTO_PULL})")
         return lines
 
+    def _gone_branch_context(self, gones: list[git_sync.GoneBranch]) -> list[str]:
+        """Advise on local branches whose upstream was deleted — never auto-delete.
+
+        The daemon has NOT pruned or deleted anything. It classifies each gone
+        branch merged (safe to remove) vs not-merged (needs human confirmation)
+        and hands the agent an explicit, checked cleanup path.
+        """
+        lines = [
+            f"{_GONE_ICON}  GIT: {len(gones)} local branch(es) track a remote branch that was "
+            "DELETED on the remote. Nothing was pruned or deleted automatically.",
+            "",
+        ]
+        for gone in gones:
+            if gone.merged:
+                lines.append(
+                    f"  {_MERGED_MARK} {gone.name} (was {gone.upstream}) — merged into the "
+                    f"default branch; safe to remove: `git branch -d {gone.name}`"
+                )
+            else:
+                lines.append(
+                    f"  {_UNMERGED_MARK} {gone.name} (was {gone.upstream}) — has commit(s) NOT "
+                    "on the default branch; deleting it loses that work. Do NOT delete without "
+                    "confirming with the human first."
+                )
+        lines += [
+            "",
+            "After double-checking the above you MAY tidy up: run `git fetch --prune` (or "
+            "`git remote prune origin`) to drop the stale remote-tracking refs — that is safe, "
+            "it only touches `origin/*` cache refs. Then `git branch -d <name>` each merged "
+            f"({_MERGED_MARK}) branch; for any {_UNMERGED_MARK} branch, ask the human before "
+            "removing it. Never use `git branch -D` (force-delete) to bypass the safety check.",
+        ]
+        return lines
+
     # ------------------------------------------------------------------
     # Guidance / acceptance
     # ------------------------------------------------------------------
 
     def get_claude_md(self) -> str | None:
         return (
-            "## git_upstream_checker — full fetch + pull policy on session start\n\n"
-            "On each new session the daemon runs a full `git fetch --all --prune` and, if "
-            "your branch is behind its upstream, acts on the configured `mode`:\n\n"
+            "## git_upstream_checker — additive fetch + pull/cleanup advice on session start\n\n"
+            "On each new session the daemon runs an **additive** `git fetch --all` (never "
+            "`--prune` — it never removes anything automatically) and then:\n\n"
+            "**If your branch is behind its upstream**, acts on the configured `mode`:\n"
             "- `warn` (default): strongly advises you to run `git pull`.\n"
             "- `agent-pull`: instructs you to run `git pull` as your first action.\n"
             "- `auto-pull`: the daemon runs `git pull --ff-only` for you on a clean, "
             "non-diverged tree; if it cannot fast-forward (dirty tree or diverged history) "
             "it degrades to a warning and you pull manually.\n\n"
-            "It is silent when up to date, not in a git repo, on a detached HEAD, or when the "
-            "branch has no upstream. Configure via "
+            "**If local branches track a remote branch that was deleted**, it lists them "
+            "(marked merged = safe vs not-merged = has unique commits) and asks you to clean "
+            "up AFTER checking: `git branch -d <name>` for merged branches, ask the human for "
+            "the rest, and optionally `git fetch --prune` the stale remote-tracking refs. The "
+            "daemon never prunes or deletes a branch itself; never use `git branch -D`.\n\n"
+            "It is silent when up to date with no gone branches, not in a git repo, on a "
+            "detached HEAD, or without an upstream. Configure via "
             "`handlers.session_start.git_upstream_checker.options.mode`."
         )
 

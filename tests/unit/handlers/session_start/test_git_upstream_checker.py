@@ -21,12 +21,17 @@ from claude_code_hooks_daemon.handlers.session_start.git_upstream_checker import
 from claude_code_hooks_daemon.utils import git_sync
 
 _ROOT = "claude_code_hooks_daemon.handlers.session_start.git_upstream_checker.ProjectContext.project_root"
-_FETCH = "claude_code_hooks_daemon.utils.git_sync.fetch_all_prune"
+_FETCH = "claude_code_hooks_daemon.utils.git_sync.fetch_all"
 _STATUS = "claude_code_hooks_daemon.utils.git_sync.upstream_status"
 _CLEAN = "claude_code_hooks_daemon.utils.git_sync.working_tree_clean"
 _PULL = "claude_code_hooks_daemon.utils.git_sync.pull_ff_only"
+_GONE = "claude_code_hooks_daemon.utils.git_sync.gone_branches"
 
 _FAKE_ROOT = Path("/fake/project")
+
+
+def _gone(name: str = "feature", *, merged: bool) -> git_sync.GoneBranch:
+    return git_sync.GoneBranch(name=name, upstream=f"origin/{name}", merged=merged)
 
 
 def _session_start_input(transcript_path: str | None = None) -> dict[str, Any]:
@@ -132,6 +137,73 @@ class TestSilentPaths:
             patch(_STATUS, return_value=None),
         ):
             result = _make().handle(_session_start_input())
+        assert result.context == []
+
+    def test_in_sync_with_no_gone_is_silent(self) -> None:
+        with (
+            patch(_ROOT, return_value=_FAKE_ROOT),
+            patch(_FETCH, return_value=True),
+            patch(_STATUS, return_value=_status(0)),
+            patch(_GONE, return_value=[]),
+        ):
+            result = _make().handle(_session_start_input())
+        assert result.context == []
+
+
+class TestGoneBranchAdvisory:
+    def test_merged_gone_advises_safe_delete(self) -> None:
+        with (
+            patch(_ROOT, return_value=_FAKE_ROOT),
+            patch(_FETCH, return_value=True),
+            patch(_STATUS, return_value=_status(0)),  # in sync — gone advisory stands alone
+            patch(_GONE, return_value=[_gone("feature", merged=True)]),
+        ):
+            result = _make().handle(_session_start_input())
+        text = "\n".join(result.context)
+        assert "DELETED on the remote" in text
+        assert "git branch -d feature" in text
+        assert "Nothing was pruned or deleted automatically" in text
+        # Optional cleanup guidance includes pruning the stale remote-tracking refs.
+        assert "git fetch --prune" in text
+        # Never recommend force-delete.
+        assert "git branch -D" in text  # only in the "Never use" warning
+        assert "Never use `git branch -D`" in text
+
+    def test_unmerged_gone_advises_ask_human(self) -> None:
+        with (
+            patch(_ROOT, return_value=_FAKE_ROOT),
+            patch(_FETCH, return_value=True),
+            patch(_STATUS, return_value=_status(0)),
+            patch(_GONE, return_value=[_gone("wip", merged=False)]),
+        ):
+            result = _make().handle(_session_start_input())
+        text = "\n".join(result.context)
+        assert "wip" in text
+        assert "Do NOT delete" in text
+        assert "human" in text
+
+    def test_behind_and_gone_combine(self) -> None:
+        with (
+            patch(_ROOT, return_value=_FAKE_ROOT),
+            patch(_FETCH, return_value=True),
+            patch(_STATUS, return_value=_status(2)),
+            patch(_GONE, return_value=[_gone("feature", merged=True)]),
+        ):
+            result = _make(mode="warn").handle(_session_start_input())
+        text = "\n".join(result.context)
+        assert "git pull" in text  # behind advisory
+        assert "git branch -d feature" in text  # gone advisory
+
+    def test_gone_detection_gated_behind_auto_fetch(self) -> None:
+        with (
+            patch(_ROOT, return_value=_FAKE_ROOT),
+            patch(_FETCH, return_value=True) as fetch,
+            patch(_STATUS, return_value=_status(0)),
+            patch(_GONE, return_value=[_gone("feature", merged=True)]) as gone,
+        ):
+            result = _make(auto_fetch=False).handle(_session_start_input())
+        fetch.assert_not_called()
+        gone.assert_not_called()
         assert result.context == []
 
 

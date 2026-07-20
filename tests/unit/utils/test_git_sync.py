@@ -312,6 +312,9 @@ class TestFetchAll:
         assert "fetch" in cmd
         assert "--all" in cmd
         assert "--prune" not in cmd  # must never prune automatically
+        # --no-prune is passed explicitly so the additive guarantee holds even
+        # when the user has fetch.prune=true configured (Plan 00179).
+        assert "--no-prune" in cmd
         env = captured["env"]
         assert isinstance(env, dict)
         assert env.get("GIT_TERMINAL_PROMPT") == "0"

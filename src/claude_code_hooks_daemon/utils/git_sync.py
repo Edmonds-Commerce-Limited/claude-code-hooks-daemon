@@ -7,7 +7,9 @@ A focused, independently-testable home for the git operations the
 - :func:`current_branch` / :func:`upstream_ref` — resolve where we are.
 - :func:`upstream_status` — ahead/behind vs ``@{upstream}`` as a typed value.
 - :func:`working_tree_clean` — is it safe to auto-pull?
-- :func:`fetch_all_prune` — the full ``git fetch --all --prune``.
+- :func:`fetch_all` — an additive ``git fetch --all`` (never ``--prune``).
+- :func:`gone_branches` — local branches whose upstream was deleted on the
+  remote (detected non-destructively, classified merged/not-merged).
 - :func:`pull_ff_only` — a safe, deterministic fast-forward-only pull.
 
 Every function is **fail-silent** on a missing/broken git (returns ``None`` /
@@ -196,13 +198,15 @@ def working_tree_clean(cwd: Path) -> bool:
 
 
 def fetch_all(cwd: Path, timeout: float = Timeout.GIT_FETCH_SESSION) -> bool:
-    """Run an additive ``git fetch --all`` non-interactively (never prunes).
+    """Run an additive ``git fetch --all --no-prune`` non-interactively.
 
     Plan 00179: the automatic session-start fetch is deliberately additive — it
-    never passes ``--prune``, so it can never remove a remote-tracking ref (and
-    therefore never surprises a local branch into a ``gone`` upstream). Deleted
-    remote branches are surfaced separately and non-destructively by
-    :func:`gone_branches`.
+    can never remove a remote-tracking ref (and therefore never surprises a local
+    branch into a ``gone`` upstream). ``--no-prune`` is passed **explicitly** so
+    the additive guarantee holds even when the user has ``fetch.prune = true`` in
+    their git config (a common setting that would otherwise make a bare
+    ``git fetch`` prune). Deleted remote branches are surfaced separately and
+    non-destructively by :func:`gone_branches`.
 
     Returns ``True`` only when git ran and exited 0. Offline / auth / timeout /
     not-a-repo all return ``False`` (fail-silent): the caller still reports
@@ -212,6 +216,7 @@ def fetch_all(cwd: Path, timeout: float = Timeout.GIT_FETCH_SESSION) -> bool:
         cwd,
         "fetch",
         "--all",
+        "--no-prune",
         "--quiet",
         timeout=timeout,
         env=_noninteractive_env(),
