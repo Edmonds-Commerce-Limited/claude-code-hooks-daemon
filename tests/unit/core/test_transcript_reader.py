@@ -1718,3 +1718,122 @@ class TestReadIncrementalLineBoundary:
         messages, _offset = reader.read_incremental(str(transcript), 0)
         contents = [m.content for m in messages]
         assert contents == ["First", "Second"]
+
+
+class TestLoadTail:
+    """Test TranscriptReader.load_tail() — bounded tail parse (Plan 00177).
+
+    load_tail() must produce the same message/tool-use accessors as load() for
+    the recent conversation tail, WITHOUT reading the whole file. This is the
+    Stop-hot-path fix: on a multi-hundred-MB transcript, load() blows the client
+    socket timeout; a bounded tail parse completes in milliseconds.
+    """
+
+    @staticmethod
+    def _assistant(text: str) -> str:
+        return json.dumps(
+            {"type": "assistant", "message": {"role": "assistant", "content": text}}
+        )
+
+    def test_load_tail_marks_loaded_on_empty_file(self, tmp_path: Path) -> None:
+        """An empty file loads (is_loaded True) with no messages, like load()."""
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text("")
+        reader = TranscriptReader()
+        reader.load_tail(str(transcript))
+        assert reader.is_loaded() is True
+        assert reader.get_messages() == []
+
+    def test_load_tail_nonexistent_stays_unloaded(self) -> None:
+        """A missing file leaves the reader unloaded, like load()."""
+        reader = TranscriptReader()
+        reader.load_tail("/nonexistent/transcript.jsonl")
+        assert reader.is_loaded() is False
+
+    def test_load_tail_reads_whole_small_file(self, tmp_path: Path) -> None:
+        """A file smaller than max_bytes is parsed in full (start == 0)."""
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text(self._assistant("First") + "\n" + self._assistant("Second") + "\n")
+        reader = TranscriptReader()
+        reader.load_tail(str(transcript), max_bytes=1_048_576)
+        assert [m.content for m in reader.get_messages()] == ["First", "Second"]
+        assert reader.get_last_assistant_text() == "Second"
+
+    def test_load_tail_ignores_file_head(self, tmp_path: Path) -> None:
+        """With a small window, only the tail records are parsed — the head is
+        never read. Proves the whole-file cost is avoided."""
+        transcript = tmp_path / "t.jsonl"
+        head = self._assistant("HEAD-" + "x" * 20_000)
+        tail_a = self._assistant("tail-a")
+        tail_b = self._assistant("tail-b")
+        transcript.write_text(head + "\n" + tail_a + "\n" + tail_b + "\n")
+
+        window = len(tail_a.encode()) + len(tail_b.encode()) + 20
+        reader = TranscriptReader()
+        reader.load_tail(str(transcript), max_bytes=window)
+
+        contents = [m.content for m in reader.get_messages()]
+        assert "tail-b" in contents
+        assert reader.get_last_assistant_text() == "tail-b"
+        # The huge head record must NOT have been parsed.
+        assert not any(c.startswith("HEAD-") for c in contents)
+
+    def test_load_tail_drops_partial_first_line(self, tmp_path: Path) -> None:
+        """When the window starts mid-record, the partial first line is dropped
+        and every following complete record is parsed."""
+        transcript = tmp_path / "t.jsonl"
+        big = self._assistant("BIG-" + "y" * 5_000)
+        rec_b = self._assistant("bee")
+        rec_c = self._assistant("cee")
+        transcript.write_text(big + "\n" + rec_b + "\n" + rec_c + "\n")
+
+        # Window includes all of B and C plus a fragment of BIG's tail.
+        window = len(rec_b.encode()) + len(rec_c.encode()) + 30
+        reader = TranscriptReader()
+        reader.load_tail(str(transcript), max_bytes=window)
+
+        contents = [m.content for m in reader.get_messages()]
+        assert contents == ["bee", "cee"]
+        assert not any(c.startswith("BIG-") for c in contents)
+
+    def test_load_tail_preserves_tool_accessors(self, tmp_path: Path) -> None:
+        """Tool-oriented accessors used by auto_continue_stop work over the tail."""
+        transcript = tmp_path / "t.jsonl"
+        bash_use = json.dumps(
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "tool_use", "name": "Bash", "input": {"command": "pytest -q"}}
+                    ],
+                },
+            }
+        )
+        tool_result = json.dumps(
+            {
+                "type": "message",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "tool_result", "is_error": True, "content": "boom"}
+                    ],
+                },
+            }
+        )
+        transcript.write_text(bash_use + "\n" + tool_result + "\n")
+
+        reader = TranscriptReader()
+        reader.load_tail(str(transcript), max_bytes=1_048_576)
+        bash = reader.get_last_bash_tool_use()
+        assert bash is not None
+        assert bash.tool_input.get("command") == "pytest -q"
+        assert reader.last_tool_result_was_error() is True
+
+    def test_load_tail_default_cap_covers_recent_messages(self, tmp_path: Path) -> None:
+        """Called with no max_bytes, the default cap still finds the last message."""
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text(self._assistant("only") + "\n")
+        reader = TranscriptReader()
+        reader.load_tail(str(transcript))
+        assert reader.get_last_assistant_text() == "only"

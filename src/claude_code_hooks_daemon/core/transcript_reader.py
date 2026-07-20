@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 _FILE_START_OFFSET = 0
 # Newline byte used to realign a mid-line seek to the next full JSONL record.
 _NEWLINE_BYTE = b"\n"
+# Newline used to split a decoded tail chunk into individual JSONL records.
+_NEWLINE_STR = "\n"
+# Default bounded tail-read window for load_tail(). 1 MiB is far larger than any
+# assistant text message or tool_result, so the recent-conversation accessors the
+# Stop handlers need (last assistant message, last tool_result) are always inside
+# it — while a multi-hundred-MB transcript is never parsed whole (Plan 00177).
+_DEFAULT_TAIL_BYTES = 1_048_576
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,8 +147,60 @@ class TranscriptReader:
             transcript_path,
         )
 
+    def load_tail(self, transcript_path: str, max_bytes: int = _DEFAULT_TAIL_BYTES) -> None:
+        """Load and parse only the last ``max_bytes`` of a JSONL transcript.
+
+        Unlike ``load()``, which materialises the ENTIRE file, ``load_tail()``
+        seeks to ``max(0, size - max_bytes)`` and parses only the trailing
+        records. The Stop hot path needs only the recent conversation tail (last
+        assistant message, last tool_result), so a bounded read keeps a Stop
+        dispatch in milliseconds even on a multi-hundred-MB transcript — the
+        whole-file parse otherwise blows the client socket timeout and is
+        misreported as a dead daemon (Plan 00177).
+
+        Always re-reads (no path cache short-circuit): the freshness poll that
+        calls this must observe freshly-appended content on each invocation.
+
+        The trailing records populate the SAME ``self._messages`` /
+        ``self._tool_uses`` lists that every accessor reads, so ``load_tail()``
+        is transparently substitutable for ``load()`` for any consumer that only
+        inspects the recent tail.
+
+        Args:
+            transcript_path: Absolute path to .jsonl transcript file
+            max_bytes: Maximum number of trailing bytes to read and parse
+        """
+        self._messages = []
+        self._tool_uses = []
+        self._path = transcript_path
+        self._loaded = False
+
+        try:
+            path = Path(transcript_path)
+            if not path.exists():
+                logger.warning("Transcript file not found: %s", transcript_path)
+                return
+            size = path.stat().st_size
+        except Exception as e:
+            # Parity with load(): a path-resolution/stat glitch degrades to an
+            # unloaded reader (fail-safe for the Stop dispatch), logged at debug.
+            logger.debug("TranscriptReader: Error checking path %s: %s", transcript_path, e)
+            return
+
+        if size > _FILE_START_OFFSET:
+            self._parse_tail(path, size, max_bytes)
+        self._loaded = True
+
+        logger.debug(
+            "TranscriptReader: Tail-loaded %d messages and %d tool uses from %s (<=%d bytes)",
+            len(self._messages),
+            len(self._tool_uses),
+            transcript_path,
+            max_bytes,
+        )
+
     def _parse(self, path: Path) -> None:
-        """Parse JSONL file line by line.
+        """Parse a whole JSONL file line by line.
 
         Supports two formats:
         - Real Claude Code format: {"type": "message", "message": {"role": ..., "content": [...]}}
@@ -154,55 +213,95 @@ class TranscriptReader:
         """
         try:
             with path.open("r") as f:
-                for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    try:
-                        data = json.loads(line)
-                    except json.JSONDecodeError:
-                        logger.debug(
-                            "TranscriptReader: Skipping malformed JSON at line %d", line_num
-                        )
-                        continue
-
-                    if not isinstance(data, dict):
-                        continue
-
-                    entry_type = data.get("type")
-                    if entry_type is None:
-                        continue
-
-                    if entry_type == "message":
-                        # Real Claude Code format
-                        self._parse_message_entry(data)
-                    elif entry_type in ("human", "assistant"):
-                        # Legacy format: type=human/assistant with message.content
-                        # Real transcripts use this format WITH content blocks (list),
-                        # so delegate to _parse_message_entry for proper block parsing.
-                        message_data = data.get("message", {})
-                        if not isinstance(message_data, dict):
-                            self._messages.append(
-                                TranscriptMessage(
-                                    role=entry_type, content="", raw=data, uuid=data.get("uuid")
-                                )
-                            )
-                        else:
-                            # Inject role into message dict for _parse_message_entry
-                            if "role" not in message_data:
-                                message_data = {**message_data, "role": entry_type}
-                            self._parse_message_entry({**data, "message": message_data})
-                    elif entry_type == "tool_use":
-                        tool_name = data.get("tool_name", "")
-                        tool_input = data.get("tool_input", {})
-                        self._tool_uses.append(
-                            ToolUse(tool_name=tool_name, tool_input=tool_input, raw=data)
-                        )
+                for line in f:
+                    self._ingest_record(line)
         except (OSError, UnicodeDecodeError) as e:
             logger.debug("TranscriptReader: Failed to read %s: %s", path, e)
         except Exception as e:
             logger.error("TranscriptReader: Unexpected error reading %s: %s", path, e)
+
+    def _parse_tail(self, path: Path, size: int, max_bytes: int) -> None:
+        """Parse only the trailing ``max_bytes`` of the file.
+
+        Seeks to ``max(0, size - max_bytes)`` and reads to EOF. When the window
+        begins after the file start it almost always lands mid-record, so the
+        partial first line is discarded (a truncated JSON fragment is not a valid
+        record) before parsing every following complete record. The same
+        record-ingest path as ``_parse`` is used, so accessors behave identically.
+
+        Args:
+            path: Path to JSONL file
+            size: Current file size in bytes (already stat()-ed by the caller)
+            max_bytes: Maximum number of trailing bytes to read
+        """
+        start = max(_FILE_START_OFFSET, size - max_bytes)
+        try:
+            with path.open("rb") as f:
+                f.seek(start)
+                chunk = f.read()
+            text = chunk.decode("utf-8", errors="replace")
+            lines = text.split(_NEWLINE_STR)
+            if start > _FILE_START_OFFSET and lines:
+                # The window began mid-record; drop the partial leading fragment.
+                lines = lines[1:]
+            for line in lines:
+                self._ingest_record(line)
+        except (OSError, UnicodeDecodeError, ValueError) as e:
+            logger.debug("TranscriptReader: Failed tail read %s: %s", path, e)
+        except Exception as e:
+            # Mirror _parse's broad, LOGGED catch: an unexpected read error must
+            # degrade to an empty reader (fail-safe for the Stop dispatch), never
+            # crash the handler. Logged at error level — not silently hidden.
+            logger.error("TranscriptReader: Unexpected error tail-reading %s: %s", path, e)
+
+    def _ingest_record(self, line: str) -> None:
+        """Parse a single JSONL line and append any message/tool-use it yields.
+
+        Shared by ``_parse`` (whole file) and ``_parse_tail`` (bounded tail) so
+        both produce identical accessor state. Malformed JSON, non-dict records,
+        and records without a 'type' field are skipped.
+
+        Args:
+            line: One raw JSONL line (surrounding whitespace is stripped)
+        """
+        line = line.strip()
+        if not line:
+            return
+
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            logger.debug("TranscriptReader: Skipping malformed JSON line")
+            return
+
+        if not isinstance(data, dict):
+            return
+
+        entry_type = data.get("type")
+        if entry_type is None:
+            return
+
+        if entry_type == "message":
+            # Real Claude Code format
+            self._parse_message_entry(data)
+        elif entry_type in ("human", "assistant"):
+            # Legacy format: type=human/assistant with message.content
+            # Real transcripts use this format WITH content blocks (list),
+            # so delegate to _parse_message_entry for proper block parsing.
+            message_data = data.get("message", {})
+            if not isinstance(message_data, dict):
+                self._messages.append(
+                    TranscriptMessage(role=entry_type, content="", raw=data, uuid=data.get("uuid"))
+                )
+            else:
+                # Inject role into message dict for _parse_message_entry
+                if "role" not in message_data:
+                    message_data = {**message_data, "role": entry_type}
+                self._parse_message_entry({**data, "message": message_data})
+        elif entry_type == "tool_use":
+            tool_name = data.get("tool_name", "")
+            tool_input = data.get("tool_input", {})
+            self._tool_uses.append(ToolUse(tool_name=tool_name, tool_input=tool_input, raw=data))
 
     def _parse_message_entry(self, data: dict[str, Any]) -> None:
         """Parse a real Claude Code message entry (type=message).

@@ -41,6 +41,14 @@ def is_stop_hook_active(hook_input: dict[str, Any]) -> bool:
 def get_transcript_reader(hook_input: dict[str, Any]) -> TranscriptReader | None:
     """Load a TranscriptReader from hook_input's transcript_path.
 
+    Uses a BOUNDED tail read (``load_tail``), not a whole-file parse: every Stop
+    handler that calls this only inspects the recent conversation tail (last
+    assistant message, last tool_result), and a whole-file parse on a
+    multi-hundred-MB transcript blows the client's socket timeout — which the
+    daemon then misreports as "not running" (Plan 00177). The tail window is far
+    larger than any single message, so the tail accessors are unaffected while
+    the dispatch stays in milliseconds regardless of transcript size.
+
     Args:
         hook_input: Hook input dictionary containing transcript_path
 
@@ -53,7 +61,7 @@ def get_transcript_reader(hook_input: dict[str, Any]) -> TranscriptReader | None
         return None
 
     reader = TranscriptReader()
-    reader.load(str(transcript_path))
+    reader.load_tail(str(transcript_path))
 
     if not reader.is_loaded():
         logger.debug("Transcript not loaded from: %s", transcript_path)

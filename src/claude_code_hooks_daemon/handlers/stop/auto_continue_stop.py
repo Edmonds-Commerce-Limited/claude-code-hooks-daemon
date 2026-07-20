@@ -657,7 +657,10 @@ class AutoContinueStopHandler(Handler):
         for _ in range(_HAS_EXPLANATION_RETRY_ATTEMPTS):
             time.sleep(_HAS_EXPLANATION_RETRY_DELAY_SECONDS)
             retry_reader = TranscriptReader()
-            retry_reader.load(transcript_path)
+            # Bounded tail read (Plan 00177): a whole-file re-parse per poll
+            # iteration on a large transcript is exactly what blows the client
+            # socket budget. Only the tail (last assistant message) is needed.
+            retry_reader.load_tail(transcript_path)
             candidate = retry_reader.get_last_assistant_message()
             if candidate is None:
                 continue
