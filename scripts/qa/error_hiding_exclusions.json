@@ -52,6 +52,24 @@
     },
     {
       "file": "core/transcript_reader.py",
+      "function": "load_tail",
+      "rule": "return-none-on-error",
+      "reason": "Bounded tail load (Plan 00177). Returns early when the path is invalid/missing \u2014 exact parity with load(). Transcript reading is advisory; the Stop dispatch must not crash if the transcript path is malformed or absent. Callers check _loaded state."
+    },
+    {
+      "file": "core/transcript_reader.py",
+      "function": "_parse_tail",
+      "rule": "log-and-continue",
+      "reason": "Bounded tail parse (Plan 00177). Logs a read error and continues with empty state \u2014 exact parity with _parse(). One unreadable transcript must not crash the Stop handler. Already logged at debug/error level."
+    },
+    {
+      "file": "core/transcript_reader.py",
+      "function": "_ingest_record",
+      "rule": "return-none-on-error",
+      "reason": "Shared JSONL record ingest for _parse and _parse_tail (Plan 00177): except json.JSONDecodeError skips a malformed line \u2014 the standard JSONL pattern (same as read_incremental's silent-continue). A single bad line must not abort parsing the rest of the transcript."
+    },
+    {
+      "file": "core/transcript_reader.py",
       "function": "read_incremental",
       "rule": "log-and-continue",
       "reason": "Logs OSError/UnicodeDecodeError at debug level and returns partial results. Incremental transcript reading is advisory \u2014 same pattern as _parse(). Already logged."

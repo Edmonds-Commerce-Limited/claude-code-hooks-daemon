@@ -1731,9 +1731,7 @@ class TestLoadTail:
 
     @staticmethod
     def _assistant(text: str) -> str:
-        return json.dumps(
-            {"type": "assistant", "message": {"role": "assistant", "content": text}}
-        )
+        return json.dumps({"type": "assistant", "message": {"role": "assistant", "content": text}})
 
     def test_load_tail_marks_loaded_on_empty_file(self, tmp_path: Path) -> None:
         """An empty file loads (is_loaded True) with no messages, like load()."""
@@ -1815,9 +1813,7 @@ class TestLoadTail:
                 "type": "message",
                 "message": {
                     "role": "user",
-                    "content": [
-                        {"type": "tool_result", "is_error": True, "content": "boom"}
-                    ],
+                    "content": [{"type": "tool_result", "is_error": True, "content": "boom"}],
                 },
             }
         )
