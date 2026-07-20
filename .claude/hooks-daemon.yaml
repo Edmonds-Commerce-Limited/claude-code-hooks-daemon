@@ -328,6 +328,13 @@ handlers:
       enabled: true            # Uses content-hash cache - only re-checks when .gitignore changes
       priority: 54
 
+    git_upstream_checker:  # Full fetch + pull policy on session start (Plan 00178)
+      enabled: true        # New sessions only; silent unless the branch is behind upstream
+      priority: 56
+      options:
+        mode: warn         # warn | agent-pull | auto-pull
+        auto_fetch: true   # run `git fetch --all --prune` before checking ahead/behind
+
     suggest_status_line:  # Suggests daemon-based status line setup
       enabled: true      # Enable to suggest status line configuration
       priority: 55

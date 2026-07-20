@@ -278,13 +278,11 @@ class TestFetchAllPrune:
         monkeypatch.setattr(subprocess, "run", _raise)
         assert git_sync.fetch_all_prune(clone) is False
 
-    def test_fail_silent_on_timeout(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_fail_silent_on_timeout(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _, clone = _make_remote_and_clone(tmp_path)
 
         def _timeout(*_a: object, **_k: object) -> None:
-            raise subprocess.TimeoutExpired(cmd="git fetch", timeout=1)
+            raise subprocess.TimeoutExpired(cmd="git fetch", timeout=Timeout.GIT_FETCH_SESSION)
 
         monkeypatch.setattr(subprocess, "run", _timeout)
         assert git_sync.fetch_all_prune(clone) is False

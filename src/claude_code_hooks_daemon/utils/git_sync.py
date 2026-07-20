@@ -101,7 +101,9 @@ def _noninteractive_env() -> dict[str, str]:
 
 def current_branch(cwd: Path) -> str | None:
     """Return the current branch name, or ``None`` when detached / not a repo."""
-    result = _run_git(cwd, "symbolic-ref", "--quiet", "--short", "HEAD", timeout=Timeout.GIT_CONTEXT)
+    result = _run_git(
+        cwd, "symbolic-ref", "--quiet", "--short", "HEAD", timeout=Timeout.GIT_CONTEXT
+    )
     if result is None or result.returncode != 0:
         return None
     branch = result.stdout.strip()

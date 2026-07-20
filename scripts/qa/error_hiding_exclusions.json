@@ -453,6 +453,18 @@
       "reason": "Bounded git subprocess wrapper for GitRepo: returns None when git is unavailable (OSError/SubprocessError) or the command exits non-zero (e.g. not a git repo, config key absent). Same explicitly-non-fatal contract as project_context._get_git_toplevel \u2014 'not a repo' / 'key absent' IS the answer, consumed as feature-detection by resolve_for/read_config."
     },
     {
+      "file": "utils/git_sync.py",
+      "function": "_run_git",
+      "rule": "return-none-on-error",
+      "reason": "Bounded git subprocess wrapper for the upstream-sync path (Plan 00178): returns None when git is unavailable (OSError/SubprocessError) or the call times out. Same explicitly-non-fatal contract as git_repo._git_output \u2014 the SessionStart handler treats 'no answer' as feature-detection (not a repo / offline) and stays silent, never crashing session start."
+    },
+    {
+      "file": "utils/git_sync.py",
+      "function": "upstream_status",
+      "rule": "return-none-on-error",
+      "reason": "Defensive parse of `git rev-list --left-right --count` output: a non-integer field (malformed/foreign git output) yields None, the documented 'cannot determine ahead/behind' signal the handler treats as silent. Feature-detection of unusable output, not a swallowed operational error."
+    },
+    {
       "file": "handlers/utils/plan_numbering.py",
       "function": "read_plan_counter",
       "rule": "return-none-on-error",

@@ -2,6 +2,7 @@
 
 from .ccy_supervisor_integrity import CcySupervisorIntegrityHandler
 from .git_filemode_checker import GitFilemodeCheckerHandler
+from .git_upstream_checker import GitUpstreamCheckerHandler
 from .gitignore_safety_checker import GitignoreSafetyCheckerHandler
 from .hook_registration_checker import HookRegistrationCheckerHandler
 from .optimal_config_checker import OptimalConfigCheckerHandler
@@ -13,6 +14,7 @@ from .version_check import VersionCheckHandler
 __all__ = [
     "CcySupervisorIntegrityHandler",
     "GitFilemodeCheckerHandler",
+    "GitUpstreamCheckerHandler",
     "GitignoreSafetyCheckerHandler",
     "HookRegistrationCheckerHandler",
     "OptimalConfigCheckerHandler",

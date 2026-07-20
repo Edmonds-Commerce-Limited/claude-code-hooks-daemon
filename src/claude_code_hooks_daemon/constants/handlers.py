@@ -483,6 +483,15 @@ class HandlerID:
         display_name="gitignore-safety-checker",
     )
 
+    # Git upstream sync checker (SessionStart handler) — Plan 00178: on new
+    # sessions run a full ``git fetch --all --prune`` and, if the branch is
+    # behind upstream, apply a configurable mode (warn / agent-pull / auto-pull)
+    GIT_UPSTREAM_CHECKER = HandlerIDMeta(
+        class_name="GitUpstreamCheckerHandler",
+        config_key="git_upstream_checker",
+        display_name="git-upstream-checker",
+    )
+
     # ccy supervisor integrity checker (SessionStart handler) — Plan 00148:
     # warn when the ccy supervisor is armed but its files are missing, not
     # executable, or git-ignored (a brick risk for teammates)

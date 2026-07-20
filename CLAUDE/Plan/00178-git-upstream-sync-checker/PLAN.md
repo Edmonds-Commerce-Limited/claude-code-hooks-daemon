@@ -57,51 +57,42 @@ check / ff-only pull) lives in a focused, independently-testable
 
 ### Phase 1: git_sync utility (TDD)
 
-- [ ] ⬜ **Task 1.1**: Write failing tests `tests/unit/utils/test_git_sync.py`
-  - upstream resolution (has upstream / none / detached)
-  - ahead-behind counts parsing (behind, ahead, diverged, in-sync)
-  - working-tree clean detection
-  - `fetch_all_prune` invokes `git fetch --all --prune` non-interactively, is
-    fail-silent on error/timeout
-  - `pull_ff_only` success + failure (non-ff, dirty) mapped to typed result
-- [ ] ⬜ **Task 1.2**: Implement `src/claude_code_hooks_daemon/utils/git_sync.py`
-- [ ] ⬜ **Task 1.3**: Add `Timeout.GIT_FETCH_SESSION` / `GIT_PULL_SESSION`
-  constants (reuse 30s network budget); no magic numbers.
+- [x] ✅ **Task 1.1**: Failing tests `tests/unit/utils/test_git_sync.py` (real bare
+  remote + clone; 29 tests, 100% cov)
+- [x] ✅ **Task 1.2**: Implemented `src/claude_code_hooks_daemon/utils/git_sync.py`
+- [x] ✅ **Task 1.3**: Added `Timeout.GIT_FETCH_SESSION` / `GIT_PULL_SESSION`
 
 ### Phase 2: Handler (TDD)
 
-- [ ] ⬜ **Task 2.1**: Write failing tests
-  `tests/unit/handlers/session_start/test_git_upstream_checker.py`
-  - init (id/priority/terminal/tags)
-  - `matches()`: SessionStart new-session only; skips resume; enabled flag
-  - `handle()` per mode: warn / agent-pull / auto-pull
-  - silent paths: in-sync, not-a-repo, no-upstream, detached HEAD
-  - auto-pull degrade-to-warn on non-ff / dirty tree
-  - unknown mode falls back to `warn` (fail-safe, logged)
-- [ ] ⬜ **Task 2.2**: Implement
+- [x] ✅ **Task 2.1**: Failing tests
+  `tests/unit/handlers/session_start/test_git_upstream_checker.py` (35 tests, 100% cov)
+- [x] ✅ **Task 2.2**: Implemented
   `src/claude_code_hooks_daemon/handlers/session_start/git_upstream_checker.py`
-  - `get_claude_md()` guidance + `get_acceptance_tests()`
+  with `get_claude_md()` guidance + `get_acceptance_tests()`
 
 ### Phase 3: Wiring
 
-- [ ] ⬜ **Task 3.1**: `HandlerID.GIT_UPSTREAM_CHECKER` meta in `constants/handlers.py`
-- [ ] ⬜ **Task 3.2**: `Priority.GIT_UPSTREAM_CHECKER` in `constants/priority.py`
-- [ ] ⬜ **Task 3.3**: Export in `handlers/session_start/__init__.py`
-- [ ] ⬜ **Task 3.4**: Register in `.claude/hooks-daemon.yaml` (enabled, mode: warn)
-- [ ] ⬜ **Task 3.5**: Add to `daemon/init_config.py` fresh-install defaults
-- [ ] ⬜ **Task 3.6**: Config schema/validation accepts the new options
+- [x] ✅ **Task 3.1**: `HandlerID.GIT_UPSTREAM_CHECKER` meta in `constants/handlers.py`
+- [x] ✅ **Task 3.2**: `Priority.GIT_UPSTREAM_CHECKER` in `constants/priority.py`
+- [x] ✅ **Task 3.3**: Export in `handlers/session_start/__init__.py`
+- [x] ✅ **Task 3.4**: Registered in `.claude/hooks-daemon.yaml` (enabled, mode: warn)
+- [x] ✅ **Task 3.5**: Added to `daemon/init_config.py` fresh-install defaults
+- [x] ✅ **Task 3.6**: Added to `.claude/hooks-daemon.yaml.example` (options accepted
+  generically by the registry; example-config completeness test passes)
 
 ### Phase 4: Integration, QA, docs
 
-- [ ] ⬜ **Task 4.1**: Response-validation + dogfooding tests pass
-- [ ] ⬜ **Task 4.2**: `./scripts/qa/run_all.sh` green (95%+ coverage)
-- [ ] ⬜ **Task 4.3**: Daemon restart RUNNING; probe via `nc` on the live socket
-- [ ] ⬜ **Task 4.4**: `generate-docs` to refresh `.claude/HOOKS-DAEMON.md`
+- [x] ✅ **Task 4.1**: Response-validation + dogfooding tests pass (61)
+- [x] ✅ **Task 4.2**: `./scripts/qa/llm_qa.py all` = 13/13 PASSED (10383 tests,
+  95.3% cov) after fixing 4 findings (error_hiding exclusions, magic timeout,
+  black, example-config completeness)
+- [x] ✅ **Task 4.3**: Daemon restart RUNNING; live SessionStart probe silent (in sync)
+- [x] ✅ **Task 4.4**: `generate-docs` refreshed `.claude/HOOKS-DAEMON.md` (SessionStart 11)
 
 ### Phase 5: Live verify
 
-- [ ] ⬜ **Task 5.1**: Simulate a behind branch; confirm warn/agent-pull/auto-pull
-  behaviour against the live daemon.
+- [x] ✅ **Task 5.1**: Real-git end-to-end across all modes: warn / agent-pull /
+  auto-pull (real fast-forward) / dirty-degrade / diverged-degrade
 
 ## Technical Decisions
 
@@ -136,3 +127,7 @@ also do work on new sessions. Downstream projects can disable or change mode.
 <!-- Curated milestones + delivery commit hashes only. -->
 
 - Plan created; recovery cron dffb57b7 (hourly :37, non-durable).
+- Phase 1 (git_sync utility) delivered `49ff3430`.
+- Phases 2–5 (handler + wiring + QA + live verify) delivered in the following
+  commit; QA 13/13 (10383 tests, 95.3% cov), daemon RUNNING, all modes verified
+  end-to-end against real git.
