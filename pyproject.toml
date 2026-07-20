@@ -48,6 +48,7 @@ dev = [
     "twine>=4.0",
     "types-PyYAML>=6.0",
     "types-jsonschema>=4.0",
+    "types-psutil>=5.9",
     "deptry>=0.20",
 ]
 

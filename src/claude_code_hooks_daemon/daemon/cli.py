@@ -65,6 +65,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     get_venv_path,
     python_venv_fingerprint,
     read_pid_file,
+    resolve_existing_venv_python,
     resolve_hostname,
     write_cleanup_status,
 )
@@ -1484,24 +1485,61 @@ def _format_project_handler_health_lines(
     return lines
 
 
+def _resolver_active_venv_realpath(project_root: Path) -> Path | None:
+    """Return the realpath of the venv the bootstrap resolver would actually use.
+
+    ``resolve_existing_venv_python`` is the SAME resolver the daemon and the
+    bash hook forwarders call to pick a venv at runtime (Plan 00184). It can
+    disagree with ``python_venv_fingerprint``-based accounting when the
+    fingerprint scheme has migrated and a stale-named symlink is left
+    pointing at the venv still actually in use. Resolving to the realpath
+    (following any symlink) lets venv-accounting protect whichever directory
+    is truly live, regardless of which name currently points at it.
+
+    Returns ``None`` when the resolver has nothing usable (e.g. brand-new
+    project with no venv provisioned yet) — accounting callers should treat
+    that as "nothing is currently active".
+    """
+    # ``resolve_existing_venv_python`` never raises: it returns a best-effort
+    # path, and its override/legacy branches are returned WITHOUT an existence
+    # check. So a non-existent result IS the "no venv provisioned yet" signal --
+    # there is no exception to catch and no error being hidden.
+    python_path = resolve_existing_venv_python(project_root)
+    if not python_path.exists():
+        return None
+    return python_path.resolve().parent.parent
+
+
 def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict[str, Any]]:
     """Return metadata dicts for every venv directory under the daemon's untracked/.
 
     Detects both fingerprint-keyed ``venv-<fp>/`` and legacy ``venv/`` paths.
-    Each entry: fingerprint, path, stamped_version, size_bytes, is_current,
-    is_legacy.
+    Each entry: fingerprint, path, real_path, is_symlink, stamped_version,
+    size_bytes, is_current, is_legacy.
 
     ``include_size=False`` skips the (potentially expensive, ~187 MB) recursive
     directory walk and reports ``size_bytes=0`` — used on the hot daemon-start
     path where only cheap name/stamp fields are needed to SELECT reclaimable
     venvs before sizing just those (Plan 00181 Task 4.2).
+
+    Plan 00184: a venv directory name may be a SYMLINK to another venv
+    directory under the same ``untracked/`` (e.g. left behind by a
+    fingerprint-scheme migration). Entries whose realpath coincides are
+    DEDUPED to a single entry (preferring the real, non-symlink directory) so
+    the same bytes are never counted twice. ``is_current`` is the UNION of the
+    fingerprint-match predicate and "this is the venv the bootstrap resolver
+    (``resolve_existing_venv_python``) actually selects" — the latter is the
+    one the running daemon and hook forwarders truly use, and must never be
+    silently unprotected merely because its directory name's fingerprint
+    doesn't match the current interpreter's fingerprint.
     """
     untracked = _daemon_untracked_dir(project_root)
     if not untracked.is_dir():
         return []
 
     current_fp = python_venv_fingerprint(project_root)
-    entries: list[dict[str, Any]] = []
+    resolver_active_realpath = _resolver_active_venv_realpath(project_root)
+    raw_entries: list[dict[str, Any]] = []
 
     for child in sorted(untracked.iterdir()):
         if not child.is_dir():
@@ -1522,17 +1560,41 @@ def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict
             if not python_alt.exists():
                 continue
 
-        entries.append(
+        real_path = child.resolve()
+        is_symlink = child.is_symlink()
+        is_current = ((not is_legacy) and (fingerprint == current_fp)) or (
+            resolver_active_realpath is not None and real_path == resolver_active_realpath
+        )
+
+        raw_entries.append(
             {
                 "fingerprint": fingerprint,
                 "path": str(child),
+                "real_path": str(real_path),
+                "is_symlink": is_symlink,
                 "stamped_version": _read_venv_stamp(child),
                 "size_bytes": _directory_size_bytes(child) if include_size else 0,
-                "is_current": (not is_legacy) and (fingerprint == current_fp),
+                "is_current": is_current,
                 "is_legacy": is_legacy,
             }
         )
-    return entries
+
+    # Dedupe entries that resolve to the same real directory (symlink + its
+    # target both scanned as separate names). Prefer the entry whose own name
+    # is NOT a symlink (the real directory); ties broken by iteration order
+    # (already sorted by name), so the choice is deterministic.
+    deduped: dict[str, dict[str, Any]] = {}
+    for entry in raw_entries:
+        real_path_key = entry["real_path"]
+        existing = deduped.get(real_path_key)
+        if existing is None:
+            deduped[real_path_key] = entry
+            continue
+        if existing["is_symlink"] and not entry["is_symlink"]:
+            deduped[real_path_key] = entry
+        # else: keep the existing (already non-symlink, or first-seen tie)
+
+    return list(deduped.values())
 
 
 def _reclaimable_venv_entries(
@@ -1551,6 +1613,11 @@ def _reclaimable_venv_entries(
     reclaimable: list[dict[str, Any]] = []
     for entry in entries:
         if entry["is_current"]:
+            continue
+        if entry["is_symlink"]:
+            # A symlink venv name is never itself deletable content — its
+            # target is either the deduped real entry (already excluded when
+            # current) or a foreign path outside this accounting (Plan 00184).
             continue
         if entry["is_legacy"]:
             reclaimable.append(entry)
@@ -1798,10 +1865,21 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
             current_stamp = entry["stamped_version"]
             break
 
+    resolver_active_realpath = _resolver_active_venv_realpath(project_root)
+
     to_remove: list[dict[str, Any]] = []
     for entry in entries:
         if entry["is_current"]:
             continue  # never touch current fingerprint
+        if entry["is_symlink"]:
+            print(f"Skipping {entry['path']}: symlink", file=sys.stderr)
+            continue
+        if (
+            resolver_active_realpath is not None
+            and Path(entry["real_path"]) == resolver_active_realpath
+        ):
+            print(f"Skipping {entry['path']}: resolver-active venv", file=sys.stderr)
+            continue
         chosen = False
         if select_legacy and entry["is_legacy"]:
             chosen = True
