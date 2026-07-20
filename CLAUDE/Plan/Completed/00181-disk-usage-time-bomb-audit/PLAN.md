@@ -1,6 +1,6 @@
 # Plan 00181: disk usage time bomb audit
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-20
 **Owner**: joseph
 **Priority**: Medium
@@ -229,3 +229,11 @@ per-venv liveness signal is added.
      "when"). Activity log lives in JOURNAL/. -->
 
 - Audit findings recorded (this document) at plan creation.
+- Phase 1 + transcript retention (shared primitive; transcripts/ bound): `11153502`
+- Phase 2 daemon append-only writers bound: `c2e15a6e`
+- Phase 2 supervisor `decision.log` cap: `fcad1b5d`
+- Phase 3 per-session runtime dirs + bootstrap import-discipline fix: `580f5f09`
+- Phase 4.1 reapers hoisted before the reuse gate: `fa98d29b`
+- Phase 4.2 venv advisory (surface, don't delete) + Task 1.3 docs: `f861396b`
+- Phase 5.1 `disk-usage` CLI: `35d8a8d0`
+- Plan completion (this commit).
