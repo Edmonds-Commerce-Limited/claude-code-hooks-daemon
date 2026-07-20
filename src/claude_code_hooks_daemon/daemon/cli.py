@@ -324,6 +324,27 @@ def _resolve_socket_path(args: argparse.Namespace, project_path: Path) -> Path:
     return get_socket_path(project_path)
 
 
+def _reap_stale_runtime_files(project_path: Path, config: Config) -> None:
+    """Age-out stale daemon + per-session runtime files (Plan 00181 Task 4.1).
+
+    Runs on EVERY start attempt — including the Plan 00127 reuse path, which
+    returns before the fork — so orphaned files are reaped even when a healthy
+    incumbent is reused. Age-based and scoped to THIS project's untracked dir: a
+    live incumbent's freshly-touched files are never removed and other projects
+    are untouched. Never touches the socket (that stays on the fork path only).
+    """
+    stale_days = config.daemon.stale_file_days
+    # Stale daemon runtime files from dead containers (age-based, not hostname-based).
+    stale_daemon = cleanup_stale_daemon_files(project_path, max_age_days=stale_days)
+    # Per-session runtime subdirs (thread-registry/, context-sidecar/,
+    # payload-capture/) whose writers never delete their own dead-session files.
+    stale_sessions = cleanup_stale_session_dirs(project_path, max_age_days=stale_days)
+    stale_total = stale_daemon + stale_sessions
+    write_cleanup_status(project_path, stale_total)
+    if stale_total > 0:
+        print(f"Cleaned up {stale_total} stale file(s) older than {stale_days} days")
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     """Start daemon in background.
 
@@ -343,6 +364,13 @@ def cmd_start(args: argparse.Namespace) -> int:
         config = Config.load(config_path)
     except FileNotFoundError:
         config = Config()  # Use defaults if no config file
+
+    # Plan 00181 Task 4.1: reap stale runtime files BEFORE the reuse gate so the
+    # common shared-daemon reuse path (which returns below without forking) still
+    # cleans up. Age-based and scoped to this project's untracked dir, so a live
+    # incumbent's freshly-touched files are never removed. Never touches the
+    # socket (that stays on the fork path only).
+    _reap_stale_runtime_files(project_path, config)
 
     # REUSE gate (Plan 00127, Decision 1): if a LIVE, HEALTHY same-root daemon
     # already owns our socket, reuse it — return 0 and leave the incumbent
@@ -406,18 +434,10 @@ def cmd_start(args: argparse.Namespace) -> int:
     # DEFINITIVE NOT_LIVE outcome inside the flock-protected critical section
     # (server._reuse_or_clear_socket), which is the single race-safe place to
     # do it. Removing this unconditional parent unlink closes that window.
-
-    # Remove stale runtime files from dead containers (age-based, not hostname-based)
-    stale_days = config.daemon.stale_file_days
-    stale_daemon = cleanup_stale_daemon_files(project_path, max_age_days=stale_days)
-    # Plan 00181 Task 3.2: also age out the per-session runtime subdirs
-    # (thread-registry/, context-sidecar/, payload-capture/) whose writers never
-    # delete their own dead-session files, so they leak one file per session.
-    stale_sessions = cleanup_stale_session_dirs(project_path, max_age_days=stale_days)
-    stale_total = stale_daemon + stale_sessions
-    write_cleanup_status(project_path, stale_total)
-    if stale_total > 0:
-        print(f"Cleaned up {stale_total} stale file(s) older than {stale_days} days")
+    #
+    # (Stale-file reaping — daemon files + per-session runtime dirs — already ran
+    # above via _reap_stale_runtime_files, before the reuse gate, so it covers
+    # the reuse path too. Plan 00181 Task 4.1.)
 
     # Daemonise process (fork and detach from terminal)
     try:

@@ -46,6 +46,18 @@ class TestCmdStartReuse:
             ),
             patch("claude_code_hooks_daemon.daemon.cli.enforce_single_daemon") as mock_enforce,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup,
+            # Hermetic: the age-based reapers now run before the reuse gate
+            # (Plan 00181 Task 4.1); patch them so this test never touches the
+            # real filesystem.
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.cleanup_stale_daemon_files",
+                return_value=0,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.cleanup_stale_session_dirs",
+                return_value=0,
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.write_cleanup_status"),
             patch("os.fork") as mock_fork,
         ):
             result = cmd_start(args)
@@ -53,6 +65,54 @@ class TestCmdStartReuse:
         assert result == 0
         mock_enforce.assert_not_called()
         mock_cleanup.assert_not_called()
+        mock_fork.assert_not_called()
+
+    def test_reuse_path_still_runs_stale_reapers(self, tmp_path: Path) -> None:
+        """Plan 00181 Task 4.1: the age-based reapers run even when a healthy
+        incumbent is reused (return 0, no fork).
+
+        The reuse gate returns before the fork; without hoisting the reapers
+        ahead of it, the common shared-daemon reuse path never reaps stale
+        daemon files or per-session runtime files. Only the SOCKET stays
+        untouched on reuse — the age-based reapers must still run.
+        """
+        args = argparse.Namespace(project_root=tmp_path)
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_project_path",
+                return_value=tmp_path,
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.read_pid_file",
+                return_value=4242,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.LIVE,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.cleanup_stale_daemon_files",
+                return_value=0,
+            ) as mock_daemon_reap,
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.cleanup_stale_session_dirs",
+                return_value=0,
+            ) as mock_session_reap,
+            patch("claude_code_hooks_daemon.daemon.cli.write_cleanup_status") as mock_status,
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_socket,
+            patch("os.fork") as mock_fork,
+        ):
+            result = cmd_start(args)
+
+        assert result == 0
+        mock_daemon_reap.assert_called_once()
+        mock_session_reap.assert_called_once()
+        mock_status.assert_called_once()
+        # Reuse must still leave the socket untouched and never fork.
+        mock_socket.assert_not_called()
         mock_fork.assert_not_called()
 
     def test_already_running_check_runs_before_enforcement(self, tmp_path: Path) -> None:

@@ -134,9 +134,15 @@ the root cause; a single shared utility is the proper fix.
 
 ### Phase 4: Close the reaper-invocation gaps
 
-- [ ] ⬜ **Task 4.1**: Ensure `cleanup_stale_daemon_files` runs even on the
-  Plan 00127 reuse path (move/duplicate the sweep before the early return, or
-  run it unconditionally on start), preserving cross-project safety.
+- [x] ✅ **Task 4.1**: Extracted `_reap_stale_runtime_files(project_path, config)`
+  (daemon-file + session-dir reapers + cleanup-status write) and hoisted it to
+  run right after config load, BEFORE the Plan 00127 reuse-gate early return —
+  so the common shared-daemon reuse path reaps too (previously the reapers sat
+  after the `return 0` and never ran on reuse). Age-based + project-scoped, so a
+  live incumbent's fresh files and other projects are untouched; the socket
+  stays on the fork path only (reuse invariants preserved). 1 new TDD test
+  (reapers called once on reuse, no socket touch, no fork) + hermetic patches on
+  the existing reuse test. Daemon restart verified RUNNING.
 - [ ] ⬜ **Task 4.2**: Make stale-venv pruning run automatically on daemon start
   (guarded, never deletes the current fingerprint), reusing
   `eager_cleanup_stale_venvs`.
