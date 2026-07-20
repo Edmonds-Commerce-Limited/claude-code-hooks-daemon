@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,9 +12,23 @@ logger = logging.getLogger(__name__)
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.retention import prune_directory
 
 # Subdirectory under the daemon's untracked dir where archives are written.
 _ARCHIVE_SUBDIR = "transcripts"
+
+# Glob matching this handler's own archive files (used for retention pruning).
+_ARCHIVE_GLOB = "transcript_*.json"
+
+# Plan 00181 retention defaults: one full-transcript snapshot is written per
+# compaction, so without a bound this directory grows forever (57 MB / 16 files
+# observed in the wild). Keep the newest N and drop anything older than the age
+# window. Both are config-overridable via
+# ``handlers.pre_compact.transcript_archiver.options.{max_archives,max_archive_age_days}``
+# (the registry injects them as ``self._max_archives`` / ``self._max_archive_age_days``).
+_DEFAULT_MAX_ARCHIVES = 40
+_DEFAULT_MAX_ARCHIVE_AGE_DAYS = 14
+_SECONDS_PER_DAY = 86400
 
 # Timestamp format for archive filenames (year-month-day_hour-minute-second).
 _ARCHIVE_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
@@ -46,6 +61,10 @@ class TranscriptArchiverHandler(Handler):
             terminal=False,
             tags=[HandlerTag.WORKFLOW, HandlerTag.ARCHIVING, HandlerTag.NON_TERMINAL],
         )
+        # Plan 00181 retention budget (config-overridable — the registry injects
+        # matching ``options.*`` keys onto these private attributes).
+        self._max_archives = _DEFAULT_MAX_ARCHIVES
+        self._max_archive_age_days = _DEFAULT_MAX_ARCHIVE_AGE_DAYS
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:
         """Match all pre-compact events.
@@ -103,10 +122,30 @@ class TranscriptArchiverHandler(Handler):
             with archive_file.open("w") as f:
                 json.dump(archive_data, f, indent=_ARCHIVE_JSON_INDENT)
 
+            # Plan 00181: bound the archive directory so it cannot grow forever.
+            # The file just written is newest, so it is always retained.
+            self._prune_archives(archive_dir)
+
         except OSError as e:
             logger.warning("Failed to archive transcript: %s", e)
 
         return HookResult(decision=Decision.ALLOW)
+
+    def _prune_archives(self, archive_dir: Path) -> None:
+        """Bound the transcript archive directory to the configured budget.
+
+        Keeps the newest ``self._max_archives`` files and drops anything older
+        than ``self._max_archive_age_days``. Best-effort (never raises).
+        """
+        max_archives = getattr(self, "_max_archives", _DEFAULT_MAX_ARCHIVES)
+        max_age_days = getattr(self, "_max_archive_age_days", _DEFAULT_MAX_ARCHIVE_AGE_DAYS)
+        prune_directory(
+            archive_dir,
+            pattern=_ARCHIVE_GLOB,
+            max_count=max_archives,
+            max_age_seconds=max_age_days * _SECONDS_PER_DAY,
+            now=time.time(),
+        )
 
     @staticmethod
     def _read_transcript(transcript_path: Any) -> str:

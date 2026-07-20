@@ -1,6 +1,8 @@
 """Comprehensive tests for TranscriptArchiverHandler."""
 
 import json
+import os
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -73,6 +75,49 @@ class TestTranscriptArchiverHandler:
         """Should match all pre-compact events."""
         hook_input = {HookInputField.TRANSCRIPT_PATH: "/tmp/whatever.jsonl"}
         assert handler.matches(hook_input) is True
+
+    def test_handle_prunes_old_archives_beyond_max(
+        self, handler, archive_dir, transcript_file, mock_datetime
+    ):
+        """Plan 00181: the archive dir is bounded to max_archives (newest kept)."""
+        handler._max_archives = 3
+        handler._max_archive_age_days = 3650  # effectively disable age pruning here
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        # Five pre-existing archives with RECENT, ordered mtimes (so only the
+        # count criterion binds — ancient mtimes would trip age pruning instead).
+        base = time.time() - 100.0
+        for i in range(5):
+            old = archive_dir / f"transcript_old{i}.json"
+            old.write_text("{}")
+            os.utime(old, (base + i, base + i))
+
+        hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript_file)}
+        handler.handle(hook_input)
+
+        remaining = {p.name for p in archive_dir.glob("transcript_*.json")}
+        # The just-written file (real 'now', newest) always survives; only the
+        # two most-recent pre-existing archives remain alongside it.
+        assert len(remaining) == 3
+        assert f"transcript_{_FIXED_TIMESTAMP}.json" in remaining
+        assert "transcript_old4.json" in remaining
+        assert "transcript_old0.json" not in remaining
+
+    def test_handle_prunes_archives_older_than_age_window(
+        self, handler, archive_dir, transcript_file, mock_datetime
+    ):
+        """Age-based pruning: an ancient archive is dropped even under the count."""
+        handler._max_archives = 100  # count does not bind here
+        handler._max_archive_age_days = 1
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        ancient = archive_dir / "transcript_ancient.json"
+        ancient.write_text("{}")
+        os.utime(ancient, (1000.0, 1000.0))  # epoch 1970 -> far older than 1 day
+
+        hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript_file)}
+        handler.handle(hook_input)
+
+        assert not ancient.exists()
+        assert (archive_dir / f"transcript_{_FIXED_TIMESTAMP}.json").exists()
 
     def test_handle_creates_archive_directory(
         self, handler, archive_dir, transcript_file, mock_datetime

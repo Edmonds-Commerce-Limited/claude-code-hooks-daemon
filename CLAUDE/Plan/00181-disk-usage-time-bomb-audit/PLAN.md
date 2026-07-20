@@ -1,6 +1,6 @@
 # Plan 00181: disk usage time bomb audit
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-07-20
 **Owner**: joseph
 **Priority**: Medium
@@ -81,15 +81,21 @@ the root cause; a single shared utility is the proper fix.
 
 ### Phase 1: Shared retention primitive (TDD)
 
-- [ ] ⬜ **Task 1.1**: Write failing tests for a `utils/retention.py` helper —
-  size-cap truncate-from-front for line logs, count/age pruning for
-  directories of per-session files, with a fail-safe "never touch the current
-  session's / current fingerprint's files" guard.
-- [ ] ⬜ **Task 1.2**: Implement the helper to pass tests; expose config keys
-  under a new `daemon.retention` block (defaults conservative, opt-out per
-  writer).
-- [ ] ⬜ **Task 1.3**: Add the config schema + `.yaml.example` documentation and
-  a `config-changes/v{X.Y.Z}.yaml` manifest entry (recommended: true).
+- [x] ✅ **Task 1.1**: `utils/retention.py` with `cap_log_file` (front-truncate a
+  line log to a byte cap, keep newest whole lines) and `prune_directory`
+  (bound a dir by max_count and/or max_age, newest kept, `protect` paths never
+  deleted). 12 tests; best-effort (missing file/dir = no-op, per-entry IO errors
+  logged not raised — explicit handling, not silent suppression). Budgets are
+  parameters (no magic/policy in the module).
+- [x] ✅ **Task 1.2 (revised)**: DECISION — instead of a global `daemon.retention`
+  block, budgets are exposed as **per-handler `options.*`** (e.g.
+  `transcript_archiver.options.max_archives`). The registry already injects any
+  `options.<k>` as `self._<k>` (registry.py:379), so each writer gets a
+  config-overridable budget with **zero new config plumbing** and per-writer
+  granularity. Defaults are named module constants.
+- [ ] ⬜ **Task 1.3**: Document the per-handler retention options in
+  `HANDLER_REFERENCE.md`; add a `config-changes/v{X.Y.Z}.yaml` manifest entry at
+  release time (recommended: true).
 
 ### Phase 2: Bound the append-only writers
 
@@ -102,9 +108,11 @@ the root cause; a single shared utility is the proper fix.
 
 ### Phase 3: Bound the archives + per-session dirs
 
-- [ ] ⬜ **Task 3.1**: Add count+age retention to `transcript_archiver` so
-  `transcripts/` keeps only the most recent N / last M days (never the
-  in-flight session).
+- [x] ✅ **Task 3.1**: `transcript_archiver` now prunes `transcripts/` after each
+  write via `prune_directory` — keeps the newest `max_archives` (default 40) and
+  drops anything older than `max_archive_age_days` (default 14); the just-written
+  archive is always newest so it survives. Config-overridable. 2 handler tests
+  (count + age). Bounds the observed 57 MB offender.
 - [ ] ⬜ **Task 3.2**: Add a recursive, subdir-aware stale sweep for
   `thread-registry/`, `context-sidecar/`, `payload-capture/`.
 
