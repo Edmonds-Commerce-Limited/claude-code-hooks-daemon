@@ -1600,6 +1600,15 @@ class CompactStateMachine:
                 return Evaluation(Decision.NOOP, _REASON_BUSY_AWAIT_RESUME)
             self._compaction_handled = True
             self._last_action_ts = now
+            # Plan 00180: a compaction actually happened, so refresh the injection
+            # budget. `max_injections` is a runaway-loop fuse on CONSECUTIVE FAILED
+            # injections (compact injected but nothing compacts), NOT a lifetime
+            # cap -- without this reset a long-lived session hits 20 legitimate
+            # compactions and is then permanently muzzled even at CRITICAL context.
+            # Reset ONLY here (the confirmed-compaction success path), never in
+            # `_enter_monitor` (the AWAIT-timeout give-up path also calls it, and a
+            # wedged session's failed injections MUST keep accumulating).
+            self._injections = 0
             self._enter_monitor()
             return Evaluation(
                 Decision.WOULD_CONTINUE,

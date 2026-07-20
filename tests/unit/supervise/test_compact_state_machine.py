@@ -245,14 +245,39 @@ class TestMonitor:
         result = sm.evaluate(None, idle=True, now=1000.0)
         assert result.decision is Decision.NOOP
 
-    def test_cap_reached_noop(self) -> None:
+    def test_cap_reached_noop_on_consecutive_failed_injections(self) -> None:
+        # Plan 00180: the cap is a runaway-loop fuse on CONSECUTIVE FAILED
+        # injections (a /compact injected but no compaction ever starts), NOT a
+        # lifetime budget. Drive the fuse via a failed attempt: inject once, let
+        # AWAIT time out with no compaction, then the next red tick trips the cap.
+        sm = CompactStateMachine(
+            CompactPolicy(max_injections=1, cooldown_seconds=0, await_timeout_seconds=120)
+        )
+        first = sm.evaluate(_reading(), idle=True, now=1000.0)
+        assert first.decision is Decision.WOULD_COMPACT
+        # No compaction materialises -> AWAIT times out -> back to MONITOR, and the
+        # injection is NOT forgiven (a failed attempt still counts toward the fuse).
+        timed_out = sm.evaluate(_reading(compacting=False), idle=True, now=1200.0)
+        assert timed_out.decision is Decision.NOOP
+        assert sm.state is SupervisorState.MONITOR
+        second = sm.evaluate(_reading(), idle=True, now=2000.0)
+        assert second.decision is Decision.NOOP
+        assert second.reason == "injection cap reached"
+
+    def test_successful_compaction_resets_injection_cap(self) -> None:
+        # Plan 00180 regression: a SUCCESSFUL compaction refreshes the injection
+        # budget, so a long-lived session compacts as many times as it genuinely
+        # needs to. With max_injections=1, the second red round would be muzzled
+        # by a lifetime cap; because the intervening compaction resets the
+        # counter, it compacts again.
         sm = CompactStateMachine(CompactPolicy(max_injections=1, cooldown_seconds=0))
         first = sm.evaluate(_reading(), idle=True, now=1000.0)
         assert first.decision is Decision.WOULD_COMPACT
-        # Drive back to MONITOR via compacting so cap (not state) is the gate.
-        sm.evaluate(_reading(compacting=True), idle=True, now=1001.0)
-        second = sm.evaluate(_reading(), idle=True, now=2000.0)
-        assert second.decision is Decision.NOOP
+        # Compaction actually happens -> continue injected -> counter reset.
+        resumed = sm.evaluate(_reading(compacting=True), idle=True, now=1005.0)
+        assert resumed.decision is Decision.WOULD_CONTINUE
+        second = sm.evaluate(_reading(), idle=True, now=1010.0)
+        assert second.decision is Decision.WOULD_COMPACT
 
     def test_cooldown_blocks_second_compact(self) -> None:
         sm = CompactStateMachine(CompactPolicy(cooldown_seconds=300))
