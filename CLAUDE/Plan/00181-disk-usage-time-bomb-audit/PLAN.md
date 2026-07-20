@@ -93,9 +93,12 @@ the root cause; a single shared utility is the proper fix.
   `options.<k>` as `self._<k>` (registry.py:379), so each writer gets a
   config-overridable budget with **zero new config plumbing** and per-writer
   granularity. Defaults are named module constants.
-- [ ] ⬜ **Task 1.3**: Document the per-handler retention options in
-  `HANDLER_REFERENCE.md`; add a `config-changes/v{X.Y.Z}.yaml` manifest entry at
-  release time (recommended: true).
+- [x] ✅ **Task 1.3**: Documented the per-handler retention options in
+  `HANDLER_REFERENCE.md` (the docs SSOT): `transcript_archiver.max_archives`
+  (40) + `max_archive_age_days` (14), and `notification_logger` /
+  `subagent_completion_logger` `max_log_bytes` (5 MiB) — each with an Options
+  table + config example. The `config-changes/v{X.Y.Z}.yaml` manifest entry is
+  a release-time step (deferred to the release, per RELEASING.md Step 3).
 
 ### Phase 2: Bound the append-only writers
 
@@ -143,9 +146,16 @@ the root cause; a single shared utility is the proper fix.
   stays on the fork path only (reuse invariants preserved). 1 new TDD test
   (reapers called once on reuse, no socket touch, no fork) + hermetic patches on
   the existing reuse test. Daemon restart verified RUNNING.
-- [ ] ⬜ **Task 4.2**: Make stale-venv pruning run automatically on daemon start
-  (guarded, never deletes the current fingerprint), reusing
-  `eager_cleanup_stale_venvs`.
+- [x] ✅ **Task 4.2** (scope corrected — see Decision 1): SURFACE, don't
+  auto-delete. Stale venvs are ~187 MB each (the biggest single offender), but
+  auto-deleting them on start is UNSAFE in the supported multi-container
+  shared-`untracked/` model: no filesystem signal proves a peer container isn't
+  actively using a given-fingerprint venv (running `bin/python` bumps neither
+  the venv dir nor the `.daemon-version` stamp mtime). Per the daemon's own
+  "surface, don't kill" principle (background_process_tracker), the daemon
+  start now emits an ADVISORY reporting reclaimable stale-venv space and points
+  at the existing guarded `prune-venvs --stale --force`. Deletion stays an
+  explicit operator action.
 
 ### Phase 5: Diagnostic + verification
 
@@ -153,6 +163,40 @@ the root cause; a single shared utility is the proper fix.
   accumulation and what a prune would reclaim (dry-run by default).
 - [ ] ⬜ **Task 5.2**: Full QA (`./scripts/qa/run_all.sh`), daemon restart
   verification, acceptance coverage for the new reapers.
+
+## Technical Decisions
+
+### Decision 1: Surface stale venvs, do not auto-delete them (Task 4.2)
+
+**Context**: Fingerprint-keyed venvs (`venv-<fp>/`) are ~187 MB each and are
+the single biggest disk offender. The plan originally called for auto-pruning
+stale venvs on daemon start.
+
+**Problem**: The daemon explicitly supports multiple containers/hosts sharing
+one bind-mounted `untracked/` (hostname isolation; Plan 00127 shared daemon;
+Plan 00319 slug keying). Each may run a DIFFERENT-fingerprint venv that is
+actively in use. There is NO filesystem signal that proves a given venv is
+abandoned vs. in-use by a live peer: executing `bin/python` bumps neither the
+venv directory mtime nor the `.daemon-version` stamp mtime. Auto-deleting a
+"stale" (older-version) venv could therefore destroy a live peer's environment
+mid-session.
+
+**Options considered**:
+
+1. Auto-delete on start, guarded by not-current + version-stale + stamp-mtime
+   aged, default-OFF via config — still a footgun once opted in; adds config
+   surface; ships dormant so it defuses nothing by default.
+2. **Advisory only**: detection runs automatically on start and REPORTS
+   reclaimable stale-venv space, pointing at the existing guarded
+   `prune-venvs --stale --force`. Zero deletion risk; consistent with the
+   daemon's established "surface, don't kill" principle
+   (background_process_tracker never kills — it surfaces and the human decides).
+
+**Decision**: Option 2. The daemon surfaces the reclaimable space on start;
+deletion stays an explicit, already-guarded operator command. This defuses the
+bomb by making it visible and actionable without ever risking a live peer's
+venv. Auto-deletion can be revisited as an opt-in follow-up if a reliable
+per-venv liveness signal is added.
 
 ## Dependencies
 

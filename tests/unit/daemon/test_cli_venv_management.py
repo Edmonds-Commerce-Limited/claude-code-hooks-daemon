@@ -374,3 +374,78 @@ class TestRepairUsesFingerprintKeyedPath:
 
         assert rc == 0
         assert sync_call["UV_PROJECT_ENVIRONMENT"] == str(expected_venv)
+
+
+class TestStaleVenvAdvisory:
+    """Plan 00181 Task 4.2 — daemon start SURFACES reclaimable stale venvs.
+
+    Decision 1: the daemon never auto-deletes venvs (unsafe in the
+    multi-container shared-untracked model). It reports reclaimable space and
+    points at the guarded ``prune-venvs`` command.
+    """
+
+    def _setup(self, tmp_path: Path) -> Path:
+        _mark_self_install(tmp_path)
+        untracked = tmp_path / "untracked"
+        untracked.mkdir()
+        return untracked
+
+    def test_reclaimable_selector_includes_legacy_and_version_stale(self, tmp_path: Path) -> None:
+        untracked = self._setup(tmp_path)
+        fp = python_venv_fingerprint(tmp_path)
+        _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
+        _make_venv(untracked / "venv-py310-deadbeef", stamp_version="v3.6.0")  # version-stale
+        _make_venv(untracked / "venv", stamp_version="v3.5.0")  # legacy
+
+        entries = cli._enumerate_venvs(tmp_path)
+        current_stamp = next(e["stamped_version"] for e in entries if e["is_current"])
+        reclaimable = cli._reclaimable_venv_entries(entries, current_stamp)
+
+        paths = {Path(e["path"]).name for e in reclaimable}
+        assert paths == {"venv-py310-deadbeef", "venv"}
+
+    def test_reclaimable_selector_excludes_current_and_same_version(self, tmp_path: Path) -> None:
+        untracked = self._setup(tmp_path)
+        fp = python_venv_fingerprint(tmp_path)
+        _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
+        # Same stamped version as current, different fingerprint → NOT flagged.
+        _make_venv(untracked / "venv-py310-deadbeef", stamp_version="v3.7.0")
+
+        entries = cli._enumerate_venvs(tmp_path)
+        current_stamp = next(e["stamped_version"] for e in entries if e["is_current"])
+        reclaimable = cli._reclaimable_venv_entries(entries, current_stamp)
+
+        assert reclaimable == []
+
+    def test_enumerate_include_size_false_skips_walk(self, tmp_path: Path) -> None:
+        untracked = self._setup(tmp_path)
+        fp = python_venv_fingerprint(tmp_path)
+        _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
+
+        entries = cli._enumerate_venvs(tmp_path, include_size=False)
+
+        assert entries
+        assert all(e["size_bytes"] == 0 for e in entries)
+
+    def test_advisory_none_when_only_current_venv(self, tmp_path: Path) -> None:
+        untracked = self._setup(tmp_path)
+        fp = python_venv_fingerprint(tmp_path)
+        _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
+
+        assert cli._stale_venv_advisory(tmp_path) is None
+
+    def test_advisory_none_when_no_venvs(self, tmp_path: Path) -> None:
+        self._setup(tmp_path)
+        assert cli._stale_venv_advisory(tmp_path) is None
+
+    def test_advisory_reports_count_and_prune_command(self, tmp_path: Path) -> None:
+        untracked = self._setup(tmp_path)
+        fp = python_venv_fingerprint(tmp_path)
+        _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
+        _make_venv(untracked / "venv-py310-deadbeef", stamp_version="v3.6.0")
+
+        advisory = cli._stale_venv_advisory(tmp_path)
+
+        assert advisory is not None
+        assert "prune-venvs" in advisory
+        assert "1" in advisory  # one reclaimable venv

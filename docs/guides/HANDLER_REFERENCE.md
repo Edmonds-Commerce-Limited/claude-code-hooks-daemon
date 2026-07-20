@@ -1275,6 +1275,15 @@ These handlers run before Claude Code compacts (summarises) the conversation to 
 
 **Description:** Archives the full conversation transcript to a timestamped file before compaction. Provides a historical record for debugging and audit purposes.
 
+**Options:**
+
+| Option                 | Type | Default | Description                                                                                                                                                       |
+| ---------------------- | ---- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `max_archives`         | int  | `40`    | Retention cap (Plan 00181): after each write the `transcripts/` directory is pruned to the newest `max_archives` files. The just-written archive always survives. |
+| `max_archive_age_days` | int  | `14`    | Retention cap (Plan 00181): archives older than this many days are pruned after each write, independent of `max_archives`.                                        |
+
+Both caps apply together (a file is removed if it exceeds *either* the count or the age limit), bounding what was an unbounded `transcripts/` directory.
+
 **Config example:**
 
 ```yaml
@@ -1283,6 +1292,9 @@ handlers:
     transcript_archiver:
       enabled: true
       priority: 10
+      options:
+        max_archives: 40
+        max_archive_age_days: 14
 ```
 
 ---
@@ -1408,6 +1420,12 @@ These handlers run when a subagent (Task tool agent) completes.
 
 **Description:** Logs subagent completion events to a JSONL file with timestamps for debugging and tracking.
 
+**Options:**
+
+| Option          | Type | Default           | Description                                                                                                                                                                                              |
+| --------------- | ---- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `max_log_bytes` | int  | `5242880` (5 MiB) | Retention cap (Plan 00181): after each append the `subagent_completions.jsonl` log is front-truncated to below this size, keeping the newest whole lines. Bounds a previously unbounded append-only log. |
+
 **Config example:**
 
 ```yaml
@@ -1416,6 +1434,8 @@ handlers:
     subagent_completion_logger:
       enabled: true
       priority: 10
+      options:
+        max_log_bytes: 5242880
 ```
 
 ---
@@ -1483,6 +1503,12 @@ handlers:
 
 **Description:** Logs all notification events to a JSONL file with timestamps for debugging and audit purposes.
 
+**Options:**
+
+| Option          | Type | Default           | Description                                                                                                                                                                                       |
+| --------------- | ---- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `max_log_bytes` | int  | `5242880` (5 MiB) | Retention cap (Plan 00181): after each append the `notifications.jsonl` log is front-truncated to below this size, keeping the newest whole lines. Bounds a previously unbounded append-only log. |
+
 **Config example:**
 
 ```yaml
@@ -1491,6 +1517,8 @@ handlers:
     notification_logger:
       enabled: true
       priority: 10
+      options:
+        max_log_bytes: 5242880
 ```
 
 ---

@@ -344,6 +344,14 @@ def _reap_stale_runtime_files(project_path: Path, config: Config) -> None:
     if stale_total > 0:
         print(f"Cleaned up {stale_total} stale file(s) older than {stale_days} days")
 
+    # Plan 00181 Task 4.2 (Decision 1): SURFACE reclaimable stale/legacy venvs
+    # (~187 MB each) — the biggest disk offender — but never auto-delete them
+    # (unsafe in the multi-container shared-untracked model). Deletion stays the
+    # operator's guarded `prune-venvs` call.
+    venv_advisory = _stale_venv_advisory(project_path)
+    if venv_advisory is not None:
+        print(venv_advisory)
+
 
 def cmd_start(args: argparse.Namespace) -> int:
     """Start daemon in background.
@@ -1476,12 +1484,17 @@ def _format_project_handler_health_lines(
     return lines
 
 
-def _enumerate_venvs(project_root: Path) -> list[dict[str, Any]]:
+def _enumerate_venvs(project_root: Path, include_size: bool = True) -> list[dict[str, Any]]:
     """Return metadata dicts for every venv directory under the daemon's untracked/.
 
     Detects both fingerprint-keyed ``venv-<fp>/`` and legacy ``venv/`` paths.
     Each entry: fingerprint, path, stamped_version, size_bytes, is_current,
     is_legacy.
+
+    ``include_size=False`` skips the (potentially expensive, ~187 MB) recursive
+    directory walk and reports ``size_bytes=0`` — used on the hot daemon-start
+    path where only cheap name/stamp fields are needed to SELECT reclaimable
+    venvs before sizing just those (Plan 00181 Task 4.2).
     """
     untracked = _daemon_untracked_dir(project_root)
     if not untracked.is_dir():
@@ -1514,12 +1527,75 @@ def _enumerate_venvs(project_root: Path) -> list[dict[str, Any]]:
                 "fingerprint": fingerprint,
                 "path": str(child),
                 "stamped_version": _read_venv_stamp(child),
-                "size_bytes": _directory_size_bytes(child),
+                "size_bytes": _directory_size_bytes(child) if include_size else 0,
                 "is_current": (not is_legacy) and (fingerprint == current_fp),
                 "is_legacy": is_legacy,
             }
         )
     return entries
+
+
+def _reclaimable_venv_entries(
+    entries: list[dict[str, Any]], current_stamp: str
+) -> list[dict[str, Any]]:
+    """Select venvs that are safe to FLAG as reclaimable (never the current one).
+
+    A venv is reclaimable if it is the legacy ``venv/`` (pre-v3.7.0 layout,
+    always superseded) or a non-current fingerprint venv whose stamped daemon
+    version differs from the current env's stamp. Mirrors the ``prune-venvs
+    --legacy`` / ``--stale`` predicates so the advisory and the destructive
+    command agree on what "stale" means. The current-fingerprint venv is never
+    included. This only FLAGS — deletion stays the operator's explicit,
+    guarded ``prune-venvs`` action (Plan 00181 Decision 1).
+    """
+    reclaimable: list[dict[str, Any]] = []
+    for entry in entries:
+        if entry["is_current"]:
+            continue
+        if entry["is_legacy"]:
+            reclaimable.append(entry)
+            continue
+        if current_stamp and entry["stamped_version"] and entry["stamped_version"] != current_stamp:
+            reclaimable.append(entry)
+    return reclaimable
+
+
+def _stale_venv_advisory(project_root: Path) -> str | None:
+    """Build a daemon-start advisory about reclaimable stale/legacy venvs.
+
+    SURFACE, don't delete (Plan 00181 Decision 1): auto-deleting venvs is unsafe
+    in the multi-container shared-``untracked/`` model — no filesystem signal
+    proves a peer is not using a given-fingerprint venv — so the daemon only
+    reports the reclaimable space and points at the guarded ``prune-venvs``
+    command. Sizing is lazy: the cheap ``include_size=False`` enumeration
+    SELECTS candidates first, then only the reclaimable venvs are walked for
+    their size, so the common "nothing to reclaim" case does zero disk walks on
+    the hot start path.
+
+    Returns the advisory string, or ``None`` when there is nothing to reclaim.
+    """
+    entries = _enumerate_venvs(project_root, include_size=False)
+    if not entries:
+        return None
+
+    current_stamp = ""
+    for entry in entries:
+        if entry["is_current"]:
+            current_stamp = entry["stamped_version"]
+            break
+
+    reclaimable = _reclaimable_venv_entries(entries, current_stamp)
+    if not reclaimable:
+        return None
+
+    total_bytes = sum(_directory_size_bytes(Path(entry["path"])) for entry in reclaimable)
+    count = len(reclaimable)
+    plural = "s" if count != 1 else ""
+    return (
+        f"💿 {count} stale/legacy venv{plural} ({_human_bytes(total_bytes)}) can be "
+        f"reclaimed. Run `prune-venvs --stale --force` (legacy: `--legacy`) to remove "
+        f"them — the daemon never deletes venvs automatically."
+    )
 
 
 def cmd_list_venvs(args: argparse.Namespace) -> int:
