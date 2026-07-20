@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.47.0] - 2026-07-20
+
+This is a **minor release** adding a read-only `disk-usage` CLI report and
+shared retention/pruning for every unbounded `untracked/` writer, plus three
+bug fixes: a ccy supervisor host↔policy-worker IPC desync that double-injected
+`/compact`, a supervisor dry-run marker loop, and a data-loss bug where a
+symlinked venv aliasing the live venv could be pruned out from under a running
+daemon (Plans 00181, 00182, 00183, 00184).
+
+### Added
+
+- **`disk-usage` CLI subcommand** — read-only report of `untracked/`
+  accumulation (transcripts, logs, runtime dirs, venvs) and reclaimable
+  space, run via `$PYTHON -m claude_code_hooks_daemon.daemon.cli disk-usage`.
+- **Shared retention utilities (`utils/retention.py`)** — `cap_log_file`
+  (front-truncate with hysteresis) and `prune_directory` (by count/age),
+  now applied to every previously-unbounded `untracked/` writer:
+  `transcript_archiver` transcripts (40 archives / 14 days), the four
+  append-only daemon writers (`hook-errors.log` rotation backups,
+  `stop-events`/`notifications`/`subagent_completions` JSONL front-caps),
+  the ccy supervisor `decision.log` (inline 4 MB cap), and the three
+  per-session runtime dirs (`thread-registry`/`context-sidecar`/
+  `payload-capture`). New config options (all ON by default with sensible
+  defaults): `transcript_archiver.max_archives`,
+  `transcript_archiver.max_archive_age_days`,
+  `notification_logger.max_log_bytes`,
+  `subagent_completion_logger.max_log_bytes`.
+- **Shared-daemon reuse now reaps too** — closed a gap where a second
+  session reusing an existing daemon skipped the retention/reaper pass.
+- **Venvs surfaced, never auto-deleted** — an advisory on daemon start
+  points at the existing guarded `prune-venvs` command instead of
+  automatically removing old venvs.
+
+### Fixed
+
+- **ccy supervisor double `/compact` injection.** A host↔policy-worker IPC
+  stale-reply desync let a delayed reply from a prior tick be applied
+  against a newer tick, injecting `/compact` twice back-to-back. Fixed
+  with per-request `tick_id` correlation (stale replies are drained and
+  discarded), a `host_state` guard in `_apply_decision`, and a 30s TTL
+  throttle on the per-tick `/proc` session-id scan.
+- **ccy supervisor dry-run marker loop.** In dry-run mode the supervisor
+  re-emitted its compaction marker every tick instead of once per session,
+  producing repeated fake prompts that woke the agent unnecessarily. Fixed
+  with a process-lifetime `_dry_run_fired` latch on `CompactStateMachine`
+  (carried through the policy-worker state round-trip) — the first
+  dry-run marker fires, all later ticks are suppressed. Armed
+  (non-dry-run) mode is unaffected.
+- **Symlinked venv could be double-counted and pruned (data loss).** A
+  venv directory that was a symlink aliasing the real, in-use venv made
+  `list-venvs`/`disk-usage` double-count it and let `prune-venvs` delete
+  the live venv the daemon and hook forwarders were actively using.
+  Fixed by deduping by realpath, skipping symlink entries, and protecting
+  the bootstrap-resolver-active venv (`resolve_existing_venv_python`)
+  from ever being flagged or pruned. Also added `types-psutil` to the
+  dev extra (a fresh venv failed mypy without it) and re-locked
+  `uv.lock`.
+
 ## [3.46.0] - 2026-07-20
 
 This is a **minor release** adding a git-upstream-awareness SessionStart
