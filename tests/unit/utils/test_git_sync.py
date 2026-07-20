@@ -2,8 +2,10 @@
 
 git_sync is the focused home for the upstream-sync git operations the
 ``git_upstream_checker`` SessionStart handler needs: resolve the current branch
-and its upstream, count ahead/behind, check the working tree is clean, run a
-full ``git fetch --all --prune``, and perform a safe ``git pull --ff-only``.
+and its upstream, count ahead/behind, check the working tree is clean, run an
+additive ``git fetch --all`` (never ``--prune`` — Plan 00179), detect local
+branches whose upstream was deleted on the remote, and perform a safe
+``git pull --ff-only``.
 
 These tests init real git repos (with a local bare "remote") in tmp_path so the
 production subprocess path is exercised end to end. Failure / env-assertion
@@ -149,7 +151,7 @@ class TestUpstreamStatus:
     def test_behind_after_remote_advances_and_fetch(self, tmp_path: Path) -> None:
         remote, clone = _make_remote_and_clone(tmp_path)
         _advance_remote(tmp_path, remote, commits=2)
-        assert git_sync.fetch_all_prune(clone) is True
+        assert git_sync.fetch_all(clone) is True
         status = _status(clone)
         assert status.behind == 2
         assert status.ahead == 0
@@ -164,7 +166,7 @@ class TestUpstreamStatus:
     def test_diverged(self, tmp_path: Path) -> None:
         remote, clone = _make_remote_and_clone(tmp_path)
         _advance_remote(tmp_path, remote, commits=1)
-        git_sync.fetch_all_prune(clone)
+        git_sync.fetch_all(clone)
         _commit(clone, "local.txt", "local\n")
         status = _status(clone)
         assert status.behind == 1
@@ -253,19 +255,19 @@ class TestWorkingTreeClean:
         assert git_sync.working_tree_clean(plain) is False
 
 
-class TestFetchAllPrune:
+class TestFetchAll:
     def test_fetch_updates_remote_tracking_ref(self, tmp_path: Path) -> None:
         remote, clone = _make_remote_and_clone(tmp_path)
         _advance_remote(tmp_path, remote, commits=1)
         # Before fetch the clone still sees itself in sync.
         assert _status(clone).behind == 0
-        assert git_sync.fetch_all_prune(clone) is True
+        assert git_sync.fetch_all(clone) is True
         assert _status(clone).behind == 1
 
     def test_returns_false_when_not_a_repo(self, tmp_path: Path) -> None:
         plain = tmp_path / "plain"
         plain.mkdir()
-        assert git_sync.fetch_all_prune(plain) is False
+        assert git_sync.fetch_all(plain) is False
 
     def test_fail_silent_on_subprocess_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -276,7 +278,7 @@ class TestFetchAllPrune:
             raise OSError("git missing")
 
         monkeypatch.setattr(subprocess, "run", _raise)
-        assert git_sync.fetch_all_prune(clone) is False
+        assert git_sync.fetch_all(clone) is False
 
     def test_fail_silent_on_timeout(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _, clone = _make_remote_and_clone(tmp_path)
@@ -285,11 +287,12 @@ class TestFetchAllPrune:
             raise subprocess.TimeoutExpired(cmd="git fetch", timeout=Timeout.GIT_FETCH_SESSION)
 
         monkeypatch.setattr(subprocess, "run", _timeout)
-        assert git_sync.fetch_all_prune(clone) is False
+        assert git_sync.fetch_all(clone) is False
 
-    def test_uses_full_fetch_flags_and_noninteractive_env(
+    def test_is_additive_never_prunes_and_noninteractive_env(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """fetch_all is purely additive: --all, and NEVER --prune (Plan 00179)."""
         _, clone = _make_remote_and_clone(tmp_path)
         captured: dict[str, Any] = {}
 
@@ -304,11 +307,11 @@ class TestFetchAllPrune:
             return _Completed()
 
         monkeypatch.setattr(subprocess, "run", _capture)
-        git_sync.fetch_all_prune(clone)
+        git_sync.fetch_all(clone)
         cmd = captured["cmd"]
         assert "fetch" in cmd
         assert "--all" in cmd
-        assert "--prune" in cmd
+        assert "--prune" not in cmd  # must never prune automatically
         env = captured["env"]
         assert isinstance(env, dict)
         assert env.get("GIT_TERMINAL_PROMPT") == "0"
@@ -318,7 +321,7 @@ class TestPullFfOnly:
     def test_fast_forward_success(self, tmp_path: Path) -> None:
         remote, clone = _make_remote_and_clone(tmp_path)
         _advance_remote(tmp_path, remote, commits=2)
-        git_sync.fetch_all_prune(clone)
+        git_sync.fetch_all(clone)
         result = git_sync.pull_ff_only(clone)
         assert result.ok is True
         assert _status(clone).behind == 0
@@ -326,7 +329,7 @@ class TestPullFfOnly:
     def test_non_fast_forward_fails_gracefully(self, tmp_path: Path) -> None:
         remote, clone = _make_remote_and_clone(tmp_path)
         _advance_remote(tmp_path, remote, commits=1)
-        git_sync.fetch_all_prune(clone)
+        git_sync.fetch_all(clone)
         _commit(clone, "local.txt", "diverge\n")  # now diverged -> ff impossible
         result = git_sync.pull_ff_only(clone)
         assert result.ok is False
@@ -343,3 +346,186 @@ class TestPullFfOnly:
         monkeypatch.setattr(subprocess, "run", _raise)
         result = git_sync.pull_ff_only(clone)
         assert result.ok is False
+
+
+def _make_gone_branch(tmp_path: Path, *, unique_commit: bool) -> Path:
+    """Return a clone with a local branch ``feature`` whose upstream was deleted.
+
+    ``origin/feature`` is pushed then deleted on the remote; the clone still
+    holds the stale ``origin/feature`` ref (we never prune). When
+    ``unique_commit`` is True the local ``feature`` carries a commit not on
+    ``main`` (so it is NOT merged into the default branch).
+    """
+    remote, clone = _make_remote_and_clone(tmp_path)
+    pusher = tmp_path / "feature_pusher"
+    subprocess.run(
+        ["git", "clone", str(remote), str(pusher)],
+        capture_output=True,
+        check=True,
+        timeout=_TIMEOUT,
+    )
+    _configure_identity(pusher)
+    _run(pusher, "checkout", "-b", "feature")
+    if unique_commit:
+        _commit(pusher, "feat.txt", "feat\n")
+    _run(pusher, "push", "origin", "feature")
+
+    # Clone: create a local branch tracking origin/feature, then return to main.
+    _run(clone, "fetch", "origin")
+    _run(clone, "checkout", "feature")
+    _run(clone, "checkout", "main")
+
+    # Delete feature on the remote. The clone keeps the stale origin/feature ref.
+    _run(pusher, "push", "origin", "--delete", "feature")
+    return clone
+
+
+class TestDefaultBranch:
+    def test_returns_main_for_clone(self, tmp_path: Path) -> None:
+        _, clone = _make_remote_and_clone(tmp_path)
+        assert git_sync.default_branch(clone) == "main"
+
+    def test_none_when_not_a_repo(self, tmp_path: Path) -> None:
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        assert git_sync.default_branch(plain) is None
+
+
+class TestGoneBranches:
+    def test_none_when_nothing_deleted(self, tmp_path: Path) -> None:
+        _, clone = _make_remote_and_clone(tmp_path)
+        assert git_sync.gone_branches(clone) == []
+
+    def test_detects_merged_gone_branch(self, tmp_path: Path) -> None:
+        clone = _make_gone_branch(tmp_path, unique_commit=False)
+        gone = git_sync.gone_branches(clone)
+        assert len(gone) == 1
+        assert gone[0].name == "feature"
+        assert gone[0].upstream == "origin/feature"
+        assert gone[0].merged is True  # no unique commits -> safe to delete
+
+    def test_detects_unmerged_gone_branch(self, tmp_path: Path) -> None:
+        clone = _make_gone_branch(tmp_path, unique_commit=True)
+        gone = git_sync.gone_branches(clone)
+        assert len(gone) == 1
+        assert gone[0].name == "feature"
+        assert gone[0].merged is False  # has unique commit -> needs confirmation
+
+    def test_empty_when_not_a_repo(self, tmp_path: Path) -> None:
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        assert git_sync.gone_branches(plain) == []
+
+    def test_fail_silent_on_subprocess_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, clone = _make_remote_and_clone(tmp_path)
+
+        def _raise(*_a: object, **_k: object) -> None:
+            raise OSError("git missing")
+
+        monkeypatch.setattr(subprocess, "run", _raise)
+        assert git_sync.gone_branches(clone) == []
+
+
+class TestDefaultBranchDefensive:
+    def test_falls_back_to_local_main(self, tmp_path: Path) -> None:
+        # A plain repo with no origin/HEAD must fall back to local `main`.
+        repo = tmp_path / "plain_repo"
+        repo.mkdir()
+        subprocess.run(
+            ["git", "init", "-b", "main", str(repo)],
+            capture_output=True,
+            check=True,
+            timeout=_TIMEOUT,
+        )
+        _configure_identity(repo)
+        _commit(repo, "f.txt", "x\n")
+        assert git_sync.default_branch(repo) == "main"
+
+    def test_none_when_symbolic_ref_empty_and_no_local_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _fake(_cwd: Path, *args: str, **_k: object) -> _FakeCompleted:
+            # symbolic-ref returns rc 0 but empty; show-ref always fails.
+            if args and args[0] == "symbolic-ref":
+                return _FakeCompleted(0, "")
+            return _FakeCompleted(1, "")
+
+        monkeypatch.setattr(git_sync, "_run_git", _fake)
+        assert git_sync.default_branch(tmp_path) is None
+
+
+class _DispatchGit:
+    """Arg-dispatching fake for _run_git to drive gone_branches deterministically."""
+
+    def __init__(self, *, prune: str, for_each: str, merged: str) -> None:
+        self._prune = prune
+        self._for_each = for_each
+        self._merged = merged
+
+    def __call__(self, _cwd: Path, *args: str, **_k: object) -> _FakeCompleted:
+        first = args[0] if args else ""
+        if first == "remote" and len(args) == 1:
+            return _FakeCompleted(0, "origin")
+        if first == "remote" and "prune" in args:
+            return _FakeCompleted(0, self._prune)
+        if first == "for-each-ref":
+            return _FakeCompleted(0, self._for_each)
+        if first == "symbolic-ref":
+            return _FakeCompleted(0, "origin/main")
+        if first == "branch":
+            return _FakeCompleted(0, self._merged)
+        return _FakeCompleted(1, "")
+
+
+class TestGoneBranchesDefensive:
+    _SEP = "\x1f"
+
+    def test_parses_would_prune_and_skips_header_lines(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        prune_out = "Pruning origin\nURL: git@example\n * [would prune] origin/feature\n"
+        for_each = f"main{self._SEP}origin/main\nfeature{self._SEP}origin/feature\n"
+        merged = "main\nfeature\n"  # feature merged -> safe
+        monkeypatch.setattr(
+            git_sync, "_run_git", _DispatchGit(prune=prune_out, for_each=for_each, merged=merged)
+        )
+        gone = git_sync.gone_branches(tmp_path)
+        assert [g.name for g in gone] == ["feature"]
+        assert gone[0].merged is True
+
+    def test_empty_when_no_local_branch_tracks_stale_ref(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        prune_out = " * [would prune] origin/orphan\n"
+        for_each = f"main{self._SEP}origin/main\n"  # nothing tracks origin/orphan
+        monkeypatch.setattr(
+            git_sync, "_run_git", _DispatchGit(prune=prune_out, for_each=for_each, merged="main")
+        )
+        assert git_sync.gone_branches(tmp_path) == []
+
+    def test_not_merged_when_merged_query_empty(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        prune_out = " * [would prune] origin/feature\n"
+        for_each = f"feature{self._SEP}origin/feature\n"
+        monkeypatch.setattr(
+            git_sync, "_run_git", _DispatchGit(prune=prune_out, for_each=for_each, merged="")
+        )
+        gone = git_sync.gone_branches(tmp_path)
+        assert len(gone) == 1
+        assert gone[0].merged is False
+
+    def test_stale_detection_skips_failed_remote_prune(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _fake(_cwd: Path, *args: str, **_k: object) -> _FakeCompleted:
+            if args and args[0] == "remote" and len(args) == 1:
+                return _FakeCompleted(0, "origin")
+            if args and args[0] == "remote" and "prune" in args:
+                return _FakeCompleted(1, "")  # prune probe failed -> skipped
+            return _FakeCompleted(1, "")
+
+        monkeypatch.setattr(git_sync, "_run_git", _fake)
+        assert git_sync.gone_branches(tmp_path) == []
