@@ -102,6 +102,16 @@ _READ_CHUNK_SIZE = 4096
 _FALLBACK_WINSIZE = struct.pack("HHHH", 24, 80, 0, 0)
 _LOG_SUBDIRECTORY = "supervise"
 _LOG_FILENAME = "decision.log"
+# Plan 00181: a red-but-idle session ticks every ~1-2s indefinitely, each tick
+# potentially appending a NOOP-reason line, so decision.log is an unbounded
+# disk time-bomb. Front-cap it: when it exceeds _DECISION_LOG_MAX_BYTES after a
+# write, drop the oldest bytes so only the newest _DECISION_LOG_RETAIN_BYTES
+# (whole lines) survive. RETAIN < MAX gives hysteresis so a log sitting at the
+# ceiling is not rewritten on every single append. This mirrors the daemon's
+# utils.retention.cap_log_file, reimplemented inline because the standalone
+# supervisor cannot import daemon modules.
+_DECISION_LOG_MAX_BYTES = 4 * 1024 * 1024
+_DECISION_LOG_RETAIN_BYTES = 2 * 1024 * 1024
 # Runtime identity file the running supervisor writes for staleness detection
 # (Plan 00164 Phase 3). Lives in the same 'supervise' subdir as the decision log.
 _SUPERVISOR_STATUS_FILENAME = "supervisor-status.json"
@@ -541,6 +551,7 @@ class DecisionLog:
         timestamp = datetime.now(UTC).isoformat()
         with self._path.open("a", encoding="utf-8") as handle:
             handle.write(f"{timestamp} {message}\n")
+        self._cap_if_needed()
         # A real action line breaks the NOOP-dedup run: the next identical NOOP
         # reason must re-log (it describes a fresh post-action observation).
         self._last_noop_message = None
@@ -567,7 +578,38 @@ class DecisionLog:
         timestamp = datetime.now(UTC).isoformat()
         with self._path.open("a", encoding="utf-8") as handle:
             handle.write(f"{timestamp} {message}\n")
+        self._cap_if_needed()
         self._last_noop_message = message
+
+    def _cap_if_needed(self) -> None:
+        """Front-truncate the log to below the byte ceiling, keeping newest lines.
+
+        Best-effort disk-bomb guard (Plan 00181): a capping failure must NEVER
+        crash a supervisor tick or lose the line just written, so IO errors are
+        reported to stderr and swallowed rather than propagated. The successful
+        path drops the oldest bytes and the (now partial) leading line so only
+        the newest ``_DECISION_LOG_RETAIN_BYTES`` of WHOLE lines remain.
+        """
+        try:
+            size = self._path.stat().st_size
+        except OSError:
+            return
+        if size <= _DECISION_LOG_MAX_BYTES:
+            return
+        try:
+            with self._path.open("rb") as handle:
+                handle.seek(max(0, size - _DECISION_LOG_RETAIN_BYTES))
+                tail = handle.read()
+            # Drop the partial first line so the file starts on a line boundary.
+            newline = tail.find(b"\n")
+            kept = tail[newline + 1 :] if newline != -1 else tail
+            tmp = self._path.with_name(self._path.name + ".retain.tmp")
+            tmp.write_bytes(kept)
+            tmp.replace(self._path)
+        except OSError as exc:
+            # FAIL LOUD but not FATAL: surface the cap failure without aborting
+            # the supervision loop (the appended line is already safely on disk).
+            sys.stderr.write(f"[claude-supervise] decision.log cap failed: {exc}\n")
 
 
 # ---------------------------------------------------------------------------

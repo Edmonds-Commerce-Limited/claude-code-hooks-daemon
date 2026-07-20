@@ -108,6 +108,81 @@ class TestDecisionLogNoopDedup:
         assert len(lines) == 3
 
 
+class TestDecisionLogSizeCap:
+    """Plan 00181: ``decision.log`` is front-capped so it cannot grow forever.
+
+    The supervisor is a standalone process that cannot import the daemon's
+    ``cap_log_file`` utility, so an inline size-cap mirrors it: when the file
+    exceeds ``_DECISION_LOG_MAX_BYTES`` after a write, the oldest bytes are
+    dropped so only the newest ``_DECISION_LOG_RETAIN_BYTES`` (whole lines)
+    survive. A red-but-idle session ticks every ~1-2s forever, so an unbounded
+    log is a genuine disk time-bomb.
+    """
+
+    def test_write_caps_file_when_over_budget(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_mod, "_DECISION_LOG_MAX_BYTES", 400)
+        monkeypatch.setattr(_mod, "_DECISION_LOG_RETAIN_BYTES", 200)
+        log_path = tmp_path / "decision.log"
+        log = DecisionLog(log_path)
+
+        for i in range(200):
+            log.write(f"line {i:04d} " + "x" * 20)
+
+        assert log_path.stat().st_size <= 400
+        # The newest line always survives (front-truncation keeps the tail).
+        assert "line 0199" in log_path.read_text(encoding="utf-8")
+
+    def test_write_noop_caps_file_when_over_budget(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_mod, "_DECISION_LOG_MAX_BYTES", 400)
+        monkeypatch.setattr(_mod, "_DECISION_LOG_RETAIN_BYTES", 200)
+        log_path = tmp_path / "decision.log"
+        log = DecisionLog(log_path)
+
+        # Each reason is unique so the dedup never suppresses (worst case growth).
+        for i in range(200):
+            log.write_noop(f"noop reason {i:04d} " + "y" * 20)
+
+        assert log_path.stat().st_size <= 400
+
+    def test_cap_drops_partial_leading_line_keeps_whole_lines(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_mod, "_DECISION_LOG_MAX_BYTES", 300)
+        monkeypatch.setattr(_mod, "_DECISION_LOG_RETAIN_BYTES", 150)
+        log_path = tmp_path / "decision.log"
+        log = DecisionLog(log_path)
+
+        for i in range(100):
+            log.write(f"msg{i:04d}")
+
+        lines = log_path.read_text(encoding="utf-8").splitlines()
+        # Front-truncation drops everything up to and including the first newline,
+        # so the first retained line must begin with a whole ISO timestamp (year),
+        # never a fragment of the previous line.
+        assert lines
+        assert lines[0].startswith("20")
+
+    def test_under_budget_file_is_untouched(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_mod, "_DECISION_LOG_MAX_BYTES", 10_000)
+        monkeypatch.setattr(_mod, "_DECISION_LOG_RETAIN_BYTES", 5_000)
+        log_path = tmp_path / "decision.log"
+        log = DecisionLog(log_path)
+
+        log.write("first")
+        log.write("second")
+
+        lines = log_path.read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 2
+        assert lines[0].endswith("first")
+        assert lines[1].endswith("second")
+
+
 class TestDecisionLogDefaultPath:
     """Tests using the default (environment-derived) path."""
 

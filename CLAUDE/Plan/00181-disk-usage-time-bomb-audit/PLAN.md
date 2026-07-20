@@ -106,9 +106,14 @@ the root cause; a single shared utility is the proper fix.
   `subagent_completions.jsonl` (`subagent_completion_logger`) each front-capped
   via `cap_log_file` with `retain_bytes` hysteresis. Tests first per writer
   (real-fs cap assertions). Full suite green (10433 passed, 95.2% coverage).
-- [ ] ⬜ **Task 2.2**: Apply the size-cap helper to the supervisor
-  `decision.log` in `claude-supervise.py` (respecting the version-lockstep
-  test) and any supervisor worker logs.
+- [x] ✅ **Task 2.2**: Supervisor `decision.log` front-capped via an inline
+  `DecisionLog._cap_if_needed` (mirrors `cap_log_file`; the standalone
+  supervisor cannot import daemon modules). Called after every `write` /
+  `write_noop`; keeps the newest `_DECISION_LOG_RETAIN_BYTES` (2 MB) of whole
+  lines once the file passes `_DECISION_LOG_MAX_BYTES` (4 MB). A cap IO failure
+  is reported to stderr and swallowed — never crashes a supervision tick, never
+  loses the just-written line. 4 TDD cap tests; all 350 supervise tests pass
+  (version-lockstep intact).
 
 ### Phase 3: Bound the archives + per-session dirs
 
