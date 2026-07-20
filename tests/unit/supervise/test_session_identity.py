@@ -13,6 +13,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from tests.unit.supervise._load import load_supervisor_module
 
 _mod = load_supervisor_module()
@@ -115,6 +117,55 @@ class TestCachedOwnSessionIds:
         # Next tick has NO process exposing the id (claude idle) -> stays learned.
         r2 = _fake_proc(tmp_path / "b", {"1": {"PATH": "/usr/bin"}})
         assert _mod.cached_own_session_ids(r2) == frozenset({_MINE})
+        _mod._own_session_ids_cache.clear()
+
+
+class TestCachedOwnSessionIdsThrottle:
+    """Plan 00182 Phase 3: the full /proc environ scan is the worker-tick latency
+    source that made a tick exceed the 2s read timeout and desync. Once our
+    session ids are learned, re-scanning every tick is wasteful — throttle it to
+    a TTL so most ticks return the accumulated set without touching /proc, while
+    an empty cache always forces a scan (we still need to discover our sessions).
+    """
+
+    def test_rescan_throttled_once_sessions_known(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _mod._own_session_ids_cache.clear()
+        monkeypatch.setattr(_mod, "_own_session_ids_last_scan", None)
+        calls = {"n": 0}
+
+        def fake_resolve(_proc_root: object = None) -> frozenset[str]:
+            calls["n"] += 1
+            return frozenset({_MINE})
+
+        monkeypatch.setattr(_mod, "resolve_own_session_ids", fake_resolve)
+        # First call: cache empty -> must scan.
+        assert _mod.cached_own_session_ids(now=0.0) == frozenset({_MINE})
+        assert calls["n"] == 1
+        # Within the TTL with a known set -> no re-scan.
+        assert _mod.cached_own_session_ids(now=5.0) == frozenset({_MINE})
+        assert calls["n"] == 1
+        # Past the TTL -> re-scan (catch newly-spawned sessions).
+        past = _mod._OWN_SESSION_SCAN_TTL_SECONDS + 1.0
+        assert _mod.cached_own_session_ids(now=past) == frozenset({_MINE})
+        assert calls["n"] == 2
+        _mod._own_session_ids_cache.clear()
+
+    def test_empty_cache_always_rescans_even_within_ttl(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _mod._own_session_ids_cache.clear()
+        monkeypatch.setattr(_mod, "_own_session_ids_last_scan", 100.0)
+        calls = {"n": 0}
+
+        def fake_resolve(_proc_root: object = None) -> frozenset[str]:
+            calls["n"] += 1
+            return frozenset()  # nothing discovered
+
+        monkeypatch.setattr(_mod, "resolve_own_session_ids", fake_resolve)
+        # last_scan is recent (now within TTL) but the cache is empty, so we MUST
+        # still scan — a fail-safe throttle never starves discovery.
+        assert _mod.cached_own_session_ids(now=101.0) == frozenset()
+        assert calls["n"] == 1
         _mod._own_session_ids_cache.clear()
 
 

@@ -106,19 +106,23 @@ double-inject.
 
 ### Phase 3: Reduce desync frequency
 
-- [ ] ⬜ **Task 3.1**: Cache/throttle the worker's `/proc` scan
-  (`cached_own_session_ids`) so a normal tick stays well under the read timeout;
-  and/or set the read timeout distinct from (and appropriately related to) the
-  poll interval so a merely-slow tick degrades to one clean fallback rather than
-  a stale-reply desync.
+- [x] ✅ **Task 3.1**: Throttled the worker's `/proc` environ scan in
+  `cached_own_session_ids` to `_OWN_SESSION_SCAN_TTL_SECONDS = 30.0` — once the
+  own-session set is known, most ticks return the accumulated set without
+  touching `/proc`, keeping the tick well under the 2s read timeout. Fail-safe:
+  an EMPTY cache always re-scans so session discovery is never starved.
+  `now` is injectable for tests.
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Full supervise suite + the new desync regression test
-  green; version-lockstep test green.
-- [ ] ⬜ **Task 4.2**: `./scripts/qa/run_all.sh` (or `llm_qa.py all`) passes;
-  daemon restart RUNNING. The supervisor is a standalone process — a live ccy
-  relaunch under sustained CRITICAL context is the true dogfood check.
+- [x] ✅ **Task 4.1**: Full supervise suite green (346 tests, +22 new across the
+  two files); version-lockstep test (`TestSupervisorVersionMatchesDaemon`) green.
+- [x] ✅ **Task 4.2**: `llm_qa.py all` green (12/13; the one "fail" is the format
+  check auto-fixing the file — re-run shows 0), 10413 tests, 95.3% cov,
+  type_check/lint/security/error_hiding all clean. NOTE: the supervisor is a
+  standalone process the daemon does not load, so a daemon restart does not
+  exercise it — the true dogfood is a **ccy relaunch under sustained CRITICAL
+  context** (out of band for this session; left as the live-verification step).
 
 ## Dependencies
 

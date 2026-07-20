@@ -668,6 +668,14 @@ _SESSION_ENV_PREFIX = b"CLAUDE_CODE_SESSION_ID="
 # a foreign terminal. Keeps ids learned during active work available on later
 # idle ticks (when no descendant currently exposes the env var).
 _own_session_ids_cache: set[str] = set()
+# Plan 00182: throttle the expensive full-/proc environ scan. Once our session
+# ids are learned they persist in the accumulate-set above, so re-scanning every
+# worker tick (poll interval 2s) was the latency source that could push a tick
+# past the 2s worker read timeout and trigger the stale-reply desync. Re-scan at
+# most once per TTL; an EMPTY cache always forces a scan so discovery is never
+# starved (fail-safe: a supervisor that has not yet found its session must look).
+_OWN_SESSION_SCAN_TTL_SECONDS = 30.0
+_own_session_ids_last_scan: float | None = None
 
 
 def _session_ids_from_environ(environ: bytes) -> set[str]:
@@ -708,9 +716,29 @@ def resolve_own_session_ids(proc_root: Path | None = None) -> frozenset[str]:
     return frozenset(found)
 
 
-def cached_own_session_ids(proc_root: Path | None = None) -> frozenset[str]:
-    """Union-accumulate and return the supervisor's own-session-id set."""
-    _own_session_ids_cache.update(resolve_own_session_ids(proc_root))
+def cached_own_session_ids(
+    proc_root: Path | None = None, *, now: float | None = None
+) -> frozenset[str]:
+    """Union-accumulate and return the supervisor's own-session-id set.
+
+    Plan 00182: the full /proc environ scan is throttled to
+    ``_OWN_SESSION_SCAN_TTL_SECONDS`` once at least one id is known -- most ticks
+    then return the accumulated set without touching /proc, keeping the worker
+    tick well under its read timeout. An EMPTY cache always re-scans so a
+    supervisor that has not yet discovered its own session is never starved.
+    ``now`` (monotonic seconds) is injectable for tests; production uses the
+    monotonic clock.
+    """
+    global _own_session_ids_last_scan
+    current = time.monotonic() if now is None else now
+    due = (
+        not _own_session_ids_cache
+        or _own_session_ids_last_scan is None
+        or (current - _own_session_ids_last_scan) >= _OWN_SESSION_SCAN_TTL_SECONDS
+    )
+    if due:
+        _own_session_ids_cache.update(resolve_own_session_ids(proc_root))
+        _own_session_ids_last_scan = current
     return frozenset(_own_session_ids_cache)
 
 
