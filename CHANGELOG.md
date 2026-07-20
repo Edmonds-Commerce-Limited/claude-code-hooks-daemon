@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.45.0] - 2026-07-20
+
+This is a **minor release** fixing a false "daemon not running" Stop-hook
+block on long Claude Code sessions (Plan 00177).
+
+### Added
+
+- **`CLAUDE_HOOKS_SOCKET_TIMEOUT` env var.** `init.sh` now reads this
+  variable (default `30.0`) to control the socket read timeout used when
+  forwarding hook events to the daemon, instead of a hardcoded 30s
+  constant.
+- **`TranscriptReader.load_tail()` bounded tail read.** A new bounded-read
+  path caps transcript parsing to the last `_DEFAULT_TAIL_BYTES` (1 MiB) of
+  the transcript file instead of loading and parsing the whole file.
+
+### Changed
+
+- **Stop/SubagentStop now fail OPEN on a socket timeout.** A `socket.timeout`
+  talking to the daemon is no longer treated identically to a dead daemon —
+  the forwarder now reports it honestly ("daemon is ALIVE, do NOT restart")
+  and returns `{}` (fail-open) instead of a false `decision:block` "Hooks
+  daemon not running" message.
+- **`auto_continue_stop` now uses the bounded tail read** instead of
+  whole-file transcript parsing, cutting repeated (~9x per Stop dispatch)
+  full-file parses down to a fixed-size tail read.
+
+### Fixed
+
+- **False `decision:block` "Hooks daemon not running" on long sessions.**
+  Root-caused to two compounding issues: (1) a flat 30s socket timeout in
+  `init.sh` that was indistinguishable from a dead daemon, and (2)
+  `auto_continue_stop` re-parsing the entire session transcript up to ~9
+  times per Stop dispatch, blowing the client's response budget on large
+  transcripts. A 150 MB transcript Stop probe went from 30s (timeout) to
+  0.72s after the fix.
+
 ## [3.44.0] - 2026-07-17
 
 This is a **minor release** adding a Ctrl+Z suspend guard to the ccy PTY
