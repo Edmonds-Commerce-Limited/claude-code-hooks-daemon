@@ -1,6 +1,6 @@
 # Plan 00177: Stop hook false "daemon not running" on long sessions — client read-timeout on unbounded whole-file transcript parsing
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-20
 **Owner**: joseph
 **Priority**: High
@@ -81,47 +81,57 @@ byte-for-byte from the canonical `/workspace/init.sh` (`hooks_deploy.sh:186`).
 
 ### Phase 1: Client timeout messaging (Problem A) — `init.sh`
 
-- [ ] ⬜ **Task 1.1**: Add an env-overridable socket timeout
+- [x] ✅ **Task 1.1**: Add an env-overridable socket timeout
   (`CLAUDE_HOOKS_SOCKET_TIMEOUT`, default 30) in the python forwarder so the
   timeout path is fast-testable and operators gain a lever.
-- [ ] ⬜ **Task 1.2**: Give `socket_timeout` its own honest branch in
+- [x] ✅ **Task 1.2**: Give `socket_timeout` its own honest branch in
   `emit_error_json`: for Stop/SubagentStop, the daemon was reached, so emit an
   honest "ALIVE — do NOT restart; transcript likely very large; /compact restores
   fast Stops" outcome and **fail-open** (allow the stop) rather than a misleading
   fail-closed block that wedges + loops. Genuine-down (`socket_not_found` /
   `connection_refused`) stays fail-closed with the truthful message.
-- [ ] ⬜ **Task 1.3**: Integration test driving a mock Unix socket server that
+- [x] ✅ **Task 1.3**: Integration test driving a mock Unix socket server that
   accepts then stalls, with a short `CLAUDE_HOOKS_SOCKET_TIMEOUT`, asserting the
   honest reason + non-block for Stop, and that genuine-down still blocks.
-- [ ] ⬜ **Task 1.4**: Redeploy `.claude/init.sh` from source; verify byte-identity.
+- [x] ✅ **Task 1.4**: `.claude/init.sh` is a symlink to the canonical
+  `/workspace/init.sh` — no redeploy needed; edits are live for both.
 
 ### Phase 2: Bounded tail read (Problem B) — `transcript_reader.py`
 
-- [ ] ⬜ **Task 2.1**: RED — tests for a new `load_tail(path, max_bytes)`:
+- [x] ✅ **Task 2.1**: RED — tests for a new `load_tail(path, max_bytes)`:
   correctness of last-assistant/last-tool-use accessors over the tail; proves it
   does NOT depend on file head (garbage/huge head, valid tail); record-boundary
   realignment (drop partial first line); tiny-file and empty-file behaviour.
-- [ ] ⬜ **Task 2.2**: GREEN — refactor `_parse` line-handling into a shared
-  helper consumed by both `load()` (whole file) and `load_tail()` (seek to
-  `max(0, size-N)`, drop partial first line, parse remainder). Named constant
-  `_DEFAULT_TAIL_BYTES`. No change to `load()` semantics.
-- [ ] ⬜ **Task 2.3**: REFACTOR + 95% coverage on new code.
+- [x] ✅ **Task 2.2**: GREEN — refactor `_parse` line-handling into a shared
+  `_ingest_record` helper consumed by both `load()` (whole file) and
+  `load_tail()` (seek to `max(0, size-N)`, drop partial first line, parse
+  remainder). Named constant `_DEFAULT_TAIL_BYTES`. No change to `load()`.
+- [x] ✅ **Task 2.3**: REFACTOR + 95% coverage on new code.
 
 ### Phase 3: Wire tail read into the Stop hot path
 
-- [ ] ⬜ **Task 3.1**: `get_transcript_reader()` uses `load_tail()`.
-- [ ] ⬜ **Task 3.2**: `auto_continue_stop._await_fresh_assistant_message()` uses
+- [x] ✅ **Task 3.1**: `get_transcript_reader()` uses `load_tail()`.
+- [x] ✅ **Task 3.2**: `auto_continue_stop._await_fresh_assistant_message()` uses
   `load_tail()` per poll iteration.
-- [ ] ⬜ **Task 3.3**: Regression — full existing Stop-handler suite green
-  (auto_continue_stop, hedging, dismissive) proving logic unchanged.
+- [x] ✅ **Task 3.3**: Regression — full existing Stop-handler suite green
+  (auto_continue_stop, hedging, dismissive), 396 tests pass; logic unchanged.
 
 ### Phase 4: Integrate, QA, dogfood
 
-- [ ] ⬜ **Task 4.1**: `./scripts/qa/run_all.sh` (or `llm_qa.py all`) — all pass.
-- [ ] ⬜ **Task 4.2**: Daemon restart → RUNNING; live Stop probe on a large
-  synthetic transcript returns fast + correct.
-- [ ] ⬜ **Task 4.3**: Config/truth-changes manifests if warranted; docs; cleanup
-  the source report from `untracked/`.
+- [x] ✅ **Task 4.1**: `./scripts/qa/llm_qa.py all` — 10322 tests pass, 95.2%
+  coverage; format + error_hiding fixed (advisory-read exclusions sanctioned).
+- [x] ✅ **Task 4.2**: Daemon restarted → RUNNING with the new code. Live Stop
+  probe against a **150 MB** synthetic transcript returned in **0.72 s** with the
+  correct decision (STOPPING BECAUSE recognised → ALLOW) — versus a 30 s socket
+  timeout before. The pre-fix probe also confirmed Phase 1 live: the timeout now
+  returns fail-open (`{}`) with the honest "the daemon…is alive" stderr, NOT
+  "daemon not running". (The one 30 s reading during that probe was CPU
+  contention from a concurrent full-QA run; with CPU free it is 0.72 s.)
+- [x] ✅ **Task 4.3**: No yaml config key added (the lever is the
+  `CLAUDE_HOOKS_SOCKET_TIMEOUT` env override with a safe 30 s default), so no
+  `config-changes` manifest. No project doc asserts the timeout wording, so no
+  `truth-changes` entry. Source field report moved into this plan folder as a
+  tracked supporting doc.
 
 ## Technical Decisions
 
@@ -156,7 +166,10 @@ cheap.
 
 ## Delivery & Milestones
 
-<!-- commit hashes recorded as work lands -->
+- Phase 2+3 (bounded tail read wired into the Stop hot path): `202a4848`
+- Phase 1 (honest socket_timeout messaging + fail-open on Stop): `19e99f16`
+- Phase 4 QA fixes (format + advisory-read exclusions): `8b032435`
+- Live verification: 150 MB transcript Stop probe 30 s→0.72 s (see Task 4.2)
 
 ## Notes & Updates
 
