@@ -1,6 +1,6 @@
 # Plan 00182: supervisor compact stacking / double-inject
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-20
 **Owner**: joseph
 **Priority**: High
@@ -149,3 +149,9 @@ double-inject.
 
 - Root cause verified (host↔worker IPC stale-reply desync) + reproduction path
   identified (this document) at plan creation.
+- Phase 1+2 (correlation-id drain + `_apply_decision` state-guard) delivered at
+  `57a78f37`.
+- Phase 3 (`/proc` session-id scan throttle) delivered at `c6a8ab7c`.
+- Live-verification residual: a ccy relaunch under sustained CRITICAL context
+  (the supervisor is a standalone process a daemon restart does not reload) —
+  a next-session dogfood step, not a code deliverable.
