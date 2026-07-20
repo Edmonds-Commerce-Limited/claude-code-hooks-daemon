@@ -1,0 +1,152 @@
+# Plan 00181: disk usage time bomb audit
+
+**Status**: Not Started
+**Created**: 2026-07-20
+**Owner**: joseph
+**Priority**: Medium
+**Recommended Executor**: Sonnet
+**Execution Strategy**: Sub-Agent Orchestration
+
+## Overview
+
+A cleanup of `untracked/` surfaced a systemic pattern: the daemon writes many
+files under its untracked directory, but **only one directory has a functioning
+reaper**. Every other accumulator — archived transcripts, append-only JSONL
+logs, the supervisor decision log, per-session sidecar/registry/capture files,
+orphaned per-session daemon runtime files, and stale venvs — grows without any
+rotation, retention cap, or age-based pruning. In a long-lived or high-churn
+environment (CI fleets, multi-day container sessions, many compactions) these
+consume unbounded disk with no automatic recovery.
+
+A read-only audit (three parallel review agents + on-disk measurement)
+confirmed the writers, located their code, and verified that **no shared
+log-rotation or retention utility exists anywhere in the codebase**. This plan
+records those findings and remediates them: introduce a single shared
+retention/rotation primitive, apply it to every unbounded writer, and close the
+reaper-invocation gaps so stale cross-session files are actually reaped.
+
+## Goals
+
+- Introduce ONE shared, config-driven retention/rotation utility (size cap +
+  age/count pruning) — single source of truth, reused by every writer.
+- Bound every confirmed unbounded writer (transcripts, the append-only JSONL
+  logs, the supervisor decision log) with a sane default cap.
+- Close the daemon-runtime-file reaper gaps so orphaned `daemon-*` files and
+  per-session `thread-registry/` / `context-sidecar/` / `payload-capture/`
+  files are reaped on a predictable schedule.
+- Make stale-venv pruning happen automatically (not only during `upgrade` or
+  manual `prune-venvs`), with a safe never-delete-current guarantee.
+- Ship a `disk-usage` diagnostic CLI so operators can see accumulation and
+  reclaim on demand.
+
+## Non-Goals
+
+- No change to what the daemon logs or archives (content/behaviour of handlers
+  is out of scope — only lifecycle/retention of the files they write).
+- No deletion of the current live venv, live daemon runtime files, or the
+  in-progress session's transcripts under any circumstances (fail-safe).
+- Not a rewrite of the transcript archiver or supervisor — only bounding their
+  output.
+
+## Audit Findings (read-only review — evidence for this plan)
+
+Ranked worst-first. On-disk sizes are one snapshot; the concern is the growth
+model (no reaper), not the current size.
+
+| #   | Item                                                                                    | Writer (file:line)                                                             | Growth model                                             | Reaper today                                                                                                                                                                                          | Verdict      |
+| --- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| 1   | Stale venvs `venv-{slug}-py{MM}-{fingerprint}` (~187 MB each)                           | install/`venv.sh` creation; prune in `venv.sh:716` `eager_cleanup_stale_venvs` | one venv per new Python fingerprint OR project-path slug | only on `upgrade` (`upgrade_version.sh:820`) or manual `prune-venvs` — never on daemon start                                                                                                          | BOMB         |
+| 2   | `transcripts/*.json` (full transcript per compaction)                                   | `handlers/pre_compact/transcript_archiver.py:91`                               | one full-transcript snapshot per PreCompact, forever     | NONE (no cap/count/age)                                                                                                                                                                               | BOMB         |
+| 3   | `logs/hooks/subagent_completions.jsonl`                                                 | `handlers/subagent_stop/subagent_completion_logger.py`                         | append per subagent stop (on by default)                 | NONE                                                                                                                                                                                                  | BOMB         |
+| 4   | `logs/hooks/notifications.jsonl`                                                        | `handlers/notification/notification_logger.py`                                 | append per notification (on by default)                  | NONE                                                                                                                                                                                                  | BOMB         |
+| 5   | `stop-events.jsonl`                                                                     | `handlers/stop/auto_continue_stop.py`                                          | append per stop event                                    | NONE                                                                                                                                                                                                  | BOMB         |
+| 6   | `hook-errors.log`                                                                       | `core/front_controller.py`                                                     | append per handler error                                 | NONE                                                                                                                                                                                                  | BOMB         |
+| 7   | supervisor `supervise/decision.log` (reached 2.9 MB / one 6.5h session)                 | `.claude/ccy/claude-supervise.py`                                              | append per idle tick                                     | NONE                                                                                                                                                                                                  | BOMB         |
+| 8   | Orphaned `daemon-*.{sock,pid,socket-path,sock.start.lock}` (44 found, 11 dead sessions) | `daemon/paths.py` runtime files                                                | one set per dead session                                 | reaper EXISTS (`paths.py:1439` `cleanup_stale_daemon_files`) but BYPASSED — Plan 00127 reuse gate returns (`cli.py:362`) before the sweep (`cli.py:411`); 7-day `stale_file_days` floor spares recent | PARTIAL      |
+| 9   | `thread-registry/`, `context-sidecar/`, `payload-capture/*.jsonl` (per-session)         | `multithread_indicator` / `context_sidecar` / `daemon/payload_capture.py`      | one file per session                                     | NONE — stale sweep is non-recursive, only `daemon-` prefix at untracked root                                                                                                                          | BOMB (small) |
+
+**Genuinely bounded today (do not touch):** `version_check_cache.json`,
+`gitignore_safety_cache.json`, `cleanup_status.json` (single-overwrite),
+`background-processes.jsonl` (self-trims), `temp/hooks/` (reaped every
+SessionEnd by `handlers/session_end/cleanup_handler.py` — the one functioning
+reaper).
+
+**Decisive structural fact:** a grep for `RotatingFileHandler` /
+`TimedRotating` / `maxBytes` / `rotate` / `log_rotation` across
+`src/claude_code_hooks_daemon/` returns **nothing** — there is no retention
+primitive at all. Every writer independently opens-and-appends. That absence is
+the root cause; a single shared utility is the proper fix.
+
+## Tasks
+
+### Phase 1: Shared retention primitive (TDD)
+
+- [ ] ⬜ **Task 1.1**: Write failing tests for a `utils/retention.py` helper —
+  size-cap truncate-from-front for line logs, count/age pruning for
+  directories of per-session files, with a fail-safe "never touch the current
+  session's / current fingerprint's files" guard.
+- [ ] ⬜ **Task 1.2**: Implement the helper to pass tests; expose config keys
+  under a new `daemon.retention` block (defaults conservative, opt-out per
+  writer).
+- [ ] ⬜ **Task 1.3**: Add the config schema + `.yaml.example` documentation and
+  a `config-changes/v{X.Y.Z}.yaml` manifest entry (recommended: true).
+
+### Phase 2: Bound the append-only writers
+
+- [ ] ⬜ **Task 2.1**: Apply the size-cap helper to `hook-errors.log`,
+  `stop-events.jsonl`, `notifications.jsonl`, `subagent_completions.jsonl`
+  (tests first per writer).
+- [ ] ⬜ **Task 2.2**: Apply the size-cap helper to the supervisor
+  `decision.log` in `claude-supervise.py` (respecting the version-lockstep
+  test) and any supervisor worker logs.
+
+### Phase 3: Bound the archives + per-session dirs
+
+- [ ] ⬜ **Task 3.1**: Add count+age retention to `transcript_archiver` so
+  `transcripts/` keeps only the most recent N / last M days (never the
+  in-flight session).
+- [ ] ⬜ **Task 3.2**: Add a recursive, subdir-aware stale sweep for
+  `thread-registry/`, `context-sidecar/`, `payload-capture/`.
+
+### Phase 4: Close the reaper-invocation gaps
+
+- [ ] ⬜ **Task 4.1**: Ensure `cleanup_stale_daemon_files` runs even on the
+  Plan 00127 reuse path (move/duplicate the sweep before the early return, or
+  run it unconditionally on start), preserving cross-project safety.
+- [ ] ⬜ **Task 4.2**: Make stale-venv pruning run automatically on daemon start
+  (guarded, never deletes the current fingerprint), reusing
+  `eager_cleanup_stale_venvs`.
+
+### Phase 5: Diagnostic + verification
+
+- [ ] ⬜ **Task 5.1**: Add a `disk-usage` CLI subcommand that reports per-writer
+  accumulation and what a prune would reclaim (dry-run by default).
+- [ ] ⬜ **Task 5.2**: Full QA (`./scripts/qa/run_all.sh`), daemon restart
+  verification, acceptance coverage for the new reapers.
+
+## Dependencies
+
+- Related: Plan 00127 (single-daemon reuse gate — the reason the daemon-file
+  reaper is bypassed). Related: Plan 00180 (supervisor injection cap — same
+  `decision.log` file touched in Task 2.2).
+
+## Success Criteria
+
+- [ ] A single shared retention utility exists and is the only place
+  rotation/pruning logic lives (DRY; no per-writer copies).
+- [ ] Every writer in the findings table with verdict BOMB is bounded by a
+  default cap; a synthetic "write 10× the cap" test proves the file stops
+  growing.
+- [ ] Orphaned `daemon-*` files and per-session sidecar/registry/capture files
+  are reaped on daemon start/session end within the configured window.
+- [ ] Stale venvs are pruned automatically without ever removing the current
+  fingerprint's venv.
+- [ ] `disk-usage` CLI reports accumulation; all QA passes; daemon restarts
+  RUNNING.
+
+## Delivery & Milestones
+
+<!-- Curated milestones + delivery commit hashes only (git is the SSoT for
+     "when"). Activity log lives in JOURNAL/. -->
+
+- Audit findings recorded (this document) at plan creation.
