@@ -830,6 +830,13 @@ class TickFacts:
     # 00164 Phase 4 fix). The worker loads it before deciding so it never runs on
     # divergent state; None on the in-process path (the machine is already live).
     machine_state: dict[str, object] | None = None
+    # Per-request correlation id (Plan 00182). The host stamps a monotonically
+    # increasing id on each worker request; the worker echoes it back on the
+    # matching TickOutcome. The host drops any reply whose id does not match the
+    # current request, so a reply left buffered by a timed-out (slow) tick can
+    # never be consumed on a LATER tick and injected out of turn. 0 on the
+    # in-process path (no worker, no correlation needed).
+    tick_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -856,6 +863,11 @@ class TickOutcome:
     # Set only for NOOP ticks NOT already covered by `deferred_log`. None on
     # action ticks. Kept out of the state machine (host-side dedup owns volume).
     noop_reason_log: str | None = None
+    # Correlation id echoed from the originating TickFacts (Plan 00182). The
+    # worker copies the request's ``tick_id`` onto its reply so the host can
+    # discard a stale reply from a previously timed-out tick. 0 on the
+    # in-process path and on legacy replies without the field.
+    tick_id: int = 0
 
 
 def _coerce_float(value: object) -> float:
@@ -2091,13 +2103,28 @@ def _apply_decision(
     *,
     master_writer: Callable[[bytes], None],
     log: DecisionLog | None,
+    host_state: str | None = None,
 ) -> None:
     """Perform a :class:`TickOutcome` on the PTY (host side, Plan 00164 P4).
 
     Injects the payload (if any), logs it, and consumes the compaction signal
     only AFTER a successful resume injection — mirroring the original inline
     behaviour of ``_poll_once`` exactly.
+
+    Plan 00182 defence-in-depth: ``host_state`` is the host's authoritative
+    ``SupervisorState`` value BEFORE this outcome is adopted. If the host is
+    already ``AWAIT_COMPACTING`` a ``WOULD_COMPACT`` outcome is stale/impossible
+    (a compaction is already in flight) -- injecting it would stack a second
+    ``/compact``, so it is suppressed and logged rather than performed. The
+    in-process path passes ``None`` (single live machine -- no desync possible).
     """
+    if (
+        host_state == SupervisorState.AWAIT_COMPACTING.value
+        and outcome.decision_value == Decision.WOULD_COMPACT.value
+    ):
+        if log is not None:
+            log.write_noop("noop: stale /compact suppressed (host already awaiting compaction)")
+        return
     if outcome.payload is not None:
         _perform_injection(master_writer, outcome.payload, submit=outcome.submit)
         if log is not None:
@@ -2183,6 +2210,7 @@ def _facts_to_json(facts: TickFacts) -> str:
             "human_compact_submitted": facts.human_compact_submitted,
             "work_idle": facts.work_idle,
             "machine_state": facts.machine_state,
+            "tick_id": facts.tick_id,
         }
     )
 
@@ -2196,6 +2224,7 @@ def _facts_from_json(line: str) -> TickFacts:
         human_compact_submitted=bool(data["human_compact_submitted"]),
         work_idle=bool(data["work_idle"]),
         machine_state=data.get("machine_state"),
+        tick_id=int(data.get("tick_id", 0)),
     )
 
 
@@ -2210,6 +2239,7 @@ def _outcome_to_json(outcome: TickOutcome) -> str:
             "deferred_log": outcome.deferred_log,
             "machine_state": outcome.machine_state,
             "noop_reason_log": outcome.noop_reason_log,
+            "tick_id": outcome.tick_id,
         }
     )
 
@@ -2225,6 +2255,7 @@ def _outcome_from_json(line: str) -> TickOutcome:
         deferred_log=data["deferred_log"],
         machine_state=data.get("machine_state"),
         noop_reason_log=data.get("noop_reason_log"),
+        tick_id=int(data.get("tick_id", 0)),
     )
 
 
@@ -2274,7 +2305,10 @@ def run_worker(
             # the whole purpose is to contain ANY unexpected decision failure.
             append_worker_error("decide_once failed:\n" + traceback.format_exc())
             outcome = _worker_error_noop()
-        out_stream.write(_outcome_to_json(outcome) + "\n")
+        # Plan 00182: echo the request's correlation id so the host can match
+        # this reply to the tick that produced it and drop any stale reply left
+        # buffered by an earlier timed-out tick.
+        out_stream.write(_outcome_to_json(replace(outcome, tick_id=facts.tick_id)) + "\n")
         out_stream.flush()
     return 0
 
@@ -2318,6 +2352,11 @@ class PolicyWorker:
         self._proc: subprocess.Popen[str] | None = None
         self._err_stream: TextIO | None = None
         self._source_fingerprint = self._current_fingerprint()
+        # Plan 00182: monotonically increasing per-request correlation id. The
+        # worker echoes it back; `decide` drops any reply whose id does not match
+        # the current request, so a stale reply buffered by a timed-out tick is
+        # never injected out of turn.
+        self._tick_id = 0
 
     def _current_fingerprint(self) -> str | None:
         """Best-effort source hash of the on-disk supervisor (None on error)."""
@@ -2360,29 +2399,50 @@ class PolicyWorker:
         return self._proc is not None and self._proc.poll() is None
 
     def decide(self, facts: TickFacts) -> TickOutcome | None:
-        """Ask the worker for a decision; None on any failure (host falls back)."""
+        """Ask the worker for a decision; None on any failure (host falls back).
+
+        Plan 00182: each request carries a unique ``tick_id`` the worker echoes
+        back. A reply whose id does not match the current request is a stale
+        reply left buffered by an earlier timed-out (slow) tick -- it is drained
+        and discarded, NEVER returned. Without this, a slow tick's late
+        ``WOULD_COMPACT`` reply would be read on the NEXT tick and injected on
+        top of a still-queued ``/compact``, stacking two compactions.
+        """
         proc = self._proc
         if proc is None or proc.stdin is None or proc.stdout is None or proc.poll() is not None:
             return None
+        self._tick_id += 1
+        tick_id = self._tick_id
         try:
-            proc.stdin.write(_facts_to_json(facts) + "\n")
+            proc.stdin.write(_facts_to_json(replace(facts, tick_id=tick_id)) + "\n")
             proc.stdin.flush()
         except (OSError, ValueError):
             return None
-        # Bounded wait: a hung worker must not stall the PTY host for a whole tick.
-        ready, _, _ = select.select([proc.stdout], [], [], self._read_timeout)
-        if not ready:
-            return None
-        try:
-            line = proc.stdout.readline()
-        except (OSError, ValueError):
-            return None
-        if not line:
-            return None
-        try:
-            return _outcome_from_json(line)
-        except (ValueError, KeyError):
-            return None
+        # Bounded wait: a hung worker must not stall the PTY host for a whole
+        # tick. Drain stale replies (from earlier timed-out ticks) until the
+        # reply matching THIS request arrives or the deadline passes.
+        deadline = time.monotonic() + self._read_timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            ready, _, _ = select.select([proc.stdout], [], [], remaining)
+            if not ready:
+                return None
+            try:
+                line = proc.stdout.readline()
+            except (OSError, ValueError):
+                return None
+            if not line:
+                return None
+            try:
+                outcome = _outcome_from_json(line)
+            except (ValueError, KeyError):
+                return None
+            if outcome.tick_id == tick_id:
+                return outcome
+            # Stale reply from a previously timed-out tick -- discard and keep
+            # reading for the reply that matches this request.
 
     def reload_if_stale(self) -> bool:
         """Respawn the worker if the on-disk supervisor code has changed.
@@ -2702,7 +2762,15 @@ def supervise(
                 )
             )
         if outcome is not None:
-            _apply_decision(outcome, master_writer=_write_master, log=log)
+            # Plan 00182: pass the host's authoritative PRE-tick state so a stale
+            # WOULD_COMPACT reply (worker still MONITOR, host already awaiting)
+            # is suppressed instead of stacking a second /compact.
+            _apply_decision(
+                outcome,
+                master_writer=_write_master,
+                log=log,
+                host_state=machine.state.value,
+            )
             # Adopt the worker's post-tick state so `machine` remains the single
             # source of truth; a later in-process fallback tick then cannot
             # diverge and inject a duplicate /compact (Plan 00164 Phase 4 fix).

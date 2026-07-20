@@ -1,6 +1,6 @@
 # Plan 00182: supervisor compact stacking / double-inject
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-07-20
 **Owner**: joseph
 **Priority**: High
@@ -88,22 +88,21 @@ double-inject.
 
 ### Phase 1: Reproduce (RED)
 
-- [ ] ⬜ **Task 1.1**: Add a failing test in the supervise suite that drives the
-  IPC path: worker `decide()` times out (host falls back, injects #1), then the
-  next tick's `readline()` yields the previous tick's buffered `WOULD_COMPACT`
-  reply — assert the host does NOT inject a second `/compact` (no test today
-  exercises timeout-then-stale-reply; existing tests cover only the Plan 00164
-  fallback-state path and happy-path IPC).
+- [x] ✅ **Task 1.1**: Added `test_decide_drops_stale_buffered_reply` (+ siblings:
+  only-stale→None, matching-reply, worker echoes id, roundtrips) in
+  `test_policy_worker.py` driving the IPC path. Meaningful RED by construction —
+  pre-fix `decide()` returns the stale `/compact`; pre-fix `_apply_decision`
+  injects it.
 
 ### Phase 2: Fix the IPC desync (GREEN)
 
-- [ ] ⬜ **Task 2.1**: Add a per-tick correlation id to the worker
-  request/response and drain/discard any reply whose id does not match the
-  current tick (or drain `proc.stdout` before each write). A reply from a
-  timed-out tick must never be consumed later.
-- [ ] ⬜ **Task 2.2**: State-guard `_apply_decision` (line 2101): do not inject a
-  `WOULD_COMPACT` payload while the host is in `AWAIT_COMPACTING`; log a NOOP
-  reason instead. Defence in depth so any future desync cannot double-inject.
+- [x] ✅ **Task 2.1**: Added a per-request `tick_id` to `TickFacts`/`TickOutcome`
+  (+ serialization + worker echo). `PolicyWorker.decide()` stamps each request
+  and drains/discards any reply whose id does not match, returning None (safe
+  fallback) if only stale replies arrive.
+- [x] ✅ **Task 2.2**: State-guarded `_apply_decision` with a `host_state` param:
+  a `WOULD_COMPACT` outcome is suppressed (logged NOOP) while the host is already
+  `AWAIT_COMPACTING`. Wired from the host loop passing `machine.state.value`.
 
 ### Phase 3: Reduce desync frequency
 

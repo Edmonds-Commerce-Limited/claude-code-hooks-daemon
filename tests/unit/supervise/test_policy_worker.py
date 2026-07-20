@@ -463,3 +463,236 @@ def test_fresh_fallback_without_shared_state_would_double_compact(tmp_path: Path
         freshness_seconds=policy.freshness_seconds,
     )
     assert outcome.decision_value == _mod.Decision.WOULD_COMPACT.value
+
+
+# ── Stale-reply desync / double-compact fix (Plan 00182) ─────────────────────
+#
+# The host<->worker pipe carries one reply per request but had NO correlation
+# id and NO stale-reply drain, and the worker read timeout (2.0s) equalled the
+# poll interval (2.0s). A worker tick that ran just over 2s (it scans all of
+# /proc) timed out; the host fell back and injected /compact #1, then read the
+# worker's now-buffered STALE WOULD_COMPACT reply on the NEXT tick and injected
+# /compact #2 -- stacking two compactions ("Not enough messages to compact.").
+# The fix: a per-request tick_id the worker echoes, so a mismatched (stale)
+# reply is drained and never returned; plus a host-side guard that never injects
+# WOULD_COMPACT while already AWAIT_COMPACTING.
+
+
+def _compact_outcome_json(tick_id: int) -> str:
+    return _mod._outcome_to_json(
+        _mod.TickOutcome(
+            decision_value=_mod.Decision.WOULD_COMPACT.value,
+            reason="red",
+            payload="/compact 🤖 [ccy-supervisor] ...",
+            submit=True,
+            consume_signal_path=None,
+            deferred_log=None,
+            tick_id=tick_id,
+        )
+    )
+
+
+def _noop_outcome_json(tick_id: int) -> str:
+    return _mod._outcome_to_json(
+        _mod.TickOutcome(
+            decision_value=_mod.Decision.NOOP.value,
+            reason="awaiting compaction start",
+            payload=None,
+            submit=True,
+            consume_signal_path=None,
+            deferred_log=None,
+            tick_id=tick_id,
+        )
+    )
+
+
+class _FakeStdout:
+    """A readline()-only stdout backed by a list of pre-buffered lines."""
+
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = list(lines)
+
+    def readline(self) -> str:
+        return self._lines.pop(0) if self._lines else ""
+
+    @property
+    def empty(self) -> bool:
+        return not self._lines
+
+
+class _FakeStdin:
+    def write(self, _s: str) -> None:
+        pass
+
+    def flush(self) -> None:
+        pass
+
+
+class _FakeProc:
+    def __init__(self, stdout: _FakeStdout) -> None:
+        self.stdin = _FakeStdin()
+        self.stdout = stdout
+
+    def poll(self) -> None:
+        return None
+
+
+def _patch_select_on_buffer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make select report ready iff the fake stdout still has buffered lines —
+    decoupling the drain-loop logic test from real fd/buffering behaviour."""
+
+    def fake_select(
+        rlist: list[object], _w: list[object], _x: list[object], _timeout: float
+    ) -> tuple[list[object], list[object], list[object]]:
+        stdout = rlist[0]
+        if getattr(stdout, "empty", True):
+            return ([], [], [])
+        return (rlist, [], [])
+
+    monkeypatch.setattr(_mod.select, "select", fake_select)
+
+
+def test_run_worker_echoes_request_tick_id(tmp_path: Path) -> None:
+    """The worker must stamp each reply with the request's correlation id so the
+    host can match reply→request and drop stale replies."""
+    sidecar_dir = tmp_path / "context-sidecar"
+    facts = _mod.TickFacts(
+        now_wall=1000.0,
+        idle=True,
+        input_line_empty=True,
+        human_compact_submitted=False,
+        work_idle=True,
+        tick_id=7,
+    )
+    out_stream = io.StringIO()
+    _mod.run_worker(
+        io.StringIO(_mod._facts_to_json(facts) + "\n"),
+        out_stream,
+        dry_run=True,
+        sidecar_dir=sidecar_dir,
+        policy=_mod.CompactPolicy(),
+    )
+    assert _mod._outcome_from_json(out_stream.getvalue().strip()).tick_id == 7
+
+
+def test_facts_json_roundtrip_carries_tick_id() -> None:
+    facts = _mod.TickFacts(
+        now_wall=1.5,
+        idle=True,
+        input_line_empty=True,
+        human_compact_submitted=False,
+        work_idle=True,
+        tick_id=42,
+    )
+    assert _mod._facts_from_json(_mod._facts_to_json(facts)).tick_id == 42
+
+
+def test_outcome_json_roundtrip_carries_tick_id() -> None:
+    outcome = _mod.TickOutcome(
+        decision_value="NOOP",
+        reason="r",
+        payload=None,
+        submit=True,
+        consume_signal_path=None,
+        deferred_log=None,
+        tick_id=99,
+    )
+    assert _mod._outcome_from_json(_mod._outcome_to_json(outcome)).tick_id == 99
+
+
+def test_outcome_from_json_defaults_missing_tick_id_to_zero() -> None:
+    # Backward-compat: a legacy worker's JSON without tick_id must still decode.
+    line = json.dumps(
+        {
+            "decision_value": "NOOP",
+            "reason": "r",
+            "payload": None,
+            "submit": True,
+            "consume_signal_path": None,
+            "deferred_log": None,
+            "machine_state": None,
+        }
+    )
+    assert _mod._outcome_from_json(line).tick_id == 0
+
+
+def test_decide_drops_stale_buffered_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE regression: a stale WOULD_COMPACT reply (from a prior timed-out tick)
+    buffered ahead of the fresh reply must be drained, not returned/injected."""
+    _patch_select_on_buffer(monkeypatch)
+    stdout = _FakeStdout([_compact_outcome_json(1) + "\n", _noop_outcome_json(2) + "\n"])
+    worker = _mod.PolicyWorker(SCRIPT_PATH, dry_run=True)
+    worker._proc = _FakeProc(stdout)
+    worker._tick_id = 1  # next decide() → request tick_id=2
+
+    outcome = worker.decide(_idle_facts())
+
+    assert outcome is not None
+    assert outcome.tick_id == 2
+    assert outcome.decision_value == _mod.Decision.NOOP.value
+    assert outcome.payload is None  # NOT the stale /compact
+
+
+def test_decide_returns_none_when_only_stale_reply_buffered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If only a stale reply is buffered (fresh one not yet produced), decide
+    drains the stale and returns None so the host falls back safely — never the
+    stale /compact."""
+    _patch_select_on_buffer(monkeypatch)
+    stdout = _FakeStdout([_compact_outcome_json(1) + "\n"])  # only the stale reply
+    worker = _mod.PolicyWorker(SCRIPT_PATH, dry_run=True)
+    worker._proc = _FakeProc(stdout)
+    worker._tick_id = 1  # next decide() → request tick_id=2
+
+    assert worker.decide(_idle_facts()) is None
+
+
+def test_decide_returns_matching_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Happy path: the reply whose id matches the request is returned."""
+    _patch_select_on_buffer(monkeypatch)
+    stdout = _FakeStdout([_noop_outcome_json(1) + "\n"])
+    worker = _mod.PolicyWorker(SCRIPT_PATH, dry_run=True)
+    worker._proc = _FakeProc(stdout)
+
+    outcome = worker.decide(_idle_facts())  # tick_id → 1
+
+    assert outcome is not None
+    assert outcome.tick_id == 1
+    assert outcome.decision_value == _mod.Decision.NOOP.value
+
+
+def _would_compact_outcome() -> object:
+    return _mod.TickOutcome(
+        decision_value=_mod.Decision.WOULD_COMPACT.value,
+        reason="red",
+        payload="/compact 🤖 [ccy-supervisor] ...",
+        submit=True,
+        consume_signal_path=None,
+        deferred_log=None,
+    )
+
+
+def test_apply_decision_suppresses_stale_compact_while_awaiting() -> None:
+    """Defence-in-depth: a WOULD_COMPACT outcome must NOT be injected while the
+    host is already AWAIT_COMPACTING (a compaction is already in flight)."""
+    injected: list[bytes] = []
+    _mod._apply_decision(
+        _would_compact_outcome(),
+        master_writer=injected.append,
+        log=None,
+        host_state=_mod.SupervisorState.AWAIT_COMPACTING.value,
+    )
+    assert injected == []  # suppressed — no second /compact stacked
+
+
+def test_apply_decision_injects_compact_when_not_awaiting() -> None:
+    """The guard must NOT over-block: a legit WOULD_COMPACT from MONITOR injects."""
+    injected: list[bytes] = []
+    _mod._apply_decision(
+        _would_compact_outcome(),
+        master_writer=injected.append,
+        log=None,
+        host_state=_mod.SupervisorState.MONITOR.value,
+    )
+    assert injected  # injected normally
