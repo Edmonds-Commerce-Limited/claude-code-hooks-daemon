@@ -1594,6 +1594,21 @@ class CompactStateMachine:
         # True when the current AWAIT was entered by a HUMAN /compact (not the
         # supervisor's own inject) -- suppresses the supervisor ESC flush.
         self._await_is_human = False
+        # Plan 00183: dry-run fires ONCE per session, once only. A dry-run marker
+        # is a no-op on the environment (no real /compact), so context stays red
+        # and the machine would re-decide to act every episode -- flooding the
+        # session with fake prompts. This latch is set on the first dry-run
+        # injection and suppresses every one thereafter for the process lifetime.
+        self._dry_run_fired = False
+
+    @property
+    def dry_run_fired(self) -> bool:
+        """True once a dry-run marker has been injected this session (Plan 00183)."""
+        return self._dry_run_fired
+
+    def mark_dry_run_fired(self) -> None:
+        """Latch the dry-run once-only fuse for the process lifetime (Plan 00183)."""
+        self._dry_run_fired = True
 
     def export_state(self) -> dict[str, object]:
         """Serialise the mutable per-episode state (Plan 00164 Phase 4 fix).
@@ -1611,6 +1626,7 @@ class CompactStateMachine:
             "compaction_handled": self._compaction_handled,
             "escapes_sent": self._escapes_sent,
             "await_is_human": self._await_is_human,
+            "dry_run_fired": self._dry_run_fired,
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -1631,6 +1647,8 @@ class CompactStateMachine:
             self._escapes_sent = _coerce_int(state["escapes_sent"])
         if "await_is_human" in state:
             self._await_is_human = bool(state["await_is_human"])
+        if "dry_run_fired" in state:
+            self._dry_run_fired = bool(state["dry_run_fired"])
 
     def evaluate(
         self,
@@ -2126,6 +2144,22 @@ def decide_once(
         foreground_ambiguous=foreground_ambiguous,
     )
     payload = _resolve_payload(evaluation.decision, dry_run=dry_run, now_wall=facts.now_wall)
+    # Plan 00183: dry-run fires ONCE per session, once only. A dry-run marker is a
+    # no-op on the environment (no real /compact), so context stays red and the
+    # machine re-decides to act every episode -- and each marker is Enter-submitted,
+    # so it lands as a real prompt that wakes the agent. Left unlatched this floods
+    # the session (MONITOR -> WOULD_COMPACT -> AWAIT -> WOULD_ESCAPE x N -> ...).
+    # After the FIRST would-be injection we latch OFF for the process lifetime: one
+    # visible demonstration, then silence. Armed mode never latches -- real
+    # compaction feedback resolves each episode there. The latch rides in the
+    # machine state so it round-trips through the policy worker (Plan 00164 P4).
+    dry_run_latched_log: str | None = None
+    if dry_run and payload is not None:
+        if machine.dry_run_fired:
+            payload = None
+            dry_run_latched_log = f"{_NOOP_LOG_PREFIX}: dry-run already fired once this session"
+        else:
+            machine.mark_dry_run_fired()
     # The raw ESC is an interrupt key, not a line -- inject it WITHOUT a trailing
     # Enter. Every other payload (compact / continue / markers) is a line.
     submit = not (evaluation.decision is Decision.WOULD_ESCAPE and not dry_run)
@@ -2156,6 +2190,10 @@ def decide_once(
         and not _is_benign_not_red(reading)
     ):
         noop_reason_log = f"{_NOOP_LOG_PREFIX}: {evaluation.reason}{_noop_band_suffix(reading)}"
+    # A dry-run suppression is not a NOOP decision (the machine still WOULD act),
+    # so the block above skips it -- surface it explicitly for decision.log.
+    if dry_run_latched_log is not None:
+        noop_reason_log = dry_run_latched_log
     return TickOutcome(
         decision_value=evaluation.decision.value,
         reason=evaluation.reason,
