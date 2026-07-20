@@ -102,8 +102,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Handler UX Adjustments
 
-- [00178: git upstream sync checker (fetch + pull policy on session start)](00178-git-upstream-sync-checker/PLAN.md) - In Progress (new `SessionStart` handler `git_upstream_checker`: on new sessions run a full `git fetch --all --prune`, compute ahead/behind vs `@{upstream}`, then apply a configurable `mode` — `warn` (default, strongly advise `git pull`), `agent-pull` (inject a directive so the agent pulls), or `auto-pull` (deterministic `git pull --ff-only` on a clean tree, degrade-to-warn on non-ff/dirty). Git mechanism factored into `utils/git_sync.py`; silent when up to date / not a repo / no upstream. On by default in `warn` like sibling git session handlers)
-
 - [00117: Enable ask_user_question_blocker (dogfood → default-on)](00117-ask-user-question-blocker-default-on/PLAN.md) - Dormant (remaining: flip shipped default + regression test; awaiting scheduling)
 
   - Dogfooding alert: agent stalled twice asking tautological questions ("Should I push?"); the prefix-positive `ask_user_question_blocker` (Plan 00108 / v3.14.0) was shipped `enabled: false` so it never fired
@@ -151,6 +149,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00178: git upstream sync checker (fetch + pull policy on session start)](Completed/00178-git-upstream-sync-checker/PLAN.md) - Complete (new `SessionStart` handler `git_upstream_checker`: on new sessions runs a full `git fetch --all --prune`, computes ahead/behind vs `@{upstream}`, then applies a configurable `mode` — `warn` (default, strongly advise `git pull`), `agent-pull` (inject a directive so the agent pulls first), or `auto-pull` (deterministic `git pull --ff-only` on a clean, non-diverged tree; degrades to a warning on a dirty tree or diverged history). Git mechanism factored into a focused, 100%-covered `utils/git_sync.py`; silent when up to date / not a repo / detached / no upstream. On by default in `warn` like sibling git session handlers. 64 new tests; QA 13/13 (10383 tests, 95.3% cov); verified end-to-end against real git across every mode. Delivery `49ff3430` (git_sync) + `440c1a65` (handler + wiring))
 
 - [00177: Stop hook false "daemon not running" on long sessions](Completed/00177-stop-hook-transcript-timeout-false-daemon-down/PLAN.md) - Complete (downstream field report, verified upstream at v3.44.0 and fixed TDD-first. Root cause: on a huge transcript the Stop hook's `auto_continue_stop` whole-file-parses the transcript up to ~9× per dispatch (matches + handle + Branch-3 + a 6-iteration freshness poll), blowing the client's flat 30 s socket timeout — which `init.sh` then misreported as "Hooks daemon not running - protection not active", steering operators to needlessly restart a healthy daemon. Two fixes: (A) the `init.sh` python forwarder now distinguishes a read-side `socket_timeout` (daemon REACHED + alive, handler slow) from genuine-down — Stop/SubagentStop fails OPEN with an honest "the daemon is ALIVE — do NOT restart; /compact restores fast Stops" diagnostic instead of the misleading block + 30 s stall loop; genuine-down (socket_not_found/connection_refused) stays fail-closed; adds a `CLAUDE_HOOKS_SOCKET_TIMEOUT` env override (default 30). (B) new bounded-tail-read `TranscriptReader.load_tail()` (seek to `max(0,size−1 MiB)`, drop the partial first line, parse only trailing records via a shared `_ingest_record` extracted from `_parse`) wired into `get_transcript_reader` + the freshness poll, so a Stop dispatch is milliseconds regardless of transcript size — the delicate STOPPING-BECAUSE/freshness logic is unchanged, only the reads got cheap. Live proof: a 150 MB transcript Stop probe went 30 s→**0.72 s** with the correct decision. QA 13/13 (10322 tests, 95.2% cov), daemon RUNNING. Follow-ups deferred: per-dispatch memoisation (report §3); ccy supervisor lifetime injection-cap reset (report Appendix A). Delivery `202a4848`/`19e99f16`/`8b032435` + completion commit)
 
@@ -1060,8 +1060,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 178 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
-- **Completed**: 141 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 30 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 142 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 29 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
