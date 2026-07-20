@@ -1247,6 +1247,16 @@ It also detects a **stale running supervisor** (Plan 00164): when a daemon upgra
 
 When you see this alert, fix the listed item(s) and commit the ccy files so the supervisor works for everyone.
 
+## git_upstream_checker — full fetch + pull policy on session start
+
+On each new session the daemon runs a full `git fetch --all --prune` and, if your branch is behind its upstream, acts on the configured `mode`:
+
+- `warn` (default): strongly advises you to run `git pull`.
+- `agent-pull`: instructs you to run `git pull` as your first action.
+- `auto-pull`: the daemon runs `git pull --ff-only` for you on a clean, non-diverged tree; if it cannot fast-forward (dirty tree or diverged history) it degrades to a warning and you pull manually.
+
+It is silent when up to date, not in a git repo, on a detached HEAD, or when the branch has no upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
+
 ## idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
 
 When the session is idle and caught up (repeated no-op failsafe-recovery ticks), this advisory suggests a bounded HOUSEKEEPING MODE: dispatch specialist housekeeping sub-agents that run read-only audits and write shareable **markdown report files** (default `untracked/reports/`). It is REPORT-ONLY — never auto-fix or auto-commit — and strictly lower priority than real work (a real user prompt aborts it). Off by default; enable via `handlers.user_prompt_submit.idle_housekeeping_advisory.enabled: true`. A project can point it at its own doc via the `custom_guidance_doc` option (`custom_guidance_mode: additive` appends it to the default, `replace` uses only the project doc). See docs/guides/CREATING_REPORTS.md.
