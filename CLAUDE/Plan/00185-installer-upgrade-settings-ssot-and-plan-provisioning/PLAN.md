@@ -216,7 +216,20 @@ consume, and the pieces 00176 does not cover:
 <!-- Curated milestones + delivery commit hashes only (git is the SSoT for
      "when"). Blow-by-blow log lives in JOURNAL/00185-Journal-YY-MM-DD.md. -->
 
-- Plan created; root cause established across install/upgrade/checker paths.
+- Plan created; root cause established across install/upgrade/checker paths — `daa273ca`.
+- Phase 1 — SSoT reconciler core (`reconcile_settings_hooks`) — `521fc96e`.
+- Phase 2 — self-healing checker (the flood fix; no reinstall needed) — `84a7b9d4`.
+- Phase 1.3/1.4 + 4.1 — `reconcile-settings` CLI, SSoT bash fallback, drift guard — `71fed429`.
+- Phase 3.1 — `deploy-plan-workflow` CLI — `7841550b`.
+- Phase 4.2 — full QA 13/13 (10503 tests, 95.2% cov); format auto-fix — `7b9541fc`.
+
+**Status of concerns raised by the user:**
+
+- Registration flood: **FIXED** — self-heal repairs an already-installed project
+  on its next session; fresh install/upgrade stay SSoT-correct; drift guard
+  prevents recurrence.
+- Plan/journal provisioning: **recovery path shipped** (`deploy-plan-workflow`);
+  proactive SessionStart advisory (Task 3.2) is the one tracked remaining item.
 
 ## Notes & Updates
 
