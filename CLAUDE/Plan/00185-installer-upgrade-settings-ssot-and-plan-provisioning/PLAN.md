@@ -168,12 +168,18 @@ consume, and the pieces 00176 does not cover:
 
 ### Phase 3: Plan-workflow on-demand deploy + drift advisory
 
-- [ ] ⬜ **Task 3.1**: RED/GREEN — new CLI subcommand
-  `deploy-plan-workflow` calling `deploy_plan_workflow_if_enabled`.
-- [ ] ⬜ **Task 3.2**: RED/GREEN — SessionStart drift advisory: when
+- [x] ✅ **Task 3.1**: `deploy-plan-workflow` CLI added (wraps
+  `deploy_plan_workflow_if_enabled`; `--project-root`). 3 tests; live `--help` ok.
+  Found (not fixed here) that the deploy fn's docstring claims a missing config
+  defaults to *enabled*, but `PlanWorkflowConfig.enabled` defaults to **False** —
+  noted for a follow-up doc fix.
+- [ ] ⬜ **Task 3.2**: SessionStart drift advisory: when
   `plan_workflow.enabled: true` but core assets (`mkplan.bash`,
-  `_JOURNAL_TEMPLATE_.md`, `PlanJournalling.md`) are missing, advise running the
-  new command. Silent when assets present or workflow disabled.
+  `_JOURNAL_TEMPLATE_.md`, `PlanJournalling.md`) are missing, advise running
+  `deploy-plan-workflow`. Silent when assets present or workflow disabled.
+  **REMAINING** — separable enhancement (a new handler needs config-default
+  registration + docs regen + acceptance + daemon-load verification); the 3.1 CLI
+  already gives users the recovery path.
 
 ### Phase 4: Regression guards + dogfood
 

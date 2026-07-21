@@ -3176,6 +3176,38 @@ def cmd_reconcile_settings(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_deploy_plan_workflow(args: argparse.Namespace) -> int:
+    """(Re)deploy plan-workflow assets on demand (Plan 00185).
+
+    Wraps the single deploy decision site ``deploy_plan_workflow_if_enabled`` so
+    a user who flips ``plan_workflow.enabled: true`` after install, or partially
+    hand-scaffolds the plan tree, can seed the daemon-owned assets
+    (``mkplan.bash``, ``_TEMPLATE_.md``, ``_JOURNAL_TEMPLATE_.md``,
+    ``PlanJournalling.md``) without a full reinstall/upgrade. Idempotent — fills
+    gaps only, never overwrites client-owned files.
+
+    Args:
+        args: Parsed CLI arguments with ``project_root`` (Path).
+
+    Returns:
+        0 on success (including a config-disabled no-op); 1 on failure.
+    """
+    from claude_code_hooks_daemon.install.plan_workflow import (
+        deploy_plan_workflow_if_enabled,
+    )
+
+    project_root: Path = args.project_root
+    config_path = project_root / ".claude" / "hooks-daemon.yaml"
+
+    result = deploy_plan_workflow_if_enabled(project_root, config_path)
+    for message in result.messages:
+        print(message)
+    if not result.success:
+        print("ERROR: plan workflow deployment failed", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_plan_qa(args: argparse.Namespace) -> int:
     """Run plan QA checks (Plan 00144): sweep, staged gate, or single-file lint.
 
@@ -4166,6 +4198,19 @@ def main() -> int:
         help="Dry-run: exit 1 if any wired registration is missing, do not modify the file",
     )
     parser_reconcile.set_defaults(func=cmd_reconcile_settings)
+
+    # deploy-plan-workflow (Plan 00185) — on-demand plan/journal asset (re)deploy
+    parser_deploy_plan = subparsers.add_parser(
+        "deploy-plan-workflow",
+        help="(Re)deploy plan-workflow assets (mkplan.bash, journal templates) if enabled",
+    )
+    parser_deploy_plan.add_argument(
+        "--project-root",
+        type=Path,
+        default=Path.cwd(),
+        help="Project root (default: current directory)",
+    )
+    parser_deploy_plan.set_defaults(func=cmd_deploy_plan_workflow)
 
     parser_bug_report = subparsers.add_parser(
         "bug-report",
