@@ -10,6 +10,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00172: Close the HandlersConfig ↔ wired-events coverage gap](00172-handlerconfig-wired-events-coverage-gap/PLAN.md) - Not Started (follow-up from the `status_line` config-drop fix audit: `HandlersConfig` declares only 11 of 31 wired events, so `_build_handler_config_mapping` would silently drop config for any of the 20 Plan-00170 wired events that later gains built-in handlers — the same failure mode, re-armed. Also fixes `PluginConfig.event_type`'s parallel omission and hardens the drift tests to cross-check `wired_event_metas()` instead of mirroring hand-maintained lists. Latent today; guardrail-completeness work)
 
+- [00186: Review follow-ups from Plan 00185 (DRY + hardening)](00186-review-followups-plan-00185-dry-hardening/PLAN.md) - In Progress (closes the loop on the 3 non-blocking findings from the v3.48.0 code-review gate per RELEASING.md "Never drop a finding": F1 — make the settings.json self-heal write atomic (temp + `os.replace`) in `settings_repair.py` so a crash mid-write can't truncate the file; F2 — drift-guard the timeout duplication between `install.py` and `hook_registration.py` (value + event set + command shape) so the SSoT drift test catches a future divergence; F3 — document the intentional double-reconcile in `cmd_reconcile_settings` (reuses the audited fail-safe writer). v3.48.0 shipped clean; this is the post-release follow-up)
+
 ### Status Line / Agent View
 
 - [00175: statusline refreshInterval first-class default + startup validation](00175-statusline-refresh-interval-first-class/PLAN.md) - In Progress (root-caused the Ctrl+Z notice lag to `statusLine.refreshInterval: 10` — Claude Code re-runs the status command only on events (Ctrl+Z is not one) plus this optional timer whose minimum is 1s, so an idle Ctrl+Z waited ~5s. Shipped deliverable: lowered the deployed default to `refreshInterval: 1` in the daemon's own `.claude/settings.json`, which `install_version.sh`/`upgrade_version.sh` copy **verbatim** into every client on install AND upgrade — so the fix rolls out automatically. Remaining/optional: lower the `_RECOMMENDED_REFRESH_INTERVAL_S` suggestion constant 10→1 + the fallback `generate_settings_json`, and a warn-only `statusline_refresh_checker` SessionStart advisory for the pre-upgrade window. Supersedes Plan 00174 (artefact store unnecessary — render is already ~39ms git-cached and Claude Code's 1s refresh floor caps any benefit); salvage carried forward = scope-keyed per-session cache correctness. The wider "we clobber the client's settings.json on every upgrade" concern this surfaced is tracked in Plan 00176)
@@ -1073,9 +1075,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 185 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
+- **Total Plans Created**: 186 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
 - **Completed**: 149 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 29 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 30 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
