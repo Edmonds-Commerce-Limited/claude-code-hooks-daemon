@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,6 +33,10 @@ logger = logging.getLogger(__name__)
 
 # The suffix appended to ``settings.json`` for the one-shot backup.
 BACKUP_SUFFIX = ".bak.pre-registration-repair"
+
+# The suffix for the transient staging file used by the atomic write (temp +
+# os.replace). It is renamed into place on success and unlinked on failure.
+_TMP_SUFFIX = ".tmp.registration-repair"
 
 
 @dataclass(frozen=True)
@@ -84,13 +89,21 @@ def repair_settings_registrations(settings_path: Path) -> RepairResult:
         return RepairResult(repaired=False)
 
     backup_path = settings_path.with_name(settings_path.name + BACKUP_SUFFIX)
+    tmp_path = settings_path.with_name(settings_path.name + _TMP_SUFFIX)
     backup_created: Path | None = None
     try:
         if not backup_path.exists():
             # copy2 preserves mtime/permissions and copies the exact bytes.
             shutil.copy2(settings_path, backup_path)
             backup_created = backup_path
-        settings_path.write_text(json.dumps(new_settings, indent=2) + "\n", encoding="utf-8")
+        # Atomic write: stage the merged JSON in a sibling temp file, then rename
+        # it into place. os.replace is atomic on the same filesystem, so a crash
+        # mid-write can never leave settings.json truncated — readers see either
+        # the old file or the fully-merged one, never a partial. A failed replace
+        # leaves the temp behind (harmless — the next repair overwrites it before
+        # its own replace); mirrors utils.retention's atomic-trim pattern.
+        tmp_path.write_text(json.dumps(new_settings, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp_path, settings_path)
     except OSError as exc:
         logger.warning("settings registration repair aborted for %s: %s", settings_path, exc)
         return RepairResult(repaired=False)

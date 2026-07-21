@@ -26,6 +26,11 @@ import sys
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants.events import STATUS_LINE_JSON_KEY, wired_event_metas
+from claude_code_hooks_daemon.utils.hook_registration import (
+    _BASH_KEYS_WITH_TIMEOUT,
+    _DEFAULT_HOOK_TIMEOUT_SECONDS,
+    _HOOK_COMMAND_TEMPLATE,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -72,3 +77,33 @@ def test_hooks_deploy_basenames_match_catalogue() -> None:
     # The deployed forwarders are exactly the wired bash_keys (status-line
     # included — the script is deployed even though it registers elsewhere).
     assert basenames == _wired_bash_keys_all()
+
+
+def test_install_py_timeout_set_matches_reconciler() -> None:
+    # The set of forwarders that carry an explicit per-invocation timeout must be
+    # identical in install.py and the reconciler, else a fresh install and the
+    # session self-heal would disagree on which hooks get a timeout.
+    install = _load_install_module()
+    assert set(install._HOOKS_WITH_TIMEOUT) == set(_BASH_KEYS_WITH_TIMEOUT)
+
+
+def test_install_py_timeout_value_matches_reconciler() -> None:
+    # install.py hardcodes the timeout literal inline in create_all_hooks; guard
+    # it against the reconciler's _DEFAULT_HOOK_TIMEOUT_SECONDS so the two never
+    # silently drift to different values.
+    text = (_REPO_ROOT / "install.py").read_text()
+    match = re.search(r'command\["timeout"\]\s*=\s*(\d+)', text)
+    assert match is not None, "could not locate the timeout assignment in install.py"
+    assert int(match.group(1)) == _DEFAULT_HOOK_TIMEOUT_SECONDS
+
+
+def test_install_py_command_template_matches_reconciler() -> None:
+    # install.py's _hook_cmd f-string and the reconciler's _HOOK_COMMAND_TEMPLATE
+    # must render byte-identical commands, else fresh-install and self-heal would
+    # register different command strings for the same event.
+    text = (_REPO_ROOT / "install.py").read_text()
+    match = re.search(r"return (f'[^']*/\.claude/hooks/\{bash_key\}')", text)
+    assert match is not None, "could not locate the _hook_cmd template in install.py"
+    # Normalise both to the same placeholder form for comparison.
+    install_template = match.group(1)[2:-1]  # strip the f'...' wrapper
+    assert install_template == _HOOK_COMMAND_TEMPLATE

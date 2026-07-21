@@ -1,6 +1,6 @@
 # Plan 00186: Review follow-ups from Plan 00185 (DRY + hardening)
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-21
 **Owner**: joseph
 **Priority**: Medium
@@ -44,34 +44,38 @@ the loop on the three items so the review value is not lost as silent tech debt.
 
 ### Phase 1: F1 — atomic self-heal write
 
-- [ ] ⬜ **Task 1.1**: RED — test that `repair_settings_registrations` never
-  leaves a partially-written file and writes via a temp+rename (assert no
-  `*.tmp` residue; content valid JSON post-write).
-- [ ] ⬜ **Task 1.2**: GREEN — write to `settings_path.with_suffix(...)`-style
-  sibling temp then `os.replace`; keep the one-shot backup semantics unchanged.
+- [x] ✅ **Task 1.1**: RED — tests that `repair_settings_registrations` leaves no
+  temp residue on success and, if `os.replace` fails, leaves the live
+  `settings.json` byte-for-byte intact (never truncated).
+- [x] ✅ **Task 1.2**: GREEN — stage the merged JSON in a sibling
+  `.tmp.registration-repair` file then `os.replace` it into place (atomic on the
+  same filesystem); temp unlinked on failure; one-shot backup unchanged.
 
 ### Phase 2: F2 — drift-guard the timeout duplication
 
-- [ ] ⬜ **Task 2.1**: Extend `test_settings_sources_ssot_drift.py` to assert
-  install.py's `_HOOKS_WITH_TIMEOUT` == the `hook_registration` timeout event
-  set (by `bash_key`), the literal timeout value == `_DEFAULT_HOOK_TIMEOUT_SECONDS`,
-  and the command template agrees.
+- [x] ✅ **Task 2.1**: Extended `test_settings_sources_ssot_drift.py` — asserts
+  install.py's `_HOOKS_WITH_TIMEOUT` == `_BASH_KEYS_WITH_TIMEOUT`, the inline
+  timeout literal == `_DEFAULT_HOOK_TIMEOUT_SECONDS`, and install.py's `_hook_cmd`
+  template == `_HOOK_COMMAND_TEMPLATE`. 3 new guards.
 
 ### Phase 3: F3 — document the intentional double-reconcile
 
-- [ ] ⬜ **Task 3.1**: Add an in-code comment in `cmd_reconcile_settings`
-  explaining the exists+write branch reuses the fail-safe writer deliberately.
+- [x] ✅ **Task 3.1**: Added an in-code comment in `cmd_reconcile_settings`
+  explaining the exists+write branch deliberately reuses the fail-safe writer so
+  the backup/atomic-write/malformed guards live in one audited place.
 
 ### Phase 4: verify
 
-- [ ] ⬜ **Task 4.1**: Full QA `llm_qa.py all` 13/13; daemon restart RUNNING.
+- [x] ✅ **Task 4.1**: Full QA `llm_qa.py all` 13/13 (10520 tests, 95.2% cov);
+  daemon restart RUNNING. (First run flagged `error_hiding` on the F1 temp
+  cleanup; fixed by matching `utils/retention.py`'s no-cleanup atomic pattern.)
 
 ## Success Criteria
 
-- [ ] Self-heal write is atomic; regression test proves no partial write.
-- [ ] The timeout duplication is drift-guarded (a divergence fails the test).
-- [ ] F3 resolved (documented); no double-reconcile confusion for future readers.
-- [ ] QA 13/13; daemon RUNNING.
+- [x] Self-heal write is atomic; regression test proves no partial write.
+- [x] The timeout duplication is drift-guarded (a divergence fails the test).
+- [x] F3 resolved (documented); no double-reconcile confusion for future readers.
+- [x] QA 13/13; daemon RUNNING.
 
 ## Dependencies
 
@@ -82,4 +86,7 @@ the loop on the three items so the review value is not lost as silent tech debt.
 <!-- Curated milestones + delivery commit hashes only (git is the SSoT for
      "when"). Blow-by-blow log lives in JOURNAL/00186-Journal-YY-MM-DD.md. -->
 
-- Plan created to capture the 3 non-blocking v3.48.0 review findings.
+- Plan created to capture the 3 non-blocking v3.48.0 review findings — `e5f02f4d`.
+- F1 atomic self-heal write + F2 timeout drift guard + F3 documented reconcile;
+  QA 13/13 (10520 tests, 95.2% cov) — delivered in the `Plan 00186: Complete`
+  closure commit.

@@ -3157,7 +3157,11 @@ def cmd_reconcile_settings(args: argparse.Namespace) -> int:
         return 0
 
     if path.exists():
-        # Existing file: repair util writes a one-shot backup then persists.
+        # Existing file: deliberately delegate to the fail-safe writer rather
+        # than persisting the ``new_settings`` computed above. This re-reads and
+        # re-reconciles (an intentional, negligible O(events) second pass) so the
+        # one-shot backup + atomic-write + malformed-file guards live in exactly
+        # ONE audited place (settings_repair) instead of being duplicated here.
         repair_result = repair_settings_registrations(path)
         if not repair_result.repaired:
             print(f"ERROR: failed to write settings.json at {path}", file=sys.stderr)
