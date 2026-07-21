@@ -15,7 +15,10 @@ Validates:
 
 from __future__ import annotations
 
-from claude_code_hooks_daemon.constants.events import wired_event_metas
+from dataclasses import dataclass, field
+from typing import Any
+
+from claude_code_hooks_daemon.constants.events import EventID, wired_event_metas
 
 # ---------------------------------------------------------------------------
 # Single source of truth: expected hook events in settings.json
@@ -255,3 +258,87 @@ def validate_hook_commands(settings: dict[str, object]) -> list[str]:
             )
 
     return issues
+
+
+# ---------------------------------------------------------------------------
+# SSoT-derived reconciliation (merge, not clobber)
+# ---------------------------------------------------------------------------
+# The reconciler ADDS every missing wired hook registration to a settings dict
+# while preserving everything else. It is the single callable shared by the
+# session-time self-heal (hook_registration_checker) and the install/upgrade
+# merge (Plan 00176). The command shape mirrors install.py's post-Plan-00102
+# ``bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/<bash_key>`` form so the exec bit on
+# the forwarder is irrelevant. Command-SHAPE fixes for already-present events
+# stay the responsibility of ``migrate_settings_to_bash_invocation`` — the
+# reconciler only fills in MISSING events, never rewrites present ones.
+
+_HOOK_COMMAND_TYPE = "command"
+_HOOK_COMMAND_TEMPLATE = 'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash_key}'
+_DEFAULT_HOOK_TIMEOUT_SECONDS = 60
+# PreToolUse / PostToolUse carry an explicit per-invocation timeout; all other
+# forwarders use Claude Code's default. Kept in lockstep with install.py's
+# ``_HOOKS_WITH_TIMEOUT`` via the shared EventID bash_keys.
+_BASH_KEYS_WITH_TIMEOUT = frozenset(
+    {EventID.PRE_TOOL_USE.bash_key, EventID.POST_TOOL_USE.bash_key}
+)
+
+
+@dataclass(frozen=True)
+class ReconcileResult:
+    """Outcome of a settings.json hook reconciliation pass.
+
+    Attributes:
+        changed: True iff one or more missing registrations were added.
+        events_added: Sorted json_keys of the events that were added (empty
+            when ``changed`` is False).
+    """
+
+    changed: bool
+    events_added: list[str] = field(default_factory=list)
+
+
+def _build_hook_registration(bash_key: str) -> list[dict[str, Any]]:
+    """Build the settings.json ``hooks[event]`` value for a single forwarder."""
+    command: dict[str, Any] = {
+        "type": _HOOK_COMMAND_TYPE,
+        "command": _HOOK_COMMAND_TEMPLATE.format(bash_key=bash_key),
+    }
+    if bash_key in _BASH_KEYS_WITH_TIMEOUT:
+        command["timeout"] = _DEFAULT_HOOK_TIMEOUT_SECONDS
+    return [{"hooks": [command]}]
+
+
+def reconcile_settings_hooks(
+    settings: dict[str, Any],
+) -> tuple[dict[str, Any], ReconcileResult]:
+    """Return a new settings dict with every missing wired hook registered.
+
+    Pure function — the input ``settings`` is never mutated. The full wired
+    hook set is derived from the SSoT (``HOOK_EVENTS_IN_SETTINGS`` /
+    ``wired_event_metas()``); StatusLine is excluded (top-level key). Present
+    events — including any client-added custom entries — are left untouched, and
+    all non-``hooks`` top-level keys (``permissions``/``env``/``statusLine``/…)
+    are preserved. A malformed (non-dict) ``hooks`` value is replaced with a
+    fresh, fully-wired block rather than crashing.
+
+    Args:
+        settings: Parsed contents of a settings.json (may be empty/partial).
+
+    Returns:
+        ``(new_settings, ReconcileResult)`` where ``new_settings`` is a shallow
+        copy with missing registrations added.
+    """
+    new_settings = dict(settings)
+
+    existing_hooks = new_settings.get("hooks")
+    new_hooks: dict[str, Any] = dict(existing_hooks) if isinstance(existing_hooks, dict) else {}
+
+    events_added: list[str] = []
+    for json_key in sorted(HOOK_EVENTS_IN_SETTINGS.keys()):
+        if json_key in new_hooks:
+            continue
+        new_hooks[json_key] = _build_hook_registration(HOOK_EVENTS_IN_SETTINGS[json_key])
+        events_added.append(json_key)
+
+    new_settings["hooks"] = new_hooks
+    return new_settings, ReconcileResult(changed=bool(events_added), events_added=events_added)

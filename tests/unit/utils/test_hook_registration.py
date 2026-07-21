@@ -5,9 +5,11 @@ from __future__ import annotations
 from claude_code_hooks_daemon.constants.events import EventID, EventIDMeta
 from claude_code_hooks_daemon.utils.hook_registration import (
     HOOK_EVENTS_IN_SETTINGS,
+    ReconcileResult,
     detect_duplicate_hooks,
     detect_legacy_hook_commands,
     detect_local_hooks_misplacement,
+    reconcile_settings_hooks,
     validate_hook_commands,
     validate_settings_hooks,
 )
@@ -426,3 +428,109 @@ class TestDetectLegacyHookCommands:
             }
         }
         assert detect_legacy_hook_commands(settings) == []
+
+
+class TestReconcileSettingsHooks:
+    """SSoT-derived, idempotent MERGE that ADDS missing wired hook registrations.
+
+    Unlike ``validate_settings_hooks`` (detect-only), ``reconcile_settings_hooks``
+    returns a NEW settings dict with every missing wired event added, while
+    preserving everything else (``permissions``/``env``/``statusLine``/unknown
+    keys and any client-added hook entries). Input is never mutated.
+    """
+
+    def _wired_json_keys(self) -> set[str]:
+        return set(HOOK_EVENTS_IN_SETTINGS.keys())
+
+    def test_adds_all_missing_events_to_empty_settings(self) -> None:
+        new_settings, result = reconcile_settings_hooks({})
+        assert isinstance(result, ReconcileResult)
+        assert result.changed is True
+        assert set(result.events_added) == self._wired_json_keys()
+        assert set(new_settings["hooks"].keys()) == self._wired_json_keys()
+
+    def test_result_reports_sorted_events(self) -> None:
+        _, result = reconcile_settings_hooks({})
+        assert result.events_added == sorted(result.events_added)
+
+    def test_reconciled_output_passes_validators(self) -> None:
+        new_settings, _ = reconcile_settings_hooks({})
+        assert validate_settings_hooks(new_settings) == []
+        assert validate_hook_commands(new_settings) == []
+
+    def test_adds_only_missing_events(self) -> None:
+        # PreToolUse already present and correct — must not be re-added.
+        existing = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": 'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/pre-tool-use',
+                                "timeout": 60,
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        _, result = reconcile_settings_hooks(existing)
+        assert "PreToolUse" not in result.events_added
+        assert self._wired_json_keys() - {"PreToolUse"} == set(result.events_added)
+
+    def test_idempotent_when_all_present(self) -> None:
+        full = _build_settings_with_all_hooks()
+        new_settings, result = reconcile_settings_hooks(full)
+        assert result.changed is False
+        assert result.events_added == []
+        assert new_settings["hooks"].keys() == full["hooks"].keys()
+
+    def test_preserves_permissions_env_statusline_and_unknown_keys(self) -> None:
+        existing = {
+            "permissions": {"allow": ["Bash(ls:*)"]},
+            "env": {"FOO": "bar"},
+            "statusLine": {"type": "command", "command": "my-custom-status"},
+            "customKey": {"nested": True},
+        }
+        new_settings, _ = reconcile_settings_hooks(existing)
+        assert new_settings["permissions"] == {"allow": ["Bash(ls:*)"]}
+        assert new_settings["env"] == {"FOO": "bar"}
+        assert new_settings["statusLine"] == {"type": "command", "command": "my-custom-status"}
+        assert new_settings["customKey"] == {"nested": True}
+
+    def test_preserves_existing_client_hook_entries(self) -> None:
+        # A client added an extra custom hook entry under an event that already
+        # exists — reconciliation must not touch present events.
+        custom_entry = {"hooks": [{"type": "command", "command": "/my/custom/script"}]}
+        existing = {"hooks": {"PreToolUse": [custom_entry]}}
+        new_settings, result = reconcile_settings_hooks(existing)
+        assert new_settings["hooks"]["PreToolUse"] == [custom_entry]
+        assert "PreToolUse" not in result.events_added
+
+    def test_pre_and_post_tool_use_get_timeout(self) -> None:
+        new_settings, _ = reconcile_settings_hooks({})
+        for json_key in ("PreToolUse", "PostToolUse"):
+            cmd = new_settings["hooks"][json_key][0]["hooks"][0]
+            assert cmd["timeout"] == 60
+        # A non-timeout event must NOT carry a timeout key.
+        session_cmd = new_settings["hooks"]["SessionStart"][0]["hooks"][0]
+        assert "timeout" not in session_cmd
+
+    def test_added_commands_use_bash_wrapper_form(self) -> None:
+        new_settings, _ = reconcile_settings_hooks({})
+        for json_key, bash_key in HOOK_EVENTS_IN_SETTINGS.items():
+            cmd = new_settings["hooks"][json_key][0]["hooks"][0]["command"]
+            assert cmd == f'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash_key}'
+
+    def test_input_not_mutated(self) -> None:
+        original = {"hooks": {}, "permissions": {"allow": []}}
+        reconcile_settings_hooks(original)
+        assert original == {"hooks": {}, "permissions": {"allow": []}}
+
+    def test_handles_non_dict_hooks_gracefully(self) -> None:
+        # A malformed hooks value is replaced with a fresh, fully-wired block
+        # rather than crashing.
+        new_settings, result = reconcile_settings_hooks({"hooks": "broken"})
+        assert result.changed is True
+        assert set(new_settings["hooks"].keys()) == self._wired_json_keys()
