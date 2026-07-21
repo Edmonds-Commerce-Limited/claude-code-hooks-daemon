@@ -278,9 +278,7 @@ _DEFAULT_HOOK_TIMEOUT_SECONDS = 60
 # PreToolUse / PostToolUse carry an explicit per-invocation timeout; all other
 # forwarders use Claude Code's default. Kept in lockstep with install.py's
 # ``_HOOKS_WITH_TIMEOUT`` via the shared EventID bash_keys.
-_BASH_KEYS_WITH_TIMEOUT = frozenset(
-    {EventID.PRE_TOOL_USE.bash_key, EventID.POST_TOOL_USE.bash_key}
-)
+_BASH_KEYS_WITH_TIMEOUT = frozenset({EventID.PRE_TOOL_USE.bash_key, EventID.POST_TOOL_USE.bash_key})
 
 
 @dataclass(frozen=True)

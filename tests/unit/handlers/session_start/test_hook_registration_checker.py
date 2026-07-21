@@ -446,9 +446,7 @@ class TestHookRegistrationCheckerAutoRepair:
     ) -> None:
         # Disable BOTH self-heal paths so the file is provably untouched; the
         # command-shape migration would otherwise rewrite the bare-path fixture.
-        handler.configure(
-            {"auto_repair_registrations": False, "auto_migrate_settings": False}
-        )
+        handler.configure({"auto_repair_registrations": False, "auto_migrate_settings": False})
         settings = _build_valid_settings()
         del settings["hooks"]["Stop"]
 
