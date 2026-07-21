@@ -1,0 +1,59 @@
+version: "3.48.0"
+date: "2026-07-21"
+
+breaking: false
+
+config_changes:
+  added:
+    - key: handlers.session_start.hook_registration_checker.options.auto_repair_registrations
+      description: >
+        Controls whether hook_registration_checker self-heals a stale
+        settings.json on session start by merging the full SSoT-derived
+        hook registration set into it (additive; preserves
+        permissions/env/statusLine and any client-added hooks; one-shot
+        backup to settings.json.bak.pre-registration-repair). Defaults to
+        true. This closes the "Missing hook registration for {Event}"
+        flood on already-installed/upgraded projects without requiring a
+        reinstall.
+      example_yaml: |
+        handlers:
+          session_start:
+            hook_registration_checker:
+              enabled: true
+              options:
+                auto_repair_registrations: true
+      migration_note: >
+        On by default; stops the SessionStart registration-warning flood
+        automatically on the next session. Set to false to opt out and
+        fall back to advisory-only warnings (re-run the installer or add
+        the missing entry manually).
+      recommended: true
+      dormant: false
+      recommended_value: true
+
+    - key: handlers.session_start.plan_workflow_asset_checker
+      description: >
+        New SessionStart advisory handler (priority 59) that fires when
+        plan_workflow.enabled is true but the daemon-owned mkplan.bash /
+        journal template assets are missing from the plan directory. Never
+        blocks; recommends running `deploy-plan-workflow` to (re)provision
+        them. Enabled by default.
+      example_yaml: |
+        handlers:
+          session_start:
+            plan_workflow_asset_checker:
+              enabled: true
+              priority: 59
+      migration_note: >
+        Enabled by default; only relevant if you use plan_workflow. No
+        action required — if plan_workflow is disabled or its assets are
+        already present, the handler is silent.
+      recommended: true
+      dormant: false
+      recommended_value: true
+
+  renamed: []
+
+  removed: []
+
+  changed: []

@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.48.0] - 2026-07-21
+
+This is a **minor release** delivering Plan 00185: installer/upgrade
+`settings.json` SSoT reconciliation and plan-workflow asset provisioning.
+It fixes the SessionStart "Missing hook registration for {Event}" flood on
+installed/upgraded projects by adding a shared, idempotent settings
+reconciler used both by the installer and by a new opt-out session-time
+self-heal, and adds an on-demand plan-workflow asset deployer plus an
+advisory handler that detects when plan-workflow assets are missing.
+
+### Added
+
+- **`reconcile-settings` CLI** (create/merge/`--check`) built on a new
+  shared `reconcile_settings_hooks()` merge core, SSoT-derived from
+  `wired_event_metas()`. Idempotent; preserves `permissions`/`env`/
+  `statusLine` and any client-added hooks. `install_version.sh`'s
+  `generate_settings_json` now delegates to it, demoting the previously
+  drifting 15-event bash heredoc to an inert last resort.
+- **SSoT drift regression test** (`test_settings_sources_ssot_drift.py`)
+  guarding the installer/reconciler settings sources against future drift.
+- **`deploy-plan-workflow` CLI** — on-demand (re)deploy of `mkplan.bash`,
+  `_JOURNAL_TEMPLATE_.md`, and `PlanJournalling.md`.
+- **New SessionStart advisory handler `plan_workflow_asset_checker`**
+  (priority 59, enabled by default) — fires when `plan_workflow.enabled`
+  but its assets (`mkplan.bash` / journal template) are missing.
+
+### Changed
+
+- Shares its settings-reconciliation core with the upgrade-time shell
+  merge added in Plan 00176.
+
+### Fixed
+
+- **SessionStart "Missing hook registration for {Event}" flood** on
+  already-installed/upgraded projects. `hook_registration_checker` now
+  self-heals stale `settings.json` on the next session via
+  `utils/settings_repair.py`, gated by the new opt-out option
+  `auto_repair_registrations` (default `true`), taking a one-shot
+  `.bak.pre-registration-repair` backup before merging. No reinstall
+  required.
+
 ## [3.47.0] - 2026-07-20
 
 This is a **minor release** adding a read-only `disk-usage` CLI report and
