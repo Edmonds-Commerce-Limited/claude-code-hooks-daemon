@@ -28,6 +28,10 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     validate_hook_commands,
     validate_settings_hooks,
 )
+from claude_code_hooks_daemon.utils.settings_repair import (
+    RepairResult,
+    repair_settings_registrations,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +72,16 @@ class HookRegistrationCheckerHandler(Handler):
         # ``bash <path>`` form on first new session after upgrade. Opt-out
         # via .claude/hooks-daemon.yaml:
         #   handlers.session_start.hook_registration_checker.options.auto_migrate_settings: false
-        self.config: dict[str, Any] = {"auto_migrate_settings": True}
+        #
+        # Plan 00185 Phase 2: auto-repair MISSING wired hook registrations by
+        # merging them (SSoT-derived) into settings.json. This is what lets an
+        # already-installed project stop the "Missing hook registration" flood on
+        # its next session without a reinstall. Opt-out via:
+        #   handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false
+        self.config: dict[str, Any] = {
+            "auto_migrate_settings": True,
+            "auto_repair_registrations": True,
+        }
 
     def configure(self, config: dict[str, Any]) -> None:
         """Apply per-handler config from the daemon's config loader."""
@@ -166,6 +179,19 @@ class HookRegistrationCheckerHandler(Handler):
                 logger.warning("Hook command migration aborted: %s", exc)
                 migration_result = None
 
+        # Plan 00185 Phase 2: self-heal — add any MISSING wired hook
+        # registrations to settings.json (SSoT-derived merge, additive and
+        # idempotent) BEFORE the audit below, so the audit sees the repaired
+        # shape and the flood stops on this very session. Fail-safe: any
+        # read/write error leaves the file untouched and the audit still warns.
+        repair_result: RepairResult | None = None
+        if self.config.get("auto_repair_registrations", True):
+            try:
+                repair_result = repair_settings_registrations(claude_dir / _SETTINGS_FILE)
+            except OSError as exc:
+                logger.warning("Hook registration repair aborted: %s", exc)
+                repair_result = None
+
         # Read settings files
         settings = self._read_json_file(claude_dir / _SETTINGS_FILE)
         local_settings = self._read_json_file(claude_dir / _SETTINGS_LOCAL_FILE)
@@ -193,6 +219,22 @@ class HookRegistrationCheckerHandler(Handler):
                 f"Original saved to {_SETTINGS_FILE}{'.bak.pre-bash-migration'} "
                 "for rollback. This makes hooks resilient to dropped exec bits "
                 "(see Plan 00102)."
+            )
+            lines.append("")
+        if repair_result is not None and repair_result.repaired:
+            added_str = ", ".join(repair_result.events_added)
+            backup_note = (
+                f"Original saved to {repair_result.backup_path.name}"
+                if repair_result.backup_path is not None
+                else "an existing backup was preserved"
+            )
+            lines.append(
+                "HOOK REGISTRATION REPAIR: Added "
+                f"{len(repair_result.events_added)} missing hook registration(s) "
+                f"to {_SETTINGS_FILE} ({added_str}). {backup_note}. These are "
+                "wired passthrough events the daemon expects (Plan 00170); "
+                "adding them stops the recurring session-start registration "
+                "warnings without a reinstall (see Plan 00185)."
             )
             lines.append("")
         # Lean SessionStart (Plan 00128): stay silent when the configuration is
@@ -249,10 +291,15 @@ class HookRegistrationCheckerHandler(Handler):
             "a handler class, then restore the daemon wrapper in "
             "`settings.json`. The daemon will auto-discover the new handler "
             "on restart.\n"
-            "- **Missing hooks**: the daemon's installer writes the full "
-            "set. If any are missing, re-run `install.py` or manually add "
-            "the missing `{event_name}` entry pointing at "
-            '`"$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash-key}`.\n'
+            "- **Missing hooks**: by default this handler SELF-HEALS — it "
+            "merges the full wired registration set into `settings.json` on "
+            "session start (additive; preserves `permissions`/`env`/`statusLine` "
+            "and any custom hooks; one-shot backup to "
+            "`settings.json.bak.pre-registration-repair`), so the flood stops "
+            "without a reinstall. Opt out with "
+            "`handlers.session_start.hook_registration_checker.options."
+            "auto_repair_registrations: false`, then re-run the installer or add "
+            "the missing `{event_name}` entry manually.\n"
             "- **Duplicate hooks**: a hook registered in both files fires "
             "twice. Keep the `settings.json` entry, delete from "
             "`settings.local.json`.\n"

@@ -147,7 +147,12 @@ class TestHookRegistrationCheckerHandle:
     def test_missing_hooks_reported(
         self, handler: HookRegistrationCheckerHandler, tmp_path: Path
     ) -> None:
-        """Missing hooks should be reported in context."""
+        """Missing hooks should be reported in context (detect-only path).
+
+        Plan 00185: with ``auto_repair_registrations`` disabled the handler falls
+        back to warn-only, so this still exercises the detection reporting.
+        """
+        handler.configure({"auto_repair_registrations": False})
         settings = _build_valid_settings()
         del settings["hooks"]["Stop"]
         del settings["hooks"]["PreToolUse"]
@@ -252,7 +257,12 @@ class TestHookRegistrationCheckerHandle:
     def test_local_settings_hook_flagged_even_without_duplicate(
         self, handler: HookRegistrationCheckerHandler, tmp_path: Path
     ) -> None:
-        """A hook present only in settings.local.json must still be flagged."""
+        """A hook present only in settings.local.json must still be flagged.
+
+        Plan 00185: disable auto-repair so the popped main entry is not silently
+        re-added — this test targets misplacement detection, not repair.
+        """
+        handler.configure({"auto_repair_registrations": False})
         settings = _build_valid_settings()
         # Remove Notification from main so the local entry is unique, not duplicate
         settings["hooks"].pop("Notification", None)
@@ -379,3 +389,107 @@ class TestHookRegistrationCheckerAcceptanceTests:
         tests = handler.get_acceptance_tests()
         assert isinstance(tests, list)
         assert len(tests) >= 1
+
+
+class TestHookRegistrationCheckerAutoRepair:
+    """Plan 00185 Phase 2: self-heal missing wired registrations."""
+
+    @pytest.fixture()
+    def handler(self) -> HookRegistrationCheckerHandler:
+        return HookRegistrationCheckerHandler()
+
+    def test_default_repairs_missing_registrations_on_disk(
+        self, handler: HookRegistrationCheckerHandler, tmp_path: Path
+    ) -> None:
+        """By default the handler ADDS missing wired events to settings.json."""
+        from claude_code_hooks_daemon.utils.hook_registration import HOOK_EVENTS_IN_SETTINGS
+
+        settings = _build_valid_settings()
+        del settings["hooks"]["Stop"]
+        del settings["hooks"]["ConfigChange"]
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps(settings))
+
+        with patch.object(handler, "_get_project_root", return_value=tmp_path):
+            result = handler.handle(_session_start_input())
+
+        # File now has EVERY wired event (repaired).
+        on_disk = json.loads(settings_path.read_text())
+        assert set(on_disk["hooks"].keys()) == set(HOOK_EVENTS_IN_SETTINGS.keys())
+        # Context reports the repair, and NOT a "missing registration" warning.
+        context_text = "\n".join(result.context)
+        assert "HOOK REGISTRATION REPAIR" in context_text
+        # The per-event missing-registration WARNING must be gone.
+        assert "Missing hook registration for" not in context_text
+
+    def test_repair_preserves_permissions(
+        self, handler: HookRegistrationCheckerHandler, tmp_path: Path
+    ) -> None:
+        settings = _build_valid_settings()
+        del settings["hooks"]["Stop"]
+        settings["permissions"] = {"allow": ["Bash(ls:*)"]}
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps(settings))
+
+        with patch.object(handler, "_get_project_root", return_value=tmp_path):
+            handler.handle(_session_start_input())
+
+        on_disk = json.loads(settings_path.read_text())
+        assert on_disk["permissions"] == {"allow": ["Bash(ls:*)"]}
+
+    def test_disabled_does_not_write_and_warns(
+        self, handler: HookRegistrationCheckerHandler, tmp_path: Path
+    ) -> None:
+        # Disable BOTH self-heal paths so the file is provably untouched; the
+        # command-shape migration would otherwise rewrite the bare-path fixture.
+        handler.configure(
+            {"auto_repair_registrations": False, "auto_migrate_settings": False}
+        )
+        settings = _build_valid_settings()
+        del settings["hooks"]["Stop"]
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps(settings))
+        before = settings_path.read_text()
+
+        with patch.object(handler, "_get_project_root", return_value=tmp_path):
+            result = handler.handle(_session_start_input())
+
+        assert settings_path.read_text() == before  # not rewritten
+        context_text = "\n".join(result.context)
+        assert "Missing hook registration for Stop" in context_text
+        assert "HOOK REGISTRATION REPAIR" not in context_text
+
+    def test_complete_settings_is_silent(
+        self, handler: HookRegistrationCheckerHandler, tmp_path: Path
+    ) -> None:
+        """A complete settings.json triggers no repair notice and no write."""
+        from claude_code_hooks_daemon.utils.hook_registration import HOOK_EVENTS_IN_SETTINGS
+
+        hooks = {
+            json_key: [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": f'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash_key}',
+                            "timeout": 60,
+                        }
+                    ]
+                }
+            ]
+            for json_key, bash_key in HOOK_EVENTS_IN_SETTINGS.items()
+        }
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"hooks": hooks}))
+
+        with patch.object(handler, "_get_project_root", return_value=tmp_path):
+            result = handler.handle(_session_start_input())
+
+        assert "HOOK REGISTRATION REPAIR" not in "\n".join(result.context)

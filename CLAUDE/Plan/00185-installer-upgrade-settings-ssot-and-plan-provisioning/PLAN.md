@@ -138,14 +138,12 @@ consume, and the pieces 00176 does not cover:
 
 ### Phase 1: SSoT settings.json reconciler (merge, not clobber)
 
-- [ ] ⬜ **Task 1.1**: RED — write failing tests for a new
-  `reconcile_settings_hooks(settings: dict) -> (dict, ReconcileResult)` util
-  (location: `utils/hook_registration.py` or a new `install/settings_reconcile.py`).
-  Cases: adds every missing wired event; fixes wrong command shape; preserves
-  `permissions`/`env`/`statusLine`/unknown top-level keys; preserves extra
-  client hook entries; idempotent (second run is a no-op); derives the event set
-  from `wired_event_metas()` (no hardcoded list).
-- [ ] ⬜ **Task 1.2**: GREEN — implement the reconciler using the SSoT.
+- [x] ✅ **Task 1.1**: RED — failing tests for `reconcile_settings_hooks()` in
+  `utils/hook_registration.py` (adds missing wired events; preserves
+  permissions/env/statusLine/unknown keys + client hook entries; idempotent;
+  SSoT-derived). Done (11 tests).
+- [x] ✅ **Task 1.2**: GREEN — implemented `reconcile_settings_hooks()` +
+  `ReconcileResult` on the SSoT (`HOOK_EVENTS_IN_SETTINGS`). Commit `521fc96e`.
 - [ ] ⬜ **Task 1.3**: Expose it via a daemon CLI subcommand
   (e.g. `reconcile-settings`) so install/upgrade shell scripts and users can call
   it through the venv python (mirrors `deploy_plan_workflow_if_enabled` usage).
@@ -156,15 +154,17 @@ consume, and the pieces 00176 does not cover:
 
 ### Phase 2: Self-healing hook_registration_checker
 
-- [ ] ⬜ **Task 2.1**: RED — failing tests: with an opt-out
-  `auto_repair_registrations: true` default, the checker ADDS missing wired
-  registrations to settings.json and reports what it added; with it `false`, it
-  only warns (current behaviour). Missing-file / read-only / malformed-json paths
-  fail safe (warn, never crash).
-- [ ] ⬜ **Task 2.2**: GREEN — implement via the Phase 1 reconciler (single source
-  of truth), mirroring the existing `auto_migrate_settings` flow.
-- [ ] ⬜ **Task 2.3**: Update `get_claude_md()` guidance + config docs
-  (HANDLER_REFERENCE) for the new option.
+- [x] ✅ **Task 2.1**: RED — failing tests for the file-level
+  `repair_settings_registrations()` + checker `auto_repair_registrations`
+  default-on behaviour, warn-mode fallback, permission preservation, one-shot
+  backup, and fail-safe malformed/non-dict paths. Done.
+- [x] ✅ **Task 2.2**: GREEN — new `utils/settings_repair.py` (file-level,
+  fail-safe, one-shot backup) built on the Phase 1 reconciler; wired into
+  `hook_registration_checker` under opt-out `auto_repair_registrations` (mirrors
+  `auto_migrate_settings`). Dogfood-proved on a simulated 10-event stale client →
+  30 events, permissions preserved, backup written.
+- [x] ✅ **Task 2.3**: Updated `get_claude_md()` "Missing hooks" remediation to
+  describe self-heal + opt-out. (HANDLER_REFERENCE doc entry: Phase 4.)
 
 ### Phase 3: Plan-workflow on-demand deploy + drift advisory
 
