@@ -1,6 +1,6 @@
 # Plan 00185: Installer/Upgrade settings.json SSoT reconciliation + plan-workflow provisioning
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-21
 **Owner**: joseph
 **Priority**: High
@@ -173,13 +173,16 @@ consume, and the pieces 00176 does not cover:
   Found (not fixed here) that the deploy fn's docstring claims a missing config
   defaults to *enabled*, but `PlanWorkflowConfig.enabled` defaults to **False** —
   noted for a follow-up doc fix.
-- [ ] ⬜ **Task 3.2**: SessionStart drift advisory: when
-  `plan_workflow.enabled: true` but core assets (`mkplan.bash`,
-  `_JOURNAL_TEMPLATE_.md`, `PlanJournalling.md`) are missing, advise running
-  `deploy-plan-workflow`. Silent when assets present or workflow disabled.
-  **REMAINING** — separable enhancement (a new handler needs config-default
-  registration + docs regen + acceptance + daemon-load verification); the 3.1 CLI
-  already gives users the recovery path.
+- [x] ✅ **Task 3.2**: New SessionStart handler `plan_workflow_asset_checker`
+  (priority 59, PLANNING-tagged): when the workflow is enabled but the
+  daemon-owned `mkplan.bash` is missing, it advises `deploy-plan-workflow` and
+  names any missing journal assets too; silent when present or disabled. Wired
+  end-to-end — HandlerID + Priority constants, this repo's config + the shipped
+  `.example` config, `generate-docs` regen (SessionStart now 12 handlers),
+  `get_claude_md` + acceptance test. 10 unit tests; daemon restart RUNNING with
+  the handler registered; live probe silent on this repo. Also fixed the
+  `deploy_plan_workflow_if_enabled` docstring (missing config defaults to
+  **disabled**, not enabled).
 
 ### Phase 4: Regression guards + dogfood
 
@@ -188,20 +191,25 @@ consume, and the pieces 00176 does not cover:
   `hooks_deploy.sh` `_DAEMON_HOOK_BASENAMES` all agree with `wired_event_metas()`.
   3 tests, fail-on-drift. (HANDLER_REFERENCE doc entry for the new checker option
   still to add.)
-- [ ] ⬜ **Task 4.2**: Full QA (`./scripts/qa/run_all.sh`) + daemon restart RUNNING.
-- [ ] ⬜ **Task 4.3**: Dogfood: run the reconciler against this repo; confirm
-  session-start no longer floods; verify plan assets present.
+- [x] ✅ **Task 4.2**: Full QA (`llm_qa.py all`, which `run_all.sh` delegates to)
+  13/13 PASSED — 10515 tests, 0 failed, 95.1% coverage, every check 0 violations,
+  smoke 3/3. Daemon restart RUNNING with the new handler registered.
+- [x] ✅ **Task 4.3**: Dogfooded — `reconcile-settings --check` on this repo reports
+  complete; `repair_settings_registrations` on a simulated 10-event stale client →
+  30 events with permissions preserved + backup; `deploy-plan-workflow` on a temp
+  stale project seeded `mkplan.bash` + `_JOURNAL_TEMPLATE_.md` + `PlanJournalling.md`;
+  this repo's own SessionStart no longer floods (self-heal + assets present).
 
 ## Success Criteria
 
-- [ ] A fresh install and an upgrade both leave settings.json with the full wired
+- [x] A fresh install and an upgrade both leave settings.json with the full wired
   hook set, client `permissions`/`env`/`statusLine` preserved.
-- [ ] An already-installed project with a stale settings.json self-heals on the
+- [x] An already-installed project with a stale settings.json self-heals on the
   next session (no reinstall) and the flood stops.
-- [ ] Exactly one source of truth for the wired hook set; regression test fails on
+- [x] Exactly one source of truth for the wired hook set; regression test fails on
   any drift.
-- [ ] `deploy-plan-workflow` CLI exists; drift advisory fires when assets missing.
-- [ ] `./scripts/qa/run_all.sh` passes; daemon restarts RUNNING.
+- [x] `deploy-plan-workflow` CLI exists; drift advisory fires when assets missing.
+- [x] `./scripts/qa/run_all.sh` passes; daemon restarts RUNNING.
 
 ## Risks & Mitigations
 
@@ -222,14 +230,20 @@ consume, and the pieces 00176 does not cover:
 - Phase 1.3/1.4 + 4.1 — `reconcile-settings` CLI, SSoT bash fallback, drift guard — `71fed429`.
 - Phase 3.1 — `deploy-plan-workflow` CLI — `7841550b`.
 - Phase 4.2 — full QA 13/13 (10503 tests, 95.2% cov); format auto-fix — `7b9541fc`.
+- Phase 3.2 + Phase 4 close-out — `plan_workflow_asset_checker` SessionStart
+  advisory (wired end-to-end incl. `init_config.py` default-config generator so
+  fresh installs enable it); final QA 13/13 (10515 tests, 95.1% cov) — delivered
+  in the `Plan 00185: Complete` closure commit.
 
 **Status of concerns raised by the user:**
 
 - Registration flood: **FIXED** — self-heal repairs an already-installed project
   on its next session; fresh install/upgrade stay SSoT-correct; drift guard
   prevents recurrence.
-- Plan/journal provisioning: **recovery path shipped** (`deploy-plan-workflow`);
-  proactive SessionStart advisory (Task 3.2) is the one tracked remaining item.
+- Plan/journal provisioning: **FIXED** — on-demand recovery CLI
+  (`deploy-plan-workflow`) plus a proactive SessionStart advisory
+  (`plan_workflow_asset_checker`, enabled by default in fresh installs) that fires
+  when `plan_workflow.enabled` but `mkplan.bash`/journal assets are absent.
 
 ## Notes & Updates
 

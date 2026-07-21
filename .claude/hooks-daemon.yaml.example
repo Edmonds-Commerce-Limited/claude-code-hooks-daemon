@@ -307,6 +307,10 @@ handlers:
       enabled: true            # Silent unless .claude/ccy/ is a ccy project with an armed ccy.env
       priority: 58
 
+    plan_workflow_asset_checker:  # Advise deploy-plan-workflow when mkplan.bash is missing (Plan 00185)
+      enabled: true               # Silent unless plan_workflow enabled AND mkplan.bash absent
+      priority: 59
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     transcript_archiver:  # Archives transcripts before compaction

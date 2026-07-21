@@ -367,8 +367,9 @@ def deploy_plan_workflow_if_enabled(
     Args:
         project_root: Absolute path to the project root.
         config_path: Path to the project's ``hooks-daemon.yaml``. A missing file
-            yields the model defaults (workflow enabled, ``CLAUDE/Plan``), so the
-            upgrade path is robust against an absent/relocated config.
+            yields the model defaults — ``plan_workflow.enabled`` defaults to
+            ``False`` (opt-in), so an absent config is a clean no-op rather than
+            an accidental deploy.
 
     Returns:
         BootstrapResult — ``deployed_mkplan`` is False with an explanatory

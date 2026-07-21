@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-07-20 (v3.47.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
+> Generated on 2026-07-21 (v3.47.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
 
 ## Active Handlers
 
@@ -58,7 +58,7 @@
 | 28 | background_process_tracker | ADVISORY | Track backgrounded Bash processes and advise on watchdog/harvest (never kills) |
 | 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
 
-### SessionStart (11 handlers)
+### SessionStart (12 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
@@ -73,6 +73,7 @@
 | 56 | version_check | ADVISORY | Check daemon version against latest GitHub release on new sessions |
 | 57 | plan_qa_sweep | ADVISORY | Advisory SessionStart sweep over the plan tree (silent when clean) |
 | 58 | ccy_supervisor_integrity | ADVISORY | Advisory: warn when the ccy supervisor is armed but its files are unsafe |
+| 59 | plan_workflow_asset_checker | ADVISORY | Advise when plan_workflow is enabled but its assets are not provisioned |
 
 ### SessionEnd (1 handler)
 

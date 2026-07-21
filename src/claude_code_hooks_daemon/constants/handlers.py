@@ -495,6 +495,15 @@ class HandlerID:
     # ccy supervisor integrity checker (SessionStart handler) — Plan 00148:
     # warn when the ccy supervisor is armed but its files are missing, not
     # executable, or git-ignored (a brick risk for teammates)
+    # Plan workflow asset checker (SessionStart handler) — Plan 00185: when the
+    # plan workflow is enabled but the daemon-owned mkplan.bash is missing from
+    # the plan dir, advise running `deploy-plan-workflow` to (re)seed the assets.
+    PLAN_WORKFLOW_ASSET_CHECKER = HandlerIDMeta(
+        class_name="PlanWorkflowAssetCheckerHandler",
+        config_key="plan_workflow_asset_checker",
+        display_name="plan-workflow-asset-checker",
+    )
+
     CCY_SUPERVISOR_INTEGRITY = HandlerIDMeta(
         class_name="CcySupervisorIntegrityHandler",
         config_key="ccy_supervisor_integrity",

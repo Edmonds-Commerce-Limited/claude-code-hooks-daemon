@@ -228,6 +228,7 @@ class ConfigTemplate:
             "    version_check: {enabled: true, priority: 55}  # Check for daemon updates on new sessions\n"
             "    plan_qa_sweep: {enabled: true, priority: 57}  # Plan-tree drift report (silent when clean)\n"
             "    ccy_supervisor_integrity: {enabled: true, priority: 58}  # Warn when the ccy supervisor is armed but its files are unsafe\n"
+            "    plan_workflow_asset_checker: {enabled: true, priority: 59}  # Advise when plan_workflow is enabled but its assets are missing\n"
             "\n"
             "  # SessionEnd - Cleanup on exit\n"
             "  session_end:\n"
