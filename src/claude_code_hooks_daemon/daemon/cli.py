@@ -83,10 +83,12 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     detect_duplicate_hooks,
     detect_legacy_hook_commands,
     detect_local_hooks_misplacement,
+    reconcile_settings_hooks,
     validate_hook_commands,
     validate_settings_hooks,
 )
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from claude_code_hooks_daemon.utils.settings_repair import repair_settings_registrations
 
 from .init_config import generate_config
 
@@ -3105,6 +3107,75 @@ def cmd_format_markdown(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reconcile_settings(args: argparse.Namespace) -> int:
+    """Reconcile a settings.json's hook registrations against the SSoT.
+
+    Adds every MISSING wired hook registration (derived from
+    ``wired_event_metas()``) to ``path`` while preserving everything else. A
+    missing file is created with the full wired set. This is the single
+    SSoT-derived generator/merger shared by the install/upgrade shell scripts
+    (replacing the drift-prone hardcoded fallback) and available to users on
+    demand. ``--check`` reports drift without writing (exit 1 if incomplete).
+
+    Args:
+        args: Parsed CLI arguments with ``path`` (Path) and ``check`` (bool).
+
+    Returns:
+        0 when complete / successfully written; 1 in ``--check`` when
+        registrations are missing, or on a read/parse/write error.
+    """
+    path: Path = args.path
+    check: bool = args.check
+
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            print(f"ERROR: cannot read settings.json at {path}: {exc}", file=sys.stderr)
+            return 1
+        if not isinstance(loaded, dict):
+            print(f"ERROR: settings.json at {path} is not a JSON object", file=sys.stderr)
+            return 1
+        settings: dict[str, Any] = loaded
+    else:
+        settings = {}
+
+    new_settings, result = reconcile_settings_hooks(settings)
+
+    if check:
+        if result.changed:
+            print(
+                f"Would add {len(result.events_added)} missing hook "
+                f"registration(s): {', '.join(result.events_added)}"
+            )
+            return 1
+        print("settings.json hook registrations are complete")
+        return 0
+
+    if not result.changed:
+        print("settings.json hook registrations already complete — no change")
+        return 0
+
+    if path.exists():
+        # Existing file: repair util writes a one-shot backup then persists.
+        repair_result = repair_settings_registrations(path)
+        if not repair_result.repaired:
+            print(f"ERROR: failed to write settings.json at {path}", file=sys.stderr)
+            return 1
+        added = repair_result.events_added
+    else:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(new_settings, indent=2) + "\n", encoding="utf-8")
+        except OSError as exc:
+            print(f"ERROR: cannot write settings.json at {path}: {exc}", file=sys.stderr)
+            return 1
+        added = result.events_added
+
+    print(f"Added {len(added)} hook registration(s): {', '.join(added)}")
+    return 0
+
+
 def cmd_plan_qa(args: argparse.Namespace) -> int:
     """Run plan QA checks (Plan 00144): sweep, staged gate, or single-file lint.
 
@@ -4078,6 +4149,23 @@ def main() -> int:
         help="Dry-run mode: exit 1 if any file would be rewritten, do not modify files",
     )
     parser_format_md.set_defaults(func=cmd_format_markdown)
+
+    # reconcile-settings (Plan 00185) — SSoT-derived settings.json hook merge
+    parser_reconcile = subparsers.add_parser(
+        "reconcile-settings",
+        help="Add missing wired hook registrations to a settings.json (SSoT merge)",
+    )
+    parser_reconcile.add_argument(
+        "path",
+        type=Path,
+        help="Path to settings.json (created with the full wired set if missing)",
+    )
+    parser_reconcile.add_argument(
+        "--check",
+        action="store_true",
+        help="Dry-run: exit 1 if any wired registration is missing, do not modify the file",
+    )
+    parser_reconcile.set_defaults(func=cmd_reconcile_settings)
 
     parser_bug_report = subparsers.add_parser(
         "bug-report",

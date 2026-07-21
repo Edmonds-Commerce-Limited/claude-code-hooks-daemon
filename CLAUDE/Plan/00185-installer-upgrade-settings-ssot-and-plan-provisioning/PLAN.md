@@ -144,13 +144,13 @@ consume, and the pieces 00176 does not cover:
   SSoT-derived). Done (11 tests).
 - [x] ✅ **Task 1.2**: GREEN — implemented `reconcile_settings_hooks()` +
   `ReconcileResult` on the SSoT (`HOOK_EVENTS_IN_SETTINGS`). Commit `521fc96e`.
-- [ ] ⬜ **Task 1.3**: Expose it via a daemon CLI subcommand
-  (e.g. `reconcile-settings`) so install/upgrade shell scripts and users can call
-  it through the venv python (mirrors `deploy_plan_workflow_if_enabled` usage).
-- [ ] ⬜ **Task 1.4**: (COORDINATE with Plan 00176) Ensure the reconciler is the
-  callable both the self-heal checker and 00176's upgrade merge use. The shell-side
-  install/upgrade wiring itself is 00176's deliverable; 00185 stops at exposing the
-  CLI. (Removing the stale bash `generate_settings_json` list is Phase 4.)
+- [x] ✅ **Task 1.3**: Added `reconcile-settings` CLI (creates a missing
+  settings.json with the full wired set; merges missing events into a partial
+  one; `--check` for CI). 6 tests. Live-verified against this repo.
+- [x] ✅ **Task 1.4**: `install_version.sh::generate_settings_json` now delegates
+  to `reconcile-settings` (SSoT) as its primary path — the 15-event hardcoded
+  heredoc is demoted to an inert last-resort behind the CLI. Syntax + shellcheck
+  clean. (Shell-side upgrade MERGE wiring remains Plan 00176's deliverable.)
 
 ### Phase 2: Self-healing hook_registration_checker
 
@@ -177,9 +177,11 @@ consume, and the pieces 00176 does not cover:
 
 ### Phase 4: Regression guards + dogfood
 
-- [ ] ⬜ **Task 4.1**: Test asserting ALL settings.json sources agree with the SSoT:
-  `install.py` `_DAEMON_FORWARDER_HOOKS`, `hooks_deploy.sh` `_DAEMON_HOOK_BASENAMES`,
-  the tracked `.claude/settings.json`, and `wired_event_metas()` — fail on drift.
+- [x] ✅ **Task 4.1**: `test_settings_sources_ssot_drift.py` asserts `install.py`
+  `_DAEMON_FORWARDER_HOOKS`, the tracked `.claude/settings.json`, and
+  `hooks_deploy.sh` `_DAEMON_HOOK_BASENAMES` all agree with `wired_event_metas()`.
+  3 tests, fail-on-drift. (HANDLER_REFERENCE doc entry for the new checker option
+  still to add.)
 - [ ] ⬜ **Task 4.2**: Full QA (`./scripts/qa/run_all.sh`) + daemon restart RUNNING.
 - [ ] ⬜ **Task 4.3**: Dogfood: run the reconciler against this repo; confirm
   session-start no longer floods; verify plan assets present.

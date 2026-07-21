@@ -73,7 +73,22 @@ source "$INSTALL_LIB_DIR/daemon_control.sh"
 generate_settings_json() {
     local project_root="$1"
     local target="$project_root/.claude/settings.json"
+    mkdir -p "$project_root/.claude"
 
+    # Plan 00185: SSoT-derived generation. The reconcile-settings CLI writes the
+    # FULL wired hook set (wired_event_metas()) into a missing settings.json, so
+    # there is no second hardcoded event list to drift from the catalogue. This is
+    # the primary path; it always succeeds here because ensure_venv has already
+    # populated VENV_PYTHON with a daemon venv that carries the CLI.
+    if [ -n "${VENV_PYTHON:-}" ] && [ -x "${VENV_PYTHON:-}" ] && \
+       "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli reconcile-settings "$target"; then
+        print_success "Generated settings.json (SSoT)"
+        return 0
+    fi
+
+    # Last-resort inert fallback for the (unreachable in practice) case where no
+    # venv python is available. Registers only the long-standing core hooks; the
+    # session-start hook_registration_checker self-heals the rest (Plan 00185).
     cat > "$target" <<'SETTINGS_EOF'
 {
   "statusLine": {
