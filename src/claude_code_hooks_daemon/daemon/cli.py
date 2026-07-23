@@ -65,6 +65,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     get_venv_path,
     python_venv_fingerprint,
     read_pid_file,
+    read_socket_discovery_file,
     resolve_existing_venv_python,
     resolve_hostname,
     write_cleanup_status,
@@ -325,6 +326,80 @@ def _resolve_socket_path(args: argparse.Namespace, project_path: Path) -> Path:
     if hasattr(args, "socket") and args.socket is not None:
         return Path(args.socket)
     return get_socket_path(project_path)
+
+
+# Plan 00187: split-brain drift warning. A stale, git-tracked
+# ``.claude/hooks-daemon.env`` can pin a non-canonical socket name as an AF_UNIX
+# length-limit workaround. ``init.sh`` sources that env and binds/looks-up that
+# name; the management CLI, invoked without the env, computes the deterministic
+# hash name and would report NOT RUNNING even though a daemon is live. This
+# message is emitted when the CLI adopts the daemon's own discovery-file socket
+# because it differs from the computed one.
+_SPLIT_BRAIN_WARNING_TEMPLATE = (
+    "WARNING: daemon socket mismatch (split-brain).\n"
+    "  A live daemon is serving on:  {discovered}\n"
+    "  but this CLI computes:        {computed}\n"
+    "  Reporting on the live daemon (discovered via the socket-path file the\n"
+    "  daemon publishes at startup). This usually means a stale\n"
+    "  CLAUDE_HOOKS_SOCKET_PATH override in .claude/hooks-daemon.env pins a\n"
+    "  non-canonical socket name. Update that override to the computed path\n"
+    "  above (or remove it) so the hook forwarders and the management CLI agree."
+)
+
+
+def _resolve_effective_daemon(
+    args: argparse.Namespace, project_path: Path
+) -> tuple[Path, Path, str | None]:
+    """Resolve the socket/PID paths of the daemon that is ACTUALLY running.
+
+    Mirrors ``init.sh``'s discovery-file fallback (both consult the same
+    ``daemon{suffix}.socket-path`` file the daemon publishes at startup) so the
+    Python management CLI agrees with the hook forwarders when a stale
+    ``hooks-daemon.env`` override pins a non-canonical socket name (Plan 00187).
+
+    Resolution order:
+
+    1. An explicit ``--socket`` flag or a set ``CLAUDE_HOOKS_SOCKET_PATH`` env is
+       honoured verbatim — never second-guessed (mirrors ``init.sh``'s guard).
+    2. Otherwise, if the computed PID path already names a live daemon, use the
+       computed paths.
+    3. Otherwise, consult the socket discovery file. If it names a DIFFERENT
+       socket whose sibling PID file is a live daemon, adopt that socket/PID and
+       return a split-brain drift warning. A stale (dead-daemon) or same-path
+       discovery file is ignored.
+
+    Returns:
+        ``(socket_path, pid_path, drift_warning)`` — ``drift_warning`` is None
+        unless a split-brain was detected and the discovered daemon adopted.
+    """
+    socket_path = _resolve_socket_path(args, project_path)
+    pid_path = _resolve_pid_path(args, project_path)
+
+    # An explicit override (flag or env) pins the target — respect it verbatim.
+    explicit = (getattr(args, "socket", None) is not None) or bool(
+        os.environ.get("CLAUDE_HOOKS_SOCKET_PATH")
+    )
+    if explicit:
+        return socket_path, pid_path, None
+
+    # Computed path already has a live daemon — nothing to reconcile.
+    if read_pid_file(str(pid_path), verify_daemon=True) is not None:
+        return socket_path, pid_path, None
+
+    discovered_socket = read_socket_discovery_file(project_path)
+    if discovered_socket is None or discovered_socket == socket_path:
+        return socket_path, pid_path, None
+
+    # The daemon publishes only its socket path; its PID file is the sibling.
+    discovered_pid = discovered_socket.with_suffix(".pid")
+    if read_pid_file(str(discovered_pid), verify_daemon=True) is None:
+        # Stale discovery file (its daemon is dead) — do not adopt.
+        return socket_path, pid_path, None
+
+    warning = _SPLIT_BRAIN_WARNING_TEMPLATE.format(
+        discovered=discovered_socket, computed=socket_path
+    )
+    return discovered_socket, discovered_pid, warning
 
 
 def _reap_stale_runtime_files(project_path: Path, config: Config) -> None:
@@ -653,8 +728,12 @@ def cmd_status(args: argparse.Namespace) -> int:
         0 if daemon is running, 1 otherwise
     """
     project_path = get_project_path(getattr(args, "project_root", None))
-    pid_path = _resolve_pid_path(args, project_path)
-    socket_path = _resolve_socket_path(args, project_path)
+    # Plan 00187: reconcile the computed socket/PID with the daemon's own
+    # discovery file so a stale hooks-daemon.env override does not make us
+    # report NOT RUNNING while hooks fire fine on a differently-named socket.
+    socket_path, pid_path, drift_warning = _resolve_effective_daemon(args, project_path)
+    if drift_warning is not None:
+        print(drift_warning, file=sys.stderr)
 
     # Read PID. verify_daemon guards against a stale PID file (after reboot /
     # PID reuse) whose PID now belongs to an unrelated live process, which
@@ -838,8 +917,12 @@ def cmd_health(args: argparse.Namespace) -> int:
         0 if healthy, 1 otherwise
     """
     project_path = get_project_path(getattr(args, "project_root", None))
-    socket_path = _resolve_socket_path(args, project_path)
-    pid_path = _resolve_pid_path(args, project_path)
+    # Plan 00187: reconcile with the daemon's discovery file (see cmd_status)
+    # so a stale hooks-daemon.env socket-name override does not mask a live
+    # daemon behind a bare NOT RUNNING.
+    socket_path, pid_path, drift_warning = _resolve_effective_daemon(args, project_path)
+    if drift_warning is not None:
+        print(drift_warning, file=sys.stderr)
 
     # Check if daemon is running
     pid = read_pid_file(str(pid_path))
