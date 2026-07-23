@@ -1257,6 +1257,41 @@ def write_socket_discovery_file(project_dir: Path | str, socket_path: Path | str
         logger.warning("Failed to write socket discovery file: %s", e)
 
 
+def read_socket_discovery_file(project_dir: Path | str) -> Path | None:
+    """Read the socket path a running daemon published to its discovery file.
+
+    The daemon writes its ACTUAL bound socket path here at every startup (see
+    :func:`write_socket_discovery_file` / ``cli.cmd_start``). The discovery file
+    lives at a deterministic location (untracked dir + hostname suffix) that does
+    NOT depend on ``CLAUDE_HOOKS_SOCKET_PATH``, so a management CLI invoked
+    WITHOUT the env override that ``init.sh`` sources can still find the socket a
+    daemon is actually serving on. This is the Python-side counterpart to
+    ``init.sh``'s discovery-file fallback — both consult the SAME file, keeping
+    the hook forwarders and the management CLI in agreement when a stale
+    ``hooks-daemon.env`` override pins a non-canonical socket name.
+
+    Args:
+        project_dir: Path to project directory
+
+    Returns:
+        The discovered socket path, or None when the discovery file is absent or
+        empty (nothing published).
+    """
+    project_path = Path(project_dir).resolve()
+    untracked_dir = _get_untracked_dir(project_path)
+    suffix = _get_hostname_suffix()
+    discovery_file = untracked_dir / f"daemon{suffix}.socket-path"
+
+    if not discovery_file.exists():
+        return None
+    try:
+        content = discovery_file.read_text().strip()
+    except OSError as e:
+        logger.warning("Failed to read socket discovery file %s: %s", discovery_file, e)
+        return None
+    return Path(content) if content else None
+
+
 def cleanup_socket_discovery_file(project_dir: Path | str) -> None:
     """Remove the socket discovery file on daemon shutdown.
 

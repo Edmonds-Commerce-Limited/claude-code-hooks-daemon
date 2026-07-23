@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     is_daemon_pid,
     is_pid_alive,
     read_pid_file,
+    read_socket_discovery_file,
     resolve_hostname,
     write_pid_file,
     write_socket_discovery_file,
@@ -980,6 +981,48 @@ class TestSocketDiscoveryFile(unittest.TestCase):
             untracked = self.project_dir / ".claude" / "hooks-daemon" / "untracked"
             discovery = untracked / "daemon-my-host.socket-path"
             self.assertTrue(discovery.exists())
+
+    def test_read_roundtrips_written_path(self):
+        """read_socket_discovery_file returns the path write_ stored."""
+        socket_path = "/run/user/1000/hooks-daemon-aee977c2.sock"
+        with patch.dict(os.environ, {"HOSTNAME": "test"}, clear=False):
+            write_socket_discovery_file(self.project_dir, socket_path)
+            self.assertEqual(
+                read_socket_discovery_file(self.project_dir), Path(socket_path)
+            )
+
+    def test_read_returns_none_when_file_missing(self):
+        """read_socket_discovery_file returns None when no discovery file exists."""
+        with patch.dict(os.environ, {"HOSTNAME": "test"}, clear=False):
+            self.assertIsNone(read_socket_discovery_file(self.project_dir))
+
+    def test_read_returns_none_when_file_empty(self):
+        """An empty discovery file is treated as no discovery (None)."""
+        with patch.dict(os.environ, {"HOSTNAME": "test"}, clear=False):
+            untracked = self.project_dir / ".claude" / "hooks-daemon" / "untracked"
+            untracked.mkdir(parents=True, exist_ok=True)
+            (untracked / "daemon-test.socket-path").write_text("")
+            self.assertIsNone(read_socket_discovery_file(self.project_dir))
+
+    def test_read_strips_surrounding_whitespace(self):
+        """read_socket_discovery_file strips trailing newline / whitespace."""
+        socket_path = "/run/user/1000/hooks-daemon-aee977c2.sock"
+        with patch.dict(os.environ, {"HOSTNAME": "test"}, clear=False):
+            untracked = self.project_dir / ".claude" / "hooks-daemon" / "untracked"
+            untracked.mkdir(parents=True, exist_ok=True)
+            (untracked / "daemon-test.socket-path").write_text(f"  {socket_path}\n")
+            self.assertEqual(
+                read_socket_discovery_file(self.project_dir), Path(socket_path)
+            )
+
+    def test_read_honours_hostname_suffix(self):
+        """read_socket_discovery_file reads the hostname-suffixed file."""
+        socket_path = "/tmp/test-host.sock"
+        with patch.dict(os.environ, {"HOSTNAME": "my-host"}, clear=False):
+            write_socket_discovery_file(self.project_dir, socket_path)
+            self.assertEqual(
+                read_socket_discovery_file(self.project_dir), Path(socket_path)
+            )
 
 
 if __name__ == "__main__":
