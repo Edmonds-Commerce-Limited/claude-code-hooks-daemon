@@ -75,7 +75,7 @@ forwarders and surface an explicit split-brain drift warning instead of a bare
 
 ### Phase 1: Discovery-file read helper (paths.py)
 
-- [ ] ⬜ **Task 1.1**: TDD `read_socket_discovery_file(project_dir) -> Path | None`
+- [x] ✅ **Task 1.1**: TDD `read_socket_discovery_file(project_dir) -> Path | None`
   - [ ] ⬜ RED: tests in `tests/daemon/test_paths.py` (round-trips
     `write_socket_discovery_file`; returns None when file missing/empty;
     strips whitespace; honours hostname suffix)
@@ -84,7 +84,7 @@ forwarders and surface an explicit split-brain drift warning instead of a bare
 
 ### Phase 2: Split-brain reconciliation in the CLI (cli.py)
 
-- [ ] ⬜ **Task 2.1**: TDD `_resolve_effective_daemon(args, project_path)`
+- [x] ✅ **Task 2.1**: TDD `_resolve_effective_daemon(args, project_path)`
   returning `(socket_path, pid_path, drift_warning)`
   - [ ] ⬜ RED: unit tests — primary live → no fallback/warning; primary dead +
     discovery names a different LIVE daemon → adopt discovered socket/pid +
@@ -93,7 +93,7 @@ forwarders and surface an explicit split-brain drift warning instead of a bare
   - [ ] ⬜ GREEN: implement (pid-file liveness via `read_pid_file(..., verify_daemon=True)`,
     pid path = discovered socket sibling `.pid`)
   - [ ] ⬜ REFACTOR
-- [ ] ⬜ **Task 2.2**: Wire `cmd_status` and `cmd_health` to use it
+- [x] ✅ **Task 2.2**: Wire `cmd_status` and `cmd_health` to use it
   - [ ] ⬜ RED: command-level tests asserting RUNNING + drift warning in the
     split-brain scenario (previously NOT RUNNING)
   - [ ] ⬜ GREEN: wire in; print the drift warning to stderr
@@ -102,7 +102,9 @@ forwarders and surface an explicit split-brain drift warning instead of a bare
 ### Phase 3: Integration & QA
 
 - [ ] ⬜ **Task 3.1**: Full QA (`./scripts/qa/run_all.sh`) green
-- [ ] ⬜ **Task 3.2**: Daemon restart verification (RUNNING)
+- [x] ✅ **Task 3.2**: Daemon restart verification (RUNNING) + live end-to-end
+  split-brain dogfood (status on a crafted drifted project reports RUNNING +
+  warning instead of the old NOT RUNNING)
 - [ ] ⬜ **Task 3.3**: Clean up `untracked/hooks-daemon-socket-mixup-upgrade.md`
   (its findings are now captured here + fixed) or move into this plan
 
