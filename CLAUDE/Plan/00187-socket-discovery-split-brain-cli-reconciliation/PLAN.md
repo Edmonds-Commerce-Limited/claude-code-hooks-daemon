@@ -105,8 +105,9 @@ forwarders and surface an explicit split-brain drift warning instead of a bare
 - [x] ✅ **Task 3.2**: Daemon restart verification (RUNNING) + live end-to-end
   split-brain dogfood (status on a crafted drifted project reports RUNNING +
   warning instead of the old NOT RUNNING)
-- [ ] ⬜ **Task 3.3**: Clean up `untracked/hooks-daemon-socket-mixup-upgrade.md`
-  (its findings are now captured here + fixed) or move into this plan
+- [x] ✅ **Task 3.3**: Field report moved out of `untracked/` into this plan as
+  `FIELD-REPORT-socket-mixup-upgrade.md` (tracked supporting doc, resolution
+  banner added)
 
 ## Success Criteria
 
