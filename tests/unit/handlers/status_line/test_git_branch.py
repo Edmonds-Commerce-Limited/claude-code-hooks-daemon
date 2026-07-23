@@ -1006,6 +1006,18 @@ class TestWorktreeIndicator:
             result = handler.handle(hook_input)
         assert self._TREE in result.context[0]
 
+    def test_linked_worktree_tree_icon_precedes_branch(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        """The tree icon renders *before* the branch name, not appended after it."""
+        (tmp_path / ".git").write_text("gitdir: /main/.git/worktrees/feature\n", encoding="utf-8")
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = self._render_mocks(tmp_path)
+            result = handler.handle(hook_input)
+        segment = result.context[0]
+        assert segment.index(self._TREE) < segment.index("main")
+
     def test_main_worktree_omits_tree_icon(self, handler: GitBranchHandler, tmp_path: Path) -> None:
         """The main worktree (``.git`` directory) renders no tree icon."""
         (tmp_path / ".git").mkdir()

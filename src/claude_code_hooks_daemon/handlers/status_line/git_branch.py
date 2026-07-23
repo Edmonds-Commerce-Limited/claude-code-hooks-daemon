@@ -215,8 +215,8 @@ class GitBranchHandler(Handler):
                 else:
                     color = _COLOR_ORANGE
                 icons = self._format_git_status_icons(cwd)
-                worktree_suffix = f" {_ICON_WORKTREE}" if is_worktree else ""
-                return [f"| ⎇ {color}{branch}{_COLOR_RESET}{icons}{worktree_suffix}"]
+                worktree_prefix = f"{_ICON_WORKTREE} " if is_worktree else ""
+                return [f"| ⎇ {worktree_prefix}{color}{branch}{_COLOR_RESET}{icons}"]
 
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
             logger.debug("Failed to get git branch: %s", e)
