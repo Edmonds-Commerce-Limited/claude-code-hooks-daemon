@@ -53,9 +53,7 @@ class TestResolveEffectiveDaemon:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 return_value=4242,
             ),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.read_socket_discovery_file"
-            ) as mock_disc,
+            patch("claude_code_hooks_daemon.daemon.cli.read_socket_discovery_file") as mock_disc,
         ):
             sock, pid, warning = _resolve_effective_daemon(_args(), tmp_path)
 
@@ -194,12 +192,8 @@ class TestResolveEffectiveDaemon:
         flag_sock = tmp_path / "flag.sock"
         flag_pid = tmp_path / "flag.pid"
         with (
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.read_socket_discovery_file"
-            ) as mock_disc,
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.read_pid_file"
-            ) as mock_rpf,
+            patch("claude_code_hooks_daemon.daemon.cli.read_socket_discovery_file") as mock_disc,
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file") as mock_rpf,
         ):
             sock, pid, warning = _resolve_effective_daemon(
                 _args(socket=flag_sock, pid_file=flag_pid), tmp_path
@@ -227,9 +221,7 @@ class TestResolveEffectiveDaemon:
                 "claude_code_hooks_daemon.daemon.cli.get_pid_path",
                 return_value=env_pid,
             ),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.read_socket_discovery_file"
-            ) as mock_disc,
+            patch("claude_code_hooks_daemon.daemon.cli.read_socket_discovery_file") as mock_disc,
         ):
             sock, pid, warning = _resolve_effective_daemon(_args(), tmp_path)
 
@@ -335,9 +327,7 @@ class TestCmdStatusSplitBrain:
 class TestCmdHealthSplitBrain:
     """cmd_health finds the live daemon via discovery and warns (Plan 00187)."""
 
-    def test_health_queries_discovered_socket_and_warns(
-        self, tmp_path: Path, capsys: Any
-    ) -> None:
+    def test_health_queries_discovered_socket_and_warns(self, tmp_path: Path, capsys: Any) -> None:
         """Health talks to the discovered live daemon and emits the drift warning."""
         from claude_code_hooks_daemon.daemon.cli import cmd_health
 

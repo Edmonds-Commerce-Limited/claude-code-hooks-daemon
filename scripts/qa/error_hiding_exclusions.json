@@ -117,6 +117,12 @@
       "reason": "Returns None when PID file missing or invalid. Callers check for None before using PID. This is the documented contract \u2014 a missing PID file means no daemon is running."
     },
     {
+      "file": "daemon/paths.py",
+      "function": "read_socket_discovery_file",
+      "rule": "return-none-on-error",
+      "reason": "Returns None when the socket discovery file is missing, empty, or unreadable. Callers (the CLI's _resolve_effective_daemon, mirroring init.sh's discovery-file fallback) treat None as 'no daemon discovered' and fall back to the computed path \u2014 this IS the documented contract (Plan 00187). Narrow except catches only OSError and logs at warning before returning; raising would crash status/health on a merely unreadable file."
+    },
+    {
       "file": "daemon/metadata.py",
       "function": "read_daemon_metadata",
       "rule": "return-none-on-error",
