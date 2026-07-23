@@ -1,6 +1,6 @@
 # Plan 00187: socket discovery split brain cli reconciliation
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-23
 **Owner**: joseph
 **Priority**: High
@@ -76,32 +76,33 @@ forwarders and surface an explicit split-brain drift warning instead of a bare
 ### Phase 1: Discovery-file read helper (paths.py)
 
 - [x] ✅ **Task 1.1**: TDD `read_socket_discovery_file(project_dir) -> Path | None`
-  - [ ] ⬜ RED: tests in `tests/daemon/test_paths.py` (round-trips
+  - [x] ✅ RED: tests in `tests/daemon/test_paths.py` (round-trips
     `write_socket_discovery_file`; returns None when file missing/empty;
     strips whitespace; honours hostname suffix)
-  - [ ] ⬜ GREEN: implement helper mirroring the write path's location logic
-  - [ ] ⬜ REFACTOR + verify 95%+ coverage
+  - [x] ✅ GREEN: implement helper mirroring the write path's location logic
+  - [x] ✅ REFACTOR + verify coverage (11 tests, incl. OSError branch)
 
 ### Phase 2: Split-brain reconciliation in the CLI (cli.py)
 
 - [x] ✅ **Task 2.1**: TDD `_resolve_effective_daemon(args, project_path)`
   returning `(socket_path, pid_path, drift_warning)`
-  - [ ] ⬜ RED: unit tests — primary live → no fallback/warning; primary dead +
+  - [x] ✅ RED: unit tests — primary live → no fallback/warning; primary dead +
     discovery names a different LIVE daemon → adopt discovered socket/pid +
     warning; discovery names same path → no warning; discovery dead/stale →
     no adoption; explicit `--socket` / `CLAUDE_HOOKS_SOCKET_PATH` → verbatim
-  - [ ] ⬜ GREEN: implement (pid-file liveness via `read_pid_file(..., verify_daemon=True)`,
+  - [x] ✅ GREEN: implement (pid-file liveness via `read_pid_file(..., verify_daemon=True)`,
     pid path = discovered socket sibling `.pid`)
-  - [ ] ⬜ REFACTOR
+  - [x] ✅ REFACTOR
 - [x] ✅ **Task 2.2**: Wire `cmd_status` and `cmd_health` to use it
-  - [ ] ⬜ RED: command-level tests asserting RUNNING + drift warning in the
+  - [x] ✅ RED: command-level tests asserting RUNNING + drift warning in the
     split-brain scenario (previously NOT RUNNING)
-  - [ ] ⬜ GREEN: wire in; print the drift warning to stderr
-  - [ ] ⬜ REFACTOR
+  - [x] ✅ GREEN: wire in; print the drift warning to stderr
+  - [x] ✅ REFACTOR
 
 ### Phase 3: Integration & QA
 
-- [ ] ⬜ **Task 3.1**: Full QA (`./scripts/qa/run_all.sh`) green
+- [x] ✅ **Task 3.1**: Full QA (`llm_qa.py all`) green — 13/13 PASSED,
+  10537 tests, coverage 95.2%
 - [x] ✅ **Task 3.2**: Daemon restart verification (RUNNING) + live end-to-end
   split-brain dogfood (status on a crafted drifted project reports RUNNING +
   warning instead of the old NOT RUNNING)
@@ -111,18 +112,24 @@ forwarders and surface an explicit split-brain drift warning instead of a bare
 
 ## Success Criteria
 
-- [ ] `read_socket_discovery_file` implemented + tested
-- [ ] `status`/`health` report RUNNING (with a drift warning) in the split-brain
+- [x] `read_socket_discovery_file` implemented + tested
+- [x] `status`/`health` report RUNNING (with a drift warning) in the split-brain
   scenario instead of a bare NOT RUNNING
-- [ ] Explicit `--socket` / env override still honoured verbatim
-- [ ] All QA checks pass; daemon restarts RUNNING
-- [ ] Field report resolved out of `untracked/`
+- [x] Explicit `--socket` / env override still honoured verbatim
+- [x] All QA checks pass; daemon restarts RUNNING
+- [x] Field report resolved out of `untracked/`
 
 ## Delivery & Milestones
 
 <!-- Curated milestones + delivery commit hashes only. -->
 
 - Plan created at 8880eee8 (parent HEAD)
+- Phase 1 `read_socket_discovery_file`: `84fdee7b` (+ OSError test `7235e557`)
+- Phase 2 `_resolve_effective_daemon` + cmd_status/cmd_health wiring: `6d501471`
+- QA fixes (black + error_hiding exclusion): `57b7001a`
+- Field report tracked into plan folder: `a8424c5e`
+- Full QA 13/13 (10537 tests, 95.2% coverage); daemon restart RUNNING; live
+  end-to-end split-brain dogfood verified
 
 ## Notes & Updates
 
