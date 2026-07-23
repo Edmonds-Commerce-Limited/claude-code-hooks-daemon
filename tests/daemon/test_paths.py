@@ -987,9 +987,7 @@ class TestSocketDiscoveryFile(unittest.TestCase):
         socket_path = "/run/user/1000/hooks-daemon-aee977c2.sock"
         with patch.dict(os.environ, {"HOSTNAME": "test"}, clear=False):
             write_socket_discovery_file(self.project_dir, socket_path)
-            self.assertEqual(
-                read_socket_discovery_file(self.project_dir), Path(socket_path)
-            )
+            self.assertEqual(read_socket_discovery_file(self.project_dir), Path(socket_path))
 
     def test_read_returns_none_when_file_missing(self):
         """read_socket_discovery_file returns None when no discovery file exists."""
@@ -1011,18 +1009,21 @@ class TestSocketDiscoveryFile(unittest.TestCase):
             untracked = self.project_dir / ".claude" / "hooks-daemon" / "untracked"
             untracked.mkdir(parents=True, exist_ok=True)
             (untracked / "daemon-test.socket-path").write_text(f"  {socket_path}\n")
-            self.assertEqual(
-                read_socket_discovery_file(self.project_dir), Path(socket_path)
-            )
+            self.assertEqual(read_socket_discovery_file(self.project_dir), Path(socket_path))
 
     def test_read_honours_hostname_suffix(self):
         """read_socket_discovery_file reads the hostname-suffixed file."""
         socket_path = "/tmp/test-host.sock"
         with patch.dict(os.environ, {"HOSTNAME": "my-host"}, clear=False):
             write_socket_discovery_file(self.project_dir, socket_path)
-            self.assertEqual(
-                read_socket_discovery_file(self.project_dir), Path(socket_path)
-            )
+            self.assertEqual(read_socket_discovery_file(self.project_dir), Path(socket_path))
+
+    def test_read_returns_none_on_os_error(self):
+        """An unreadable discovery file is handled gracefully (None, no raise)."""
+        with patch.dict(os.environ, {"HOSTNAME": "test"}, clear=False):
+            write_socket_discovery_file(self.project_dir, "/tmp/test.sock")
+            with patch.object(Path, "read_text", side_effect=OSError("boom")):
+                self.assertIsNone(read_socket_discovery_file(self.project_dir))
 
 
 if __name__ == "__main__":
