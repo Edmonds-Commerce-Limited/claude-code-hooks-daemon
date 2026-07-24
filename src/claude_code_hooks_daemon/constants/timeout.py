@@ -55,6 +55,7 @@ class Timeout:
     GIT_FETCH_BACKGROUND = 30  # 30 seconds (background git fetch in status line)
     GIT_FETCH_SESSION = 30  # 30 seconds (full fetch --all --prune on session start)
     GIT_PULL_SESSION = 30  # 30 seconds (git pull --ff-only in auto-pull mode)
+    GIT_WORKTREE = 30  # 30 seconds (git worktree add/remove for WorktreeCreate/Remove)
     VALIDATION_CHECK = 5  # 5 seconds (installation validation subprocess)
     VERSION_CHECK = 5  # 5 seconds (git ls-remote for version check)
 

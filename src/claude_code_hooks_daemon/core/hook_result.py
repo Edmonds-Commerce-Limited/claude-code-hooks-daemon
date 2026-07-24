@@ -39,6 +39,11 @@ _STATUS_DEFAULT_TEXT = "Claude"
 _STATUS_JOIN = f" {_STATUS_SEGMENT_SEPARATOR} "
 # One terminal row per newline: Claude Code renders multi-line statusLine output.
 _STATUS_ROW_SEPARATOR = "\n"
+# WorktreeCreate raw-path response (Plan 00188). The daemon→forwarder envelope
+# key carrying the created worktree path; the forwarder extracts it and prints
+# the raw path (Claude Code parses the WorktreeCreate hook's stdout as a path).
+_WORKTREE_CREATE_EVENT_NAME = "WorktreeCreate"
+_WORKTREE_PATH_KEY = "worktreePath"
 # Matches ANSI SGR/CSI escape sequences so colour codes are excluded from the
 # DISPLAYED width when wrapping (they occupy zero visible columns).
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -114,6 +119,11 @@ class HookResult(BaseModel):
     context: list[str] = Field(default_factory=list)
     guidance: str | None = Field(default=None)
     handlers_matched: list[str] = Field(default_factory=list)
+    # WorktreeCreate raw-path output (Plan 00188). Claude Code parses the
+    # WorktreeCreate hook's stdout as the *created worktree path* (not a JSON
+    # decision), so the handler carries the absolute path here and to_json emits
+    # {"worktreePath": ...} which the forwarder prints raw.
+    worktree_path: str | None = Field(default=None)
 
     @field_validator("decision", mode="before")
     @classmethod
@@ -254,6 +264,13 @@ class HookResult(BaseModel):
             if isinstance(terminal_columns, int) and terminal_columns > 0:
                 return {"text": _wrap_status_parts(parts, terminal_columns)}
             return {"text": _STATUS_JOIN.join(parts)}
+
+        # Special case: WorktreeCreate returns the created worktree path. Claude
+        # Code parses this hook's stdout as a raw path, so an empty {} would be
+        # taken literally as the path "/<cwd>/{}" and fail creation (Plan 00188).
+        # The forwarder extracts .worktreePath and prints it raw.
+        if event_name == _WORKTREE_CREATE_EVENT_NAME and self.worktree_path:
+            return {_WORKTREE_PATH_KEY: self.worktree_path}
 
         # Silent allow with no context - valid for all events
         if self.decision == Decision.ALLOW and not self.context and not self.guidance:

@@ -196,6 +196,16 @@ class HandlerID:
         config_key="worktree_file_copy",
         display_name="prevent-worktree-file-copying",
     )
+    WORKTREE_CREATE = HandlerIDMeta(
+        class_name="WorktreeCreateHandler",
+        config_key="worktree_create",
+        display_name="worktree-create",
+    )
+    WORKTREE_REMOVE = HandlerIDMeta(
+        class_name="WorktreeRemoveHandler",
+        config_key="worktree_remove",
+        display_name="worktree-remove",
+    )
     GIT_CONTEXT_INJECTOR = HandlerIDMeta(
         class_name="GitContextInjectorHandler",
         config_key="git_context_injector",
@@ -676,4 +686,7 @@ HandlerKey = Literal[
     "startup_cleanup",
     # Hook registration checker
     "hook_registration_checker",
+    # Worktree lifecycle handlers (Plan 00188)
+    "worktree_create",
+    "worktree_remove",
 ]
