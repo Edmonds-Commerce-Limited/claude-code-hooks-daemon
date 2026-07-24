@@ -19,6 +19,7 @@ import pytest
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.handlers.worktree_create.worktree_create_handler import (
+    DEFAULT_WORKTREE_COPY_FILES,
     WorktreeCreateHandler,
 )
 
@@ -110,3 +111,104 @@ class TestHandle:
         payload = self._input(repo, name="")
         result = handler.handle(payload)
         assert Path(result.worktree_path or "").name.startswith("worktree-")
+
+
+class TestEnvFileSeeding:
+    """Fresh worktrees seed git-ignored local files from the repo top-level.
+
+    Local env files (.env.local, .env.test.local) are git-ignored, so a fresh
+    worktree checkout has none of them. The handler copies a configurable list
+    from the main working copy so the worktree behaves like the main checkout.
+    Fixtures use dummy content only — never real secrets.
+    """
+
+    def _input(self, repo: Path, name: str = "Seed Env") -> dict:
+        return {
+            "hook_event_name": EventType.WORKTREE_CREATE.value,
+            "cwd": str(repo),
+            "name": name,
+            "prompt_id": "pid-seed",
+            "session_id": "sid-seed",
+        }
+
+    def test_default_env_files_copied_into_worktree(self, repo: Path) -> None:
+        for fname in DEFAULT_WORKTREE_COPY_FILES:
+            (repo / fname).write_text(f"SEED={fname}\n", encoding="utf-8")
+
+        handler = WorktreeCreateHandler()
+        result = handler.handle(self._input(repo))
+        worktree = Path(result.worktree_path or "")
+
+        for fname in DEFAULT_WORKTREE_COPY_FILES:
+            copied = worktree / fname
+            assert copied.is_file(), f"{fname} should be seeded into the worktree"
+            assert copied.read_text(encoding="utf-8") == f"SEED={fname}\n"
+
+    def test_missing_files_are_skipped_without_error(self, repo: Path) -> None:
+        # Only one of the default files exists; the other must be skipped cleanly.
+        present = DEFAULT_WORKTREE_COPY_FILES[0]
+        (repo / present).write_text("SEED=present\n", encoding="utf-8")
+
+        handler = WorktreeCreateHandler()
+        result = handler.handle(self._input(repo))
+        worktree = Path(result.worktree_path or "")
+
+        assert (worktree / present).is_file()
+        for absent in DEFAULT_WORKTREE_COPY_FILES[1:]:
+            assert not (worktree / absent).exists()
+
+    def test_no_recopy_on_idempotent_refire(self, repo: Path) -> None:
+        fname = DEFAULT_WORKTREE_COPY_FILES[0]
+        (repo / fname).write_text("SEED=original\n", encoding="utf-8")
+
+        handler = WorktreeCreateHandler()
+        first = handler.handle(self._input(repo))
+        worktree = Path(first.worktree_path or "")
+
+        # Simulate an edit made inside the worktree after creation.
+        (worktree / fname).write_text("SEED=edited-in-worktree\n", encoding="utf-8")
+
+        # A re-fired event for the same agent reuses the worktree and MUST NOT
+        # clobber the in-worktree edit.
+        handler.handle(self._input(repo))
+        assert (worktree / fname).read_text(encoding="utf-8") == "SEED=edited-in-worktree\n"
+
+    def test_configured_copy_files_list_is_honoured(self, repo: Path) -> None:
+        (repo / "custom.env").write_text("SEED=custom\n", encoding="utf-8")
+        (repo / ".env.local").write_text("SEED=default-not-configured\n", encoding="utf-8")
+
+        handler = WorktreeCreateHandler()
+        # Simulate the registry applying the `copy_files` option.
+        handler._copy_files = ["custom.env"]
+        result = handler.handle(self._input(repo))
+        worktree = Path(result.worktree_path or "")
+
+        assert (worktree / "custom.env").is_file()
+        # A default file NOT in the configured list is not copied.
+        assert not (worktree / ".env.local").exists()
+
+    def test_unsafe_entries_are_ignored(self, repo: Path, tmp_path: Path) -> None:
+        outside = tmp_path / "outside-secret.env"
+        outside.write_text("SEED=outside\n", encoding="utf-8")
+
+        handler = WorktreeCreateHandler()
+        handler._copy_files = ["../outside-secret.env", str(outside)]
+        result = handler.handle(self._input(repo))
+        worktree = Path(result.worktree_path or "")
+
+        # Neither a traversal entry nor an absolute path escapes into the worktree.
+        assert not (worktree / "outside-secret.env").exists()
+        assert list(worktree.glob("**/outside-secret.env")) == []
+
+    def test_copy_failure_does_not_break_worktree_creation(self, repo: Path) -> None:
+        # A directory at the source name makes the copy raise (IsADirectoryError),
+        # exercising the best-effort path: worktree creation must still succeed.
+        (repo / ".env.local").mkdir()
+
+        handler = WorktreeCreateHandler()
+        handler._copy_files = [".env.local"]
+        result = handler.handle(self._input(repo))
+        worktree = Path(result.worktree_path or "")
+
+        assert worktree.is_dir()
+        assert result.worktree_path is not None

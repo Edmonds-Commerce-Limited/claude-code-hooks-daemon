@@ -33,6 +33,18 @@
       "reason": "Git helper methods are explicitly non-fatal. Callers check for None and handle missing git context gracefully. These are utility methods, not critical paths."
     },
     {
+      "file": "handlers/worktree_create/worktree_create_handler.py",
+      "function": "_repo_toplevel",
+      "rule": "return-none-on-error",
+      "reason": "Git helper for env-file seeding (Plan 00190). Non-fatal: if the repo top-level cannot be resolved, seeding is skipped and the caller returns None so worktree creation still succeeds. Logged with the exception before returning. Same pattern as core/project_context.py::_get_git_toplevel."
+    },
+    {
+      "file": "handlers/worktree_create/worktree_create_handler.py",
+      "function": "_seed_files",
+      "rule": "log-and-continue",
+      "reason": "Env-file seeding (Plan 00190) is strictly best-effort: a copy OSError is logged with the failing entry and the exception, then the loop continues. A missing/unreadable local env file must never break worktree creation (that would abort the agent launch) — the seeded files are a convenience, not a correctness requirement."
+    },
+    {
       "file": "core/pseudo_event.py",
       "function": "_fire",
       "rule": "return-none-on-error",

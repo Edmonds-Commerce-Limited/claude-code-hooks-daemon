@@ -451,6 +451,17 @@ handlers:
       # worktree path, so a disabled/passthrough hook breaks worktree creation.
       enabled: true
       priority: 50
+      options:
+        # Git-ignored local files seeded from the repo top-level into a fresh
+        # worktree so it behaves like the main checkout (these files are never
+        # committed, so a worktree checkout would otherwise lack them). Best-
+        # effort: a missing/unreadable source is skipped, never failing creation;
+        # never re-copied on an idempotent re-fire. Entries are relative to the
+        # repo root; absolute paths and `..` traversal are ignored. Set to an
+        # empty list to disable seeding.
+        copy_files:
+          - .env.local
+          - .env.test.local
 
   worktree_remove:  # WorktreeRemove event (worktree teardown)
     worktree_remove:  # Prunes stale worktree registrations; removes a named worktree
