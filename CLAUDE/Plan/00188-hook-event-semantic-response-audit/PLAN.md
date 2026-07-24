@@ -81,15 +81,28 @@ so semantic-contract regressions are caught the same way structural drift is.
   (`WorktreeCreate`), 2 safe-but-subtle (`UserPromptExpansion`, `Elicitation`),
   28 safe.
 
-### Phase 2: Fix WorktreeCreate (confirmed High)
+### Phase 2: Own WorktreeCreate with semantic naming (owner-steered)
 
-- [ ] ⬜ **Task 2.1**: RED — failing test: `WorktreeCreate` response must (a) create
-  the worktree dir, (b) echo an absolute path under the repo, (c) contain no
-  `{`/`}` template placeholder.
-- [ ] ⬜ **Task 2.2**: GREEN — implement a built-in `WorktreeCreate` handler (and
-  `WorktreeRemove` teardown) that materialises the worktree and returns its path.
-- [ ] ⬜ **Task 2.3**: REFACTOR + coverage ≥95%.
-- [ ] ⬜ **Task 2.4**: Restart daemon; live-dogfood an `isolation: "worktree"` agent.
+Real payload (captured): `{session_id, transcript_path, cwd, prompt_id, hook_event_name, name}` — Claude Code sends NO path; only human-ish field is
+`name`. Scheme: `<cwd>/.claude/worktrees/<slug(name)>-<shorthash>/`.
+
+- [ ] ⬜ **Task 2.1**: RED — pure-function tests for `core/worktree_naming.py`
+  (`slugify`, `worktree_dir_name(name, prompt_id, session_id)`, `worktree_path`):
+  human-friendly slug prefix, 8-char stable hash suffix, empty/gnarly-name
+  fallbacks, length cap, no `{`/`}`.
+- [ ] ⬜ **Task 2.2**: GREEN — `core/worktree_naming.py`.
+- [ ] ⬜ **Task 2.3**: RED+GREEN — `WorktreeCreateHandler` (default-enabled): runs
+  `git -C <cwd> worktree add -b <name> <path>`, returns abs path; idempotent on
+  re-fire; fails loudly (never emits `{}`/`{`-bearing path).
+- [ ] ⬜ **Task 2.4**: Wire raw-path response — `HookResult.to_json` emits
+  `{"worktreePath": <abs>}` for WorktreeCreate; add `worktree` response_mode to
+  the `worktree-create` forwarder (extracts `.worktreePath`, prints RAW); handle
+  daemon-down fallback so it never prints `{}`.
+- [ ] ⬜ **Task 2.5**: `WorktreeRemoveHandler` — `git worktree remove` + branch
+  cleanup; clean no-op if the path is unknown.
+- [ ] ⬜ **Task 2.6**: Restart daemon; live-dogfood an `isolation: "worktree"`
+  agent → success with the semantic path; capture the WorktreeRemove payload.
+- [ ] ⬜ **Task 2.7**: Revert the temporary `payload_capture` config change.
 
 ### Phase 3: Fix other mandatory-response events flagged in Phase 1
 
