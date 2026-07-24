@@ -40,6 +40,14 @@ class EventIDMeta:
             excluded from the settings-registration requirement so the live
             hook_registration_checker does not demand a forwarder that does not
             exist yet.
+        raw_stdout: True when Claude Code parses this hook's stdout as a RAW
+            VALUE (e.g. a path or text) rather than a JSON decision object. For
+            such events an empty ``{}`` passthrough is taken literally and
+            CORRUPTS the feature (Plan 00188: WorktreeCreate ``{}`` -> the path
+            ``/<cwd>/{}``), so a raw_stdout event MUST ship a built-in default
+            handler — it can never be a bare fail-open passthrough. Decision /
+            context / observe events (the vast majority) are False: ``{}`` is
+            their correct "no opinion" response.
     """
 
     enum_value: str
@@ -49,6 +57,7 @@ class EventIDMeta:
     can_block: bool = False
     category: str = ""
     wired: bool = True
+    raw_stdout: bool = False
 
 
 class EventID:
@@ -160,6 +169,9 @@ class EventID:
         json_key="StatusLine",
         can_block=False,
         category="status",
+        # The status line is raw text on stdout — the daemon ships status_line
+        # handlers that render it (never a bare {} passthrough).
+        raw_stdout=True,
     )
 
     # -----------------------------------------------------------------------
@@ -315,6 +327,9 @@ class EventID:
         json_key="WorktreeCreate",
         can_block=True,
         category="worktree",
+        # Claude Code parses stdout as the created worktree PATH — {} corrupts it
+        # (Plan 00188). Ships a built-in WorktreeCreateHandler, never a passthrough.
+        raw_stdout=True,
     )
 
     WORKTREE_REMOVE = EventIDMeta(

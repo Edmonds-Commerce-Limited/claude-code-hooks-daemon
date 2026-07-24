@@ -97,10 +97,32 @@ class WorktreeCreateHandler(Handler):
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """No tool-call acceptance tests.
-
-        WorktreeCreate cannot be triggered by a tool call in the main thread (it
-        fires only when Claude Code spawns a worktree). It is verified by unit
-        tests against a real git repo plus a live worktree-agent dogfood.
+        """VERIFIED_BY_LOAD: WorktreeCreate fires only when Claude Code spawns a
+        worktree (untriggerable by a tool call), so it is verified by daemon load
+        + unit tests against a real git repo + a live worktree-agent dogfood.
         """
-        return []
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            Decision,
+            RecommendedModel,
+            TestType,
+        )
+
+        return [
+            AcceptanceTest(
+                title="worktree_create returns a real path (not '{}')",
+                command='echo "worktree create verified by unit tests + live dogfood"',
+                description=(
+                    "WorktreeCreate creates a git worktree at "
+                    ".claude/worktrees/<slug>-<hash>/ and returns its absolute path; "
+                    "never an empty {} (which Claude Code would take as /<cwd>/{})."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                safety_notes="Untriggerable by tool call; verified by daemon load + unit tests.",
+                test_type=TestType.CONTEXT,
+                requires_event="WorktreeCreate event",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+        ]

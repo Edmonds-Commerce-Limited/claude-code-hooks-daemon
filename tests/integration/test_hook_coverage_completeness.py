@@ -233,3 +233,40 @@ def test_settings_map_excludes_unwired_events() -> None:
         assert (
             json_key not in HOOK_EVENTS_IN_SETTINGS
         ), f"Unwired event {json_key} leaked into HOOK_EVENTS_IN_SETTINGS"
+
+
+# ---------------------------------------------------------------------------
+# Semantic-contract gate (Plan 00188): raw-stdout events must ship a handler
+# ---------------------------------------------------------------------------
+
+
+def test_raw_stdout_events_ship_a_builtin_handler() -> None:
+    """Every ``raw_stdout`` event MUST ship a built-in handler — never a bare
+    passthrough.
+
+    Structural wiring (forwarder + schema + settings) only proves an event is
+    *dispatchable*; it never checks the *semantic* response. For events whose
+    stdout Claude Code parses as a RAW value (a path, the status line), an empty
+    ``{}`` passthrough is taken literally and corrupts the feature — this is the
+    exact class that shipped the WorktreeCreate ``/<cwd>/{}`` break. Such events
+    are therefore required to carry a default handler that produces the real
+    value, verified here by the presence of a non-test handler module in the
+    event's handler directory.
+    """
+    handlers_root = _REPO_ROOT / "src" / "claude_code_hooks_daemon" / "handlers"
+    raw_events = [m for m in _all_metas() if m.raw_stdout]
+    assert raw_events, "Expected at least one raw_stdout event (WorktreeCreate, StatusLine)"
+
+    for meta in raw_events:
+        event_dir = handlers_root / meta.config_key
+        assert event_dir.is_dir(), (
+            f"raw_stdout event {meta.json_key} has no handler directory "
+            f"({event_dir}); a raw-value event cannot be a bare '{{}}' passthrough"
+        )
+        handler_modules = [
+            p for p in event_dir.glob("*.py") if not p.name.startswith("_") and "test" not in p.name
+        ]
+        assert handler_modules, (
+            f"raw_stdout event {meta.json_key} ships no built-in handler module in "
+            f"{event_dir}; an empty '{{}}' response would corrupt the feature"
+        )

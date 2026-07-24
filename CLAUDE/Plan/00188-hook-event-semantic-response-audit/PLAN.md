@@ -86,39 +86,48 @@ so semantic-contract regressions are caught the same way structural drift is.
 Real payload (captured): `{session_id, transcript_path, cwd, prompt_id, hook_event_name, name}` — Claude Code sends NO path; only human-ish field is
 `name`. Scheme: `<cwd>/.claude/worktrees/<slug(name)>-<shorthash>/`.
 
-- [ ] ⬜ **Task 2.1**: RED — pure-function tests for `core/worktree_naming.py`
-  (`slugify`, `worktree_dir_name(name, prompt_id, session_id)`, `worktree_path`):
-  human-friendly slug prefix, 8-char stable hash suffix, empty/gnarly-name
-  fallbacks, length cap, no `{`/`}`.
-- [ ] ⬜ **Task 2.2**: GREEN — `core/worktree_naming.py`.
-- [ ] ⬜ **Task 2.3**: RED+GREEN — `WorktreeCreateHandler` (default-enabled): runs
-  `git -C <cwd> worktree add -b <name> <path>`, returns abs path; idempotent on
-  re-fire; fails loudly (never emits `{}`/`{`-bearing path).
-- [ ] ⬜ **Task 2.4**: Wire raw-path response — `HookResult.to_json` emits
-  `{"worktreePath": <abs>}` for WorktreeCreate; add `worktree` response_mode to
-  the `worktree-create` forwarder (extracts `.worktreePath`, prints RAW); handle
-  daemon-down fallback so it never prints `{}`.
-- [ ] ⬜ **Task 2.5**: `WorktreeRemoveHandler` — `git worktree remove` + branch
-  cleanup; clean no-op if the path is unknown.
-- [ ] ⬜ **Task 2.6**: Restart daemon; live-dogfood an `isolation: "worktree"`
-  agent → success with the semantic path; capture the WorktreeRemove payload.
-- [ ] ⬜ **Task 2.7**: Revert the temporary `payload_capture` config change.
+- [x] ✅ **Task 2.1**: RED — pure-function tests for `core/worktree_naming.py`
+  (16 tests).
+- [x] ✅ **Task 2.2**: GREEN — `core/worktree_naming.py`.
+- [x] ✅ **Task 2.3**: RED+GREEN — `WorktreeCreateHandler` (default-enabled, 17
+  tests against a real git repo); idempotent; fails loudly.
+- [x] ✅ **Task 2.4**: Wired raw-path response — `HookResult.to_json` →
+  `{"worktreePath": <abs>}`; `worktree` response_mode in `init.sh`
+  (`print_worktree`) + `.claude/hooks/worktree-create`; daemon-down/no-path →
+  non-zero exit, never `{}`.
+- [x] ✅ **Task 2.5**: `WorktreeRemoveHandler` (8 tests): `git worktree prune`
+  always + `git worktree remove --force <path>` when a path field is present;
+  clean no-op otherwise (WorktreeRemove is `{}`-safe).
+- [x] ✅ **Task 2.6**: Restarted daemon; live-dogfooded an `isolation:"worktree"`
+  agent → ran INSIDE `.claude/worktrees/agent-<id>-<hash>`. (WorktreeRemove did
+  NOT fire for a Task-tool worktree — payload uncaptured; handler is
+  payload-defensive. Finding: Claude Code sends its internal agent id as `name`.)
+- [x] ✅ **Task 2.7**: Reverted the temporary `payload_capture` config change.
 
 ### Phase 3: Fix other mandatory-response events flagged in Phase 1
 
-- [ ] ⬜ **Task 3.1**: For each flagged event, TDD fix (one checkpoint commit each).
+- [x] ✅ **Task 3.1**: None needed. The audit confirmed WorktreeCreate is the ONLY
+  event whose `{}` passthrough corrupts the feature. `UserPromptExpansion` /
+  `Elicitation` are safe-but-subtle (`{}` = valid-JSON no-op) — documented in the
+  matrix as future-handler land-mines, no fix required today.
 
 ### Phase 4: Enforcement
 
-- [ ] ⬜ **Task 4.1**: Add a `mandatory_response` marker to `EventIDMeta` (or an
-  equivalent registry) and a test that fails if a mandatory-response event's
-  default behaviour is empty passthrough.
-- [ ] ⬜ **Task 4.2**: Extend the completeness gate docs to cover the semantic layer.
+- [x] ✅ **Task 4.1**: Added `raw_stdout: bool` to `EventIDMeta` (marks events
+  whose stdout Claude Code parses as a raw value, where `{}` corrupts). Marked
+  `WORKTREE_CREATE` + `STATUS_LINE`. New completeness test
+  `test_raw_stdout_events_ship_a_builtin_handler` fails if any raw_stdout event
+  lacks a built-in handler (i.e. would fall back to a `{}` passthrough).
+- [x] ✅ **Task 4.2**: Semantic-contract layer documented in the completeness
+  test module + `raw_stdout` docstring on `EventIDMeta`.
 
 ### Phase 5: Dogfood + close
 
-- [ ] ⬜ **Task 5.1**: Dogfood each triggerable event; document the untriggerable.
-- [ ] ⬜ **Task 5.2**: Full QA, daemon restart RUNNING, clean up scratch report.
+- [x] ✅ **Task 5.1**: Live-dogfooded WorktreeCreate (agent ran inside the
+  worktree). Probed all 31 forwarders (`scratchpad/event-probe.txt`); the
+  `{}`-returning events are confirmed contract-correct no-ops (audit matrix).
+- [ ] 🔄 **Task 5.2**: Full QA green, daemon restart RUNNING, clean up scratch
+  report `untracked/hooks-daemon-worktree-bug.md`.
 
 ## Audit Matrix (Phase 1 — COMPLETE)
 

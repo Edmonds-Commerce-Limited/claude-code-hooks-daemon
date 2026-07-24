@@ -445,6 +445,18 @@ handlers:
       enabled: true
       priority: 60
 
+  worktree_create:  # WorktreeCreate event (isolation:worktree agents / --worktree sessions)
+    worktree_create:  # Creates the git worktree at a semantic path and echoes it
+      # MUST stay enabled: Claude Code parses this hook's stdout as the created
+      # worktree path, so a disabled/passthrough hook breaks worktree creation.
+      enabled: true
+      priority: 50
+
+  worktree_remove:  # WorktreeRemove event (worktree teardown)
+    worktree_remove:  # Prunes stale worktree registrations; removes a named worktree
+      enabled: true
+      priority: 50
+
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
 # Example:
 # plugins:

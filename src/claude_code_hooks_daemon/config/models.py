@@ -106,6 +106,11 @@ class HandlersConfig(BaseModel):
     stop: dict[str, Any] = Field(default_factory=dict)
     subagent_stop: dict[str, Any] = Field(default_factory=dict)
     status_line: dict[str, Any] = Field(default_factory=dict)
+    # Worktree lifecycle events with built-in handlers (Plan 00188). Declared so
+    # _build_handler_config_mapping covers them and handlers.worktree_*.enabled
+    # is honoured (an undeclared field would silently fall back to enabled=True).
+    worktree_create: dict[str, Any] = Field(default_factory=dict)
+    worktree_remove: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_handler_dependencies(self) -> Self:

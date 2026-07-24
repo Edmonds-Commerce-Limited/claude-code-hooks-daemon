@@ -270,6 +270,11 @@ def backup_existing_hooks(project_root: Path) -> None:
 
 _STOP_EVENT_NAMES = ("Stop", "SubagentStop")
 
+# WorktreeCreate needs the "worktree" response mode: Claude Code parses this
+# hook's stdout as the created worktree PATH, so the forwarder must extract
+# .worktreePath from the daemon response and print it RAW (Plan 00188).
+_WORKTREE_CREATE_EVENT_NAME = "WorktreeCreate"
+
 # Single source of truth for install.py: bash_key -> JSON event name for every
 # daemon forwarder hook (StatusLine excluded — it uses the custom status-line
 # script + top-level statusLine settings key). create_all_hooks() generates a
@@ -360,6 +365,34 @@ fi
 
 forward_stop_event "{event_name}"
 exit $?  # propagate 0 (allow) or 2 (block / hard re-entry)
+"""
+    elif event_name == _WORKTREE_CREATE_EVENT_NAME:
+        hook_content = f"""#!/bin/bash
+#
+# Claude Code Hooks - {event_name} Forwarder
+#
+# Forwards {event_name} hook calls to daemon via Unix socket.
+# CRITICAL: Pipes JSON directly - NEVER store in shell variables.
+# CRITICAL: All errors output valid JSON to stdout for agent visibility.
+#
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+source "$SCRIPT_DIR/../init.sh"
+
+# Try to start daemon - if it fails, output proper JSON error to stdout
+if ! ensure_daemon; then
+    emit_hook_error "{event_name}" "daemon_startup_failed" \\
+        "Failed to start hooks daemon. Use the hooks-daemon skill to check logs (Skill tool: skill=hooks-daemon, args=logs)"
+    exit 0  # Exit 0 so Claude processes the JSON response
+fi
+
+# Plan 00188: "worktree" response mode. Claude Code parses this hook's stdout as
+# the created worktree PATH, so the transport extracts .worktreePath from the
+# daemon response and prints it RAW (never '{{}}', which would become a bad path).
+# send_request_stdin handles socket errors internally (non-zero exit on failure).
+send_request_stdin "{event_name}" "worktree"
 """
     else:
         hook_content = f"""#!/bin/bash
