@@ -70,13 +70,16 @@ so semantic-contract regressions are caught the same way structural drift is.
 
 ### Phase 1: Audit (research + classify)
 
-- [ ] 🔄 **Task 1.1**: Obtain authoritative Claude Code response contract for every
-  wired event (claude-code-guide agent + https://code.claude.com/docs/en/hooks).
-- [ ] ⬜ **Task 1.2**: Build the per-event audit matrix (see table below): contract,
-  fail-open-safe? mandatory-response? current daemon behaviour, verdict.
-- [ ] ⬜ **Task 1.3**: Probe the live daemon for each event's actual returned JSON
-  (via the forwarder scripts) to confirm current behaviour empirically.
-- [ ] ⬜ **Task 1.4**: Rank findings by severity (breaks a feature > cosmetic).
+- [x] ✅ **Task 1.1**: Obtain authoritative Claude Code response contract for every
+  wired event (claude-code-guide agent + https://code.claude.com/docs/en/hooks +
+  direct WebFetch of `hooks.md`).
+- [x] ✅ **Task 1.2**: Build the per-event audit matrix (see table below): parse
+  mode, `{}` verdict, current daemon behaviour.
+- [x] ✅ **Task 1.3**: Probe the live daemon for each event's actual returned JSON
+  (via the forwarder scripts) → `scratchpad/event-probe.txt`.
+- [x] ✅ **Task 1.4**: Rank findings by severity. Result: 1 BROKEN
+  (`WorktreeCreate`), 2 safe-but-subtle (`UserPromptExpansion`, `Elicitation`),
+  28 safe.
 
 ### Phase 2: Fix WorktreeCreate (confirmed High)
 
@@ -104,12 +107,59 @@ so semantic-contract regressions are caught the same way structural drift is.
 - [ ] ⬜ **Task 5.1**: Dogfood each triggerable event; document the untriggerable.
 - [ ] ⬜ **Task 5.2**: Full QA, daemon restart RUNNING, clean up scratch report.
 
-## Audit Matrix (populated in Phase 1)
+## Audit Matrix (Phase 1 — COMPLETE)
 
-| Event                         | can_block | Claude Code response contract                 | Fail-open `{}` safe? | Current daemon | Verdict         |
-| ----------------------------- | --------- | --------------------------------------------- | -------------------- | -------------- | --------------- |
-| WorktreeCreate                | true      | MUST create worktree dir + echo absolute path | ❌ NO                | `{}`           | 🚫 BROKEN — fix |
-| _(rest populated in Phase 1)_ |           |                                               |                      |                |                 |
+**Sources:** authoritative Claude Code hooks docs (https://code.claude.com/docs/en/hooks
+
+- `hooks.md`, fetched 2026-07-24) cross-checked against an empirical probe of every
+  forwarder (`scratchpad/event-probe.txt`).
+
+**The governing distinction:** Claude Code parses a hook's stdout in one of two
+ways. **Decision/context events** parse stdout as a JSON object → an empty `{}`
+means "no decision / no added context" → **SAFE fail-open**. **Data-return
+events** parse stdout as a raw value → `{}` is taken literally as that value →
+**corrupts the feature**. Only `WorktreeCreate` returns a raw value (the worktree
+path), which is why it is the sole genuinely-broken event: `{}` becomes the path
+`/workspace/{}`.
+
+| Event               | Parse mode                | `{}` verdict   | Current daemon | Note                                                                                                                                       |
+| ------------------- | ------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| WorktreeCreate      | RAW PATH (stdout)         | 🚫 BROKEN      | `{}`           | Only true break. Hook must `git worktree add` + print abs path; `{}`→`/workspace/{}` fails creation                                        |
+| WorktreeRemove      | side-effect only          | ✅ SAFE        | `{}`           | CC removes the dir itself; hook is informational                                                                                           |
+| UserPromptExpansion | JSON decision / raw text  | ⚠️ SAFE-SUBTLE | `{}`           | `{}` is valid JSON = no decision = expansion proceeds. A client handler that prints RAW text replaces the prompt — must not emit `{}` then |
+| Elicitation         | JSON `hookSpecificOutput` | ⚠️ SAFE-SUBTLE | `{}`           | `{}` = no auto-response → dialog proceeds to user normally. Not broken; a handler wanting to auto-answer must emit `action`/`content`      |
+| ElicitationResult   | JSON `hookSpecificOutput` | ✅ SAFE        | `{}`           | `{}` = user response passes through unchanged                                                                                              |
+| PreToolUse          | JSON decision             | ✅ SAFE        | `{}`/deny      | `{}` = allow                                                                                                                               |
+| PostToolUse         | JSON decision             | ✅ SAFE        | `{}`           | `{}` = no feedback                                                                                                                         |
+| PermissionRequest   | JSON decision             | ✅ SAFE        | `{}`           | `{}` = defer to normal prompt (auto_approve_reads relies on this)                                                                          |
+| PermissionDenied    | observe                   | ✅ SAFE        | `{}`           | notification-only                                                                                                                          |
+| Stop                | JSON decision             | ✅ SAFE        | block/`{}`     | `{}` = allow stop                                                                                                                          |
+| StopFailure         | observe                   | ✅ SAFE        | `{}`           | notification-only                                                                                                                          |
+| SubagentStart       | observe                   | ✅ SAFE        | `{}`           |                                                                                                                                            |
+| SubagentStop        | JSON decision/context     | ✅ SAFE        | ctx/`{}`       |                                                                                                                                            |
+| SessionStart        | context                   | ✅ SAFE        | ctx            | `{}` = no added context                                                                                                                    |
+| SessionEnd          | observe                   | ✅ SAFE        | `{}`           |                                                                                                                                            |
+| Setup               | observe                   | ✅ SAFE        | `{}`           |                                                                                                                                            |
+| UserPromptSubmit    | context                   | ✅ SAFE        | ctx            |                                                                                                                                            |
+| Notification        | observe                   | ✅ SAFE        | `{}`           |                                                                                                                                            |
+| MessageDisplay      | observe                   | ✅ SAFE        | `{}`           |                                                                                                                                            |
+| TaskCreated         | JSON decision             | ✅ SAFE        | `{}`           | `{}` = allow                                                                                                                               |
+| TaskCompleted       | observe                   | ✅ SAFE        | `{}`           |                                                                                                                                            |
+| TeammateIdle        | JSON decision             | ✅ SAFE        | `{}`           | `{}` = no directive                                                                                                                        |
+| InstructionsLoaded  | context                   | ✅ SAFE        | `{}`           | `{}` = no injected instructions                                                                                                            |
+| ConfigChange        | JSON decision             | ✅ SAFE        | `{}`           | `{}` = accept change                                                                                                                       |
+| CwdChanged          | observe                   | ✅ SAFE        | `{}`           |                                                                                                                                            |
+| FileChanged         | observe                   | ✅ SAFE        | `{}`           |                                                                                                                                            |
+| PreCompact          | observe                   | ✅ SAFE        | `{}`           |                                                                                                                                            |
+| PostCompact         | observe                   | ✅ SAFE        | `{}`           |                                                                                                                                            |
+| Status (statusLine) | RAW text                  | ✅ SAFE        | rendered line  | Real handler renders the line; works correctly                                                                                             |
+
+**Headline:** 1 genuinely broken (`WorktreeCreate`), 2 safe-but-subtle
+(`UserPromptExpansion`, `Elicitation` — safe today, land-mines for a future
+client handler), 28 safe. The Plan 00170 "wire everything as `{}` passthrough"
+model is sound for every JSON-parsed event and wrong only for the raw-value
+events; `WorktreeCreate` is the one raw-value event wired as if it were a
+decision event.
 
 ## Success Criteria
 
