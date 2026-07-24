@@ -1,6 +1,6 @@
 # Plan 00188: hook event semantic response audit
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-24
 **Owner**: joseph
 **Priority**: High
@@ -126,8 +126,9 @@ Real payload (captured): `{session_id, transcript_path, cwd, prompt_id, hook_eve
 - [x] ✅ **Task 5.1**: Live-dogfooded WorktreeCreate (agent ran inside the
   worktree). Probed all 31 forwarders (`scratchpad/event-probe.txt`); the
   `{}`-returning events are confirmed contract-correct no-ops (audit matrix).
-- [ ] 🔄 **Task 5.2**: Full QA green, daemon restart RUNNING, clean up scratch
-  report `untracked/hooks-daemon-worktree-bug.md`.
+- [x] ✅ **Task 5.2**: Full QA green (two independent `llm_qa.py all` runs, both
+  exit 0), daemon restart RUNNING with both new handlers loaded, scratch report
+  `untracked/hooks-daemon-worktree-bug.md` removed (resolved — tracked here).
 
 ## Audit Matrix (Phase 1 — COMPLETE)
 
@@ -185,12 +186,20 @@ decision event.
 
 ## Success Criteria
 
-- [ ] `isolation: "worktree"` sub-agents launch successfully (WorktreeCreate fixed).
-- [ ] Every event in the audit matrix has a verdict; every BROKEN one is fixed.
-- [ ] A regression test guards each mandatory-response contract.
-- [ ] Full QA passes; daemon restarts RUNNING.
-- [ ] Scratch report `untracked/hooks-daemon-worktree-bug.md` resolved/removed.
+- [x] `isolation: "worktree"` sub-agents launch successfully (WorktreeCreate fixed).
+- [x] Every event in the audit matrix has a verdict; every BROKEN one is fixed.
+- [x] A regression test guards each mandatory-response contract
+  (`test_raw_stdout_events_ship_a_builtin_handler`).
+- [x] Full QA passes; daemon restarts RUNNING.
+- [x] Scratch report `untracked/hooks-daemon-worktree-bug.md` resolved/removed.
 
 ## Delivery & Milestones
 
 - Plan created; recovery cron `7a4541bc` (hourly :37).
+- Phase 1 audit matrix delivered at `8aa778ef`.
+- Phase 2 design delivered at `cdab91ef`.
+- WorktreeCreate fix (daemon-owned creation + semantic naming, live-dogfooded)
+  delivered at `9c5539ed`.
+- WorktreeRemove handler + `raw_stdout` semantic-contract enforcement + config/
+  installer/example wiring delivered at `cd059414`.
+- Plan closed at the completion commit (this commit).
