@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.49.0] - 2026-07-24
+
+This is a **minor release** delivering Plan 00188: a full hook-event
+semantic-response audit across all 31 wired Claude Code hook events, and a
+fix for the one genuine break it found — `WorktreeCreate`. The daemon now
+owns worktree creation with human-friendly semantic naming, replacing Claude
+Code's opaque `wf_<hash>` scheme. Also included: Plan 00187's fix for a
+socket-discovery split-brain in the daemon CLI, a status-line worktree icon
+fix, and Plan 00186's hardening follow-ups from the v3.48.0 review.
+
+### Added
+
+- **`WorktreeCreateHandler`** (PreToolUse-equivalent `WorktreeCreate` event,
+  priority 50, terminal, default-enabled) — the daemon now owns worktree
+  creation. Runs `git worktree add` under
+  `.claude/worktrees/<slug(name)>-<shorthash>/` and echoes the absolute path
+  via a new `worktree` `init.sh` response mode, replacing Claude Code's
+  fail-open `{}` passthrough (which was silently interpreted as the literal
+  worktree path and broke every `isolation: "worktree"` sub-agent).
+- **`WorktreeRemoveHandler`** (`WorktreeRemove` event, default-enabled,
+  non-blocking) — prunes stale worktree registrations, payload-defensive.
+- **`HookResult.worktree_path`** field carrying the created worktree's
+  absolute path back to Claude Code.
+- **`EventIDMeta.raw_stdout`** flag plus a new completeness test
+  (`test_raw_stdout_events_ship_a_builtin_handler`) that fails CI if any
+  raw-stdout-contract event regresses to a `{}` fail-open passthrough.
+- New config keys `handlers.worktree_create` and `handlers.worktree_remove`
+  (both default-enabled).
+- Full hook-event semantic-response audit matrix (Plan 00188 Phase 1)
+  covering all 31 wired events; documents two safe-but-subtle events
+  (`UserPromptExpansion`, `Elicitation`) as future land-mines and confirms
+  28 events already safe.
+
+### Changed
+
+- `hook_registration_checker`'s `settings.json` self-heal write is now
+  atomic — stages to a sibling temp file and `os.replace`s into place
+  (Plan 00186).
+
+### Fixed
+
+- **`isolation: "worktree"` sub-agents broken by `{}` fail-open passthrough**
+  on the `WorktreeCreate` event — Claude Code parses daemon stdout as the
+  raw worktree path, so an empty JSON object became the literal path
+  `/workspace/{}` (Plan 00188).
+- **Daemon CLI socket-discovery split-brain**: `status`/`health`/`restart`
+  could report NOT RUNNING while hooks fired correctly, when a stale
+  `hooks-daemon.env` pinned a non-canonical socket. The CLI now mirrors
+  `init.sh`'s socket-discovery-file fallback (`read_socket_discovery_file`,
+  `_resolve_effective_daemon`) with an explicit split-brain drift warning
+  (Plan 00187).
+- **Status-line worktree tree icon** rendered as a suffix instead of a
+  branch-name prefix (`git_branch.py`).
+
 ## [3.48.0] - 2026-07-21
 
 This is a **minor release** delivering Plan 00185: installer/upgrade

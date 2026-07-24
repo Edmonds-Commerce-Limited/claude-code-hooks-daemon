@@ -1,0 +1,44 @@
+# Required
+version: "3.49.0"
+date: "2026-07-24"
+
+# Required
+breaking: false
+
+# Required section (lists may be empty)
+config_changes:
+
+  # New config keys introduced in this version
+  added:
+    - key: handlers.worktree_create
+      description: >-
+        Daemon-owned worktree creation for the WorktreeCreate event. Runs
+        `git worktree add` under `.claude/worktrees/<slug(name)>-<shorthash>/`
+        and echoes the absolute path back to Claude Code, replacing the
+        opaque `wf_<hash>` naming scheme Claude Code uses by default.
+      example_yaml: |
+        worktree_create:
+          enabled: true
+      migration_note: "Ships default-enabled — no action required."
+      recommended: false
+      dormant: false
+
+    - key: handlers.worktree_remove
+      description: >-
+        Prunes stale worktree registrations for the WorktreeRemove event.
+        Non-blocking, payload-defensive.
+      example_yaml: |
+        worktree_remove:
+          enabled: true
+      migration_note: "Ships default-enabled — no action required."
+      recommended: false
+      dormant: false
+
+  # Keys renamed from one path to another
+  renamed: []
+
+  # Keys removed entirely (no longer valid)
+  removed: []
+
+  # Keys with changed semantics or defaults
+  changed: []

@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-07-21 (v3.48.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
+> Generated on 2026-07-24 (v3.49.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
 
 ## Active Handlers
 
@@ -145,6 +145,18 @@
 | 32 | upgrade_notifier | NON-TERMINAL | Show a daemon-upgrade-available indicator on the status line |
 | 40 | account_display | NON-TERMINAL | Display Claude account username in status line |
 | 60 | usage_tracking | NON-TERMINAL | Display daily and weekly token usage percentages |
+
+### WorktreeCreate (1 handler)
+
+| Priority | Handler | Behavior | Description |
+|----------|---------|----------|-------------|
+| 50 | worktree_create | TERMINAL | Create a git worktree at a semantic path and return its absolute path |
+
+### WorktreeRemove (1 handler)
+
+| Priority | Handler | Behavior | Description |
+|----------|---------|----------|-------------|
+| 50 | worktree_remove | TERMINAL | Prune stale worktree registrations (and remove a named worktree) |
 
 ### Plugin (1 handler)
 
