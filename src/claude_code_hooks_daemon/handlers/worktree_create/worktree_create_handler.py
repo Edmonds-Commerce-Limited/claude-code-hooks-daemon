@@ -17,7 +17,6 @@ opaque ``wf_<hash>``.
 from __future__ import annotations
 
 import logging
-import shutil
 import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
 from pathlib import Path
 from typing import Any
@@ -39,16 +38,19 @@ _KEY_NAME = "name"
 _KEY_PROMPT_ID = "prompt_id"
 _KEY_SESSION_ID = "session_id"
 
-# Git-ignored local files seeded from the main working copy into a fresh worktree
-# (Plan 00190). These live only in the developer's checkout — never committed —
-# so a worktree checkout would otherwise lack them and the agent would run
-# against a config missing its local overrides/secrets. Overridable per project
-# via the ``copy_files`` handler option. The parent-traversal / absolute-path
-# guard in ``_seed_files`` keeps a misconfigured entry from escaping the worktree.
-DEFAULT_WORKTREE_COPY_FILES: tuple[str, ...] = (".env.local", ".env.test.local")
+# Git-ignored local files SYMLINKED from the main working copy into a fresh
+# worktree (Plan 00190). These live only in the developer's checkout — never
+# committed — so a worktree checkout would otherwise lack them and the agent
+# would run against a config missing its local overrides/secrets. A symlink (not
+# a copy) keeps the main working copy as the single source of truth: editing the
+# canonical file is reflected in every worktree, and there is never a stale
+# duplicate to reconcile. Overridable per project via the ``symlink_files``
+# handler option. The parent-traversal / absolute-path guard in ``_seed_files``
+# keeps a misconfigured entry from escaping the worktree.
+DEFAULT_WORKTREE_SYMLINK_FILES: tuple[str, ...] = (".env.local", ".env.test.local")
 
 # Parent-directory reference — an entry containing this component is rejected so a
-# copy can never write outside the worktree root.
+# symlink can never be written outside the worktree root.
 _PARENT_REF = ".."
 
 
@@ -61,9 +63,10 @@ class WorktreeCreateHandler(Handler):
             priority=_WORKTREE_CREATE_PRIORITY,
             terminal=True,
         )
-        # Files seeded into a fresh worktree; the registry overrides this from the
-        # ``copy_files`` handler option (Plan 00190) via setattr, else the default.
-        self._copy_files: list[str] = list(DEFAULT_WORKTREE_COPY_FILES)
+        # Files symlinked into a fresh worktree; the registry overrides this from
+        # the ``symlink_files`` handler option (Plan 00190) via setattr, else the
+        # default.
+        self._symlink_files: list[str] = list(DEFAULT_WORKTREE_SYMLINK_FILES)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Handle every WorktreeCreate event (no matcher filtering)."""
@@ -79,8 +82,8 @@ class WorktreeCreateHandler(Handler):
         path = worktree_path(cwd, name, prompt_id, session_id)
 
         # Idempotent: a re-fired event for the same agent reuses the worktree.
-        # Seeding runs only on FRESH creation so a re-fire never clobbers edits
-        # made inside the worktree.
+        # Seeding runs only on FRESH creation; an existing worktree's links are
+        # left exactly as they are.
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             branch = worktree_dir_name(name, prompt_id, session_id)
@@ -106,48 +109,61 @@ class WorktreeCreateHandler(Handler):
         )
 
     def _seed_files(self, cwd: str, worktree: Path) -> None:
-        """Copy configured git-ignored local files into a fresh worktree.
+        """Symlink configured git-ignored local files into a fresh worktree.
 
         Files live only in the main working copy (they are git-ignored), so a
         worktree checkout lacks them. Each configured entry is resolved relative
-        to the repository top-level and copied to the same relative location in
-        the worktree. Best-effort by design: a missing source is skipped, and a
-        copy failure is logged (never silently swallowed) but does NOT break
-        worktree creation — an unusable env file is far less harmful than a
-        failed worktree launch.
+        to the repository top-level and a symlink at the same relative location in
+        the worktree is pointed back at it. A symlink (not a copy) keeps the main
+        working copy as the single source of truth — no stale duplicate to
+        reconcile.
+
+        Best-effort by design: a missing source is skipped, an already-present
+        destination is left untouched (never clobbered), and a symlink failure is
+        logged (never silently swallowed) but does NOT break worktree creation —
+        an unusable env file is far less harmful than a failed worktree launch.
         """
-        if not self._copy_files:
+        if not self._symlink_files:
             return
 
         source_root = self._repo_toplevel(cwd)
         if source_root is None:
             return
 
-        for entry in self._copy_files:
+        for entry in self._symlink_files:
             rel = Path(entry)
-            # Reject absolute paths and parent-traversal so a copy can never
-            # escape the worktree root.
+            # Reject absolute paths and parent-traversal so a symlink can never be
+            # written outside the worktree root.
             if rel.is_absolute() or _PARENT_REF in rel.parts:
-                logger.warning("worktree_create: ignoring unsafe copy_files entry %r", entry)
+                logger.warning("worktree_create: ignoring unsafe symlink_files entry %r", entry)
                 continue
 
             src = source_root / rel
-            if not src.is_file():
+            if not src.exists():
                 continue
 
             dest = worktree / rel
+            # Never clobber a destination that already exists (e.g. a tracked
+            # file the checkout provided, or a link from a prior run).
+            if dest.is_symlink() or dest.exists():
+                continue
+
             try:
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dest)
+                # Absolute target so the link resolves regardless of the
+                # worktree's own location under the repo.
+                dest.symlink_to(src)
             except OSError as exc:
-                logger.warning("worktree_create: failed to seed %r into worktree: %s", entry, exc)
+                logger.warning(
+                    "worktree_create: failed to symlink %r into worktree: %s", entry, exc
+                )
 
     @staticmethod
     def _repo_toplevel(cwd: str) -> Path | None:
         """Return the git top-level for ``cwd``, or None if it cannot be resolved.
 
-        The main working copy's root is the seeding source: env files live at the
-        repo root, while ``cwd`` may be a subdirectory of it.
+        The main working copy's root is the symlink target root: env files live at
+        the repo root, while ``cwd`` may be a subdirectory of it.
         """
         try:
             result = subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary
@@ -167,7 +183,7 @@ class WorktreeCreateHandler(Handler):
     def get_claude_md(self) -> str | None:
         """Guidance injected into the project CLAUDE.md."""
         return (
-            "## worktree_create — semantic worktree naming + env-file seeding\n\n"
+            "## worktree_create — semantic worktree naming + env-file symlinking\n\n"
             'When Claude Code creates a worktree (an `isolation: "worktree"` agent '
             "or `--worktree` session), the daemon creates it at a human-friendly "
             "path `.claude/worktrees/<slug-of-name>-<shorthash>/` and echoes that "
@@ -175,13 +191,15 @@ class WorktreeCreateHandler(Handler):
             "readable worktree directory (e.g. `refactor-auth-4f2a1c9b`) instead of "
             "an opaque `wf_<hash>`. The short hash suffix keeps identically-named "
             "agents from colliding.\n\n"
-            "On **fresh** creation the daemon also seeds git-ignored local files "
-            "from the repo top-level into the new worktree so it behaves like the "
-            "main checkout — by default `.env.local` and `.env.test.local`. "
-            "Configure the list via the `copy_files` option under "
-            "`handlers.worktree_create.worktree_create.options`. Seeding is "
-            "best-effort (a copy failure is logged, never fatal) and never runs on "
-            "a re-fire, so in-worktree edits are preserved."
+            "On **fresh** creation the daemon also **symlinks** git-ignored local "
+            "files from the repo top-level into the new worktree so it behaves like "
+            "the main checkout — by default `.env.local` and `.env.test.local`. A "
+            "symlink (not a copy) keeps the main working copy as the single source "
+            "of truth: editing the canonical file is reflected in every worktree, "
+            "with no stale duplicate. Configure the list via the `symlink_files` "
+            "option under `handlers.worktree_create.worktree_create.options`. It is "
+            "best-effort (a symlink failure is logged, never fatal), never clobbers "
+            "an existing destination, and never runs on a re-fire."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

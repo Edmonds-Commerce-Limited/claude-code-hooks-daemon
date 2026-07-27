@@ -17,53 +17,61 @@ fresh worktree checkout has none of them — the agent then runs against a
 configuration with no local secrets/overrides and behaves differently from the
 main checkout.
 
-This plan makes the `worktree_create` handler seed a configurable list of
+This plan makes the `worktree_create` handler **symlink** a configurable list of
 git-ignored files from the repository top-level into the newly-created worktree
-root, so a worktree "just works" like the main checkout. Copying is best-effort,
-only on fresh creation (never on idempotent re-fire), and never blocks or fails
-worktree creation.
+root, so a worktree "just works" like the main checkout. A symlink (not a copy)
+keeps the main working copy as the **single source of truth**: a copy would fork
+into two files that drift apart, whereas a link means editing the canonical file
+is reflected in every worktree with no stale duplicate to reconcile. Symlinking
+is best-effort, only on fresh creation (never on idempotent re-fire), never
+clobbers an existing destination, and never blocks or fails worktree creation.
 
 ## Goals
 
-- On fresh worktree creation, copy a configured list of files (default
-  `.env.local`, `.env.test.local`) from the repo top-level into the worktree.
-- Make the file list configurable via a `copy_files` handler option.
-- Copy is best-effort: a failure logs a warning and is skipped; worktree
-  creation (and the returned path) is never broken by a copy failure.
-- No re-copy on idempotent re-fire (must not clobber edits made inside the
-  worktree).
+- On fresh worktree creation, symlink a configured list of files (default
+  `.env.local`, `.env.test.local`) from the repo top-level into the worktree,
+  each link pointing back at the canonical file (single source of truth).
+- Make the file list configurable via a `symlink_files` handler option.
+- Symlinking is best-effort: a failure logs a warning and is skipped; worktree
+  creation (and the returned path) is never broken by a symlink failure.
+- Never clobber a destination that already exists; no re-seed on idempotent
+  re-fire.
 
 ## Non-Goals
 
-- No copying of tracked files (git already provides those in the checkout).
+- No copying — symlink only, so the main working copy stays the single source of
+  truth.
+- No symlinking of tracked files (git already provides those in the checkout).
 - No glob/wildcard expansion — an explicit filename list only (relative paths
   allowed; absolute paths and `..` traversal are ignored for safety).
-- No recursive directory copy.
+- No recursive directory linking.
 
 ## Tasks
 
 ### Phase 1: TDD implementation
 
-- [x] ✅ **Task 1.1**: Write failing tests for env-file seeding on the handler
-  - [x] ✅ copies default env files present at repo root
-  - [x] ✅ skips files that do not exist
-  - [x] ✅ does not copy on idempotent re-fire
-  - [x] ✅ honours a configured `copy_files` list
+- [x] ✅ **Task 1.1**: Write failing tests for env-file symlinking on the handler
+  - [x] ✅ symlinks default env files present at repo root
+  - [x] ✅ link is live — reflects edits to the canonical file (single source of truth)
+  - [x] ✅ skips sources that do not exist
+  - [x] ✅ does not re-seed on idempotent re-fire
+  - [x] ✅ honours a configured `symlink_files` list
   - [x] ✅ ignores unsafe entries (absolute / `..`)
-  - [x] ✅ copy failure does not break worktree creation
-- [x] ✅ **Task 1.2**: Implement seeding in `WorktreeCreateHandler`
+  - [x] ✅ never clobbers an existing destination
+  - [x] ✅ symlink failure does not break worktree creation
+- [x] ✅ **Task 1.2**: Implement symlinking in `WorktreeCreateHandler`
 - [x] ✅ **Task 1.3**: Update `get_claude_md()` guidance
-- [x] ✅ **Task 1.4**: Document the `copy_files` option in `hooks-daemon.yaml.example`
+- [x] ✅ **Task 1.4**: Document the `symlink_files` option in `hooks-daemon.yaml.example`
 
 ### Phase 2: Verify
 
 - [x] ✅ **Task 2.1**: Run full QA (`llm_qa.py all` via uv)
-- [ ] ⬜ **Task 2.2**: Hand off diff to user for `/release`
+- [ ] ⬜ **Task 2.2**: Hand off diff for `/release`
 
 ## Success Criteria
 
-- [ ] A fresh worktree contains the configured env files when they exist at the
-      repo top-level.
+- [ ] A fresh worktree contains symlinks to the configured files when they exist
+      at the repo top-level, resolving to the canonical files.
 - [ ] All new + existing tests pass; QA is green.
 - [ ] No secrets are embedded in code, tests, or fixtures (public branch).
 

@@ -19,7 +19,7 @@ import pytest
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.handlers.worktree_create.worktree_create_handler import (
-    DEFAULT_WORKTREE_COPY_FILES,
+    DEFAULT_WORKTREE_SYMLINK_FILES,
     WorktreeCreateHandler,
 )
 
@@ -114,12 +114,13 @@ class TestHandle:
 
 
 class TestEnvFileSeeding:
-    """Fresh worktrees seed git-ignored local files from the repo top-level.
+    """Fresh worktrees SYMLINK git-ignored local files from the repo top-level.
 
     Local env files (.env.local, .env.test.local) are git-ignored, so a fresh
-    worktree checkout has none of them. The handler copies a configurable list
-    from the main working copy so the worktree behaves like the main checkout.
-    Fixtures use dummy content only — never real secrets.
+    worktree checkout has none of them. The handler symlinks a configurable list
+    back to the main working copy so the worktree behaves like the main checkout
+    while the canonical file stays the single source of truth. Fixtures use dummy
+    content only — never real secrets.
     """
 
     def _input(self, repo: Path, name: str = "Seed Env") -> dict:
@@ -131,60 +132,77 @@ class TestEnvFileSeeding:
             "session_id": "sid-seed",
         }
 
-    def test_default_env_files_copied_into_worktree(self, repo: Path) -> None:
-        for fname in DEFAULT_WORKTREE_COPY_FILES:
+    def test_default_env_files_symlinked_into_worktree(self, repo: Path) -> None:
+        for fname in DEFAULT_WORKTREE_SYMLINK_FILES:
             (repo / fname).write_text(f"SEED={fname}\n", encoding="utf-8")
 
         handler = WorktreeCreateHandler()
         result = handler.handle(self._input(repo))
         worktree = Path(result.worktree_path or "")
 
-        for fname in DEFAULT_WORKTREE_COPY_FILES:
-            copied = worktree / fname
-            assert copied.is_file(), f"{fname} should be seeded into the worktree"
-            assert copied.read_text(encoding="utf-8") == f"SEED={fname}\n"
+        for fname in DEFAULT_WORKTREE_SYMLINK_FILES:
+            link = worktree / fname
+            assert link.is_symlink(), f"{fname} should be a symlink in the worktree"
+            # The link points back at the canonical file in the main working copy.
+            assert link.resolve() == (repo / fname).resolve()
+            assert link.read_text(encoding="utf-8") == f"SEED={fname}\n"
 
-    def test_missing_files_are_skipped_without_error(self, repo: Path) -> None:
+    def test_symlink_reflects_source_edits_single_source_of_truth(self, repo: Path) -> None:
+        fname = DEFAULT_WORKTREE_SYMLINK_FILES[0]
+        (repo / fname).write_text("SEED=original\n", encoding="utf-8")
+
+        handler = WorktreeCreateHandler()
+        result = handler.handle(self._input(repo))
+        worktree = Path(result.worktree_path or "")
+
+        # Editing the canonical file is seen through the worktree link — proving
+        # it is a live symlink (single source of truth), not a copy.
+        (repo / fname).write_text("SEED=updated-in-main\n", encoding="utf-8")
+        assert (worktree / fname).read_text(encoding="utf-8") == "SEED=updated-in-main\n"
+
+    def test_missing_sources_are_skipped_without_error(self, repo: Path) -> None:
         # Only one of the default files exists; the other must be skipped cleanly.
-        present = DEFAULT_WORKTREE_COPY_FILES[0]
+        present = DEFAULT_WORKTREE_SYMLINK_FILES[0]
         (repo / present).write_text("SEED=present\n", encoding="utf-8")
 
         handler = WorktreeCreateHandler()
         result = handler.handle(self._input(repo))
         worktree = Path(result.worktree_path or "")
 
-        assert (worktree / present).is_file()
-        for absent in DEFAULT_WORKTREE_COPY_FILES[1:]:
+        assert (worktree / present).is_symlink()
+        for absent in DEFAULT_WORKTREE_SYMLINK_FILES[1:]:
             assert not (worktree / absent).exists()
+            assert not (worktree / absent).is_symlink()
 
-    def test_no_recopy_on_idempotent_refire(self, repo: Path) -> None:
-        fname = DEFAULT_WORKTREE_COPY_FILES[0]
+    def test_no_reseed_on_idempotent_refire(self, repo: Path) -> None:
+        fname = DEFAULT_WORKTREE_SYMLINK_FILES[0]
         (repo / fname).write_text("SEED=original\n", encoding="utf-8")
 
         handler = WorktreeCreateHandler()
         first = handler.handle(self._input(repo))
         worktree = Path(first.worktree_path or "")
 
-        # Simulate an edit made inside the worktree after creation.
-        (worktree / fname).write_text("SEED=edited-in-worktree\n", encoding="utf-8")
+        # Remove the link inside the existing worktree.
+        (worktree / fname).unlink()
 
-        # A re-fired event for the same agent reuses the worktree and MUST NOT
-        # clobber the in-worktree edit.
+        # A re-fired event reuses the existing worktree and does NOT re-seed —
+        # seeding is fresh-creation only.
         handler.handle(self._input(repo))
-        assert (worktree / fname).read_text(encoding="utf-8") == "SEED=edited-in-worktree\n"
+        assert not (worktree / fname).exists()
+        assert not (worktree / fname).is_symlink()
 
-    def test_configured_copy_files_list_is_honoured(self, repo: Path) -> None:
+    def test_configured_symlink_files_list_is_honoured(self, repo: Path) -> None:
         (repo / "custom.env").write_text("SEED=custom\n", encoding="utf-8")
         (repo / ".env.local").write_text("SEED=default-not-configured\n", encoding="utf-8")
 
         handler = WorktreeCreateHandler()
-        # Simulate the registry applying the `copy_files` option.
-        handler._copy_files = ["custom.env"]
+        # Simulate the registry applying the `symlink_files` option.
+        handler._symlink_files = ["custom.env"]
         result = handler.handle(self._input(repo))
         worktree = Path(result.worktree_path or "")
 
-        assert (worktree / "custom.env").is_file()
-        # A default file NOT in the configured list is not copied.
+        assert (worktree / "custom.env").is_symlink()
+        # A default file NOT in the configured list is not linked.
         assert not (worktree / ".env.local").exists()
 
     def test_unsafe_entries_are_ignored(self, repo: Path, tmp_path: Path) -> None:
@@ -192,7 +210,7 @@ class TestEnvFileSeeding:
         outside.write_text("SEED=outside\n", encoding="utf-8")
 
         handler = WorktreeCreateHandler()
-        handler._copy_files = ["../outside-secret.env", str(outside)]
+        handler._symlink_files = ["../outside-secret.env", str(outside)]
         result = handler.handle(self._input(repo))
         worktree = Path(result.worktree_path or "")
 
@@ -200,15 +218,44 @@ class TestEnvFileSeeding:
         assert not (worktree / "outside-secret.env").exists()
         assert list(worktree.glob("**/outside-secret.env")) == []
 
-    def test_copy_failure_does_not_break_worktree_creation(self, repo: Path) -> None:
-        # A directory at the source name makes the copy raise (IsADirectoryError),
-        # exercising the best-effort path: worktree creation must still succeed.
-        (repo / ".env.local").mkdir()
+    def test_existing_destination_is_not_clobbered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A destination that already exists (e.g. a tracked file) must be left as
+        # is — never replaced by a symlink.
+        source_root = tmp_path / "main"
+        source_root.mkdir()
+        (source_root / ".env.local").write_text("SEED=canonical\n", encoding="utf-8")
+
+        worktree = tmp_path / "wt"
+        worktree.mkdir()
+        (worktree / ".env.local").write_text("SEED=pre-existing\n", encoding="utf-8")
 
         handler = WorktreeCreateHandler()
-        handler._copy_files = [".env.local"]
+        monkeypatch.setattr(handler, "_repo_toplevel", lambda _cwd: source_root)
+        handler._seed_files(str(source_root), worktree)
+
+        dest = worktree / ".env.local"
+        assert not dest.is_symlink()
+        assert dest.read_text(encoding="utf-8") == "SEED=pre-existing\n"
+
+    def test_symlink_failure_does_not_break_worktree_creation(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Force the symlink call to raise, exercising the best-effort path:
+        # worktree creation must still succeed and return a valid path.
+        (repo / ".env.local").write_text("SEED=canonical\n", encoding="utf-8")
+
+        def _boom(*_args: object, **_kwargs: object) -> None:
+            raise OSError("symlink not permitted")
+
+        monkeypatch.setattr(Path, "symlink_to", _boom)
+
+        handler = WorktreeCreateHandler()
+        handler._symlink_files = [".env.local"]
         result = handler.handle(self._input(repo))
         worktree = Path(result.worktree_path or "")
 
         assert worktree.is_dir()
         assert result.worktree_path is not None
+        assert not (worktree / ".env.local").exists()

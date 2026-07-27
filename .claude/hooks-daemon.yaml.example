@@ -452,14 +452,17 @@ handlers:
       enabled: true
       priority: 50
       options:
-        # Git-ignored local files seeded from the repo top-level into a fresh
+        # Git-ignored local files symlinked from the repo top-level into a fresh
         # worktree so it behaves like the main checkout (these files are never
-        # committed, so a worktree checkout would otherwise lack them). Best-
-        # effort: a missing/unreadable source is skipped, never failing creation;
-        # never re-copied on an idempotent re-fire. Entries are relative to the
-        # repo root; absolute paths and `..` traversal are ignored. Set to an
-        # empty list to disable seeding.
-        copy_files:
+        # committed, so a worktree checkout would otherwise lack them). A symlink
+        # (not a copy) keeps the main working copy as the single source of truth:
+        # editing the canonical file is reflected in every worktree, with no stale
+        # duplicate. Best-effort: a missing source is skipped, an existing
+        # destination is never clobbered, and creation is never failed; never
+        # re-created on an idempotent re-fire. Entries are relative to the repo
+        # root; absolute paths and `..` traversal are ignored. Set to an empty
+        # list to disable.
+        symlink_files:
           - .env.local
           - .env.test.local
 
