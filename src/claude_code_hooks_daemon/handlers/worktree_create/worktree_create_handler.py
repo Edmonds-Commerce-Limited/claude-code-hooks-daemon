@@ -17,6 +17,7 @@ opaque ``wf_<hash>``.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
 from pathlib import Path
 from typing import Any
@@ -123,23 +124,27 @@ class WorktreeCreateHandler(Handler):
         logged (never silently swallowed) but does NOT break worktree creation —
         an unusable env file is far less harmful than a failed worktree launch.
         """
-        if not self._symlink_files:
+        entries = self._normalised_symlink_files()
+        if not entries:
             return
 
         source_root = self._repo_toplevel(cwd)
         if source_root is None:
             return
 
-        for entry in self._symlink_files:
+        for entry in entries:
             rel = Path(entry)
-            # Reject absolute paths and parent-traversal so a symlink can never be
+            # Reject absolute paths and parent-traversal so the symlink is never
             # written outside the worktree root.
             if rel.is_absolute() or _PARENT_REF in rel.parts:
                 logger.warning("worktree_create: ignoring unsafe symlink_files entry %r", entry)
                 continue
 
             src = source_root / rel
-            if not src.exists():
+            # Only individual files are linked (see the plan's Non-Goals). A
+            # directory source is skipped so a worktree never gains a whole
+            # subtree through a single link.
+            if not src.is_file():
                 continue
 
             dest = worktree / rel
@@ -150,13 +155,37 @@ class WorktreeCreateHandler(Handler):
 
             try:
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                # Absolute target so the link resolves regardless of the
-                # worktree's own location under the repo.
-                dest.symlink_to(src)
+                # RELATIVE target so the link keeps resolving when the identical
+                # on-disk tree is viewed at a different absolute prefix — e.g. a
+                # container bind-mount (``/workspace``) versus the host path. An
+                # absolute target would dangle across that host<->container view
+                # divergence, which this project explicitly supports.
+                dest.symlink_to(os.path.relpath(src, dest.parent))
             except OSError as exc:
                 logger.warning(
                     "worktree_create: failed to symlink %r into worktree: %s", entry, exc
                 )
+
+    def _normalised_symlink_files(self) -> list[str]:
+        """Return the configured entries, tolerating a bare-string ``symlink_files``.
+
+        The registry applies the option verbatim via ``setattr`` with no
+        validation, so a common YAML slip — ``symlink_files: ".env.local"`` (a
+        string instead of a list) — would otherwise be iterated character by
+        character and silently link nothing. Coerce a string to a single-entry
+        list (do what the author meant); reject any other non-list value with a
+        warning rather than failing silently.
+        """
+        raw: object = self._symlink_files
+        if isinstance(raw, str):
+            return [raw]
+        if isinstance(raw, (list, tuple)):
+            return [str(item) for item in raw]
+        logger.warning(
+            "worktree_create: symlink_files must be a list of paths, got %s; skipping",
+            type(raw).__name__,
+        )
+        return []
 
     @staticmethod
     def _repo_toplevel(cwd: str) -> Path | None:

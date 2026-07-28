@@ -68,6 +68,20 @@ clobbers an existing destination, and never blocks or fails worktree creation.
 - [x] ✅ **Task 2.1**: Run full QA (`llm_qa.py all` via uv)
 - [ ] ⬜ **Task 2.2**: Hand off diff for `/release`
 
+### Phase 3: Adversarial review fixes (see `opus-review-1.md`)
+
+- [x] ✅ **Task 3.1**: HIGH — relative symlink target (survives host↔container
+  path-view remap); absolute link dangled across a bind-mount prefix change
+- [x] ✅ **Task 3.2**: MEDIUM — coerce a bare-string `symlink_files` to a list
+  (was silently iterated per-character into a no-op)
+- [x] ✅ **Task 3.3**: MEDIUM — restore `is_file()` source check so a directory
+  source is not linked (honours the no-directory-linking Non-Goal)
+- [x] ✅ **Task 3.4**: Tests for all three (relative-link + relocation, string
+  coercion, directory-source skip)
+- Deferred by decision: MEDIUM SSoT destructive-edit hazard (accepted as-is);
+  MEDIUM `_repo_toplevel`/`_get_git_toplevel` DRY extraction (not worth the
+  cross-module surface on this change)
+
 ## Success Criteria
 
 - [ ] A fresh worktree contains symlinks to the configured files when they exist
