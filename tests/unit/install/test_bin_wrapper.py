@@ -13,6 +13,7 @@ import stat
 from pathlib import Path
 
 from claude_code_hooks_daemon.install import bin_wrapper
+from claude_code_hooks_daemon.utils import cli_command
 
 
 class TestWrapperTemplate:
@@ -119,3 +120,36 @@ class TestSelfInstallCopyDoesNotDrift:
         if not deployed.is_file():
             return
         assert os.access(deployed, os.X_OK)
+
+
+class TestDeployAndGuidanceAgreeOnTheSamePath:
+    """The module that DEPLOYS the wrapper and the module that PRINTS its path
+    each pin the name independently. Nothing but a docstring binds them.
+
+    If one is renamed, guidance points at a path where nothing was deployed —
+    and the reader gets "command not found", which is precisely the failure
+    Plan 00192 exists to eliminate. Worse, it would be silent: both modules keep
+    passing their own tests. Assert the agreement instead of documenting it.
+    """
+
+    def test_wrapper_name_matches(self) -> None:
+        assert bin_wrapper.WRAPPER_NAME == cli_command.WRAPPER_NAME, (
+            "install.bin_wrapper deploys a different filename than "
+            "utils.cli_command tells agents to run."
+        )
+
+    def test_bin_dir_matches(self) -> None:
+        assert bin_wrapper.BIN_DIR_NAME == cli_command.BIN_DIR_NAME, (
+            "install.bin_wrapper deploys into a different directory than "
+            "utils.cli_command tells agents to run."
+        )
+
+    def test_deployed_location_is_the_advertised_location(self, tmp_path: Path) -> None:
+        """End-to-end: deploy, then check guidance names that exact file.
+
+        Stronger than comparing constants — it catches a divergence in how
+        either module ASSEMBLES the path, not just in the pieces it uses.
+        """
+        deployed = bin_wrapper.deploy_bin_wrapper(tmp_path)
+        advertised = tmp_path / cli_command.BIN_DIR_NAME / cli_command.WRAPPER_NAME
+        assert deployed == advertised

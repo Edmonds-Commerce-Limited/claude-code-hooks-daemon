@@ -3,6 +3,34 @@
 version: "3.50.0"
 truth_changes:
   - was: >
+      Daemon CLI commands are run through an interpreter variable, as
+      "$PYTHON -m claude_code_hooks_daemon.daemon.cli <command>". Project docs,
+      notes and handler guidance commonly assert this form.
+    now: >
+      Run the deployed wrapper instead (v3.50.0):
+      ".claude/hooks-daemon/bin/hooks-daemon <command>" — or "./bin/hooks-daemon"
+      in the daemon's own repo. $PYTHON is NEVER exported in an agent's or a
+      user's shell; only the daemon's internal bash entry points set it. The old
+      form therefore expanded to "-m: command not found", and the PATH python3
+      cannot import the module because the daemon lives in an isolated
+      fingerprint-keyed venv. The wrapper resolves that venv itself and anchors
+      to its own location, so it works from any directory including a git
+      worktree. If your project's docs or notes repeat the old invocation,
+      replace them — an agent that follows them concludes the daemon is not
+      installed and may try to "fix" a working install.
+
+  - was: >
+      "./daemon.sh <command>" in the daemon repository runs the daemon CLI.
+    now: >
+      "./daemon.sh" is a deprecated shim (v3.50.0) that forwards to
+      "./bin/hooks-daemon", which is the single canonical entry point. It had
+      hardcoded the legacy pre-v3.7.0 venv path, so on a current checkout it
+      pointed at an interpreter that may not exist. The shim prints its notice
+      to stderr only, so output capture is unaffected. Its bespoke "logs-tail"
+      and "logs-all" verbs map onto real CLI flags; "logs-clear" has no CLI
+      equivalent and now says so rather than pretending.
+
+  - was: >
       A plan document may grow to whatever size the work requires; only its
       content is linted, never its length.
     now: >

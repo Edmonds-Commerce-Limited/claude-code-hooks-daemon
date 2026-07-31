@@ -7,6 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.50.0] - 2026-07-31
+
+This is a **minor release** with two themes.
+
+**Agents were being handed commands that cannot run.** Every daemon-CLI
+instruction the daemon emitted — in block reasons, in `get_claude_md()`
+guidance, and in the resident `CLAUDE.md` block it generates into your project —
+was written as `$PYTHON -m claude_code_hooks_daemon.daemon.cli …`. `$PYTHON` is
+never exported in an agent's shell; only the daemon's own bash entry points set
+it internally. So the instruction expanded to `-m: command not found`, and the
+PATH `python3` cannot import the module because the daemon lives in an isolated
+fingerprint-keyed venv.
+
+The failure is silent-by-confusion rather than loud, and the recovery it
+provokes is destructive: having seen `ModuleNotFoundError`, an agent reasonably
+concludes the package is not installed and starts "fixing" that — `pip install`
+into the wrong environment, editing the container Dockerfile, rebuilding a venv
+that was never broken. Two of the affected messages fire precisely when the
+agent is already in trouble, including `project_handler_load_checker`, which
+reports *degraded security protection* and then prints a diagnostic command that
+also fails.
+
+**Plan size is now enforced.** `PLAN.md` and `JOURNAL/` are governed by opposite
+contracts; v3.49.1 established the contract, and this release adds the tiered
+enforcement it described.
+
+### Added
+
+- **`bin/hooks-daemon` — a deployed CLI wrapper.** Resolves the daemon's venv
+  through the canonical resolver and forwards every subcommand. It anchors to
+  its **own** location rather than the working directory, so it runs correctly
+  from anywhere — including a git worktree, where the previous `daemon-cli.sh`
+  aborted with "Not in a hooks daemon project". Deployed by both fresh installs
+  and **upgrades**, so existing projects get it.
+- **`plan_workflow.qa.plan_doc_size`** — tiered read-cost limits on plan
+  documents: advisory above 18,000 bytes / 350 lines, escalated warning above
+  25,000 / 500, edits **blocked** above 35,000 / 900. Only an edit that GROWS
+  the file can be blocked, so an oversized plan can always be refactored down.
+  Journals and the plan-index README are exempt at any size.
+- **`plan-shrink-without-journal`** commit check — flags a commit that removes
+  2,000+ bytes from a `PLAN.md` while staging no journal entry, the shape that
+  usually means narrative was deleted rather than relocated.
+- **Plan QA documentation in the deployed skill** (`plan-qa.md`) — `--sweep`,
+  `--lint`, `--check-staged` and `--json`. The skill previously had no plan-QA
+  coverage at all, so client projects had no discoverable way to run it.
+- **`python_var_guidance` QA gate** — fails the build if a literal `$PYTHON`
+  instruction is reintroduced into `src/`.
+- **`scripts/dummy-client-repo.sh`** — provisions a real client-mode install via
+  the production installer for acceptance testing. Self-install mode is not
+  representative of a client install, and this class of bug is invisible without
+  one.
+
+### Changed
+
+- **Every emitted daemon-CLI command is now an absolute wrapper path.** No API
+  or config compatibility is affected — but the visible text of the daemon's own
+  guidance changes. 77 occurrences across 29 source files were replaced.
+  Your project's `CLAUDE.md` block will change on the next daemon restart or
+  `generate-docs` — this is expected and is the fix. If your own project docs
+  repeat the old `$PYTHON` form, update them; see the truth-changes manifest.
+- **`daemon.sh` is deprecated**, now a shim forwarding to `bin/hooks-daemon`.
+  Its notice goes to stderr only. `logs-tail` and `logs-all` map onto real CLI
+  flags; `logs-clear` has no CLI equivalent and reports that rather than
+  silently doing something else.
+- **Journal territory is decided by LOCATION, not just filename.** Anything
+  inside a `JOURNAL/` directory is exempt from plan-document rules at any depth
+  and under any name.
+- Shipped plan documentation no longer teaches patterns the daemon blocks —
+  `docs/PLAN_SYSTEM.md` and `CLAUDE/PlanWorkflow.md` previously instructed
+  agents to write dated progress logs, effort estimates and target dates, all
+  three of which the daemon's own handlers reject.
+
+### Fixed
+
+- **`daemon_location_guard` shipped a hardcoded interpreter path to every
+  client** — `PYTHON=/workspace/untracked/venv/bin/python`, which is both this
+  repository's own path and the legacy pre-v3.7.0 venv.
+- **`plan_number_helper` matched an `echo` across a newline into an unrelated
+  command.** Its glob patterns used `[^;&|]*` specifically to stop a match
+  running past the end of its own command, but a negated character class matches
+  newline by default. So an `echo` on one line could reach forward and borrow a
+  glob character from the next — the exact false-positive class the guard was
+  written to prevent. Newline and carriage return are now in the separator set.
+- **`markdown_table_formatter` silently rewrote mis-named journal files**,
+  violating the byte-stability that the append-only check exists to protect.
+- **`background_process_tracker` fired on literal `&` characters and on
+  keywords inside quoted strings and heredoc bodies.**
+- Chain attribution named the wrong handler in the "To disable" footer.
+- `plan_workflow.get_claude_md()` returned `None`, leaving the PLAN-vs-JOURNAL
+  contract stated nowhere an agent reads by default.
+
+### Post-Upgrade Tasks
+
+This release ships one **recommended** post-upgrade task: audit your plan
+documents against the new size tiers before the block tier bites. See
+`CLAUDE/UPGRADES/v3/v3.49.1-to-v3.50.0/post-upgrade-tasks/`.
+
 ## [3.49.1] - 2026-07-31
 
 This is a **patch release** establishing the **PLAN-vs-JOURNAL contract** and
