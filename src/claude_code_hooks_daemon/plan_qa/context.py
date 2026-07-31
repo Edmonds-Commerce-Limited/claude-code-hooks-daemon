@@ -23,7 +23,7 @@ from typing import Protocol
 from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 from claude_code_hooks_daemon.plan_qa.model import README_FILENAME, PlanTree
 from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex
-from claude_code_hooks_daemon.plan_qa.types import CheckContext
+from claude_code_hooks_daemon.plan_qa.types import CheckContext, PlanDocSizeLimits
 
 
 class JournalPolicy(Protocol):
@@ -46,6 +46,31 @@ class JournalPolicy(Protocol):
 
     @property
     def grandfather_before(self) -> int: ...
+
+
+class PlanDocSizePolicy(Protocol):
+    """Structural view of the plan-doc size policy (Plan 00190)."""
+
+    @property
+    def enabled(self) -> bool: ...
+
+    @property
+    def advisory_bytes(self) -> int: ...
+
+    @property
+    def advisory_lines(self) -> int: ...
+
+    @property
+    def warning_bytes(self) -> int: ...
+
+    @property
+    def warning_lines(self) -> int: ...
+
+    @property
+    def block_bytes(self) -> int: ...
+
+    @property
+    def block_lines(self) -> int: ...
 
 
 class QaPolicy(Protocol):
@@ -75,6 +100,9 @@ class QaPolicy(Protocol):
     @property
     def journal(self) -> JournalPolicy: ...
 
+    @property
+    def plan_doc_size(self) -> PlanDocSizePolicy: ...
+
 
 def _tree_and_readme(
     project_root: Path,
@@ -100,13 +128,14 @@ def _tree_and_readme(
 
 
 def _with_journal(context: CheckContext, policy: QaPolicy) -> CheckContext:
-    """Stamp the flattened journal policy (Plan 00163) onto a built context.
+    """Stamp the journal (Plan 00163) and size (Plan 00190) policy onto a context.
 
-    Kept as one typed helper so all three surfaces thread the six journal
-    knobs identically without repetition — ``dataclasses.replace`` type-checks
-    each field, so no suppression is needed.
+    Kept as one typed helper so all three surfaces thread these knobs
+    identically without repetition — ``dataclasses.replace`` type-checks each
+    field, so no suppression is needed.
     """
     journal = policy.journal
+    size = policy.plan_doc_size
     return replace(
         context,
         journal_enabled=journal.enabled,
@@ -115,6 +144,15 @@ def _with_journal(context: CheckContext, policy: QaPolicy) -> CheckContext:
         journal_freshness_days=journal.freshness_days,
         journal_enforce_on_completion=journal.enforce_on_completion,
         journal_grandfather_before=journal.grandfather_before,
+        plan_doc_size=PlanDocSizeLimits(
+            enabled=size.enabled,
+            advisory_bytes=size.advisory_bytes,
+            advisory_lines=size.advisory_lines,
+            warning_bytes=size.warning_bytes,
+            warning_lines=size.warning_lines,
+            block_bytes=size.block_bytes,
+            block_lines=size.block_lines,
+        ),
     )
 
 

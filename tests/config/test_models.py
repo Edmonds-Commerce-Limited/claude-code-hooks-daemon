@@ -923,6 +923,50 @@ class TestPlanWorkflowQaConfig:
         assert config.qa.collision_allowlist == []
         assert config.qa.extra_root_files == []
 
+    def test_plan_doc_size_defaults(self) -> None:
+        """Plan 00190: read-cost tiers, on by default."""
+        config = PlanWorkflowConfig()
+        size = config.qa.plan_doc_size
+        assert size.enabled is True
+        assert (size.advisory_bytes, size.advisory_lines) == (18_000, 350)
+        assert (size.warning_bytes, size.warning_lines) == (25_000, 500)
+        assert (size.block_bytes, size.block_lines) == (35_000, 900)
+
+    def test_plan_doc_size_custom_values(self) -> None:
+        config = PlanWorkflowConfig.model_validate(
+            {
+                "qa": {
+                    "plan_doc_size": {
+                        "advisory_bytes": 10_000,
+                        "warning_bytes": 20_000,
+                        "block_bytes": 30_000,
+                    }
+                }
+            }
+        )
+        assert config.qa.plan_doc_size.advisory_bytes == 10_000
+        assert config.qa.plan_doc_size.block_bytes == 30_000
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            # block below advisory — the advisory tier could never be reached.
+            {"advisory_bytes": 30_000, "block_bytes": 10_000},
+            {"advisory_lines": 900, "block_lines": 100},
+            # warning equal to advisory — no escalation between tiers.
+            {"advisory_bytes": 18_000, "warning_bytes": 18_000},
+            {"warning_lines": 900, "block_lines": 900},
+        ],
+    )
+    def test_plan_doc_size_rejects_non_monotonic_tiers(self, overrides: dict) -> None:
+        """FAIL FAST: non-monotonic tiers silently disable a tier."""
+        with pytest.raises(ValidationError, match="must increase strictly"):
+            PlanWorkflowConfig.model_validate({"qa": {"plan_doc_size": overrides}})
+
+    def test_plan_doc_size_rejects_unknown_key(self) -> None:
+        with pytest.raises(ValidationError):
+            PlanWorkflowConfig.model_validate({"qa": {"plan_doc_size": {"blok_bytes": 1}}})
+
     def test_extra_root_files_accepted(self) -> None:
         """QA sub-model accepts an additive extra_root_files allowlist (Plan 00153)."""
         config = PlanWorkflowConfig.model_validate(

@@ -96,6 +96,7 @@ class TestRegistryCatalogue:
             "path-existence",
             "journal-dayfile-naming",
             "journal-append-only",
+            "plan-doc-size",
             # Cross-file tree checks (dual COMMIT+SWEEP registration)
             "no-new-collisions",
             "row-folder-bijection",
@@ -123,8 +124,8 @@ class TestRegistryCatalogue:
 
         registry = all_checks()
         by_stage = {stage: [spec for spec in registry if spec.stage == stage] for stage in Stage}
-        # 8 original + 2 journal EDIT checks (Plan 00163)
-        assert len(by_stage[Stage.EDIT]) == 10
+        # 8 original + 2 journal EDIT checks (Plan 00163) + plan-doc-size (Plan 00190)
+        assert len(by_stage[Stage.EDIT]) == 11
         # 5 commit-only + 5 dual tree checks + 2 journal COMMIT checks (Plan 00163)
         assert len(by_stage[Stage.COMMIT]) == 12
         # 3 sweep-only + 5 dual tree checks + 2 journal SWEEP checks (Plan 00163)
@@ -149,8 +150,9 @@ class TestRegistryCatalogue:
     def test_every_spec_declares_sins(self) -> None:
         from claude_code_hooks_daemon.plan_qa.checks import all_checks
 
-        # Journal checks (Plan 00163) are a post-audit feature category — they
-        # defend journalling hygiene, not one of the original 31-sin audit
+        # Journal checks (Plan 00163) and plan-doc-size (Plan 00190) are
+        # post-audit feature categories — they defend journalling hygiene and
+        # plan read-cost respectively, not one of the original 31-sin audit
         # findings, so they legitimately carry no `sins` provenance.
         post_audit_no_sins = {
             "journal-dayfile-naming",
@@ -159,6 +161,7 @@ class TestRegistryCatalogue:
             "journal-freshness",
             "journal-entry-with-progress",
             "journal-completion-entry",
+            "plan-doc-size",
         }
         for spec in all_checks():
             if spec.check_id in post_audit_no_sins:

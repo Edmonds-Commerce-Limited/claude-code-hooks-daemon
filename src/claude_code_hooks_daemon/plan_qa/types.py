@@ -45,6 +45,38 @@ DEFAULT_JOURNAL_DIR_NAME: Final[str] = "JOURNAL"
 DEFAULT_JOURNAL_FRESHNESS_DAYS: Final[int] = 3
 DEFAULT_JOURNAL_MODE: Final[str] = "advise"
 
+# Plan-document size defaults (Plan 00190 Decision 2). Derived from READ COST,
+# not from percentiles of any one repo: the canonical unit is tokens, with
+# bytes and lines as the runtime proxy (measured density 3.97 bytes/token).
+# A plan is grounding for the work, not the work itself, so it should cost no
+# more to read than the source it describes.
+DEFAULT_PLAN_DOC_ADVISORY_BYTES: Final[int] = 18_000  # ~4,500 tokens
+DEFAULT_PLAN_DOC_ADVISORY_LINES: Final[int] = 350
+DEFAULT_PLAN_DOC_WARNING_BYTES: Final[int] = 25_000  # ~6,300 tokens
+DEFAULT_PLAN_DOC_WARNING_LINES: Final[int] = 500
+DEFAULT_PLAN_DOC_BLOCK_BYTES: Final[int] = 35_000  # ~8,800 tokens
+DEFAULT_PLAN_DOC_BLOCK_LINES: Final[int] = 900
+
+
+@dataclass(frozen=True)
+class PlanDocSizeLimits:
+    """Tiered read-cost limits for plan documents (Plan 00190).
+
+    Plain data — tier selection lives in the check that consumes this, so the
+    policy value object stays free of behaviour.
+
+    Each tier trips on ``bytes > B OR lines > L``: both axes are needed
+    because a long thin plan and a short dense one cost the same to read.
+    """
+
+    enabled: bool = True
+    advisory_bytes: int = DEFAULT_PLAN_DOC_ADVISORY_BYTES
+    advisory_lines: int = DEFAULT_PLAN_DOC_ADVISORY_LINES
+    warning_bytes: int = DEFAULT_PLAN_DOC_WARNING_BYTES
+    warning_lines: int = DEFAULT_PLAN_DOC_WARNING_LINES
+    block_bytes: int = DEFAULT_PLAN_DOC_BLOCK_BYTES
+    block_lines: int = DEFAULT_PLAN_DOC_BLOCK_LINES
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -86,6 +118,11 @@ class CheckContext:
     journal_freshness_days: int = DEFAULT_JOURNAL_FRESHNESS_DAYS
     journal_enforce_on_completion: bool = False
     journal_grandfather_before: int = 0
+
+    # Plan-document size policy (Plan 00190; mirrors
+    # plan_workflow.qa.plan_doc_size.*). One value object rather than six flat
+    # knobs, since the thresholds only ever make sense together.
+    plan_doc_size: PlanDocSizeLimits = field(default_factory=PlanDocSizeLimits)
 
     # Stage 1 (EDIT): the file being written and its would-be content.
     file_path: Path | None = None

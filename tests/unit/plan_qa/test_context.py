@@ -44,6 +44,20 @@ class _Policy:
     collision_allowlist: tuple[int, ...] = ()
     extra_root_files: tuple[str, ...] = ()
     journal: _Journal = field(default_factory=_Journal)
+    plan_doc_size: "_PlanDocSize" = field(default_factory=lambda: _PlanDocSize())
+
+
+@dataclass(frozen=True)
+class _PlanDocSize:
+    """Duck-typed stand-in for PlanWorkflowQaPlanDocSizeConfig (Plan 00190)."""
+
+    enabled: bool = True
+    advisory_bytes: int = 18_000
+    advisory_lines: int = 350
+    warning_bytes: int = 25_000
+    warning_lines: int = 500
+    block_bytes: int = 35_000
+    block_lines: int = 900
 
 
 def _scaffold(tmp_path: Path) -> Path:
@@ -216,6 +230,49 @@ class TestEditContext:
         assert context.journal_dir_name == "LOG"
         assert context.journal_freshness_days == 7
         assert context.journal_grandfather_before == 163
+
+    def test_plan_doc_size_policy_threaded(self, tmp_path: Path) -> None:
+        # Plan 00190: size thresholds must be configurable, not hardcoded.
+        root = _scaffold(tmp_path)
+        policy = _Policy(
+            plan_doc_size=_PlanDocSize(
+                enabled=False,
+                advisory_bytes=1_000,
+                advisory_lines=10,
+                warning_bytes=2_000,
+                warning_lines=20,
+                block_bytes=3_000,
+                block_lines=30,
+            )
+        )
+        context = edit_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=policy,
+            file_path=root / "CLAUDE/Plan/00190-s/PLAN.md",
+            file_content="# Plan 00190: s\n",
+            file_exists_before=False,
+        )
+        assert context.plan_doc_size.enabled is False
+        assert context.plan_doc_size.advisory_bytes == 1_000
+        assert context.plan_doc_size.warning_lines == 20
+        assert context.plan_doc_size.block_bytes == 3_000
+
+    def test_plan_doc_size_defaults_are_the_documented_tiers(self, tmp_path: Path) -> None:
+        """An unconfigured policy yields the Decision 2 read-cost tiers."""
+        root = _scaffold(tmp_path)
+        context = edit_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=_Policy(),
+            file_path=root / "CLAUDE/Plan/00190-s/PLAN.md",
+            file_content="# Plan 00190: s\n",
+            file_exists_before=False,
+        )
+        limits = context.plan_doc_size
+        assert (limits.advisory_bytes, limits.advisory_lines) == (18_000, 350)
+        assert (limits.warning_bytes, limits.warning_lines) == (25_000, 500)
+        assert (limits.block_bytes, limits.block_lines) == (35_000, 900)
 
     def test_level_type_reexport_sanity(self) -> None:
         # Guard against accidental enum drift between surfaces.

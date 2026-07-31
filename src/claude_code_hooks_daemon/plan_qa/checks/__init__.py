@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.plan_qa.checks import (
     location_status_coherence,
     no_new_collisions,
     path_existence,
+    plan_doc_size,
     plan_ref_format,
     row_folder_bijection,
     same_commit_plan_doc,
@@ -53,6 +54,7 @@ def all_checks() -> tuple[CheckSpec, ...]:
         terminal_placement_hint.CHECK,
         archive_immutability.CHECK,
         path_existence.CHECK,
+        plan_doc_size.CHECK,
         journal_dayfile_naming.CHECK,
         journal_append_only.CHECK,
         # Cross-file tree checks — dual COMMIT + SWEEP registration

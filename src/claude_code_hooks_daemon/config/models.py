@@ -431,6 +431,75 @@ class PlanWorkflowQaJournalConfig(BaseModel):
     )
 
 
+class PlanWorkflowQaPlanDocSizeConfig(BaseModel):
+    """Tiered size limits for plan DOCUMENTS only (Plan 00190).
+
+    Nested under ``plan_workflow.qa.plan_doc_size``. A ``PLAN.md`` is read in
+    full at the start of every session that touches the plan, so its size is a
+    recurring context-budget cost. A ``JOURNAL/`` day-file is not read whole —
+    it is tailed, grepped, or handed to a sub-agent — so it is UNBOUNDED by
+    design and no threshold here ever applies to it.
+
+    Thresholds are derived from READ COST, not from percentiles of any one
+    repository: the canonical unit is tokens, with bytes and lines as the
+    runtime proxy. Both axes are checked (``bytes > B OR lines > L``) because
+    a long thin plan and a short dense one cost the same to read.
+
+    Tiers escalate in WORDING; only the top tier denies, and even then a
+    shrinking edit, a grandfathered plan number, or a declared
+    ``MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason>`` in the file downgrades it to
+    advice — so an oversized plan can always be refactored back down.
+
+    Attributes:
+        enabled: Master switch for the size check
+        advisory_bytes/advisory_lines: First nudge (~4,500 tokens)
+        warning_bytes/warning_lines: Escalated wording (~6,300 tokens)
+        block_bytes/block_lines: Hard limit (~8,800 tokens)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=True, description="Enable the plan-document size check")
+    advisory_bytes: Annotated[int, Field(ge=1)] = Field(
+        default=18_000, description="Bytes above which a plan document is advised as large"
+    )
+    advisory_lines: Annotated[int, Field(ge=1)] = Field(
+        default=350, description="Lines above which a plan document is advised as large"
+    )
+    warning_bytes: Annotated[int, Field(ge=1)] = Field(
+        default=25_000, description="Bytes above which the advisory wording escalates"
+    )
+    warning_lines: Annotated[int, Field(ge=1)] = Field(
+        default=500, description="Lines above which the advisory wording escalates"
+    )
+    block_bytes: Annotated[int, Field(ge=1)] = Field(
+        default=35_000, description="Bytes above which plan-document edits are blocked"
+    )
+    block_lines: Annotated[int, Field(ge=1)] = Field(
+        default=900, description="Lines above which plan-document edits are blocked"
+    )
+
+    @model_validator(mode="after")
+    def _validate_tiers_are_monotonic(self) -> "PlanWorkflowQaPlanDocSizeConfig":
+        """FAIL FAST on tiers that cannot escalate.
+
+        Non-monotonic thresholds silently disable a tier (a block limit below
+        the advisory limit means the advisory can never be reached), which is
+        far worse than a startup error.
+        """
+        for axis, tiers in (
+            ("bytes", (self.advisory_bytes, self.warning_bytes, self.block_bytes)),
+            ("lines", (self.advisory_lines, self.warning_lines, self.block_lines)),
+        ):
+            advisory, warning, block = tiers
+            if not advisory < warning < block:
+                raise ValueError(
+                    f"plan_doc_size {axis} tiers must increase strictly "
+                    f"(advisory < warning < block); got {advisory} < {warning} < {block}"
+                )
+        return self
+
+
 class PlanWorkflowQaConfig(BaseModel):
     """Configuration for the plan QA subsystem (Plan 00144).
 
@@ -508,6 +577,10 @@ class PlanWorkflowQaConfig(BaseModel):
     journal: PlanWorkflowQaJournalConfig = Field(
         default_factory=PlanWorkflowQaJournalConfig,
         description="Per-plan journalling policy (Plan 00163)",
+    )
+    plan_doc_size: PlanWorkflowQaPlanDocSizeConfig = Field(
+        default_factory=PlanWorkflowQaPlanDocSizeConfig,
+        description="Tiered read-cost size limits for plan documents (Plan 00190)",
     )
 
 
