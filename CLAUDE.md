@@ -1021,6 +1021,13 @@ enclosing plan number with a today/yesterday date
 remove earlier entries (`journal-append-only`). Corrections are new
 dated entries at the bottom, not edits to old ones.
 
+A journal is **unbounded by design** — its length is never a problem
+and it must not be tidied or trimmed. It is safe to grow forever
+precisely because it is never read whole: grep it, `tail -n N` the
+newest day-file directly, or send a sub-agent. `PLAN.md` is the
+opposite — read in full every session, so keep it lean and curated,
+with history in git rather than in the file body.
+
 Grandfathered plans in `plan_workflow.qa.legacy_plan_allowlist`
 only ever advise. Lint any file on demand:
 `$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --lint <file>`.
