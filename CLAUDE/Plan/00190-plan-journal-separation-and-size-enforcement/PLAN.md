@@ -148,9 +148,11 @@ re-enable plan rules on every journal file.
 - [x] ✅ **Task 0.6**: `journal-append-only` remediation now states the journal is
   unbounded by design and must not be tidied — a prerequisite for the size
   tiers, not a follow-up (`a114d270`)
-- [ ] ⬜ **Task 0.3**: `journal.mode: block` is silently subordinate to
-  `edit_mode` — the documented promise is conditionally false; fix docs
-- [ ] ⬜ **Task 0.4**: `mkplan.bash:318-322` fallback writes `## Notes & Updates`
+- [x] ✅ **Task 0.3**: `journal.mode: block` documented as a ceiling subordinate
+  to the surface mode — behaviour was correct, docs were wrong; two regression
+  tests now pin the real semantics (`f6e5ccaa`)
+- [x] ✅ **Task 0.4**: `mkplan.bash` fallback now emits the `Delivery & Milestones` stub instead of pre-seeding the retired section; both copies
+  resynced and verified identical (`0c1a78d8`)
 - [ ] ⬜ **Task 0.5**: *(low severity, re-diagnosed)* `core/chain.py:199-202`
   attributes the "To disable" footer to the FIRST denying handler while
   displaying a LATER handler's reason. Only manifests on multi-deny, and the fix
@@ -242,3 +244,8 @@ re-enable plan rules on every journal file.
   activity stream into PLAN.md — `544f67ea`
 - Phase 0 Task 0.6: append-only remediation now defends journal growth,
   unblocking the size-tier work — `a114d270`
+- Phase 0 Task 0.4: scaffolder stopped pre-seeding the retired section —
+  `0c1a78d8`
+- Phase 0 Task 0.3: journal-mode subordination documented and pinned by
+  regression tests — `f6e5ccaa`
+- Phase 0 closed except 0.5 (deferred by decision) and 0.7 (tracked)
