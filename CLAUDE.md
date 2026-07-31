@@ -1094,22 +1094,6 @@ Content inside markdown code blocks is exempt from validation.
 
 When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
 
-## background_process_tracker — backgrounded processes are tracked
-
-A PostToolUse advisory that fires when a Bash call backgrounds a process (`run_in_background: true`, or a `&`/`nohup`/`setsid`/`disown` command). It records the command to `background-processes.jsonl` and injects rate-limited guidance.
-
-**The daemon never kills.** It surfaces runaways; you decide.
-
-When you background a long-lived process:
-
-- Create a non-durable recurring **watchdog cron** (CronCreate, durable:false) whose prompt runs `$PYTHON -m claude_code_hooks_daemon.daemon.cli harvest-background` and acts on any runaway — this covers the idle/compaction window a tool-call hook cannot. Do NOT wait for the cron; keep working.
-- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).
-- Reap a runaway by its **process group**: `kill -- -<pgid>` (not just the pid).
-- Keep a wanted long task: note `KEEP_RUNNING_BECAUSE="reason"`.
-- Delete the watchdog cron (CronDelete) when no backgrounded work remains.
-
-Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
-
 ## markdown_table_formatter — markdown tables are auto-aligned
 
 After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-formatted via `mdformat + mdformat-gfm` so that table pipes are aligned and column widths are consistent. The handler is non-terminal and advisory — it never blocks, it just rewrites the file on disk.
@@ -1191,6 +1175,22 @@ handlers:
     recovery_cron_advisor:
       enabled: false
 ```
+
+## background_process_tracker — backgrounded processes are tracked
+
+A PostToolUse advisory that fires when a Bash call backgrounds a process (`run_in_background: true`, or a `&`/`nohup`/`setsid`/`disown` command). It records the command to `background-processes.jsonl` and injects rate-limited guidance.
+
+**The daemon never kills.** It surfaces runaways; you decide.
+
+When you background a long-lived process:
+
+- Create a non-durable recurring **watchdog cron** (CronCreate, durable:false) whose prompt runs `$PYTHON -m claude_code_hooks_daemon.daemon.cli harvest-background` and acts on any runaway — this covers the idle/compaction window a tool-call hook cannot. Do NOT wait for the cron; keep working.
+- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).
+- Reap a runaway by its **process group**: `kill -- -<pgid>` (not just the pid).
+- Keep a wanted long task: note `KEEP_RUNNING_BECAUSE="reason"`.
+- Delete the watchdog cron (CronDelete) when no backgrounded work remains.
+
+Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
 
 ## project_handler_load_checker — project protection degraded alert
 
