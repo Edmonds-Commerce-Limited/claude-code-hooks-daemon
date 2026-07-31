@@ -230,3 +230,46 @@ class TestPlanWorkflowHandler:
         assert "planning" in handler.tags
         assert "advisory" in handler.tags
         assert "non-terminal" in handler.tags
+
+
+class TestClaudeMdGuidance:
+    """Plan 00190 Task 4.4: this is the resident-context injection point.
+
+    It returned None, so the PLAN-vs-JOURNAL contract — the thing agents were
+    getting wrong — was stated nowhere an agent reads by default.
+    """
+
+    @pytest.fixture
+    def guidance(self) -> str:
+        text = PlanWorkflowHandler().get_claude_md()
+        assert text is not None
+        return text
+
+    def test_states_the_plan_write_contract(self, guidance: str) -> None:
+        lowered = guidance.lower()
+        assert "plan.md" in lowered
+        assert "lean" in lowered
+        assert "rewrite" in lowered or "in place" in lowered
+
+    def test_states_the_journal_write_contract(self, guidance: str) -> None:
+        lowered = guidance.lower()
+        assert "journal" in lowered
+        assert "append" in lowered
+        assert "unbounded" in lowered or "never" in lowered
+
+    def test_states_the_read_contract_for_both(self, guidance: str) -> None:
+        """The read contract is what JUSTIFIES the size limits."""
+        lowered = guidance.lower()
+        assert "read" in lowered
+        assert "tail" in lowered or "grep" in lowered
+        assert "sub-agent" in lowered or "subagent" in lowered
+
+    def test_names_the_size_tiers(self, guidance: str) -> None:
+        assert "18" in guidance and "25" in guidance and "35" in guidance
+
+    def test_never_suggests_deleting_plan_content(self, guidance: str) -> None:
+        lowered = guidance.lower()
+        assert "relocate" in lowered
+        assert "split" in lowered
+        # Deletion must not be offered as a remedy.
+        assert "delete the" not in lowered

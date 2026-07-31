@@ -795,7 +795,33 @@ plan_workflow:
       freshness_days: 3          # nag a plan whose newest day-file is older than N days
       enforce_on_completion: false
       grandfather_before: 0      # plans below this number are never nagged for a JOURNAL/
+    plan_doc_size:               # tiered read-cost limits on PLAN.md (Plan 00190)
+      enabled: true              # master switch for the plan-doc-size check
+      advisory_bytes: 18000      # first nudge (~4,500 tokens)
+      advisory_lines: 350
+      warning_bytes: 25000       # escalated wording (~6,300 tokens)
+      warning_lines: 500
+      block_bytes: 35000         # edits denied above this (~8,800 tokens)
+      block_lines: 900
 ```
+
+`plan_doc_size` bounds **plan documents only**. A `PLAN.md` is read in full at
+the start of every session that touches the plan, so its size is a recurring
+context cost; a `JOURNAL/` day-file is only ever tailed, grepped or read by a
+sub-agent, so journals -- and the plan-index `README.md` -- are exempt at any
+size. Each tier trips on `bytes > B OR lines > L`, since a long thin plan and a
+short dense one cost the same to read. Tiers must increase strictly on both
+axes or config validation FAILS FAST, because a non-monotonic setting silently
+disables a tier.
+
+Only the top tier denies, and three guards keep it from trapping you: a
+shrinking edit is never blocked (so an oversized plan can always be refactored
+down), plans in `legacy_plan_allowlist` only ever advise, and a file declaring
+`<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->` is downgraded to advice. The
+remediation always names two remedies -- relocate narrative into `JOURNAL/`, or
+split an over-scoped plan -- and never suggests deleting content. See
+[CLAUDE/PlanJournalling.md](../../CLAUDE/PlanJournalling.md) for the full
+PLAN-vs-JOURNAL contract.
 
 `extra_root_files` is an ADDITIVE allowlist layered on top of the built-in
 accepted set (`README.md`, `CLAUDE.md`, `mkplan.bash`, `_TEMPLATE_.md`): list any

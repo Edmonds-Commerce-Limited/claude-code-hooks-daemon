@@ -475,6 +475,12 @@ class PipeBlockerHandler(Handler):
             "`pytest tests/ > /tmp/out.txt 2>&1` then read the file selectively.\n\n"
             "**Allowed** (whitelisted): `grep`, `rg`, `awk`, `sed`, `jq`, `ls`, `cat`, "
             "`git log`, `git tag`, `git branch`, and other cheap filtering commands.\n\n"
+            "**Only PIPES are restricted — reading a file directly is not.** "
+            "`tail -n 40 <file>`, `head -n 40 <file>` and `grep pattern <file>` take "
+            "the path as an ARGUMENT, so no pipe exists and this handler never sees "
+            "them. That is the supported way to sample a large append-only file such "
+            "as a plan's `JOURNAL/` day-file — which you should tail or grep rather "
+            "than read whole.\n\n"
             "**Add to whitelist** (if safe to pipe): set `extra_whitelist` in "
             "`.claude/hooks-daemon.yaml` under `pipe_blocker`."
         )

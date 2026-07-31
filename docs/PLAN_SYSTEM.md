@@ -163,7 +163,48 @@ All plan-related documents stay together:
 - Easy to find all context for a plan
 - Historical plans remain complete
 
-### 4. Atomic Units of Work
+### 4. PLAN.md vs JOURNAL/ — two files, two contracts
+
+The most common plan-hygiene failure is treating `PLAN.md` as a journal:
+appending dated progress notes to it session after session until it is tens
+of KB of stale log. The two files obey **opposite** contracts, on two axes.
+
+|             | `PLAN.md`                                                                      | `JOURNAL/NNNNN-Journal-YY-MM-DD.md`                                                                      |
+| ----------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| **Write**   | Commit if dirty, edit IN PLACE, commit. Rewrite freely — git holds the history | **APPEND ONLY.** Never edit or remove an earlier entry; corrections are new dated entries at the bottom  |
+| **Content** | Lean, surgical, always correct — current truth only                            | What actually happened: dated progress, findings, incidents, hand-offs                                   |
+| **Read**    | Read **in full** every session — it is your grounding                          | **Never read whole.** `tail -n N` the newest day-file, grep it, or send a sub-agent for deep archaeology |
+| **Size**    | Bounded and enforced (see below)                                               | **Unbounded by design.** Length is never a problem; never tidy or trim a journal                         |
+
+**The read contract is what justifies the write contract.** A plan is re-read
+in full at the start of every session that touches it, so every kilobyte is a
+recurring context cost paid before any work starts. A journal is only ever
+sampled, so it is safe to let it grow forever.
+
+**Enforced size tiers on `PLAN.md`** (bytes **or** lines, whichever trips
+first) — configurable via `plan_workflow.qa.plan_doc_size`:
+
+| Tier     | Bytes    | Lines | Effect            |
+| -------- | -------- | ----- | ----------------- |
+| Advisory | > 18,000 | > 350 | Nudge             |
+| Warning  | > 25,000 | > 500 | Escalated wording |
+| Block    | > 35,000 | > 900 | Edit denied       |
+
+**When a plan gets too big there are exactly two remedies, and neither is
+deletion:**
+
+1. **Relocate** the narrative into the plan's `JOURNAL/` day-file.
+2. **Split** the plan if the task tree itself is the bulk — an over-scoped
+   plan is not fixed by better journalling.
+
+Shrinking edits are never blocked, so an oversized plan can always be
+refactored down. A plan that genuinely warrants its size can declare why with
+`<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`.
+
+See [CLAUDE/PlanJournalling.md](../CLAUDE/PlanJournalling.md) for the full
+journalling contract.
+
+### 5. Atomic Units of Work
 
 **One plan = one cohesive piece of work**
 
@@ -181,7 +222,7 @@ All plan-related documents stay together:
                                  00052-feature-phase-3/
 ```
 
-### 5. Task Status System
+### 6. Task Status System
 
 Plans use **emoji status indicators** for visual clarity:
 
@@ -277,7 +318,6 @@ Every `PLAN.md` follows this structure:
 **Created**: YYYY-MM-DD
 **Owner**: [Name/Agent]
 **Priority**: High | Medium | Low
-**Estimated Effort**: [X hours/days]
 
 ## Overview
 
@@ -346,20 +386,17 @@ Every `PLAN.md` follows this structure:
 |------|--------|-------------|------------|
 | Risk description | High/Med/Low | High/Med/Low | How to handle |
 
-## Timeline
+## Delivery & Milestones
 
-- Phase 1: 2026-02-01 to 2026-02-05
-- Phase 2: 2026-02-06 to 2026-02-10
-- Target Completion: 2026-02-10
+<!-- Curated milestones + delivery commit hashes ONLY.
+     The blow-by-blow activity log lives in JOURNAL/ — never here. -->
 
-## Notes & Updates
-
-### 2026-02-03
-- Update or note about progress/changes
-
-### 2026-02-05
-- Another update or decision
+- Milestone reached at <commit-hash>
 ```
+
+> **Do not add a dated progress log to `PLAN.md`.** Narrative belongs in the
+> plan's `JOURNAL/` day-files. See
+> [PLAN.md vs JOURNAL/](#planmd-vs-journal--two-files-two-contracts).
 
 ### Template Sections Explained
 
@@ -369,7 +406,11 @@ Every `PLAN.md` follows this structure:
 - **Created**: Start date
 - **Owner**: Person/agent responsible
 - **Priority**: Urgency level
-- **Estimated Effort**: Time estimate (improves over time)
+
+> Plans describe **what**, not **when**. Effort estimates, per-phase durations
+> and target-completion dates are blocked in plan documents by the
+> `plan_time_estimates` handler — break the work into concrete tasks and let
+> scheduling be decided outside the plan.
 
 **Overview**: What and why (2-3 paragraphs maximum)
 
@@ -400,8 +441,6 @@ Every `PLAN.md` follows this structure:
 **Success Criteria**: Definition of done (checkboxes)
 
 **Risks & Mitigations**: What could go wrong and how to handle it
-
-**Timeline**: Target dates (estimates, not commitments)
 
 **Delivery & Milestones**: Curated milestones + delivery commit hashes. The
 blow-by-blow running log of progress lives in the plan's `JOURNAL/` (append-only
@@ -834,20 +873,23 @@ Add project-specific supporting docs:
 
 ### 4. Handling Changes
 
-**When requirements change mid-plan**:
+**When requirements change mid-plan**, do two separate things:
+
+1. **Edit `PLAN.md` in place** so it states the NEW truth — revise the Goals,
+   add the new tasks, remove the ones no longer needed, and record the
+   reasoning under `## Technical Decisions`. Do not append a "what changed"
+   note; the plan describes what IS, and git holds what it used to say.
+
+2. **Append the change to the plan's `JOURNAL/` day-file** — that is where the
+   narrative of *when and why it changed* belongs:
 
 ```markdown
-## Notes & Updates
+<!-- CLAUDE/Plan/00042-feature-x/JOURNAL/00042-Journal-26-02-10.md -->
 
-### 2026-02-10 - Scope Change
-Original goal was X, but stakeholder requested Y instead.
+## 14:20 · decision · — — scope changed at stakeholder request
 
-**Impact**:
-- Added 2 new tasks to Phase 2
-- Removed Task 3.1 (no longer needed)
-- Timeline extended by 2 days
-
-**Decision**: Proceed with revised scope (approved by stakeholder)
+Original goal was X; stakeholder asked for Y instead. Added two tasks to
+Phase 2 and dropped Task 3.1. Proceeding with the revised scope.
 ```
 
 **When to split a plan**:
@@ -1063,8 +1105,6 @@ jobs:
 **Created**: 2026-02-15
 **Owner**: AI Assistant
 **Priority**: Medium
-**Estimated Effort**: 4 hours
-**Actual Effort**: 3.5 hours
 
 ## Overview
 
@@ -1134,21 +1174,21 @@ Add a dark mode toggle to the application UI. Users have requested a dark theme 
 
 **Date**: 2026-02-15
 
-## Notes & Updates
+## Delivery & Milestones
 
-### 2026-02-15
-- Started implementation
-- Chose CSS variables approach
+- Core implementation delivered at a1b2c3d
+- Deployed to production at e4f5a6b
+```
 
-### 2026-02-16
-- Completed core implementation
-- All tests passing
+The day-by-day narrative for this plan lives in its journal, not here:
 
-### 2026-02-17
-- Deployed to staging
-- QA approved
-- Deployed to production
-- Plan complete!
+```markdown
+<!-- CLAUDE/Plan/Completed/00042-dark-mode/JOURNAL/00042-Journal-26-02-17.md -->
+
+## 09:15 · action · — — deployed to staging, QA approved
+
+Staging deploy clean; QA signed off on the contrast ratios. Promoting to
+production next.
 ```
 
 ### Example 2: Complex Refactoring Plan
@@ -1160,7 +1200,6 @@ Add a dark mode toggle to the application UI. Users have requested a dark theme 
 **Created**: 2026-02-10
 **Owner**: Development Team
 **Priority**: High
-**Estimated Effort**: 3 weeks
 
 ## Overview
 
@@ -1302,35 +1341,23 @@ See `database-analysis.md` for detailed audit of current state.
 | Team adoption issues | Medium | Medium | Training sessions, pair programming, code reviews |
 | Timeline overrun | Medium | High | Start with smallest repositories, learn as we go |
 
-## Timeline
+## Delivery & Milestones
 
-- Week 1 (Feb 10-14): Design + Foundation
-- Week 2 (Feb 17-21): UserRepository migration + additional repos
-- Week 3 (Feb 24-28): Remaining migrations + optimization
-- Target Completion: 2026-02-28
+- Base `Repository<T>` + UserRepository delivered at 9f8e7d6
+```
 
-## Notes & Updates
+Note what is NOT in that plan: no timeline, and no running log. The blocker
+and its resolution are journal material — they record what happened, and the
+plan itself was edited in place to carry the resulting decision:
 
-### 2026-02-10
-- Created plan after team discussion
-- Everyone aligned on Repository Pattern approach
-- Sarah volunteered to lead migration
+```markdown
+<!-- CLAUDE/Plan/00044-repository-pattern/JOURNAL/00044-Journal-26-02-17.md -->
 
-### 2026-02-11
-- Design review complete
-- Repository interfaces approved
-- Started implementing base infrastructure
+## 11:40 · finding · P2 — SQLite syntax differs from PostgreSQL
 
-### 2026-02-14
-- Base Repository<T> complete
-- UserRepository PostgreSQL implementation done
-- Currently working on SQLite test version
-
-### 2026-02-17
-- Hit blocker: SQLite syntax differences from PostgreSQL
-- Decision: Create adapter layer for DB-specific SQL
-- Created adapters for both PostgreSQL and SQLite
-- Back on track now
+The shared query builder assumed PostgreSQL. Rather than fork the
+repositories, added a DB-specific adapter layer behind one interface;
+implementations for both engines are in place and the migration is unblocked.
 ```
 
 ### Example 3: Bug Fix Plan
@@ -1342,8 +1369,6 @@ See `database-analysis.md` for detailed audit of current state.
 **Created**: 2026-02-15
 **Owner**: Performance Team
 **Priority**: Critical
-**Estimated Effort**: 1 day
-**Actual Effort**: 6 hours
 
 **GitHub Issue**: #287
 
@@ -1437,31 +1462,30 @@ See `memory-profile-analysis.md` for detailed profiling data.
 
 **Date**: 2026-02-15
 
-## Notes & Updates
+## Delivery & Milestones
 
-### 2026-02-15 10:00
-- Started investigation
-- Memory leak confirmed locally
+- Fix + regression test delivered at 3c2b1a0
+- Production rollout complete at 7d6e5f4; GitHub issue #287 closed
+```
 
-### 2026-02-15 14:00
-- Heap profiling complete
-- Found EventListener instances growing
-- Root cause: Missing removeListener in error handlers
+A bug-fix investigation generates a lot of narrative — profiling runs, dead
+ends, the moment the root cause landed. All of it goes in the journal, where
+it can grow freely and be grepped later, and none of it bloats the plan:
 
-### 2026-02-15 16:00
-- Fix implemented
-- Tests passing
-- Profiling shows flat memory usage
+```markdown
+<!-- CLAUDE/Plan/Completed/00045-memory-leak/JOURNAL/00045-Journal-26-02-15.md -->
 
-### 2026-02-16 09:00
-- Deployed to staging
-- Monitoring looks good
+## 14:00 · finding · P1 — root cause: listeners never removed on the error path
 
-### 2026-02-16 14:00
-- Production rollout complete
-- Memory usage stable
-- GitHub issue #287 closed
-- Plan complete!
+Heap profiling showed `EventListener` instances growing without bound. The
+happy path calls `removeListener`; the error handlers do not, so every failed
+event leaked one. Fix is to remove in a `finally`, plus a cleanup timer for
+defence in depth.
+
+## 16:00 · action · P1 — fix in, memory flat under the same load
+
+Regression test added. Re-profiled: memory is flat where it previously grew
+linearly with error count.
 ```
 
 ---

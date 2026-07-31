@@ -30,6 +30,68 @@ abandoned) and **hand-off context** (where the last session left off).
 Two diaries would drift; one specification (`PLAN.md`) plus one activity log
 (`JOURNAL/`) stay coherent.
 
+## The two contracts (SSoT)
+
+This table is the single source of truth for how the two files differ.
+Everything else — handler guidance, `docs/PLAN_SYSTEM.md`, the size checks —
+points here rather than restating it.
+
+|             | `PLAN.md`                                                                          | `JOURNAL/NNNNN-Journal-YY-MM-DD.md`                                                                              |
+| ----------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **Write**   | Commit if dirty, edit **in place**, commit. Rewrite freely — git holds the history | **APPEND ONLY.** Never edit or remove an earlier entry; corrections are new dated entries at the bottom          |
+| **Content** | Lean, surgical, always correct — current truth only                                | What actually happened: dated progress, findings, dead-ends, hand-offs                                           |
+| **Read**    | Read **in full** every session — it is your grounding                              | **Never read whole.** `tail -n N` the newest day-file, grep for a term, or send a sub-agent for deep archaeology |
+| **Size**    | Bounded and enforced — see the tiers below                                         | **Unbounded by design.** Length is never a problem; never tidy, trim or summarise a journal                      |
+
+### Why the asymmetry (the read contract justifies the write contract)
+
+A plan is re-read **in full** at the start of every session that touches it, so
+every kilobyte is a recurring context cost paid before any work begins. A
+journal is only ever **sampled** — tailed, grepped, or read by a sub-agent
+whose context is discarded afterwards — so it is safe to let it grow forever.
+
+That single fact explains both halves of the design: it is why a plan has a
+size limit at all, and why applying one to a journal would be a category
+error. It is also why "my journal is getting long" is never a problem to fix.
+
+### Reading a journal without flooding your context
+
+```bash
+tail -n 60 CLAUDE/Plan/00190-thing/JOURNAL/00190-Journal-26-07-31.md
+grep -n "rate limit" CLAUDE/Plan/00190-thing/JOURNAL/*.md
+```
+
+Both take the path as an **argument**, so no pipe is involved and the
+`pipe_blocker` handler never sees them. For anything deeper — "why did we
+abandon approach B three weeks ago?" — dispatch a sub-agent to read the
+journal and report back, so the bulk never enters your own context.
+
+### Size tiers on `PLAN.md`
+
+Enforced by the `plan-doc-size` check; configurable under
+`plan_workflow.qa.plan_doc_size`. A tier trips on **bytes or lines**,
+whichever comes first.
+
+| Tier     | Bytes    | Lines | Effect            |
+| -------- | -------- | ----- | ----------------- |
+| Advisory | > 18,000 | > 350 | Nudge             |
+| Warning  | > 25,000 | > 500 | Escalated wording |
+| Block    | > 35,000 | > 900 | Edit denied       |
+
+**When a plan exceeds a tier there are exactly two remedies, and neither is
+deletion:**
+
+1. **Relocate** the narrative into this plan's `JOURNAL/` day-file.
+2. **Split** the plan if the task tree itself is the bulk — an over-scoped
+   plan is not fixed by better journalling.
+
+Shrinking edits are never blocked, so an oversized plan can always be
+refactored down. A plan that genuinely warrants its size declares why with
+`<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`. A commit that shrinks a
+`PLAN.md` sharply without staging a journal entry is flagged by
+`plan-shrink-without-journal` — that shape is usually content being deleted
+rather than moved.
+
 ## Layout
 
 ```

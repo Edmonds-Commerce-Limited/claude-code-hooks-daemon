@@ -202,12 +202,6 @@ Refer to detailed info in supporting docs as required
 |------|--------|-------------|------------|
 | Risk description | High/Med/Low | High/Med/Low | How we'll handle it |
 
-## Timeline
-
-- Phase 1: [Date range]
-- Phase 2: [Date range]
-- Target Completion: YYYY-MM-DD
-
 ## Delivery & Milestones
 
 <!-- Curated milestones + delivery commit hashes (git is the SSoT for "when").
@@ -550,7 +544,6 @@ Use this template when creating new handlers for hook events.
 **Type**: Handler Implementation
 **Event Type**: PreToolUse | PostToolUse | SessionStart | etc.
 **Priority Range**: [10-20 for safety, 25-35 for quality, 36-55 for workflow]
-**Estimated Effort**: [X hours]
 
 ## Overview
 
@@ -649,7 +642,6 @@ class [HandlerName]Handler(Handler):
 
 **Status**: Not Started
 **Type**: Feature Implementation
-**Estimated Effort**: [X hours/days]
 
 ## Overview
 
@@ -723,7 +715,6 @@ Use this template when improving existing code without changing behavior.
 
 **Status**: Not Started
 **Type**: Refactoring
-**Estimated Effort**: [X hours]
 
 ## Overview
 
@@ -796,13 +787,18 @@ Use this template when improving existing code without changing behavior.
 1. **Before starting work**: Review plan, mark task 🔄
 2. **During work**: Update status if blocked
 3. **After completing**: Mark ✅, run QA, commit with reference
-4. **Daily**: Review plan, update progress notes
+4. **Regularly**: Review the plan and edit it IN PLACE so it states current
+   truth. Append the narrative of what happened to the plan's `JOURNAL/`
+   day-file — never to `PLAN.md`. See @CLAUDE/PlanJournalling.md.
 
 ### Handling Changes
 
 When requirements change mid-plan:
 
-1. **Document Change**: Add note to plan with date
+1. **Document Change**: Edit `PLAN.md` in place to state the new truth
+   (revise Goals/Tasks, record the reasoning under Technical Decisions), and
+   append a dated entry to the plan's `JOURNAL/` recording what changed and
+   why. Do NOT append a change-log section to `PLAN.md`.
 2. **Update Tasks**: Revise task list as needed
 3. **Assess Impact**: Update estimates, dependencies
 4. **Communicate**: Ensure stakeholders aware
@@ -953,7 +949,7 @@ Agent:
    - Implement handler
    - Run QA suite
 8. Commits with "Plan 001: Implement sed blocker handler"
-9. Updates plan progress notes
+9. Ticks the task in PLAN.md and appends the narrative to the plan's JOURNAL/
 10. Marks complete when all QA passes
 ```
 

@@ -213,15 +213,25 @@ re-enable plan rules on every journal file.
 
 ### Phase 4: Documentation Consistency
 
-- [ ] ⬜ **Task 4.1**: SSoT contract in `CLAUDE/PlanJournalling.md`; one-line
-  pointers elsewhere
-- [ ] ⬜ **Task 4.2**: `docs/PLAN_SYSTEM.md` — remove the template section and
-  three worked examples that teach dated logs inside PLAN.md
-- [ ] ⬜ **Task 4.3**: `CLAUDE/PlanWorkflow.md` — qualify 8 progress-log lines
-- [ ] ⬜ **Task 4.4**: Implement `plan_workflow.get_claude_md()` (currently None,
-  highest-leverage injection point)
-- [ ] ⬜ **Task 4.5**: `pipe_blocker.get_claude_md()` — state that unpiped
-  `tail -n N <file>` is unrestricted
+- [x] ✅ **Task 4.1**: SSoT two-axis contract table in
+  `CLAUDE/PlanJournalling.md` (+ the deployed install template, kept in sync),
+  including the read contract, the causal justification, and the size tiers
+- [x] ✅ **Task 4.2**: `docs/PLAN_SYSTEM.md` — template and all four worked
+  examples rewritten. They taught THREE daemon-blocked patterns: dated
+  `## Notes & Updates` logs, `**Estimated Effort**`, and `## Timeline` target
+  dates. Added a `PLAN.md vs JOURNAL/` core-concept section
+- [x] ✅ **Task 4.3**: `CLAUDE/PlanWorkflow.md` — removed the `## Timeline`
+  template section and three `Estimated Effort` header lines (all blocked by
+  `plan_time_estimates`); requalified the progress-log lines to say edit
+  PLAN.md in place and append narrative to `JOURNAL/`
+- [x] ✅ **Task 4.4**: `plan_workflow.get_claude_md()` implemented — it
+  returned None, so the contract was stated nowhere an agent reads by default
+- [x] ✅ **Task 4.5**: `pipe_blocker.get_claude_md()` — states that only PIPES
+  are restricted and `tail -n N <file>` / `grep pattern <file>` take the path
+  as an argument, so the read contract is actionable
+- [x] ✅ **Task 4.6** *(added)*: `plan_qa_edit` and `plan_qa_commit_gate`
+  `get_claude_md()` document the two new checks — a blocking rule that is not
+  in resident guidance is the exact failure this plan exists to prevent
 
 ### Phase 5: Verification & Release
 
