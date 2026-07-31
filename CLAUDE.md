@@ -667,9 +667,9 @@ Bash commands that change directory into `.claude/hooks-daemon/` (or `cd` into a
 **Run daemon CLI from the project root instead** — it always works regardless of cwd:
 
 ```
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+/workspace/bin/hooks-daemon status
+/workspace/bin/hooks-daemon restart
+/workspace/bin/hooks-daemon logs
 ```
 
 If you need to inspect daemon source for debugging, use `Read` from the project root with the absolute path — never `cd` in. Do NOT edit anything inside `.claude/hooks-daemon/`; changes will be overwritten on the next upgrade.
@@ -879,7 +879,7 @@ Before making a `git commit` in the hooks daemon repository, this handler advise
 **Why**: Unit tests alone don't catch import errors. A handler that fails to import silently disables protection without any test-time error. Daemon restart is the definitive check.
 
 **Run before committing** (in this repo only):
-`$PYTHON -m claude_code_hooks_daemon.daemon.cli restart` then verify status shows RUNNING.
+`/workspace/bin/hooks-daemon restart` then verify status shows RUNNING.
 
 ## qa_suppression — QA suppression annotations are blocked
 
@@ -1014,7 +1014,7 @@ commit with a TODO list of what the commit must also contain.
   of the two you just did
 
 Check the staged tree any time without committing:
-`$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --check-staged`.
+`/workspace/bin/hooks-daemon plan-qa --check-staged`.
 Commits inside nested/vendor repos or foreign worktrees are exempt.
 
 ## plan_qa_edit — PLAN.md writes are linted in real time
@@ -1069,7 +1069,7 @@ with history in git rather than in the file body.
 
 Grandfathered plans in `plan_workflow.qa.legacy_plan_allowlist`
 only ever advise. Lint any file on demand:
-`$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --lint <file>`.
+`/workspace/bin/hooks-daemon plan-qa --lint <file>`.
 
 ## plan_time_estimates — plans describe WHAT, not WHEN
 
@@ -1228,7 +1228,7 @@ A PostToolUse advisory that fires when a Bash call backgrounds a process (`run_i
 
 When you background a long-lived process:
 
-- Create a non-durable recurring **watchdog cron** (CronCreate, durable:false) whose prompt runs `$PYTHON -m claude_code_hooks_daemon.daemon.cli harvest-background` and acts on any runaway — this covers the idle/compaction window a tool-call hook cannot. Do NOT wait for the cron; keep working.
+- Create a non-durable recurring **watchdog cron** (CronCreate, durable:false) whose prompt runs `/workspace/bin/hooks-daemon harvest-background` and acts on any runaway — this covers the idle/compaction window a tool-call hook cannot. Do NOT wait for the cron; keep working.
 - Check on demand: run `harvest-background` (exit 1 == runaways surfaced).
 - Reap a runaway by its **process group**: `kill -- -<pgid>` (not just the pid).
 - Keep a wanted long task: note `KEEP_RUNNING_BECAUSE="reason"`.
@@ -1252,42 +1252,8 @@ After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-
 **Ad-hoc formatting of existing files:**
 
 ```
-$PYTHON -m claude_code_hooks_daemon.daemon.cli format-markdown <path>
+/workspace/bin/hooks-daemon format-markdown <path>
 ```
-
-## project_handler_load_checker — project protection degraded alert
-
-At session start this handler reports any **project handlers** (`.claude/project-handlers/`) that FAILED to load in the running daemon. A skipped handler is a silently-disabled protection — the alert exists so you never assume a guardrail is active when it is not.
-
-### When you see `🚨 PROJECT PROTECTION DEGRADED 🚨`
-
-1. **Do not assume normal guardrails are in force.** The listed handlers are OFF for this session.
-2. **Diagnose** each failure: `$PYTHON -m claude_code_hooks_daemon.daemon.cli validate-project-handlers` names the file, the missing method, and the daemon version that introduced it.
-3. **Fix** the handler(s) — usually adding a required method stub (e.g. `get_claude_md`) that a daemon upgrade made mandatory.
-4. **Restart the daemon** (`$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`). The alert reflects the *running* daemon, so it clears only after a restart reloads the fixed handlers — fixing the file alone is not enough.
-
-The handler is silent when every project handler loads, so seeing this alert always means real action is required.
-
-## plan_qa_sweep — plan-tree drift report at session start
-
-At the start of each new session the plan directory is swept with the
-plan QA check catalogue (index/folder bijection, number collisions,
-statistics recount, archive structure, status-vs-location coherence,
-staleness). Findings are injected once as advisory context — the
-sweep never blocks.
-
-**When a drift report appears**: fix the listed findings (each names
-its exact remediation) as part of your plan housekeeping, then
-re-check with:
-
-```
-$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --sweep
-```
-
-The CLI exits 1 while findings remain (CI-able). Single-file lint:
-`plan-qa --lint <PLAN.md>`; staged-commit check: `plan-qa --check-staged`.
-Policy lives under `plan_workflow.qa` in `.claude/hooks-daemon.yaml`
-(archive dir names, staleness window, legacy/collision allowlists).
 
 ## ccy_supervisor_integrity — keep the ccy supervisor properly set up
 
@@ -1316,6 +1282,52 @@ On each new session the daemon runs an **additive** `git fetch --all` (never `--
 
 It is silent when up to date with no gone branches, not in a git repo, on a detached HEAD, or without an upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
 
+## plan_qa_sweep — plan-tree drift report at session start
+
+At the start of each new session the plan directory is swept with the
+plan QA check catalogue (index/folder bijection, number collisions,
+statistics recount, archive structure, status-vs-location coherence,
+staleness). Findings are injected once as advisory context — the
+sweep never blocks.
+
+**When a drift report appears**: fix the listed findings (each names
+its exact remediation) as part of your plan housekeeping, then
+re-check with:
+
+```
+/workspace/bin/hooks-daemon plan-qa --sweep
+```
+
+The CLI exits 1 while findings remain (CI-able). Single-file lint:
+`plan-qa --lint <PLAN.md>`; staged-commit check: `plan-qa --check-staged`.
+Policy lives under `plan_workflow.qa` in `.claude/hooks-daemon.yaml`
+(archive dir names, staleness window, legacy/collision allowlists).
+
+## plan_workflow_asset_checker — plan tooling provisioning alert
+
+At session start, when the plan workflow is enabled but the daemon-owned `mkplan.bash` is missing from the plan directory, this advisory fires (it never blocks). A missing `mkplan.bash` means `CLAUDE.md` and `plan_number_helper` reference a scaffolder that does not exist and journalling is inert.
+
+**Fix**: (re)deploy the assets on demand —
+
+```
+/workspace/bin/hooks-daemon deploy-plan-workflow
+```
+
+The deploy is idempotent (fills gaps only, never overwrites client-owned files). Silent when `mkplan.bash` is present or the workflow is disabled.
+
+## project_handler_load_checker — project protection degraded alert
+
+At session start this handler reports any **project handlers** (`.claude/project-handlers/`) that FAILED to load in the running daemon. A skipped handler is a silently-disabled protection — the alert exists so you never assume a guardrail is active when it is not.
+
+### When you see `🚨 PROJECT PROTECTION DEGRADED 🚨`
+
+1. **Do not assume normal guardrails are in force.** The listed handlers are OFF for this session.
+2. **Diagnose** each failure: `/workspace/bin/hooks-daemon validate-project-handlers` names the file, the missing method, and the daemon version that introduced it.
+3. **Fix** the handler(s) — usually adding a required method stub (e.g. `get_claude_md`) that a daemon upgrade made mandatory.
+4. **Restart the daemon** (`/workspace/bin/hooks-daemon restart`). The alert reflects the *running* daemon, so it clears only after a restart reloads the fixed handlers — fixing the file alone is not enough.
+
+The handler is silent when every project handler loads, so seeing this alert always means real action is required.
+
 ## hook_registration_checker — hooks configuration policy
 
 On every new session this handler audits hook configuration across `.claude/settings.json` and `.claude/settings.local.json`. When it reports issues, fix them — do not ignore the warning.
@@ -1329,21 +1341,9 @@ On every new session this handler audits hook configuration across `.claude/sett
 ### Remediation
 
 - **Hooks in `settings.local.json`**: move each `hooks` entry to `settings.json`, then delete the `hooks` key from `settings.local.json`. Confirm no duplicates remain.
-- **Legacy-style commands**: replace them with a project-level handler. Run `$PYTHON -m claude_code_hooks_daemon.daemon.cli init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
+- **Legacy-style commands**: replace them with a project-level handler. Run `/workspace/bin/hooks-daemon init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
 - **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
 - **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry, delete from `settings.local.json`.
-
-## plan_workflow_asset_checker — plan tooling provisioning alert
-
-At session start, when the plan workflow is enabled but the daemon-owned `mkplan.bash` is missing from the plan directory, this advisory fires (it never blocks). A missing `mkplan.bash` means `CLAUDE.md` and `plan_number_helper` reference a scaffolder that does not exist and journalling is inert.
-
-**Fix**: (re)deploy the assets on demand —
-
-```
-$PYTHON -m claude_code_hooks_daemon.daemon.cli deploy-plan-workflow
-```
-
-The deploy is idempotent (fills gaps only, never overwrites client-owned files). Silent when `mkplan.bash` is present or the workflow is disabled.
 
 ## idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
 
