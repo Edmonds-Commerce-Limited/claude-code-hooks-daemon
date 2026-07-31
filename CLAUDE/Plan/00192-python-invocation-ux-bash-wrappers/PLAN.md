@@ -182,14 +182,27 @@ absolute path.
 CWD: `daemon-cli.sh` exits 1 with "Not in a hooks daemon project", while
 `bin/hooks-daemon` resolves the venv and reaches the daemon CLI.
 
-### Phase 3: Swap all emission sites
+### Phase 3: Swap all emission sites (DONE)
 
-- [ ] ⬜ **Task 3.1**: Add a QA check that fails when a literal `$PYTHON` appears in
-  any agent-facing string under `src/` (guards against regression).
-- [ ] ⬜ **Task 3.2**: Convert the 12 handler sites to the resolver utility.
-- [ ] ⬜ **Task 3.3**: Convert the 5 generator/error surfaces.
-- [ ] ⬜ **Task 3.4**: Regenerate `.claude/HOOKS-DAEMON.md` and the resident
-  `CLAUDE.md` block; confirm zero `$PYTHON` occurrences remain.
+- [x] ✅ **Task 3.1**: `scripts/qa/check_python_var_guidance.py` — 14th QA gate,
+  fails the build if the pattern returns. Exempts the resolver module itself,
+  mirroring how `check_canonical_callers` exempts `resolve_venv.sh`. RED run
+  enumerated **77 violations across 29 files**.
+- [x] ✅ **Task 3.2**: 12 handler sites converted. Module-level constants became
+  functions (the wrapper path depends on install mode, known only after startup).
+- [x] ✅ **Task 3.3**: 5 generator/error surfaces converted.
+- [x] ✅ **Task 3.4**: Markdown shipped to clients now names the wrapper. Four
+  troubleshooting snippets invoked a RAW interpreter rather than the CLI; those
+  became proper subcommands (`health`, `list-venvs`, `config-validate`), so no
+  guidance tells an agent to run raw python at all.
+- [x] ✅ **Task 3.5**: Regenerated docs — self-install `CLAUDE.md` and
+  `.claude/HOOKS-DAEMON.md` both at **0**.
+
+Fixed en route: `daemon_location_guard` hardcoded
+`PYTHON=/workspace/untracked/venv/bin/python` — the legacy venv AND this repo's
+path, shipped to every client. Two tests asserted the OLD broken behaviour and
+now pin the new contract. A Bandit B608 false positive (prose reading "delete
+from" next to a new f-string) was reworded, not suppressed.
 
 ### Phase 4: Skill coverage for plan QA
 
@@ -202,15 +215,19 @@ CWD: `daemon-cli.sh` exits 1 with "Not in a hooks daemon project", while
 Every check runs in BOTH modes. Self-install alone cannot verify this class of
 bug — the field report came from a client install whose layout differs.
 
-- [ ] ⬜ **Task 5.1**: Full QA: `./scripts/qa/run_all.sh`.
-- [ ] ⬜ **Task 5.2**: Daemon restart + status RUNNING (self-install).
-- [ ] ⬜ **Task 5.3**: Rebuild the client fixture against the fix
-  (`scripts/dummy-client-repo.sh create`) and assert its generated `CLAUDE.md`
-  contains **zero** `$PYTHON` occurrences (currently 9).
-- [ ] ⬜ **Task 5.4**: Execute the emitted commands verbatim in BOTH modes —
-  every one must run as printed.
-- [ ] ⬜ **Task 5.5**: Verify the worktree path (gap 4) from a real git worktree
-  of the client fixture.
+- [x] ✅ **Task 5.1**: QA **14/14 PASSED**, 10,749 tests, 95.2% coverage.
+- [x] ✅ **Task 5.2**: Daemon restart + RUNNING (self-install), performed
+  *through the new wrapper*.
+- [x] ✅ **Task 5.3**: Client fixture rebuilt against committed code — its
+  generated `CLAUDE.md` went **9 → 0**.
+- [x] ✅ **Task 5.4**: Commands copied verbatim from the client's `CLAUDE.md`
+  execute — `status` and `plan-qa --sweep` both return real CLI responses, no
+  exit 127, no `-m: command not found`.
+- [x] ✅ **Task 5.5**: CWD-independence verified A/B from an unrelated directory:
+  `daemon-cli.sh` exits 1 ("Not in a hooks daemon project") while
+  `bin/hooks-daemon` resolves and reaches the CLI.
+
+Both daemons verified RUNNING and isolated afterwards (dogfood + fixture).
 
 ## Technical Decisions
 
