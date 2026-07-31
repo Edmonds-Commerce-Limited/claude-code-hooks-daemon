@@ -139,15 +139,18 @@ def _command_is_backgrounded(command: str) -> bool:
     """Return True if a bash command launches a process in the background."""
     if not command:
         return False
-    # Deliberate asymmetry: the keyword test runs on the RAW command so a
-    # quoted sub-shell (``bash -c "nohup worker &"``) is still caught. Only the
-    # bare-``&`` test is quote-aware, because that is the form with observed
-    # false positives — an over-eager advisory that never kills is cheaper than
-    # missing real backgrounding.
-    if _BACKGROUND_KEYWORDS_RE.search(command):
+    # The two masks are applied asymmetrically, following what bash actually
+    # does with each span:
+    #   - A HEREDOC BODY is stdin data; the outer shell never executes it. So
+    #     it is masked for BOTH tests — prose there is never a command.
+    #   - A QUOTED SPAN may well be a command for a nested interpreter
+    #     (``bash -c "nohup worker"``), so it is masked only for the bare-``&``
+    #     test, where treating a literal ampersand as an operator was the
+    #     observed false positive.
+    heredoc_masked = _mask_heredoc_bodies(command)
+    if _BACKGROUND_KEYWORDS_RE.search(heredoc_masked):
         return True
-    literal_masked = _mask_quoted_spans(_mask_heredoc_bodies(command))
-    return _BACKGROUND_AMP_RE.search(literal_masked) is not None
+    return _BACKGROUND_AMP_RE.search(_mask_quoted_spans(heredoc_masked)) is not None
 
 
 def write_state_record(

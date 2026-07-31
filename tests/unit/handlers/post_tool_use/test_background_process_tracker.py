@@ -160,6 +160,24 @@ class TestHeredocBodies:
     def test_masking_preserves_length(self):
         assert len(_mask_heredoc_bodies(self.QUOTED_HEREDOC)) == len(self.QUOTED_HEREDOC)
 
+    def test_keyword_in_heredoc_body_is_prose(self):
+        """A heredoc body is stdin data — the outer shell never executes it.
+
+        Observed: a commit message describing this handler mentioned nohup and
+        tripped the advisory.
+        """
+        command = (
+            "git commit -F - <<'EOF'\n"
+            "keyword detection (nohup/setsid/disown) needs structural context\n"
+            "EOF"
+        )
+        assert _command_is_backgrounded(command) is False
+
+    def test_keyword_in_quoted_span_still_fires(self):
+        """A quoted span MAY be a command for a nested interpreter, unlike a
+        heredoc body — so keyword detection stays active inside quotes."""
+        assert _command_is_backgrounded("bash -c 'nohup worker.sh'") is True
+
 
 class TestHandleAdvisory:
     @pytest.fixture

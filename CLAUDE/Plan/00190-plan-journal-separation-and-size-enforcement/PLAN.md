@@ -158,13 +158,15 @@ re-enable plan rules on every journal file.
   displaying a LATER handler's reason. Only manifests on multi-deny, and the fix
   touches deliberate Plan 00144 chain semantics — needs its own TDD cycle rather
   than a hasty patch
-- [x] ✅ **Task 0.7**: `background_process_tracker` false-positived on a literal
-  `&` inside a quoted string — same defect class as 0.1 (naive matching without
-  structural context). Fixed: the bare-`&` test now runs against a
-  quote/escape-masked copy of the command, and heredoc bodies are masked too —
-  writing plan/journal prose via `<<'EOF'` was the highest-frequency misfire.
-  Keyword detection deliberately still runs on the raw string, so
-  `bash -c "nohup worker &"` is unaffected
+- [x] ✅ **Task 0.7**: `background_process_tracker` false-positived on literal
+  `&` and on backgrounding keywords appearing in prose — same defect class as
+  0.1 (matching without structural context). Fixed by masking literal spans,
+  asymmetrically and following bash semantics: a **heredoc body** is stdin data
+  the outer shell never executes, so it is masked for both the keyword and the
+  `&` test; a **quoted span** may be a command for a nested interpreter
+  (`bash -c "nohup worker"`), so it is masked only for the `&` test. Verified
+  12/12 against the live daemon. Residual, accepted: a keyword inside a short
+  `-m` quoted message still matches
 
 ### Phase 1: Research & Design
 
