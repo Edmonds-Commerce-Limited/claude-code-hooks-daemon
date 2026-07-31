@@ -1034,9 +1034,9 @@ only ever advise. Lint any file on demand:
 
 ## plan_time_estimates — plans describe WHAT, not WHEN
 
-Writing time estimates into a plan document is blocked — that is any `CLAUDE/Plan/**/*.md` EXCEPT journal day-files. Plans capture the work to be done, not how long it will take.
+Writing time estimates into a plan document is blocked — that is any `CLAUDE/Plan/**/*.md` EXCEPT anything under a plan's `JOURNAL/`. Plans capture the work to be done, not how long it will take.
 
-**Journal day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`) are exempt.** A journal records what actually happened, so an elapsed duration there is a historical fact, not a forward estimate.
+**Everything under `JOURNAL/` is exempt** — day-files (`NNNNN-Journal-YY-MM-DD.md`) and any other file in there. A journal records what actually happened, so an elapsed duration is a historical fact, not a forward estimate. The exemption is by LOCATION as well as by filename, so a mis-named day-file stays exempt.
 
 **Blocked in plan documents:**
 
@@ -1093,25 +1093,6 @@ Content inside markdown code blocks is exempt from validation.
 ## git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
 When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
-
-## markdown_table_formatter — markdown tables are auto-aligned
-
-After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-formatted via `mdformat + mdformat-gfm` so that table pipes are aligned and column widths are consistent. The handler is non-terminal and advisory — it never blocks, it just rewrites the file on disk.
-
-**What changes:**
-
-- Table pipes are aligned vertically and delimiter rows widened to match cell widths.
-- Ordered lists keep consecutive numbering (`1.` `2.` `3.`).
-- `---` thematic breaks are preserved (mdformat's 70-underscore default is post-processed back).
-- Asterisks in table cells are escaped (`*` → `\*`) as required by GFM.
-
-**Exempt:** journal day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`, Plan 00163) are NEVER reformatted — they are an append-only, byte-stable log and rewriting them would trip the `journal-append-only` check.
-
-**Ad-hoc formatting of existing files:**
-
-```
-$PYTHON -m claude_code_hooks_daemon.daemon.cli format-markdown <path>
-```
 
 ## recovery_cron_advisor — failsafe recovery cron lifecycle advisory
 
@@ -1191,6 +1172,25 @@ When you background a long-lived process:
 - Delete the watchdog cron (CronDelete) when no backgrounded work remains.
 
 Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
+
+## markdown_table_formatter — markdown tables are auto-aligned
+
+After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-formatted via `mdformat + mdformat-gfm` so that table pipes are aligned and column widths are consistent. The handler is non-terminal and advisory — it never blocks, it just rewrites the file on disk.
+
+**What changes:**
+
+- Table pipes are aligned vertically and delimiter rows widened to match cell widths.
+- Ordered lists keep consecutive numbering (`1.` `2.` `3.`).
+- `---` thematic breaks are preserved (mdformat's 70-underscore default is post-processed back).
+- Asterisks in table cells are escaped (`*` → `\*`) as required by GFM.
+
+**Exempt:** anything under a plan's `JOURNAL/` directory is NEVER reformatted — day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`, Plan 00163) and any other file in there. A journal is an append-only, byte-stable log; rewriting it would trip the `journal-append-only` check. The exemption is by LOCATION as well as by filename, so a mis-named day-file is still safe.
+
+**Ad-hoc formatting of existing files:**
+
+```
+$PYTHON -m claude_code_hooks_daemon.daemon.cli format-markdown <path>
+```
 
 ## project_handler_load_checker — project protection degraded alert
 
