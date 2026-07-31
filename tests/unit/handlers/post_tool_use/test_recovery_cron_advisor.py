@@ -11,12 +11,58 @@ import pytest
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
+    _CREATION_GUIDANCE,
     _MAX_TRACKED_PLANS,
     _PROGRESS_ADVISE_INTERVAL,
     LifecyclePhase,
     RecoveryCronAdvisorHandler,
     _detect_lifecycle_phase,
 )
+
+_RETIRED_SECTION = "Notes & Updates"
+
+
+class TestCronIdDestinationIsJournal:
+    """The cron ID belongs in JOURNAL/, never in PLAN.md (Plan 00190).
+
+    This handler was the ONLY injected instruction in the daemon telling an
+    agent to write into ``## Notes & Updates`` -- a section retired in favour
+    of ``JOURNAL/``. It directly contradicted CLAUDE/PlanWorkflow.md, which
+    says record the cron ID in the plan's JOURNAL. An injected instruction
+    beats a doc an agent may never open, so this was actively teaching the
+    anti-pattern.
+    """
+
+    def test_creation_guidance_names_the_journal(self) -> None:
+        """Runtime creation guidance directs the cron ID to the journal."""
+        assert "JOURNAL" in _CREATION_GUIDANCE
+
+    def test_creation_guidance_does_not_name_retired_section(self) -> None:
+        """Runtime creation guidance must not resurrect the retired section."""
+        assert _RETIRED_SECTION not in _CREATION_GUIDANCE
+
+    def test_claude_md_does_not_advertise_retired_section(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        """Injected CLAUDE.md guidance must not name the retired section.
+
+        ``get_claude_md()`` is rendered into CLAUDE.md's generated block, so
+        any mention there is resident in every session.
+        """
+        guidance = handler.get_claude_md()
+
+        assert guidance is not None
+        assert _RETIRED_SECTION not in guidance
+
+    def test_claude_md_directs_cron_id_to_journal(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        """Injected guidance names JOURNAL/ as the cron ID's destination."""
+        guidance = handler.get_claude_md()
+
+        assert guidance is not None
+        assert "JOURNAL" in guidance
+
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -198,14 +244,22 @@ class TestDetectLifecyclePhase:
         )
         assert _detect_lifecycle_phase(hook_input) == LifecyclePhase.PROGRESS
 
-    def test_progress_on_notes_section_edit(self) -> None:
-        """Editing PLAN.md touching ## Notes & Updates returns PROGRESS phase."""
+    def test_notes_section_edit_alone_is_not_progress(self) -> None:
+        """A dated note appended to PLAN.md is NOT a progress signal (Plan 00190).
+
+        ``## Notes & Updates`` is the RETIRED location for the blow-by-blow
+        stream, subsumed into ``JOURNAL/``. Treating an edit to it as
+        first-class "legitimate progress" rewarded the exact anti-pattern the
+        plan/journal separation exists to remove. Real progress edits touch a
+        task-status icon by the plan template's own grammar, so nothing of
+        value is lost.
+        """
         hook_input = _edit_input(
             "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
             new_string="## Notes & Updates\n\n### 2026-06-23\n\n- Progress made.",
             old_string="## Notes & Updates\n",
         )
-        assert _detect_lifecycle_phase(hook_input) == LifecyclePhase.PROGRESS
+        assert _detect_lifecycle_phase(hook_input) != LifecyclePhase.PROGRESS
 
     def test_progress_on_in_progress_icon_write(self) -> None:
         """Writing PLAN.md with 🔄 icon (but not Status Complete) returns PROGRESS."""

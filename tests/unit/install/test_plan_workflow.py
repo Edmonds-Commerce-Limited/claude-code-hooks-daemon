@@ -116,6 +116,30 @@ class TestMkplanDeployment:
         assert body.startswith("#!/usr/bin/env bash")
         assert "hooksdaemon.latestPlanNumber" in body
 
+    def test_fallback_skeleton_does_not_seed_retired_section(self) -> None:
+        """The no-template fallback must not pre-seed `## Notes & Updates`.
+
+        Plan 00190: mkplan.bash contradicted itself in a single run -- the
+        fallback skeleton wrote a `## Notes & Updates` heading pre-seeded with
+        a dated entry, WHILE the same script scaffolded `JOURNAL/`. A plan
+        could be born with both, and the dated entry is a worked example of
+        the exact anti-pattern journalling replaces.
+
+        The fallback is reached whenever `_TEMPLATE_.md` is absent -- i.e.
+        every drop-in deployment before `deploy-plan-workflow` has run -- so
+        it shapes first impressions in client projects.
+        """
+        body = mkplan_template_path().read_text()
+
+        assert "Notes & Updates" not in body
+        assert "Delivery & Milestones" in body
+
+    def test_fallback_skeleton_points_at_the_journal(self) -> None:
+        """The fallback tells the author where the activity log lives."""
+        body = mkplan_template_path().read_text()
+
+        assert "JOURNAL/" in body
+
     def test_deploys_mkplan_script(self, tmp_path: Path) -> None:
         """bootstrap deploys mkplan.bash into the plan directory."""
         bootstrap_plan_workflow(tmp_path)

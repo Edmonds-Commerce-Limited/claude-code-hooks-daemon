@@ -150,6 +150,43 @@ class TestHandleJournal:
         journal.mkdir(parents=True)
         return journal / name
 
+    def test_journal_block_mode_is_subordinate_to_edit_mode(self, tmp_path: Path) -> None:
+        """`journal.mode: block` does NOT deny unless `edit_mode` is also block.
+
+        Plan 00190: the docs promised `journal-dayfile-naming` "may ratchet to
+        block via mode: block". That promise is CONDITIONAL — the handler
+        re-gates every blocker on `edit_mode` (plan_qa_edit.py:121), so a
+        project on the documented `edit_mode: warn` rollout posture that sets
+        `journal.mode: block` gets advisories while believing naming is
+        enforced.
+
+        This test pins the ACTUAL behaviour so the documented claim can be
+        corrected against something executable rather than a reading of it.
+        """
+        target = self._journal_file(tmp_path, "my-journal.md")
+        policy = PlanWorkflowQaConfig(edit_mode="warn")
+        policy.journal.mode = "block"
+
+        with _patched_root(tmp_path):
+            result = _handler(policy=policy).handle(_write_input(target, "# journal\n"))
+
+        assert result.decision == Decision.ALLOW, "edit_mode: warn downgrades the journal block"
+        assert "journal-dayfile-naming" in " ".join(result.context)
+
+    def test_journal_checks_are_disabled_entirely_by_edit_mode_off(self, tmp_path: Path) -> None:
+        """`edit_mode: off` silences journal checks even with journal.enabled.
+
+        The sub-block cannot keep itself alive: `matches()` returns False on
+        `edit_mode: off` (plan_qa_edit.py:71) before journal config is ever
+        consulted.
+        """
+        target = self._journal_file(tmp_path, "my-journal.md")
+        policy = PlanWorkflowQaConfig(edit_mode="off")
+        policy.journal.enabled = True
+        policy.journal.mode = "block"
+
+        assert _handler(policy=policy).matches(_write_input(target, "# journal\n")) is False
+
     def test_new_journal_with_bad_name_advises(self, tmp_path: Path) -> None:
         target = self._journal_file(tmp_path, "my-journal.md")
         with _patched_root(tmp_path):

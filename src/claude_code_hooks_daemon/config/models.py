@@ -382,10 +382,21 @@ class PlanWorkflowQaJournalConfig(BaseModel):
     check ships ADVISE; only ``journal-dayfile-naming`` may ever ratchet to
     block via ``mode: block`` after a clean dogfood period.
 
+    SUBORDINATE TO THE SURFACE MODE (Plan 00190). ``mode: block`` is a
+    CEILING, not a guarantee: the edit surface re-gates every blocker on
+    ``plan_workflow.qa.edit_mode``, so ``mode: block`` only denies when
+    ``edit_mode`` is ALSO ``block``. Under the documented ``edit_mode: warn``
+    rollout posture it degrades to an advisory, and ``edit_mode: off``
+    disables both journal edit checks outright regardless of ``enabled``.
+    This sub-block cannot keep itself alive. Pinned by
+    ``tests/unit/handlers/pre_tool_use/test_plan_qa_edit.py``.
+
     Attributes:
-        enabled: Master switch for all journal checks
+        enabled: Master switch for all journal checks — subject to
+            ``edit_mode``/``commit_gate_mode``/``sweep_mode`` still being on
         mode: Enforcement mode for journal checks (advise | block | off) —
-            ships as advise; only naming honours block
+            ships as advise; only naming honours block, and only when the
+            owning surface mode is block too
         dir_name: Journal sub-directory name inside a plan folder
         freshness_days: Sweep nag threshold for a plan whose newest day-file
             is older than this (deliberately shorter than plan staleness_days)

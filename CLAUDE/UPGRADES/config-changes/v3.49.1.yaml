@@ -1,0 +1,19 @@
+version: "3.49.1"
+date: "2026-07-31"
+
+breaking: false
+
+# No config keys were added, renamed, removed, or had their defaults changed in
+# this release. It fixes plan/journal rule-bleed in handler logic and corrects
+# documentation; all existing configuration is honoured unchanged.
+#
+# NOTE (documentation, not a config change): plan_workflow.qa.journal.mode is
+# now documented as a CEILING subordinate to the surface mode — a journal
+# blocker only denies when plan_workflow.qa.edit_mode is ALSO "block". The
+# behaviour is unchanged and was always this way; only the docs were wrong. See
+# truth-changes/v3.49.1.yaml.
+config_changes:
+  added: []
+  renamed: []
+  removed: []
+  changed: []

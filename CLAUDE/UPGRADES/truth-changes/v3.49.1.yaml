@@ -1,0 +1,50 @@
+version: "3.49.1"
+truth_changes:
+  - was: >
+      mkplan.bash scaffolds a "## Notes & Updates" section into new plans when
+      no _TEMPLATE_.md is present, so a project's docs may describe that
+      section as part of the plan skeleton.
+    now: >
+      The mkplan.bash fallback skeleton emits the "## Delivery & Milestones"
+      stub instead, matching the three plan templates (v3.49.1). This completes
+      the v3.40.0 journalling migration, which changed the templates but left
+      the generator behind — a plan could previously be born with BOTH a seeded
+      "## Notes & Updates" section and a JOURNAL/. Existing plans are never
+      rewritten; only newly scaffolded plans are affected.
+  - was: >
+      The recovery-cron advisory instructs the agent to record the failsafe
+      recovery cron ID in the plan's "## Notes & Updates" section.
+    now: >
+      It instructs recording the cron ID in the plan's JOURNAL/ day-file, NOT
+      in PLAN.md (v3.49.1). Runtime session state is journal content; PLAN.md
+      stays a lean, curated specification. The previous instruction contradicted
+      CLAUDE/PlanWorkflow.md, and because it was INJECTED at runtime it
+      outranked the doc in practice. Editing a "## Notes & Updates" section is
+      also no longer treated as a progress signal by that advisory — task-status
+      icons (⬜/🔄/✅) still are, and every genuine progress edit touches one
+      under the plan template's task grammar.
+  - was: >
+      Setting plan_workflow.qa.journal.mode to "block" makes the
+      journal-dayfile-naming check block, independently of other plan QA
+      settings.
+    now: >
+      journal.mode is a CEILING, not a guarantee (v3.49.1 — documentation fix,
+      behaviour unchanged). The journal sub-block is subordinate to the surface
+      mode it rides on: a journal blocker only denies when
+      plan_workflow.qa.edit_mode is ALSO "block". Under the documented
+      "edit_mode: warn" rollout posture it degrades to an advisory, and
+      "edit_mode: off" disables both journal edit checks outright even with
+      "journal.enabled: true". Set the surface mode first, then ratchet
+      journal.mode.
+  - was: >
+      The plan_time_estimates handler blocks time estimates in any
+      CLAUDE/Plan/*.md file.
+    now: >
+      It blocks them in plan documents — any CLAUDE/Plan/**/*.md EXCEPT journal
+      day-files (v3.49.1). A journal records what actually happened, so an
+      elapsed duration there is a historical fact, not a forward estimate. The
+      handler previously matched every markdown file under the plan directory,
+      including JOURNAL/ day-files, and blocked the hand-off entries journals
+      exist to carry. The exemption keys on the day-file grammar and is
+      deliberately independent of journal config, so disabling journalling
+      cannot re-enable plan rules on journal files.

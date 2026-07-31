@@ -143,6 +143,13 @@ rules the daemon actually checks. All journal checks ship **ADVISE** (they add
 context, they do not block) and are governed by `plan_workflow.qa.journal.*` in
 `.claude/hooks-daemon.yaml`.
 
+> **`mode: block` is a ceiling, not a guarantee.** The journal sub-block is
+> subordinate to the surface mode it rides on: a journal blocker only denies
+> when `plan_workflow.qa.edit_mode` is ALSO `block`. Under `edit_mode: warn` it
+> degrades to an advisory, and `edit_mode: off` disables both journal edit
+> checks outright — even with `journal.enabled: true`. Set the surface mode
+> first, then ratchet `journal.mode`.
+
 ### Daemon-enforced (POLICY)
 
 | Check                    | Stage | What it advises                                                                            | Knob                                                |

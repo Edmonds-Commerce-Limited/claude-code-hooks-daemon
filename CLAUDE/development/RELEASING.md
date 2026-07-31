@@ -415,11 +415,33 @@ may not exist on the host.
 
 ## Step 13: Commit & Push
 
+### 🚨 Stage source changes too — the file list below is NOT sufficient
+
+**Steps 10 (Code Review) and 11 (CLAUDE.md Guidance Audit) are both expected to
+modify `src/`.** Step 11 exists precisely to fix `get_claude_md()` bodies. The
+`git add` list below names only version/doc artifacts, so a guidance fix is
+silently left uncommitted unless you stage it explicitly.
+
+**Why this is silent and dangerous**: the daemon's own auto-commit hook commits
+the *regenerated* `CLAUDE.md` on restart. So the GENERATED artifact lands in
+git while its SOURCE handler does not. The tagged tree then ships resident
+CLAUDE.md guidance that no handler in that tree produces — and the next
+`generate-docs` or daemon restart in any client project silently reverts it.
+This was caught by the Opus gate during v3.49.1; it would otherwise have
+shipped.
+
+**Always run this before staging** and add anything it reports:
+
+```bash
+git status --porcelain -- src/ scripts/ tests/
+```
+
 ```bash
 git add pyproject.toml version.py README.md CLAUDE.md CHANGELOG.md RELEASES/vX.Y.Z.md \
   .claude/HOOKS-DAEMON.md uv.lock .claude/ccy/claude-supervise.py \
   CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/ \
   CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/
+# Plus EVERY src/, scripts/ and tests/ path reported above (Steps 10/11 edits).
 git commit -m "Release vX.Y.Z: [Title]
 
 - Updated version to X.Y.Z across all files
@@ -430,6 +452,15 @@ Full changelog: RELEASES/vX.Y.Z.md
 
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
 git push origin main
+```
+
+**Verify nothing was left behind before tagging** — a non-empty result means a
+Step 10/11 source edit did not make it into the release commit. Fix and amend
+BEFORE Step 14; once tagged, the divergence is published:
+
+```bash
+git status --porcelain -- src/ scripts/ tests/
+# Expected: empty.
 ```
 
 ## Step 14: Tag & GitHub Release

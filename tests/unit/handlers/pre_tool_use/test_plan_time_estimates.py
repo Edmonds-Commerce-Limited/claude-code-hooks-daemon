@@ -544,3 +544,89 @@ class TestPlanTimeEstimatesHandler:
         assert "Plan/" in guidance or "plan document" in lowered
         # Mentions the forbidden estimate kinds
         assert "hour" in lowered or "estimate" in lowered
+
+
+class TestJournalDayFilesAreExempt:
+    """Journal day-files are NOT plan documents (Plan 00190).
+
+    Regression tests for the rule-bleed bug: ``matches()`` gated only on
+    ``"/Plan/" in file_path`` and an ``.md`` suffix, so it fired on every
+    markdown file under the plan directory -- including ``JOURNAL/`` day-files.
+
+    A journal is an append-only record of what actually happened. "this took
+    two hours" in a journal is a HISTORICAL FACT, not a forward estimate, so
+    the plan-document rule must never reach it. Blocking it also blocked the
+    hand-off entries the journal exists to carry.
+    """
+
+    @pytest.fixture
+    def handler(self) -> PlanTimeEstimatesHandler:
+        """Create handler instance."""
+        return PlanTimeEstimatesHandler()
+
+    def test_does_not_match_journal_day_file_write(self, handler: PlanTimeEstimatesHandler) -> None:
+        """A journal day-file recording elapsed effort is not a plan document."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": ("/workspace/CLAUDE/Plan/00190-x/JOURNAL/00190-Journal-26-07-31.md"),
+                "content": "## 09:00 · handoff · — \n\nEstimated Effort: 2 hours remaining.",
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_does_not_match_journal_day_file_edit(self, handler: PlanTimeEstimatesHandler) -> None:
+        """The exemption applies to Edit as well as Write."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": ("/workspace/CLAUDE/Plan/00190-x/JOURNAL/00190-Journal-26-07-31.md"),
+                "old_string": "prior entry",
+                "new_string": "prior entry\n\nThe migration took 4 hours of work.",
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_exemption_is_config_independent(self, handler: PlanTimeEstimatesHandler) -> None:
+        """Exemption keys on the day-file GRAMMAR, never on journal config.
+
+        Mirrors ``markdown_table_formatter``: a journal must stay exempt even
+        when journal config is disabled or misconfigured, otherwise an
+        unrelated knob silently re-enables plan rules on journal files. This
+        handler is constructed bare -- no policy is injected -- so passing
+        proves the exemption consults nothing but the filename.
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": ("/workspace/CLAUDE/Plan/00190-x/JOURNAL/00190-Journal-26-07-31.md"),
+                "content": "Estimated Effort: 3 days",
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_still_matches_plan_document_in_same_folder(
+        self, handler: PlanTimeEstimatesHandler
+    ) -> None:
+        """Control: the plan document beside the journal is still enforced."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/00190-x/PLAN.md",
+                "content": "**Estimated Effort**: 2 hours",
+            },
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_still_matches_non_dayfile_markdown_in_plan_folder(
+        self, handler: PlanTimeEstimatesHandler
+    ) -> None:
+        """Control: supporting docs remain in scope — only day-files are exempt."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/00190-x/BRAINSTORM.md",
+                "content": "**Estimated Effort**: 2 hours",
+            },
+        }
+        assert handler.matches(hook_input) is True
