@@ -14,6 +14,9 @@ import pytest
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.background_process_tracker import (
     BackgroundProcessTrackerHandler,
+    _command_is_backgrounded,
+    _mask_heredoc_bodies,
+    _mask_quoted_spans,
     write_state_record,
 )
 
@@ -73,13 +76,89 @@ class TestMatches:
             "ls -la && pwd",  # && is not backgrounding
             "grep x file 2>&1",  # 2>&1 is a redirect, not a backgrounder
             "git commit -m 'x'",
+            # Plan 00190: a literal & INSIDE A QUOTED STRING is data, not a
+            # control operator. Both of these are verbatim commands that
+            # misfired during the v3.49.1 work -- the second is a commit
+            # message describing this very bug.
+            'grep -rn "Notes & Updates" /workspace/tests/',
+            "git commit -m \"false-positives on a literal '&' inside a string\"",
+            "rg -n 'foo & bar' src/",
+            'echo "a & b" > /tmp/x.txt',
         ],
     )
     def test_does_not_match_foreground(self, handler, command):
         assert handler.matches(_bash(command)) is False
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "sleep 600 &",
+            "python worker.py & echo started",
+            'echo "quoted & here" && sleep 600 &',  # quoted &, then a REAL one
+            "nohup bash -c 'sleep 600 &'",  # keyword still caught inside quotes
+        ],
+    )
+    def test_still_matches_real_backgrounding(self, handler, command):
+        """Stripping quotes must not blind the detector to genuine backgrounding."""
+        assert handler.matches(_bash(command)) is True
+
     def test_non_bash_ignored(self, handler):
         assert handler.matches({"tool_name": "Read", "tool_input": {"file_path": "/x"}}) is False
+
+
+class TestMaskQuotedSpans:
+    """Plan 00190: shell quoting decides whether a ``&`` is data or an operator."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo a \\& b",  # backslash-escaped & outside quotes is literal
+            "echo 'a \\& b'",  # backslash is NOT an escape inside single quotes
+            'echo "a \\& b"',  # ...but it is inside double quotes
+            'echo "unterminated & ',  # unterminated quote masks to end of string
+        ],
+    )
+    def test_escaped_and_quoted_ampersands_are_masked(self, command):
+        assert _command_is_backgrounded(command) is False
+
+    def test_masking_preserves_offsets(self):
+        """Masking must not delete characters — the lookbehind depends on them."""
+        command = 'echo "x & y" 2>&1'
+        assert len(_mask_quoted_spans(command)) == len(command)
+
+    def test_unquoted_text_is_untouched(self):
+        assert _mask_quoted_spans("sleep 600 &") == "sleep 600 &"
+
+
+class TestHeredocBodies:
+    """A heredoc body is literal data — prose there is never a control operator.
+
+    This is how journal and plan prose reaches disk in this project, so an
+    unmasked heredoc body makes the advisory fire on routine documentation
+    writes (observed: it fired on the very commit that documented this fix).
+    """
+
+    QUOTED_HEREDOC = "cat >> notes.md <<'EOF'\nfixed a literal & in a string\nEOF"
+    BARE_HEREDOC = "cat >> notes.md <<EOF\nfixed a literal & in a string\nEOF"
+    TAB_HEREDOC = "cat <<-EOF\n\tprose with & inside\n\tEOF"
+
+    @pytest.mark.parametrize(
+        "command",
+        [QUOTED_HEREDOC, BARE_HEREDOC, TAB_HEREDOC],
+    )
+    def test_ampersand_in_heredoc_body_is_not_backgrounding(self, command):
+        assert _command_is_backgrounded(command) is False
+
+    def test_real_backgrounding_after_heredoc_still_detected(self):
+        command = "cat <<'EOF' > f.txt\nprose with & inside\nEOF\nsleep 600 &"
+        assert _command_is_backgrounded(command) is True
+
+    def test_herestring_is_not_a_heredoc(self):
+        """``<<<`` takes a single-line word, not a delimited body."""
+        assert _command_is_backgrounded('grep x <<< "a & b"') is False
+
+    def test_masking_preserves_length(self):
+        assert len(_mask_heredoc_bodies(self.QUOTED_HEREDOC)) == len(self.QUOTED_HEREDOC)
 
 
 class TestHandleAdvisory:

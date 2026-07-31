@@ -158,9 +158,13 @@ re-enable plan rules on every journal file.
   displaying a LATER handler's reason. Only manifests on multi-deny, and the fix
   touches deliberate Plan 00144 chain semantics — needs its own TDD cycle rather
   than a hasty patch
-- [ ] ⬜ **Task 0.7**: `background_process_tracker` false-positives on a literal
-  `&` inside a quoted string. Same defect class as 0.1 — naive matching without
-  structural context
+- [x] ✅ **Task 0.7**: `background_process_tracker` false-positived on a literal
+  `&` inside a quoted string — same defect class as 0.1 (naive matching without
+  structural context). Fixed: the bare-`&` test now runs against a
+  quote/escape-masked copy of the command, and heredoc bodies are masked too —
+  writing plan/journal prose via `<<'EOF'` was the highest-frequency misfire.
+  Keyword detection deliberately still runs on the raw string, so
+  `bash -c "nohup worker &"` is unaffected
 
 ### Phase 1: Research & Design
 
@@ -248,7 +252,7 @@ re-enable plan rules on every journal file.
   `0c1a78d8`
 - Phase 0 Task 0.3: journal-mode subordination documented and pinned by
   regression tests — `f6e5ccaa`
-- Phase 0 closed except 0.5 (deferred by decision) and 0.7 (tracked)
+- Phase 0 closed except 0.5 (deferred by decision)
 - **Released v3.49.1 "The PLAN-vs-JOURNAL Contract"** — release commit
   `f5f01974`, tag `0df2fcc5`. Ships the contract + five fixes; no enforcement
   thresholds (Phases 2-5 remain)

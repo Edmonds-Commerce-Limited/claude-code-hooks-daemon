@@ -53,14 +53,101 @@ _BACKGROUND_KEYWORDS_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:nohup|setsid
 # redirection like ``2>&1`` (``&`` preceded by ``>``/``&``/digit is excluded).
 _BACKGROUND_AMP_RE: Final[re.Pattern[str]] = re.compile(r"(?<![>&\d])&(?!&)")
 
+# Shell quoting/escaping characters, for masking spans in which a ``&`` is data
+# rather than a control operator.
+_ESCAPE_CHAR: Final[str] = "\\"
+_SINGLE_QUOTE: Final[str] = "'"
+_DOUBLE_QUOTE: Final[str] = '"'
+_QUOTE_CHARS: Final[frozenset[str]] = frozenset({_SINGLE_QUOTE, _DOUBLE_QUOTE})
+
+# Masked characters are replaced (not deleted) so surrounding offsets survive
+# and the lookbehind in _BACKGROUND_AMP_RE still sees the true preceding char.
+_MASK_CHAR: Final[str] = " "
+_LINE_SEPARATOR: Final[str] = "\n"
+
+# A heredoc operator: ``<<`` or ``<<-`` followed by an optionally-quoted
+# delimiter word. ``<<<`` (a herestring) does not match — its next character is
+# ``<``, which cannot start a delimiter word.
+_HEREDOC_OPEN_RE: Final[re.Pattern[str]] = re.compile(
+    r"<<-?\s*(?P<quote>['\"]?)(?P<delim>[A-Za-z_][A-Za-z0-9_]*)(?P=quote)"
+)
+
+
+def _mask_heredoc_bodies(command: str) -> str:
+    """Return ``command`` with heredoc bodies masked out.
+
+    Plan 00190: everything between a heredoc operator and its terminator is
+    literal data, so an ``&`` there is prose — never a control operator. This
+    is how plan and journal text reaches disk in this project, so leaving
+    bodies unmasked makes the advisory fire on routine documentation writes.
+
+    Masking also protects the quote scanner that runs next: an unbalanced
+    quote in prose would otherwise desynchronise it for the rest of the string.
+    """
+    masked: list[str] = []
+    pending_delimiters: list[str] = []
+    for line in command.split(_LINE_SEPARATOR):
+        if pending_delimiters:
+            # Inside a body: mask wholesale and do not scan for new operators.
+            masked.append(_MASK_CHAR * len(line))
+            if line.strip() == pending_delimiters[0]:
+                pending_delimiters.pop(0)
+            continue
+        masked.append(line)
+        # Several heredocs may open on one line; they close in order.
+        pending_delimiters.extend(match.group("delim") for match in _HEREDOC_OPEN_RE.finditer(line))
+    return _LINE_SEPARATOR.join(masked)
+
+
+def _mask_quoted_spans(command: str) -> str:
+    """Return ``command`` with quoted and backslash-escaped spans masked out.
+
+    Plan 00190: a ``&`` inside a quoted string is DATA — a grep pattern
+    (``grep "Notes & Updates"``), a commit message, an echoed literal — not a
+    backgrounding operator. Scanning with shell quoting rules (single quotes
+    are fully literal; double quotes honour backslash escapes) is what
+    distinguishes the two; a regex alone cannot.
+    """
+    masked: list[str] = []
+    quote: str | None = None
+    index = 0
+    length = len(command)
+    while index < length:
+        char = command[index]
+        # A backslash escapes the next character outside quotes, and inside
+        # double quotes (but NOT inside single quotes, where it is literal).
+        escapes_next = char == _ESCAPE_CHAR and quote != _SINGLE_QUOTE and index + 1 < length
+        if escapes_next:
+            masked.append(_MASK_CHAR * 2)
+            index += 2
+            continue
+        if quote is None:
+            if char in _QUOTE_CHARS:
+                quote = char
+                masked.append(_MASK_CHAR)
+            else:
+                masked.append(char)
+        else:
+            if char == quote:
+                quote = None
+            masked.append(_MASK_CHAR)
+        index += 1
+    return "".join(masked)
+
 
 def _command_is_backgrounded(command: str) -> bool:
     """Return True if a bash command launches a process in the background."""
     if not command:
         return False
+    # Deliberate asymmetry: the keyword test runs on the RAW command so a
+    # quoted sub-shell (``bash -c "nohup worker &"``) is still caught. Only the
+    # bare-``&`` test is quote-aware, because that is the form with observed
+    # false positives — an over-eager advisory that never kills is cheaper than
+    # missing real backgrounding.
     if _BACKGROUND_KEYWORDS_RE.search(command):
         return True
-    return _BACKGROUND_AMP_RE.search(command) is not None
+    literal_masked = _mask_quoted_spans(_mask_heredoc_bodies(command))
+    return _BACKGROUND_AMP_RE.search(literal_masked) is not None
 
 
 def write_state_record(
