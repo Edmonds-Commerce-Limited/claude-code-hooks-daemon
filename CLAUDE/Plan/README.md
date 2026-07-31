@@ -104,6 +104,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Handler UX Adjustments
 
+- [00193: Extend the `$PYTHON` guidance sweep to living docs](00193-python-var-guidance-sweep-living-docs/PLAN.md) - Not Started
+
+  - Follow-up to Plan 00192, raised by the v3.50.0 release code-review gate and tracked rather than dropped (RELEASING.md "Never Drop Findings")
+  - Plan 00192 fixed 77 occurrences in `src/` and gated that path; **223 occurrences across 23 living docs remain outside the gate's scope** — same defect, same destructive recovery path (agent concludes the package is uninstalled and "fixes" a working install)
+  - Pre-existing, not a regression: shipped in v3.49.1 and every prior version
+  - Severity is not proportional to count — the three MANDATORY `CodeLifecycle/` docs gate every code change, and `LLM-INSTALL.md`/`LLM-UPDATE.md` are read precisely when a project is already broken
+  - Requires classification before remediation: some snippets define `PYTHON` locally and are correct, so a blind find-and-replace would damage them
+
 - [00117: Enable ask_user_question_blocker (dogfood → default-on)](00117-ask-user-question-blocker-default-on/PLAN.md) - Dormant (remaining: flip shipped default + regression test; awaiting scheduling)
 
   - Dogfooding alert: agent stalled twice asking tautological questions ("Should I push?"); the prefix-positive `ask_user_question_blocker` (Plan 00108 / v3.14.0) was shipped `enabled: false` so it never fired
@@ -1087,9 +1095,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 192 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 and 00191 were allocated by the counter but their folders are not present on this branch)
+- **Total Plans Created**: 193 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 and 00191 were allocated by the counter but their folders are not present on this branch)
 - **Completed**: 155 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 29 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 30 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
