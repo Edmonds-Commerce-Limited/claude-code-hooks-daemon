@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.constants import ConfigKey
 from claude_code_hooks_daemon.core import AcceptanceTest
 from claude_code_hooks_daemon.core.cli_acceptance_test import CliAcceptanceTest
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
@@ -324,13 +325,13 @@ class PlaybookGenerator:
         lines.append("")
         lines.append("1. **Restart daemon to ensure latest code is loaded**:")
         lines.append("   ```bash")
-        lines.append("   $PYTHON -m claude_code_hooks_daemon.daemon.cli restart")
+        lines.append(f"   {daemon_cli_command('restart')}")
         lines.append("   ```")
         lines.append("   Should show: `Daemon started successfully`")
         lines.append("")
         lines.append("2. **Verify daemon is running**:")
         lines.append("   ```bash")
-        lines.append("   $PYTHON -m claude_code_hooks_daemon.daemon.cli status")
+        lines.append(f"   {daemon_cli_command('status')}")
         lines.append("   ```")
         lines.append("   Should show: `Status: RUNNING`")
         lines.append("")

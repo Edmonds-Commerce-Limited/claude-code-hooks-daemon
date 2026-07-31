@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.hook_command_migration import (
     MigrationResult,
     migrate_settings_to_bash_invocation,
@@ -286,7 +287,7 @@ class HookRegistrationCheckerHandler(Handler):
             "`settings.local.json`. Confirm no duplicates remain.\n"
             "- **Legacy-style commands**: replace them with a project-level "
             "handler. Run "
-            "`$PYTHON -m claude_code_hooks_daemon.daemon.cli init-project-handlers` "
+            f"`{daemon_cli_command('init-project-handlers')}` "
             "to scaffold `.claude/project-handlers/`, port the logic into "
             "a handler class, then restore the daemon wrapper in "
             "`settings.json`. The daemon will auto-discover the new handler "
@@ -301,7 +302,7 @@ class HookRegistrationCheckerHandler(Handler):
             "auto_repair_registrations: false`, then re-run the installer or add "
             "the missing `{event_name}` entry manually.\n"
             "- **Duplicate hooks**: a hook registered in both files fires "
-            "twice. Keep the `settings.json` entry, delete from "
+            "twice. Keep the `settings.json` entry and remove the duplicate in "
             "`settings.local.json`.\n"
         )
 

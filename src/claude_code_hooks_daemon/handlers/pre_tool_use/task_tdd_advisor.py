@@ -11,6 +11,7 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
 
 class TaskTddAdvisorHandler(Handler):
@@ -99,7 +100,7 @@ class TaskTddAdvisorHandler(Handler):
                 f"   • Keep tests passing\n\n"
                 f"4️⃣  VERIFY:\n"
                 f"   • Run full QA suite: ./scripts/qa/run_all.sh\n"
-                f"   • Restart daemon: $PYTHON -m claude_code_hooks_daemon.daemon.cli restart\n"
+                f"   • Restart daemon: {daemon_cli_command('restart')}\n"
                 f"   • Verify daemon status: RUNNING\n\n"
                 f"✅ BENEFITS OF TDD:\n"
                 f"   • Clear requirements before coding\n"

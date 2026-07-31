@@ -17,7 +17,7 @@ Error: Failed to start daemon
 ```bash
 # Remove stale socket
 rm .claude/hooks-daemon/untracked/daemon-*.sock
-$PYTHON -m claude_code_hooks_daemon.daemon.cli start
+.claude/hooks-daemon/bin/hooks-daemon start
 ```
 
 **2. Permission denied**
@@ -31,14 +31,15 @@ ls -la .claude/hooks-daemon/untracked/
 **3. Python environment issues**
 
 ```bash
-# Verify Python version (3.11+ required)
-$PYTHON --version
+# Verify the interpreter and venv the daemon actually resolves
+# (reports Python version, venv path and health in one go)
+.claude/hooks-daemon/bin/hooks-daemon health
 
-# Verify venv exists
-ls -la .claude/hooks-daemon/untracked/venv/
+# List every venv the daemon knows about
+.claude/hooks-daemon/bin/hooks-daemon list-venvs
 
 # Repair venv
-$PYTHON -m claude_code_hooks_daemon.daemon.cli repair
+.claude/hooks-daemon/bin/hooks-daemon repair
 ```
 
 **4. Port already in use**
@@ -95,7 +96,7 @@ ModuleNotFoundError: No module named 'my_dependency'
 .claude/hooks-daemon/untracked/venv/bin/pip install my_dependency
 
 # Restart daemon
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 **3. Handler Configuration Error**
@@ -153,7 +154,7 @@ bash /tmp/hooks-daemon-upgrade.sh
 
 ```bash
 # Check daemon logs
-$PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 
 # If stuck, kill and retry
 pkill -f hooks-daemon
@@ -176,7 +177,7 @@ cd .claude/hooks-daemon
 git checkout v2.12.0  # Previous working version
 
 # Restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 ## Handler Not Triggering
@@ -190,7 +191,7 @@ Handler exists but never fires
 **1. Verify handler loaded:**
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli handlers | grep my_handler
+.claude/hooks-daemon/bin/hooks-daemon handlers | grep my_handler
 ```
 
 If not listed, check:
@@ -204,10 +205,10 @@ If not listed, check:
 ```bash
 # Enable debug logging
 export HOOKS_DAEMON_LOG_LEVEL=DEBUG
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 
 # Check logs
-$PYTHON -m claude_code_hooks_daemon.daemon.cli logs | grep my_handler
+.claude/hooks-daemon/bin/hooks-daemon logs | grep my_handler
 ```
 
 **3. Debug hook event flow:**
@@ -237,8 +238,8 @@ yaml.scanner.ScannerError: mapping values are not allowed here
 **Solution:**
 
 ```bash
-# Validate YAML syntax
-$PYTHON -c "import yaml; yaml.safe_load(open('.claude/hooks-daemon.yaml'))"
+# Validate config syntax AND schema (stricter than a bare YAML parse)
+.claude/hooks-daemon/bin/hooks-daemon config-validate
 
 # Compare with example
 diff .claude/hooks-daemon.yaml .claude/hooks-daemon.yaml.example
@@ -298,10 +299,10 @@ export HOOKS_DAEMON_LOG_LEVEL=DEBUG
 
 ```bash
 # Check daemon stats
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 
 # Restart daemon to clear caches
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 
 # If persistent, check for handler memory leaks
 ```
@@ -320,10 +321,10 @@ Error: Socket file not found: .claude/hooks-daemon/untracked/daemon-*.sock
 
 ```bash
 # Check daemon is running
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 
 # If stopped, start it
-$PYTHON -m claude_code_hooks_daemon.daemon.cli start
+.claude/hooks-daemon/bin/hooks-daemon start
 ```
 
 ### Permission Denied on Socket
@@ -341,7 +342,7 @@ PermissionError: [Errno 13] Permission denied: '/path/to/daemon.sock'
 chmod 600 .claude/hooks-daemon/untracked/daemon-*.sock
 
 # Restart daemon
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 ## Getting Help
@@ -350,10 +351,10 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 
 ```bash
 # Comprehensive diagnostics
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status --verbose > diagnostic-report.txt
+.claude/hooks-daemon/bin/hooks-daemon status --verbose > diagnostic-report.txt
 
 # Include daemon logs
-$PYTHON -m claude_code_hooks_daemon.daemon.cli logs >> diagnostic-report.txt
+.claude/hooks-daemon/bin/hooks-daemon logs >> diagnostic-report.txt
 
 # Include configuration
 cat .claude/hooks-daemon.yaml >> diagnostic-report.txt
@@ -363,8 +364,8 @@ cat .claude/hooks-daemon.yaml >> diagnostic-report.txt
 
 When reporting issues, include:
 
-1. Daemon version: `$PYTHON -m claude_code_hooks_daemon.daemon.cli --version`
-2. Python version: `$PYTHON --version`
+1. Daemon version: `.claude/hooks-daemon/bin/hooks-daemon --version`
+2. Python version: `.claude/hooks-daemon/bin/hooks-daemon health` (reports the resolved interpreter)
 3. OS: `uname -a`
 4. Diagnostic report (above)
 5. Steps to reproduce
@@ -377,19 +378,19 @@ When reporting issues, include:
 
 ```bash
 # Status
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 
 # Restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 
 # Logs
-$PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 
 # Repair
-$PYTHON -m claude_code_hooks_daemon.daemon.cli repair
+.claude/hooks-daemon/bin/hooks-daemon repair
 
 # Validate config
-$PYTHON -m claude_code_hooks_daemon.daemon.cli validate-config
+.claude/hooks-daemon/bin/hooks-daemon validate-config
 ```
 
 ### Log Locations

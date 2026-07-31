@@ -20,13 +20,25 @@ the remediation the alert asks for. Advisory only — it never blocks.
 
 from __future__ import annotations
 
-from typing import Any, Final
+from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
-# Restart command surfaced in the alert and the CLAUDE.md guidance.
-_RESTART_CMD: Final[str] = "$PYTHON -m claude_code_hooks_daemon.daemon.cli restart"
+
+def _restart_cmd() -> str:
+    """Restart command surfaced in the alert and the CLAUDE.md guidance.
+
+    Computed on demand (Plan 00192): the wrapper path depends on the install
+    mode, which ``ProjectContext`` only knows after daemon startup.
+    """
+    return daemon_cli_command("restart")
+
+
+def _validate_cmd() -> str:
+    """Diagnostic command for the degraded-protection alert."""
+    return daemon_cli_command("validate-project-handlers")
 
 
 class ProjectHandlerLoadCheckerHandler(Handler):
@@ -106,13 +118,11 @@ class ProjectHandlerLoadCheckerHandler(Handler):
             [
                 "",
                 "These protections are OFF. Fix the handler(s), then restart the "
-                f"daemon (`{_RESTART_CMD}`) before continuing — the alert clears "
+                f"daemon (`{_restart_cmd()}`) before continuing — the alert clears "
                 "only once a restart reloads them. Do NOT assume normal guardrails "
                 "are in force.",
                 "",
-                "Diagnose each failure with: "
-                "`$PYTHON -m claude_code_hooks_daemon.daemon.cli "
-                "validate-project-handlers`",
+                f"Diagnose each failure with: `{_validate_cmd()}`",
             ]
         )
 
@@ -133,13 +143,11 @@ class ProjectHandlerLoadCheckerHandler(Handler):
             "\n"
             "1. **Do not assume normal guardrails are in force.** The listed "
             "handlers are OFF for this session.\n"
-            "2. **Diagnose** each failure: "
-            "`$PYTHON -m claude_code_hooks_daemon.daemon.cli "
-            "validate-project-handlers` names the file, the missing method, and "
-            "the daemon version that introduced it.\n"
+            f"2. **Diagnose** each failure: `{_validate_cmd()}` names the file, "
+            "the missing method, and the daemon version that introduced it.\n"
             "3. **Fix** the handler(s) — usually adding a required method stub "
             "(e.g. `get_claude_md`) that a daemon upgrade made mandatory.\n"
-            f"4. **Restart the daemon** (`{_RESTART_CMD}`). The alert reflects "
+            f"4. **Restart the daemon** (`{_restart_cmd()}`). The alert reflects "
             "the *running* daemon, so it clears only after a restart reloads the "
             "fixed handlers — fixing the file alone is not enough.\n"
             "\n"

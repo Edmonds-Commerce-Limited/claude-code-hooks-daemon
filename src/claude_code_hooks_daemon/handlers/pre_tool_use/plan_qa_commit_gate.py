@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.plan_qa.context import staged_context
 from claude_code_hooks_daemon.plan_qa.report import format_advisory, format_block_reason
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
 from claude_code_hooks_daemon.plan_qa.types import Level, Stage
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
 
 logger = logging.getLogger(__name__)
@@ -195,7 +196,7 @@ class PlanQaCommitGateHandler(Handler):
             "  of the two you just did\n"
             "\n"
             "Check the staged tree any time without committing:\n"
-            "`$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --check-staged`.\n"
+            f"`{daemon_cli_command('plan-qa', '--check-staged')}`.\n"
             "Commits inside nested/vendor repos or foreign worktrees are exempt."
         )
 

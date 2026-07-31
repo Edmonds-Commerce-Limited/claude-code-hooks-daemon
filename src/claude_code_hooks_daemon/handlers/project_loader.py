@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.constants import Priority
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
 logger = logging.getLogger(__name__)
 
@@ -346,10 +347,11 @@ class ProjectHandlerLoader:
             logger.warning(
                 "%d project handler(s) failed to load and were skipped: %s. "
                 "Daemon started with %d working project handler(s). "
-                "Run: $PYTHON -m claude_code_hooks_daemon.daemon.cli validate-project-handlers",
+                "Run: %s",
                 len(failures),
                 ", ".join(f.filename for f in failures),
                 len(results),
+                daemon_cli_command("validate-project-handlers"),
             )
 
         logger.info(

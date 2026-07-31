@@ -481,8 +481,8 @@ Edit `tests/unit/strategies/tdd/test_registry.py`:
 #### 8. Restart daemon
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon restart
+.claude/hooks-daemon/bin/hooks-daemon status
 # Expected: RUNNING
 ```
 

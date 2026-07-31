@@ -27,11 +27,20 @@ from claude_code_hooks_daemon.install.plan_workflow import (
     MKPLAN_SCRIPT_NAME,
     PLAN_JOURNALLING_DOC_NAME,
 )
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
 logger = logging.getLogger(__name__)
 
 _RESUME_TRANSCRIPT_MIN_BYTES = 100
-_DEPLOY_CLI_HINT = "$PYTHON -m claude_code_hooks_daemon.daemon.cli deploy-plan-workflow"
+
+
+def _deploy_cli_hint() -> str:
+    """Deploy directive naming the deployed wrapper (Plan 00192).
+
+    Computed on demand: the wrapper path depends on the install mode, which
+    ``ProjectContext`` only knows after daemon startup.
+    """
+    return daemon_cli_command("deploy-plan-workflow")
 
 
 class PlanWorkflowAssetCheckerHandler(Handler):
@@ -113,7 +122,7 @@ class PlanWorkflowAssetCheckerHandler(Handler):
             "",
             "Fix — (re)deploy the assets (idempotent; fills gaps only):",
             "",
-            f"  {_DEPLOY_CLI_HINT}",
+            f"  {_deploy_cli_hint()}",
         ]
         return HookResult(decision=Decision.ALLOW, context=context)
 
@@ -130,7 +139,7 @@ class PlanWorkflowAssetCheckerHandler(Handler):
             "**Fix**: (re)deploy the assets on demand —\n"
             "\n"
             "```\n"
-            f"{_DEPLOY_CLI_HINT}\n"
+            f"{_deploy_cli_hint()}\n"
             "```\n"
             "\n"
             "The deploy is idempotent (fills gaps only, never overwrites "

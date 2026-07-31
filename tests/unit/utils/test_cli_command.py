@@ -115,6 +115,42 @@ class TestDaemonCliCommand:
         assert result == result.strip()
 
 
+class TestUninitialisedProjectContext:
+    """Guidance strings must never crash, and never regress to ``$PYTHON``.
+
+    ``ProjectContext.project_root()`` raises when the daemon has not been
+    initialised — which is the case in unit tests and in any tooling that
+    renders handler guidance outside a running daemon. Raising from a *docstring
+    builder* would take down callers over cosmetics, so the resolver degrades to
+    the project-root-relative wrapper path. That is still runnable from the
+    project root (the documented working directory for every daemon command),
+    and is strictly better than emitting a variable that is never set.
+    """
+
+    def _uninitialise(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", False, raising=False)
+        monkeypatch.setattr(pc.ProjectContext, "_instance", None, raising=False)
+
+    def test_does_not_raise(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._uninitialise(monkeypatch)
+        cli_command.daemon_cli_command("status")
+
+    def test_falls_back_to_relative_client_wrapper_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._uninitialise(monkeypatch)
+        result = cli_command.daemon_cli_command("plan-qa", "--sweep")
+        assert result == ".claude/hooks-daemon/bin/hooks-daemon plan-qa --sweep"
+
+    def test_fallback_still_contains_no_shell_variable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._uninitialise(monkeypatch)
+        result = cli_command.daemon_cli_command("status")
+        assert "$" not in result
+        assert "PYTHON" not in result
+
+
 class TestWrapperNameConstant:
     """No magic strings — the deployed name is a single named constant."""
 

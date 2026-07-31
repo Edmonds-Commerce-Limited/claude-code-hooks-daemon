@@ -23,16 +23,21 @@ from claude_code_hooks_daemon.plan_qa.context import sweep_context
 from claude_code_hooks_daemon.plan_qa.report import format_advisory
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
 from claude_code_hooks_daemon.plan_qa.types import Stage
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
 logger = logging.getLogger(__name__)
 
 _RESUME_TRANSCRIPT_MIN_BYTES: Final[int] = 100
 _SWEEP_MODE_ADVISE: Final[str] = "advise"
 
-_CLI_HINT: Final[str] = (
-    "Full report / re-check after fixing: "
-    "$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --sweep"
-)
+
+def _cli_hint() -> str:
+    """Re-check directive naming the deployed wrapper (Plan 00192).
+
+    Computed on demand rather than at import: the wrapper path depends on the
+    install mode, which ``ProjectContext`` only knows after daemon startup.
+    """
+    return "Full report / re-check after fixing: " + daemon_cli_command("plan-qa", "--sweep")
 
 
 class PlanQaSweepHandler(Handler):
@@ -103,7 +108,7 @@ class PlanQaSweepHandler(Handler):
 
         return HookResult(
             decision=Decision.ALLOW,
-            context=[format_advisory(findings), "", _CLI_HINT],
+            context=[format_advisory(findings), "", _cli_hint()],
         )
 
     def get_claude_md(self) -> str | None:
@@ -121,7 +126,7 @@ class PlanQaSweepHandler(Handler):
             "re-check with:\n"
             "\n"
             "```\n"
-            "$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --sweep\n"
+            f"{daemon_cli_command('plan-qa', '--sweep')}\n"
             "```\n"
             "\n"
             "The CLI exits 1 while findings remain (CI-able). Single-file lint:\n"

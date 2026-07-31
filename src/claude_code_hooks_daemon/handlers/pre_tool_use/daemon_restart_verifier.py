@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.core import (
     TestType,
 )
 from claude_code_hooks_daemon.daemon.validation import is_hooks_daemon_repo
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
 
 class DaemonRestartVerifierHandler(Handler):
@@ -89,8 +90,8 @@ class DaemonRestartVerifierHandler(Handler):
         guidance = (
             "💡 RECOMMENDED: Verify daemon can restart before committing:\n\n"
             "```bash\n"
-            "$PYTHON -m claude_code_hooks_daemon.daemon.cli restart\n"
-            "$PYTHON -m claude_code_hooks_daemon.daemon.cli status\n"
+            f"{daemon_cli_command('restart')}\n"
+            f"{daemon_cli_command('status')}\n"
             "```\n\n"
             "This catches import errors and loading failures that unit tests miss.\n"
             "The 5-handler import bug would have been caught by this check!"
@@ -112,7 +113,7 @@ class DaemonRestartVerifierHandler(Handler):
             "import silently disables protection without any test-time error. Daemon restart "
             "is the definitive check.\n\n"
             "**Run before committing** (in this repo only):\n"
-            "`$PYTHON -m claude_code_hooks_daemon.daemon.cli restart` then verify status shows RUNNING."
+            f"`{daemon_cli_command('restart')}` then verify status shows RUNNING."
         )
 
     def get_acceptance_tests(self) -> list[AcceptanceTest]:

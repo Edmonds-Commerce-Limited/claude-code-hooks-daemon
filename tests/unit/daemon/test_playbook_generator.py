@@ -617,8 +617,12 @@ def test_generate_markdown_includes_all_sections() -> None:
     # Verify all major sections
     assert "# Acceptance Testing Playbook" in markdown
     assert "## Prerequisites" in markdown
-    assert "$PYTHON -m claude_code_hooks_daemon.daemon.cli restart" in markdown
-    assert "$PYTHON -m claude_code_hooks_daemon.daemon.cli status" in markdown
+    # Plan 00192: the playbook must be runnable as printed. It names the
+    # deployed wrapper, never "$PYTHON" — which is unset in any shell a reader
+    # would paste this into.
+    assert "bin/hooks-daemon restart" in markdown
+    assert "bin/hooks-daemon status" in markdown
+    assert "$PYTHON" not in markdown
     assert "## Instructions" in markdown
     assert "## Tests" in markdown
     assert "## Summary" in markdown

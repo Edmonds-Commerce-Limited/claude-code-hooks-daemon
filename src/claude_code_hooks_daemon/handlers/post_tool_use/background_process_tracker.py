@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
 # State file under the daemon untracked dir (never /tmp — B108).
 _STATE_FILENAME: Final[str] = "background-processes.jsonl"
@@ -173,23 +174,30 @@ def write_state_record(
     path.write_text("\n".join(existing[-max_lines:]) + "\n")
 
 
-_ADVISORY: Final[str] = (
-    "You launched a background / long-lived process. The daemon will NOT "
-    "auto-kill it — detection is surfaced, you decide.\n\n"
-    "Set up the failsafe (mirrors the recovery cron; the dangerous window is when "
-    "the REPL is idle/compacting, so a tool-call hook cannot cover it):\n"
-    "  • Create a non-durable recurring watchdog cron (CronCreate, durable:false, "
-    "recurring:true, off-:00 minute) whose prompt runs:\n"
-    "      $PYTHON -m claude_code_hooks_daemon.daemon.cli harvest-background\n"
-    "    and acts on any runaway it surfaces. Record the cron ID. Do NOT wait for "
-    "the cron — keep working at full speed.\n"
-    "  • Check now once: run `harvest-background` yourself.\n\n"
-    "If a runaway is surfaced, reap the WHOLE process group (not just the pid):\n"
-    "      kill -- -<pgid>\n"
-    "To deliberately keep a wanted long task (build/server), note "
-    'KEEP_RUNNING_BECAUSE="reason" and move on.\n'
-    "Delete the watchdog cron (CronDelete) once no backgrounded work remains."
-)
+def _advisory() -> str:
+    """Build the backgrounded-process advisory.
+
+    Computed on demand (Plan 00192) because the harvest command names the
+    deployed wrapper, whose path depends on the install mode that
+    ``ProjectContext`` only knows after daemon startup.
+    """
+    return (
+        "You launched a background / long-lived process. The daemon will NOT "
+        "auto-kill it — detection is surfaced, you decide.\n\n"
+        "Set up the failsafe (mirrors the recovery cron; the dangerous window is when "
+        "the REPL is idle/compacting, so a tool-call hook cannot cover it):\n"
+        "  • Create a non-durable recurring watchdog cron (CronCreate, durable:false, "
+        "recurring:true, off-:00 minute) whose prompt runs:\n"
+        f"      {daemon_cli_command('harvest-background')}\n"
+        "    and acts on any runaway it surfaces. Record the cron ID. Do NOT wait for "
+        "the cron — keep working at full speed.\n"
+        "  • Check now once: run `harvest-background` yourself.\n\n"
+        "If a runaway is surfaced, reap the WHOLE process group (not just the pid):\n"
+        "      kill -- -<pgid>\n"
+        "To deliberately keep a wanted long task (build/server), note "
+        'KEEP_RUNNING_BECAUSE="reason" and move on.\n'
+        "Delete the watchdog cron (CronDelete) once no backgrounded work remains."
+    )
 
 
 class BackgroundProcessTrackerHandler(Handler):
@@ -268,7 +276,7 @@ class BackgroundProcessTrackerHandler(Handler):
 
         if not self._should_advise(session_id):
             return HookResult(decision=Decision.ALLOW)
-        return HookResult(decision=Decision.ALLOW, context=[_ADVISORY])
+        return HookResult(decision=Decision.ALLOW, context=[_advisory()])
 
     def get_claude_md(self) -> str | None:
         return (
@@ -281,7 +289,7 @@ class BackgroundProcessTrackerHandler(Handler):
             "When you background a long-lived process:\n\n"
             "- Create a non-durable recurring **watchdog cron** (CronCreate, "
             "durable:false) whose prompt runs "
-            "`$PYTHON -m claude_code_hooks_daemon.daemon.cli harvest-background` and "
+            f"`{daemon_cli_command('harvest-background')}` and "
             "acts on any runaway — this covers the idle/compaction window a tool-call "
             "hook cannot. Do NOT wait for the cron; keep working.\n"
             "- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).\n"

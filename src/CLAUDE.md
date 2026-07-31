@@ -16,7 +16,7 @@ This directory contains the source code for the Claude Code Hooks Daemon. It is 
 
 ```bash
 # Scaffold project handlers directory
-$PYTHON -m claude_code_hooks_daemon.daemon.cli init-project-handlers
+.claude/hooks-daemon/bin/hooks-daemon init-project-handlers
 ```
 
 Project handlers use the same `Handler` ABC as built-in handlers but are scoped to your project. See the full guide: [Project-Level Handlers Guide](../CLAUDE/PROJECT_HANDLERS.md)

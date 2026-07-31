@@ -169,7 +169,11 @@ class TestDaemonLocationGuardHandler:
         result = handler.handle(hook_input)
 
         assert result.guidance is not None
-        assert "PYTHON" in result.guidance or "$PYTHON" in result.guidance
+        # Plan 00192: this handler fires when an agent is ALREADY confused, so
+        # its remedy must be runnable as printed. It names the deployed wrapper
+        # and must never emit "$PYTHON", which is unset in an agent's shell.
+        assert "bin/hooks-daemon status" in result.guidance
+        assert "$PYTHON" not in result.guidance
 
     def test_handle_mentions_upgrade_command(self, handler):
         """Should mention official upgrade command in guidance."""

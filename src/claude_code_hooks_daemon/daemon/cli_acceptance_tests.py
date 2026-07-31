@@ -8,9 +8,11 @@ The PlaybookGenerator collects these and renders them in a dedicated
 from __future__ import annotations
 
 from claude_code_hooks_daemon.core.cli_acceptance_test import CliAcceptanceTest
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
-# CLI base command prefix used in playbook instructions
-_CLI_PREFIX = "$PYTHON -m claude_code_hooks_daemon.daemon.cli"
+# CLI base command prefix used in playbook instructions. Resolved to the
+# deployed wrapper (Plan 00192) so a generated playbook can be run verbatim.
+_CLI_PREFIX = daemon_cli_command()
 
 
 def get_cli_acceptance_tests() -> list[CliAcceptanceTest]:

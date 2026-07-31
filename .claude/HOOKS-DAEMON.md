@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-07-31 (v3.49.1) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
+> Generated on 2026-07-31 (v3.49.1) by `generate-docs`. Regenerate: `/workspace/bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 

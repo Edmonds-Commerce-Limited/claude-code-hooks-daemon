@@ -80,6 +80,7 @@ from claude_code_hooks_daemon.daemon.validation import (
     is_hooks_daemon_repo,
     is_inside_daemon_directory,
 )
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.hook_registration import (
     detect_duplicate_hooks,
     detect_legacy_hook_commands,
@@ -1565,7 +1566,7 @@ def _format_project_handler_health_lines(
     lines.append(
         "  Fix the handler(s), then restart the daemon — the signal clears only "
         "after a restart reloads them. Diagnose with: "
-        "$PYTHON -m claude_code_hooks_daemon.daemon.cli validate-project-handlers"
+        f"{daemon_cli_command('validate-project-handlers')}"
     )
     return lines
 

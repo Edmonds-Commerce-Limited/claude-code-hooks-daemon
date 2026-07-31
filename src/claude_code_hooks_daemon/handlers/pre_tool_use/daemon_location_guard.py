@@ -6,6 +6,7 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
 # Match a `cd` whose TARGET is the .claude/hooks-daemon/ directory (or a path
 # inside it). The target is a single token that contains no whitespace or
@@ -71,10 +72,9 @@ class DaemonLocationGuardHandler(Handler):
         guidance = (
             "✅ CORRECT USAGE:\n"
             "  Run daemon commands from project root:\n\n"
-            "  PYTHON=/workspace/untracked/venv/bin/python\n"
-            "  $PYTHON -m claude_code_hooks_daemon.daemon.cli status\n"
-            "  $PYTHON -m claude_code_hooks_daemon.daemon.cli restart\n"
-            "  $PYTHON -m claude_code_hooks_daemon.daemon.cli logs\n\n"
+            f"  {daemon_cli_command('status')}\n"
+            f"  {daemon_cli_command('restart')}\n"
+            f"  {daemon_cli_command('logs')}\n\n"
             "📦 CORRECT UPGRADE PROCESS:\n\n"
             "  # Download latest upgrade script\n"
             "  curl -fsSL https://raw.githubusercontent.com/anthropics/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/upgrade.sh\n\n"
@@ -106,9 +106,9 @@ class DaemonLocationGuardHandler(Handler):
             "**Run daemon CLI from the project root instead** — it always works regardless "
             "of cwd:\n\n"
             "```\n"
-            "$PYTHON -m claude_code_hooks_daemon.daemon.cli status\n"
-            "$PYTHON -m claude_code_hooks_daemon.daemon.cli restart\n"
-            "$PYTHON -m claude_code_hooks_daemon.daemon.cli logs\n"
+            f"{daemon_cli_command('status')}\n"
+            f"{daemon_cli_command('restart')}\n"
+            f"{daemon_cli_command('logs')}\n"
             "```\n\n"
             "If you need to inspect daemon source for debugging, use `Read` from the project "
             "root with the absolute path — never `cd` in. Do NOT edit anything inside "

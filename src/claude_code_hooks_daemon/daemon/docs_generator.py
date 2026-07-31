@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from claude_code_hooks_daemon.constants import ConfigKey
 from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
@@ -107,7 +108,7 @@ class DocsGenerator:
         return (
             "# Hooks Daemon - Active Configuration\n\n"
             f"> Generated on {today} (v{__version__}) by `generate-docs`. "
-            "Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`"
+            f"Regenerate: `{daemon_cli_command('generate-docs')}`"
         )
 
     def _render_plan_mode_section(self) -> str | None:

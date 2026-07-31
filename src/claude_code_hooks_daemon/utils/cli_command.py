@@ -65,6 +65,21 @@ def daemon_bin_path() -> Path:
     return daemon_root() / BIN_DIR_NAME / WRAPPER_NAME
 
 
+def _fallback_relative_path() -> str:
+    """Wrapper path relative to the project root.
+
+    Used only when :class:`ProjectContext` is not initialised — unit tests, and
+    any tooling that renders handler guidance outside a running daemon.
+
+    This is a deliberate, narrow exception to FAIL FAST. The alternative is
+    raising from a *documentation-string builder*, which would take a caller
+    down over cosmetics. The relative path is still runnable from the project
+    root — the documented working directory for every daemon command — and is
+    strictly better than emitting a variable that is never set.
+    """
+    return "/".join((*_CLIENT_DAEMON_SEGMENTS, BIN_DIR_NAME, WRAPPER_NAME))
+
+
 def daemon_cli_command(*args: str) -> str:
     """Return a copy-paste runnable daemon-CLI invocation.
 
@@ -76,5 +91,10 @@ def daemon_cli_command(*args: str) -> str:
         ``/project/.claude/hooks-daemon/bin/hooks-daemon plan-qa --sweep``.
         Never contains a shell variable.
     """
-    parts: tuple[str, ...] = (str(daemon_bin_path()), *args)
+    try:
+        wrapper = str(daemon_bin_path())
+    except RuntimeError:
+        # ProjectContext not initialised — see _fallback_relative_path().
+        wrapper = _fallback_relative_path()
+    parts: tuple[str, ...] = (wrapper, *args)
     return _ARG_SEPARATOR.join(parts)

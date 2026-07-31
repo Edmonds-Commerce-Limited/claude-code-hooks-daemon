@@ -8,6 +8,8 @@ after v2.13.0 made get_acceptance_tests() mandatory for handlers.
 import re
 from dataclasses import dataclass
 
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+
 
 @dataclass
 class AbstractMethodInfo:
@@ -130,7 +132,7 @@ Handler location: {handler_path}
 1. Open {handler_path}
 2. Add the '{violation.method_name}()' method to your handler class
 3. See CLAUDE/HANDLER_DEVELOPMENT.md for implementation examples
-4. Restart daemon: $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+4. Restart daemon: {daemon_cli_command("restart")}
 """.strip()
 
         return EnhancedError(
@@ -161,7 +163,7 @@ Full traceback available in daemon logs.
 1. Check the handler file for syntax errors: {handler_path}
 2. Verify all imports are available
 3. Check daemon logs for full traceback:
-   $PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+   {daemon_cli_command("logs")}
 """.strip()
 
         return EnhancedError(
