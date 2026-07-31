@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.49.1] - 2026-07-31
+
+This is a **patch release** establishing the **PLAN-vs-JOURNAL contract** and
+fixing five dogfooding bugs where the two rule-sets had bled into each other.
+
+`PLAN.md` and `JOURNAL/` are governed by near-**opposite** rules. Applying the
+wrong set to a file is a defect in either direction, and every bug fixed here
+is an instance of exactly that. No enforcement thresholds ship in this
+release — this is the groundwork and the contract; tiered size enforcement is
+tracked in Plan 00190 Phases 2-5.
+
+### Added
+
+- Plan 00190 documenting the full contract, the empirical evidence, and the
+  design for tiered size enforcement.
+
+### Changed
+
+- **`plan_workflow.qa.journal.mode` documented as a ceiling, not a guarantee.**
+  Behaviour is unchanged and correct — surface modes (`edit_mode`) are
+  document-type-agnostic gates and `journal:` is a document-type sub-block
+  subordinate to them — but three docs promised `journal-dayfile-naming` "may
+  ratchet to block via `mode: block`" without saying that only holds when
+  `edit_mode` is **also** `block`. Under the documented `edit_mode: warn`
+  rollout posture it degrades to an advisory, and `edit_mode: off` disables
+  both journal edit checks outright regardless of `journal.enabled`. Corrected
+  in `config/models.py`, `docs/guides/HANDLER_REFERENCE.md`, and both
+  `PlanJournalling.md` copies, and pinned by two regression tests so the claim
+  is anchored to something executable.
+- **`plan_qa_edit` guidance now states the read side of the contract.** Its
+  injected CLAUDE.md text says a journal is unbounded by design and must not be
+  tidied — safe to grow precisely because it is never read whole — contrasted
+  with `PLAN.md` being read in full every session. Previously it described
+  append-only discipline without ever saying length is fine, leaving the
+  tidy-the-journal bleed vector open in the always-resident context.
+- `plan_time_estimates` guidance now states its true scope
+  (`CLAUDE/Plan/**/*.md` except journal day-files); the previous
+  `CLAUDE/Plan/*.md` was a single-level glob that concealed the real reach.
+
+### Fixed
+
+- **`plan_time_estimates` fired on journal day-files.** `matches()` gated only
+  on `"/Plan/" in file_path` plus an `.md` suffix, so it matched **every**
+  markdown file under the plan directory — including `JOURNAL/` day-files. A
+  journal is an append-only record of what actually happened, so an elapsed
+  duration there is a historical fact, not a forward estimate. The handler was
+  blocking exactly the hand-off entries journals exist to carry. The exemption
+  keys on the day-file **grammar** (`parse_journal_dayfile_name`, matching
+  `markdown_table_formatter`) and is deliberately **not** keyed on journal
+  config — otherwise `journal.enabled: false` would silently re-enable plan
+  rules on journals.
+- **`recovery_cron_advisor` instructed agents to write into the retired
+  `## Notes & Updates` section.** This was the only *injected* instruction in
+  the daemon telling an agent to put the blow-by-blow stream into `PLAN.md`,
+  and it directly contradicted `CLAUDE/PlanWorkflow.md`. Fixed at four sites:
+  runtime creation guidance, both `get_claude_md()` table rows, and progress
+  detection (which treated an edit to that section as first-class "legitimate
+  progress"). Task-status icons already cover every genuine progress edit under
+  the plan template's own task grammar.
+- **`journal-append-only` never said the journal is *supposed* to grow.** The
+  remediation explained *how* to append but never *why* length is fine. That is
+  the bleed vector in the opposite direction: an agent nagged about an
+  oversized `PLAN.md`, looking at a much larger journal, has every incentive to
+  be "helpfully consistent" and tidy it — destroying an append-only record.
+- **`mkplan.bash` contradicted itself in a single run.** Its no-template
+  fallback skeleton wrote a `## Notes & Updates` heading pre-seeded with a
+  dated entry, *while the same script scaffolded* `JOURNAL/`. A plan could be
+  born with both. Replaced with the `## Delivery & Milestones` stub the three
+  templates already carry.
+
 ## [3.49.0] - 2026-07-24
 
 This is a **minor release** delivering Plan 00188: a full hook-event
