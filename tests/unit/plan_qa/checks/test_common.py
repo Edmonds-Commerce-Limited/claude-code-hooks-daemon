@@ -43,6 +43,40 @@ class TestEditTarget:
     def test_none_when_outside_plan_dir(self) -> None:
         assert edit_target(_context("docs/PLAN.md")) is None
 
+    def test_plan_md_inside_journal_is_not_a_plan_edit(self) -> None:
+        """Plan 00190: a file under ``JOURNAL/`` is journal territory.
+
+        Before the shared classifier this path satisfied BOTH predicates and
+        received plan rules AND journal rules simultaneously.
+        """
+        assert edit_target(_context("CLAUDE/Plan/00042-widget/JOURNAL/PLAN.md")) is None
+
+    def test_nested_plan_md_below_journal_is_not_a_plan_edit(self) -> None:
+        assert edit_target(_context("CLAUDE/Plan/00042-widget/JOURNAL/sub/PLAN.md")) is None
+
+
+class TestScopesAreDisjoint:
+    """No path may resolve to both a plan-document and a journal target."""
+
+    PATHS = [
+        "CLAUDE/Plan/00042-widget/PLAN.md",
+        "CLAUDE/Plan/00042-widget/JOURNAL/PLAN.md",
+        "CLAUDE/Plan/00042-widget/JOURNAL/00042-Journal-26-07-31.md",
+        "CLAUDE/Plan/00042-widget/JOURNAL/notes.md",
+        "CLAUDE/Plan/Completed/00042-widget/JOURNAL/PLAN.md",
+        "CLAUDE/Plan/00042-widget/RESEARCH.md",
+        "CLAUDE/Plan/README.md",
+        "docs/PLAN.md",
+    ]
+
+    def test_no_path_resolves_to_both_targets(self) -> None:
+        from claude_code_hooks_daemon.plan_qa.checks.common import journal_edit_target
+
+        for rel_path in self.PATHS:
+            context = _context(rel_path)
+            both = edit_target(context) is not None and journal_edit_target(context) is not None
+            assert not both, f"{rel_path} classified as BOTH plan document and journal"
+
     def test_none_when_no_file_in_context(self) -> None:
         assert edit_target(_context(None)) is None
 

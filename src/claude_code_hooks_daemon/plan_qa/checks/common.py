@@ -11,11 +11,10 @@ from dataclasses import dataclass
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME, PlanDoc
+from claude_code_hooks_daemon.plan_qa.paths import classify
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level
 
 _PLAN_FOLDER_NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"^(\d{1,5})-[a-zA-Z]")
-
-_MARKDOWN_SUFFIX: Final[str] = ".md"
 
 # Journal mode tokens (mirror PlanWorkflowQaJournalConfig.mode).
 _JOURNAL_MODE_OFF: Final[str] = "off"
@@ -35,35 +34,23 @@ class EditTarget:
 def edit_target(context: CheckContext) -> EditTarget | None:
     """Resolve an EDIT context to a plan-document target, or ``None``.
 
-    ``None`` means "this check does not apply": no file in the context, not
-    named ``PLAN.md``, or not under the configured plan directory.
+    ``None`` means "this check does not apply": no file in the context, or the
+    shared classifier says this path is not a plan document — because it is
+    outside the plan directory, is not named ``PLAN.md``, or is journal
+    territory (Plan 00190).
     """
     if context.file_path is None or context.file_content is None:
         return None
-    if context.file_path.name != PLAN_DOC_FILENAME:
-        return None
-    # Outside the plan dir = "check does not apply" (a documented no-match
-    # signal, not an error condition).
-    if not context.file_path.is_relative_to(context.plan_dir):
+
+    classified = classify(context.file_path, context)
+    if not classified.is_plan_document:
         return None
 
-    rel = context.file_path.relative_to(context.plan_dir)
-    parts = rel.parts
-    archive_dirs = {context.completed_dir}
-    if context.cancelled_dir is not None:
-        archive_dirs.add(context.cancelled_dir)
-    in_archive = len(parts) > 0 and parts[0] in archive_dirs
-
-    folder_name = parts[-2] if len(parts) >= 2 else ""
-    number_match = _PLAN_FOLDER_NUMBER_RE.match(folder_name)
-    plan_number = int(number_match.group(1)) if number_match else None
-
-    rel_path = str(context.file_path.relative_to(context.project_root))
     return EditTarget(
-        rel_path=rel_path,
-        plan_number=plan_number,
+        rel_path=classified.rel_path,
+        plan_number=classified.plan_number,
         doc=PlanDoc.parse(context.file_content),
-        in_archive=in_archive,
+        in_archive=classified.in_archive,
     )
 
 
@@ -99,25 +86,25 @@ def journal_edit_target(context: CheckContext) -> JournalEditTarget | None:
     """
     if context.file_path is None or context.file_content is None:
         return None
-    if not context.journal_enabled or context.journal_mode == _JOURNAL_MODE_OFF:
-        return None
-    if context.file_path.suffix != _MARKDOWN_SUFFIX:
-        return None
-    if not context.file_path.is_relative_to(context.plan_dir):
+    # POLICY gate — deliberately here and not in the classifier. Classification
+    # is config-independent (Plan 00190 Decision 5) so that disabling
+    # journalling can never re-apply plan rules to a journal file; it only
+    # switches the journal CHECKS off.
+    if not journalling_active(context):
         return None
 
-    # Layout: <plan_dir>/[archive/]NNNNN-name/<journal_dir_name>/<file>.md — the
-    # file's parent must be the journal dir, and its grandparent the plan folder.
-    parent = context.file_path.parent
-    if parent.name != context.journal_dir_name:
+    classified = classify(context.file_path, context)
+    if not classified.is_journal:
         return None
-    folder_match = _PLAN_FOLDER_NUMBER_RE.match(parent.parent.name)
-    plan_number = int(folder_match.group(1)) if folder_match else None
+    # Day-files live DIRECTLY in the journal directory. Anything nested deeper
+    # is journal territory (so plan rules stay off it) but is not a day-file
+    # the journal checks act on.
+    if context.file_path.parent.name != context.journal_dir_name:
+        return None
 
-    rel_path = str(context.file_path.relative_to(context.project_root))
     return JournalEditTarget(
-        rel_path=rel_path,
-        plan_number=plan_number,
+        rel_path=classified.rel_path,
+        plan_number=classified.plan_number,
         basename=context.file_path.name,
     )
 
