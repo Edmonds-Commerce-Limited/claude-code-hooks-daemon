@@ -63,6 +63,21 @@ class TestRun:
         assert findings[0].level == Level.ADVISE
         assert "shrink" in findings[0].message.lower() or "remov" in findings[0].message.lower()
 
+    def test_remediation_says_length_is_never_a_problem(self) -> None:
+        """Remediation must state the journal is SUPPOSED to grow (Plan 00190).
+
+        The message explained HOW to append but never WHY the file may be
+        long. That is the precise bleed vector once plan-size enforcement
+        exists: an agent freshly nagged about an oversized PLAN.md, looking at
+        a much larger journal, has every incentive to be "helpfully
+        consistent" and tidy it -- destroying an append-only record.
+        """
+        findings = journal_append_only.CHECK.run(_ctx(before=_APPEND, after=_BEFORE))
+        remediation = findings[0].remediation.lower()
+
+        assert "unbounded" in remediation or "no size limit" in remediation
+        assert "do not tidy" in remediation or "never tidy" in remediation
+
     def test_earlier_rewrite_advises(self) -> None:
         rewritten = _BEFORE.replace("first entry", "EDITED first entry") + "\n## 10:00\n\nx\n"
         findings = journal_append_only.CHECK.run(_ctx(before=_BEFORE, after=rewritten))

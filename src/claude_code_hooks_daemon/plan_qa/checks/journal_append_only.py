@@ -29,7 +29,8 @@ from claude_code_hooks_daemon.plan_qa.types import (
 CHECK_ID: Final[str] = "journal-append-only"
 
 _REMEDIATION: Final[str] = (
-    "Journals are append-only: add a NEW dated entry at the bottom instead of "
+    "Journals are append-only and unbounded by design — length is never a problem, "
+    "so do not tidy or trim one. Add a NEW dated entry at the bottom instead of "
     "editing or removing earlier ones. Corrections are new entries, never rewrites."
 )
 
