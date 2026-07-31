@@ -116,8 +116,8 @@ git commit -m "Plan NNNNN: Phase N - Description"
 **After every change to handler code, restart immediately:**
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 # Expected: RUNNING
 ```
 
@@ -125,7 +125,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 
 1. Check the daemon is running the new code (restart if in doubt)
 2. Use `nc` to probe the live daemon directly: `echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/hooks/stop`
-3. Check daemon logs: `$PYTHON -m claude_code_hooks_daemon.daemon.cli logs | tail -20`
+3. Check daemon logs: `./bin/hooks-daemon logs | tail -20`
 
 **The "daemon running old code" failure mode is silent and common.** Unit tests pass, QA passes, but production behaviour is wrong because the daemon was never restarted. This is the #1 dogfooding failure mode.
 
@@ -171,8 +171,8 @@ in limbo.
 **EVERY change MUST pass daemon restart verification**:
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 # Expected: Status: RUNNING
 ```
 
@@ -233,19 +233,30 @@ Blocking handlers match patterns in the full Bash command string, including git 
 ### Key Paths (Different from Normal Installs)
 
 ```bash
-# Python command (fingerprint-keyed venv from v3.7.0; project-path slug from v3.19.1)
-# Resolve dynamically via init.sh / venv-include.bash — the venv dir is keyed by a
-# project-path slug plus a fingerprint of the Python version, base_prefix, and arch.
-PYTHON=/workspace/untracked/venv-{slug}-py{MM}-{fingerprint}/bin/python
-
-# Legacy (pre-v3.7.0) — still works as fallback if present
-PYTHON=/workspace/untracked/venv/bin/python
+# Run the daemon CLI through the deployed wrapper. It resolves the venv for you.
+# In self-install mode (this repo) it lives at the project root:
+./bin/hooks-daemon status
 
 # Config
 CONFIG=/workspace/.claude/hooks-daemon.yaml
 
 # Source code runs from workspace
 SRC=/workspace/src/claude_code_hooks_daemon/
+```
+
+**Do NOT hand-roll an interpreter path, and do not expect `$PYTHON` to be set —
+it never is in your shell** (Plan 00192). The venv layout below is REFERENCE
+ONLY, for understanding where things live; the wrapper is the supported way to
+invoke the CLI:
+
+```text
+# fingerprint-keyed venv (v3.7.0+; project-path slug from v3.19.1). The dir is
+# keyed by a project-path slug plus a fingerprint of the Python version,
+# base_prefix and arch — so never hardcode it.
+/workspace/untracked/venv-{slug}-py{MM}-{fingerprint}/bin/python
+
+# legacy (pre-v3.7.0) — may still exist as a fallback
+/workspace/untracked/venv/bin/python
 ```
 
 ### Why This Matters
@@ -262,7 +273,7 @@ SRC=/workspace/src/claude_code_hooks_daemon/
 - Source at `/workspace/src/` (NOT installed package)
 - Config has `self_install_mode: true`
 - `.claude/hooks-daemon.env` sets `HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"`
-- Inspect/manage venvs: `$PYTHON -m claude_code_hooks_daemon.daemon.cli list-venvs`
+- Inspect/manage venvs: `./bin/hooks-daemon list-venvs`
   and `prune-venvs --legacy | --all-except-current` (never deletes current fingerprint)
 
 **See CLAUDE/SELF_INSTALL.md for complete details**
@@ -291,8 +302,8 @@ its own `HOSTNAME`, so it cannot disturb the dogfood daemon.
 
 ```bash
 # Daemon lifecycle
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+./bin/hooks-daemon status
+./bin/hooks-daemon restart
 
 # Development
 ./scripts/qa/llm_qa.py all       # QA before commits (LLM-optimized, ~16 lines)
@@ -528,13 +539,13 @@ Projects can define their own handlers in `.claude/project-handlers/`. These are
 
 ```bash
 # Scaffold project-handlers directory
-$PYTHON -m claude_code_hooks_daemon.daemon.cli init-project-handlers
+./bin/hooks-daemon init-project-handlers
 
 # Validate handlers load correctly
-$PYTHON -m claude_code_hooks_daemon.daemon.cli validate-project-handlers
+./bin/hooks-daemon validate-project-handlers
 
 # Run project handler tests
-$PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers --verbose
+./bin/hooks-daemon test-project-handlers --verbose
 ```
 
 **Directory structure**: Event-type subdirectories (`pre_tool_use/`, `post_tool_use/`, `session_start/`, etc.) with handler `.py` files and co-located `test_` files.
@@ -545,7 +556,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers --verbose
 
 See @.claude/HOOKS-DAEMON.md for the current active handler summary, generated from live config.
 
-**Regenerate**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
+**Regenerate**: `./bin/hooks-daemon generate-docs`
 
 **Config file**: `.claude/hooks-daemon.yaml`
 
@@ -1343,7 +1354,7 @@ On every new session this handler audits hook configuration across `.claude/sett
 - **Hooks in `settings.local.json`**: move each `hooks` entry to `settings.json`, then delete the `hooks` key from `settings.local.json`. Confirm no duplicates remain.
 - **Legacy-style commands**: replace them with a project-level handler. Run `/workspace/bin/hooks-daemon init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
 - **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
-- **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry, delete from `settings.local.json`.
+- **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry and remove the duplicate in `settings.local.json`.
 
 ## idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
 
