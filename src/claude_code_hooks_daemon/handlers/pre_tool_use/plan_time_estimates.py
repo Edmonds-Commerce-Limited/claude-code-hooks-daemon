@@ -1,6 +1,7 @@
 """PlanTimeEstimatesHandler - blocks time estimates in plan documents."""
 
 import re
+from pathlib import Path
 from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import (
@@ -12,6 +13,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
+from claude_code_hooks_daemon.plan_qa.model import parse_journal_dayfile_name
 
 
 class PlanTimeEstimatesHandler(Handler):
@@ -80,6 +82,17 @@ class PlanTimeEstimatesHandler(Handler):
         if not file_path or "/Plan/" not in file_path or not file_path.endswith(".md"):
             return False
 
+        # Plan 00190: a journal day-file is an APPEND-ONLY record of what
+        # actually happened, not a plan document. "this took two hours" in a
+        # journal is a historical fact, not a forward estimate, so the
+        # plan-document rule must never reach it. The distinctive day-file
+        # grammar (NNNNN-Journal-YY-MM-DD.md) is a config-independent
+        # exemption signal — matching markdown_table_formatter, and
+        # deliberately NOT keyed on journal config, so that disabling an
+        # unrelated knob can never re-enable plan rules on a journal.
+        if parse_journal_dayfile_name(Path(file_path).name) is not None:
+            return False
+
         content = get_file_content(hook_input)
         if tool_name == ToolName.EDIT:
             content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("new_string", "")
@@ -140,8 +153,12 @@ class PlanTimeEstimatesHandler(Handler):
     def get_claude_md(self) -> str | None:
         return (
             "## plan_time_estimates — plans describe WHAT, not WHEN\n\n"
-            "Writing time estimates into a `CLAUDE/Plan/*.md` file is blocked. Plans "
-            "capture the work to be done, not how long it will take.\n\n"
+            "Writing time estimates into a plan document is blocked — that is any "
+            "`CLAUDE/Plan/**/*.md` EXCEPT journal day-files. Plans capture the work "
+            "to be done, not how long it will take.\n\n"
+            "**Journal day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`) are exempt.** A "
+            "journal records what actually happened, so an elapsed duration there is a "
+            "historical fact, not a forward estimate.\n\n"
             "**Blocked in plan documents:**\n\n"
             "- Effort estimates — `**Estimated Effort**: 4 hours`, `Total Estimated Time: 2 days`\n"
             "- Per-phase durations — `Phase 1: ... (3 days)`, `takes 8-12 hours`\n"
