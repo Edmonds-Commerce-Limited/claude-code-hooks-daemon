@@ -249,3 +249,9 @@ re-enable plan rules on every journal file.
 - Phase 0 Task 0.3: journal-mode subordination documented and pinned by
   regression tests — `f6e5ccaa`
 - Phase 0 closed except 0.5 (deferred by decision) and 0.7 (tracked)
+- **Released v3.49.1 "The PLAN-vs-JOURNAL Contract"** — release commit
+  `f5f01974`, tag `0df2fcc5`. Ships the contract + five fixes; no enforcement
+  thresholds (Phases 2-5 remain)
+- Follow-up found during release: RELEASING.md Step 13's `git add` list omits
+  handler sources, so a Step 11 guidance fix can be left uncommitted while its
+  regenerated CLAUDE.md is auto-committed
