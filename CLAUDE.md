@@ -267,6 +267,26 @@ SRC=/workspace/src/claude_code_hooks_daemon/
 
 **See CLAUDE/SELF_INSTALL.md for complete details**
 
+### Client-Mode Testing (standard practice)
+
+Self-install mode is NOT representative of a real client install — different
+source, venv, socket and wrapper locations. A change can pass every
+self-install test and still be broken for every user.
+
+When a change touches paths, interpreters, wrappers or deployed assets, verify
+it in a real client install too:
+
+```bash
+scripts/dummy-client-repo.sh create     # provisions untracked/dummy-client-repo
+scripts/dummy-client-repo.sh cli status # run the daemon CLI inside it
+scripts/dummy-client-repo.sh destroy
+```
+
+It drives the production installer (never synthesised state) and is isolated by
+its own `HOSTNAME`, so it cannot disturb the dogfood daemon.
+
+**See [CLAUDE/development/CLIENT-MODE-TESTING.md](CLAUDE/development/CLIENT-MODE-TESTING.md)**
+
 ### Quick Commands
 
 ```bash

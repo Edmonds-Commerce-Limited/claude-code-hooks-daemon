@@ -55,6 +55,12 @@ Verified ground truth in a live agent shell (2026-07-31):
 | Real interpreter                               | `untracked/venv-workspace-py311-81c29529/bin/python` |
 | `plan-qa --sweep` via that interpreter         | works (exit 1, 1 advisory finding)                   |
 
+Independently corroborated by a field report from a **separate client install**
+(client-a infra repo, ccy/Podman, daemon v3.49.0) — see
+`FIELD-REPORT-client-a-v3.49.0.md` in this folder. That report reproduces the
+same root cause on a different layout, Python version and venv fingerprint,
+confirming this is install-independent rather than a quirk of self-install mode.
+
 Structural gaps found:
 
 1. **`daemon-cli.sh` is unreachable in self-install mode.** It is not deployed
@@ -69,20 +75,73 @@ Structural gaps found:
    than forwarding, and is mode `rwx--x--x`.
 3. **The skill has zero plan-QA coverage** — `rg 'plan-qa' src/…/skills/` returns
    nothing.
+4. **`daemon-cli.sh` is not git-worktree-aware** (field report). It walks up from
+   `pwd` for `.claude/hooks-daemon.yaml`, which IS present in a worktree, then
+   anchors `DAEMON_DIR` there — but `.claude/.gitignore:3` ignores
+   `hooks-daemon/`, so `scripts/lib/resolve_venv.sh` exists only in the main
+   checkout. Result: exit 5, "canonical library missing". Worktrees are a common
+   agent workflow, so this compounds the primary bug. **A real code defect, not
+   a docs defect.**
+5. **No console entry point.** `pyproject.toml` declares no `[project.scripts]`
+   (verified), so nothing named `hooks-daemon` / `plan-qa` exists on `PATH` and
+   there is no fallback when the documented invocation fails.
+6. **`init.sh` deliberately does not export the interpreter** (verified,
+   `init.sh:502-503`): it resolves into `PYTHON_CMD` and comments that this is
+   intentional because the hot path uses system `python3`. That decision is
+   correct and should stand — which confirms the bug is purely that the
+   documentation is **written from inside the wrapper scripts' variable scope**
+   and handed to a reader who is not in that scope.
 
 ### Affected source sites
 
-Handlers injecting `$PYTHON` into agent-visible text: `plan_qa_edit`,
-`plan_qa_commit_gate`, `plan_qa_sweep`, `daemon_location_guard`,
-`daemon_restart_verifier`, `task_tdd_advisor`, `project_handler_load_checker`,
-`plan_workflow_asset_checker`, `hook_registration_checker`,
-`background_process_tracker`, `markdown_table_formatter`, `project_loader`.
+**29 files under `src/` contain a literal `$PYTHON`** (`rg -l '\$PYTHON' src/`).
+Of those, 12 are handlers injecting it into agent-visible block reasons or
+`get_claude_md()`: `plan_qa_edit`, `plan_qa_commit_gate`, `plan_qa_sweep`,
+`daemon_location_guard`, `daemon_restart_verifier`, `task_tdd_advisor`,
+`project_handler_load_checker`, `plan_workflow_asset_checker`,
+`hook_registration_checker`, `background_process_tracker`,
+`markdown_table_formatter`, `project_loader`.
 
 Generator/error surfaces: `daemon/docs_generator.py` (emits 13 occurrences into
 the resident `CLAUDE.md` block), `daemon/playbook_generator.py`,
-`daemon/cli_acceptance_tests.py`, `daemon/cli.py`, `utils/error_formatter.py`.
+`daemon/cli_acceptance_tests.py` (hardcodes `_CLI_PREFIX`), `daemon/cli.py`,
+`utils/error_formatter.py`.
+
+The remainder are `src/**/*.md` docs (`skills/hooks-daemon/*.md`,
+`src/CLAUDE.md`, `strategies/tdd/CLAUDE.md`) that are shipped to client projects
+and read by agents, so they are in scope too.
+
+### Why this is worse than an unrunnable command
+
+The field report documents the recovery behaviour it provokes. Having seen
+`ModuleNotFoundError`, an agent reasonably concludes the package is not
+installed and tries to fix that: `pip install claude-code-hooks-daemon` (wrong
+environment, blocked by PEP 668), editing the container Dockerfile, or building
+a new venv — **all of which damage a working installation whose venv was never
+broken**. The report exists because exactly that path was started before being
+caught.
+
+Two messages make this worse by firing precisely when the agent is already in
+trouble: `daemon_location_guard` (redirecting an agent that has `cd`'d into the
+daemon dir — its three remedy commands all fail) and
+`project_handler_load_checker` (reporting *degraded security protection*, whose
+diagnostic command also fails). A real, security-relevant degradation cannot be
+investigated by following the printed instructions.
 
 ## Tasks
+
+### Phase 0: Client-mode test fixture (DONE — enables every later phase)
+
+- [x] ✅ **Task 0.1**: Automate provisioning of a real client-mode install at
+  `untracked/dummy-client-repo/` via `scripts/dummy-client-repo.sh`, driving the
+  PRODUCTION installer (`scripts/install_version.sh`) rather than synthesised
+  state — the v3.10.0 SEV-1 escaped because a gate faked install state.
+  - [x] ✅ `create` / `status` / `cli` / `python` / `destroy` subcommands.
+  - [x] ✅ Isolated by a dedicated `HOSTNAME` so it never collides with the
+    dogfood daemon (verified: dogfood PID 459 untouched).
+  - [x] ✅ FAIL FAST if the install leaves no RUNNING daemon.
+- [x] ✅ **Task 0.2**: Reproduce this plan's bug in true client mode — confirmed
+  **9 unrunnable `$PYTHON` lines** in the fresh client's generated `CLAUDE.md`.
 
 ### Phase 1: Shared resolver utility
 
@@ -117,12 +176,20 @@ the resident `CLAUDE.md` block), `daemon/playbook_generator.py`,
   `--sweep`, `--lint <file>`, `--check-staged`, and `--json`.
 - [ ] ⬜ **Task 4.2**: Reference it from `SKILL.md` "Available Commands".
 
-### Phase 5: Verification
+### Phase 5: Dual-mode verification
+
+Every check runs in BOTH modes. Self-install alone cannot verify this class of
+bug — the field report came from a client install whose layout differs.
 
 - [ ] ⬜ **Task 5.1**: Full QA: `./scripts/qa/run_all.sh`.
-- [ ] ⬜ **Task 5.2**: Daemon restart + status RUNNING.
-- [ ] ⬜ **Task 5.3**: Dogfood — confirm a fresh session's injected guidance contains
-  only runnable commands, executed verbatim as printed.
+- [ ] ⬜ **Task 5.2**: Daemon restart + status RUNNING (self-install).
+- [ ] ⬜ **Task 5.3**: Rebuild the client fixture against the fix
+  (`scripts/dummy-client-repo.sh create`) and assert its generated `CLAUDE.md`
+  contains **zero** `$PYTHON` occurrences (currently 9).
+- [ ] ⬜ **Task 5.4**: Execute the emitted commands verbatim in BOTH modes —
+  every one must run as printed.
+- [ ] ⬜ **Task 5.5**: Verify the worktree path (gap 4) from a real git worktree
+  of the client fixture.
 
 ## Technical Decisions
 

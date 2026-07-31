@@ -302,6 +302,15 @@ A feature is DONE when ALL of the following are verified:
 - [ ] Run: `./scripts/qa/run_all.sh`
 - [ ] Expected output: "ALL CHECKS PASSED"
 
+### 5b. Client-Mode Verification (if paths/interpreters/wrappers/assets changed)
+
+Self-install mode is NOT representative of a real client install.
+
+- [ ] Rebuild the fixture: `scripts/dummy-client-repo.sh create`
+- [ ] Verify the new behaviour in client mode (`dummy-client-repo.sh cli …`)
+- [ ] Confirm the dogfood daemon still reports RUNNING
+- [ ] See: @CLAUDE/development/CLIENT-MODE-TESTING.md
+
 ### 6. Acceptance Tests (Before Release)
 
 - [ ] Handler implements `get_acceptance_tests()` with test definitions

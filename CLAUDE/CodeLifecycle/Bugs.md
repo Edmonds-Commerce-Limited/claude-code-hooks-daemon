@@ -247,6 +247,16 @@ A bug fix is DONE when ALL of the following are verified:
 - [ ] Run: `./scripts/qa/run_all.sh`
 - [ ] Expected: "ALL CHECKS PASSED"
 
+### 5b. Client-Mode Verification (if paths/interpreters/wrappers/assets changed)
+
+Many field bugs are reported from client installs and are invisible in
+self-install mode. If the bug came from a client install, reproduce it there.
+
+- [ ] Rebuild the fixture: `scripts/dummy-client-repo.sh create`
+- [ ] Reproduce the bug in client mode, then verify the fix there
+- [ ] Confirm the dogfood daemon still reports RUNNING
+- [ ] See: @CLAUDE/development/CLIENT-MODE-TESTING.md
+
 ### 6. Daemon Verification
 
 - [ ] Daemon restarts successfully

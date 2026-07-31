@@ -176,6 +176,16 @@ A general code change is DONE when ALL of the following are verified:
 - [ ] Run: `./scripts/qa/run_all.sh`
 - [ ] Expected: "ALL CHECKS PASSED"
 
+### 5. Client-Mode Verification (if paths/interpreters/wrappers/assets changed)
+
+Self-install mode is NOT representative of a real client install. A change can
+pass every self-install test and still be broken for every user.
+
+- [ ] Rebuild the fixture: `scripts/dummy-client-repo.sh create`
+- [ ] Verify the changed behaviour in client mode (`dummy-client-repo.sh cli …`)
+- [ ] Confirm the dogfood daemon still reports RUNNING
+- [ ] See: @CLAUDE/development/CLIENT-MODE-TESTING.md
+
 ## Common Change Types
 
 ### Refactoring
