@@ -5,7 +5,7 @@ CLAUDE/Plan/<digits>-<name>/PLAN.md:
 
   1. CREATION  — a new PLAN.md is written, or mkplan.bash is invoked.
   2. PROGRESS  — an existing PLAN.md is edited touching task-status icons
-                 (⬜/🔄/✅) or the "## Notes & Updates" section.
+                 (⬜/🔄/✅).
   3. COMPLETION — the plan's **Status** line is changed to Complete/Completed.
 
 On each phase the handler injects advisory context:
@@ -86,12 +86,6 @@ _STATUS_COMPLETE_RE: Final[re.Pattern[str]] = re.compile(
 # misclassified as PROGRESS.
 _TASK_STATUS_ICON_RE: Final[re.Pattern[str]] = re.compile(r"[⬜✅\U0001f504]")
 
-# Matches the Notes & Updates section heading
-_NOTES_SECTION_RE: Final[re.Pattern[str]] = re.compile(
-    r"##\s+Notes\s+[&&]\s+Updates",
-    re.IGNORECASE,
-)
-
 # Matches mkplan.bash invocations in Bash commands
 _MKPLAN_BASH_RE: Final[re.Pattern[str]] = re.compile(
     r"mkplan\.bash\b",
@@ -142,7 +136,9 @@ _CREATION_GUIDANCE: Final[str] = (
     "Create a non-durable hourly failsafe recovery cron NOW:\n"
     "  • Use CronCreate with durable:false and recurring:true.\n"
     "  • Choose an off-:00 minute (e.g. 17 * * * * or 37 * * * *).\n"
-    "  • Record the cron ID in this plan's Notes & Updates section.\n"
+    "  • Record the cron ID in this plan's JOURNAL/ day-file (append a dated\n"
+    "    entry at the bottom) — NOT in PLAN.md. Runtime session state is\n"
+    "    journal content; PLAN.md stays a lean, curated spec.\n"
     "  • Do NOT wait for the cron to fire — keep working immediately.\n\n"
     "This is a FAILSAFE RECOVERY cron, NOT a heartbeat. The agent must never\n"
     "pace itself to the cron. Work proceeds at full speed until an external\n"
@@ -210,8 +206,16 @@ _STATUS_PREFIX_RE: Final[re.Pattern[str]] = re.compile(
 
 
 def _text_has_progress_markers(text: str) -> bool:
-    """Return True if text contains task-status icons or Notes & Updates heading."""
-    return bool(_TASK_STATUS_ICON_RE.search(text)) or bool(_NOTES_SECTION_RE.search(text))
+    """Return True if text contains task-status icons.
+
+    Plan 00190: a dated note appended to PLAN.md is deliberately NOT a
+    progress marker. The retired ``## Notes & Updates`` section is the
+    anti-pattern the plan/journal separation removes, so treating an edit to
+    it as first-class progress rewarded the very behaviour being eliminated.
+    Every genuine progress edit touches a task-status icon under the plan
+    template's own task grammar, so no real signal is lost.
+    """
+    return bool(_TASK_STATUS_ICON_RE.search(text))
 
 
 def _edit_results_in_status_complete(new_string: str, old_string: str) -> bool:
@@ -242,7 +246,7 @@ def _detect_lifecycle_phase(hook_input: dict[str, Any]) -> LifecyclePhase | None
     Detection rules:
     - CREATION: Write to an active PLAN.md (any content) OR a Bash call to mkplan.bash.
     - COMPLETION: Write/Edit to active PLAN.md with **Status**: Complete in content.
-    - PROGRESS: Edit to active PLAN.md touching task-status icons or Notes & Updates.
+    - PROGRESS: Edit to active PLAN.md touching task-status icons.
       (Completion takes priority over Progress when Status Complete is present.)
     """
     tool_name = hook_input.get(HookInputField.TOOL_NAME)
@@ -441,8 +445,8 @@ class RecoveryCronAdvisorHandler(Handler):
             "(never from files inside `Completed/`) and from `mkplan.bash` Bash invocations:\n\n"
             "| Phase | Trigger | Guidance injected |\n"
             "|-------|---------|-------------------|\n"
-            "| **Creation** | New PLAN.md written, or `mkplan.bash` invoked | Create a non-durable hourly cron now (CronCreate, durable:false); record the ID in the plan; do NOT wait for the cron. |\n"
-            "| **Progress** | Edit to PLAN.md touching task-status icons (⬜/🔄/✅) or `## Notes & Updates` section | Confirm the recovery cron is still running (CronList); recreate if missing; keep working. |\n"
+            "| **Creation** | New PLAN.md written, or `mkplan.bash` invoked | Create a non-durable hourly cron now (CronCreate, durable:false); record the ID in the plan's `JOURNAL/` day-file (NOT in PLAN.md); do NOT wait for the cron. |\n"
+            "| **Progress** | Edit to PLAN.md touching task-status icons (⬜/🔄/✅) | Confirm the recovery cron is still running (CronList); recreate if missing; keep working. |\n"
             "| **Completion** | `**Status**: Complete[d]` written/edited | Plan complete — **warns first**: deleting now leaves the still-live session with no recovery coverage. Keep the cron if any further work may happen (it is non-durable and dies on session exit); `CronDelete` only when certain the session is finished. |\n\n"
             "Progress reminders are rate-limited per plan: the handler advises on the first\n"
             "progress edit and then once every few progress edits for that plan, so it does\n"
