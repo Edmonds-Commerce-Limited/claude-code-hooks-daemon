@@ -1027,7 +1027,9 @@ only ever advise. Lint any file on demand:
 
 ## plan_time_estimates — plans describe WHAT, not WHEN
 
-Writing time estimates into a `CLAUDE/Plan/*.md` file is blocked. Plans capture the work to be done, not how long it will take.
+Writing time estimates into a plan document is blocked — that is any `CLAUDE/Plan/**/*.md` EXCEPT journal day-files. Plans capture the work to be done, not how long it will take.
+
+**Journal day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`) are exempt.** A journal records what actually happened, so an elapsed duration there is a historical fact, not a forward estimate.
 
 **Blocked in plan documents:**
 
