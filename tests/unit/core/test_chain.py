@@ -535,6 +535,56 @@ class TestHandlerChain:
 
         assert result.decided_by is None
 
+    def test_decided_by_tracks_the_result_actually_shown(self) -> None:
+        """Plan 00190 Task 0.5: attribution must follow the DISPLAYED result.
+
+        A non-terminal deny followed by a TERMINAL deny replaces final_result
+        with the terminal handler's, but decided_by kept naming the first
+        denier — so the reason came from one handler while the 'To disable:'
+        footer named a different one, pointing users at the wrong config key.
+        """
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "first-denier",
+                priority=10,
+                terminal=False,
+                result=HookResult(decision=Decision.DENY, reason="first reason"),
+            )
+        )
+        chain.add(
+            MockHandler(
+                "terminal-denier",
+                priority=20,
+                terminal=True,
+                result=HookResult(decision=Decision.DENY, reason="terminal reason"),
+            )
+        )
+
+        result = chain.execute({"tool_name": "Write"})
+
+        assert result.result.reason == "terminal reason"
+        assert result.decided_by == "terminal-denier"
+
+    def test_non_terminal_deny_keeps_attribution_over_a_laxer_terminal(self) -> None:
+        """The Plan 00144 semantics must survive: a laxer terminal result does
+        not wash out an earlier deny, so attribution stays with the denier."""
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "first-denier",
+                priority=10,
+                terminal=False,
+                result=HookResult(decision=Decision.DENY, reason="first reason"),
+            )
+        )
+        chain.add(MockHandler("terminal-allower", priority=20, terminal=True))
+
+        result = chain.execute({"tool_name": "Write"})
+
+        assert result.result.reason == "first reason"
+        assert result.decided_by == "first-denier"
+
     def test_non_terminal_deny_survives_later_terminal_allow(self) -> None:
         """A later TERMINAL ALLOW still cannot wash out an earlier deny.
 

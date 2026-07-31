@@ -1,0 +1,46 @@
+# NOTE: filename must match the actual released version. Current daemon is
+# 3.49.1 and this cycle adds a feature, so 3.50.0 is the expected number —
+# rename this file if the release lands on a different version.
+version: "3.50.0"
+date: "2026-07-31"
+
+breaking: false
+
+config_changes:
+  added:
+    - key: plan_workflow.qa.plan_doc_size
+      description: >
+        Tiered read-cost size limits for plan DOCUMENTS (Plan 00190). A PLAN.md
+        is read in full at the start of every session that touches the plan, so
+        its size is a recurring context cost; a JOURNAL/ day-file is only ever
+        tailed, grepped or read by a sub-agent, so journals — and the plan-index
+        README.md — are exempt at any size. Sub-keys: enabled (default true),
+        advisory_bytes/advisory_lines (18000/350), warning_bytes/warning_lines
+        (25000/500), block_bytes/block_lines (35000/900). A tier trips on
+        "bytes > B OR lines > L"; tiers must increase strictly on both axes or
+        config validation fails fast.
+      default: "enabled: true, with the 18000/25000/35000-byte tiers above"
+      recommended: false
+      dormant: false
+
+  renamed: []
+  removed: []
+
+  changed:
+    # Not a config key change, but the most important upgrade note in this
+    # release: enforcement that did not previously exist is now active by
+    # default. Recorded here so check-config-migrations surfaces it.
+    - key: plan_workflow.qa.plan_doc_size.block_bytes
+      description: >
+        NEW ENFORCEMENT, ON BY DEFAULT. Writing or editing a PLAN.md is now
+        DENIED when the result would exceed 35,000 bytes or 900 lines — but
+        ONLY when the edit GROWS the file. Shrinking a plan is silent (that is
+        the intended remedy) and a same-size edit such as ticking a checkbox
+        only advises, so an already-oversized plan can always be updated and
+        refactored down. Plans listed in plan_workflow.qa.legacy_plan_allowlist
+        only ever advise, and a plan that genuinely warrants its size can
+        declare why in the file with
+        "<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->".
+        If your project has large plans and you want a slower rollout, raise
+        block_bytes/block_lines, or set plan_doc_size.enabled: false. See the
+        post-upgrade task for how to audit your plan tree first.

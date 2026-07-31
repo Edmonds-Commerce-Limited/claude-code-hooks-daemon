@@ -172,6 +172,26 @@ class TestShrinkingIsNeverPenalised:
     def test_creation_has_no_before_and_is_still_checked(self):
         assert _run(_context(_body_of_bytes(40_000), content_before=None))[0].level is Level.BLOCK
 
+    def test_same_size_edit_on_an_oversized_plan_advises_but_does_not_block(self):
+        """Ticking a checkbox is a same-size edit — blocking it traps the agent.
+
+        The check exists to stop plans GROWING into logs. An edit that does not
+        grow the file makes nothing worse, so it still advises (the size stays
+        visible) but must never deny.
+        """
+        before = _body_of_bytes(40_000)
+        after = before.replace("# Plan 00190: Thing", "# Plan 00190: Thing!", 1)
+        after = after[: len(before)]
+        assert len(after) == len(before)
+        findings = _run(_context(after, content_before=before))
+        assert len(findings) == 1
+        assert findings[0].level is Level.ADVISE
+
+    def test_growth_that_stays_oversized_still_blocks(self):
+        before = _body_of_bytes(40_000)
+        after = _body_of_bytes(44_000)
+        assert _run(_context(after, content_before=before))[0].level is Level.BLOCK
+
 
 class TestEscapeHatch:
     MARKER = "<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: tracks a 12-subsystem migration -->\n"

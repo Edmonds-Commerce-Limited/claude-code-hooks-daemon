@@ -814,9 +814,11 @@ short dense one cost the same to read. Tiers must increase strictly on both
 axes or config validation FAILS FAST, because a non-monotonic setting silently
 disables a tier.
 
-Only the top tier denies, and three guards keep it from trapping you: a
-shrinking edit is never blocked (so an oversized plan can always be refactored
-down), plans in `legacy_plan_allowlist` only ever advise, and a file declaring
+Only the top tier denies, and only for an edit that makes the problem worse: an
+edit must GROW the file to be blocked. Shrinking is silent (that is the remedy
+in progress) and a same-size edit such as ticking a checkbox only advises, so
+an already-oversized plan can always be updated and refactored down. Beyond
+that, plans in `legacy_plan_allowlist` only ever advise, and a file declaring
 `<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->` is downgraded to advice. The
 remediation always names two remedies -- relocate narrative into `JOURNAL/`, or
 split an over-scoped plan -- and never suggests deleting content. See

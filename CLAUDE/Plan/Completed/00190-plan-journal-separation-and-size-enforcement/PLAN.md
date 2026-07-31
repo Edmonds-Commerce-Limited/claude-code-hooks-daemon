@@ -1,6 +1,6 @@
 # Plan 00190: PLAN-vs-JOURNAL Separation & Tiered Plan Size Enforcement
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-31
 **Owner**: joseph
 **Priority**: High
@@ -153,11 +153,13 @@ re-enable plan rules on every journal file.
   tests now pin the real semantics (`f6e5ccaa`)
 - [x] ✅ **Task 0.4**: `mkplan.bash` fallback now emits the `Delivery & Milestones` stub instead of pre-seeding the retired section; both copies
   resynced and verified identical (`0c1a78d8`)
-- [ ] ⬜ **Task 0.5**: *(low severity, re-diagnosed)* `core/chain.py:199-202`
-  attributes the "To disable" footer to the FIRST denying handler while
-  displaying a LATER handler's reason. Only manifests on multi-deny, and the fix
-  touches deliberate Plan 00144 chain semantics — needs its own TDD cycle rather
-  than a hasty patch
+- [x] ✅ **Task 0.5**: `core/chain.py` attributed the "To disable" footer to the
+  FIRST denying handler while displaying a LATER handler's reason. Exact
+  trigger, once traced: a non-terminal deny followed by a **terminal** deny —
+  the terminal branch replaces `final_result` but left `decided_by` behind, so
+  the footer named the wrong config key. Fixed by making attribution follow the
+  result actually displayed; the Plan 00144 semantics (a laxer terminal result
+  never washes out an earlier deny) are preserved and now pinned by a test
 - [x] ✅ **Task 0.7**: `background_process_tracker` false-positived on literal
   `&` and on backgrounding keywords appearing in prose — same defect class as
   0.1 (matching without structural context). Fixed by masking literal spans,
@@ -201,7 +203,10 @@ re-enable plan rules on every journal file.
   in-content escape hatch `MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason>` (a Write
   carries no shell command to prefix, and the reason then survives review);
   shrinking edits never penalised. Messages cite only the axis actually
-  breached — naming both when one is under misstates the facts
+  breached — naming both when one is under misstates the facts. **Only an edit
+  that GROWS the file can block**: measuring the corpus showed 6 plans over the
+  block tier, 2 of them active, and a same-size edit (ticking a checkbox) would
+  have denied them — closing the risk register's top item without allowlists
 - [x] ✅ **Task 3.4**: Scope ruled — the size rule applies to `PLAN.md` ONLY.
   `PLAN_INDEX` (measured at 132,938 B / 1,101 lines, and unbounded by design
   since it grows a row per plan) and supporting docs are exempt by
@@ -235,9 +240,19 @@ re-enable plan rules on every journal file.
 
 ### Phase 5: Verification & Release
 
-- [ ] ⬜ **Task 5.1**: Full QA; daemon restart RUNNING
-- [ ] ⬜ **Task 5.2**: Dogfood — this plan stays under the advisory tier
-- [ ] ⬜ **Task 5.3**: config-changes + truth-changes + post-upgrade-task manifests
+- [x] ✅ **Task 5.1**: Full QA 13/13 (10,718 tests, 95.2% coverage); daemon
+  restart verified RUNNING after every change; all enforcement verified against
+  the LIVE daemon through the production hook wrappers, not just unit tests
+- [x] ✅ **Task 5.2**: Dogfood — this plan is 15,058 B / 279 lines, under the
+  18,000 / 350 advisory tier, with an unbounded journal beside it. Corpus
+  measured: 6/187 plans over the block tier, and the growth-gating rule was
+  live-tested against the real 57 KB plan 00100 (tick-a-box allowed, shrink
+  silent, growth denied)
+- [x] ✅ **Task 5.3**: `UNRELEASED/` manifests staged — config-changes
+  (the new `plan_doc_size` block and the on-by-default enforcement),
+  truth-changes (4 `was → now` pairs), and a `recommended`-severity
+  post-upgrade task that audits a client's plan tree against the tiers before
+  the block bites
 
 ## Dependencies
 
@@ -246,18 +261,22 @@ re-enable plan rules on every journal file.
 
 ## Success Criteria
 
-- [ ] Both contracts stated symmetrically in one authoritative location
-- [ ] One classifier; no check applies to both plan documents and journal files
-- [ ] Journals provably exempt from every size and curation rule
-- [ ] Plan documents advise, then warn, then block, with an escape hatch
-- [ ] Every message names relocate-or-split; none recommends a blocked command
-- [ ] Full QA passes; daemon restarts RUNNING
+- [x] Both contracts stated symmetrically in one authoritative location
+  (`CLAUDE/PlanJournalling.md`, two-axis table; everything else points at it)
+- [x] One classifier; no check applies to both plan documents and journal files
+  (pinned by a test asserting no path resolves to both targets)
+- [x] Journals provably exempt from every size and curation rule
+  (live-verified: a 500 KB journal day-file is silent)
+- [x] Plan documents advise, then warn, then block, with an escape hatch
+- [x] Every message names relocate-or-split; none recommends a blocked command
+  (asserted by test: no message contains "delete" or "trim")
+- [x] Full QA passes; daemon restarts RUNNING
 
 ## Risks & Mitigations
 
 | Risk                                         | Impact | Mitigation                                             |
 | -------------------------------------------- | ------ | ------------------------------------------------------ |
-| Existing oversized plans become uneditable   | High   | Exempt shrinking edits; grandfather; escape hatch      |
+| Existing oversized plans become uneditable   | High   | CLOSED: only a GROWING edit can block (see Task 3.3)   |
 | Agent deletes narrative instead of moving it | High   | Two-remedy messages + commit-stage shrink guard        |
 | Scope-predicate drift re-opens the bleed     | High   | Single classifier + test asserting all consumers agree |
 | Worktree edits resolve the wrong repo        | High   | Resolve git repo from the file's own path              |
@@ -269,21 +288,19 @@ re-enable plan rules on every journal file.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00190-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Plan scaffolded, indexed, research fan-out dispatched — `62c75f65`
-- Phase 0 Task 0.1: journal rule-bleed fix (found by the bug blocking its own
-  documentation) — `0e1048d5`
-- Phase 0 Task 0.2: removed the daemon's only injected instruction to write the
-  activity stream into PLAN.md — `544f67ea`
-- Phase 0 Task 0.6: append-only remediation now defends journal growth,
-  unblocking the size-tier work — `a114d270`
-- Phase 0 Task 0.4: scaffolder stopped pre-seeding the retired section —
-  `0c1a78d8`
-- Phase 0 Task 0.3: journal-mode subordination documented and pinned by
-  regression tests — `f6e5ccaa`
-- Phase 0 closed except 0.5 (deferred by decision)
-- **Released v3.49.1 "The PLAN-vs-JOURNAL Contract"** — release commit
-  `f5f01974`, tag `0df2fcc5`. Ships the contract + five fixes; no enforcement
-  thresholds (Phases 2-5 remain)
-- Follow-up found during release: RELEASING.md Step 13's `git add` list omits
-  handler sources, so a Step 11 guidance fix can be left uncommitted while its
-  regenerated CLAUDE.md is auto-committed
+- Plan scaffolded; research fan-out — `62c75f65`
+- Phase 0 rule-bleed fixes (0.1, 0.2, 0.6, 0.4, 0.3) — `0e1048d5`, `544f67ea`,
+  `a114d270`, `0c1a78d8`, `f6e5ccaa`
+- **Released v3.49.1 "The PLAN-vs-JOURNAL Contract"** — `f5f01974`, tag
+  `0df2fcc5` (contract + Phase 0 fixes; no thresholds yet)
+- Task 0.7: quote/heredoc-aware backgrounding detection — `92341a47`,
+  `f4d708f9`
+- Phase 2: one `PlanFileKind` classifier, then journal exemption by LOCATION —
+  `295a8476`, `26742b8d`
+- Phase 3: tiered `plan-doc-size` + shrink guard — `95c28cc6`, `3e03516e`
+- Phase 4: docs stopped teaching the anti-pattern — `b1b089d9`
+- Task 0.5 + Phase 5 completion and release manifests — this commit
+
+Open follow-up (not blocking): RELEASING.md Step 13's `git add` list omits
+handler sources, so a Step 11 guidance fix can be left uncommitted while its
+regenerated CLAUDE.md is auto-committed. Documented in Step 13 during v3.49.1.

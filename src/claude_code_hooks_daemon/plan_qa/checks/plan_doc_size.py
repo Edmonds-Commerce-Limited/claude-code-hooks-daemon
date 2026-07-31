@@ -12,10 +12,15 @@ That asymmetry is the whole design. The thresholds come from read cost
 remediation names TWO remedies because most oversized plans are over-scoped
 rather than journal-polluted.
 
-Three guards keep the block from ever trapping an agent:
+Guards keep the block from ever trapping an agent — only an edit that makes
+the problem WORSE can be denied:
 
-- **Shrinking edits are never penalised** — otherwise an oversized plan could
-  never be refactored downwards, which is the one action the check wants.
+- **Shrinking edits are silent** — that is the remedy in progress, and
+  otherwise an oversized plan could never be refactored downwards.
+- **Non-growing edits never block.** Ticking a checkbox on an already-oversized
+  plan is a same-size edit; denying it would leave the agent unable to update a
+  plan they are legitimately working. It still advises, so the size stays
+  visible. The check exists to stop plans GROWING into logs.
 - **Grandfathered plans only advise**, via ``legacy_plan_allowlist``.
 - **An escape hatch** (``MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason>``) downgrades
   a block to advice for a plan that genuinely warrants the size.
@@ -162,6 +167,11 @@ def _run(context: CheckContext) -> list[Finding]:
     before = context.file_content_before
     if before is not None and len(content) < len(before):
         return []
+    # An edit that does not GROW the file makes nothing worse. Ticking a
+    # checkbox on an already-oversized plan is same-size, and denying it would
+    # trap the agent in a plan they cannot update. Such edits still advise, so
+    # the size stays visible, but they never block.
+    grows = before is None or len(content) > len(before)
 
     byte_count = len(content.encode("utf-8"))
     line_count = content.count("\n")
@@ -173,7 +183,7 @@ def _run(context: CheckContext) -> list[Finding]:
     if breached is None:
         return []
 
-    level = breached.level
+    level = breached.level if grows else Level.ADVISE
     remediation = _REMEDY
     if level is Level.BLOCK:
         # Grandfathered plans and a declared justification both downgrade the

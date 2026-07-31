@@ -197,9 +197,10 @@ deletion:**
 2. **Split** the plan if the task tree itself is the bulk — an over-scoped
    plan is not fixed by better journalling.
 
-Shrinking edits are never blocked, so an oversized plan can always be
-refactored down. A plan that genuinely warrants its size can declare why with
-`<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`.
+**Only an edit that GROWS the file can be blocked.** Shrinking it is silent
+and a same-size edit such as ticking a checkbox only advises — so an oversized
+plan can always be updated and refactored down. A plan that genuinely warrants
+its size can declare why with `<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`.
 
 See [CLAUDE/PlanJournalling.md](../CLAUDE/PlanJournalling.md) for the full
 journalling contract.

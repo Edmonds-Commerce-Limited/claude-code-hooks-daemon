@@ -217,6 +217,14 @@ class HandlerChain:
                             if accumulated_context:
                                 result.context = accumulated_context + result.context
                             final_result = result
+                            # This terminal result REPLACES whatever was held,
+                            # so attribution must follow it (Plan 00190 Task
+                            # 0.5). Otherwise the reason shown comes from this
+                            # handler while the "To disable:" footer names an
+                            # earlier non-terminal denier — pointing the user
+                            # at the wrong config key.
+                            if _is_restrictive(result.decision):
+                                decided_by = handler.name
                         for h in handlers_matched[:-1]:
                             final_result.add_handler(h)
                         terminated_by = handler.name
