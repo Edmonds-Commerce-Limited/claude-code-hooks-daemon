@@ -62,15 +62,19 @@ fail() {
 # Resolve the venv interpreter the installer created inside the dummy daemon
 # dir. Prints the path on stdout; returns non-zero when absent so callers can
 # decide what to do (we never swallow that signal).
+#
+# Delegates to the CANONICAL resolver rather than globbing untracked/venv-*
+# itself — that glob has exactly one owner (Plan 00104 Decision 7), and a
+# second copy here would drift from it the moment the layout changes.
 resolve_dummy_python() {
-    local venv_dir
-    for venv_dir in "$DUMMY_DAEMON_DIR"/untracked/venv-*; do
-        if [ -x "$venv_dir/bin/python" ]; then
-            printf '%s\n' "$venv_dir/bin/python"
-            return 0
-        fi
-    done
-    return 1
+    local lib="$REPO_ROOT/scripts/lib/resolve_venv.sh"
+    if [ ! -f "$lib" ]; then
+        echo "❌ canonical venv resolver missing at $lib" >&2
+        return 1
+    fi
+    # shellcheck disable=SC1090  # path is computed at runtime from REPO_ROOT
+    source "$lib"
+    resolve_venv_python "$DUMMY_DAEMON_DIR"
 }
 
 # Stop the dummy daemon if a working interpreter is present. Cleanup must not

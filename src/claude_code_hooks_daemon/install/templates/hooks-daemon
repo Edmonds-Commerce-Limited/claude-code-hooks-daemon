@@ -1,0 +1,76 @@
+#!/bin/bash
+#
+# hooks-daemon — the daemon CLI entry point for agents and humans.
+#
+# Deployed by the installer to {daemon_root}/bin/hooks-daemon:
+#   client install : <project>/.claude/hooks-daemon/bin/hooks-daemon
+#   self-install   : <project>/bin/hooks-daemon
+#
+# WHY THIS EXISTS (Plan 00192)
+# ----------------------------
+# Guidance used to tell agents to run:
+#     $PYTHON -m claude_code_hooks_daemon.daemon.cli <subcommand>
+# $PYTHON is never set in an agent's shell, and the PATH python3 cannot import
+# the package because the daemon venv sets include-system-site-packages=false.
+# The line expanded to "-m claude_code_hooks_daemon..." and bash reported
+# "-m: command not found" — an error naming neither Python, the venv, nor the
+# daemon. Agents concluded the package was missing and damaged working installs
+# trying to reinstall it.
+#
+# This wrapper takes the interpreter problem away from the caller entirely.
+#
+# DESIGN NOTES
+# ------------
+# 1. It anchors to its OWN location (not the caller's CWD). daemon-cli.sh walks
+#    up from $PWD looking for .claude/hooks-daemon.yaml, which breaks inside a
+#    git worktree: the worktree has the tracked yaml but NOT the git-ignored
+#    .claude/hooks-daemon/scripts/lib/. Anchoring to $0 is worktree-proof.
+# 2. It performs NO network access. The skill wrappers self-bootstrap against a
+#    release manifest on every invocation, which is unacceptable for hot-path
+#    commands like `plan-qa --lint` and fails closed in offline containers.
+# 3. It fails loudly. A wrapper that silently degrades would recreate the exact
+#    confusion this script exists to eliminate.
+
+set -euo pipefail
+
+# Resolve this script's real directory, following symlinks so the wrapper still
+# anchors correctly if a project links it onto PATH.
+_source="${BASH_SOURCE[0]}"
+while [ -L "$_source" ]; do
+    _dir="$(cd -P "$(dirname "$_source")" && pwd)"
+    _source="$(readlink "$_source")"
+    # A relative symlink target resolves against the link's own directory.
+    case "$_source" in
+        /*) ;;
+        *) _source="$_dir/$_source" ;;
+    esac
+done
+BIN_DIR="$(cd -P "$(dirname "$_source")" && pwd)"
+
+# The daemon root is the parent of bin/ in BOTH install modes, so this wrapper
+# needs no knowledge of which mode it is running in.
+DAEMON_DIR="$(cd -P "$BIN_DIR/.." && pwd)"
+
+RESOLVE_LIB="$DAEMON_DIR/scripts/lib/resolve_venv.sh"
+if [ ! -f "$RESOLVE_LIB" ]; then
+    echo "❌ hooks-daemon: venv resolver missing at $RESOLVE_LIB" >&2
+    echo "   This wrapper expects to live at <daemon_root>/bin/hooks-daemon." >&2
+    echo "   Reinstall or upgrade the daemon to restore scripts/lib/." >&2
+    exit 5
+fi
+
+# shellcheck disable=SC1090  # path is computed at runtime from DAEMON_DIR
+source "$RESOLVE_LIB"
+
+if ! PYTHON="$(resolve_venv_python "$DAEMON_DIR")"; then
+    echo "❌ hooks-daemon: could not resolve a usable venv under $DAEMON_DIR" >&2
+    echo "   Run the installer/upgrade to rebuild it." >&2
+    exit 5
+fi
+
+if [ ! -x "$PYTHON" ]; then
+    echo "❌ hooks-daemon: resolved interpreter is not executable: $PYTHON" >&2
+    exit 5
+fi
+
+exec "$PYTHON" -m claude_code_hooks_daemon.daemon.cli "$@"

@@ -143,23 +143,40 @@ investigated by following the printed instructions.
 - [x] ✅ **Task 0.2**: Reproduce this plan's bug in true client mode — confirmed
   **9 unrunnable `$PYTHON` lines** in the fresh client's generated `CLAUDE.md`.
 
-### Phase 1: Shared resolver utility
+### Phase 1: Shared resolver utility (DONE)
 
-- [ ] ⬜ **Task 1.1**: Write failing tests for a `daemon_cli_command()` utility that
-  returns a runnable absolute invocation for the current install mode.
-  - [ ] ⬜ Self-install mode resolves to the fingerprint-keyed venv interpreter.
-  - [ ] ⬜ Client-install mode resolves to the deployed wrapper path.
-  - [ ] ⬜ Fails loudly (never returns a `$PYTHON` literal) when no venv resolves.
-- [ ] ⬜ **Task 1.2**: Implement the utility to pass, with named constants (no magic
-  strings) and full type annotations.
+Chosen shape (Decision 2): a deployed `bin/hooks-daemon` wrapper, emitted as an
+absolute path.
 
-### Phase 2: Self-install wrapper
+- [x] ✅ **Task 1.1**: Failing tests for `daemon_cli_command()` — RED confirmed
+  via `ImportError`.
+  - [x] ✅ Self-install resolves to `{project_root}/bin/hooks-daemon`.
+  - [x] ✅ Client install resolves to
+    `{project_root}/.claude/hooks-daemon/bin/hooks-daemon`.
+  - [x] ✅ Regression guard: emitted string never contains `$`, `PYTHON`, or
+    `-m claude_code_hooks_daemon`.
+- [x] ✅ **Task 1.2**: `utils/cli_command.py` implemented — named constants, full
+  annotations, 13 tests green.
 
-- [ ] ⬜ **Task 2.1**: Write failing tests for a no-network wrapper reachable in
-  self-install mode that forwards all arguments to the daemon CLI.
-- [ ] ⬜ **Task 2.2**: Implement the wrapper; verify `plan-qa --sweep` runs through it.
-- [ ] ⬜ **Task 2.3**: Repoint or retire `daemon.sh` (stale legacy venv path, odd
-  permissions); ensure exactly one canonical root entry point.
+### Phase 2: The wrapper (template + deploy DONE; installer wiring REMAINS)
+
+- [x] ✅ **Task 2.1**: Failing tests for the wrapper template and its deployment.
+- [x] ✅ **Task 2.2**: `install/templates/hooks-daemon` implemented — shellcheck
+  clean, no network access, anchors to its OWN location (`$0`) rather than CWD.
+  Verified live: restarted the dogfood daemon through it.
+- [x] ✅ **Task 2.3**: `install/bin_wrapper.py` deploy function — overwrite-on-run,
+  chmod 0o755, never world-writable, mirroring `_deploy_mkplan`.
+- [x] ✅ **Task 2.4**: Drift guard — the tracked self-install copy must match the
+  bundled template byte-for-byte.
+- [ ] ⬜ **Task 2.5**: Wire `deploy_bin_wrapper()` into the installer
+  (`install.py` / `install_version.sh`) so clients actually receive it. **Until
+  this lands the wrapper ships to nobody.**
+- [ ] ⬜ **Task 2.6**: Repoint or retire the stale root `daemon.sh` (legacy venv
+  path, mode `rwx--x--x`); ensure exactly one canonical entry point.
+
+**Anchoring to `$0` also fixes gap 4 for free.** Verified A/B from an unrelated
+CWD: `daemon-cli.sh` exits 1 with "Not in a hooks daemon project", while
+`bin/hooks-daemon` resolves the venv and reaches the daemon CLI.
 
 ### Phase 3: Swap all emission sites
 
