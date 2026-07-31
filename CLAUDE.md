@@ -759,6 +759,8 @@ pytest tests/ 2>&1 | /…/scripts/echd-capture 20
 
 **Allowed** (whitelisted): `grep`, `rg`, `awk`, `sed`, `jq`, `ls`, `cat`, `git log`, `git tag`, `git branch`, and other cheap filtering commands.
 
+**Only PIPES are restricted — reading a file directly is not.** `tail -n 40 <file>`, `head -n 40 <file>` and `grep pattern <file>` take the path as an ARGUMENT, so no pipe exists and this handler never sees them. That is the supported way to sample a large append-only file such as a plan's `JOURNAL/` day-file — which you should tail or grep rather than read whole.
+
 **Add to whitelist** (if safe to pipe): set `extra_whitelist` in `.claude/hooks-daemon.yaml` under `pipe_blocker`.
 
 ## dangerous_permissions — chmod 777 is blocked
@@ -983,6 +985,13 @@ commit with a TODO list of what the commit must also contain.
   stage a closing journal entry when
   `plan_workflow.qa.journal.enforce_on_completion` is on
   (`journal-completion-entry`)
+- (advise-only, Plan 00190) a commit whose PLAN.md loses 2,000+
+  bytes while staging NO journal entry is flagged
+  (`plan-shrink-without-journal`): that shape usually means
+  narrative was DELETED rather than relocated into `JOURNAL/`.
+  If the content was genuinely obsolete this is fine as it stands
+  — git keeps the history; the check exists so you notice which
+  of the two you just did
 
 Check the staged tree any time without committing:
 `$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --check-staged`.
@@ -1007,6 +1016,15 @@ call with the exact remediation; fix the content and retry.
   (`header-body-coherence`)
 - use the template task grammar `- [ ] ⬜ **Task N.N**:` — not
   ad-hoc markers like `[✓]`/`[⏳]` (`task-grammar`)
+- a `PLAN.md` must stay under the size tiers (`plan-doc-size`):
+  advisory above 18,000 bytes / 350 lines, escalated warning above
+  25,000 / 500, and edits BLOCKED above 35,000 / 900. The two
+  remedies are RELOCATE the narrative into this plan's `JOURNAL/`
+  or SPLIT the plan — never delete content. Shrinking edits are
+  never blocked, so an oversized plan can always be refactored
+  down; declare a genuine exception in the file with
+  `<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`. Journals and
+  the plan-index README are exempt at any size.
 
 **Advisory rules**: missing Created/Owner/Priority headers on new
 plans; a terminal status set while the folder is still in the plan
@@ -1046,6 +1064,30 @@ Writing time estimates into a plan document is blocked — that is any `CLAUDE/P
 - `ETA:`, `timeline:`, `deadline:`, `due date:` lines
 
 **Instead:** break work into concrete tasks and implementation steps, and let the user decide scheduling. Technical durations that describe a feature (cache TTL, session timeout, retention window) are allowed — only work/effort estimates are blocked.
+
+## plan_workflow — PLAN.md and JOURNAL/ obey OPPOSITE contracts
+
+Confusing these two is the single most common plan-hygiene failure: narrative gets appended to `PLAN.md` until it is tens of KB of stale log. Each file has a WRITE contract and a READ contract, and the read contract is what justifies the write contract.
+
+|             | `PLAN.md`                                                                                | `JOURNAL/NNNNN-Journal-YY-MM-DD.md`                                                                  |
+| ----------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **Write**   | Commit if dirty, EDIT IN PLACE, commit. Rewrite freely — git holds the history           | APPEND ONLY. Never edit or remove an earlier entry; corrections are new dated entries at the bottom  |
+| **Content** | LEAN, surgical, always correct — current truth only: goals, decisions, task tree, status | What actually happened: dated progress, findings, incidents, hand-offs                               |
+| **Read**    | Read IN FULL every session — it is your grounding                                        | NEVER read whole. `tail -n N` the newest day-file, grep it, or send a sub-agent for deep archaeology |
+| **Size**    | Bounded — see tiers below                                                                | UNBOUNDED by design. Length is never a problem; never tidy or trim a journal                         |
+
+**Why the asymmetry**: a plan is re-read in full at the start of every session that touches it, so every KB is a recurring context cost paid before any work starts. A journal is only ever sampled, so it is safe to grow forever.
+
+**Size tiers on `PLAN.md`** (bytes OR lines, whichever trips first): advisory above 18,000 bytes / 350 lines; escalated warning above 25,000 / 500; edits BLOCKED above 35,000 / 900.
+
+**When a plan gets too big there are exactly two remedies, and NEITHER is deletion**:
+
+1. **Relocate** the narrative into this plan's `JOURNAL/` day-file.
+2. **Split** the plan if the task tree itself is the bulk — an over-scoped plan is not fixed by better journalling.
+
+Shrinking edits are never blocked, so an oversized plan can always be refactored down. If a plan genuinely warrants its size, record why in the file: `<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`.
+
+**Task status icons**: ⬜ not started, 🔄 in progress, ✅ complete. Include a Success Criteria section and break work into phases.
 
 ## npm_command — use llm: prefixed npm commands
 
