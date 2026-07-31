@@ -140,17 +140,25 @@ re-enable plan rules on every journal file.
 
 ### Phase 0: Live dogfooding fixes
 
-- [x] ✅ **Task 0.1**: `plan_time_estimates` fired on journal day-files — fixed,
-  QA 13/13, daemon verified, live probe confirms (commit `0e1048d5`)
-- [ ] ⬜ **Task 0.2**: `recovery_cron_advisor` instructs recording the cron ID in
-  `## Notes & Updates` (4 sites: `:145`, `:444`, `:445`, `:89-93`/`:213-214`)
+- [x] ✅ **Task 0.1**: `plan_time_estimates` fired on journal day-files — fixed;
+  live probe confirms journal allowed / PLAN.md denied (`0e1048d5`)
+- [x] ✅ **Task 0.2**: `recovery_cron_advisor` instructed recording the cron ID in
+  `## Notes & Updates` — 4 sites fixed; `CLAUDE.md`'s generated block verified
+  clean after restart (`544f67ea`)
+- [x] ✅ **Task 0.6**: `journal-append-only` remediation now states the journal is
+  unbounded by design and must not be tidied — a prerequisite for the size
+  tiers, not a follow-up (`a114d270`)
 - [ ] ⬜ **Task 0.3**: `journal.mode: block` is silently subordinate to
   `edit_mode` — the documented promise is conditionally false; fix docs
 - [ ] ⬜ **Task 0.4**: `mkplan.bash:318-322` fallback writes `## Notes & Updates`
-- [ ] ⬜ **Task 0.5**: `plan_time_estimates` block reason names the wrong handler
-  in its "To disable" hint
-- [ ] ⬜ **Task 0.6**: `journal-append-only` remediation never says the journal is
-  *supposed* to grow — the precise bleed vector once size nags exist
+- [ ] ⬜ **Task 0.5**: *(low severity, re-diagnosed)* `core/chain.py:199-202`
+  attributes the "To disable" footer to the FIRST denying handler while
+  displaying a LATER handler's reason. Only manifests on multi-deny, and the fix
+  touches deliberate Plan 00144 chain semantics — needs its own TDD cycle rather
+  than a hasty patch
+- [ ] ⬜ **Task 0.7**: `background_process_tracker` false-positives on a literal
+  `&` inside a quoted string. Same defect class as 0.1 — naive matching without
+  structural context
 
 ### Phase 1: Research & Design
 
@@ -230,3 +238,7 @@ re-enable plan rules on every journal file.
 - Plan scaffolded, indexed, research fan-out dispatched — `62c75f65`
 - Phase 0 Task 0.1: journal rule-bleed fix (found by the bug blocking its own
   documentation) — `0e1048d5`
+- Phase 0 Task 0.2: removed the daemon's only injected instruction to write the
+  activity stream into PLAN.md — `544f67ea`
+- Phase 0 Task 0.6: append-only remediation now defends journal growth,
+  unblocking the size-tier work — `a114d270`
