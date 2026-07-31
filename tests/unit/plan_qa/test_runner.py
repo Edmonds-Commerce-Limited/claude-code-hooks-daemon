@@ -111,6 +111,7 @@ class TestRegistryCatalogue:
             "plan-ref-format",
             "journal-entry-with-progress",
             "journal-completion-entry",
+            "plan-shrink-without-journal",
             # Sweep-only
             "staleness-nag",
             "dormant-honesty",
@@ -127,7 +128,8 @@ class TestRegistryCatalogue:
         # 8 original + 2 journal EDIT checks (Plan 00163) + plan-doc-size (Plan 00190)
         assert len(by_stage[Stage.EDIT]) == 11
         # 5 commit-only + 5 dual tree checks + 2 journal COMMIT checks (Plan 00163)
-        assert len(by_stage[Stage.COMMIT]) == 12
+        # + plan-shrink-without-journal (Plan 00190)
+        assert len(by_stage[Stage.COMMIT]) == 13
         # 3 sweep-only + 5 dual tree checks + 2 journal SWEEP checks (Plan 00163)
         assert len(by_stage[Stage.SWEEP]) == 10
 
@@ -162,6 +164,7 @@ class TestRegistryCatalogue:
             "journal-entry-with-progress",
             "journal-completion-entry",
             "plan-doc-size",
+            "plan-shrink-without-journal",
         }
         for spec in all_checks():
             if spec.check_id in post_audit_no_sins:

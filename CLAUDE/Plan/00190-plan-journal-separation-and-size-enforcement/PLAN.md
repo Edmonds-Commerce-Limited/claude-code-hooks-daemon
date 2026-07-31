@@ -192,14 +192,24 @@ re-enable plan rules on every journal file.
 
 ### Phase 3: Tiered Size Enforcement
 
-- [ ] ⬜ **Task 3.1**: TDD the size check, plan documents only
-- [ ] ⬜ **Task 3.2**: `plan_workflow.qa.plan_doc_size` config with named
-  constants and monotonicity validation
-- [ ] ⬜ **Task 3.3**: Two-remedy messaging; escape hatch; shrink exemption
-- [ ] ⬜ **Task 3.4**: Rule the scope of `CLAUDE/Plan/README.md` (34,002 tokens —
-  it would block instantly) and of the 107 supporting docs
-- [ ] ⬜ **Task 3.5**: `plan-shrink-without-journal` commit-stage guard against
-  delete-instead-of-relocate
+- [x] ✅ **Task 3.1**: `plan-doc-size` check, plan documents only; tiers
+  advisory/warning/block as ADVISE/ADVISE/BLOCK per Decision 1
+- [x] ✅ **Task 3.2**: `plan_workflow.qa.plan_doc_size` config with named
+  constants and a FAIL-FAST monotonicity validator (non-monotonic tiers
+  silently disable a tier, which is worse than a startup error)
+- [x] ✅ **Task 3.3**: Two-remedy messaging that explicitly rules out deletion;
+  in-content escape hatch `MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason>` (a Write
+  carries no shell command to prefix, and the reason then survives review);
+  shrinking edits never penalised. Messages cite only the axis actually
+  breached — naming both when one is under misstates the facts
+- [x] ✅ **Task 3.4**: Scope ruled — the size rule applies to `PLAN.md` ONLY.
+  `PLAN_INDEX` (measured at 132,938 B / 1,101 lines, and unbounded by design
+  since it grows a row per plan) and supporting docs are exempt by
+  construction via the Phase 2 classifier, not by a maintained list
+- [x] ✅ **Task 3.5**: `plan-shrink-without-journal` commit-stage guard —
+  a PLAN.md losing ≥2,000 bytes with no staged journal entry is the signature
+  of delete-instead-of-relocate. Advisory, since a genuine curation pass is
+  legitimate; the point is to make the agent notice which it just did
 
 ### Phase 4: Documentation Consistency
 

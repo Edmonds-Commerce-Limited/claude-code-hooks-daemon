@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.plan_qa.checks import (
     path_existence,
     plan_doc_size,
     plan_ref_format,
+    plan_shrink_without_journal,
     row_folder_bijection,
     same_commit_plan_doc,
     staleness_nag,
@@ -71,6 +72,7 @@ def all_checks() -> tuple[CheckSpec, ...]:
         plan_ref_format.CHECK,
         journal_entry_with_progress.CHECK,
         journal_completion_entry.CHECK,
+        plan_shrink_without_journal.CHECK,
         # Stage 3 — sweep-only checks
         staleness_nag.CHECK,
         dormant_honesty.CHECK,
