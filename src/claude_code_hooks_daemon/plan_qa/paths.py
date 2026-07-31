@@ -20,6 +20,7 @@ off. Policy gating belongs in the checks, on top of the answer given here.
 """
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -29,7 +30,7 @@ from claude_code_hooks_daemon.plan_qa.model import (
     PLAN_DOC_FILENAME,
     parse_journal_dayfile_name,
 )
-from claude_code_hooks_daemon.plan_qa.types import CheckContext
+from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME, CheckContext
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _PLAN_INDEX_FILENAME: Final[str] = "README.md"
@@ -86,6 +87,37 @@ class PlanFile:
     def is_plan_document(self) -> bool:
         """Whether plan-document rules (status, task grammar, size) apply."""
         return self.kind is PlanFileKind.PLAN_DOCUMENT
+
+
+def _journal_dir_index(directories: Sequence[str], journal_dir_name: str) -> int | None:
+    """Index of the first journal directory in ``directories``, else ``None``.
+
+    The one place the "is this journal territory?" question is answered.
+    :func:`classify` and :func:`is_journal_file` both route through here so
+    they cannot drift apart.
+    """
+    return next(
+        (index for index, name in enumerate(directories) if name == journal_dir_name),
+        None,
+    )
+
+
+def is_journal_file(path: Path, journal_dir_name: str = DEFAULT_JOURNAL_DIR_NAME) -> bool:
+    """Whether ``path`` is journal territory, by LOCATION or by day-file NAME.
+
+    A path-only, config-independent predicate for handlers that hold a file
+    path but no :class:`CheckContext`. Both signals are legitimate:
+
+    - **Location** — anything inside a journal directory, at any depth. This
+      is the signal handlers previously lacked, so a file in ``JOURNAL/``
+      with a non-conforming name still received plan-document rules.
+    - **Name** — the distinctive ``NNNNN-Journal-YY-MM-DD.md`` grammar, which
+      still identifies a day-file that has been misplaced.
+    """
+    return (
+        _journal_dir_index(path.parts[:-1], journal_dir_name) is not None
+        or parse_journal_dayfile_name(path.name) is not None
+    )
 
 
 def _archive_dir_names(context: CheckContext) -> frozenset[str]:
@@ -145,10 +177,7 @@ def classify(path: Path, context: CheckContext) -> PlanFile:
 
     # (2) Journal containment FIRST. Any ancestor named after the journal
     # directory makes this journal territory, however deeply nested.
-    journal_depth = next(
-        (index for index, name in enumerate(directories) if name == context.journal_dir_name),
-        None,
-    )
+    journal_depth = _journal_dir_index(directories, context.journal_dir_name)
     plan_folder = directories[0] if directories else None
     if journal_depth is not None:
         # The plan folder is whatever directory encloses the journal dir.

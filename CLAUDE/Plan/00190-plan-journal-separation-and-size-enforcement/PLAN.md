@@ -176,13 +176,19 @@ re-enable plan rules on every journal file.
 
 ### Phase 2: Scope Demarcation
 
-- [ ] ⬜ **Task 2.1**: `plan_qa/paths.py` — `PlanFileKind` + `classify()` SSoT,
+- [x] ✅ **Task 2.1**: `plan_qa/paths.py` — `PlanFileKind` + `classify()` SSoT,
   testing `JOURNAL/` containment BEFORE the `PLAN.md` filename test so
-  dual classification is structurally impossible
-- [ ] ⬜ **Task 2.2**: Reimplement `edit_target()`/`journal_edit_target()` as thin
-  adapters; fix `JOURNAL/PLAN.md` classifying as both
-- [ ] ⬜ **Task 2.3**: Reconcile the two disagreeing "journal file" definitions
-- [ ] ⬜ **Task 2.4**: Regression tests asserting no rule crosses the boundary
+  dual classification is structurally impossible. `PLAN_INDEX` is a distinct
+  kind (the index is 132,938 B and grows one row per plan by design)
+- [x] ✅ **Task 2.2**: `edit_target()`/`journal_edit_target()` reimplemented as
+  thin adapters; `JOURNAL/PLAN.md` no longer classifies as both
+- [x] ✅ **Task 2.3**: Reconciled the disagreeing definitions behind
+  `is_journal_file()` — journal territory is decided by LOCATION as well as
+  day-file grammar, closing a real bleed where a mis-named file inside
+  `JOURNAL/` still received plan rules (`plan_time_estimates`) or was
+  silently rewritten (`markdown_table_formatter`)
+- [x] ✅ **Task 2.4**: Regression tests — no path resolves to both targets;
+  `classify()` and `is_journal_file()` asserted to agree on every sample
 
 ### Phase 3: Tiered Size Enforcement
 

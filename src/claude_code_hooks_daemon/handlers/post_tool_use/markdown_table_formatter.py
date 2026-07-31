@@ -28,7 +28,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_path
-from claude_code_hooks_daemon.plan_qa.model import parse_journal_dayfile_name
+from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
 # Extensions treated as markdown (lowercase match).
@@ -69,11 +69,13 @@ class MarkdownTableFormatterHandler(Handler):
         if not file_path.lower().endswith(_MARKDOWN_EXTENSIONS):
             return False
 
-        # Plan 00163: journal day-files are an append-only, byte-stable log;
+        # Plan 00163: a journal is an append-only, byte-stable log;
         # reformatting one would rewrite earlier entries and trip the
-        # journal-append-only check. The distinctive day-file grammar
-        # (NNNNN-Journal-YY-MM-DD.md) is a config-independent exemption signal.
-        if parse_journal_dayfile_name(Path(file_path).name) is not None:
+        # journal-append-only check. Plan 00190: exempt the whole of journal
+        # territory via the shared config-independent predicate — by LOCATION
+        # as well as by day-file grammar — so a file inside JOURNAL/ whose
+        # name does not parse is not silently rewritten.
+        if is_journal_file(Path(file_path)):
             return False
 
         # PostToolUse runs after the write, so the file must exist on disk.
@@ -130,9 +132,11 @@ class MarkdownTableFormatterHandler(Handler):
             "post-processed back).\n"
             "- Asterisks in table cells are escaped (`*` → `\\*`) as required by GFM.\n"
             "\n"
-            "**Exempt:** journal day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`, Plan "
-            "00163) are NEVER reformatted — they are an append-only, byte-stable log and "
-            "rewriting them would trip the `journal-append-only` check.\n"
+            "**Exempt:** anything under a plan's `JOURNAL/` directory is NEVER "
+            "reformatted — day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`, Plan 00163) "
+            "and any other file in there. A journal is an append-only, byte-stable log; "
+            "rewriting it would trip the `journal-append-only` check. The exemption is "
+            "by LOCATION as well as by filename, so a mis-named day-file is still safe.\n"
             "\n"
             "**Ad-hoc formatting of existing files:**\n"
             "\n"

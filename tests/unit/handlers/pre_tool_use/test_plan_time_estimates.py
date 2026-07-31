@@ -605,6 +605,34 @@ class TestJournalDayFilesAreExempt:
         }
         assert handler.matches(hook_input) is False
 
+    @pytest.mark.parametrize(
+        "file_path",
+        [
+            # Non-conforming name, but unambiguously inside JOURNAL/.
+            "/workspace/CLAUDE/Plan/00190-x/JOURNAL/notes.md",
+            "/workspace/CLAUDE/Plan/00190-x/JOURNAL/00190-Journal-BADDATE.md",
+            "/workspace/CLAUDE/Plan/00190-x/JOURNAL/sub/deep.md",
+            "/workspace/CLAUDE/Plan/Completed/00042-y/JOURNAL/notes.md",
+        ],
+    )
+    def test_exempt_by_location_not_only_by_name(
+        self, handler: PlanTimeEstimatesHandler, file_path: str
+    ) -> None:
+        """Plan 00190 Task 2.3: journal territory is decided by LOCATION too.
+
+        Keying the exemption on the day-file grammar alone let a plan rule
+        reach any file inside ``JOURNAL/`` whose name did not parse — a typo'd
+        date was enough to re-enable plan rules on journal content.
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": file_path,
+                "content": "That migration took 4 hours of work.",
+            },
+        }
+        assert handler.matches(hook_input) is False
+
     def test_still_matches_plan_document_in_same_folder(
         self, handler: PlanTimeEstimatesHandler
     ) -> None:

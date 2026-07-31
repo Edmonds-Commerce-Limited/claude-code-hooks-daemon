@@ -12,6 +12,7 @@ import pytest
 from claude_code_hooks_daemon.plan_qa.paths import (
     PlanFileKind,
     classify,
+    is_journal_file,
 )
 from claude_code_hooks_daemon.plan_qa.types import CheckContext
 
@@ -165,3 +166,55 @@ class TestExhaustiveness:
             result = _classify(rel_path)
             plan_ruled = kind in (PlanFileKind.PLAN_DOCUMENT, PlanFileKind.SUPPORTING_DOC)
             assert not (result.is_journal and plan_ruled)
+
+
+class TestIsJournalFile:
+    """Path-only predicate for handlers that have no CheckContext.
+
+    Handlers previously exempted journals by day-file NAME alone, so a file
+    inside ``JOURNAL/`` with a non-conforming name (a typo'd date, or
+    ``notes.md``) still received plan-document rules — a plan rule leaking
+    onto journal territory.
+    """
+
+    @pytest.mark.parametrize(
+        "rel_path",
+        [
+            "CLAUDE/Plan/00190-thing/JOURNAL/00190-Journal-26-07-31.md",
+            "CLAUDE/Plan/00190-thing/JOURNAL/notes.md",  # location, not name
+            "CLAUDE/Plan/00190-thing/JOURNAL/00190-Journal-BADDATE.md",
+            "CLAUDE/Plan/00190-thing/JOURNAL/sub/deep.md",
+            "CLAUDE/Plan/Completed/00042-t/JOURNAL/notes.md",
+            # A correctly-named day-file counts even if misplaced.
+            "CLAUDE/Plan/00190-thing/00190-Journal-26-07-31.md",
+        ],
+    )
+    def test_journal_files(self, rel_path):
+        assert is_journal_file(PROJECT_ROOT / rel_path) is True
+
+    @pytest.mark.parametrize(
+        "rel_path",
+        [
+            "CLAUDE/Plan/00190-thing/PLAN.md",
+            "CLAUDE/Plan/00190-thing/RESEARCH.md",
+            "CLAUDE/Plan/README.md",
+            "src/module.py",
+            # "JOURNAL" as the FILE name is not a journal directory.
+            "CLAUDE/Plan/00190-thing/JOURNAL.md",
+        ],
+    )
+    def test_non_journal_files(self, rel_path):
+        assert is_journal_file(PROJECT_ROOT / rel_path) is False
+
+    def test_custom_journal_dir_name(self):
+        path = PROJECT_ROOT / "CLAUDE/Plan/00190-thing/LOG/notes.md"
+        assert is_journal_file(path, journal_dir_name="LOG") is True
+        assert is_journal_file(path) is False
+
+    def test_agrees_with_classify_on_every_sample(self):
+        """The two consumers of the journal rule must never disagree."""
+        for rel_path in TestExhaustiveness.SAMPLES.values():
+            classified = _classify(rel_path)
+            if classified.kind is PlanFileKind.OUTSIDE:
+                continue
+            assert classified.is_journal == is_journal_file(PROJECT_ROOT / rel_path)
