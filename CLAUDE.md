@@ -1020,9 +1020,10 @@ call with the exact remediation; fix the content and retry.
   advisory above 18,000 bytes / 350 lines, escalated warning above
   25,000 / 500, and edits BLOCKED above 35,000 / 900. The two
   remedies are RELOCATE the narrative into this plan's `JOURNAL/`
-  or SPLIT the plan — never delete content. Shrinking edits are
-  never blocked, so an oversized plan can always be refactored
-  down; declare a genuine exception in the file with
+  or SPLIT the plan — never delete content. Only an edit that
+  GROWS the file can be blocked (shrinking is silent, same-size
+  only advises), so an oversized plan can always be updated and
+  refactored down; declare a genuine exception in the file with
   `<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`. Journals and
   the plan-index README are exempt at any size.
 
@@ -1085,7 +1086,7 @@ Confusing these two is the single most common plan-hygiene failure: narrative ge
 1. **Relocate** the narrative into this plan's `JOURNAL/` day-file.
 2. **Split** the plan if the task tree itself is the bulk — an over-scoped plan is not fixed by better journalling.
 
-Shrinking edits are never blocked, so an oversized plan can always be refactored down. If a plan genuinely warrants its size, record why in the file: `<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`.
+**Only an edit that GROWS the file can be blocked.** Shrinking it is silent and a same-size edit (ticking a checkbox) only advises — so an oversized plan can always be updated and refactored down. If a plan genuinely warrants its size, record why in the file: `<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`.
 
 **Task status icons**: ⬜ not started, 🔄 in progress, ✅ complete. Include a Success Criteria section and break work into phases.
 
