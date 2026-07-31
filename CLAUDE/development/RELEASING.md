@@ -100,7 +100,7 @@ Updates version in: `pyproject.toml`, `version.py`, `README.md` (badge), `CLAUDE
 
 Also updates README.md stats: test count badge+body, handler count, event type count from `.claude/HOOKS-DAEMON.md`.
 
-**Regenerate `.claude/HOOKS-DAEMON.md` after the version bump**: run `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`. This tracked, generated doc embeds the daemon version in its header (`> Generated on YYYY-MM-DD (vX.Y.Z) …`), so without regenerating it the header ships stale one version behind (v3.43.1 shipped with a v3.43.0 header before this step existed). Stage `.claude/HOOKS-DAEMON.md` with the release commit (add it to the Step 13 `git add` list).
+**Regenerate `.claude/HOOKS-DAEMON.md` after the version bump**: run `./bin/hooks-daemon generate-docs`. This tracked, generated doc embeds the daemon version in its header (`> Generated on YYYY-MM-DD (vX.Y.Z) …`), so without regenerating it the header ships stale one version behind (v3.43.1 shipped with a v3.43.0 header before this step existed). Stage `.claude/HOOKS-DAEMON.md` with the release commit (add it to the Step 13 `git add` list).
 
 **Re-lock `uv.lock` after the `pyproject.toml` version bump** (self-install mode tracks `uv.lock`): run `uv lock`. The dependency QA check runs `uv lock --check` and will FAIL the Step 8 gate with a lockfile-out-of-date error until the lock is regenerated. Stage `uv.lock` with the release commit.
 
@@ -351,7 +351,12 @@ end-to-end against a fresh fixture project. Together they catch:
   `write-venv-metadata` → daemon-start that produces a non-running daemon.
 
 ```bash
-$PYTHON -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py tests/acceptance/test_stop_hook_hard_block.py tests/acceptance/test_skill_install_python_discovery.py -v
+# pytest needs the daemon's venv interpreter. Resolve it through the CANONICAL
+# resolver — never hand-roll a venv path, and never assume $PYTHON is exported
+# (it never is in an agent's shell; see Plan 00192).
+source scripts/lib/resolve_venv.sh
+PY="$(resolve_venv_python /workspace)"
+"$PY" -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py tests/acceptance/test_stop_hook_hard_block.py tests/acceptance/test_skill_install_python_discovery.py -v
 # Expected: tests/acceptance/test_diagnostic_scripts.py — 12 passed
 #           tests/acceptance/test_install_sh_end_to_end.py — 2 passed
 #           tests/acceptance/test_tool_use_error_recovery.py — 2 passed
@@ -392,7 +397,7 @@ may not exist on the host.
 
 **Step 12.2**: Verify OBSERVABLE handlers in system-reminders (SessionStart, UserPromptSubmit, PostToolUse).
 
-**Step 12.3**: Generate playbook: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.md`
+**Step 12.3**: Generate playbook: `./bin/hooks-daemon generate-playbook > /tmp/playbook.md`
 
 **Step 12.4**: Execute tests sequentially in main thread:
 

@@ -27,7 +27,7 @@ Project-level handlers support **co-located tests**. When you scaffold project h
 Run your project handler tests:
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers --verbose
+.claude/hooks-daemon/bin/hooks-daemon test-project-handlers --verbose
 ```
 
 See the full guide: [Project-Level Handlers Guide](../CLAUDE/PROJECT_HANDLERS.md)

@@ -11,7 +11,7 @@ Non-blocking (advisory only) - provides context but doesn't prevent execution.
 """
 
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -27,6 +27,13 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import next_plan_num
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+# Shell metacharacters that terminate one command and begin another. Used inside a
+# NEGATED regex character class so a pattern anchored on `echo`/`printf` cannot run
+# past the end of its own command into an unrelated one. A newline is a command
+# separator just as much as `;`, `&` and `|` are, and must be listed explicitly:
+# a negated class matches "\n" unless told otherwise.
+_COMMAND_SEPARATORS: Final[str] = r";&|\n\r"
 
 
 class PlanNumberHelperHandler(Handler):
@@ -99,14 +106,20 @@ class PlanNumberHelperHandler(Handler):
 
         # 3. Glob expansion (echo, printf with plan directory globs)
         # Match patterns like: echo CLAUDE/Plan/0*, echo CLAUDE/Plan/*, echo CLAUDE/Plan/[0-9]*
-        # Use [^;&|]* instead of .* to avoid matching across command separators (&&, ||, ;, |)
-        # which would cause false positives when echo and CLAUDE/Plan appear in different subcommands.
+        # Use _COMMAND_SEPARATORS instead of .* to avoid matching across command separators,
+        # which would cause false positives when echo and CLAUDE/Plan appear in different
+        # subcommands. A NEWLINE separates commands exactly as `;`/`&`/`|` do, so it belongs
+        # in the class too — a negated class matches "\n" by default, which previously let an
+        # `echo` on one line reach forward and borrow a glob character from an unrelated
+        # command on the next line.
         # The referenced path segment MUST contain a real glob metacharacter (*, [, ?) — a bare
         # digit is NOT enough, otherwise `echo CLAUDE/Plan/00135-feature/PLAN.md` (a reference to
         # a specific numbered folder) would falsely match as a discovery glob.
         glob_patterns = [
-            rf"echo\s+[^;&|]*{re.escape(plan_dir)}/[^\s;&|]*[\*\[?]",  # echo with glob chars
-            rf"printf\s+[^;&|]*{re.escape(plan_dir)}/[^\s;&|]*[\*\[?]",  # printf with glob chars
+            rf"echo\s+[^{_COMMAND_SEPARATORS}]*{re.escape(plan_dir)}"
+            rf"/[^\s{_COMMAND_SEPARATORS}]*[\*\[?]",  # echo with glob chars
+            rf"printf\s+[^{_COMMAND_SEPARATORS}]*{re.escape(plan_dir)}"
+            rf"/[^\s{_COMMAND_SEPARATORS}]*[\*\[?]",  # printf with glob chars
         ]
 
         for pattern in glob_patterns:

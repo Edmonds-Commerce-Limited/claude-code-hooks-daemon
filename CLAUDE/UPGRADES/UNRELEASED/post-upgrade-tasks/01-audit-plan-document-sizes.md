@@ -106,7 +106,7 @@ a few large plans are acceptable and will keep nudging.
 Then confirm the daemon agrees:
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --sweep
+.claude/hooks-daemon/bin/hooks-daemon plan-qa --sweep
 ```
 
 ## Rollback / if this goes wrong

@@ -173,6 +173,33 @@ class TestPlanNumberHelperHandler:
             hook_input
         ), "Should NOT match: echo and CLAUDE/Plan/ path are in different subcommands"
 
+    def test_ignores_echo_and_plan_glob_on_separate_lines(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        r"""Regression: a NEWLINE separates commands just as ``;``/``&``/``|`` do.
+
+        Bug: the glob patterns used ``[^;&|]*`` to stop ``echo`` matching a
+        ``CLAUDE/Plan/`` glob in a *different* subcommand, but a negated
+        character class also matches ``\n``. So an ``echo`` on line 1 reached
+        forward across the newline into an unrelated command on line 2 and
+        borrowed its glob character.
+
+        Hit while running a content grep whose ONLY plan reference was an
+        exclusion glob — the exact false-positive class the ``[^;&|]`` guard
+        was written to prevent.
+        """
+        command = (
+            'echo "=== $PYTHON occurrences ==="\n'
+            "rg -c 'PYTHON' --glob '!CLAUDE/Plan/Completed/**' ."
+        )
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+        }
+        assert not handler_enabled.matches(
+            hook_input
+        ), "Should NOT match: echo and the plan glob are on separate lines"
+
     def test_ignores_safe_commands(self, handler_enabled: PlanNumberHelperHandler) -> None:
         """Should not match safe commands."""
         safe_commands = [
