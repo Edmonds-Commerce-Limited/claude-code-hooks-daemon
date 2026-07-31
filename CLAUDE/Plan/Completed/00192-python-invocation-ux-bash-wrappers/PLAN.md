@@ -1,6 +1,6 @@
 # Plan 00192: Replace `$PYTHON` guidance with real bash wrapper UX
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-07-31
 **Owner**: joseph
 **Priority**: High
@@ -10,8 +10,8 @@
 ## Overview
 
 The daemon instructs agents to run `$PYTHON -m claude_code_hooks_daemon.daemon.cli …`
-in 17 source locations, 12 of them handlers that inject the string directly into
-agent-visible block reasons and `get_claude_md()` guidance. `$PYTHON` is **not set**
+in 77 places across 29 source files, 12 of them handlers that inject the string
+directly into agent-visible block reasons and `get_claude_md()` guidance. `$PYTHON` is **not set**
 in an agent's Bash shell, and the PATH `python3` cannot import the module because the
 daemon lives in an isolated fingerprint-keyed venv. Every such instruction therefore
 expands to `-m claude_code_hooks_daemon.daemon.cli …` and fails with
@@ -175,8 +175,13 @@ absolute path.
   deployed executable at
   `.claude/hooks-daemon/bin/hooks-daemon`, byte-identical to the template, and
   reports `Daemon: RUNNING`.
-- [ ] ⬜ **Task 2.6**: Repoint or retire the stale root `daemon.sh` (legacy venv
-  path, mode `rwx--x--x`); ensure exactly one canonical entry point.
+- [x] ✅ **Task 2.6**: Retired the stale root `daemon.sh` — now a thin deprecation
+  shim that forwards every subcommand to `bin/hooks-daemon`, so `bin/hooks-daemon`
+  is the single canonical entry point. Mode corrected `rwx--x--x` → 755. The two
+  bespoke log verbs with a CLI equivalent (`logs-tail`, `logs-all`) are
+  translated; `logs-clear` has none, so it says so and exits 2 rather than
+  pretending. The deprecation notice goes to **stderr**, never stdout, so
+  anything capturing output is unaffected.
 
 **Anchoring to `$0` also fixes gap 4 for free.** Verified A/B from an unrelated
 CWD: `daemon-cli.sh` exits 1 with "Not in a hooks daemon project", while
@@ -204,11 +209,14 @@ path, shipped to every client. Two tests asserted the OLD broken behaviour and
 now pin the new contract. A Bandit B608 false positive (prose reading "delete
 from" next to a new f-string) was reworded, not suppressed.
 
-### Phase 4: Skill coverage for plan QA
+### Phase 4: Skill coverage for plan QA (DONE)
 
-- [ ] ⬜ **Task 4.1**: Add a `plan-qa.md` page to the deployed skill covering
-  `--sweep`, `--lint <file>`, `--check-staged`, and `--json`.
-- [ ] ⬜ **Task 4.2**: Reference it from `SKILL.md` "Available Commands".
+- [x] ✅ **Task 4.1**: Added `skills/hooks-daemon/plan-qa.md` covering `--sweep`,
+  `--lint <file>`, `--check-staged` and `--json`, plus what the clean output
+  looks like, the disabled-workflow message, and where policy lives
+  (`plan_workflow.qa`). Every command is the deployed wrapper path, with the
+  self-install variant noted once rather than duplicated per snippet.
+- [x] ✅ **Task 4.2**: Referenced from `SKILL.md` under "Available Commands".
 
 ### Phase 5: Dual-mode verification
 
@@ -249,12 +257,14 @@ never have to. Guidance must be copy-paste runnable.
 
 ## Success Criteria
 
-- [ ] `rg '\$PYTHON' src/` returns no agent-facing occurrences.
-- [ ] A QA check fails the build if a literal `$PYTHON` is reintroduced.
-- [ ] `plan-qa --sweep` runs verbatim as printed in injected guidance, in
-  self-install mode.
-- [ ] Deployed skill documents plan QA.
-- [ ] Full QA passes; daemon restarts RUNNING.
+- [x] ✅ `rg '\$PYTHON' src/` returns no agent-facing occurrences (77 → 0).
+- [x] ✅ A QA check fails the build if a literal `$PYTHON` is reintroduced
+  (`python_var_guidance`, gate 12 of 14).
+- [x] ✅ `plan-qa --sweep` runs verbatim as printed in injected guidance, in
+  **both** self-install mode and the client fixture.
+- [x] ✅ Deployed skill documents plan QA (`plan-qa.md` + `SKILL.md` entry).
+- [x] ✅ Full QA passes (14/14, 10,749 tests, 95.2% coverage); daemon restarts
+  RUNNING.
 
 ## Risks & Mitigations
 
@@ -269,4 +279,10 @@ never have to. Guidance must be copy-paste runnable.
 <!-- Curated milestones + delivery commit hashes only (git is the SSoT for
      "when"). Activity log lives in JOURNAL/. -->
 
-- Plan created; root cause verified against a live agent shell.
+- Plan created; root cause verified against a live agent shell — `90b38f16`
+- Phase 0: client-mode fixture automated, standard practice documented — `367b4cc0`
+- Phase 1+2: resolver utility + deployed `bin/hooks-daemon` wrapper — `93a412fb`
+- Task 2.5: wrapper deployment wired into install AND upgrade — `3b58c9df`
+- Phase 3: all 77 emission sites swapped + `python_var_guidance` gate — `51ceb4ee`
+- Verified 9 → 0 in a real client install — `3a4f5975`
+- Phase 4 + Task 2.6: skill plan-QA page; `daemon.sh` retired to a shim — this commit
