@@ -53,6 +53,22 @@ scripts/dummy-client-repo.sh destroy    # stop daemon, remove worktree + dir
 4. **It lives in `untracked/`** and is disposable. Rebuild it rather than
    repairing it.
 
+### Which code the fixture actually runs (important)
+
+`create` mixes two sources, and the difference will bite you:
+
+| Component                    | Comes from                      | Sees uncommitted work? |
+| ---------------------------- | ------------------------------- | ---------------------- |
+| `scripts/install_version.sh` | your **main checkout**          | **yes**                |
+| Everything under `src/`      | a detached **worktree at HEAD** | **no**                 |
+
+So an uncommitted installer change takes effect immediately, while an
+uncommitted `src/` change does **not** — the venv is built from the worktree.
+
+**Commit `src/` changes before provisioning**, or the fixture will silently
+exercise the previous version of your Python code and you will conclude a fix
+does not work when it was never installed.
+
 ### CWD matters
 
 The daemon CLI derives socket/PID/log paths from the **current working

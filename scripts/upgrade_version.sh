@@ -735,6 +735,30 @@ except Exception as e:
 "
 
 # ============================================================
+# Step 13b: Redeploy the hooks-daemon bin wrapper (Plan 00192)
+# ============================================================
+#
+# Daemon-owned tooling: overwritten on every upgrade so a stale wrapper can
+# never outlive a fix. This step is what delivers the wrapper to installs that
+# predate it — without it, existing projects would keep the broken
+# "$PYTHON -m ..." guidance forever. DAEMON_DIR is the daemon root in both
+# install modes.
+
+log_step "13b" "Redeploying hooks-daemon CLI wrapper"
+
+"$VENV_PYTHON" -c "
+from pathlib import Path
+from claude_code_hooks_daemon.install.bin_wrapper import deploy_bin_wrapper
+
+try:
+    target = deploy_bin_wrapper(Path('$DAEMON_DIR'))
+    print(f'✓ CLI wrapper redeployed to {target}')
+except Exception as e:
+    print(f'✗ CLI wrapper redeployment failed: {e}')
+    exit(1)
+"
+
+# ============================================================
 # Step 14: Deploy plan workflow (config-driven SSoT — Plan 00136)
 # ============================================================
 #

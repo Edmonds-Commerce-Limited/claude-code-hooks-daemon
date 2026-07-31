@@ -168,9 +168,13 @@ absolute path.
   chmod 0o755, never world-writable, mirroring `_deploy_mkplan`.
 - [x] ✅ **Task 2.4**: Drift guard — the tracked self-install copy must match the
   bundled template byte-for-byte.
-- [ ] ⬜ **Task 2.5**: Wire `deploy_bin_wrapper()` into the installer
-  (`install.py` / `install_version.sh`) so clients actually receive it. **Until
-  this lands the wrapper ships to nobody.**
+- [x] ✅ **Task 2.5**: Wired `deploy_bin_wrapper()` into BOTH paths —
+  `install_version.sh` Step 10b (fresh installs) and `upgrade_version.sh`
+  Step 13b (existing installs, which is what delivers the fix to projects that
+  predate it). Verified end-to-end by rebuilding the client fixture: wrapper
+  deployed executable at
+  `.claude/hooks-daemon/bin/hooks-daemon`, byte-identical to the template, and
+  reports `Daemon: RUNNING`.
 - [ ] ⬜ **Task 2.6**: Repoint or retire the stale root `daemon.sh` (legacy venv
   path, mode `rwx--x--x`); ensure exactly one canonical entry point.
 

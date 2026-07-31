@@ -460,6 +460,30 @@ except Exception as e:
 "
 
 # ============================================================
+# Step 10b: Deploy the hooks-daemon bin wrapper (Plan 00192)
+# ============================================================
+#
+# The wrapper is the command every piece of agent-facing guidance names. It
+# must exist BEFORE the daemon starts and regenerates its docs in Step 13,
+# otherwise the generated CLAUDE.md would point at a file that is not there
+# yet. DAEMON_DIR is the daemon root in BOTH install modes (it equals
+# PROJECT_ROOT in self-install), so one argument serves both.
+
+log_step "10b" "Deploying hooks-daemon CLI wrapper"
+
+"$VENV_PYTHON" -c "
+from pathlib import Path
+from claude_code_hooks_daemon.install.bin_wrapper import deploy_bin_wrapper
+
+try:
+    target = deploy_bin_wrapper(Path('$DAEMON_DIR'))
+    print(f'✓ CLI wrapper deployed to {target}')
+except Exception as e:
+    print(f'✗ CLI wrapper deployment failed: {e}')
+    exit(1)
+"
+
+# ============================================================
 # Step 11: Start daemon and verify
 # ============================================================
 
