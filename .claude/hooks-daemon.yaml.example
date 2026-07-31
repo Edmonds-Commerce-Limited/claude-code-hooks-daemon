@@ -452,19 +452,22 @@ handlers:
       enabled: true
       priority: 50
       options:
-        # Git-ignored local files symlinked from the repo top-level into a fresh
-        # worktree so it behaves like the main checkout (these files are never
-        # committed, so a worktree checkout would otherwise lack them). A symlink
-        # (not a copy) keeps the main working copy as the single source of truth:
-        # editing the canonical file is reflected in every worktree, with no stale
-        # duplicate. Best-effort: a missing source is skipped, an existing
-        # destination is never clobbered, and creation is never failed; never
-        # re-created on an idempotent re-fire. Entries are relative to the repo
-        # root; absolute paths and `..` traversal are ignored. Set to an empty
-        # list to disable.
-        symlink_files:
-          - .env.local
-          - .env.test.local
+        # OPT-IN. Git-ignored local files symlinked from the repo top-level into a
+        # fresh worktree so it behaves like the main checkout (these files are
+        # never committed, so a worktree checkout would otherwise lack them). A
+        # symlink (not a copy) keeps the main working copy as the single source of
+        # truth: editing the canonical file is reflected in every worktree, with no
+        # stale duplicate. COROLLARY: an edit made to the file *inside* a worktree
+        # writes through to the main checkout — isolation is intentionally broken
+        # for these paths. FAIL-FAST: every entry MUST resolve to a file at the
+        # repo root, else worktree creation fails loudly (create the file or drop
+        # it from the list) — so only list files you know should exist. Entries are
+        # relative to the repo root; absolute paths and `..` traversal are
+        # rejected. An existing destination is never clobbered; nothing runs on a
+        # re-fire. Empty/unset (the default) = no symlinking. Recommended value:
+        # symlink_files:
+        #   - .env.local
+        #   - .env.test.local
 
   worktree_remove:  # WorktreeRemove event (worktree teardown)
     worktree_remove:  # Prunes stale worktree registrations; removes a named worktree

@@ -1,4 +1,4 @@
-# Plan 00190: worktree create seed env files
+# Plan 00191: worktree create seed env files
 
 **Status**: In Progress
 **Created**: 2026-07-24
@@ -17,23 +17,30 @@ fresh worktree checkout has none of them — the agent then runs against a
 configuration with no local secrets/overrides and behaves differently from the
 main checkout.
 
-This plan makes the `worktree_create` handler **symlink** a configurable list of
+This plan makes the `worktree_create` handler **symlink** an **opt-in** list of
 git-ignored files from the repository top-level into the newly-created worktree
 root, so a worktree "just works" like the main checkout. A symlink (not a copy)
 keeps the main working copy as the **single source of truth**: a copy would fork
 into two files that drift apart, whereas a link means editing the canonical file
-is reflected in every worktree with no stale duplicate to reconcile. Symlinking
-is best-effort, only on fresh creation (never on idempotent re-fire), never
-clobbers an existing destination, and never blocks or fails worktree creation.
+is reflected in every worktree with no stale duplicate to reconcile. The links
+are **relative** so they survive the identical tree being viewed at different
+absolute prefixes (host vs container bind-mount). Symlinking runs only on fresh
+creation (never on idempotent re-fire) and never clobbers an existing
+destination. It is **fail-fast**: every configured entry must resolve to a file
+at the repo root, or worktree creation aborts loudly — surfacing a
+misconfiguration rather than silently producing a worktree missing its files.
 
 ## Goals
 
-- On fresh worktree creation, symlink a configured list of files (default
+- On fresh worktree creation, symlink an opt-in list of files (recommended
   `.env.local`, `.env.test.local`) from the repo top-level into the worktree,
-  each link pointing back at the canonical file (single source of truth).
-- Make the file list configurable via a `symlink_files` handler option.
-- Symlinking is best-effort: a failure logs a warning and is skipped; worktree
-  creation (and the returned path) is never broken by a symlink failure.
+  each **relative** link pointing back at the canonical file (single source of
+  truth).
+- Make the file list configurable via a `symlink_files` handler option
+  (default empty — opt-in).
+- Fail-fast: a configured entry that is unsafe, missing, or not a regular file
+  raises `WorktreeSeedError` **before** the worktree is created (no partial
+  state); a symlink syscall failure propagates.
 - Never clobber a destination that already exists; no re-seed on idempotent
   re-fire.
 
@@ -43,8 +50,11 @@ clobbers an existing destination, and never blocks or fails worktree creation.
   truth.
 - No symlinking of tracked files (git already provides those in the checkout).
 - No glob/wildcard expansion — an explicit filename list only (relative paths
-  allowed; absolute paths and `..` traversal are ignored for safety).
-- No recursive directory linking.
+  allowed; absolute paths and `..` traversal are rejected for safety).
+- No recursive directory linking (a directory source is a configuration error).
+- Not on-by-default — a shared upstream daemon must not abort worktree creation
+  in repos that simply lack these files, so symlinking only runs when a project
+  opts in.
 
 ## Tasks
 
@@ -81,6 +91,24 @@ clobbers an existing destination, and never blocks or fails worktree creation.
 - Deferred by decision: MEDIUM SSoT destructive-edit hazard (accepted as-is);
   MEDIUM `_repo_toplevel`/`_get_git_toplevel` DRY extraction (not worth the
   cross-module surface on this change)
+
+### Phase 4: PR #35 review round 2 (maintainer) + merge main
+
+- [x] ✅ **Task 4.0**: Merge latest `origin/main` into the branch; resolve the
+  plan-number collision by renumbering this plan 00190 → **00191** (main claimed
+  00190 for the plan-journal-separation plan)
+- [x] ✅ **Task 4.1**: "symlinks MUST be relative" — already satisfied by Task 3.1
+- [x] ✅ **Task 4.2**: "fail fast and loud for any configured path not present in
+  repo root" — reworked to **opt-in + fail-fast**: `symlink_files` defaults empty;
+  a configured entry that is unsafe/missing/not-a-file raises `WorktreeSeedError`
+  before creation. Removed the best-effort skip + both `error_hiding_exclusions`
+  entries (handler no longer swallows anything)
+- [x] ✅ **Task 4.3**: Rewrote tests for opt-in + fail-fast (unconfigured no-op,
+  missing-file-raises-before-creation, unsafe-raises, directory-raises,
+  syscall-failure-propagates) + kept relative-link/relocation, string coercion,
+  never-clobber, SSoT live-link
+- [x] ✅ **Task 4.4**: Updated `get_claude_md()` + `yaml.example` (opt-in,
+  fail-fast, SSoT write-through corollary)
 
 ## Success Criteria
 

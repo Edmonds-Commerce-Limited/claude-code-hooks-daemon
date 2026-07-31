@@ -1,7 +1,7 @@
-# Opus Adversarial Review — Plan 00190 (worktree env-file symlinking)
+# Opus Adversarial Review — Plan 00191 (worktree env-file symlinking)
 
 **Reviewer**: hostile senior review pass (Opus 4.8)
-**Scope**: branch `plan/00190-worktree-create-seed-env-files`, commits `63bb20a6` (copy) → `1005d2c7` (symlink pivot), PR #35
+**Scope**: branch `plan/00191-worktree-create-seed-env-files`, commits `63bb20a6` (copy) → `1005d2c7` (symlink pivot), PR #35
 **Files read in full**: `worktree_create_handler.py`, `test_worktree_create_handler.py`, `core/worktree_naming.py`, `.claude/hooks-daemon.yaml.example`, `scripts/qa/error_hiding_exclusions.json`, `PLAN.md`, plus `handlers/registry.py` (option plumbing) and `core/project_context.py` (`_get_git_toplevel`).
 
 ---
@@ -19,7 +19,7 @@
 
 **Defect**: `git rev-parse --show-toplevel` returns an **absolute** path keyed to the *current* `cwd`'s view of the tree. This project explicitly supports the same bind-mounted tree being seen at two different absolute prefixes — host `/home/user/project` and container `/workspace` (documented all over CLAUDE.md: venv slug isolation, single-daemon project scoping, etc.). A worktree created inside the container writes a link literally pointing at `/workspace/.env.local`; when the host process later reads that same on-disk worktree at `/home/user/project/.claude/worktrees/.../.env.local`, the link target `/workspace/...` does not exist on the host → **dangling symlink**. The reverse (host-created link → container read) dangles identically.
 
-**Failure scenario (reproduced in /tmp)**: with the tree present at prefix A the absolute link resolves; drop prefix A and view the identical tree at prefix B and `Path.exists()` returns **False**, `read_text()` raises `FileNotFoundError [Errno 2]`. A relative link (`../../../.env.local`) resolved correctly under both prefixes. This is strictly *worse* than the problem Plan 00190 set out to fix: instead of an **absent** file the agent now gets a **broken** symlink — many dotenv loaders / `source .env.local` / `open()` calls error on a dangling link rather than treating it as "absent".
+**Failure scenario (reproduced in /tmp)**: with the tree present at prefix A the absolute link resolves; drop prefix A and view the identical tree at prefix B and `Path.exists()` returns **False**, `read_text()` raises `FileNotFoundError [Errno 2]`. A relative link (`../../../.env.local`) resolved correctly under both prefixes. This is strictly *worse* than the problem Plan 00191 set out to fix: instead of an **absent** file the agent now gets a **broken** symlink — many dotenv loaders / `source .env.local` / `open()` calls error on a dangling link rather than treating it as "absent".
 
 **The in-code justification is wrong**: the comment at line 154 ("Absolute target so the link resolves regardless of the worktree's own location under the repo") is a non-sequitur — a *relative* link computed against `dest.parent` also resolves regardless of the worktree's location, AND additionally survives prefix remapping. Absolute buys nothing here and costs container-share correctness.
 
