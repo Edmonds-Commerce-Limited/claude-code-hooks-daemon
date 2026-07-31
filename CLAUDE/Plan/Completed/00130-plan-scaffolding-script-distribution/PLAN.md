@@ -1,6 +1,6 @@
 # Plan 00130: Plan-Scaffolding Script Distribution (`mkplan.bash`)
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-06-19
 **Owner**: joseph
 **Priority**: Medium
@@ -176,8 +176,20 @@ no `ls`/scan, no second method, no new handler. README index updates stay with t
   exec-bit + idempotency tests, guidance-text change, `track_plans_in_project` SSOT fix) is a
   separate TDD plan — see "Next steps" below.
 
-### Next steps (follow-up implementation plan)
+### Implementation outcome
 
-- Wire deploy into `install/plan_workflow.py` (overwrite + `0o755`) honouring `track_plans_in_project`.
-- Update `plan_number_helper.get_claude_md()` + regenerate the `<hooksdaemon>` block.
-- TDD: installer deploy/idempotency test; handler guidance-text regression test; H-1/QA pass; release.
+The three follow-ups identified at the end of the audit remit were **absorbed into
+Phase 5 of this plan rather than split into a separate plan**, and all three
+shipped: the installer deploy (overwrite + `0o755`, honouring `track_plans_in_project`),
+the `plan_number_helper.get_claude_md()` guidance change, and the TDD/QA/release pass.
+
+## Delivery & Milestones
+
+<!-- Curated milestones + delivery commit hashes (git is the SSoT for "when"). -->
+
+- Baseline captured + plan indexed at `0a823f6e`
+- Hostile audit v1 (1 CRITICAL, 3 HIGH) at `af1439ee`
+- Script refined to v2 — C1 concurrency lock + H1 path override — at `15b107df`
+- Distribution + guidance decisions (`PROPOSAL-AUDIT.md`) at `e3f97bb6`
+- Phase 5 implementation — bundled template, installer deploy, canonical guidance — at `ebd38637`
+- Released to users in **v3.23.0** at `9285093a`
