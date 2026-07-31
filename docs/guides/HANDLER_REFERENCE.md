@@ -816,7 +816,16 @@ advises when a commit changes a plan's PLAN.md tasks but stages no journal
 entry; `journal-completion-entry` advises when a commit flips a plan to a
 terminal status without a closing journal entry — the latter is OPT-IN,
 firing only when `enforce_on_completion: true`. Only `journal-dayfile-naming`
-may ratchet to BLOCK via `mode: block`; the rest are advisory forever. Set
+may ratchet to BLOCK via `mode: block`; the rest are advisory forever.
+
+`journal.mode` is a CEILING, not a guarantee — it is **subordinate to the
+surface mode**. A journal blocker only denies when the owning surface mode is
+also `block`: with `edit_mode: warn` (the documented rollout posture)
+`mode: block` degrades to an advisory, and `edit_mode: off` disables both
+journal edit checks outright regardless of `journal.enabled`. Set the surface
+mode first, then ratchet `journal.mode`.
+
+Set
 `grandfather_before` to the plan number at which your project adopted
 journalling so pre-existing journal-less plans are never nagged (no backfill),
 and `freshness_days` to nag a quiet `JOURNAL/` sooner than the 30-day plan
