@@ -1164,44 +1164,9 @@ Writing ephemeral or session-specific content to `CLAUDE.md` or `README.md` is b
 
 Content inside markdown code blocks is exempt from validation.
 
-## background_process_tracker — backgrounded processes are tracked
-
-A PostToolUse advisory that fires when a Bash call backgrounds a process (`run_in_background: true`, or a `&`/`nohup`/`setsid`/`disown` command). It records the command to `background-processes.jsonl` and injects rate-limited guidance.
-
-**The daemon never kills.** It surfaces runaways; you decide.
-
-When you background a long-lived process:
-
-- Create a non-durable recurring **watchdog cron** (CronCreate, durable:false) whose prompt runs `/workspace/bin/hooks-daemon harvest-background` and acts on any runaway — this covers the idle/compaction window a tool-call hook cannot. Do NOT wait for the cron; keep working.
-- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).
-- Reap a runaway by its **process group**: `kill -- -<pgid>` (not just the pid).
-- Keep a wanted long task: note `KEEP_RUNNING_BECAUSE="reason"`.
-- Delete the watchdog cron (CronDelete) when no backgrounded work remains.
-
-Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
-
 ## git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
 When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
-
-## markdown_table_formatter — markdown tables are auto-aligned
-
-After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-formatted via `mdformat + mdformat-gfm` so that table pipes are aligned and column widths are consistent. The handler is non-terminal and advisory — it never blocks, it just rewrites the file on disk.
-
-**What changes:**
-
-- Table pipes are aligned vertically and delimiter rows widened to match cell widths.
-- Ordered lists keep consecutive numbering (`1.` `2.` `3.`).
-- `---` thematic breaks are preserved (mdformat's 70-underscore default is post-processed back).
-- Asterisks in table cells are escaped (`*` → `\*`) as required by GFM.
-
-**Exempt:** anything under a plan's `JOURNAL/` directory is NEVER reformatted — day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`, Plan 00163) and any other file in there. A journal is an append-only, byte-stable log; rewriting it would trip the `journal-append-only` check. The exemption is by LOCATION as well as by filename, so a mis-named day-file is still safe.
-
-**Ad-hoc formatting of existing files:**
-
-```
-/workspace/bin/hooks-daemon format-markdown <path>
-```
 
 ## recovery_cron_advisor — failsafe recovery cron lifecycle advisory
 
@@ -1266,6 +1231,41 @@ handlers:
       enabled: false
 ```
 
+## background_process_tracker — backgrounded processes are tracked
+
+A PostToolUse advisory that fires when a Bash call backgrounds a process (`run_in_background: true`, or a `&`/`nohup`/`setsid`/`disown` command). It records the command to `background-processes.jsonl` and injects rate-limited guidance.
+
+**The daemon never kills.** It surfaces runaways; you decide.
+
+When you background a long-lived process:
+
+- Create a non-durable recurring **watchdog cron** (CronCreate, durable:false) whose prompt runs `/workspace/bin/hooks-daemon harvest-background` and acts on any runaway — this covers the idle/compaction window a tool-call hook cannot. Do NOT wait for the cron; keep working.
+- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).
+- Reap a runaway by its **process group**: `kill -- -<pgid>` (not just the pid).
+- Keep a wanted long task: note `KEEP_RUNNING_BECAUSE="reason"`.
+- Delete the watchdog cron (CronDelete) when no backgrounded work remains.
+
+Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
+
+## markdown_table_formatter — markdown tables are auto-aligned
+
+After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-formatted via `mdformat + mdformat-gfm` so that table pipes are aligned and column widths are consistent. The handler is non-terminal and advisory — it never blocks, it just rewrites the file on disk.
+
+**What changes:**
+
+- Table pipes are aligned vertically and delimiter rows widened to match cell widths.
+- Ordered lists keep consecutive numbering (`1.` `2.` `3.`).
+- `---` thematic breaks are preserved (mdformat's 70-underscore default is post-processed back).
+- Asterisks in table cells are escaped (`*` → `\*`) as required by GFM.
+
+**Exempt:** anything under a plan's `JOURNAL/` directory is NEVER reformatted — day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`, Plan 00163) and any other file in there. A journal is an append-only, byte-stable log; rewriting it would trip the `journal-append-only` check. The exemption is by LOCATION as well as by filename, so a mis-named day-file is still safe.
+
+**Ad-hoc formatting of existing files:**
+
+```
+/workspace/bin/hooks-daemon format-markdown <path>
+```
+
 ## ccy_supervisor_integrity — keep the ccy supervisor properly set up
 
 At session start this handler checks a ccy project (`.claude/ccy/`) whose supervisor is **armed** (`ccy.env` exports `CCY_CLAUDE_WRAPPER` referencing `claude-supervise.py`). It warns — never blocks — when the setup is brick-risky:
@@ -1292,23 +1292,6 @@ On each new session the daemon runs an **additive** `git fetch --all` (never `--
 **If local branches track a remote branch that was deleted**, it lists them (marked merged = safe vs not-merged = has unique commits) and asks you to clean up AFTER checking: `git branch -d <name>` for merged branches, ask the human for the rest, and optionally `git fetch --prune` the stale remote-tracking refs. The daemon never prunes or deletes a branch itself; never use `git branch -D`.
 
 It is silent when up to date with no gone branches, not in a git repo, on a detached HEAD, or without an upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
-
-## hook_registration_checker — hooks configuration policy
-
-On every new session this handler audits hook configuration across `.claude/settings.json` and `.claude/settings.local.json`. When it reports issues, fix them — do not ignore the warning.
-
-### Policy
-
-1. **All hooks live in `settings.json`.** That file is tracked in version control, visible to teammates, and is the single source of truth for the daemon.
-2. **`settings.local.json` must contain ZERO `hooks` entries.** It exists for per-developer `permissions` and IDE state only. A `hooks` block there is either (a) invisible to the rest of the team, or (b) duplicated with `settings.json` — in which case the hook fires twice per event.
-3. **Hook commands must invoke the daemon wrapper.** Every registered command must end with `/.claude/hooks/{event}`. Anything else (inline Python, custom shell scripts, bespoke paths) is a legacy setup that bypasses the daemon entirely.
-
-### Remediation
-
-- **Hooks in `settings.local.json`**: move each `hooks` entry to `settings.json`, then delete the `hooks` key from `settings.local.json`. Confirm no duplicates remain.
-- **Legacy-style commands**: replace them with a project-level handler. Run `/workspace/bin/hooks-daemon init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
-- **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
-- **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry and remove the duplicate in `settings.local.json`.
 
 ## plan_qa_sweep — plan-tree drift report at session start
 
@@ -1355,6 +1338,23 @@ At session start this handler reports any **project handlers** (`.claude/project
 4. **Restart the daemon** (`/workspace/bin/hooks-daemon restart`). The alert reflects the *running* daemon, so it clears only after a restart reloads the fixed handlers — fixing the file alone is not enough.
 
 The handler is silent when every project handler loads, so seeing this alert always means real action is required.
+
+## hook_registration_checker — hooks configuration policy
+
+On every new session this handler audits hook configuration across `.claude/settings.json` and `.claude/settings.local.json`. When it reports issues, fix them — do not ignore the warning.
+
+### Policy
+
+1. **All hooks live in `settings.json`.** That file is tracked in version control, visible to teammates, and is the single source of truth for the daemon.
+2. **`settings.local.json` must contain ZERO `hooks` entries.** It exists for per-developer `permissions` and IDE state only. A `hooks` block there is either (a) invisible to the rest of the team, or (b) duplicated with `settings.json` — in which case the hook fires twice per event.
+3. **Hook commands must invoke the daemon wrapper.** Every registered command must end with `/.claude/hooks/{event}`. Anything else (inline Python, custom shell scripts, bespoke paths) is a legacy setup that bypasses the daemon entirely.
+
+### Remediation
+
+- **Hooks in `settings.local.json`**: move each `hooks` entry to `settings.json`, then delete the `hooks` key from `settings.local.json`. Confirm no duplicates remain.
+- **Legacy-style commands**: replace them with a project-level handler. Run `/workspace/bin/hooks-daemon init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
+- **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
+- **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry and remove the duplicate in `settings.local.json`.
 
 ## idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
 
