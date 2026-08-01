@@ -3,6 +3,10 @@
 **Status**: MANDATORY for all code modifications
 **Audience**: AI agents and human developers
 
+> **Run every command below from the PROJECT ROOT.** Paths like
+> `./bin/hooks-daemon` and `./scripts/qa/...` are relative to it, and resolve to
+> nothing from anywhere else (`exit 127`).
+
 ## Overview
 
 Standard process for any code modification that isn't a new feature or bug fix.
@@ -34,8 +38,8 @@ Standard process for any code modification that isn't a new feature or bug fix.
 ./scripts/qa/run_all.sh
 
 # 4. Verify daemon loads (MANDATORY)
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 # Expected: Status: RUNNING
 
 # 5. Commit if all pass
@@ -111,10 +115,10 @@ Overall Status: ✅ ALL CHECKS PASSED
 
 ```bash
 # Restart daemon with your changes
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+./bin/hooks-daemon restart
 
 # Verify daemon is RUNNING
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon status
 
 # Expected:
 # Daemon: RUNNING
@@ -122,7 +126,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 # Socket: [path] (exists)
 
 # Check for errors
-$PYTHON -m claude_code_hooks_daemon.daemon.cli logs | grep -i error
+./bin/hooks-daemon logs | grep -i error
 
 # Expected: No import errors, no loading failures
 ```
@@ -168,8 +172,8 @@ A general code change is DONE when ALL of the following are verified:
 
 - [ ] Daemon restarts without errors
 - [ ] No import failures in logs
-- [ ] Run: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
-- [ ] Verify: `$PYTHON -m claude_code_hooks_daemon.daemon.cli status` (RUNNING)
+- [ ] Run: `./bin/hooks-daemon restart`
+- [ ] Verify: `./bin/hooks-daemon status` (RUNNING)
 
 ### 4. Full QA
 

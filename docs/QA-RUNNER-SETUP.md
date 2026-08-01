@@ -44,19 +44,24 @@ The module is self-contained and uses only Python stdlib (subprocess, json, path
 
 ### Command Line Usage
 
+Use the shell wrapper — it resolves the daemon's virtualenv for you, so you
+never need to locate a Python interpreter. Arguments are
+`<project-root> <tools> <save-results>`, all optional:
+
 ```bash
-# Run all QA checks
-python3 -m claude_code_hooks_daemon.qa.runner
+# Run all QA checks against the current directory
+./scripts/run-qa-runner.sh
 
 # Run specific tools
-python3 -m claude_code_hooks_daemon.qa.runner --tools eslint,typescript
+./scripts/run-qa-runner.sh . "eslint,typescript"
 
-# Save results to JSON
-python3 -m claude_code_hooks_daemon.qa.runner --save-results
-
-# Using the shell wrapper
-./scripts/run-qa-runner.sh /workspace "eslint,typescript" true
+# Run specific tools and save results to JSON
+./scripts/run-qa-runner.sh . "eslint,typescript" true
 ```
+
+> A bare `python3 -m claude_code_hooks_daemon.qa.runner` does **not** work: the
+> daemon lives in an isolated virtualenv that the PATH `python3` cannot import
+> from, so it fails with `ModuleNotFoundError`. Always go through the wrapper.
 
 ### Programmatic Usage
 
@@ -290,9 +295,7 @@ if result.status == "failed":
 QA agents can invoke the module:
 
 ```bash
-python3 -m claude_code_hooks_daemon.qa.runner \
-  --project-root /workspace \
-  --save-results
+./scripts/run-qa-runner.sh /workspace "" true
 ```
 
 Parse the JSON output for structured results.
@@ -373,10 +376,7 @@ except Exception as e:
 ### Example 1: Full QA Check
 
 ```bash
-python3 -m claude_code_hooks_daemon.qa.runner \
-  --project-root /workspace \
-  --tools eslint,typescript,prettier,cspell \
-  --save-results
+./scripts/run-qa-runner.sh /workspace "eslint,typescript,prettier,cspell" true
 ```
 
 ### Example 2: In Agent
@@ -399,7 +399,7 @@ if result.total_errors > 0:
 ### Example 3: Quick TypeScript Check
 
 ```bash
-python3 -m claude_code_hooks_daemon.qa.runner --tools typescript
+./scripts/run-qa-runner.sh . "typescript"
 ```
 
 ## Troubleshooting

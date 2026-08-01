@@ -77,24 +77,33 @@ Worktrees support **parent-child relationships** for complex plans:
 
 ### 3. Python Venv Setup (CRITICAL)
 
-**Each worktree MUST have its own Python virtual environment.** The main workspace venv at `/workspace/untracked/venv/` has the package installed in editable mode pointing to `/workspace/src/`. A worktree needs its own venv pointing to its own `src/` directory.
+**Each worktree MUST have its own Python virtual environment.** The main
+workspace venv has the package installed in editable mode pointing to
+`/workspace/src/`. A worktree needs its own venv pointing to its own `src/`.
+
+**Do not hand-roll it.** `setup_worktree.sh` creates the worktree AND its venv
+in one step, using the fingerprint-keyed layout the resolver expects:
 
 ```bash
-# After creating a worktree, set up its venv:
-cd /workspace/untracked/worktrees/worktree-plan-00028
-python3 -m venv untracked/venv
-untracked/venv/bin/pip install -e ".[dev]"
-
-# ALWAYS use the worktree's own venv Python:
-PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/python
+# Run from the PROJECT ROOT — creates the worktree and its venv together:
+./scripts/setup_worktree.sh worktree-plan-00028
 ```
 
-**Why**:
+**Why not `python3 -m venv untracked/venv`**: that builds the retired
+pre-v3.7.0 layout. Venvs have been fingerprint-keyed since v3.7.0
+(`untracked/venv-{slug}-py{MM}-{fingerprint}/`), and `resolve_venv.sh` will not
+accept a hand-made `untracked/venv/` — the wrapper exits 5 telling you to run
+the installer.
+
+**Why each worktree needs its own**:
 
 - Editable installs (`pip install -e .`) point to a specific `src/` directory
 - The main workspace venv imports from `/workspace/src/`, not the worktree's `src/`
 - Using the wrong venv means your code changes won't be picked up
-- Daemon restart in a worktree must use the worktree's venv
+
+**You never name the interpreter.** Each worktree has its own
+`./bin/hooks-daemon`, which anchors to its own location and resolves that
+worktree's venv itself.
 
 ### 4. Daemon Process Isolation (CRITICAL)
 
@@ -122,11 +131,10 @@ No collision occurs because each worktree has a different absolute path for `.cl
 
 ```bash
 cd /workspace/untracked/worktrees/worktree-plan-00028
-PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/python
 
 # Daemon automatically uses worktree's .claude/ for socket/PID
-$PYTHON -m claude_code_hooks_daemon.daemon.cli start
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon start
+./bin/hooks-daemon status
 # Expected: Status: RUNNING (with worktree-local socket)
 ```
 
@@ -142,21 +150,20 @@ The most explicit way to control daemon paths is with CLI flags:
 
 ```bash
 cd /workspace/untracked/worktrees/worktree-plan-00028
-PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/python
 
 # Start daemon with explicit paths
-$PYTHON -m claude_code_hooks_daemon.daemon.cli \
+./bin/hooks-daemon \
   --pid-file .claude/hooks-daemon/untracked/daemon-wt.pid \
   --socket .claude/hooks-daemon/untracked/daemon-wt.sock \
   start
 
 # All commands support these flags
-$PYTHON -m claude_code_hooks_daemon.daemon.cli \
+./bin/hooks-daemon \
   --pid-file .claude/hooks-daemon/untracked/daemon-wt.pid \
   --socket .claude/hooks-daemon/untracked/daemon-wt.sock \
   status
 
-$PYTHON -m claude_code_hooks_daemon.daemon.cli \
+./bin/hooks-daemon \
   --pid-file .claude/hooks-daemon/untracked/daemon-wt.pid \
   --socket .claude/hooks-daemon/untracked/daemon-wt.sock \
   stop
@@ -194,13 +201,12 @@ export CLAUDE_HOOKS_LOG_PATH={worktree}/.claude/hooks-daemon/untracked/daemon-wt
 ```bash
 # ALWAYS stop daemon BEFORE removing worktree
 cd /workspace/untracked/worktrees/worktree-plan-00028
-PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/python
 
 # Method 1: Auto-discovery (works if cwd is worktree)
-$PYTHON -m claude_code_hooks_daemon.daemon.cli stop
+./bin/hooks-daemon stop
 
 # Method 2: Explicit paths with CLI flags (works from any directory)
-$PYTHON -m claude_code_hooks_daemon.daemon.cli \
+./bin/hooks-daemon \
   --pid-file /workspace/untracked/worktrees/worktree-plan-00028/.claude/hooks-daemon/untracked/daemon-*.pid \
   --socket /workspace/untracked/worktrees/worktree-plan-00028/.claude/hooks-daemon/untracked/daemon-*.sock \
   stop
@@ -236,7 +242,7 @@ When launching sub-agents for worktree tasks:
 - Verify agent is in correct worktree
 - Never `cd` back to main workspace
 - All file operations relative to worktree root
-- Use the worktree's own `$PYTHON`, not the main workspace's
+- Use the worktree's own `./bin/hooks-daemon`, not the main workspace's
 
 **Example agent prompt:**
 
@@ -244,7 +250,8 @@ When launching sub-agents for worktree tasks:
 You are working in a git worktree at /workspace/untracked/worktrees/worktree-plan-00028/
 DO NOT work in /workspace - only work in YOUR worktree directory.
 All file paths should be relative to /workspace/untracked/worktrees/worktree-plan-00028/
-Use PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/python
+Run the daemon CLI as ./bin/hooks-daemon from that worktree — it resolves that
+worktree's own venv, so you never name an interpreter.
 ```
 
 ### 6. Merge Protocol
@@ -295,7 +302,7 @@ Before merging parent to main:
 # After child merges to parent:
 # 1. Stop child's daemon
 WT=/workspace/untracked/worktrees/worktree-child-plan-00028-handler-1
-$WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$WT/bin/hooks-daemon stop 2>/dev/null || true
 
 # 2. Remove worktree and branch
 cd /workspace
@@ -305,7 +312,7 @@ git branch -d worktree-child-plan-00028-handler-1
 # After parent merges to main:
 # 1. Stop parent's daemon
 WT=/workspace/untracked/worktrees/worktree-plan-00028
-$WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$WT/bin/hooks-daemon stop 2>/dev/null || true
 
 # 2. Remove worktree and branch
 cd /workspace
@@ -329,16 +336,11 @@ git branch -d worktree-plan-00028
 # 1. Ensure untracked/worktrees directory exists
 mkdir -p untracked/worktrees
 
-# 2. Create parent worktree from main branch
+# 2. Create parent worktree from main branch (also builds its venv)
 cd /workspace
-git worktree add untracked/worktrees/worktree-plan-00028 -b worktree-plan-00028
+./scripts/setup_worktree.sh worktree-plan-00028
 
-# 3. Set up Python venv in worktree
-cd /workspace/untracked/worktrees/worktree-plan-00028
-python3 -m venv untracked/venv
-untracked/venv/bin/pip install -e ".[dev]"
-
-# 4. Verify creation
+# 3. Verify creation
 cd /workspace
 git worktree list
 ```
@@ -346,17 +348,11 @@ git worktree list
 ### Creating a Child (Task) Worktree
 
 ```bash
-# 1. Create child from parent worktree branch
+# 1. Create child from parent worktree branch (also builds its venv)
 cd /workspace
-git worktree add untracked/worktrees/worktree-child-plan-00028-handler-1 \
-  -b worktree-child-plan-00028-handler-1 worktree-plan-00028
+./scripts/setup_worktree.sh worktree-child-plan-00028-handler-1 worktree-plan-00028
 
-# 2. Set up Python venv in child worktree
-cd /workspace/untracked/worktrees/worktree-child-plan-00028-handler-1
-python3 -m venv untracked/venv
-untracked/venv/bin/pip install -e ".[dev]"
-
-# 3. Verify it's based on parent
+# 2. Verify it's based on parent
 cd /workspace
 git worktree list
 ```
@@ -369,9 +365,6 @@ git worktree list
 # Navigate to worktree
 cd /workspace/untracked/worktrees/worktree-plan-00028
 
-# Set Python to worktree's venv
-PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/python
-
 # Work normally - commits, edits, tests
 git status
 # ... do your work ...
@@ -380,8 +373,8 @@ git status
 ./scripts/qa/run_all.sh
 
 # Verify daemon loads with your changes
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 
 git add <specific-files>
 git commit -m "Plan 00028: Implement handler"
@@ -404,7 +397,7 @@ git merge worktree-child-plan-00028-handler-1
 
 # 3. Stop child's daemon process
 CHILD_WT=/workspace/untracked/worktrees/worktree-child-plan-00028-handler-1
-$CHILD_WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$CHILD_WT/bin/hooks-daemon stop 2>/dev/null || true
 
 # 4. Immediately cleanup child
 cd /workspace
@@ -427,14 +420,13 @@ git branch -d worktree-child-plan-00028-handler-1
 # This is THE MOST IMPORTANT STEP - sync worktree with main BEFORE merging back
 # Prevents conflicts and ensures worktree has all latest changes from main
 cd /workspace/untracked/worktrees/worktree-plan-00028
-PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/python
 git fetch origin
 git merge main --no-edit
 # ⚠️ If there are conflicts, resolve them HERE in the worktree
 # ⚠️ Test thoroughly after merge - the worktree must pass all QA
 ./scripts/qa/run_all.sh
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 # Expected: Status: RUNNING
 
 # STEP 2: Verify main workspace is clean
@@ -461,8 +453,8 @@ git merge worktree-plan-00028 --no-edit
 # STEP 6: Verify merge succeeded
 git status  # Should show clean state
 ./scripts/qa/run_all.sh  # Verify all QA still passes
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 # Expected: Status: RUNNING
 
 # STEP 7: Push to origin
@@ -470,7 +462,7 @@ git push
 
 # STEP 8: Stop worktree daemon BEFORE removing worktree
 WT=/workspace/untracked/worktrees/worktree-plan-00028
-$WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$WT/bin/hooks-daemon stop 2>/dev/null || true
 
 # STEP 9: ONLY NOW cleanup parent worktree
 # (Not before merge push - we need it in case merge fails)
@@ -503,7 +495,7 @@ Cleanup is **mandatory and immediate** after merging. **Always stop the daemon f
 # After merging child to parent:
 # 1. Stop daemon
 CHILD_WT=/workspace/untracked/worktrees/worktree-child-plan-00028-handler-1
-$CHILD_WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$CHILD_WT/bin/hooks-daemon stop 2>/dev/null || true
 # 2. Remove worktree and branch
 cd /workspace
 git worktree remove untracked/worktrees/worktree-child-plan-00028-handler-1
@@ -512,7 +504,7 @@ git branch -d worktree-child-plan-00028-handler-1
 # After merging parent to main:
 # 1. Stop daemon
 WT=/workspace/untracked/worktrees/worktree-plan-00028
-$WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$WT/bin/hooks-daemon stop 2>/dev/null || true
 # 2. Remove worktree and branch
 cd /workspace
 git worktree remove untracked/worktrees/worktree-plan-00028
@@ -528,38 +520,18 @@ git branch -d worktree-plan-00028
 **Step 1: Create Parent (Plan) Worktree**
 
 ```bash
-# Main orchestrator creates parent worktree for the plan
+# Main orchestrator creates the parent worktree (and its venv) for the plan
 cd /workspace
-git worktree add untracked/worktrees/worktree-plan-00028 -b worktree-plan-00028
-
-# Set up parent venv
-cd /workspace/untracked/worktrees/worktree-plan-00028
-python3 -m venv untracked/venv
-untracked/venv/bin/pip install -e ".[dev]"
+./scripts/setup_worktree.sh worktree-plan-00028
 ```
 
 **Step 2: Wave 1 - Create Handlers (4 child agents in parallel)**
 
 ```bash
-# Create 4 child worktrees from parent
+# Create 4 child worktrees from parent — each with its own venv
 cd /workspace
-git worktree add untracked/worktrees/worktree-child-plan-00028-handler-a \
-  -b worktree-child-plan-00028-handler-a worktree-plan-00028
-
-git worktree add untracked/worktrees/worktree-child-plan-00028-handler-b \
-  -b worktree-child-plan-00028-handler-b worktree-plan-00028
-
-git worktree add untracked/worktrees/worktree-child-plan-00028-handler-c \
-  -b worktree-child-plan-00028-handler-c worktree-plan-00028
-
-git worktree add untracked/worktrees/worktree-child-plan-00028-handler-d \
-  -b worktree-child-plan-00028-handler-d worktree-plan-00028
-
-# Each child sets up its own venv
 for wt in handler-a handler-b handler-c handler-d; do
-  cd /workspace/untracked/worktrees/worktree-child-plan-00028-${wt}
-  python3 -m venv untracked/venv
-  untracked/venv/bin/pip install -e ".[dev]"
+  ./scripts/setup_worktree.sh "worktree-child-plan-00028-${wt}" worktree-plan-00028
 done
 
 # Launch 4 agents, each in their child worktree
@@ -578,7 +550,7 @@ cd /workspace/untracked/worktrees/worktree-plan-00028
 # Merge child, stop its daemon, then cleanup
 git merge worktree-child-plan-00028-handler-a
 WT=/workspace/untracked/worktrees/worktree-child-plan-00028-handler-a
-$WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$WT/bin/hooks-daemon stop 2>/dev/null || true
 cd /workspace
 git worktree remove untracked/worktrees/worktree-child-plan-00028-handler-a
 git branch -d worktree-child-plan-00028-handler-a
@@ -586,7 +558,7 @@ git branch -d worktree-child-plan-00028-handler-a
 cd /workspace/untracked/worktrees/worktree-plan-00028
 git merge worktree-child-plan-00028-handler-b
 WT=/workspace/untracked/worktrees/worktree-child-plan-00028-handler-b
-$WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$WT/bin/hooks-daemon stop 2>/dev/null || true
 cd /workspace
 git worktree remove untracked/worktrees/worktree-child-plan-00028-handler-b
 git branch -d worktree-child-plan-00028-handler-b
@@ -599,11 +571,10 @@ git branch -d worktree-child-plan-00028-handler-b
 ```bash
 # From parent worktree - verify everything works together
 cd /workspace/untracked/worktrees/worktree-plan-00028
-PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/python
 
 ./scripts/qa/run_all.sh
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 # Expected: Status: RUNNING
 ```
 
@@ -623,7 +594,7 @@ git push
 
 # STEP 3: Stop daemon, then cleanup parent
 WT=/workspace/untracked/worktrees/worktree-plan-00028
-$WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$WT/bin/hooks-daemon stop 2>/dev/null || true
 git worktree remove untracked/worktrees/worktree-plan-00028
 git branch -d worktree-plan-00028
 ```
@@ -683,10 +654,10 @@ The team lead operates from the **main workspace** and coordinates all worktree 
      prompt="You are working in a git worktree at
        /workspace/untracked/worktrees/worktree-child-plan-00028-handler-a/
        DO NOT work in /workspace.
-       PYTHON=/workspace/untracked/worktrees/worktree-child-plan-00028-handler-a/untracked/venv/bin/python
+       Run the daemon CLI as ./bin/hooks-daemon from that worktree.
        Your task: Implement handler A. See TaskList for details.
        Run ./scripts/qa/run_all.sh before committing.
-       Verify daemon loads: $PYTHON -m claude_code_hooks_daemon.daemon.cli restart"
+       Verify daemon loads: ./bin/hooks-daemon restart"
    )
    ```
 
@@ -715,9 +686,10 @@ The team lead operates from the **main workspace** and coordinates all worktree 
 Each teammate MUST:
 
 - **Stay in their worktree** - never `cd /workspace`
-- **Use their own `$PYTHON`** - the worktree-local venv
+- **Use their own `./bin/hooks-daemon`** - it anchors to its own location, so
+  the worktree's copy automatically uses the worktree-local venv
 - **Run QA before committing** - `./scripts/qa/run_all.sh`
-- **Verify daemon loads** - `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+- **Verify daemon loads** - `./bin/hooks-daemon restart`
 - **Communicate via `SendMessage`** - report completion, ask questions
 - **Mark tasks complete** via `TaskUpdate` when done
 - **Respond to shutdown requests** - approve via `SendMessage` with `type: "shutdown_response"`
@@ -730,7 +702,7 @@ The shutdown order matters to avoid orphaned processes:
 1. SendMessage(type="shutdown_request") to each teammate
    ↓ (wait for shutdown_response from each)
 2. Stop each child worktree daemon
-   $CHILD_WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop
+   $CHILD_WT/bin/hooks-daemon stop
    ↓
 3. Merge children → parent (if not already done)
    ↓
@@ -853,30 +825,34 @@ touch src/claude_code_hooks_daemon/handlers/pre_tool_use/new_handler.py  # WRONG
 
 ✅ **Solution**: Always verify `pwd` before file operations
 
-### ❌ Using Wrong Python / Venv
+### ❌ Running the MAIN workspace's wrapper while working in a worktree
 
 ```bash
-# Using main workspace venv in a worktree
-PYTHON=/workspace/untracked/venv/bin/python  # WRONG for worktree work
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart  # Imports main src, not worktree src
+cd /workspace/untracked/worktrees/worktree-plan-00028
+/workspace/bin/hooks-daemon restart  # WRONG — imports main src, not worktree src
 ```
 
-✅ **Solution**: Always use the worktree's own venv:
+The wrapper anchors to its OWN location, so an absolute path to `/workspace/bin/`
+always resolves the MAIN venv no matter where you are.
+
+✅ **Solution**: use the worktree's own wrapper — relative, from inside it:
 
 ```bash
-PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/python
+cd /workspace/untracked/worktrees/worktree-plan-00028
+./bin/hooks-daemon restart
 ```
 
-### ❌ Forgetting Venv Setup
+### ❌ Creating a Worktree with Bare `git worktree add`
 
 ```bash
-# Creating worktree without setting up venv
+# No venv is created, so nothing can import the package
 git worktree add untracked/worktrees/worktree-plan-00028 -b worktree-plan-00028
 cd untracked/worktrees/worktree-plan-00028
 pytest tests/  # ModuleNotFoundError!
 ```
 
-✅ **Solution**: Always run venv setup immediately after creating a worktree
+✅ **Solution**: always create worktrees with `./scripts/setup_worktree.sh`,
+which adds the worktree and builds its venv together.
 
 ### ❌ Branch Name Confusion
 
@@ -907,8 +883,8 @@ git merge worktree-plan-00028  # Merged code with import errors!
 ✅ **Solution**: Always verify daemon starts in worktree before merging:
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 # Expected: Status: RUNNING
 ```
 
@@ -924,7 +900,7 @@ git worktree remove untracked/worktrees/worktree-plan-00028  # Orphaned daemon p
 
 ```bash
 WT=/workspace/untracked/worktrees/worktree-plan-00028
-$WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop
+$WT/bin/hooks-daemon stop
 # THEN remove worktree
 ```
 
@@ -1029,9 +1005,10 @@ $ git worktree list
 
 ### After Creating Any Worktree:
 
-- [ ] Python venv created: `python3 -m venv untracked/venv`
-- [ ] Package installed in editable mode: `untracked/venv/bin/pip install -e ".[dev]"`
-- [ ] `$PYTHON` set to worktree's own venv Python
+- [ ] Created via `./scripts/setup_worktree.sh <branch> [base]` (builds the
+  fingerprint-keyed venv and installs the package editable in one step)
+- [ ] `./bin/hooks-daemon` present in the worktree (it resolves that worktree's
+  own venv automatically — no interpreter path to set)
 - [ ] QA scripts work: `./scripts/qa/run_all.sh`
 
 ### Before Merging Child → Parent:
@@ -1047,7 +1024,7 @@ $ git worktree list
 - [ ] ✋ **STEP 1**: ⚠️ **MERGED MAIN INTO WORKTREE FIRST** ⚠️ (`cd worktree && git merge main`)
 - [ ] ✋ **STEP 2**: Resolved any conflicts in parent worktree (NOT in main!)
 - [ ] ✋ **STEP 3**: Full QA passes in worktree (`./scripts/qa/run_all.sh`)
-- [ ] ✋ **STEP 4**: Daemon restarts successfully in worktree (`$PYTHON -m claude_code_hooks_daemon.daemon.cli restart && status`)
+- [ ] ✋ **STEP 4**: Daemon restarts successfully in worktree (`./bin/hooks-daemon restart && status`)
 - [ ] ✋ **STEP 5**: Verified main workspace is clean (`git status` shows clean)
 - [ ] ✋ **STEP 6**: Committed or stashed any uncommitted changes in main workspace
 - [ ] ✋ **STEP 7**: Asked human for final approval
@@ -1068,7 +1045,7 @@ $ git worktree list
 
 - [ ] ✋ **STEP 11**: Verified merge succeeded (`git status` shows clean)
 - [ ] ✋ **STEP 12**: Full QA passes (`./scripts/qa/run_all.sh`)
-- [ ] ✋ **STEP 13**: Daemon restarts successfully (`$PYTHON -m claude_code_hooks_daemon.daemon.cli restart && status`)
+- [ ] ✋ **STEP 13**: Daemon restarts successfully (`./bin/hooks-daemon restart && status`)
 - [ ] ✋ **STEP 14**: Pushed to origin successfully (`git push`)
 - [ ] ✋ **STEP 15**: Stopped parent worktree daemon (`$WT/.../daemon.cli stop`)
 - [ ] ✋ **STEP 16**: ONLY NOW remove parent worktree folder
@@ -1103,15 +1080,20 @@ git worktree prune
 
 ### "ModuleNotFoundError: No module named 'claude_code_hooks_daemon'"
 
-**Cause**: Venv not set up in worktree, or using wrong Python
-**Solution**:
+**Cause**: The worktree has no venv, or has a hand-made `untracked/venv/` (the
+retired pre-v3.7.0 layout, which `resolve_venv.sh` refuses).
+
+**Solution**: recreate the worktree through the SSoT script, which builds a
+fingerprint-keyed venv:
 
 ```bash
-cd /workspace/untracked/worktrees/worktree-plan-00028
-python3 -m venv untracked/venv
-untracked/venv/bin/pip install -e ".[dev]"
-PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/python
+cd /workspace
+git worktree remove untracked/worktrees/worktree-plan-00028
+./scripts/setup_worktree.sh worktree-plan-00028
 ```
+
+Then run the daemon CLI as `./bin/hooks-daemon` from inside the worktree — it
+resolves that worktree's venv itself, so there is no interpreter to name.
 
 ### Orphaned Daemon After Worktree Removal
 
@@ -1206,13 +1188,8 @@ worktree-child-handler-refactor-module-1
 ### Common Commands
 
 ```bash
-# Create parent from main
-git worktree add untracked/worktrees/worktree-plan-00028 -b worktree-plan-00028
-
-# Set up venv in worktree (MANDATORY after creation)
-cd /workspace/untracked/worktrees/worktree-plan-00028
-python3 -m venv untracked/venv
-untracked/venv/bin/pip install -e ".[dev]"
+# Create parent from main (worktree + venv in one step)
+./scripts/setup_worktree.sh worktree-plan-00028
 
 # Create child from parent
 cd /workspace
@@ -1225,7 +1202,7 @@ git merge worktree-child-plan-00028-task
 
 # Stop child daemon, then cleanup immediately
 WT=/workspace/untracked/worktrees/worktree-child-plan-00028-task
-$WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$WT/bin/hooks-daemon stop 2>/dev/null || true
 cd /workspace
 git worktree remove untracked/worktrees/worktree-child-plan-00028-task
 git branch -d worktree-child-plan-00028-task
@@ -1242,7 +1219,7 @@ git merge worktree-plan-00028
 
 # Step 3: Stop daemon, then cleanup parent
 WT=/workspace/untracked/worktrees/worktree-plan-00028
-$WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$WT/bin/hooks-daemon stop 2>/dev/null || true
 git worktree remove untracked/worktrees/worktree-plan-00028
 git branch -d worktree-plan-00028
 ```

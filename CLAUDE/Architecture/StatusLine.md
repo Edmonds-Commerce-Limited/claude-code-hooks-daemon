@@ -390,8 +390,8 @@ Create `tests/handlers/status_line/test_my_element.py` with tests for `matches()
 The daemon is not running. Check:
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+./bin/hooks-daemon status
+./bin/hooks-daemon restart
 ```
 
 ### Status line shows "NO STATUS DATA"
@@ -399,7 +399,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 All handlers returned empty context. Check:
 
 - Are handlers enabled in `hooks-daemon.yaml`?
-- Check daemon logs: `$PYTHON -m claude_code_hooks_daemon.daemon.cli logs`
+- Check daemon logs: `./bin/hooks-daemon logs`
 
 ### Status line shows "ERROR: ..."
 

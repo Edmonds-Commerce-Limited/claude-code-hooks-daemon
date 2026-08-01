@@ -39,28 +39,41 @@ v3.7.0 derives a fingerprint from `md5(sys.version | sys.base_prefix | platform.
 Manage venvs with:
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli list-venvs
-$PYTHON -m claude_code_hooks_daemon.daemon.cli prune-venvs --legacy --dry-run
-$PYTHON -m claude_code_hooks_daemon.daemon.cli prune-venvs --all-except-current --force
+./bin/hooks-daemon list-venvs
+./bin/hooks-daemon prune-venvs --legacy --dry-run
+./bin/hooks-daemon prune-venvs --all-except-current --force
 ```
 
 The current-environment venv is never deleted, even with `--force`.
 
 ## Critical Paths
 
-### Python Command
+### Daemon CLI
 
-**ALWAYS use venv Python:**
+**Never name an interpreter.** The venv is fingerprint-keyed, so its path is
+different on every machine and changes when the Python underneath it changes.
+Use the wrapper — it resolves the interpreter itself:
 
 ```bash
-PYTHON=/workspace/untracked/venv/bin/python
+./bin/hooks-daemon status
 ```
 
 **NEVER use:**
 
-- `python` (might be system Python)
-- `python3` (might be system Python)
-- `.claude/hooks-daemon/untracked/venv/bin/python` (doesn't exist in self-install mode)
+- `python` / `python3` — the venv sets `include-system-site-packages = false`,
+  so a PATH interpreter genuinely cannot import the package
+- Any hardcoded `untracked/venv/bin/python` <!-- python-var-guidance-exempt: names the banned pattern to warn against it --> — that is the retired
+  pre-v3.7.0 layout; `resolve_venv.sh` refuses it
+- `$PYTHON` <!-- python-var-guidance-exempt: names the banned pattern to warn against it --> — never exported into your shell
+
+**If you need the interpreter itself** (e.g. to run `pytest` directly), resolve
+it through the canonical resolver rather than guessing:
+
+```bash
+source scripts/lib/resolve_venv.sh
+PY="$(resolve_venv_python /workspace)"
+"$PY" -m pytest tests/unit -q
+```
 
 ### Config File
 
@@ -102,22 +115,22 @@ All commands use venv Python:
 
 ```bash
 # Check if daemon is running
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon status
 
 # Start daemon (if not running)
-$PYTHON -m claude_code_hooks_daemon.daemon.cli start
+./bin/hooks-daemon start
 
 # Stop daemon (graceful shutdown)
-$PYTHON -m claude_code_hooks_daemon.daemon.cli stop
+./bin/hooks-daemon stop
 
 # Restart daemon (stop + start)
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+./bin/hooks-daemon restart
 
 # View daemon logs
-$PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+./bin/hooks-daemon logs
 
 # Health check
-$PYTHON -m claude_code_hooks_daemon.daemon.cli health
+./bin/hooks-daemon health
 ```
 
 ## Development Workflow
@@ -146,10 +159,10 @@ Edit files in `/workspace/src/claude_code_hooks_daemon/`
 
 ```bash
 # Restart daemon to pick up code changes
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+./bin/hooks-daemon restart
 
 # Verify daemon is running
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon status
 
 # Debug hooks if needed
 ./scripts/debug_hooks.sh start "Testing my changes"
@@ -163,7 +176,7 @@ If something goes wrong:
 
 ```bash
 # View daemon logs
-$PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+./bin/hooks-daemon logs
 
 # Or check log files directly
 tail -f untracked/logs/daemon.log
@@ -173,13 +186,16 @@ tail -f untracked/logs/daemon.log
 
 ### "ModuleNotFoundError: No module named 'claude_code_hooks_daemon'"
 
-**Cause**: Using system Python instead of venv Python
+**Cause**: You invoked a system `python3`. The daemon lives in an isolated,
+fingerprint-keyed virtualenv built with `include-system-site-packages = false`,
+so the PATH interpreter genuinely cannot import it. The package is installed —
+the interpreter is simply the wrong one.
 
-**Fix**: Use `$PYTHON` (venv Python) for all commands
+**Fix**: Use the wrapper. It resolves the correct interpreter itself, so you
+never spell out a venv path (they are fingerprint-keyed and change):
 
 ```bash
-PYTHON=/workspace/untracked/venv/bin/python
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon status
 ```
 
 ### "Config file not found"
@@ -201,7 +217,7 @@ echo $HOOKS_DAEMON_ROOT_DIR
 **Fix**: Restart daemon after code changes
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+./bin/hooks-daemon restart
 ```
 
 ### "Socket already in use"
@@ -212,7 +228,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 
 ```bash
 # Graceful stop
-$PYTHON -m claude_code_hooks_daemon.daemon.cli stop
+./bin/hooks-daemon stop
 
 # If still running, check PID file
 cat untracked/daemon.pid
@@ -287,46 +303,28 @@ Not from pip package in venv site-packages.
 ### Verify Paths
 
 ```bash
-# Check daemon root
-$PYTHON -c "
-from claude_code_hooks_daemon.daemon.paths import get_daemon_root
-print(get_daemon_root())
-"
-# Should output: /workspace
+# Daemon root and socket location
+./bin/hooks-daemon status
+# Socket should be under /workspace/untracked/
 
-# Check venv location
-$PYTHON -c "import sys; print(sys.prefix)"
-# Should output: /workspace/untracked/venv
-
-# Check socket location
-$PYTHON -c "
-from claude_code_hooks_daemon.daemon.paths import get_socket_path
-print(get_socket_path())
-"
-# Should output: /workspace/untracked/socket
+# Venv location (fingerprint-keyed — never hardcode it)
+./bin/hooks-daemon list-venvs
 ```
 
 ### Verify Config
 
 ```bash
 # Check self_install_mode setting
-$PYTHON -c "
-from claude_code_hooks_daemon.config.loader import ConfigLoader
-config = ConfigLoader.load()
-print(config.get('daemon', {}).get('self_install_mode', False))
-"
-# Should output: True
+./bin/hooks-daemon config
+# The daemon section should show: self_install_mode: true
 ```
 
 ### Verify Source Import
 
 ```bash
-# Check where code is imported from
-$PYTHON -c "
-import claude_code_hooks_daemon
-print(claude_code_hooks_daemon.__file__)
-"
-# Should output: /workspace/src/claude_code_hooks_daemon/__init__.py
+# Confirm the install is importable and serving
+./bin/hooks-daemon health
+# In self-install mode the code is served from /workspace/src/
 # NOT: /workspace/untracked/venv/lib/.../site-packages/...
 ```
 
@@ -365,7 +363,7 @@ print(claude_code_hooks_daemon.__file__)
 
 Key points for self-install mode:
 
-1. **Always use venv Python**: `/workspace/untracked/venv/bin/python`
+1. **Always use the wrapper**: `./bin/hooks-daemon` — never a hardcoded interpreter path
 2. **Paths are at workspace root**: `untracked/`, not `.claude/hooks-daemon/untracked/`
 3. **Config has self_install_mode: true**: In `.claude/hooks-daemon.yaml`
 4. **Environment sets HOOKS_DAEMON_ROOT_DIR**: In `.claude/hooks-daemon.env`

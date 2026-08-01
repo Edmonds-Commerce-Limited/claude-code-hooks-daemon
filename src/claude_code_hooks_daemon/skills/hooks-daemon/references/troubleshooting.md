@@ -92,8 +92,11 @@ ModuleNotFoundError: No module named 'my_dependency'
 **Solution:**
 
 ```bash
-# Install missing dependency in daemon venv
-.claude/hooks-daemon/untracked/venv/bin/pip install my_dependency
+# Install a missing dependency into the daemon venv. The venv is
+# fingerprint-keyed, so resolve its interpreter rather than guessing a path.
+source .claude/hooks-daemon/scripts/lib/resolve_venv.sh
+PY="$(resolve_venv_python "$PWD/.claude/hooks-daemon")"
+"$PY" -m pip install my_dependency
 
 # Restart daemon
 .claude/hooks-daemon/bin/hooks-daemon restart

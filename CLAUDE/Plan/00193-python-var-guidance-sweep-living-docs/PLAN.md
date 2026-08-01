@@ -1,6 +1,6 @@
 # Plan 00193: Extend the `$PYTHON` guidance sweep to living docs
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-07-31
 **Owner**: joseph
 **Priority**: Medium
@@ -50,36 +50,26 @@ Drop Findings".
 
 ## Context & Background
 
-### Inventory (measured at plan creation, `rg -c 'PYTHON'`)
+### Inventory
 
-| File                                        | Count |
-| ------------------------------------------- | ----- |
-| `CLAUDE/Worktree.md`                        | 37    |
-| `CLAUDE/LLM-UPDATE.md`                      | 36    |
-| `CLAUDE/AgentTeam.md`                       | 27    |
-| `CLAUDE/SELF_INSTALL.md`                    | 23    |
-| `CLAUDE/PROJECT_HANDLERS.md`                | 16    |
-| `CLAUDE/LLM-INSTALL.md`                     | 14    |
-| `docs/guides/GETTING_STARTED.md`            | 11    |
-| `docs/guides/CONFIGURATION.md`              | 8     |
-| `CLAUDE/CodeLifecycle/General.md`           | 7     |
-| `CLAUDE/CodeLifecycle/Bugs.md`              | 7     |
-| `CLAUDE/QA.md`                              | 6     |
-| `CLAUDE/CodeLifecycle/Features.md`          | 6     |
-| `CLAUDE/HANDLER_DEVELOPMENT.md`             | 4     |
-| `examples/project-handlers/README.md`       | 3     |
-| `docs/guides/HANDLER_REFERENCE.md`          | 3     |
-| `CLAUDE/PlanWorkflow.md`                    | 3     |
-| `CLAUDE/Architecture/StatusLine.md`         | 3     |
-| `CLAUDE/AcceptanceTests/GENERATING.md`      | 3     |
-| `CLAUDE/CodeLifecycle/README.md`            | 2     |
-| `CLAUDE/Performance/README.md`              | 1     |
-| `CLAUDE/DEBUGGING_HOOKS.md`                 | 1     |
-| `CLAUDE/development/RELEASING.md`           | 1     |
-| `CLAUDE/development/CLIENT-MODE-TESTING.md` | 1     |
+The plan opened with "223 occurrences across 23 files", counted by grepping for
+the literal string `PYTHON`. That figure was wrong **in kind**, not merely in
+count: it measured one spelling of the defect. The defect is "documentation
+hands the reader a command that cannot run", and it has **three** spellings:
 
-The last two rows are the deliberate explanatory references listed under
-Non-Goals — verify, do not rewrite.
+| Variant                                   | What it is                                                                                                                    | Found  |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------ |
+| 1. `$PYTHON` / `$VENV_PYTHON`             | Never exported to a reader's shell; line expands to `-m …` → `command not found`                                              | 297    |
+| 2. `<python> -m …daemon.cli`              | A PATH `python3` cannot import the package (`include-system-site-packages = false`)                                           | (in 1) |
+| 3. `untracked/venv/bin/python` \| `…/pip` | The **retired pre-v3.7.0 venv layout**. Venvs are fingerprint-keyed since v3.7.0, so this directory exists on no live install | 65     |
+
+Variant 3 was invisible until the gate was widened in Phase 3 — it names a real
+path rather than an unset variable, so it *looks* runnable and greps clean for
+`PYTHON`. It was the single largest group.
+
+`CLAUDE/development/RELEASING.md` and `CLAUDE/development/CLIENT-MODE-TESTING.md`
+are the deliberate explanatory references listed under Non-Goals — verified and
+marked exempt in place, not rewritten.
 
 ### Severity is not uniform
 
@@ -112,34 +102,43 @@ damage the former.
 
 ### Phase 1: Classify
 
-- [ ] ⬜ **Task 1.1**: For every occurrence, classify as (a) instructs the
+- [x] ✅ **Task 1.1**: For every occurrence, classify as (a) instructs the
   reader to run an undefined `$PYTHON` — DEFECT, (b) defines `PYTHON` locally
   in the same snippet — KEEP, (c) explains the trap — KEEP.
-- [ ] ⬜ **Task 1.2**: Record the counts per class so the QA gate's exemption
+- [x] ✅ **Task 1.2**: Record the counts per class so the QA gate's exemption
   list can be written from evidence rather than guessed.
 
 ### Phase 2: Remediate
 
-- [ ] ⬜ **Task 2.1**: Fix the three MANDATORY CodeLifecycle docs first — they
+- [x] ✅ **Task 2.1**: Fix the three MANDATORY CodeLifecycle docs first — they
   gate every code change in the project.
-- [ ] ⬜ **Task 2.2**: Fix the recovery-path docs (`LLM-INSTALL.md`,
+- [x] ✅ **Task 2.2**: Fix the recovery-path docs (`LLM-INSTALL.md`,
   `LLM-UPDATE.md`, `SELF_INSTALL.md`), which are read when things are already
   broken.
-- [ ] ⬜ **Task 2.3**: Fix the remaining `CLAUDE/**` docs.
-- [ ] ⬜ **Task 2.4**: Fix `docs/**` and `examples/**` (user-facing).
-- [ ] ⬜ **Task 2.5**: Where a doc genuinely needs a raw interpreter (pytest,
+- [x] ✅ **Task 2.3**: Fix the remaining `CLAUDE/**` docs.
+- [x] ✅ **Task 2.4**: Fix `docs/**` and `examples/**` (user-facing).
+- [x] ✅ **Task 2.5**: Where a doc genuinely needs a raw interpreter (pytest,
   ad-hoc scripts), use the canonical resolver pattern rather than inventing a
   path — see `CLAUDE/development/RELEASING.md` Step 12.0 for the worked form.
+- [x] ✅ **Task 2.6**: Replace hand-rolled venv/install recipes with their SSoT
+  scripts — `setup_worktree.sh`, `install_version.sh`, `upgrade_version.sh`,
+  and the `handlers` / `health` / `repair` / `list-venvs` CLI subcommands.
+  Several docs also told the reader to `cd .claude/hooks-daemon`, which
+  `daemon_location_guard` blocks.
 
 ### Phase 3: Lock it in
 
-- [ ] ⬜ **Task 3.1**: Extend `scripts/qa/check_python_var_guidance.py` to cover
+- [x] ✅ **Task 3.1**: Extend `scripts/qa/check_python_var_guidance.py` to cover
   `CLAUDE/**`, `docs/**` and `examples/**`, with explicit exemptions for the
   history paths in Non-Goals and the class-(b)/(c) occurrences found in Phase 1.
-- [ ] ⬜ **Task 3.2**: Confirm the gate FAILS on a reintroduced occurrence
-  (deliberately add one, watch it fail, remove it) — a gate never seen red is
-  not known to work.
-- [ ] ⬜ **Task 3.3**: Full QA green; daemon restarts RUNNING.
+- [x] ✅ **Task 3.2**: Confirm the gate FAILS on a reintroduced occurrence — the
+  widened gate was observed RED at 297, then 61, then 2 before reaching 0, and
+  the new variant-3 rule was written test-first (3 failing tests → pass).
+- [x] ✅ **Task 3.3**: Full QA green (14/14); daemon restarts RUNNING.
+- [x] ✅ **Task 3.4**: Give the gate a test file — it shipped with none, which is
+  why its `src/`-only scope went unchallenged. `tests/unit/qa/test_check_python_var_guidance.py`
+  covers all three variants, the exemption semantics, and locks the real trees
+  clean via `TestRepositoryIsClean`.
 
 ### Phase 4: Verify where it matters
 
@@ -171,6 +170,21 @@ damage the former.
 already distinguishes exempt paths; this is a scope change, not new logic.
 **Date**: 2026-07-31
 
+### Decision 2: A gate's SCOPE is part of its contract and must be tested
+
+**Context**: Plan 00192 shipped `python_var_guidance` scoped to `src/` only,
+with no test file. It passed every release gate while 297 occurrences of the
+exact defect it exists to prevent sat in `CLAUDE/`, `docs/` and `examples/`.
+That is the direct answer to "how did this get through QA": **a gate only ever
+checks what you point it at**, and nothing asserted where this one pointed.
+
+**Decision**: Widening the scope is necessary but not sufficient. The gate now
+has a test file whose `TestRepositoryIsClean` case runs it against its real
+default roots — so a future narrowing of `_DEFAULT_SCAN_ROOTS` is a *test
+failure*, not a silent loss of coverage. Exemptions are same-line and must state
+their reason inline, so silencing a finding is visible in the diff.
+**Date**: 2026-08-01
+
 ## Success Criteria
 
 - [ ] Every class-(a) occurrence is corrected; class-(b)/(c) are intact.
@@ -194,3 +208,7 @@ already distinguishes exempt paths; this is a scope change, not new logic.
 
 - Plan created from the v3.50.0 release code-review finding; inventory measured
   at 223 occurrences across 23 files.
+- Phases 1–3 delivered: 297 variant-1/2 occurrences and 65 variant-3 occurrences
+  corrected across 30 files; gate widened to `CLAUDE/`, `docs/`, `examples/` and
+  given its first test file; QA 14/14; daemon RUNNING. Phase 4 (client-fixture
+  verification) outstanding.

@@ -6,12 +6,16 @@ instead of bare 'python -m claude_code_hooks_daemon' or '/hooks-daemon' slash sy
 
 import json
 import subprocess  # nosec B404 - subprocess used for running QA checker only
+import sys
 from pathlib import Path
 from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parents[3] / "scripts" / "qa"
 CHECKER = SCRIPT_DIR / "check_skill_references.py"
-PYTHON = Path(__file__).resolve().parents[3] / "untracked" / "venv" / "bin" / "python"
+# pytest already runs under the daemon's venv, so sys.executable IS the right
+# interpreter. Spelling out untracked/venv/bin/python would name the retired
+# pre-v3.7.0 layout, which only resolves here by accident on a stale leftover.
+PYTHON = Path(sys.executable)
 
 
 def _run_checker(*args: str) -> dict[str, Any]:

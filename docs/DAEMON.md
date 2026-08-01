@@ -290,10 +290,10 @@ plugins: []
 Commands:
 
 ```bash
-python3 -m claude_code_hooks_daemon.daemon.cli start   # Start daemon
-python3 -m claude_code_hooks_daemon.daemon.cli stop    # Stop daemon
-python3 -m claude_code_hooks_daemon.daemon.cli status  # Check if running
-python3 -m claude_code_hooks_daemon.daemon.cli restart # Restart daemon
+.claude/hooks-daemon/bin/hooks-daemon start   # Start daemon
+.claude/hooks-daemon/bin/hooks-daemon stop    # Stop daemon
+.claude/hooks-daemon/bin/hooks-daemon status  # Check if running
+.claude/hooks-daemon/bin/hooks-daemon restart # Restart daemon
 ```
 
 ## Multi-Project Support
@@ -406,7 +406,7 @@ tail -f .claude/hooks/daemon.log
 Restart daemon:
 
 ```bash
-python3 -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 ### Multiple Projects Conflict

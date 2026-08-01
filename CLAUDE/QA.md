@@ -4,6 +4,10 @@
 **Status**: Primary source of truth for QA workflow
 **Audience**: All developers and AI agents
 
+> **Run every command below from the PROJECT ROOT.** Paths like
+> `./bin/hooks-daemon` and `./scripts/qa/...` are relative to it, and resolve to
+> nothing from anywhere else (`exit 127`).
+
 ---
 
 ## Overview
@@ -122,7 +126,7 @@ Verify code meets quality standards (format, lint, types, coverage, security).
 WORKFLOW:
 1. cd to target directory
 2. Run: ./scripts/qa/run_all.sh (all 7 checks)
-3. Verify daemon: $PYTHON -m claude_code_hooks_daemon.daemon.cli restart && status
+3. Verify daemon: ./bin/hooks-daemon restart && status
 4. Check coverage: MUST be 95%+ (shown in QA output)
 5. Verify no security issues (Bandit must pass)
 6. **Check library/plugin separation** (see checklist below)
@@ -372,7 +376,7 @@ Acceptance testing is **agentic** - AI agents execute real-world test scenarios:
 
 ```bash
 # 1. Generate fresh playbook (ephemeral)
-$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.md
+./bin/hooks-daemon generate-playbook > /tmp/playbook.md
 
 # 2. Execute tests manually following playbook
 # ... test each scenario ...
@@ -399,7 +403,7 @@ Your fix might have affected earlier tests. Full re-run ensures no regressions.
 3. **If bug found**: STOP immediately
 4. Fix bug using TDD (write failing test, implement fix, verify)
 5. Run FULL QA: `./scripts/qa/run_all.sh` (must pass 100%)
-6. Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+6. Restart daemon: `./bin/hooks-daemon restart`
 7. **Regenerate playbook** (to reflect fix)
 8. **RESTART from Test 1.1** (not from where you left off)
 9. Continue until ALL tests pass with ZERO code changes
@@ -450,7 +454,7 @@ All plugin handlers MUST implement `get_acceptance_tests()` - empty arrays are r
 1. **During development**: Write tests first (TDD)
 2. **Before committing**: Run `./scripts/qa/run_all.sh` (automated QA)
 3. **Fix any issues**: Use `./scripts/qa/run_autofix.sh` for format/lint
-4. **Verify daemon**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart && status`
+4. **Verify daemon**: `./bin/hooks-daemon restart && status`
 5. **For significant work**: Spawn QA Agent for deep review
 
 ### For Agent Team Work
@@ -623,8 +627,8 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 ./scripts/qa/run_dependency_check.sh
 
 # Daemon restart verification
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 ```
 
 ### Success Indicators

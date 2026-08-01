@@ -21,10 +21,10 @@ is laid out differently, and the two disagree in exactly the places bugs hide:
 actual user.** Anything that resolves a path, an interpreter, a wrapper, or a
 deployed asset must be verified in both modes.
 
-Plan 00192 is the worked example: the daemon shipped 9 unrunnable
-`$PYTHON -m …` lines into every client's resident `CLAUDE.md`, and no
-self-install test could see it because self-install has no deployed wrapper to
-disagree with.
+Plan 00192 is the worked example: the daemon shipped 9 unrunnable client-facing
+lines naming `$PYTHON` — a variable no agent shell ever sets. <!-- python-var-guidance-exempt: names the banned pattern to warn against it -->
+No self-install test could see it, because self-install has no deployed wrapper
+to disagree with.
 
 ## The fixture
 

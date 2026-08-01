@@ -3,6 +3,10 @@
 **Status**: MANDATORY for all bug fixes
 **Audience**: AI agents and human developers
 
+> **Run every command below from the PROJECT ROOT.** Paths like
+> `./bin/hooks-daemon` and `./scripts/qa/...` are relative to it, and resolve to
+> nothing from anywhere else (`exit 127`).
+
 ## Overview
 
 Rigorous process to fix bugs with confidence that they won't return.
@@ -162,15 +166,15 @@ pytest tests/ -v
 
 ```bash
 # Restart daemon
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+./bin/hooks-daemon restart
 
 # Verify daemon is RUNNING
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon status
 
 # Expected: Status: RUNNING
 
 # Check logs for errors
-$PYTHON -m claude_code_hooks_daemon.daemon.cli logs | grep -i error
+./bin/hooks-daemon logs | grep -i error
 
 # Expected: No errors related to your fix
 ```
@@ -261,8 +265,8 @@ self-install mode. If the bug came from a client install, reproduce it there.
 
 - [ ] Daemon restarts successfully
 - [ ] No import errors in logs
-- [ ] Run: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
-- [ ] Verify: `$PYTHON -m claude_code_hooks_daemon.daemon.cli status` (RUNNING)
+- [ ] Run: `./bin/hooks-daemon restart`
+- [ ] Verify: `./bin/hooks-daemon status` (RUNNING)
 
 ### 7. Live Verification
 
@@ -296,7 +300,7 @@ Your fix might have affected earlier tests. Full re-run ensures no regressions.
 **Step 1: Reproduce**
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+./bin/hooks-daemon restart
 # Error: No module named 'claude_code_hooks_daemon.constants.decision'
 ```
 
@@ -331,7 +335,7 @@ pytest tests/integration/test_bug_daemon_loads.py -v
 **Step 5: Restart daemon**
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+./bin/hooks-daemon restart
 # Daemon started successfully
 ```
 

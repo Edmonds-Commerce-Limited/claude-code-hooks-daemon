@@ -2,6 +2,10 @@
 
 **CRITICAL**: This directory defines the rigorous "Definition of Done" for all code changes.
 
+> **Run every command below from the PROJECT ROOT.** Paths like
+> `./bin/hooks-daemon` and `./scripts/qa/...` are relative to it, and resolve to
+> nothing from anywhere else (`exit 127`).
+
 ## Purpose
 
 These documents prevent shipping broken code by enforcing a complete testing pyramid:
@@ -41,8 +45,8 @@ These documents prevent shipping broken code by enforcing a complete testing pyr
 
 ```bash
 # MANDATORY for every change (no exceptions)
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 # Expected: Status: RUNNING
 ```
 

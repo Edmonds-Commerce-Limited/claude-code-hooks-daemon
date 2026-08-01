@@ -341,21 +341,19 @@ SNAPSHOT=$(ls -d "$DAEMON_DIR/untracked/upgrade-snapshots/"* | sort -r | head -1
 cat "$SNAPSHOT/manifest.json"
 
 # Stop daemon
-"$DAEMON_DIR/untracked/venv/bin/python" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+"$DAEMON_DIR/bin/hooks-daemon" stop 2>/dev/null || true
 
 # Restore files
 cp "$SNAPSHOT/files/hooks-daemon.yaml" .claude/hooks-daemon.yaml
 cp "$SNAPSHOT/files/settings.json" .claude/settings.json 2>/dev/null || true
 cp "$SNAPSHOT/files/hooks/"* .claude/hooks/ 2>/dev/null || true
 
-# Checkout original version (read from manifest.json)
-cd "$DAEMON_DIR"
-git checkout <version-from-manifest>
-untracked/venv/bin/pip install -e .
+# Reinstall the original version (read from manifest.json) — rebuilds the venv
+bash "$DAEMON_DIR/scripts/upgrade_version.sh" \
+  "$PWD" "$DAEMON_DIR" <version-from-manifest>
 
 # Restart
-cd ../..
-"$DAEMON_DIR/untracked/venv/bin/python" -m claude_code_hooks_daemon.daemon.cli restart
+"$DAEMON_DIR/bin/hooks-daemon" restart
 ```
 
 ## Emergency Rollback (No Snapshots)
@@ -368,23 +366,17 @@ If upgrade fails and no snapshots are available (e.g., upgrading from a version 
    cp .claude/hooks-daemon.yaml.backup .claude/hooks-daemon.yaml
    ```
 
-2. **Revert daemon code**:
+2. **Revert daemon code and rebuild its venv** (one step):
 
    ```bash
-   cd .claude/hooks-daemon
-   git checkout vX.Y  # Previous working version
+   bash .claude/hooks-daemon/scripts/upgrade_version.sh \
+     "$PWD" "$PWD/.claude/hooks-daemon" vX.Y  # Previous working version
    ```
 
-3. **Reinstall dependencies**:
+3. **Restart daemon**:
 
    ```bash
-   untracked/venv/bin/pip install -e .
-   ```
-
-4. **Restart daemon**:
-
-   ```bash
-   untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+   .claude/hooks-daemon/bin/hooks-daemon restart
    ```
 
 ## Best Practices

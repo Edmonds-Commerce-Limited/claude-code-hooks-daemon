@@ -21,13 +21,11 @@ You can also use JSON format (`hooks-daemon.json`), but YAML is recommended for 
 If you do not have a config file yet, use the `init-config` command:
 
 ```bash
-VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
-
 # Generate a full config with all handlers listed
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli init-config --mode full > .claude/hooks-daemon.yaml
+.claude/hooks-daemon/bin/hooks-daemon init-config --mode full > .claude/hooks-daemon.yaml
 
 # Generate a minimal config with just the structure
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli init-config --mode minimal > .claude/hooks-daemon.yaml
+.claude/hooks-daemon/bin/hooks-daemon init-config --mode minimal > .claude/hooks-daemon.yaml
 ```
 
 ---
@@ -157,7 +155,7 @@ handlers:
 To enable a handler, set `enabled: true`. To disable it, set `enabled: false`. Changes take effect after a daemon restart:
 
 ```bash
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 ---
@@ -461,7 +459,7 @@ plugins:
 Generate one with:
 
 ```bash
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli init-config --mode minimal
+.claude/hooks-daemon/bin/hooks-daemon init-config --mode minimal
 ```
 
 ### Full Config
@@ -469,7 +467,7 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli init-config --mode minimal
 Use a full config to see every available handler with descriptions and recommended settings. This is the default output of the installer and lists all event types and handlers:
 
 ```bash
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli init-config --mode full
+.claude/hooks-daemon/bin/hooks-daemon init-config --mode full
 ```
 
 ### Recommended Starting Config
@@ -486,7 +484,7 @@ The daemon validates its config on startup. If there are issues, you will see er
 
 ```bash
 # Check logs for config errors
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli logs | grep -i "config\|error\|warning"
+.claude/hooks-daemon/bin/hooks-daemon logs | grep -i "config\|error\|warning"
 ```
 
 ### Common Config Errors
@@ -542,7 +540,7 @@ With `daemon.strict_mode: true`, the daemon fails fast on any error. This is use
 **Handler changes** (enabling, disabling, priority adjustments) require a daemon restart:
 
 ```bash
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 **Claude Code settings** (`.claude/settings.json`) require a full Claude Code session restart. This file is managed by the installer and rarely needs manual changes.

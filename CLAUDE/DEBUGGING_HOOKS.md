@@ -67,7 +67,7 @@ daemon:
 
 ```bash
 # Apply the config (restart the daemon — NOT Claude Code):
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+./bin/hooks-daemon restart
 
 # ...work in Claude Code; the daemon appends each payload as one JSON line...
 
@@ -455,7 +455,7 @@ TIMESTAMP [LEVEL] module: message
 
 ```bash
 # Check daemon is running
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon status
 ```
 
 **"No logs in buffer"**

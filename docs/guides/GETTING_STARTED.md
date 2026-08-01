@@ -104,8 +104,7 @@ After restarting your Claude Code session, the daemon starts automatically on th
 ### Check Daemon Status
 
 ```bash
-VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 ```
 
 You should see output indicating the daemon is **RUNNING** with a PID and socket path.
@@ -142,7 +141,7 @@ daemon:
 Then restart the daemon:
 
 ```bash
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 The hello world handlers add a small context message to every hook event. Disable them once you have confirmed things work.
@@ -240,7 +239,7 @@ handlers:
 Then restart the daemon:
 
 ```bash
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 ### Handler Options
@@ -264,8 +263,7 @@ You should see Claude's attempt blocked with a message explaining why the comman
 Generate a report of all handlers and their current state:
 
 ```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/python scripts/handler_status.py
+.claude/hooks-daemon/bin/hooks-daemon handlers
 ```
 
 This shows every handler, whether it is enabled or disabled, its priority, and its tags.
@@ -273,7 +271,7 @@ This shows every handler, whether it is enabled or disabled, its priority, and i
 ### View Daemon Logs
 
 ```bash
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 ```
 
 Logs show which handlers matched, what decisions were made, and any errors.
@@ -283,22 +281,20 @@ Logs show which handlers matched, what decisions were made, and any errors.
 ## Common Daemon Commands
 
 ```bash
-VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
-
 # Check if daemon is running
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 
 # Start the daemon (usually not needed -- lazy startup handles this)
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli start
+.claude/hooks-daemon/bin/hooks-daemon start
 
 # Stop the daemon
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli stop
+.claude/hooks-daemon/bin/hooks-daemon stop
 
 # Restart after config or code changes
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 
 # View recent logs
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 ```
 
 ---

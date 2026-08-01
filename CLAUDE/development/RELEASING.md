@@ -352,8 +352,9 @@ end-to-end against a fresh fixture project. Together they catch:
 
 ```bash
 # pytest needs the daemon's venv interpreter. Resolve it through the CANONICAL
-# resolver — never hand-roll a venv path, and never assume $PYTHON is exported
-# (it never is in an agent's shell; see Plan 00192).
+# resolver — never hand-roll a venv path, and never assume the shell exports an
+# interpreter variable (python-var-guidance-exempt: $PYTHON is named here as the
+# banned pattern to warn against — no agent shell ever sets it; Plan 00192).
 source scripts/lib/resolve_venv.sh
 PY="$(resolve_venv_python /workspace)"
 "$PY" -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py tests/acceptance/test_stop_hook_hard_block.py tests/acceptance/test_skill_install_python_discovery.py -v

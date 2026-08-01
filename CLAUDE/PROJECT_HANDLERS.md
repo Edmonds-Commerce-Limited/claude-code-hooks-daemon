@@ -27,7 +27,7 @@ Project-level handlers let you create custom hook handlers scoped to a specific 
 ### 1. Scaffold the Directory
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli init-project-handlers
+.claude/hooks-daemon/bin/hooks-daemon init-project-handlers
 ```
 
 This creates:
@@ -145,22 +145,22 @@ class TestMigrationReminderHandler:
 ### 4. Run Tests
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers
+.claude/hooks-daemon/bin/hooks-daemon test-project-handlers
 # Or with verbose output:
-$PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers --verbose
+.claude/hooks-daemon/bin/hooks-daemon test-project-handlers --verbose
 ```
 
 ### 5. Validate
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli validate-project-handlers
+.claude/hooks-daemon/bin/hooks-daemon validate-project-handlers
 ```
 
 ### 6. Restart Daemon
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon restart
+.claude/hooks-daemon/bin/hooks-daemon status
 # Expected: Status: RUNNING
 ```
 
@@ -378,10 +378,11 @@ Every handler should test:
 
 ```bash
 # Via CLI command (recommended)
-$PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers --verbose
+.claude/hooks-daemon/bin/hooks-daemon test-project-handlers --verbose
 
-# Or directly with pytest
-$PYTHON -m pytest .claude/project-handlers/ --import-mode=importlib -v
+# The wrapper runs them with the daemon's own interpreter, so pytest and the
+# daemon package are both importable without you locating a venv.
+.claude/hooks-daemon/bin/hooks-daemon test-project-handlers --verbose
 ```
 
 ---
@@ -417,10 +418,11 @@ project_handlers:
 
 ## CLI Reference
 
-All commands use the daemon's Python interpreter:
+All commands go through the deployed wrapper, which resolves the daemon's
+interpreter for you:
 
 ```bash
-PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
+.claude/hooks-daemon/bin/hooks-daemon <command>
 ```
 
 ### init-project-handlers
@@ -428,7 +430,7 @@ PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
 Scaffold the project-handlers directory structure with example handler and conftest.py.
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli init-project-handlers [--force] [--project-root PATH]
+.claude/hooks-daemon/bin/hooks-daemon init-project-handlers [--force] [--project-root PATH]
 ```
 
 | Flag             | Description                         |
@@ -441,7 +443,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli init-project-handlers [--force] [
 Discover and validate all project handlers without starting the daemon.
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli validate-project-handlers [--project-root PATH]
+.claude/hooks-daemon/bin/hooks-daemon validate-project-handlers [--project-root PATH]
 ```
 
 **Output includes**: handler name, priority, terminal flag, tags, acceptance test count, load status.
@@ -459,7 +461,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli validate-project-handlers [--proj
 Run pytest on project handler test files.
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers [--verbose] [--project-root PATH]
+.claude/hooks-daemon/bin/hooks-daemon test-project-handlers [--verbose] [--project-root PATH]
 ```
 
 | Flag             | Description                         |
@@ -472,7 +474,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers [--verbose]
 Generate acceptance test playbook including project handler tests.
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook
+.claude/hooks-daemon/bin/hooks-daemon generate-playbook
 ```
 
 Project handlers that define `get_acceptance_tests()` are automatically included in the generated playbook under a "Project Handlers" section.
@@ -576,7 +578,7 @@ class SessionCheckHandler(Handler):
 2. **Check file name**: Must not start with `_` or `test_`
 3. **Check imports**: Run `validate-project-handlers` for import errors
 4. **Check class**: Must be a concrete subclass of `Handler` (not abstract)
-5. **Restart daemon**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+5. **Restart daemon**: `.claude/hooks-daemon/bin/hooks-daemon restart`
 
 ### Tests failing to import
 
@@ -589,7 +591,7 @@ class SessionCheckHandler(Handler):
 
 1. **Check event type**: Is the handler in the correct subdirectory for the event?
 2. **Check `matches()`**: Is the matching logic correct? Test with `validate-project-handlers`.
-3. **Check daemon logs**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli logs`
+3. **Check daemon logs**: `.claude/hooks-daemon/bin/hooks-daemon logs`
 4. **Check priority**: A higher-priority terminal handler may be stopping dispatch before yours runs.
 
 ### Field name issues
@@ -604,7 +606,8 @@ Use the utility functions (`get_bash_command`, `get_file_path`) which handle thi
 ### Daemon won't start after adding handler
 
 1. Check for syntax errors in your handler file
-2. Check for import errors: `$PYTHON -c "import your_handler_module"`
+2. Check for import errors: `.claude/hooks-daemon/bin/hooks-daemon validate-project-handlers`
+   names the file and the failing import
 3. Run `validate-project-handlers` for detailed error output
 4. Check daemon logs for the specific error
 

@@ -2088,14 +2088,23 @@ def cmd_init_config(args: argparse.Namespace) -> int:
 
     config_path = project_path / ".claude" / "hooks-daemon.yaml"
 
+    # Determine mode
+    mode: Literal["minimal", "full"] = "minimal" if args.minimal else "full"
+
+    # --stdout: print the template for review and write nothing. Reviewing the
+    # available handlers is the common case on an EXISTING install, so this
+    # deliberately runs BEFORE the exists/--force check — printing cannot
+    # destroy anything, and requiring --force to read something would push the
+    # reader toward a destructive flag for a read-only task.
+    if getattr(args, "stdout", False):
+        print(generate_config(mode=mode))
+        return 0
+
     # Check if config already exists
     if config_path.exists() and not args.force:
         print(f"ERROR: Configuration file already exists: {config_path}", file=sys.stderr)
-        print("Use --force to overwrite", file=sys.stderr)
+        print("Use --force to overwrite, or --stdout to review without writing", file=sys.stderr)
         return 1
-
-    # Determine mode
-    mode: Literal["minimal", "full"] = "minimal" if args.minimal else "full"
 
     # Generate config
     config_yaml = generate_config(mode=mode)
@@ -2109,7 +2118,7 @@ def cmd_init_config(args: argparse.Namespace) -> int:
         print(f"Generated {mode} configuration: {config_path}")
         print("\nNext steps:")
         print("1. Edit the configuration to enable desired handlers")
-        print("2. Start the daemon: python3 -m claude_code_hooks_daemon.daemon.cli start")
+        print(f"2. Start the daemon: {daemon_cli_command('start')}")
         return 0
     except Exception as e:
         print(f"ERROR: Failed to write configuration: {e}", file=sys.stderr)
@@ -3903,6 +3912,11 @@ def main() -> int:
     )
     parser_init_config.add_argument(
         "--force", action="store_true", help="Overwrite existing configuration file"
+    )
+    parser_init_config.add_argument(
+        "--stdout",
+        action="store_true",
+        help="Print the template to stdout for review instead of writing it (needs no --force)",
     )
     parser_init_config.set_defaults(func=cmd_init_config)
 

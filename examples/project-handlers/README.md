@@ -32,9 +32,9 @@ Detects writes to TypeScript/SCSS source files and reminds to rebuild compiled a
 
 1. Copy the example handler and test file to your `.claude/project-handlers/` directory
 2. Adapt the matching logic, handler ID, and context messages to your project
-3. Run tests: `$PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers --verbose`
-4. Validate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli validate-project-handlers`
-5. Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+3. Run tests: `.claude/hooks-daemon/bin/hooks-daemon test-project-handlers --verbose`
+4. Validate: `.claude/hooks-daemon/bin/hooks-daemon validate-project-handlers`
+5. Restart daemon: `.claude/hooks-daemon/bin/hooks-daemon restart`
 
 ## Handler Anatomy
 

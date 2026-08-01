@@ -1,6 +1,6 @@
 # Claude Code Hooks Daemon - LLM Update Guide
 
-> **v3.7.0+ venv layout change**: From v3.7.0, the venv is **fingerprint-keyed** — `untracked/venv-py{MM}-{fingerprint}/` instead of the legacy `untracked/venv/`. This lets the same project directory work in two different Python envs (e.g. YOLO container + desktop host) without corruption. The upgrader auto-provisions the fingerprint-keyed venv and, when upgrade verification succeeds, auto-deletes the legacy `untracked/venv/`. If you had a bespoke venv location or the auto-cleanup was skipped, run `$PYTHON -m claude_code_hooks_daemon.daemon.cli prune-venvs --legacy --dry-run` after upgrading to see what's left. Commands below that reference `untracked/venv/` are representative — the actual path after v3.7.0 is resolved dynamically by `scripts/venv-include.bash`.
+> **v3.7.0+ venv layout change**: From v3.7.0, the venv is **fingerprint-keyed** — `untracked/venv-py{MM}-{fingerprint}/` instead of the legacy `untracked/venv/`. This lets the same project directory work in two different Python envs (e.g. YOLO container + desktop host) without corruption. The upgrader auto-provisions the fingerprint-keyed venv and, when upgrade verification succeeds, auto-deletes the legacy `untracked/venv/`. If you had a bespoke venv location or the auto-cleanup was skipped, run `.claude/hooks-daemon/bin/hooks-daemon prune-venvs --legacy --dry-run` after upgrading to see what's left. Commands below that reference `untracked/venv/` are representative — the actual path after v3.7.0 is resolved dynamically by `scripts/venv-include.bash`.
 
 ## CRITICAL: Determine Your Location First
 
@@ -213,21 +213,22 @@ cd ../..
 ### 3. Update Dependencies and Restart Daemon
 
 ```bash
-# Update Python package
-.claude/hooks-daemon/untracked/venv/bin/pip install -e .claude/hooks-daemon
+# Rebuild the venv and reinstall the package for the checked-out version.
+# Args: PROJECT_ROOT, DAEMON_DIR, TARGET_VERSION (all absolute).
+bash .claude/hooks-daemon/scripts/upgrade_version.sh \
+  "$PWD" "$PWD/.claude/hooks-daemon" "$TARGET_VERSION"
 
 # Restart daemon
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart || \
+.claude/hooks-daemon/bin/hooks-daemon restart || \
   echo "Daemon not running - will start on first hook call"
 ```
 
 ### 4. Verify Update
 
 ```bash
-VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
 
 # Verify daemon works
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 
 # Test hooks still work
 echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}' | \
@@ -253,117 +254,31 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}'
 This discovers ALL handlers by scanning the codebase (source of truth):
 
 ```bash
-cd .claude/hooks-daemon
+# Every handler the daemon ships, with its default enabled state and priority.
+.claude/hooks-daemon/bin/hooks-daemon init-config --stdout
 
-VENV_PYTHON=untracked/venv/bin/python
-
-$VENV_PYTHON -c "
-from claude_code_hooks_daemon.handlers.registry import HandlerRegistry, EVENT_TYPE_MAPPING
-from claude_code_hooks_daemon.core.handler import Handler
-import importlib, json
-from pathlib import Path
-
-registry = HandlerRegistry()
-handlers_dir = Path('src/claude_code_hooks_daemon/handlers')
-result = {}
-
-for dir_name, event_type in EVENT_TYPE_MAPPING.items():
-    event_dir = handlers_dir / dir_name
-    if not event_dir.is_dir():
-        continue
-    handlers = []
-    for py_file in event_dir.glob('*.py'):
-        if py_file.name.startswith('_'):
-            continue
-        mod = f'claude_code_hooks_daemon.handlers.{dir_name}.{py_file.stem}'
-        try:
-            module = importlib.import_module(mod)
-            for attr_name in dir(module):
-                attr = getattr(module, attr_name)
-                if isinstance(attr, type) and issubclass(attr, Handler) and attr is not Handler:
-                    instance = attr()
-                    handlers.append({
-                        'class': attr.__name__,
-                        'handler_id': instance.handler_id,
-                        'name': instance.name,
-                        'priority': instance.priority,
-                        'terminal': instance.terminal,
-                        'tags': list(instance.tags) if hasattr(instance, 'tags') else [],
-                        'doc': (attr.__doc__ or '').strip().split('\n')[0] if attr.__doc__ else '',
-                    })
-        except Exception as e:
-            handlers.append({'module': mod, 'error': str(e)})
-    if handlers:
-        result[dir_name] = sorted(handlers, key=lambda h: h.get('priority', 99))
-
-print(json.dumps(result, indent=2))
-"
+# Every handler the RUNNING daemon actually loaded, by event type.
+.claude/hooks-daemon/bin/hooks-daemon handlers
 ```
 
 ### Method 2: Get Full Default Config Template
 
 ```bash
-cd .claude/hooks-daemon
-VENV_PYTHON=untracked/venv/bin/python
-
-$VENV_PYTHON -c "
-from claude_code_hooks_daemon.daemon.init_config import generate_config
-print(generate_config(mode='full'))
-"
+.claude/hooks-daemon/bin/hooks-daemon init-config --stdout
 ```
+
+`--stdout` prints the template and writes nothing, so it is safe on an existing
+install — no `--force`, and your current config is untouched.
 
 ### Method 3: Compare with Current Config
 
 To find handlers you're missing:
 
 ```bash
-cd .claude/hooks-daemon
-VENV_PYTHON=untracked/venv/bin/python
-
-$VENV_PYTHON -c "
-from claude_code_hooks_daemon.handlers.registry import HandlerRegistry, EVENT_TYPE_MAPPING
-from claude_code_hooks_daemon.core.handler import Handler
-import importlib
-from pathlib import Path
-
-handlers_dir = Path('src/claude_code_hooks_daemon/handlers')
-available = {}
-
-for dir_name in EVENT_TYPE_MAPPING.keys():
-    event_dir = handlers_dir / dir_name
-    if not event_dir.is_dir():
-        continue
-    handlers = []
-    for py_file in event_dir.glob('*.py'):
-        if py_file.name.startswith('_'):
-            continue
-        mod = f'claude_code_hooks_daemon.handlers.{dir_name}.{py_file.stem}'
-        try:
-            module = importlib.import_module(mod)
-            for attr_name in dir(module):
-                attr = getattr(module, attr_name)
-                if isinstance(attr, type) and issubclass(attr, Handler) and attr is not Handler:
-                    instance = attr()
-                    handlers.append(instance.name)
-        except:
-            pass
-    if handlers:
-        available[dir_name] = sorted(handlers)
-
-import yaml
-from pathlib import Path
-current_config = yaml.safe_load(Path('../hooks-daemon.yaml').read_text())
-current = current_config.get('handlers', {})
-
-print('Available handlers NOT in your config:\n')
-for event_type, handler_names in available.items():
-    event_config = current.get(event_type, {})
-    missing = [h for h in handler_names if h not in event_config]
-    if missing:
-        print(f'{event_type}:')
-        for h in missing:
-            print(f'  - {h}')
-"
+# Compare YOUR config against the shipped defaults. Anything under
+# "added_handlers" exists upstream but is absent from your config.
+.claude/hooks-daemon/bin/hooks-daemon init-config --stdout > /tmp/default-config.yaml
+.claude/hooks-daemon/bin/hooks-daemon config-diff .claude/hooks-daemon.yaml /tmp/default-config.yaml
 ```
 
 ### Method 4: Version-Specific Config Migration Advisory (Recommended)
@@ -372,13 +287,12 @@ The most targeted approach — tells you exactly which new config options are av
 
 ```bash
 cd .claude/hooks-daemon
-VENV_PYTHON=untracked/venv/bin/python
 
 # Replace with your actual versions
 PREVIOUS_VERSION="2.8.0"
 NEW_VERSION="2.15.2"
 
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli check-config-migrations \
+.claude/hooks-daemon/bin/hooks-daemon check-config-migrations \
   --from "$PREVIOUS_VERSION" \
   --to "$NEW_VERSION" \
   --config ../.claude/hooks-daemon.yaml
@@ -464,14 +378,14 @@ cat RELEASES/vX.Y.Z.md
 
 ```bash
 cd .claude/hooks-daemon
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 **Step 5: Verify handler count increased:**
 
 ```bash
 cd .claude/hooks-daemon
-untracked/venv/bin/python scripts/handler_status.py | grep -i "enabled"
+.claude/hooks-daemon/bin/hooks-daemon handlers | grep -i "enabled"
 ```
 
 A well-configured installation has **30+ handlers enabled**. If your count is significantly lower, review the full handler list and enable more.
@@ -492,7 +406,7 @@ Handlers are tagged by language, function, and specificity. Use tags to filter:
 
 ```bash
 cd .claude/hooks-daemon
-untracked/venv/bin/python scripts/handler_status.py
+.claude/hooks-daemon/bin/hooks-daemon handlers
 ```
 
 Review the output and check:
@@ -701,10 +615,10 @@ Schema and full convention: `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/READM
 - Just update code and restart daemon
 
 ```bash
-cd .claude/hooks-daemon
-git fetch --tags && git checkout v2.2.1
-untracked/venv/bin/pip install -e .
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+git -C .claude/hooks-daemon fetch --tags
+bash .claude/hooks-daemon/scripts/upgrade_version.sh \
+  "$PWD" "$PWD/.claude/hooks-daemon" v2.2.1
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 ### Minor Upgrades (v2.1.0 -> v2.2.0)
@@ -754,7 +668,7 @@ SNAPSHOT=$(ls -d "$DAEMON_DIR/untracked/upgrade-snapshots/"* | sort -r | head -1
 echo "Restoring from: $SNAPSHOT"
 
 # Stop daemon
-"$DAEMON_DIR/untracked/venv/bin/python" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+"$DAEMON_DIR/bin/hooks-daemon" stop 2>/dev/null || true
 
 # Restore config
 cp "$SNAPSHOT/files/hooks-daemon.yaml" .claude/hooks-daemon.yaml
@@ -768,38 +682,32 @@ cp "$SNAPSHOT/files/hooks/"* .claude/hooks/ 2>/dev/null || true
 # Check manifest for original version
 cat "$SNAPSHOT/manifest.json"
 
-# Checkout original version (from manifest)
-cd "$DAEMON_DIR"
-git checkout <version-from-manifest>
-untracked/venv/bin/pip install -e .
+# Reinstall the original version (from manifest) — rebuilds the venv too
+bash "$DAEMON_DIR/scripts/upgrade_version.sh" \
+  "$PWD" "$DAEMON_DIR" <version-from-manifest>
 
 # Restart
-cd ../..
-"$DAEMON_DIR/untracked/venv/bin/python" -m claude_code_hooks_daemon.daemon.cli restart
+"$DAEMON_DIR/bin/hooks-daemon" restart
 ```
 
 ### Quick Rollback (Config Only)
 
 ```bash
-cd .claude/hooks-daemon
-
 # Stop daemon
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+.claude/hooks-daemon/bin/hooks-daemon stop 2>/dev/null || true
 
 # Restore config backup
-cp ../hooks-daemon.yaml.backup ../hooks-daemon.yaml
+cp .claude/hooks-daemon.yaml.backup .claude/hooks-daemon.yaml
 
 # Find previous version tag
-git tag -l | sort -V
+git -C .claude/hooks-daemon tag -l | sort -V
 
-# Checkout previous version
-git checkout vX.Y.Z  # Replace with your previous version
-
-# Reinstall
-untracked/venv/bin/pip install -e .
+# Reinstall the previous version (rebuilds the venv too)
+bash .claude/hooks-daemon/scripts/upgrade_version.sh \
+  "$PWD" "$PWD/.claude/hooks-daemon" vX.Y.Z
 
 # Verify rollback
-cat src/claude_code_hooks_daemon/version.py
+cat .claude/hooks-daemon/src/claude_code_hooks_daemon/version.py
 ```
 
 ### If Rollback Fails
@@ -835,13 +743,9 @@ After updating code, compare your config with the new template:
 
 ```bash
 cd .claude/hooks-daemon
-VENV_PYTHON=untracked/venv/bin/python
 
 # Generate new default config
-$VENV_PYTHON -c "
-from claude_code_hooks_daemon.daemon.init_config import generate_config
-print(generate_config(mode='full'))
-" > /tmp/new_default_config.yaml
+.claude/hooks-daemon/bin/hooks-daemon init-config --stdout > /tmp/new_default_config.yaml
 
 # Diff against your config
 diff ../hooks-daemon.yaml /tmp/new_default_config.yaml
@@ -852,24 +756,23 @@ diff ../hooks-daemon.yaml /tmp/new_default_config.yaml
 The daemon includes CLI commands for config operations:
 
 ```bash
-VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
 
 # Diff: find customizations between old default and user config
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli config-diff \
+.claude/hooks-daemon/bin/hooks-daemon config-diff \
   --old-default /tmp/old_default.yaml \
   --user-config .claude/hooks-daemon.yaml
 
 # Merge: apply customizations to new default
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli config-merge \
+.claude/hooks-daemon/bin/hooks-daemon config-merge \
   --new-default /tmp/new_default.yaml \
   --custom-diff /tmp/custom_diff.yaml
 
 # Validate: check config structure
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli config-validate \
+.claude/hooks-daemon/bin/hooks-daemon config-validate \
   --config .claude/hooks-daemon.yaml
 
 # Migration advisory: see new options for your upgrade path
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli check-config-migrations \
+.claude/hooks-daemon/bin/hooks-daemon check-config-migrations \
   --from PREVIOUS_VERSION \
   --to NEW_VERSION \
   --config .claude/hooks-daemon.yaml
@@ -884,13 +787,12 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli check-config-migrations \
 
 ```bash
 cd .claude/hooks-daemon
-VENV_PYTHON=untracked/venv/bin/python
 
-# 1. Version check
-$VENV_PYTHON -c "from claude_code_hooks_daemon.version import __version__; print(f'Version: {__version__}')"
+# 1. Version check — the notes header names the INSTALLED version
+.claude/hooks-daemon/bin/hooks-daemon release-notes
 
 # 2. Daemon status
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 
 # 3. Hook test
 echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | ../../.claude/hooks/pre-tool-use
@@ -931,25 +833,23 @@ git -C .claude/hooks-daemon stash pop
 ### Daemon Won't Start After Update
 
 ```bash
-VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
 
-# Check for import errors
-$VENV_PYTHON -c "import claude_code_hooks_daemon; print('OK')"
+# Check the install is importable and the daemon is serving
+.claude/hooks-daemon/bin/hooks-daemon health
 
-# If error, reinstall dependencies
-.claude/hooks-daemon/untracked/venv/bin/pip install -e .claude/hooks-daemon --force-reinstall
+# If it reports a broken install, repair it (rebuilds the venv in place)
+.claude/hooks-daemon/bin/hooks-daemon repair
 
 # Check daemon logs
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 ```
 
 ### Hooks Don't Work After Update
 
 ```bash
-VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
 
 # 1. Restart daemon (sufficient for most updates)
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 
 # 2. Check hook forwarders exist
 ls -la .claude/hooks/
@@ -1075,15 +975,19 @@ plugins:
 ### Venv Broken After Update
 
 ```bash
-VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
 
 # Try repair command
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli repair
+.claude/hooks-daemon/bin/hooks-daemon repair
 
-# If repair fails, recreate venv
-rm -rf .claude/hooks-daemon/untracked/venv
-python3 -m venv .claude/hooks-daemon/untracked/venv
-.claude/hooks-daemon/untracked/venv/bin/pip install -e .claude/hooks-daemon
+# If repair fails, let the installer rebuild the venv from scratch.
+# NEVER hand-build one — `python3 -m venv untracked/venv` creates the retired
+# pre-v3.7.0 layout, which resolve_venv.sh refuses (every wrapper call exits 5).
+CURRENT_TAG="$(git -C .claude/hooks-daemon describe --tags --abbrev=0)"
+bash .claude/hooks-daemon/scripts/upgrade_version.sh \
+  "$PWD" "$PWD/.claude/hooks-daemon" "$CURRENT_TAG"
+
+# Inspect what venvs exist and which one is active
+.claude/hooks-daemon/bin/hooks-daemon list-venvs
 ```
 
 ---
@@ -1093,14 +997,13 @@ python3 -m venv .claude/hooks-daemon/untracked/venv
 **All commands from project root** (no `cd` needed):
 
 ```bash
-VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
 
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli start
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli stop
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli logs
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli repair   # Fix broken venv
+.claude/hooks-daemon/bin/hooks-daemon start
+.claude/hooks-daemon/bin/hooks-daemon stop
+.claude/hooks-daemon/bin/hooks-daemon status
+.claude/hooks-daemon/bin/hooks-daemon restart
+.claude/hooks-daemon/bin/hooks-daemon logs
+.claude/hooks-daemon/bin/hooks-daemon repair   # Fix broken venv
 ```
 
 ---
@@ -1227,7 +1130,7 @@ If you encounter update issues:
 1. **Check daemon logs**:
 
    ```bash
-   .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs
+   .claude/hooks-daemon/bin/hooks-daemon logs
    ```
 
 2. **Run debug script**:

@@ -618,6 +618,50 @@ class TestCmdInitConfig:
         config_file = claude_dir / "hooks-daemon.yaml"
         assert config_file.exists()
 
+    def test_stdout_prints_template_without_writing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--stdout prints the template for review and writes nothing.
+
+        LLM-INSTALL.md tells the reader to review every handler before enabling
+        them, but init-config could only WRITE the config. So the doc reached
+        past the CLI for a raw ``python -c`` import — the exact unrunnable shape
+        Plan 00192 eliminated. The CLI has to be able to do this itself.
+        """
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "hooks-daemon").mkdir()
+
+        args = argparse.Namespace(project_root=tmp_path, minimal=False, force=False, stdout=True)
+
+        result = cmd_init_config(args)
+        assert result == 0
+
+        captured = capsys.readouterr()
+        assert "version:" in captured.out, "template must go to stdout"
+        assert not (claude_dir / "hooks-daemon.yaml").exists(), "must not write the config file"
+
+    def test_stdout_works_when_config_already_exists(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--stdout needs no --force: printing cannot destroy anything.
+
+        Reviewing the available options is the common case on an EXISTING
+        install, so requiring --force there would push the reader toward a
+        destructive flag purely to read something.
+        """
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "hooks-daemon").mkdir()
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\n# my customisations\n")
+
+        args = argparse.Namespace(project_root=tmp_path, minimal=False, force=False, stdout=True)
+
+        result = cmd_init_config(args)
+        assert result == 0
+        assert "# my customisations" in config_file.read_text(), "existing config untouched"
+
     def test_config_already_exists_no_force(self, tmp_path: Path) -> None:
         """cmd_init_config fails if config exists without --force."""
         claude_dir = tmp_path / ".claude"

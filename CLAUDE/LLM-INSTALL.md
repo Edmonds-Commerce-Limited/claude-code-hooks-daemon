@@ -85,7 +85,13 @@ FORCE=true bash /tmp/hooks-daemon-install.sh
 
 If you prefer manual control over each step:
 
-> **v3.7.0+ venv layout**: From v3.7.0 the installer creates a **fingerprint-keyed** venv at `.claude/hooks-daemon/untracked/venv-py{MM}-{fingerprint}/` (where `{fingerprint} = md5(sys.version | sys.base_prefix | platform.machine())[:8]`), not the legacy `untracked/venv/`. The commands below show the legacy path for readability; the actual installer script handles the fingerprint-keyed path. To find the active venv after install: `$PYTHON -m claude_code_hooks_daemon.daemon.cli list-venvs`.
+> **Never hand-build the venv.** From v3.7.0 the venv is **fingerprint-keyed** —
+> `.claude/hooks-daemon/untracked/venv-{slug}-py{MM}-{fingerprint}/`, where
+> `{fingerprint} = md5(sys.version | sys.base_prefix | platform.machine())[:8]`.
+> A hand-made `untracked/venv/` is the retired pre-v3.7.0 layout and
+> `resolve_venv.sh` refuses it, so every wrapper call then exits 5. Let the
+> installer create it, and find it afterwards with
+> `.claude/hooks-daemon/bin/hooks-daemon list-venvs`.
 
 ### 1. Verify Prerequisites
 
@@ -100,7 +106,7 @@ python3 --version
 git add .claude/ && git commit -m "Save hooks before daemon install" && git push || true
 ```
 
-### 2. Clone & Setup Venv
+### 2. Clone the Daemon
 
 ```bash
 mkdir -p .claude && cd .claude
@@ -113,26 +119,26 @@ LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "main")
 git checkout "$LATEST_TAG"
 echo "Using version: $LATEST_TAG"
 
-# Create isolated venv (survives container restarts)
-python3 -m venv untracked/venv
-untracked/venv/bin/pip install -e .
-
-# Verify
-untracked/venv/bin/python -c "import claude_code_hooks_daemon; print('OK')"
+cd ../..
 ```
 
 ### 3. Run Installer
 
+The Layer-2 installer does everything: builds the fingerprint-keyed venv,
+installs the package editable, writes `.claude/hooks/`, `settings.json` and
+`hooks-daemon.yaml`, and starts the daemon.
+
 ```bash
-# The installer auto-detects project root by searching upward for .claude/
-# Creates .claude/hooks/, settings.json, hooks-daemon.yaml
-# DISPLAYS (but does not create) required .claude/.gitignore content
-untracked/venv/bin/python install.py
+# Both arguments are absolute paths: PROJECT_ROOT then DAEMON_DIR
+bash .claude/hooks-daemon/scripts/install_version.sh \
+  "$PWD" "$PWD/.claude/hooks-daemon"
+```
 
-# For explicit control (optional):
-# untracked/venv/bin/python install.py --project-root /workspace
+Verify it came up:
 
-cd ../..
+```bash
+.claude/hooks-daemon/bin/hooks-daemon status
+# Expected: Status: RUNNING
 ```
 
 **Files created:**
@@ -175,10 +181,8 @@ git commit -m "Install Claude Code Hooks Daemon" && git push
 ### 5. Verify Hooks Active (After Restart)
 
 ```bash
-VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
-
 # Check daemon auto-started (lazy startup on first hook call)
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 
 # Test destructive git is blocked
 echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}' \
@@ -204,11 +208,11 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}' \
 
 A successful installation meets ALL of these conditions:
 
-1. **Daemon running**: `$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status` shows `RUNNING`
+1. **Daemon running**: `.claude/hooks-daemon/bin/hooks-daemon status` shows `RUNNING`
 2. **Hooks deployed**: `.claude/hooks/pre-tool-use` and other hook scripts exist and are executable
 3. **Blocking works**: `echo '{"tool_name":"Bash","tool_input":{"command":"git reset --hard"}}' | .claude/hooks/pre-tool-use` returns a `deny` decision
 4. **Safe commands pass**: `echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | .claude/hooks/pre-tool-use` returns `{}` (allow)
-5. **No DEGRADED MODE**: `$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli logs` shows no "DEGRADED MODE" warnings
+5. **No DEGRADED MODE**: `.claude/hooks-daemon/bin/hooks-daemon logs` shows no "DEGRADED MODE" warnings
 6. **Git clean**: `.claude/hooks-daemon/` is excluded via `.gitignore`, not tracked by git
 
 If any of these fail, see Troubleshooting section below.
@@ -222,14 +226,13 @@ If any of these fail, see Troubleshooting section below.
 **Step 6.1: Generate the full default config with ALL handlers visible:**
 
 ```bash
-cd .claude/hooks-daemon
-VENV_PYTHON=untracked/venv/bin/python
-$VENV_PYTHON -c "
-from claude_code_hooks_daemon.daemon.init_config import generate_config
-print(generate_config(mode='full'))
-" > /tmp/full-config.yaml
+.claude/hooks-daemon/bin/hooks-daemon init-config --stdout > /tmp/full-config.yaml
 cat /tmp/full-config.yaml
 ```
+
+`--stdout` prints the template for review and writes nothing, so it is safe to
+run on an existing install — your current `.claude/hooks-daemon.yaml` is not
+touched and no `--force` is needed.
 
 **Step 6.2: Review every handler and enable all that are relevant.**
 
@@ -296,13 +299,13 @@ handlers:
 **Step 6.4: Restart daemon to load new config:**
 
 ```bash
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 **Step 6.5: Verify handlers loaded:**
 
 ```bash
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 ```
 
 **Note**: Settings.json changes require Claude session restart, config.yaml changes only need daemon restart.
@@ -316,8 +319,7 @@ handlers:
 **You MUST run this after installation to verify your handler configuration.** Review the output and check that the handlers you need are actually enabled.
 
 ```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/python scripts/handler_status.py
+.claude/hooks-daemon/bin/hooks-daemon handlers
 ```
 
 This displays:
@@ -332,8 +334,7 @@ This displays:
 **Save for reference:**
 
 ```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/python scripts/handler_status.py > /tmp/handler-status.txt
+.claude/hooks-daemon/bin/hooks-daemon handlers > /tmp/handler-status.txt
 cat /tmp/handler-status.txt
 ```
 
@@ -465,13 +466,13 @@ handlers:
 **3. Restart daemon:**
 
 ```bash
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 **4. Verify planning handlers loaded:**
 
 ```bash
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 ```
 
 ---
@@ -526,7 +527,7 @@ handlers:
 **5. Restart:**
 
 ```bash
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 ---
@@ -552,10 +553,10 @@ handlers:
 python3 --version
 
 # Verify installation
-.claude/hooks-daemon/untracked/venv/bin/python -c "import claude_code_hooks_daemon; print('OK')"
+.claude/hooks-daemon/bin/hooks-daemon health
 
 # Check logs
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 ```
 
 **Handlers not blocking:**
@@ -582,7 +583,7 @@ If you see "Layer 2 installer not found" during install, you are installing an o
 **Option 1 - Git restore (if you committed before install):**
 
 ```bash
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+.claude/hooks-daemon/bin/hooks-daemon stop 2>/dev/null || true
 git restore .claude/
 rm -rf .claude/hooks-daemon/
 ```
@@ -596,7 +597,7 @@ if [ -z "$BACKUP_DIR" ]; then
     exit 1
 fi
 
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+.claude/hooks-daemon/bin/hooks-daemon stop 2>/dev/null || true
 rm -rf .claude/hooks
 mv "$BACKUP_DIR" .claude/hooks
 ```
@@ -606,13 +607,11 @@ mv "$BACKUP_DIR" .claude/hooks
 ## CLI Reference
 
 ```bash
-VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
-
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli start
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli stop
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon start
+.claude/hooks-daemon/bin/hooks-daemon stop
+.claude/hooks-daemon/bin/hooks-daemon status
+.claude/hooks-daemon/bin/hooks-daemon restart
+.claude/hooks-daemon/bin/hooks-daemon logs
 ```
 
 ---
@@ -759,8 +758,8 @@ The feedback file can be shared with project maintainers to improve the install 
 Include in issue:
 
 ```bash
-# Version
-.claude/hooks-daemon/untracked/venv/bin/python -c "import claude_code_hooks_daemon; print(claude_code_hooks_daemon.__version__)"
+# Full diagnostic report (version, paths, config, daemon state)
+.claude/hooks-daemon/bin/hooks-daemon bug-report
 
 # Python
 python3 --version
@@ -769,7 +768,7 @@ python3 --version
 uname -a
 
 # Logs
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs > daemon-logs.txt
+.claude/hooks-daemon/bin/hooks-daemon logs > daemon-logs.txt
 
 # Config (sanitize sensitive data)
 cat .claude/hooks-daemon.yaml

@@ -290,7 +290,7 @@ All agents operate from `/workspace/untracked/worktrees/worktree-child-plan-NNNN
 
 - Verify `pwd` shows your worktree path before ANY file operation
 - Use absolute paths relative to your worktree root
-- Set `PYTHON=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/untracked/venv/bin/python`
+- Run the daemon CLI as `./bin/hooks-daemon` from inside your worktree — it resolves your worktree's own venv
 - Communicate via `SendMessage` tool (text output NOT visible to team lead)
 - Respond to shutdown requests with `SendMessage(type="shutdown_response")`
 
@@ -315,7 +315,7 @@ All agents operate from `/workspace/untracked/worktrees/worktree-child-plan-NNNN
 3. **Write failing tests FIRST** (TDD - see @CLAUDE/CodeLifecycle/Features.md)
 4. Implement code to make tests pass
 5. Run `./scripts/qa/run_all.sh` (auto-fix what you can)
-6. Verify daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart && status`
+6. Verify daemon: `./bin/hooks-daemon restart && status`
 7. Commit with "Plan NNNNN: " prefix
 8. Update task to `ready_for_testing` status (NOT "completed")
 9. Report "ready for testing" via `SendMessage` to team lead
@@ -395,7 +395,7 @@ SendMessage(
 1. Triggered after Tester reports "tests verified"
 2. `cd` to developer's worktree
 3. Run `./scripts/qa/run_all.sh` (all 7 checks)
-4. Verify daemon restarts: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart && status`
+4. Verify daemon restarts: `./bin/hooks-daemon restart && status`
 5. Check coverage: Must be 95%+ (shown in QA output)
 6. Verify no security issues (Bandit must pass)
 7. Report "QA verified" or "QA failed" via `SendMessage`
@@ -670,7 +670,8 @@ You are a DEVELOPER AGENT working on Plan NNNNN: [Plan Name], Task: [Task Descri
 CRITICAL WORKTREE ISOLATION:
 - Your worktree: /workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/
 - DO NOT work in /workspace - ONLY work in YOUR worktree
-- PYTHON=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/untracked/venv/bin/python
+- Run the daemon CLI as ./bin/hooks-daemon from inside that worktree — it
+  resolves that worktree's own venv, so you never name an interpreter
 
 YOUR ROLE (Developer):
 1. Implement features/handlers following TDD (tests FIRST)
@@ -686,7 +687,7 @@ WORKFLOW:
 3. Write FAILING tests first (@CLAUDE/CodeLifecycle/Features.md)
 4. Implement code to make tests pass
 5. Run: ./scripts/qa/run_all.sh (MUST pass)
-6. Verify: $PYTHON -m claude_code_hooks_daemon.daemon.cli restart && status
+6. Verify: ./bin/hooks-daemon restart && status
 7. Commit: "Plan NNNNN: [description]"
 8. Update task status to "ready_for_testing"
 9. SendMessage to team-lead: "Ready for testing"
@@ -710,7 +711,8 @@ You are a TESTER AGENT verifying work for Plan NNNNN: [Plan Name], Task: [Task D
 
 CRITICAL WORKTREE:
 - Work in: /workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/
-- PYTHON=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/untracked/venv/bin/python
+- Run the daemon CLI as ./bin/hooks-daemon from inside that worktree — it
+  resolves that worktree's own venv, so you never name an interpreter
 
 YOUR ROLE (Tester - Gate 1):
 Independently verify developer's implementation actually works.
@@ -750,7 +752,8 @@ You are a QA AGENT verifying code quality for Plan NNNNN: [Plan Name], Task: [Ta
 
 CRITICAL WORKTREE:
 - Work in: /workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/
-- PYTHON=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/untracked/venv/bin/python
+- Run the daemon CLI as ./bin/hooks-daemon from inside that worktree — it
+  resolves that worktree's own venv, so you never name an interpreter
 
 YOUR ROLE (QA - Gate 2):
 See CLAUDE/QA.md for complete role definition. Key responsibilities:
@@ -760,7 +763,7 @@ See CLAUDE/QA.md for complete role definition. Key responsibilities:
 WORKFLOW:
 1. cd to worktree path above
 2. Run: ./scripts/qa/run_all.sh (all 7 checks)
-3. Verify daemon: $PYTHON -m claude_code_hooks_daemon.daemon.cli restart && status
+3. Verify daemon: ./bin/hooks-daemon restart && status
 4. Check coverage: MUST be 95%+ (shown in QA output)
 5. Verify no security issues (Bandit must pass)
 6. Check library/plugin separation (see CLAUDE/QA.md)
@@ -792,7 +795,8 @@ You are a SENIOR REVIEWER AGENT reviewing Plan NNNNN: [Plan Name], Task: [Task D
 
 CRITICAL WORKTREE:
 - Work in: /workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/
-- PYTHON=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/untracked/venv/bin/python
+- Run the daemon CLI as ./bin/hooks-daemon from inside that worktree — it
+  resolves that worktree's own venv, so you never name an interpreter
 
 YOUR ROLE (Senior Reviewer - Gate 3):
 Verify work is COMPLETE per plan and architecturally sound.
@@ -832,7 +836,8 @@ You are an HONESTY CHECKER AGENT auditing Plan NNNNN: [Plan Name], Task: [Task D
 
 CRITICAL WORKTREE:
 - Work in: /workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/
-- PYTHON=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/untracked/venv/bin/python
+- Run the daemon CLI as ./bin/hooks-daemon from inside that worktree — it
+  resolves that worktree's own venv, so you never name an interpreter
 
 YOUR ROLE (Honesty Checker - Gate 4 - FINAL):
 Verify work delivers REAL VALUE, not just "looks complete".
@@ -1013,15 +1018,14 @@ Child worktree daemon (isolated automatically):
 
 ```bash
 cd /workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X
-PYTHON=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/untracked/venv/bin/python
-$PYTHON -m claude_code_hooks_daemon.daemon.cli start
+./bin/hooks-daemon start
 ```
 
 **Stopping daemon (MANDATORY before worktree removal):**
 
 ```bash
 WT=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X
-$WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop
+$WT/bin/hooks-daemon stop
 ```
 
 **Reference:** Plan 00028 adds `--pid-file` and `--socket` CLI flags for explicit path overrides (optional, not required for basic isolation).
@@ -1074,7 +1078,6 @@ Step 6: Merge (ONLY after all 4 gates pass)
 ```bash
 # Team lead operates from parent worktree
 cd /workspace/untracked/worktrees/worktree-plan-NNNNN
-PYTHON=/workspace/untracked/worktrees/worktree-plan-NNNNN/untracked/venv/bin/python
 
 # 1. Verify all 4 gates passed (check message log)
 # Gate 1: Tester reported "tests verified"
@@ -1090,7 +1093,7 @@ git merge worktree-child-plan-NNNNN-task-a
 
 # 4. Stop child daemon BEFORE removing worktree
 CHILD_WT=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-a
-$CHILD_WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$CHILD_WT/bin/hooks-daemon stop 2>/dev/null || true
 
 # 5. Remove child worktree immediately
 cd /workspace
@@ -1123,15 +1126,14 @@ cd /workspace/untracked/worktrees/worktree-plan-NNNNN
 # STEP 1: SYNC WORKTREE WITH MAIN FIRST (PREVENTS CONFLICTS!)
 # ===================================================================
 cd /workspace/untracked/worktrees/worktree-plan-NNNNN
-PYTHON=/workspace/untracked/worktrees/worktree-plan-NNNNN/untracked/venv/bin/python
 
 git fetch origin
 git merge main --no-edit
 # ⚠️ Resolve conflicts HERE in the worktree (isolated, safe)
 
 ./scripts/qa/run_all.sh  # QA MUST pass after sync
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 # Expected: Status: RUNNING
 
 # ===================================================================
@@ -1191,8 +1193,8 @@ git merge worktree-plan-NNNNN --no-edit
 # ===================================================================
 git status  # Should show clean state
 ./scripts/qa/run_all.sh  # All QA MUST pass in main workspace
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 # Expected: Status: RUNNING
 
 # If QA fails in main: REVERT MERGE IMMEDIATELY
@@ -1207,7 +1209,7 @@ git push
 # STEP 8: STOP DAEMON, THEN CLEANUP WORKTREE
 # ===================================================================
 WT=/workspace/untracked/worktrees/worktree-plan-NNNNN
-$WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$WT/bin/hooks-daemon stop 2>/dev/null || true
 
 git worktree remove untracked/worktrees/worktree-plan-NNNNN
 git branch -D worktree-plan-NNNNN
@@ -1387,7 +1389,7 @@ git status  # Confirm everything clean
 **Solution**:
 
 - **MANDATORY in agent prompts**: Verify daemon restarts after code changes
-- Command: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart && status`
+- Command: `./bin/hooks-daemon restart && status`
 - Expected output: `Status: RUNNING`
 
 **Prevention**: Add daemon restart to QA checklist in agent prompts.
@@ -1622,7 +1624,7 @@ git merge worktree-child-plan-00028-handler-a
 
 # Stop daemon, cleanup child A
 CHILD=/workspace/untracked/worktrees/worktree-child-plan-00028-handler-a
-$CHILD/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$CHILD/bin/hooks-daemon stop 2>/dev/null || true
 cd /workspace
 git worktree remove untracked/worktrees/worktree-child-plan-00028-handler-a
 git branch -d worktree-child-plan-00028-handler-a
@@ -1643,10 +1645,9 @@ SendMessage(type="shutdown_request", recipient="honesty-checker-handler-a", cont
 # All 4 handlers merged to parent worktree
 # Run full QA in parent
 cd /workspace/untracked/worktrees/worktree-plan-00028
-PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/python
 ./scripts/qa/run_all.sh
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 
 # Sync worktree with main FIRST
 git merge main --no-edit
@@ -1676,8 +1677,8 @@ git merge worktree-plan-00028 --no-edit
 
 # Verify QA in main
 ./scripts/qa/run_all.sh
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 
 # If QA fails: git reset --hard HEAD~1 (REVERT IMMEDIATELY)
 
@@ -1686,7 +1687,7 @@ git push
 
 # Stop daemon, cleanup parent
 WT=/workspace/untracked/worktrees/worktree-plan-00028
-$WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+$WT/bin/hooks-daemon stop 2>/dev/null || true
 git worktree remove untracked/worktrees/worktree-plan-00028
 git branch -D worktree-plan-00028
 
@@ -1779,7 +1780,7 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] Write failing tests FIRST (TDD)
 - [ ] Implement code to pass tests
 - [ ] Run `./scripts/qa/run_all.sh` (MUST pass)
-- [ ] Verify daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart && status`
+- [ ] Verify daemon: `./bin/hooks-daemon restart && status`
 - [ ] Commit with "Plan NNNNN: " prefix
 - [ ] Update task to `ready_for_testing` (NOT completed)
 

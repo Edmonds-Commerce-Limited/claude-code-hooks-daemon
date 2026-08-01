@@ -333,9 +333,9 @@ recount.
 ### CLI
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --sweep          # whole tree; exit 1 on findings (CI-able)
-$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --check-staged   # staged-tree commit-gate checks
-$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --lint <PLAN.md> # single-file edit-stage checks
+./bin/hooks-daemon plan-qa --sweep          # whole tree; exit 1 on findings (CI-able)
+./bin/hooks-daemon plan-qa --check-staged   # staged-tree commit-gate checks
+./bin/hooks-daemon plan-qa --lint <PLAN.md> # single-file edit-stage checks
 ```
 
 Add `--json` to any of these for machine-readable output.

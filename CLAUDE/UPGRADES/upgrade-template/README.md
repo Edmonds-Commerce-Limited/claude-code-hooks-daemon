@@ -27,7 +27,7 @@ Before starting the upgrade:
 - [ ] Verify daemon is stopped
   ```bash
   cd .claude/hooks-daemon
-  untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop
+  .claude/hooks-daemon/bin/hooks-daemon stop
   ```
 - [ ] Check for uncommitted changes
   ```bash
@@ -124,8 +124,8 @@ cd hooks-daemon
 ### 2. Update Dependencies
 
 ```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/pip install -e .
+bash .claude/hooks-daemon/scripts/upgrade_version.sh \
+  "$PWD" "$PWD/.claude/hooks-daemon" v{NEW_VERSION}
 ```
 
 **Expected output**:
@@ -178,8 +178,8 @@ cp .claude/hooks-daemon/CLAUDE/UPGRADES/vX/vX.Y-to-vX.Z/config-after.yaml .claud
 **Action**: Run installer to update scripts:
 
 ```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/python install.py --project-root ../..
+bash .claude/hooks-daemon/scripts/install_version.sh \
+  "$PWD" "$PWD/.claude/hooks-daemon"
 ```
 
 **Prompts**:
@@ -213,7 +213,7 @@ handlers:
 
 ```bash
 cd .claude/hooks-daemon
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 **Expected output**:
@@ -282,7 +282,7 @@ __version__ = "X.Z.0"
 
 ```bash
 cd .claude/hooks-daemon
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 ```
 
 **Expected output** (daemon running):
@@ -380,7 +380,7 @@ If upgrade fails or causes issues:
 
 ```bash
 cd .claude/hooks-daemon
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop
+.claude/hooks-daemon/bin/hooks-daemon stop
 ```
 
 ### 2. Restore Configuration Backup
@@ -410,14 +410,14 @@ mv hooks-daemon.backup hooks-daemon
 ### 4. Reinstall Previous Dependencies
 
 ```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/pip install -e .
+bash .claude/hooks-daemon/scripts/upgrade_version.sh \
+  "$PWD" "$PWD/.claude/hooks-daemon" v{PREV_VERSION}
 ```
 
 ### 5. Restart Daemon
 
 ```bash
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 ### 6. Verify Rollback

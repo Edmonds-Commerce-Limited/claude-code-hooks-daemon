@@ -76,10 +76,7 @@ filepath = runner.save_results(result)
 ### As Command Line
 
 ```bash
-python3 -m claude_code_hooks_daemon.qa.runner \
-  --project-root /path/to/project \
-  --tools ruff,mypy,black,pytest \
-  --save-results
+./scripts/run-qa-runner.sh /path/to/project "ruff,mypy,black,pytest" true
 ```
 
 Exit codes:

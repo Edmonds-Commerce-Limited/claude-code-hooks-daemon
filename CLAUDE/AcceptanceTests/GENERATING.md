@@ -39,10 +39,10 @@ Every handler implements `get_acceptance_tests()` which returns structured test 
 
 ```bash
 # Generate playbook to stdout (markdown format)
-python -m claude_code_hooks_daemon.daemon.cli generate-playbook
+./bin/hooks-daemon generate-playbook
 
 # Save to temporary file for testing
-python -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.md
+./bin/hooks-daemon generate-playbook > /tmp/playbook.md
 
 # Test, then DELETE (ephemeral)
 rm /tmp/playbook.md
@@ -140,7 +140,7 @@ Acceptance Testing → Find Bug → Fix with TDD → Run QA → Restart FROM TES
 3. **STOP acceptance testing immediately**
 4. Fix bug using TDD (write failing test, implement fix, verify)
 5. Run FULL QA: `./scripts/qa/run_all.sh` (must pass 100%)
-6. Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+6. Restart daemon: `./bin/hooks-daemon restart`
 7. **Regenerate playbook** (to reflect fix)
 8. **RESTART acceptance testing FROM TEST 1.1** (not from where you left off)
 9. Continue until ALL tests pass with ZERO code changes
@@ -188,14 +188,14 @@ All destructive commands use non-existent refs/paths/files that would fail harml
 ### 1. Restart Daemon
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+./bin/hooks-daemon restart
 # Should show: Daemon started successfully
 ```
 
 ### 2. Verify Daemon Running
 
 ```bash
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon status
 # Should show: Status: RUNNING
 ```
 

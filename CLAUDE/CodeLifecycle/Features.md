@@ -3,6 +3,10 @@
 **Status**: MANDATORY for all new features and handlers
 **Audience**: AI agents and human developers
 
+> **Run every command below from the PROJECT ROOT.** Paths like
+> `./bin/hooks-daemon` and `./scripts/qa/...` are relative to it, and resolve to
+> nothing from anywhere else (`exit 127`).
+
 ## Overview
 
 Complete lifecycle from idea to production-ready feature with rigorous testing at every layer.
@@ -140,10 +144,10 @@ Unit tests use mocks and don't import handlers through the daemon registry.
 # Edit .claude/hooks-daemon.yaml and add handler entry
 
 # Step 2: Restart daemon
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+./bin/hooks-daemon restart
 
 # Step 3: Verify daemon is RUNNING
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon status
 
 # Expected output:
 # Daemon: RUNNING
@@ -151,7 +155,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 # Socket: [path] (exists)
 
 # Step 4: Check logs for errors
-$PYTHON -m claude_code_hooks_daemon.daemon.cli logs | grep -i error
+./bin/hooks-daemon logs | grep -i error
 
 # Expected: No import errors, no loading failures
 ```
@@ -239,7 +243,7 @@ def get_acceptance_tests(self) -> list[AcceptanceTest]:
 
 ```bash
 # Generate fresh playbook from code
-$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.md
+./bin/hooks-daemon generate-playbook > /tmp/playbook.md
 ```
 
 Execute tests in a real Claude Code session. See `CLAUDE/AcceptanceTests/GENERATING.md` for details.
@@ -287,8 +291,8 @@ A feature is DONE when ALL of the following are verified:
 - [ ] Daemon restarts successfully with new code
 - [ ] No import errors in daemon logs
 - [ ] Handler appears in loaded handlers list
-- [ ] Run: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
-- [ ] Verify: `$PYTHON -m claude_code_hooks_daemon.daemon.cli status`
+- [ ] Run: `./bin/hooks-daemon restart`
+- [ ] Verify: `./bin/hooks-daemon status`
 
 ### 4. Dogfooding Tests
 

@@ -37,7 +37,7 @@ and fail with an actionable directive instead.
 
 **Why:** the v3.9.0 field regression — a `tomllib` import crashed under Python
 3.9; all five SSOT shell sites suppressed it with `2>/dev/null` and silently
-fell back to the retired `untracked/venv/bin/python`, so every diagnostic
+fell back to the retired `untracked/venv/bin/python`, <!-- python-var-guidance-exempt: names the retired layout to describe the bug --> so every diagnostic
 reported "installation corrupted" on healthy hosts. This is the shell-script
 form of the same principle the `error_hiding_blocker` handler and the FAIL FAST
 standard in [CLAUDE.md](../../CLAUDE.md) enforce in source code.

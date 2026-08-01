@@ -41,10 +41,52 @@ _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
 _OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "python_var_guidance.json"
 
-_DEFAULT_SCAN_ROOT: Final[Path] = _REPO_ROOT / "src"
+#: Trees whose contents reach an agent or a user as instructions. ``src`` builds
+#: guidance at runtime; ``CLAUDE``/``docs``/``examples`` are read directly and
+#: ship into client projects. Scoping this to ``src`` alone is what let 297
+#: occurrences survive the v3.50.0 release that was specifically about this bug
+#: (Plan 00193) — a gate only ever checks what you point it at.
+_DEFAULT_SCAN_ROOTS: Final[tuple[Path, ...]] = (
+    _REPO_ROOT / "src",
+    _REPO_ROOT / "CLAUDE",
+    _REPO_ROOT / "docs",
+    _REPO_ROOT / "examples",
+)
 
-#: The banned pattern: a literal ``$PYTHON`` shell variable reference.
-_BANNED_PATTERN: Final[re.Pattern[str]] = re.compile(r"\$\{?PYTHON\}?\b")
+#: The banned patterns — every documented way of invoking the daemon that
+#: CANNOT work in a reader's shell:
+#:
+#: 1. ``$PYTHON`` / ``$VENV_PYTHON`` — never exported; only the daemon's own
+#:    bash entry points set them internally, so the line expands to
+#:    ``-m claude_code_hooks_daemon...`` and bash reports ``-m: command not found``.
+#: 2. Any interpreter invoking ``-m claude_code_hooks_daemon.daemon.cli`` — a
+#:    bare ``python3`` cannot import the package (the venv is built with
+#:    ``include-system-site-packages = false``).
+#: 3. Any ``untracked/venv/bin/…`` path — the LEGACY pre-v3.7.0 venv layout.
+#:    Venvs have been fingerprint-keyed since v3.7.0
+#:    (``untracked/venv-{slug}-py{MM}-{fingerprint}/``), so this directory is
+#:    absent on every current install. Docs that spell it out hand the reader a
+#:    path that cannot exist — the same unrunnable-guidance defect as (1), in a
+#:    spelling the original pattern never looked for (Plan 00193).
+#:
+#: The ban on (2) is deliberately scoped to ``daemon.cli`` — the exact surface
+#: the wrapper replaces. Internal module entry points such as
+#: ``python -m claude_code_hooks_daemon.core.error_response`` are invoked BY
+#: daemon scripts that already hold the venv interpreter; they have no wrapper
+#: equivalent and are not reader-facing guidance.
+#:
+#: The ban on (3) requires the ``untracked/`` prefix so that generic venv advice
+#: (``python3 -m venv /tmp/venv && /tmp/venv/bin/pip install <pkg>``, emitted by
+#: ``pip_break_system`` and ``sudo_pip``) is untouched — that is the user's own
+#: throwaway venv, not the daemon's.
+#:
+#: The remedy is the deployed wrapper, which resolves the venv itself:
+#: ``.claude/hooks-daemon/bin/hooks-daemon <command>``.
+_BANNED_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\$\{?(?:VENV_)?PYTHON\}?\b"
+    r"|[\w./$\"'{}-]*python3?[\"']?\s+-m\s+claude_code_hooks_daemon\.daemon\.cli"
+    r"|untracked/venv/bin/"
+)
 
 #: File suffixes that reach agents — Python source that builds guidance strings,
 #: and markdown shipped into client projects.
@@ -58,11 +100,22 @@ _SCANNED_SUFFIXES: Final[frozenset[str]] = frozenset({".py", ".md"})
 #: ``utils/cli_command.py`` is the module that REPLACES the pattern; its
 #: docstring necessarily quotes it to explain what it fixes — mirroring how
 #: ``check_canonical_callers.sh`` exempts ``resolve_venv.sh`` because that file
-#: IS the resolver.
+#: IS the resolver. ``daemon/paths.py`` is exempt for the same reason: it IS the
+#: venv resolver, and its docstrings must document the legacy fallback rung it
+#: still has to recognise in order to migrate away from it.
+#: Immutable history is also exempt: plans, shipped upgrade guides and archived
+#: playbooks record what was true at the time and must not be rewritten.
 _EXEMPT_SUBPATHS: Final[tuple[str, ...]] = (
     "src/claude_code_hooks_daemon/install/templates/hooks-daemon",
     "src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/",
     "src/claude_code_hooks_daemon/utils/cli_command.py",
+    "src/claude_code_hooks_daemon/daemon/paths.py",
+    "CLAUDE/Plan/",
+    "CLAUDE/UPGRADES/v2/",
+    "CLAUDE/UPGRADES/v3/",
+    "CLAUDE/UPGRADES/truth-changes/",
+    "CLAUDE/UPGRADES/config-changes/",
+    "CLAUDE/AcceptanceTests/PLAYBOOK-v1-manual-archived.md",
 )
 
 #: Inline escape hatch for a genuine exception, recorded in-place.
@@ -143,13 +196,16 @@ def scan_tree(root: Path) -> list[Violation]:
 
 def main() -> int:
     json_mode = "--json" in sys.argv
-    scan_root = _DEFAULT_SCAN_ROOT
+    scan_roots = _DEFAULT_SCAN_ROOTS
     args = sys.argv[1:]
     for index, arg in enumerate(args):
         if arg == "--path" and index + 1 < len(args):
-            scan_root = Path(args[index + 1]).resolve()
+            scan_roots = (Path(args[index + 1]).resolve(),)
 
-    violations = scan_tree(scan_root)
+    violations: list[Violation] = []
+    for root in scan_roots:
+        if root.is_dir():
+            violations.extend(scan_tree(root))
 
     output = {
         "tool": "python_var_guidance",

@@ -871,7 +871,7 @@ handlers:
       priority: 44
 ```
 
-**CLI:** lint any file on demand with `$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --lint <PLAN.md>` (add `--json` for machine-readable output).
+**CLI:** lint any file on demand with `.claude/hooks-daemon/bin/hooks-daemon plan-qa --lint <PLAN.md>` (add `--json` for machine-readable output).
 
 ---
 
@@ -894,7 +894,7 @@ handlers:
 
 **Policy configuration:** shares the top-level `plan_workflow.qa` block documented under [`plan_qa_edit`](#plan_qa_edit).
 
-**CLI:** check the staged tree any time without committing with `$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --check-staged`.
+**CLI:** check the staged tree any time without committing with `.claude/hooks-daemon/bin/hooks-daemon plan-qa --check-staged`.
 
 **Config example:**
 
@@ -1283,7 +1283,7 @@ handlers:
 
 **Policy configuration:** shares the top-level `plan_workflow.qa` block documented under [`plan_qa_edit`](#plan_qa_edit) -- the archive dir names, `staleness_days`, and the legacy/collision allowlists all apply to the sweep.
 
-**CLI:** the same catalogue runs against the HEAD tree with `$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --sweep`, which exits 1 while findings remain (CI-able). Single-file lint is `plan-qa --lint <PLAN.md>` and the staged-commit check is `plan-qa --check-staged`; add `--json` to any of these for machine-readable output.
+**CLI:** the same catalogue runs against the HEAD tree with `.claude/hooks-daemon/bin/hooks-daemon plan-qa --sweep`, which exits 1 while findings remain (CI-able). Single-file lint is `plan-qa --lint <PLAN.md>` and the staged-commit check is `plan-qa --check-staged`; add `--json` to any of these for machine-readable output.
 
 **Config example:**
 

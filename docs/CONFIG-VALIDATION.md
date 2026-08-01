@@ -70,20 +70,20 @@ MAX_PRIORITY = 60
 **CLI Command**:
 
 ```bash
-python3 -m claude_code_hooks_daemon.daemon.cli init-config [--minimal] [--force]
+.claude/hooks-daemon/bin/hooks-daemon init-config [--minimal] [--force]
 ```
 
 **Example Usage**:
 
 ```bash
 # Generate full config (default)
-python3 -m claude_code_hooks_daemon.daemon.cli init-config
+.claude/hooks-daemon/bin/hooks-daemon init-config
 
 # Generate minimal config
-python3 -m claude_code_hooks_daemon.daemon.cli init-config --minimal
+.claude/hooks-daemon/bin/hooks-daemon init-config --minimal
 
 # Overwrite existing config
-python3 -m claude_code_hooks_daemon.daemon.cli init-config --force
+.claude/hooks-daemon/bin/hooks-daemon init-config --force
 ```
 
 ## Validation Rules
@@ -360,19 +360,19 @@ except ValidationError as e:
 
 ```bash
 # Show help
-python3 -m claude_code_hooks_daemon.daemon.cli init-config --help
+.claude/hooks-daemon/bin/hooks-daemon init-config --help
 
 # Generate full config (default)
-python3 -m claude_code_hooks_daemon.daemon.cli init-config
+.claude/hooks-daemon/bin/hooks-daemon init-config
 
 # Generate minimal config
-python3 -m claude_code_hooks_daemon.daemon.cli init-config --minimal
+.claude/hooks-daemon/bin/hooks-daemon init-config --minimal
 
 # Overwrite existing config
-python3 -m claude_code_hooks_daemon.daemon.cli init-config --force
+.claude/hooks-daemon/bin/hooks-daemon init-config --force
 
 # Combine flags
-python3 -m claude_code_hooks_daemon.daemon.cli init-config --minimal --force
+.claude/hooks-daemon/bin/hooks-daemon init-config --minimal --force
 ```
 
 ## Forward Compatibility

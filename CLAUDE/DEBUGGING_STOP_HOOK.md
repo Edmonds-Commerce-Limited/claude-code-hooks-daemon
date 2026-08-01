@@ -245,13 +245,13 @@ Cross-reference with the transcript:
 ### 1. Daemon Not Running
 
 ```bash
-/workspace/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon status
 ```
 
 If not `RUNNING`, restart it:
 
 ```bash
-/workspace/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+./bin/hooks-daemon restart
 ```
 
 Then test the hook script again.
@@ -313,7 +313,7 @@ Run these in order and stop at the first failure:
 
 ```bash
 # 1. Is daemon running?
-/workspace/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
+./bin/hooks-daemon status
 
 # 2. Does the hook script produce a block response?
 echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/hooks/stop
@@ -341,8 +341,8 @@ After any code change to the stop hook chain:
 1. Restart the daemon:
 
    ```bash
-   /workspace/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
-   /workspace/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
+   ./bin/hooks-daemon restart
+   ./bin/hooks-daemon status
    ```
 
 2. Run the hook script test:
@@ -354,7 +354,9 @@ After any code change to the stop hook chain:
 3. Run the unit tests:
 
    ```bash
-   /workspace/untracked/venv/bin/pytest tests/unit/handlers/stop/ -v
+   source scripts/lib/resolve_venv.sh
+   PY="$(resolve_venv_python /workspace)"
+   "$PY" -m pytest tests/unit/handlers/stop/ -v
    ```
 
 4. Run full QA:

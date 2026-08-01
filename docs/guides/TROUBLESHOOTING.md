@@ -2,6 +2,11 @@
 
 Practical solutions for common issues with the Claude Code Hooks Daemon. Work through these sections to diagnose and fix problems.
 
+> **Run every command below from your PROJECT ROOT.** `.claude/hooks-daemon/bin/hooks-daemon`
+> is relative to it and resolves to nothing from anywhere else (`exit 127`). The
+> wrapper finds the daemon's virtualenv for you — you never need to locate a
+> Python interpreter yourself.
+
 ---
 
 ## 1. Quick Health Check
@@ -10,16 +15,16 @@ Run these commands to get a snapshot of your daemon's health:
 
 ```bash
 # Check if the daemon is running
-python -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 
 # View recent logs
-python -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 
 # Check loaded handlers
-python -m claude_code_hooks_daemon.daemon.cli handlers
+.claude/hooks-daemon/bin/hooks-daemon handlers
 
 # Validate your configuration
-python -m claude_code_hooks_daemon.daemon.cli config-validate
+.claude/hooks-daemon/bin/hooks-daemon config-validate
 ```
 
 **Expected healthy output from `status`:**
@@ -43,20 +48,20 @@ If status shows running but hooks are not working, see [Hooks Not Firing](#3-hoo
 **Step 1: Check for an existing daemon process**
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 ```
 
 If a stale PID file exists from a crashed daemon, stop it first:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli stop
-python -m claude_code_hooks_daemon.daemon.cli start
+.claude/hooks-daemon/bin/hooks-daemon stop
+.claude/hooks-daemon/bin/hooks-daemon start
 ```
 
 **Step 2: Check for configuration errors**
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli config-validate
+.claude/hooks-daemon/bin/hooks-daemon config-validate
 ```
 
 If validation fails, fix the errors in `.claude/hooks-daemon.yaml`. Common YAML issues:
@@ -71,8 +76,10 @@ The daemon requires Python 3.11 or later:
 
 ```bash
 python --version
-# Or if using a venv:
-.claude/hooks-daemon/untracked/venv/bin/python --version
+
+# Which Python the daemon's own venv was built with (and where it lives):
+.claude/hooks-daemon/bin/hooks-daemon list-venvs
+# The fingerprint encodes the minor version, e.g. "...-py311-..." = Python 3.11
 ```
 
 If your Python version is too old, install a newer version and reinstall the daemon.
@@ -89,13 +96,13 @@ Remove the stale socket and restart:
 
 ```bash
 rm .claude/hooks-daemon/untracked/daemon-*.sock
-python -m claude_code_hooks_daemon.daemon.cli start
+.claude/hooks-daemon/bin/hooks-daemon start
 ```
 
 **Step 5: Check logs for startup errors**
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 ```
 
 Look for import errors, missing dependencies, or configuration issues in the log output.
@@ -105,7 +112,7 @@ Look for import errors, missing dependencies, or configuration issues in the log
 If the venv is corrupted (e.g., after a Python upgrade):
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli repair
+.claude/hooks-daemon/bin/hooks-daemon repair
 ```
 
 This runs `uv sync` to rebuild the virtual environment.
@@ -119,13 +126,13 @@ This runs `uv sync` to rebuild the virtual environment.
 **Step 1: Verify the daemon is running**
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 ```
 
 If not running, start it:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli start
+.claude/hooks-daemon/bin/hooks-daemon start
 ```
 
 **Step 2: Verify hook scripts are installed**
@@ -146,7 +153,7 @@ The hook scripts must connect to the same socket the daemon is listening on:
 
 ```bash
 # Check what socket the daemon is using
-python -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 # Look for the "Socket:" line
 
 # Check what socket the hook scripts expect
@@ -159,7 +166,7 @@ If the paths do not match, restart the daemon or reinstall the hook scripts.
 **Step 4: Check the daemon log for incoming requests**
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 ```
 
 If the daemon is receiving requests, you will see log lines like:
@@ -189,7 +196,7 @@ If the socket file does not exist, the daemon is not running or started with a d
 **Step 1: Verify the handler is enabled**
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli config
+.claude/hooks-daemon/bin/hooks-daemon config
 ```
 
 Check that the handler appears in the output and is `enabled: true`. If it is missing or disabled, add or enable it in `.claude/hooks-daemon.yaml`:
@@ -205,13 +212,13 @@ handlers:
 **Step 2: Verify the handler is loaded**
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli handlers
+.claude/hooks-daemon/bin/hooks-daemon handlers
 ```
 
 This lists all registered handlers. If your handler does not appear, the daemon may need a restart to pick up config changes:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 **Step 3: Check handler priority ordering**
@@ -234,9 +241,9 @@ Enable DEBUG logging to see exactly which handlers match:
 # daemon:
 #   log_level: DEBUG
 
-python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 # Trigger the event, then check logs:
-python -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 ```
 
 Look for log lines showing which handlers matched or did not match.
@@ -246,7 +253,7 @@ Look for log lines showing which handlers matched or did not match.
 The daemon loads configuration at startup. Any changes to `.claude/hooks-daemon.yaml` require a restart:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 ---
@@ -269,7 +276,7 @@ handlers:
 Then restart the daemon:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 **Option 2: Check handler options**
@@ -301,7 +308,7 @@ Blocking handlers usually suggest safe alternatives in their error messages. Rea
 **Step 1: Check daemon response times**
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 ```
 
 Look for request processing times. Normal handler dispatch should complete in under 10ms.
@@ -316,7 +323,7 @@ daemon:
 ```
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 **Step 3: Disable unused handlers**
@@ -344,13 +351,13 @@ daemon:
 **Step 5: Check daemon memory usage**
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli health
+.claude/hooks-daemon/bin/hooks-daemon health
 ```
 
 If memory usage is high, the daemon may have accumulated too many in-memory logs. A restart clears the log buffer:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 ---
@@ -365,7 +372,7 @@ The daemon uses **in-memory logging** by default. Logs are not written to disk f
 
 ```bash
 # View all in-memory logs
-python -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 
 # The daemon log file (if configured) is at:
 # .claude/hooks-daemon/untracked/daemon-{hostname}.log
@@ -392,7 +399,7 @@ daemon:
 Then restart:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 Remember to set it back to `INFO` after debugging to avoid performance overhead.
@@ -423,7 +430,7 @@ daemon:
 2. Restart the daemon:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 3. Trigger the action you want to debug (run a command in Claude Code).
@@ -431,7 +438,7 @@ python -m claude_code_hooks_daemon.daemon.cli restart
 4. Check the logs:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 ```
 
 5. Look for lines showing:
@@ -477,7 +484,7 @@ This script:
 Validate your configuration:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli config-validate
+.claude/hooks-daemon/bin/hooks-daemon config-validate
 ```
 
 Common YAML mistakes:
@@ -512,7 +519,7 @@ handlers:
 If a handler is not in your config file, it will not load. Use `init-config` to generate a template with all available handlers:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli init-config
+.claude/hooks-daemon/bin/hooks-daemon init-config
 ```
 
 This generates a configuration file with all handlers listed. You can then copy the handler entries you need into your existing config.
@@ -522,13 +529,13 @@ This generates a configuration file with all handlers listed. You can then copy 
 To see what differs between your config and the default:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli config-diff
+.claude/hooks-daemon/bin/hooks-daemon config-diff
 ```
 
 To merge new defaults into your existing config while preserving your customisations:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli config-merge
+.claude/hooks-daemon/bin/hooks-daemon config-merge
 ```
 
 ### Version string
@@ -553,7 +560,7 @@ If the version is missing or outdated, the daemon may report a configuration war
 
 ```bash
 cd /path/to/your/project
-python -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 ```
 
 ---
@@ -578,7 +585,7 @@ daemon:
 **Fix:** If you want to restart it:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 ---
@@ -591,8 +598,8 @@ python -m claude_code_hooks_daemon.daemon.cli restart
 
 ```bash
 # Force stop and restart
-python -m claude_code_hooks_daemon.daemon.cli stop
-python -m claude_code_hooks_daemon.daemon.cli start
+.claude/hooks-daemon/bin/hooks-daemon stop
+.claude/hooks-daemon/bin/hooks-daemon start
 ```
 
 If that does not work, remove the socket and PID files manually:
@@ -600,7 +607,7 @@ If that does not work, remove the socket and PID files manually:
 ```bash
 rm .claude/hooks-daemon/untracked/daemon-*.sock
 rm .claude/hooks-daemon/untracked/daemon-*.pid
-python -m claude_code_hooks_daemon.daemon.cli start
+.claude/hooks-daemon/bin/hooks-daemon start
 ```
 
 ---
@@ -612,7 +619,7 @@ python -m claude_code_hooks_daemon.daemon.cli start
 **Fix:** Run validation to see the specific errors:
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli config-validate
+.claude/hooks-daemon/bin/hooks-daemon config-validate
 ```
 
 Fix the reported issues and try again. See [Configuration Issues](#9-configuration-issues) for common mistakes.
@@ -627,10 +634,10 @@ Fix the reported issues and try again. See [Configuration Issues](#9-configurati
 
 ```bash
 # Repair the venv
-python -m claude_code_hooks_daemon.daemon.cli repair
+.claude/hooks-daemon/bin/hooks-daemon repair
 
 # Or if the CLI itself fails, use the venv Python directly:
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli repair
+.claude/hooks-daemon/bin/hooks-daemon repair
 ```
 
 ---
@@ -643,7 +650,7 @@ python -m claude_code_hooks_daemon.daemon.cli repair
 
 ```bash
 export CLAUDE_HOOKS_SOCKET_PATH="/tmp/hooks-daemon.sock"
-python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 Note: Using `/tmp` for the socket is less secure but resolves path length issues. The daemon automatically sanitises the hostname-based suffix to keep paths short.
@@ -667,7 +674,7 @@ If you believe the block is incorrect, see [Handler Blocking Too Much](#5-handle
 ### Check your daemon version
 
 ```bash
-python -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 ```
 
 The version number is displayed in the status output.
@@ -678,16 +685,16 @@ Before reporting an issue, collect this information:
 
 ```bash
 # Daemon status
-python -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 
 # Configuration
-python -m claude_code_hooks_daemon.daemon.cli config
+.claude/hooks-daemon/bin/hooks-daemon config
 
 # Handler list
-python -m claude_code_hooks_daemon.daemon.cli handlers
+.claude/hooks-daemon/bin/hooks-daemon handlers
 
 # Recent logs
-python -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 
 # Python version
 python --version
