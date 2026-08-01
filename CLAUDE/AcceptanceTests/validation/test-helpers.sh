@@ -117,8 +117,10 @@ setup_test_env() {
     export TEST_DIR="/tmp/acceptance-test-$$-${test_name}"
     mkdir -p "$TEST_DIR"
 
-    # Save original directory
-    export ORIGINAL_DIR="$(pwd)"
+    # Save original directory (declare then assign — SC2155: a combined
+    # `export VAR="$(cmd)"` masks the command's exit status)
+    ORIGINAL_DIR="$(pwd)"
+    export ORIGINAL_DIR
 }
 
 cleanup_test_env() {
@@ -155,10 +157,18 @@ print_test_summary() {
 
 # Daemon status check
 check_daemon_running() {
-    local python_cmd="${PYTHON:-/workspace/untracked/venv/bin/python}"
+    # Use the deployed wrapper — it resolves the fingerprint-keyed venv itself.
+    # This previously defaulted to /workspace/untracked/venv/bin/python: the
+    # daemon repo's OWN path, in the RETIRED pre-v3.7.0 layout, shipped to every
+    # client project where neither exists (Plan 00193).
+    local wrapper="${HOOKS_DAEMON_DIR:-$PWD/.claude/hooks-daemon}/bin/hooks-daemon"
+    if [ ! -x "$wrapper" ]; then
+        log_error "hooks-daemon wrapper not found or not executable: $wrapper"
+        return 1
+    fi
 
     log_info "Checking daemon status..."
-    if $python_cmd -m claude_code_hooks_daemon.daemon.cli status | grep -q "RUNNING"; then
+    if "$wrapper" status | grep -q "RUNNING"; then
         log_success "Daemon is running"
         return 0
     else

@@ -153,12 +153,35 @@ damage the former.
 
 ### Phase 4: Verify where it matters
 
-- [ ] ⬜ **Task 4.1**: Rebuild the client fixture
-  (`scripts/dummy-client-repo.sh create`) and confirm the client-visible copies
-  of these docs contain no undefined-variable instructions.
-- [ ] ⬜ **Task 4.2**: Execute a sample of the corrected commands verbatim from
-  the client tree — the Plan 00192 standard: a command is fixed when it RUNS,
-  not when it looks right.
+- [x] ✅ **Task 4.1**: Rebuilt the client fixture and scanned every client-visible
+  doc. 478 raw hits → 29 outside immutable history → 3 real defect groups, all
+  fixed (below). Everything else is exempt history or an inline-marked
+  explanatory mention.
+- [x] ✅ **Task 4.2**: Executed the corrected commands verbatim from the client
+  tree — `status`, `health`, `handlers`, `list-venvs`, `config`, `check`,
+  `plan-qa --sweep`, and the installer's own printed `Daemon management:` block.
+  All run. This is what surfaced Plan 00194 (below).
+- [x] ✅ **Task 4.3**: Removed the blanket path-exemption on the skill wrappers.
+  It was silencing five `echo` lines that told the operator to run
+  `$PYTHON -m …daemon.cli` instead of the wrapper. The `.sh` output-statement
+  rule separates their legitimate invocations from their printed guidance, so
+  the exemption was unnecessary — **a path exemption silences a whole file;
+  prefer a rule that can tell the two apart.**
+- [x] ✅ **Task 4.4**: Fixed two hardcoded legacy defaults shipping to every
+  client: `CLAUDE/AcceptanceTests/validation/test-helpers.sh` defaulted to
+  `/workspace/untracked/venv/bin/python` — this repo's OWN path, in the retired
+  layout, in a client project where neither exists — and
+  `CLAUDE/UPGRADES/upgrade-template/verification.sh` hand-rolled venv resolution
+  with a legacy fallback. Both now use the deployed wrapper.
+
+### Phase 5: Residual gate coverage
+
+- [ ] ⬜ **Task 5.1**: The `.sh` rule fires only on output statements, so a
+  hardcoded legacy venv path in a NON-output shell line (an assignment or
+  default, as in Tasks 4.4) is still ungated. Both known instances are fixed,
+  but the class is not locked. Decide between an assignment-aware rule and an
+  inline-marker exemption for the genuine resolvers
+  (`resolve_venv.sh`, `scripts/install/*.sh`, the skill `install.sh` probe).
 
 ## Dependencies
 

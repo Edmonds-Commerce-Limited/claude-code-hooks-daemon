@@ -74,32 +74,25 @@ fi
 info "Checking daemon startup..."
 cd "$DAEMON_DIR"
 
-# Resolve venv python — v3.7.0+ uses fingerprint-keyed untracked/venv-*/,
-# pre-v3.7.0 used untracked/venv/. Prefer any fingerprint-keyed path that
-# exists, fall back to legacy. See scripts/install/venv_resolver.sh for the
-# SSOT precedence shipped with the daemon.
-VENV_PYTHON=""
-for _vp in untracked/venv-*/bin/python; do
-    if [ -x "$_vp" ]; then
-        VENV_PYTHON="$_vp"
-        break
-    fi
-done
-unset _vp
-if [ -z "$VENV_PYTHON" ]; then
-    VENV_PYTHON="untracked/venv/bin/python"
+# Use the deployed wrapper — it resolves the fingerprint-keyed venv itself, so
+# there is no interpreter path to spell out. This previously hand-rolled the
+# resolution and fell back to `untracked/venv/bin/python`, the RETIRED
+# pre-v3.7.0 layout that no current install has (Plan 00193).
+DAEMON_CLI="$DAEMON_DIR/bin/hooks-daemon"
+if [ ! -x "$DAEMON_CLI" ]; then
+    fail "Daemon startup" "hooks-daemon wrapper missing or not executable: $DAEMON_CLI"
 fi
 
 # Stop daemon if running (best-effort; failure means it wasn't running)
-if ! $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli stop 2> /tmp/verify_daemon_stop.log; then
+if ! "$DAEMON_CLI" stop 2> /tmp/verify_daemon_stop.log; then
     : # daemon wasn't running — that's fine, we're about to start it
 fi
 
 # Try to get status (daemon should start on first request)
-if $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status > /dev/null 2>&1; then
+if "$DAEMON_CLI" status > /tmp/verify_daemon_status.log 2>&1; then
     pass "Daemon startup" "Daemon responded to status check"
 else
-    fail "Daemon startup" "Daemon failed to respond"
+    fail "Daemon startup" "Daemon failed to respond (see /tmp/verify_daemon_status.log)"
 fi
 
 # 5. Check hook execution
@@ -135,7 +128,12 @@ fi
 
 # 7. Clean up
 info "Cleaning up..."
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli stop > /dev/null 2>&1 || true
+# Best-effort stop: a non-zero exit here means the daemon was already stopped,
+# which is the desired end state. The output is kept for diagnosis rather than
+# discarded.
+if ! "$DAEMON_CLI" stop > /tmp/verify_daemon_cleanup.log 2>&1; then
+    info "Daemon was already stopped (see /tmp/verify_daemon_cleanup.log)"
+fi
 
 echo
 echo -e "${GREEN}=== All Verification Checks Passed ===${NC}"

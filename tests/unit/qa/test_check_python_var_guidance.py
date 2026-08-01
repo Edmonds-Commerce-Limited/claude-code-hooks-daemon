@@ -213,6 +213,29 @@ class TestShellScriptGuidance:
         data = _run_checker(tmp_path)
         assert data["summary"]["passed"], data["violations"]
 
+    def test_skill_wrappers_are_not_blanket_exempt(self, tmp_path: Path) -> None:
+        """A script that resolves `PYTHON` may still PRINT bad guidance.
+
+        The skill wrappers (`daemon-cli.sh`, `health-check.sh`,
+        `init-handlers.sh`) were blanket path-exempt because they legitimately
+        set and use `PYTHON` internally. That exemption also hid five `echo`
+        lines telling the operator to run `$PYTHON -m …daemon.cli` instead of
+        the wrapper — found in the client fixture (Plan 00193 Phase 4).
+
+        The output-statement rule draws the line precisely enough that the
+        blanket exemption is unnecessary, so it was removed: invocations pass,
+        printed guidance does not.
+        """
+        script = tmp_path / "health-check.sh"
+        script.write_text(
+            'PYTHON="$(resolve_venv_python "$DIR")"\n'
+            '"$PYTHON" -m claude_code_hooks_daemon.daemon.cli status\n'
+            'echo "  $PYTHON -m claude_code_hooks_daemon.daemon.cli restart"\n'
+        )
+        data = _run_checker(tmp_path)
+        assert not data["summary"]["passed"]
+        assert _violated_lines(data) == [3], "only the echoed guidance is a defect"
+
     def test_allows_diagnostic_reporting_a_resolved_path(self, tmp_path: Path) -> None:
         """Naming the interpreter you just failed to find is not an instruction.
 

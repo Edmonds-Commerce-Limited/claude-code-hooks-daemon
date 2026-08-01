@@ -133,9 +133,17 @@ _SHELL_GUIDANCE_MARKERS: Final[re.Pattern[str]] = re.compile(
 
 #: Paths exempt from the rule, relative to the repo root.
 #:
-#: ``templates/hooks-daemon`` and the skill wrappers legitimately SET and use
-#: ``PYTHON`` internally — they are the scripts that resolve it. The rule targets
-#: guidance that tells a READER to use a variable they never received.
+#: ``templates/hooks-daemon`` legitimately SETS and uses ``PYTHON`` internally —
+#: it is the script that resolves it. The rule targets guidance that tells a
+#: READER to use a variable they never received.
+#:
+#: The skill wrappers (``skills/hooks-daemon/scripts/``) used to be blanket-exempt
+#: for the same reason, but that also hid five ``echo`` lines telling the operator
+#: to run ``$PYTHON -m …daemon.cli`` instead of the wrapper — found in the client
+#: fixture (Plan 00193 Phase 4). The ``.sh`` output-statement rule below draws the
+#: line precisely enough that the blanket exemption is unnecessary: their
+#: invocations pass, their printed guidance does not. A path exemption silences a
+#: whole file; prefer a rule that can tell the two apart.
 #: ``utils/cli_command.py`` is the module that REPLACES the pattern; its
 #: docstring necessarily quotes it to explain what it fixes — mirroring how
 #: ``check_canonical_callers.sh`` exempts ``resolve_venv.sh`` because that file
@@ -146,7 +154,6 @@ _SHELL_GUIDANCE_MARKERS: Final[re.Pattern[str]] = re.compile(
 #: playbooks record what was true at the time and must not be rewritten.
 _EXEMPT_SUBPATHS: Final[tuple[str, ...]] = (
     "src/claude_code_hooks_daemon/install/templates/hooks-daemon",
-    "src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/",
     "src/claude_code_hooks_daemon/utils/cli_command.py",
     "src/claude_code_hooks_daemon/daemon/paths.py",
     # This checker IS the rule; its docstrings must quote every banned pattern
