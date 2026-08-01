@@ -244,10 +244,10 @@ CONFIG=/workspace/.claude/hooks-daemon.yaml
 SRC=/workspace/src/claude_code_hooks_daemon/
 ```
 
-**Do NOT hand-roll an interpreter path, and do not expect `$PYTHON` to be set —
-it never is in your shell** (Plan 00192). The venv layout below is REFERENCE
-ONLY, for understanding where things live; the wrapper is the supported way to
-invoke the CLI:
+**Do NOT hand-roll an interpreter path, and do not expect `$PYTHON` <!-- python-var-guidance-exempt: names the banned pattern to warn against it --> to be
+set — it never is in your shell** (Plan 00192). The venv layout below is
+REFERENCE ONLY, for understanding where things live; the wrapper is the
+supported way to invoke the CLI:
 
 ```text
 # fingerprint-keyed venv (v3.7.0+; project-path slug from v3.19.1). The dir is
@@ -255,8 +255,8 @@ invoke the CLI:
 # base_prefix and arch — so never hardcode it.
 /workspace/untracked/venv-{slug}-py{MM}-{fingerprint}/bin/python
 
-# legacy (pre-v3.7.0) — may still exist as a fallback
-/workspace/untracked/venv/bin/python
+# legacy (pre-v3.7.0), still the last resolver fallback in daemon/paths.py
+/workspace/untracked/venv/bin/python   # python-var-guidance-exempt: reference, not guidance
 ```
 
 ### Why This Matters
