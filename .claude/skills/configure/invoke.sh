@@ -10,17 +10,20 @@ cat <<PROMPT
 
 View or modify the hooks daemon handler configuration.
 
-## Python Path Detection
+## Locate the daemon CLI wrapper
 
-First, detect the correct Python path:
+There is no interpreter to detect. The deployed \`bin/hooks-daemon\` wrapper
+resolves the fingerprint-keyed venv itself. Resolve the wrapper once, from the
+project root:
 
 \`\`\`bash
-if [ -f "/workspace/untracked/venv/bin/python" ]; then
-    PYTHON="/workspace/untracked/venv/bin/python"
-elif [ -f "\$(git rev-parse --show-toplevel 2>/dev/null)/.claude/hooks-daemon/untracked/venv/bin/python" ]; then
-    PYTHON="\$(git rev-parse --show-toplevel)/.claude/hooks-daemon/untracked/venv/bin/python"
+PROJECT_ROOT="\$(git rev-parse --show-toplevel)"
+if [ -x "\$PROJECT_ROOT/.claude/hooks-daemon/bin/hooks-daemon" ]; then
+    DAEMON_CLI="\$PROJECT_ROOT/.claude/hooks-daemon/bin/hooks-daemon"   # normal install
+elif [ -x "\$PROJECT_ROOT/bin/hooks-daemon" ]; then
+    DAEMON_CLI="\$PROJECT_ROOT/bin/hooks-daemon"                        # self-install
 else
-    echo "ERROR: Cannot find hooks daemon Python. Is the daemon installed?"
+    echo "ERROR: bin/hooks-daemon wrapper not found. Is the daemon installed?" >&2
     exit 1
 fi
 \`\`\`
@@ -102,8 +105,8 @@ Parse the arguments to determine the action:
 6. After editing, restart daemon and verify:
 
 \`\`\`bash
-\$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-\$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+"\$DAEMON_CLI" restart
+"\$DAEMON_CLI" status
 # Expected: Status: RUNNING
 \`\`\`
 

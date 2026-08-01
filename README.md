@@ -137,16 +137,14 @@ If you haven't configured it yet, the daemon will suggest it on your next new se
 Add your own handlers in `.claude/project-handlers/` — auto-discovered on daemon restart, co-located with tests, with full CLI support:
 
 ```bash
-VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
-
 # Scaffold the directory with an example handler and tests
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli init-project-handlers
+.claude/hooks-daemon/bin/hooks-daemon init-project-handlers
 
 # Validate handlers load correctly
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli validate-project-handlers
+.claude/hooks-daemon/bin/hooks-daemon validate-project-handlers
 
 # Run project handler tests
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers --verbose
+.claude/hooks-daemon/bin/hooks-daemon test-project-handlers --verbose
 ```
 
 See [CLAUDE/PROJECT_HANDLERS.md](CLAUDE/PROJECT_HANDLERS.md) for the complete guide.
@@ -170,14 +168,15 @@ Installation takes around 30 seconds. Claude will clone the daemon, create a vir
 ### Manual
 
 ```bash
-mkdir -p .claude && cd .claude
-git clone https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git hooks-daemon
-cd hooks-daemon
-git fetch --tags && git checkout "$(git describe --tags --abbrev=0)"
-python3 -m venv untracked/venv
-untracked/venv/bin/pip install -e .
-untracked/venv/bin/python install.py
-cd ../..
+mkdir -p .claude
+git clone https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git .claude/hooks-daemon
+git -C .claude/hooks-daemon fetch --tags
+git -C .claude/hooks-daemon checkout "$(git -C .claude/hooks-daemon describe --tags --abbrev=0)"
+
+# The installer builds the venv, installs the package and starts the daemon.
+# Never hand-build the venv: it is fingerprint-keyed, and a hand-made
+# untracked/venv/ is the retired pre-v3.7.0 layout the resolver refuses.
+bash .claude/hooks-daemon/scripts/install_version.sh "$PWD" "$PWD/.claude/hooks-daemon"
 ```
 
 After installation, create `.claude/.gitignore` so generated files aren't committed:
@@ -210,12 +209,15 @@ Then read /tmp/LLM-UPDATE.md and follow the instructions exactly.
 ### Manual
 
 ```bash
-cd .claude/hooks-daemon
-cp ../hooks-daemon.yaml ../hooks-daemon.yaml.backup
-git fetch --tags && git checkout "$(git describe --tags --abbrev=0)"
-untracked/venv/bin/pip install -e .
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
-cd ../..
+cp .claude/hooks-daemon.yaml .claude/hooks-daemon.yaml.backup
+git -C .claude/hooks-daemon fetch --tags
+TARGET="$(git -C .claude/hooks-daemon describe --tags --abbrev=0)"
+
+# Rebuilds the venv and reinstalls the package for the target version.
+bash .claude/hooks-daemon/scripts/upgrade_version.sh \
+  "$PWD" "$PWD/.claude/hooks-daemon" "$TARGET"
+
+.claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
 Version-specific migration guides are in [CLAUDE/UPGRADES/](CLAUDE/UPGRADES/).
@@ -267,11 +269,9 @@ See [CLAUDE/HANDLER_DEVELOPMENT.md](CLAUDE/HANDLER_DEVELOPMENT.md) for the compl
 ## Daemon Management
 
 ```bash
-VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
-
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status   # Check if running
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart  # Restart after handler changes
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli stop     # Stop daemon
+.claude/hooks-daemon/bin/hooks-daemon status   # Check if running
+.claude/hooks-daemon/bin/hooks-daemon restart  # Restart after handler changes
+.claude/hooks-daemon/bin/hooks-daemon stop     # Stop daemon
 ```
 
 The daemon starts automatically on the first hook call and exits after 10 minutes of inactivity. Each project gets its own isolated daemon instance.
@@ -394,10 +394,10 @@ For comprehensive troubleshooting and bug reporting, see [BUG_REPORTING.md](BUG_
 
 ```bash
 # Daemon won't start — check logs
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 
 # Force restart
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/bin/hooks-daemon restart
 
 # Verify hook forwarding works
 echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo test"}}' | \

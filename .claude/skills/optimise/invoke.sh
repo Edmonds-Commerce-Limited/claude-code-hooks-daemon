@@ -3,23 +3,27 @@
 
 set -euo pipefail
 
-# Detect Python path
-if [ -f "/workspace/untracked/venv/bin/python" ]; then
-    PYTHON="/workspace/untracked/venv/bin/python"
-elif [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/.claude/hooks-daemon/untracked/venv/bin/python" ]; then
-    PYTHON="$(git rev-parse --show-toplevel)/.claude/hooks-daemon/untracked/venv/bin/python"
-else
-    PYTHON="python3"
-fi
-
 # Detect config and project root
 PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 CONFIG="${PROJECT_ROOT}/.claude/hooks-daemon.yaml"
 
+# Locate the deployed daemon CLI wrapper. There is no interpreter to detect —
+# the wrapper resolves the fingerprint-keyed venv itself. FAIL FAST if absent:
+# a bare "python3" fallback cannot import the package and only defers the error.
+if [ -x "${PROJECT_ROOT}/.claude/hooks-daemon/bin/hooks-daemon" ]; then
+    DAEMON_CLI="${PROJECT_ROOT}/.claude/hooks-daemon/bin/hooks-daemon"   # normal install
+elif [ -x "${PROJECT_ROOT}/bin/hooks-daemon" ]; then
+    DAEMON_CLI="${PROJECT_ROOT}/bin/hooks-daemon"                        # self-install
+else
+    echo "ERROR: bin/hooks-daemon wrapper not found under ${PROJECT_ROOT}." >&2
+    echo "       Is the hooks daemon installed in this project?" >&2
+    exit 1
+fi
+
 # Print dynamic environment values so Claude sees them before the static instructions
 echo "## Detected Environment"
 echo ""
-echo "- Python:       ${PYTHON}"
+echo "- Daemon CLI:   ${DAEMON_CLI}"
 echo "- Config:       ${CONFIG}"
 echo "- Project root: ${PROJECT_ROOT}"
 echo ""
@@ -31,9 +35,9 @@ cat <<'SKILL_INSTRUCTIONS'
 
 You are now running the /optimise skill. Follow these instructions precisely and completely.
 
-The environment values (Python path, config path, project root) are printed above.
-Use those exact values throughout these instructions wherever PYTHON, CONFIG, and
-PROJECT_ROOT are referenced.
+The environment values (daemon CLI path, config path, project root) are printed
+above. Use those exact values throughout these instructions wherever DAEMON_CLI,
+CONFIG, and PROJECT_ROOT are referenced.
 
 ---
 
@@ -289,12 +293,12 @@ printed at the top of this output):
        workflow_docs: "CLAUDE/PlanWorkflow.md"
        enforce_claude_code_sync: false
 
-After all edits are applied, restart the daemon using the PYTHON path printed above:
+After all edits are applied, restart the daemon using the DAEMON_CLI path printed above:
 
-  PYTHON -m claude_code_hooks_daemon.daemon.cli restart
-  PYTHON -m claude_code_hooks_daemon.daemon.cli status
+  DAEMON_CLI restart
+  DAEMON_CLI status
 
-(Replace PYTHON with the actual path printed at the top.)
+(Replace DAEMON_CLI with the actual wrapper path printed at the top.)
 
 Then output a summary:
 
@@ -310,7 +314,7 @@ Then output a summary:
 If the daemon fails to restart, output:
 
   WARNING: Daemon failed to restart after changes.
-  Check logs: PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+  Check logs: DAEMON_CLI logs
   The config changes were saved but may have a syntax error.
 
 ---

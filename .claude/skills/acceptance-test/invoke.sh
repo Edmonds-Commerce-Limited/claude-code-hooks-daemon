@@ -15,10 +15,12 @@ Sub-agent testing is FORBIDDEN - agents cannot reliably test hooks (context limi
 
 ## Step 1: Restart Daemon
 
-Ensure latest code is loaded:
+Ensure latest code is loaded. Run every command below **from the daemon repo
+root** — the deployed \`bin/hooks-daemon\` wrapper resolves the fingerprint-keyed
+venv itself, so there is no interpreter to set up:
 
 \`\`\`bash
-\$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+./bin/hooks-daemon restart
 \`\`\`
 
 **Expected**: "Daemon started successfully"
@@ -56,7 +58,7 @@ case "${FILTER}" in
 esac
 
 # Generate JSON playbook
-\$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook --format json \$FILTER_TYPE \$FILTER_HANDLER > /tmp/acceptance_tests.json
+./bin/hooks-daemon generate-playbook --format json \$FILTER_TYPE \$FILTER_HANDLER > /tmp/acceptance_tests.json
 \`\`\`
 
 **Expected**: Valid JSON array of test objects
@@ -161,7 +163,7 @@ Enter FAIL-FAST cycle: TDD fix -> QA -> restart -> retest ALL from beginning.
 2. Investigate root cause of failure
 3. Fix bug using TDD (write failing test -> implement fix -> verify)
 4. Run FULL QA: \`./scripts/qa/run_all.sh\` (must pass 100%)
-5. Restart daemon: \`\$PYTHON -m claude_code_hooks_daemon.daemon.cli restart\`
+5. Restart daemon: \`./bin/hooks-daemon restart\`
 6. **RESTART acceptance testing FROM TEST 1** (not from where you left off)
 7. Continue until ALL tests pass with ZERO code changes
 

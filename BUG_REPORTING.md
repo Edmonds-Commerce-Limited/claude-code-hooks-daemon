@@ -119,10 +119,10 @@ If you can't run the debug script, provide:
 
 ```bash
 # Get daemon logs
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/bin/hooks-daemon logs
 
 # Check daemon status
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 ```
 
 **Hook Test:**
@@ -146,7 +146,7 @@ To see it running, check status immediately after a hook call:
 
 ```bash
 echo '{"tool_name":"Bash","tool_input":{"command":"echo test"}}' | .claude/hooks/pre-tool-use && \
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/bin/hooks-daemon status
 ```
 
 ### "Hooks not working after installation"
@@ -172,9 +172,10 @@ echo '{"tool_name":"Bash","tool_input":{"command":"echo test"}}' | .claude/hooks
 This was a bug in v2.0.0 that's fixed in v2.1.0. Update your daemon:
 
 ```bash
-cd .claude/hooks-daemon
-git pull origin main
-untracked/venv/bin/pip install -e .
+git -C .claude/hooks-daemon pull origin main
+TARGET="$(git -C .claude/hooks-daemon describe --tags --abbrev=0)"
+bash .claude/hooks-daemon/scripts/upgrade_version.sh \
+  "$PWD" "$PWD/.claude/hooks-daemon" "$TARGET"
 ```
 
 ## Getting Help
@@ -194,8 +195,10 @@ If you've identified and fixed a bug:
    # Create test that reproduces the bug
    tests/test_my_bug.py
 
-   # Verify test fails
-   ./untracked/venv/bin/python -m pytest tests/test_my_bug.py
+   # Verify test fails (resolve the interpreter — the venv is fingerprint-keyed)
+   source scripts/lib/resolve_venv.sh
+   PY="$(resolve_venv_python "$PWD")"
+   "$PY" -m pytest tests/test_my_bug.py
    ```
 
 2. **Fix the bug**

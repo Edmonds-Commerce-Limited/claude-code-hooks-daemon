@@ -174,9 +174,28 @@ damage the former.
   `CLAUDE/UPGRADES/upgrade-template/verification.sh` hand-rolled venv resolution
   with a legacy fallback. Both now use the deployed wrapper.
 
-### Phase 5: Residual gate coverage
+### Phase 5: Close the client-install scope hole
 
-- [ ] ⬜ **Task 5.1**: The `.sh` rule fires only on output statements, so a
+- [x] ✅ **Task 5.0**: A client install clones the ENTIRE repo to
+  `.claude/hooks-daemon/`, so repo-root `README.md`, `BUG_REPORTING.md`,
+  `CONTRIBUTING.md`, `CLAUDE.md` and the daemon's own `.claude/skills/` +
+  `.claude/agents/` all ship to clients — yet every one of them sat OUTSIDE the
+  scan roots. Added `.claude` to `_DEFAULT_SCAN_ROOTS` and introduced
+  `_DEFAULT_SCAN_FILES` for the four repo-root docs. That surfaced 38 further
+  violations, all now fixed: README.md (14), BUG_REPORTING.md (5),
+  `configure/SKILL.md` (5), `mode/SKILL.md` (4), `transcript-inspector.md` (4),
+  `release-agent.md` (4), `CLAUDE.md` (2, inline-marked as reference).
+- [x] ✅ **Task 5.1**: Fixed the five skill launchers the gate could NOT flag,
+  because their defects live in assignments rather than output statements.
+  `configure`, `mode` and `optimise` each carried a two-branch guard on the
+  RETIRED `untracked/venv/bin/python` layout; `optimise` then fell through to a
+  bare `python3` that cannot import the package at all, and `acceptance-test`
+  referenced `$PYTHON` having never defined it. All five now resolve the
+  deployed wrapper with an explicit fail-fast else.
+
+### Phase 6: Residual gate coverage
+
+- [ ] ⬜ **Task 6.1**: The `.sh` rule fires only on output statements, so a
   hardcoded legacy venv path in a NON-output shell line (an assignment or
   default, as in Tasks 4.4) is still ungated. Both known instances are fixed,
   but the class is not locked. Decide between an assignment-aware rule and an

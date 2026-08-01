@@ -46,12 +46,28 @@ _OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "python_var_guidance.json"
 #: ship into client projects. Scoping this to ``src`` alone is what let 297
 #: occurrences survive the v3.50.0 release that was specifically about this bug
 #: (Plan 00193) — a gate only ever checks what you point it at.
+#: A client install clones this ENTIRE repo to ``.claude/hooks-daemon/``, so
+#: "what ships to a client" is not just the obvious doc trees. Repo-root
+#: ``README.md``/``BUG_REPORTING.md`` and the daemon's OWN ``.claude/skills/``
+#: and ``.claude/agents/`` are all physically present and readable in every
+#: client project — and the skills are live, agent-loadable instructions
+#: (Plan 00193 Phase 4, found by a client-install audit).
 _DEFAULT_SCAN_ROOTS: Final[tuple[Path, ...]] = (
     _REPO_ROOT / "src",
     _REPO_ROOT / "CLAUDE",
     _REPO_ROOT / "docs",
     _REPO_ROOT / "examples",
     _REPO_ROOT / "scripts",
+    _REPO_ROOT / ".claude",
+)
+
+#: Reader-facing markdown that lives at the repo root rather than in a tree.
+#: ``CHANGELOG.md`` is deliberately absent — it is immutable history.
+_DEFAULT_SCAN_FILES: Final[tuple[Path, ...]] = (
+    _REPO_ROOT / "README.md",
+    _REPO_ROOT / "BUG_REPORTING.md",
+    _REPO_ROOT / "CONTRIBUTING.md",
+    _REPO_ROOT / "CLAUDE.md",
 )
 
 #: The banned patterns — every documented way of invoking the daemon that
@@ -165,6 +181,11 @@ _EXEMPT_SUBPATHS: Final[tuple[str, ...]] = (
     "CLAUDE/UPGRADES/truth-changes/",
     "CLAUDE/UPGRADES/config-changes/",
     "CLAUDE/AcceptanceTests/PLAYBOOK-v1-manual-archived.md",
+    # Runtime/scratch state under .claude, not source: the git-ignored daemon
+    # runtime dir, agent worktrees, and timestamped hook backups.
+    ".claude/hooks-daemon/",
+    ".claude/worktrees/",
+    ".claude/hooks.bak",
 )
 
 #: Inline escape hatch for a genuine exception, recorded in-place.
@@ -252,15 +273,20 @@ def scan_tree(root: Path) -> list[Violation]:
 def main() -> int:
     json_mode = "--json" in sys.argv
     scan_roots = _DEFAULT_SCAN_ROOTS
+    scan_files = _DEFAULT_SCAN_FILES
     args = sys.argv[1:]
     for index, arg in enumerate(args):
         if arg == "--path" and index + 1 < len(args):
             scan_roots = (Path(args[index + 1]).resolve(),)
+            scan_files = ()
 
     violations: list[Violation] = []
     for root in scan_roots:
         if root.is_dir():
             violations.extend(scan_tree(root))
+    for path in scan_files:
+        if path.is_file():
+            violations.extend(scan_file(path))
 
     output = {
         "tool": "python_var_guidance",

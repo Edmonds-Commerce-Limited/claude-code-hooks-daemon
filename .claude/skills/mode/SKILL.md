@@ -56,14 +56,16 @@ The message appears in the Stop event denial reason, so Claude sees it when it t
 
 ## Python Path Detection
 
-The skill detects the correct Python path automatically:
+There is no interpreter to detect. The deployed wrapper resolves the
+fingerprint-keyed venv itself, and lives at the same place relative to the
+daemon root in both install modes:
 
 ```bash
-if [ -f "/workspace/untracked/venv/bin/python" ]; then
-    PYTHON="/workspace/untracked/venv/bin/python"
-elif [ -f ".claude/hooks-daemon/untracked/venv/bin/python" ]; then
-    PYTHON=".claude/hooks-daemon/untracked/venv/bin/python"
-fi
+# self-install (daemon development)
+./bin/hooks-daemon <command>
+
+# normal install
+.claude/hooks-daemon/bin/hooks-daemon <command>
 ```
 
 ## IPC Protocol

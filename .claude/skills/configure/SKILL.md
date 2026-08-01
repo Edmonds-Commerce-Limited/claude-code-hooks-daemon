@@ -90,13 +90,14 @@ The skill detects the correct Python path automatically:
 
 ```bash
 # Self-install mode (daemon development)
-if [ -f "/workspace/untracked/venv/bin/python" ]; then
-    PYTHON="/workspace/untracked/venv/bin/python"
+./bin/hooks-daemon <command>
+
 # Normal install mode
-elif [ -f ".claude/hooks-daemon/untracked/venv/bin/python" ]; then
-    PYTHON=".claude/hooks-daemon/untracked/venv/bin/python"
-fi
+.claude/hooks-daemon/bin/hooks-daemon <command>
 ```
+
+The wrapper resolves the fingerprint-keyed venv itself, so there is no
+interpreter path to detect or hardcode.
 
 ## Handler Options Reference
 
@@ -105,6 +106,7 @@ fi
 Every handler's configurable options, values, defaults, and examples are documented there. Do not duplicate that content here.
 
 Quick examples of what options look like:
+
 - `sed_blocker` → `blocking_mode` (`strict` | `direct_invocation_only`)
 - `git_stash` → `mode` (`warn` | `deny`)
 - `markdown_organization` → `track_plans_in_project`, `plan_workflow_docs`
@@ -152,21 +154,24 @@ Handler: sed_blocker
 ## Error Handling
 
 **Handler not found:**
+
 ```
 Handler "destrutive_git" not found.
 Did you mean: destructive_git?
 ```
 
 **Invalid option:**
+
 ```
 Unknown option "blcoking_mode" for sed_blocker.
 Available options: blocking_mode
 ```
 
 **Daemon fails to restart:**
+
 ```
 WARNING: Daemon failed to start after config change.
-Check logs: $PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+Check logs: .claude/hooks-daemon/bin/hooks-daemon logs
 Consider reverting the change.
 ```
 
