@@ -167,6 +167,67 @@ class TestScannedSurface:
         assert data["summary"]["passed"], data["violations"]
 
 
+class TestShellScriptGuidance:
+    """Shell scripts PRINT instructions too — that is guidance, and it counts.
+
+    Found by provisioning the client fixture: ``install_version.sh`` closed with
+    a "Daemon management:" block echoing variant 2, and ``setup_worktree.sh``
+    echoed the literal ``$PYTHON -m …`` variant-1 form as its "Quick start".
+    Both reach the user exactly like a doc does, but ``.sh`` was outside the
+    scanned suffixes, so neither was ever checked.
+
+    Two conditions must BOTH hold for a `.sh` line to be a defect: it is an
+    output statement, AND it shows a command rather than reporting a value.
+    Printing an already-resolved interpreter as a value is legitimate — that is
+    what the resolver is for.
+    """
+
+    def test_flags_escaped_variable_in_echo(self, tmp_path: Path) -> None:
+        r"""`echo "\$PYTHON …"` prints a literal, unexpanded `$PYTHON`."""
+        (tmp_path / "s.sh").write_text(
+            'echo "  \\$PYTHON -m claude_code_hooks_daemon.daemon.cli status"\n'
+        )
+        data = _run_checker(tmp_path)
+        assert not data["summary"]["passed"]
+        assert _violated_lines(data) == [1]
+
+    def test_flags_print_helper_showing_a_command(self, tmp_path: Path) -> None:
+        (tmp_path / "s.sh").write_text(
+            'print_info "Check: $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status"\n'
+        )
+        data = _run_checker(tmp_path)
+        assert not data["summary"]["passed"]
+
+    def test_allows_internal_invocation(self, tmp_path: Path) -> None:
+        """The script resolved the interpreter itself — this is not guidance."""
+        (tmp_path / "s.sh").write_text(
+            '"$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli status 2>&1\n'
+        )
+        data = _run_checker(tmp_path)
+        assert data["summary"]["passed"], data["violations"]
+
+    def test_allows_assignment_and_use(self, tmp_path: Path) -> None:
+        (tmp_path / "s.sh").write_text(
+            'PYTHON="$(resolve_venv_python "$ROOT")"\n"$PYTHON" -m pytest -q\n'
+        )
+        data = _run_checker(tmp_path)
+        assert data["summary"]["passed"], data["violations"]
+
+    def test_allows_diagnostic_reporting_a_resolved_path(self, tmp_path: Path) -> None:
+        """Naming the interpreter you just failed to find is not an instruction.
+
+        `print_error "Venv Python not found: $VENV_PYTHON"` expands to the real
+        path the script resolved. Flagging it would force scripts to hide the
+        very detail that makes the error actionable.
+        """
+        (tmp_path / "s.sh").write_text(
+            'print_error "Venv Python not found: $VENV_PYTHON"\n'
+            'echo "Python: $(resolve_existing_venv_python "$ROOT")" >&2\n'
+        )
+        data = _run_checker(tmp_path)
+        assert data["summary"]["passed"], data["violations"]
+
+
 class TestRepositoryIsClean:
     """The real trees must stay clean — this is the regression lock."""
 

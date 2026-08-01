@@ -51,6 +51,7 @@ _DEFAULT_SCAN_ROOTS: Final[tuple[Path, ...]] = (
     _REPO_ROOT / "CLAUDE",
     _REPO_ROOT / "docs",
     _REPO_ROOT / "examples",
+    _REPO_ROOT / "scripts",
 )
 
 #: The banned patterns — every documented way of invoking the daemon that
@@ -89,8 +90,46 @@ _BANNED_PATTERN: Final[re.Pattern[str]] = re.compile(
 )
 
 #: File suffixes that reach agents — Python source that builds guidance strings,
-#: and markdown shipped into client projects.
-_SCANNED_SUFFIXES: Final[frozenset[str]] = frozenset({".py", ".md"})
+#: markdown shipped into client projects, and shell scripts that PRINT
+#: instructions to the operator.
+_SCANNED_SUFFIXES: Final[frozenset[str]] = frozenset({".py", ".md", ".sh"})
+
+#: Shell suffix, scanned under a narrower rule (see ``_is_shell_output_line``).
+_SHELL_SUFFIX: Final[str] = ".sh"
+
+#: Statements by which a shell script emits text to the operator. Only these
+#: lines are guidance; everything else in a ``.sh`` file is the script doing its
+#: job. A script that resolved an interpreter and then invokes it
+#: (``"$VENV_PYTHON" -m …``) is CORRECT — that is what the resolver is for —
+#: so the ``.sh`` rule must never flag a bare invocation.
+#:
+#: Found when provisioning the client fixture (Plan 00193 Phase 4):
+#: ``install_version.sh`` closed with a "Daemon management:" block echoing
+#: variant 2, and ``setup_worktree.sh`` echoed the literal ``$PYTHON -m …``
+#: variant-1 form as its "Quick start". Both reach the operator exactly as a doc
+#: does, but ``.sh`` was outside the scanned suffixes so neither was checked.
+_SHELL_OUTPUT_STATEMENT: Final[re.Pattern[str]] = re.compile(
+    r"^\s*(?:echo|printf|print_[a-z_]+|cat\s*<<)\b"
+)
+
+#: Within an output statement, what distinguishes GUIDANCE from a DIAGNOSTIC.
+#:
+#: A shell script legitimately prints an already-resolved interpreter as a
+#: *value* — ``print_error "Venv Python not found: $VENV_PYTHON"`` names the
+#: path it just failed to find, and ``echo "Python: $(resolve_… )"`` reports an
+#: answer. Neither asks the reader to run anything, so neither is a defect.
+#:
+#: A line is guidance only when it shows a COMMAND:
+#:
+#: 1. it spells out ``-m …daemon.cli`` — the invocation the wrapper replaces; or
+#: 2. it prints an ESCAPED ``\$PYTHON`` — deliberately unexpanded, so what the
+#:    reader sees really is the literal, unrunnable variable.
+#:
+#: An UNESCAPED ``$PYTHON`` in an output statement expands to whatever the
+#: script resolved, so it is a value, not an instruction.
+_SHELL_GUIDANCE_MARKERS: Final[re.Pattern[str]] = re.compile(
+    r"-m\s+claude_code_hooks_daemon\.daemon\.cli" r"|\\\$\{?(?:VENV_)?PYTHON\}?\b"
+)
 
 #: Paths exempt from the rule, relative to the repo root.
 #:
@@ -110,6 +149,9 @@ _EXEMPT_SUBPATHS: Final[tuple[str, ...]] = (
     "src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/",
     "src/claude_code_hooks_daemon/utils/cli_command.py",
     "src/claude_code_hooks_daemon/daemon/paths.py",
+    # This checker IS the rule; its docstrings must quote every banned pattern
+    # in order to define and explain them.
+    "scripts/qa/check_python_var_guidance.py",
     "CLAUDE/Plan/",
     "CLAUDE/UPGRADES/v2/",
     "CLAUDE/UPGRADES/v3/",
@@ -165,11 +207,17 @@ def scan_file(path: Path) -> list[Violation]:
     except UnicodeDecodeError:
         return []
 
+    is_shell = path.suffix == _SHELL_SUFFIX
+
     violations: list[Violation] = []
     for number, line in enumerate(content.splitlines(), start=1):
         if _EXEMPT_MARKER in line:
             continue
-        if _BANNED_PATTERN.search(line):
+        if is_shell and not (
+            _SHELL_OUTPUT_STATEMENT.match(line) and _SHELL_GUIDANCE_MARKERS.search(line)
+        ):
+            continue
+        if _BANNED_PATTERN.search(line) or (is_shell and _SHELL_GUIDANCE_MARKERS.search(line)):
             violations.append(
                 Violation(
                     file=str(path),

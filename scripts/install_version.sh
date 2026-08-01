@@ -624,9 +624,10 @@ echo "  Profiles:  HANDLER_PROFILE=recommended|strict seeds extra handlers at"
 echo "             FRESH-INSTALL time only; afterwards edit enabled: flags in config"
 echo "  Plans:     edit plan_workflow.enabled in $TARGET_CONFIG (deployed when enabled)"
 echo ""
-echo "Daemon management:"
-echo "  Status:   $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status"
-echo "  Restart:  $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart"
+echo "Daemon management (the wrapper resolves the venv itself — never name an"
+echo "interpreter; the venv is fingerprint-keyed and its path changes):"
+echo "  Status:   $DAEMON_DIR/bin/hooks-daemon status"
+echo "  Restart:  $DAEMON_DIR/bin/hooks-daemon restart"
 echo ""
 
 exit 0

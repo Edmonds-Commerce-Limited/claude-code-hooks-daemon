@@ -50,13 +50,13 @@ result = {
     "tool": "smoke_test",
     "summary": {"total_probes": 3, "passed_probes": 0, "failed_probes": 3, "passed": False},
     "probes": [],
-    "error": "Daemon not running — no socket found. Run: $PYTHON -m claude_code_hooks_daemon.daemon.cli restart",
+    "error": "Daemon not running — no socket found. Run: ./bin/hooks-daemon restart",
 }
 json.dump(result, sys.stdout, indent=2)
 print()
 PYEOF
     echo "❌ SMOKE TEST FAILED: Daemon not running"
-    echo "   Run: \$PYTHON -m claude_code_hooks_daemon.daemon.cli restart"
+    echo "   Run: ${PROJECT_ROOT}/bin/hooks-daemon restart"
     exit 1
 fi
 

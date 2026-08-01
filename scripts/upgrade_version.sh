@@ -818,13 +818,13 @@ log_step "15" "Restarting daemon"
 if ! restart_daemon_verified "$VENV_PYTHON"; then
     print_error "Daemon failed to start after upgrade"
     print_info "This may indicate config validation errors"
-    print_info "Check: $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status"
+    print_info "Check: $DAEMON_DIR/bin/hooks-daemon status"
 
     if [ -n "$CONFIG_BACKUP" ]; then
         echo ""
         print_info "To restore previous config:"
         echo "  cp $CONFIG_BACKUP $TARGET_CONFIG"
-        echo "  $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart"
+        echo "  $DAEMON_DIR/bin/hooks-daemon restart"
     fi
 
     # Don't trigger rollback for daemon start failure - code is updated
@@ -856,7 +856,7 @@ if ! run_post_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false
         echo ""
         print_info "To restore previous config:"
         echo "  cp $CONFIG_BACKUP $TARGET_CONFIG"
-        echo "  $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart"
+        echo "  $DAEMON_DIR/bin/hooks-daemon restart"
     fi
 
     # Don't trigger rollback - code is updated, but user needs to investigate
@@ -886,7 +886,7 @@ else
     print_info "This usually means an upgrade added a required handler method an older"
     print_info "handler does not implement yet. The daemon started fine and skipped them."
     print_info "Fix the handler(s) above, then restart the daemon:"
-    echo "  $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart"
+    echo "  $DAEMON_DIR/bin/hooks-daemon restart"
     print_info "Until then, every new session will show a degraded-protection alert."
 fi
 

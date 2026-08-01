@@ -175,7 +175,9 @@ Bridges the Python config preservation CLI for use in bash upgrade orchestration
 | `report_incompatibilities`    | old_default, new_default, venv_python              | Reports breaking changes between versions               |
 | `preserve_config_for_upgrade` | old_default, user_config, new_default, venv_python | Full pipeline: diff + merge + validate                  |
 
-Calls Python CLI via `$venv_python -m claude_code_hooks_daemon.daemon.cli config-diff|config-merge|config-validate`.
+Internally calls `$venv_python -m claude_code_hooks_daemon.daemon.cli config-diff|config-merge|config-validate` <!-- python-var-guidance-exempt: documents this module's internal call, not a command for a reader to run -->
+using the interpreter it has already resolved. Readers driving the daemon
+themselves should use the `bin/hooks-daemon` wrapper instead.
 
 ## Test Modules
 

@@ -55,17 +55,21 @@ Drop Findings".
 The plan opened with "223 occurrences across 23 files", counted by grepping for
 the literal string `PYTHON`. That figure was wrong **in kind**, not merely in
 count: it measured one spelling of the defect. The defect is "documentation
-hands the reader a command that cannot run", and it has **three** spellings:
+hands the reader a command that cannot run", and it has **four** spellings —
+the fourth being not a document at all, but a script printing to the operator:
 
 | Variant                                   | What it is                                                                                                                    | Found  |
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------ |
 | 1. `$PYTHON` / `$VENV_PYTHON`             | Never exported to a reader's shell; line expands to `-m …` → `command not found`                                              | 297    |
 | 2. `<python> -m …daemon.cli`              | A PATH `python3` cannot import the package (`include-system-site-packages = false`)                                           | (in 1) |
 | 3. `untracked/venv/bin/python` \| `…/pip` | The **retired pre-v3.7.0 venv layout**. Venvs are fingerprint-keyed since v3.7.0, so this directory exists on no live install | 65     |
+| 4. The same, PRINTED at runtime by `.sh`  | Installer / upgrader / worktree scripts echo commands to the operator; `.sh` was outside the scanned suffixes entirely        | 9      |
 
-Variant 3 was invisible until the gate was widened in Phase 3 — it names a real
-path rather than an unset variable, so it *looks* runnable and greps clean for
-`PYTHON`. It was the single largest group.
+Each variant was invisible to the search that found the previous one. Variant 3
+names a real-looking path rather than an unset variable, so it *looks* runnable
+and greps clean for `PYTHON` — it was the single largest group. Variant 4 is not
+in a document at all: it is emitted at runtime, and was found only by
+provisioning the client fixture and reading what the installer actually printed.
 
 `CLAUDE/development/RELEASING.md` and `CLAUDE/development/CLIENT-MODE-TESTING.md`
 are the deliberate explanatory references listed under Non-Goals — verified and
@@ -139,6 +143,13 @@ damage the former.
   why its `src/`-only scope went unchallenged. `tests/unit/qa/test_check_python_var_guidance.py`
   covers all three variants, the exemption semantics, and locks the real trees
   clean via `TestRepositoryIsClean`.
+- [x] ✅ **Task 3.5**: Cover `scripts/**` and `.sh` files. Provisioning the client
+  fixture showed the installer PRINTS variant 2 at completion, and
+  `setup_worktree.sh` printed the literal `$PYTHON -m …` variant-1 form — runtime
+  guidance reaches the operator exactly like a doc, but `.sh` was outside the
+  scanned suffixes. The `.sh` rule fires only on an output statement that shows a
+  COMMAND (`-m …daemon.cli`, or an escaped `\$PYTHON`); a diagnostic reporting an
+  already-resolved interpreter is legitimate and must not be flagged.
 
 ### Phase 4: Verify where it matters
 
