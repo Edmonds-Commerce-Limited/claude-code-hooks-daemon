@@ -48,8 +48,11 @@ ls -la .claude/hooks-daemon/untracked/
 # Check for existing daemon processes
 ps aux | grep hooks-daemon
 
-# Kill stale processes
-pkill -f hooks-daemon
+# Stop THIS project's daemon. Use the CLI, not pkill: it targets this
+# project's PID file only. `pkill -f hooks-daemon` matches every daemon
+# on the host, so in a shared PID namespace (a container and its host, or
+# two containers sharing a bind mount) it kills OTHER projects' daemons too.
+.claude/hooks-daemon/bin/hooks-daemon stop
 ```
 
 ## DEGRADED MODE
@@ -159,8 +162,9 @@ bash /tmp/hooks-daemon-upgrade.sh
 # Check daemon logs
 .claude/hooks-daemon/bin/hooks-daemon logs
 
-# If stuck, kill and retry
-pkill -f hooks-daemon
+# If stuck, stop THIS project's daemon and retry (never `pkill -f hooks-daemon`
+# — that matches every daemon on the host, not just this project's)
+.claude/hooks-daemon/bin/hooks-daemon stop
 /hooks-daemon upgrade
 ```
 
@@ -175,9 +179,16 @@ The upgrade script auto-rollsback, but if needed manually:
 # Restore backed-up config
 cp .claude/hooks-daemon.yaml.backup .claude/hooks-daemon.yaml
 
-# Checkout previous version
-cd .claude/hooks-daemon
-git checkout v2.12.0  # Previous working version
+# Roll back to the previous version. Run upgrade_version.sh rather than a bare
+# `git checkout`: it rebuilds the venv and reinstalls the package for the target
+# version. A checkout alone moves the source but leaves the venv holding the
+# NEW version's dependencies.
+#
+# Use `git -C` and absolute paths — never `cd` into .claude/hooks-daemon/
+# (the daemon_location_guard handler blocks it, and daemon commands are
+# designed to run from the project root).
+bash .claude/hooks-daemon/scripts/upgrade_version.sh \
+  "$PWD" "$PWD/.claude/hooks-daemon" "v2.12.0"   # previous working version
 
 # Restart
 .claude/hooks-daemon/bin/hooks-daemon restart
@@ -352,9 +363,18 @@ chmod 600 .claude/hooks-daemon/untracked/daemon-*.sock
 
 ### Generate Diagnostic Report
 
+The `bug-report` command collects everything below in one go — prefer it:
+
 ```bash
-# Comprehensive diagnostics
-.claude/hooks-daemon/bin/hooks-daemon status --verbose > diagnostic-report.txt
+.claude/hooks-daemon/bin/hooks-daemon bug-report "short description of the problem"
+# Writes to untracked/bug-reports/ by default; use -o - for stdout.
+```
+
+To assemble a report by hand instead:
+
+```bash
+# Comprehensive diagnostics (health is the detailed view; status is a summary)
+.claude/hooks-daemon/bin/hooks-daemon health > diagnostic-report.txt
 
 # Include daemon logs
 .claude/hooks-daemon/bin/hooks-daemon logs >> diagnostic-report.txt
@@ -367,8 +387,8 @@ cat .claude/hooks-daemon.yaml >> diagnostic-report.txt
 
 When reporting issues, include:
 
-1. Daemon version: `.claude/hooks-daemon/bin/hooks-daemon --version`
-2. Python version: `.claude/hooks-daemon/bin/hooks-daemon health` (reports the resolved interpreter)
+1. Daemon version: `git -C .claude/hooks-daemon describe --tags` (there is no `--version` flag)
+2. Resolved interpreter: `.claude/hooks-daemon/bin/hooks-daemon list-venvs`
 3. OS: `uname -a`
 4. Diagnostic report (above)
 5. Steps to reproduce
@@ -392,8 +412,8 @@ When reporting issues, include:
 # Repair
 .claude/hooks-daemon/bin/hooks-daemon repair
 
-# Validate config
-.claude/hooks-daemon/bin/hooks-daemon validate-config
+# Validate config (config-validate takes the config path)
+.claude/hooks-daemon/bin/hooks-daemon config-validate .claude/hooks-daemon.yaml
 ```
 
 ### Log Locations

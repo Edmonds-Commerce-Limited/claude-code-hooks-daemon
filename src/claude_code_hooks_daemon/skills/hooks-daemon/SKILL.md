@@ -221,7 +221,7 @@ case "$SUBCOMMAND" in
         bash "$SKILL_DIR/scripts/daemon-cli.sh" regenerate-docs "$@"
         ;;
 
-    logs|status|restart|handlers|validate-config|bug-report|check|release-notes)
+    logs|status|restart|handlers|config-validate|bug-report|check|release-notes)
         # Forward to daemon CLI wrapper
         bash "$SKILL_DIR/scripts/daemon-cli.sh" "$SUBCOMMAND" "$@"
         ;;

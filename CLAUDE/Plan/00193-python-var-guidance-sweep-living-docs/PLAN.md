@@ -193,9 +193,49 @@ damage the former.
   referenced `$PYTHON` having never defined it. All five now resolve the
   deployed wrapper with an explicit fail-fast else.
 
-### Phase 6: Residual gate coverage
+### Phase 6: Act on the client-mode verification findings
 
-- [ ] ⬜ **Task 6.1**: The `.sh` rule fires only on output statements, so a
+Verified each claim in the client fixture before acting; every item below was
+reproduced, fixed with TDD, and re-verified end-to-end.
+
+- [x] ✅ **Task 6.0**: `init-project-handlers` scaffolded an `ExampleHandler`
+  with no `get_claude_md()`, so `validate-project-handlers` rejected the
+  daemon's OWN scaffold and the next session showed "PROJECT PROTECTION
+  DEGRADED" — from following the documented first step.
+- [x] ✅ **Task 6.1**: That rejection message pointed at `CLAUDE/UPGRADES/v2/`,
+  which does not resolve in a client project. Added
+  `utils.cli_command.daemon_path()` as the one place that anchors a daemon-owned
+  path for reader-facing text; major version now derived, not pinned to `v2`.
+- [x] ✅ **Task 6.2**: `cmd_start` forked without flushing stdio, so the first
+  child re-emitted the parent's buffer — `restart` printed the stop lines TWICE
+  with the same pid. Only reproduces under block-buffered stdout, so it
+  corrupted exactly the captured output tooling parses.
+- [x] ✅ **Task 6.3**: `test-project-handlers` shelled out to pytest with no
+  availability check. pytest is a dev-only extra, so NO client had it. Now fails
+  fast with the pip command. Rejected installing pytest for every client — it
+  would drag black/mypy/bandit/twine in to serve an optional workflow.
+- [x] ✅ **Task 6.4**: `scripts/run-qa-runner.sh` built its command with a bare
+  `python3` and died with `ModuleNotFoundError` — the exact failure
+  `docs/QA-RUNNER-SETUP.md` warns about, in the very wrapper that doc tells you
+  to use instead. Worse, it reported the failure as "QA checks found issues
+  (exit code: 1)", disguising a total failure to run as a QA finding. Now
+  resolves via the canonical `resolve_venv.sh` and exits 2 on resolver failure.
+- [x] ✅ **Task 6.5**: Doc commands that do not exist: `validate-config` (real
+  name `config-validate`, and it takes the config path), `--version`, and
+  `status --verbose`. Also `health` was documented as reporting the resolved
+  interpreter, which it does not. Fixed in `health.md`, `troubleshooting.md` and
+  the skill's dispatch table (which routed on the wrong name).
+- [x] ✅ **Task 6.6**: `troubleshooting.md` taught `pkill -f hooks-daemon`
+  (twice) — unscoped, so in a shared PID namespace it kills OTHER projects'
+  daemons, precisely what the daemon's own enforcement code scopes by project
+  root to avoid. Replaced with `hooks-daemon stop`. Its rollback recipe also
+  `cd`-ed into `.claude/hooks-daemon/` (blocked by `daemon_location_guard`) and
+  used a bare `git checkout`, which moves the source but leaves the venv on the
+  other version's dependencies; now uses `upgrade_version.sh`.
+
+### Phase 7: Residual gate coverage
+
+- [ ] ⬜ **Task 7.1**: The `.sh` rule fires only on output statements, so a
   hardcoded legacy venv path in a NON-output shell line (an assignment or
   default, as in Tasks 4.4) is still ungated. Both known instances are fixed,
   but the class is not locked. Decide between an assignment-aware rule and an

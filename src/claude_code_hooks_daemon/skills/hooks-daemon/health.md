@@ -111,14 +111,14 @@ See logs for details: /hooks-daemon logs
 For detailed diagnostics when reporting issues:
 
 ```bash
-# Generate diagnostic report
-.claude/hooks-daemon/bin/hooks-daemon status --verbose
+# Generate diagnostic report (health is the detailed view; status is a summary)
+.claude/hooks-daemon/bin/hooks-daemon health
 
 # Check handler registry
 .claude/hooks-daemon/bin/hooks-daemon handlers
 
-# Validate configuration
-.claude/hooks-daemon/bin/hooks-daemon validate-config
+# Validate configuration (config-validate takes the config path)
+.claude/hooks-daemon/bin/hooks-daemon config-validate .claude/hooks-daemon.yaml
 ```
 
 ## Troubleshooting

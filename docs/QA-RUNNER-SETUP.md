@@ -59,9 +59,11 @@ never need to locate a Python interpreter. Arguments are
 ./scripts/run-qa-runner.sh . "eslint,typescript" true
 ```
 
-> A bare `python3 -m claude_code_hooks_daemon.qa.runner` does **not** work: the
-> daemon lives in an isolated virtualenv that the PATH `python3` cannot import
-> from, so it fails with `ModuleNotFoundError`. Always go through the wrapper.
+> A bare `python3 -m claude_code_hooks_daemon.qa.runner` <!-- python-var-guidance-exempt: names the banned pattern to warn against it --> does **not** work:
+> the daemon lives in an isolated virtualenv (built with
+> `include-system-site-packages = false`) that the PATH `python3` cannot import
+> from, so it fails with `ModuleNotFoundError`. Always go through the wrapper,
+> which resolves the fingerprint-keyed venv via `scripts/lib/resolve_venv.sh`.
 
 ### Programmatic Usage
 
