@@ -29,6 +29,37 @@ make the fixture run it, and ask "what bug could ship while this gate passes?"
 If the answer is "the bug we just fixed, in a different integration shape," the
 gate is theatre — strengthen the fixture.
 
+## A QA gate only ever checks what you point it at — so test its BOUNDARY
+
+A gate reporting green means "clean **within its scope**", never "clean". Scope
+is a silent, unasserted assumption unless a test pins it. Three independent
+dimensions can each be wrong while the gate stays green:
+
+| Dimension     | How it goes wrong                        | Real instance                                                                                                                                   |
+| ------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Scan roots    | Points at one tree, defect lives in more | `python_var_guidance` scoped to `src/`; 297 hits in `CLAUDE/` etc.                                                                              |
+| File suffixes | Misses a surface that also instructs     | `.py`/`.md` only, so `.sh` scripts printing commands went unseen                                                                                |
+| Pattern       | Matches one spelling of the defect       | `$PYTHON` only, missing `untracked/venv/bin/python` — 65 more <!-- python-var-guidance-exempt: names both banned spellings to contrast them --> |
+
+**Why:** v3.50.0 shipped a release *specifically about* unrunnable guidance, with
+a gate to prevent it, and 371 instances of that same defect survived across all
+three dimensions (Plan 00193). Each was invisible to the search that found the
+previous one. The gate had **no test file at all**, so nothing ever asserted
+where it pointed.
+
+**Apply:** every gate gets a test that runs it against its **real default
+scope** and asserts zero findings (see `TestRepositoryIsClean` in
+`tests/unit/qa/test_check_python_var_guidance.py`). Narrowing scan roots,
+suffixes, or the pattern then becomes a test failure rather than a silent loss
+of coverage. Before merging a gate, ask: "if this shipped green, where could the
+defect still be?" — and encode the answer as scope.
+
+Corollary: when a gate flags a case that is genuinely legitimate, prefer
+**sharpening the rule** over adding an exemption. The `.sh` rule distinguishes
+an output line showing a *command* from one reporting a resolved *value*, which
+removed five false positives without a single exemption. Exemptions must be
+inline and state their reason, so silencing a finding is visible in the diff.
+
 ## No silent fallback — surface errors loudly
 
 Never pair `2>/dev/null` with a silent fallback to a default/legacy path when
