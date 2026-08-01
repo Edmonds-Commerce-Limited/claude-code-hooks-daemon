@@ -104,13 +104,20 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Handler UX Adjustments
 
-- [00193: Extend the `$PYTHON` guidance sweep to living docs](00193-python-var-guidance-sweep-living-docs/PLAN.md) - Not Started
+- [00193: Extend the `$PYTHON` guidance sweep to living docs](00193-python-var-guidance-sweep-living-docs/PLAN.md) - In Progress (Phases 1-3 delivered; Phase 4 client verification remaining)
 
   - Follow-up to Plan 00192, raised by the v3.50.0 release code-review gate and tracked rather than dropped (RELEASING.md "Never Drop Findings")
-  - Plan 00192 fixed 77 occurrences in `src/` and gated that path; **223 occurrences across 23 living docs remain outside the gate's scope** — same defect, same destructive recovery path (agent concludes the package is uninstalled and "fixes" a working install)
-  - Pre-existing, not a regression: shipped in v3.49.1 and every prior version
-  - Severity is not proportional to count — the three MANDATORY `CodeLifecycle/` docs gate every code change, and `LLM-INSTALL.md`/`LLM-UPDATE.md` are read precisely when a project is already broken
-  - Requires classification before remediation: some snippets define `PYTHON` locally and are correct, so a blind find-and-replace would damage them
+  - The opening estimate of "223 occurrences across 23 files" was wrong **in kind**: it counted one spelling. The defect is "docs hand the reader a command that cannot run", and it had **four** — `$PYTHON`, `python3 -m …daemon.cli`, the retired `untracked/venv/bin/…` layout (65, the largest group, invisible because it names a real-looking path), and commands **printed at runtime by `.sh` scripts** (9, not in a document at all)
+  - Root cause of the escape: the gate shipped scoped to `src/` only **with no test file**, so nothing asserted where it pointed. Scan roots, file suffixes and pattern were all wrong at once — see [LESSONS.md](../development/LESSONS.md) "A QA gate only ever checks what you point it at"
+  - Second layer found: docs were teaching superseded procedures — hand-rolled venvs that `resolve_venv.sh` *rejects*, the self-deprecated `install.py`, and `cd .claude/hooks-daemon` which `daemon_location_guard` **blocks**
+  - Gate now covers `src/ CLAUDE/ docs/ examples/ scripts/` with 20 tests; `TestRepositoryIsClean` pins the scope itself so narrowing it is a test failure
+
+- [00194: `bin/hooks-daemon` targets a daemon by CWD, not by its own anchor](00194-wrapper-cwd-vs-anchor-daemon-targeting/PLAN.md) - Not Started
+
+  - Found during Plan 00193 Phase 4 client-fixture verification; **behaviour** half tracked here, documentation half already fixed in 00193
+  - The wrapper resolves its *interpreter* from `$0` but the daemon it *manages* from CWD, so the same wrapper invoked by absolute path from two directories acts on two different daemons
+  - Observed live: the client fixture's wrapper, run from `/workspace`, restarted the **dogfood** daemon — silent, and looks like success
+  - Its DESIGN NOTES asserted "It anchors to its OWN location (not the caller's CWD)", true of the interpreter only; corrected in 00193
 
 - [00117: Enable ask_user_question_blocker (dogfood → default-on)](00117-ask-user-question-blocker-default-on/PLAN.md) - Dormant (remaining: flip shipped default + regression test; awaiting scheduling)
 
@@ -1095,9 +1102,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 193 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 and 00191 were allocated by the counter but their folders are not present on this branch)
+- **Total Plans Created**: 194 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 and 00191 were allocated by the counter but their folders are not present on this branch)
 - **Completed**: 155 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 30 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 31 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
