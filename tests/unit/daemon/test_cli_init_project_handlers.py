@@ -96,6 +96,73 @@ class TestInitProjectHandlers:
         assert "def handle(" in handler_content
         assert "def get_acceptance_tests(" in handler_content
 
+    def test_scaffolded_handler_implements_every_required_abstract_method(
+        self, tmp_path: Path
+    ) -> None:
+        """The scaffold must satisfy the validator that ships alongside it.
+
+        Regression test: init-project-handlers emitted an ExampleHandler with no
+        get_claude_md(), so validate-project-handlers rejected the daemon's OWN
+        scaffold and project_handler_load_checker raised "PROJECT PROTECTION
+        DEGRADED" on the client's next session.
+
+        Asserted against _ABSTRACT_METHOD_VERSIONS rather than a hardcoded name,
+        so adding a future required method fails here instead of silently
+        shipping a broken scaffold again.
+        """
+        from claude_code_hooks_daemon.daemon.cli import cmd_init_project_handlers
+        from claude_code_hooks_daemon.handlers.project_loader import (
+            _ABSTRACT_METHOD_VERSIONS,
+        )
+
+        project_path = _setup_project(tmp_path)
+        args = argparse.Namespace(project_root=project_path, force=False)
+
+        cmd_init_project_handlers(args)
+
+        handler_content = (
+            project_path / ".claude" / "project-handlers" / "pre_tool_use" / "example_handler.py"
+        ).read_text()
+
+        missing = [
+            method_name
+            for method_name in _ABSTRACT_METHOD_VERSIONS
+            if f"def {method_name}(" not in handler_content
+        ]
+        assert not missing, (
+            f"Scaffolded example handler is missing required abstract method(s): "
+            f"{missing}. validate-project-handlers will reject the daemon's own "
+            f"scaffold."
+        )
+
+    def test_scaffolded_handler_loads_through_the_real_validator(self, tmp_path: Path) -> None:
+        """The scaffold must load cleanly through ProjectHandlerLoader itself.
+
+        Stronger than a text scan: runs the production loader over the emitted
+        tree and asserts zero failures. ABCMeta refuses to instantiate a class
+        with unimplemented abstract methods, so this reproduces the exact defect
+        validate-project-handlers reported against the daemon's own scaffold.
+        """
+        from claude_code_hooks_daemon.daemon.cli import cmd_init_project_handlers
+        from claude_code_hooks_daemon.handlers.project_loader import (
+            ProjectHandlerLoader,
+        )
+
+        project_path = _setup_project(tmp_path)
+        args = argparse.Namespace(project_root=project_path, force=False)
+
+        cmd_init_project_handlers(args)
+
+        result = ProjectHandlerLoader.discover_handlers_with_failures(
+            project_path / ".claude" / "project-handlers"
+        )
+
+        assert not result.failures, (
+            "ProjectHandlerLoader rejected the daemon's own scaffold: "
+            f"{[f.reason for f in result.failures]}"
+        )
+        assert result.handlers, "Scaffold produced no loadable handlers"
+
     def test_creates_conftest_with_fixtures(self, tmp_path: Path) -> None:
         """init-project-handlers creates conftest.py with useful fixtures."""
         from claude_code_hooks_daemon.daemon.cli import cmd_init_project_handlers

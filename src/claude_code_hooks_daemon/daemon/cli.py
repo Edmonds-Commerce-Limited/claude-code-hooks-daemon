@@ -2829,6 +2829,19 @@ class ExampleHandler(Handler):
             context=["EXAMPLE: This is an example project handler context message."],
         )
 
+    def get_claude_md(self) -> str | None:
+        """Guidance injected into CLAUDE.md for this handler - customise this.
+
+        Return a markdown section describing what this handler does, so agents
+        know how to avoid triggering it. Return None if the handler needs no
+        agent-facing guidance (rare - prefer explaining the behaviour).
+        """
+        return """## example-project-handler - example advisory
+
+Demonstrates the project handler pattern. Replace this guidance with a
+description of what YOUR handler blocks or advises, and what to do instead.
+"""
+
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         """Define acceptance tests for this handler."""
         return [

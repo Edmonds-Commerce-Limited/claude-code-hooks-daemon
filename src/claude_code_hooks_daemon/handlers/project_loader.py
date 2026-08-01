@@ -27,7 +27,7 @@ from claude_code_hooks_daemon.constants import Priority
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
-from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command, daemon_path
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,40 @@ _ABSTRACT_METHOD_VERSIONS: dict[str, str] = {
 # (Plan 00133) as a CONCRETE method (default True), deliberately NOT abstract —
 # so it does not appear above. Project handlers need not implement it; they
 # inherit the opt-out default and override only to declare themselves opt-in.
+
+
+#: Path from the daemon root to the versioned upgrade-guide tree.
+_UPGRADE_GUIDES_SUBPATH: tuple[str, ...] = ("CLAUDE", "UPGRADES")
+
+#: Separator between a semver string's components.
+_VERSION_SEPARATOR: str = "."
+
+
+def _upgrade_guides_hint(missing: list[tuple[str, str]]) -> str:
+    """Return an upgrade-guide path that resolves from the reader's cwd.
+
+    The guides ship inside the daemon's own tree. In a CLIENT install that is
+    ``.claude/hooks-daemon/CLAUDE/UPGRADES/``, NOT ``CLAUDE/UPGRADES/`` — a bare
+    relative path sent readers to a directory their project does not have.
+
+    The major-version subdirectory is derived from the version that introduced
+    the missing method, so the hint stays correct as new abstract methods land
+    in later majors rather than being pinned to ``v2/``.
+
+    Args:
+        missing: ``(method_name, introduced_version)`` pairs from
+            :func:`_get_missing_abstract_method_versions`.
+
+    Returns:
+        An absolute path when :class:`ProjectContext` is initialised, else the
+        client-install-relative path — never a bare ``CLAUDE/UPGRADES``, which
+        is the spelling that misled readers.
+    """
+    base = daemon_path(*_UPGRADE_GUIDES_SUBPATH)
+    majors = {version.split(_VERSION_SEPARATOR)[0] for _, version in missing if version}
+    if len(majors) == 1:
+        return f"{base}/v{majors.pop()}"
+    return base
 
 
 def _get_missing_abstract_method_versions(cls: type) -> list[tuple[str, str]]:
@@ -202,7 +236,7 @@ class ProjectHandlerLoader:
                         f"{', '.join(class_names)} are missing required method(s): "
                         f"{method_list}. "
                         f"Add the following stub(s) to fix:\n{stubs}\n"
-                        f"See CLAUDE/UPGRADES/v2/ for migration guides."
+                        f"See {_upgrade_guides_hint(missing)} for migration guides."
                     )
 
             raise RuntimeError(

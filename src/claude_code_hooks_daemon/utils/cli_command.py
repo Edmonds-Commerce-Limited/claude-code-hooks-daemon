@@ -80,6 +80,32 @@ def _fallback_relative_path() -> str:
     return "/".join((*_CLIENT_DAEMON_SEGMENTS, BIN_DIR_NAME, WRAPPER_NAME))
 
 
+def daemon_path(*segments: str) -> str:
+    """Return a reader-resolvable path to something inside the daemon's tree.
+
+    Use for any daemon-owned path quoted in agent- or user-facing text — docs,
+    guides, error messages. A bare relative path like ``CLAUDE/UPGRADES/`` is
+    wrong in a CLIENT install, where the daemon lives at
+    ``.claude/hooks-daemon/`` and no such directory exists at the project root.
+
+    Args:
+        *segments: Path segments below the daemon root, e.g.
+            ``("CLAUDE", "UPGRADES")``.
+
+    Returns:
+        An absolute path, or the client-relative path when
+        :class:`ProjectContext` is not initialised. Never a bare project-root
+        relative path.
+    """
+    try:
+        base: tuple[str, ...] = (str(daemon_root()),)
+    except RuntimeError:
+        # ProjectContext not initialised — see _fallback_relative_path(). A
+        # path-builder must never take its caller down over cosmetics.
+        base = _CLIENT_DAEMON_SEGMENTS
+    return "/".join((*base, *segments))
+
+
 def daemon_cli_command(*args: str) -> str:
     """Return a copy-paste runnable daemon-CLI invocation.
 

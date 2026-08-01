@@ -283,6 +283,63 @@ class OldStyleHandler(Handler):
         output = captured.out + captured.err
         assert "UPGRADES" in output, f"Output should reference upgrade guides, got:\n{output}"
 
+    def test_upgrade_guide_hint_is_resolvable_from_the_reader_cwd(
+        self, tmp_path: Path, capsys: Any
+    ) -> None:
+        """The upgrade-guide pointer must resolve where the reader stands.
+
+        Regression test: the message said "See CLAUDE/UPGRADES/v2/". In a CLIENT
+        project that path does not exist — the daemon lives at
+        .claude/hooks-daemon/, so the guides are at
+        .claude/hooks-daemon/CLAUDE/UPGRADES/. A reader who followed the hint
+        found nothing and had no way to know where to look.
+
+        Asserts the emitted path is anchored to the daemon root rather than
+        being a bare relative path.
+        """
+        from claude_code_hooks_daemon.daemon.cli import cmd_validate_project_handlers
+
+        project_path = _setup_project(tmp_path)
+        handlers_dir = project_path / ".claude" / "project-handlers"
+        pre_tool_use = handlers_dir / "pre_tool_use"
+        pre_tool_use.mkdir(parents=True)
+        (handlers_dir / "__init__.py").write_text("")
+        (pre_tool_use / "__init__.py").write_text("")
+
+        handler_code = '''"""Handler missing get_claude_md."""
+from typing import Any
+from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
+from claude_code_hooks_daemon.core.hook_result import Decision
+
+class OldStyleHandler(Handler):
+    def __init__(self) -> None:
+        super().__init__(handler_id="old-style", priority=50)
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        return False
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult(decision=Decision.ALLOW)
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        return [AcceptanceTest(
+            title="test", command="echo test", description="test",
+            expected_decision=Decision.ALLOW, expected_message_patterns=[],
+            test_type=TestType.BLOCKING,
+        )]
+'''
+        (pre_tool_use / "old_style_handler.py").write_text(handler_code)
+
+        args = argparse.Namespace(project_root=project_path)
+        cmd_validate_project_handlers(args)
+
+        output = "".join(capsys.readouterr()[:2])
+
+        assert "See CLAUDE/UPGRADES" not in output, (
+            "Upgrade-guide hint is a bare relative path. It does not resolve "
+            f"from a client project root. Got:\n{output}"
+        )
+        assert (
+            "hooks-daemon/CLAUDE/UPGRADES" in output or str(project_path) in output
+        ), f"Upgrade-guide hint is not anchored to the daemon root:\n{output}"
+
     def test_counts_handlers_per_event_type(self, tmp_path: Path, capsys: Any) -> None:
         """validate-project-handlers shows handler count per event type."""
         from claude_code_hooks_daemon.daemon.cli import cmd_validate_project_handlers
