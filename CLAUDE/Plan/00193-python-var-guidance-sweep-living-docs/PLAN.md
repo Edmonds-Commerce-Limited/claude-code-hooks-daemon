@@ -195,43 +195,41 @@ damage the former.
 
 ### Phase 6: Act on the client-mode verification findings
 
-Verified each claim in the client fixture before acting; every item below was
-reproduced, fixed with TDD, and re-verified end-to-end.
+Every claim was reproduced in the client fixture before acting, fixed with TDD,
+and re-verified end-to-end. Full write-ups in `JOURNAL/` (2026-08-01).
 
-- [x] ✅ **Task 6.0**: `init-project-handlers` scaffolded an `ExampleHandler`
-  with no `get_claude_md()`, so `validate-project-handlers` rejected the
-  daemon's OWN scaffold and the next session showed "PROJECT PROTECTION
-  DEGRADED" — from following the documented first step.
-- [x] ✅ **Task 6.1**: That rejection message pointed at `CLAUDE/UPGRADES/v2/`,
-  which does not resolve in a client project. Added
-  `utils.cli_command.daemon_path()` as the one place that anchors a daemon-owned
-  path for reader-facing text; major version now derived, not pinned to `v2`.
-- [x] ✅ **Task 6.2**: `cmd_start` forked without flushing stdio, so the first
-  child re-emitted the parent's buffer — `restart` printed the stop lines TWICE
-  with the same pid. Only reproduces under block-buffered stdout, so it
+- [x] ✅ **Task 6.0**: `init-project-handlers` emitted a handler with no
+  `get_claude_md()`, so `validate-project-handlers` rejected the daemon's OWN
+  scaffold → "PROJECT PROTECTION DEGRADED" from the documented first step.
+- [x] ✅ **Task 6.1**: That message cited `CLAUDE/UPGRADES/v2/`, unresolvable in
+  a client. Added `utils.cli_command.daemon_path()` as the one anchor point for
+  daemon-owned paths in reader-facing text; major version derived, not pinned.
+- [x] ✅ **Task 6.2**: `cmd_start` forked without flushing stdio, so `restart`
+  printed the stop lines twice with the same pid. Block-buffered only — it
   corrupted exactly the captured output tooling parses.
-- [x] ✅ **Task 6.3**: `test-project-handlers` shelled out to pytest with no
-  availability check. pytest is a dev-only extra, so NO client had it. Now fails
-  fast with the pip command. Rejected installing pytest for every client — it
-  would drag black/mypy/bandit/twine in to serve an optional workflow.
-- [x] ✅ **Task 6.4**: `scripts/run-qa-runner.sh` built its command with a bare
-  `python3` and died with `ModuleNotFoundError` — the exact failure
-  `docs/QA-RUNNER-SETUP.md` warns about, in the very wrapper that doc tells you
-  to use instead. Worse, it reported the failure as "QA checks found issues
-  (exit code: 1)", disguising a total failure to run as a QA finding. Now
-  resolves via the canonical `resolve_venv.sh` and exits 2 on resolver failure.
-- [x] ✅ **Task 6.5**: Doc commands that do not exist: `validate-config` (real
-  name `config-validate`, and it takes the config path), `--version`, and
-  `status --verbose`. Also `health` was documented as reporting the resolved
-  interpreter, which it does not. Fixed in `health.md`, `troubleshooting.md` and
-  the skill's dispatch table (which routed on the wrong name).
-- [x] ✅ **Task 6.6**: `troubleshooting.md` taught `pkill -f hooks-daemon`
-  (twice) — unscoped, so in a shared PID namespace it kills OTHER projects'
-  daemons, precisely what the daemon's own enforcement code scopes by project
-  root to avoid. Replaced with `hooks-daemon stop`. Its rollback recipe also
-  `cd`-ed into `.claude/hooks-daemon/` (blocked by `daemon_location_guard`) and
-  used a bare `git checkout`, which moves the source but leaves the venv on the
-  other version's dependencies; now uses `upgrade_version.sh`.
+- [x] ✅ **Task 6.3**: `test-project-handlers` assumed pytest, a dev-only extra
+  no client has. Now fails fast with the pip command. Rejected shipping pytest
+  to every client: it drags black/mypy/bandit/twine in for an optional workflow.
+- [x] ✅ **Task 6.4**: `scripts/run-qa-runner.sh` used a bare `python3` and died
+  with `ModuleNotFoundError` — the failure `docs/QA-RUNNER-SETUP.md` warns
+  about, in the wrapper that doc recommends — then reported it as "QA checks
+  found issues", disguising a failure to run as a finding. Now uses
+  `resolve_venv.sh` and exits 2 on resolver failure.
+- [x] ✅ **Task 6.5**: Non-existent documented commands: `validate-config` (real
+  name `config-validate`, takes a path), `--version`, `status --verbose`; plus
+  `health` wrongly documented as reporting the interpreter. Fixed in `health.md`,
+  `troubleshooting.md` and the skill dispatch table (which routed the wrong name).
+- [x] ✅ **Task 6.6**: `troubleshooting.md` taught `pkill -f hooks-daemon` twice
+  — unscoped, so in a shared PID namespace it kills other projects' daemons,
+  what the daemon's own enforcement scopes by project root to avoid. Its
+  rollback recipe also `cd`-ed into the blocked daemon dir and used a bare
+  `git checkout`, leaving the venv on the other version's dependencies.
+- [x] ✅ **Task 6.7**: `dummy-client-repo.sh destroy` reported a clean teardown
+  while ORPHANING the fixture daemon — an unanchored `stop` resolved the DOGFOOD
+  project, said "Daemon not running", and teardown deleted the tree around a
+  live daemon. Plan 00194's CWD-vs-anchor bug, biting for real. Fixed with
+  `--project-root` plus a `verify_dummy_daemon_stopped` post-condition; a
+  contract test now rejects any unanchored CLI invocation in that script.
 
 ### Phase 7: Residual gate coverage
 

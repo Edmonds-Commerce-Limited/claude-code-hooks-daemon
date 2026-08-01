@@ -86,11 +86,64 @@ stop_dummy_daemon() {
         info "no venv interpreter found — nothing to stop"
         return 0
     fi
-    if HOSTNAME="$DUMMY_HOSTNAME" "$py" -m claude_code_hooks_daemon.daemon.cli stop; then
+    # --project-root is MANDATORY, not decorative. The CLI resolves the daemon
+    # it manages (socket/PID/log) from the project root derived from the CURRENT
+    # WORKING DIRECTORY — the interpreter's own location does not select it. Run
+    # from the dogfood repo without this flag, the stop resolved /workspace,
+    # found no dummy PID file, printed "Daemon not running" and exited 0. The
+    # teardown believed it and deleted the tree around a live daemon.
+    if HOSTNAME="$DUMMY_HOSTNAME" "$py" -m claude_code_hooks_daemon.daemon.cli \
+        --project-root "$DUMMY_ROOT" stop; then
         info "dummy daemon stopped"
     else
         info "WARNING: dummy daemon stop reported an error (continuing teardown)"
     fi
+}
+
+# _surviving_dummy_daemons — pids still running out of the dummy venv.
+#
+# Matches the dummy repo's own venv path, which is unique to this fixture, so it
+# can never match the dogfood daemon or another project's. pgrep exits 1 when
+# nothing matches, which is a normal outcome here rather than an error, so it is
+# translated into empty output explicitly instead of being suppressed.
+_surviving_dummy_daemons() {
+    local found
+    if found="$(pgrep -f "${DUMMY_DAEMON_DIR}/untracked/venv-")"; then
+        printf '%s\n' "$found"
+    else
+        printf ''
+    fi
+}
+
+# verify_dummy_daemon_stopped — post-condition for teardown.
+#
+# A stop that TARGETS the wrong project exits 0 while the real daemon lives on,
+# so "stop succeeded" is not evidence the daemon is gone. Reap any survivor by
+# process group rather than deleting its directory out from under it.
+verify_dummy_daemon_stopped() {
+    local survivors pid pgid
+    survivors="$(_surviving_dummy_daemons)"
+    if [ -z "$survivors" ]; then
+        return 0
+    fi
+
+    info "WARNING: daemon still alive after stop (pids: $(echo "$survivors" | tr '\n' ' '))"
+    for pid in $survivors; do
+        if pgid="$(ps -o pgid= -p "$pid" | tr -d ' ')" && [ -n "$pgid" ]; then
+            if ! kill -- -"$pgid"; then
+                info "WARNING: could not signal process group $pgid"
+            fi
+        else
+            info "WARNING: could not determine process group for pid $pid"
+        fi
+    done
+    sleep 1
+
+    survivors="$(_surviving_dummy_daemons)"
+    if [ -n "$survivors" ]; then
+        fail "dummy daemon survived teardown (pids: $(echo "$survivors" | tr '\n' ' ')) — refusing to delete its directory and orphan it"
+    fi
+    info "surviving daemon reaped"
 }
 
 remove_dummy_worktree() {
@@ -115,6 +168,10 @@ cmd_destroy() {
         return 0
     fi
     stop_dummy_daemon
+    # Before deleting anything: prove the daemon is actually gone. A stop that
+    # resolved the wrong project exits 0 while the daemon lives on, and deleting
+    # the tree then orphans it — with teardown still reporting success.
+    verify_dummy_daemon_stopped
     remove_dummy_worktree
     rm -rf "$DUMMY_ROOT"
     info "removed $DUMMY_ROOT"
