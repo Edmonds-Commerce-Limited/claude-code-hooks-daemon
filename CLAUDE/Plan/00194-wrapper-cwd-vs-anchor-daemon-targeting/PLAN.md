@@ -68,6 +68,30 @@ point.
   worktree's own wrapper"), which only holds if the wrapper's identity actually
   determines the target.
 
+### Observed in the wild (Plan 00193 Task 6.7, commit 56f5e732)
+
+This is no longer hypothetical. `scripts/dummy-client-repo.sh` invoked
+`daemon.cli stop` with neither a `cd` nor `--project-root`. Run from
+`/workspace`, the stop resolved the DOGFOOD project, found no dummy PID file,
+printed **"Daemon not running"**, and exited **0** — after which teardown
+deleted the fixture tree around a live daemon, orphaning it while reporting a
+clean teardown.
+
+Two properties of that failure are the ones this plan must design against:
+
+1. **It is indistinguishable from success.** A stop targeting the wrong project
+   legitimately finds no PID file, so it reports the truthful-but-useless
+   "Daemon not running" and exits 0. Callers cannot tell "nothing to stop" from
+   "stopped the wrong thing".
+2. **It was harmless only by luck.** No `daemon-dummy-client-repo.pid` happened
+   to exist under `/workspace`. With a host and container sharing a bind-mounted
+   `untracked/` — a configuration `CLAUDE.md` explicitly supports — the same
+   call stops a DIFFERENT project's daemon and still reports success.
+
+Fixed locally in that script with an explicit `--project-root` plus a
+post-condition that verifies the process is actually gone. That is a workaround
+at one call site; this plan is the systemic fix.
+
 ## Tasks
 
 ### Phase 1: Establish the intended contract
