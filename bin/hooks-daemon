@@ -27,18 +27,25 @@
 #    has the tracked yaml but NOT the git-ignored
 #    .claude/hooks-daemon/scripts/lib/. Anchoring to $0 is worktree-proof.
 #
-#    ⚠️ This anchoring covers the INTERPRETER ONLY. The daemon this command
-#    then MANAGES (socket/PID/log) is chosen by the CLI from the CURRENT
-#    WORKING DIRECTORY's project root — so the same wrapper, invoked by
-#    absolute path from two different directories, will act on two different
-#    daemons:
+#    The anchoring covers BOTH halves (Plan 00194). It resolves the
+#    interpreter, and it also derives this daemon root's OWN project root and
+#    passes it as --project-root, so the daemon MANAGED (socket/PID/log) is the
+#    one belonging to this wrapper — not whichever project the caller happens to
+#    be standing in:
 #
 #        cd /project-a && /project-b/.claude/hooks-daemon/bin/hooks-daemon restart
-#        # ^ runs project-b's interpreter, but restarts project-A's daemon
+#        # ^ restarts project-B's daemon, because that is B's wrapper
 #
-#    Pass --project-root explicitly, or cd into the project first, whenever the
-#    two could differ. Do not read design note 1 as "this wrapper is
-#    CWD-independent" — only half of it is.
+#    Before Plan 00194 that line restarted project-A's daemon, silently and
+#    looking like success. It bit twice for real: a fixture wrapper run from the
+#    dogfood repo restarted the dogfood daemon, and an unanchored `stop`
+#    resolved the wrong project, reported "Daemon not running", exited 0, and
+#    let teardown delete a live daemon's directory.
+#
+#    Precedence is unchanged: an explicit --project-root from the caller is
+#    appended AFTER the derived one, and argparse takes the last occurrence, so
+#    the caller always wins. Env overrides (CLAUDE_HOOKS_SOCKET_PATH etc.) are
+#    read further down the stack and are unaffected.
 # 2. It performs NO network access. The skill wrappers self-bootstrap against a
 #    release manifest on every invocation, which is unacceptable for hot-path
 #    commands like `plan-qa --lint` and fails closed in offline containers.
@@ -85,6 +92,27 @@ fi
 if [ ! -x "$PYTHON" ]; then
     echo "❌ hooks-daemon: resolved interpreter is not executable: $PYTHON" >&2
     exit 5
+fi
+
+# Derive THIS wrapper's own project root, so the daemon managed is this
+# project's (Plan 00194). The daemon root is <project>/.claude/hooks-daemon in a
+# client install and <project> itself in self-install, so the layout alone
+# distinguishes them — no mode flag needed.
+_parent_dir="$(cd -P "$DAEMON_DIR/.." && pwd)"
+if [ "$(basename "$DAEMON_DIR")" = "hooks-daemon" ] && [ "$(basename "$_parent_dir")" = ".claude" ]; then
+    PROJECT_ROOT="$(cd -P "$_parent_dir/.." && pwd)"   # client install
+else
+    PROJECT_ROOT="$DAEMON_DIR"                          # self-install
+fi
+
+# Only anchor when the derived root really is a project. Injecting a
+# --project-root that fails validation would turn a currently-working
+# invocation into a hard error, so an unanchorable layout defers to the CLI's
+# existing CWD walk-up and its existing diagnostics. Fail-safe, not fail-shut.
+if [ -d "$PROJECT_ROOT/.claude" ]; then
+    # Derived anchor FIRST: argparse takes the last occurrence, so a caller's
+    # own --project-root still overrides it.
+    exec "$PYTHON" -m claude_code_hooks_daemon.daemon.cli --project-root "$PROJECT_ROOT" "$@"
 fi
 
 exec "$PYTHON" -m claude_code_hooks_daemon.daemon.cli "$@"
