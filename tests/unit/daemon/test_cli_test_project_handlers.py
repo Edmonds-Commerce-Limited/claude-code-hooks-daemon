@@ -73,6 +73,58 @@ class TestTestProjectHandlers:
             assert "pytest" in str(cmd_list) or "-m" in cmd_list
             assert str(handlers_dir) in str(cmd_list)
 
+    def test_reports_actionable_error_when_pytest_is_absent(
+        self, tmp_path: Path, capsys: Any
+    ) -> None:
+        """Missing pytest must produce actionable guidance, not a raw traceback.
+
+        Regression test: pytest is a dev-only extra, so NO client install has
+        it. Every client that followed the documented workflow — scaffold
+        handlers, then run test-project-handlers — got a bare
+        "No module named pytest" naming an opaque fingerprint-keyed venv path,
+        with no indication that the fix is to install it.
+        """
+        from claude_code_hooks_daemon.daemon.cli import cmd_test_project_handlers
+
+        project_path = _setup_project(tmp_path)
+        (project_path / ".claude" / "project-handlers").mkdir()
+
+        args = argparse.Namespace(project_root=project_path, verbose=False)
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.cli.importlib.util.find_spec",
+            return_value=None,
+        ):
+            result = cmd_test_project_handlers(args)
+
+        assert result != 0, "Missing pytest must be a failure"
+
+        output = "".join(capsys.readouterr()[:2])
+        assert "pytest" in output
+        assert (
+            "pip install" in output
+        ), f"Error must tell the user how to install pytest. Got:\n{output}"
+
+    def test_does_not_invoke_pytest_when_it_is_absent(self, tmp_path: Path) -> None:
+        """Fail fast: do not spawn a subprocess that is known to fail."""
+        from claude_code_hooks_daemon.daemon.cli import cmd_test_project_handlers
+
+        project_path = _setup_project(tmp_path)
+        (project_path / ".claude" / "project-handlers").mkdir()
+
+        args = argparse.Namespace(project_root=project_path, verbose=False)
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.importlib.util.find_spec",
+                return_value=None,
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            cmd_test_project_handlers(args)
+
+        mock_run.assert_not_called()
+
     def test_passes_import_mode_importlib(self, tmp_path: Path) -> None:
         """test-project-handlers uses --import-mode=importlib."""
         from claude_code_hooks_daemon.daemon.cli import cmd_test_project_handlers

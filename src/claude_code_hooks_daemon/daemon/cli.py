@@ -27,6 +27,7 @@ Provides:
 import argparse
 import asyncio
 import datetime
+import importlib.util
 import json
 import logging
 import os
@@ -99,6 +100,12 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.daemon.project_handler_health import (
         ProjectHandlerHealthState,
     )
+
+# Test-runner module ``test-project-handlers`` shells out to. It is a dev-only
+# extra (see pyproject ``[project.optional-dependencies].dev``), so it is
+# deliberately absent from client installs and its presence must be probed
+# before use rather than assumed.
+_PYTEST_MODULE = "pytest"
 
 # Milliseconds in one second. ``Timeout.BASH_DEFAULT`` is expressed in
 # milliseconds (see constants/timeout.py), but ``subprocess.run(timeout=...)``
@@ -525,6 +532,16 @@ def cmd_start(args: argparse.Namespace) -> int:
     # (Stale-file reaping — daemon files + per-session runtime dirs — already ran
     # above via _reap_stale_runtime_files, before the reuse gate, so it covers
     # the reuse path too. Plan 00181 Task 4.1.)
+
+    # Flush BEFORE forking. fork() copies the process's unflushed stdio buffer,
+    # so the first child inherits everything printed so far and re-emits it when
+    # it exits — every prior line appears TWICE. Only reproduces when stdout is
+    # block-buffered (redirected to a file or pipe), so it is invisible at an
+    # interactive terminal and corrupts exactly the captured output that tooling
+    # parses. `restart` showed "Sent SIGTERM (PID: N) / Daemon stopped" twice
+    # with the same pid, reading as two daemons killed.
+    sys.stdout.flush()
+    sys.stderr.flush()
 
     # Daemonise process (fork and detach from terminal)
     try:
@@ -3078,11 +3095,30 @@ def cmd_test_project_handlers(args: argparse.Namespace) -> int:
         print("Run 'init-project-handlers' to create it", file=sys.stderr)
         return 1
 
+    # FAIL FAST: pytest is a dev-only extra, so no client install has it.
+    # Without this check the user gets a bare "No module named pytest" naming an
+    # opaque fingerprint-keyed venv path, with no hint that the fix is to
+    # install it into THAT venv.
+    if importlib.util.find_spec(_PYTEST_MODULE) is None:
+        print(
+            f"ERROR: {_PYTEST_MODULE} is not installed in the daemon virtualenv.",
+            file=sys.stderr,
+        )
+        print(
+            f"       {_PYTEST_MODULE} ships as a dev-only extra, so a normal "
+            f"install does not include it.",
+            file=sys.stderr,
+        )
+        print("", file=sys.stderr)
+        print("Install it into the daemon virtualenv, then re-run:", file=sys.stderr)
+        print(f"  {sys.executable} -m pip install {_PYTEST_MODULE}", file=sys.stderr)
+        return 1
+
     # Build pytest command using current Python interpreter
     cmd = [
         sys.executable,
         "-m",
-        "pytest",
+        _PYTEST_MODULE,
         str(handlers_path),
         "--import-mode=importlib",
     ]

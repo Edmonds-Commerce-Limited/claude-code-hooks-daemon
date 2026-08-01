@@ -74,6 +74,53 @@ class TestCmdStartParentProcess:
             result = cmd_start(args)
             assert result == 0
 
+    def test_stdio_is_flushed_before_forking(self, tmp_path: Path) -> None:
+        """cmd_start must flush stdout/stderr BEFORE os.fork().
+
+        Regression test: fork duplicates the parent's unflushed stdio buffer.
+        The first child inherits it and flushes on sys.exit(0), so every line
+        printed before the fork is emitted TWICE.
+
+        Visible as `hooks-daemon restart` printing "Sent SIGTERM to daemon
+        (PID: N) / Daemon stopped" twice for a single stop — with the SAME pid,
+        which reads as two daemons having been killed. It only reproduces when
+        stdout is block-buffered (redirected to a file or pipe), so it is
+        invisible at an interactive terminal and hits captured output only —
+        exactly the tooling that parses it.
+        """
+        args = argparse.Namespace(project_root=tmp_path)
+        call_order: list[str] = []
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_project_path",
+                return_value=tmp_path,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.read_pid_file",
+                side_effect=[None, 42],
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.NOT_LIVE,
+            ),
+            patch.object(sys.stdout, "flush", side_effect=lambda: call_order.append("flush")),
+            patch("os.fork", side_effect=lambda: call_order.append("fork") or 100),
+            patch("time.sleep"),
+        ):
+            cmd_start(args)
+
+        assert "fork" in call_order, "Test did not exercise the fork path"
+        assert (
+            "flush" in call_order
+        ), "stdout was never flushed; the fork will duplicate buffered output"
+        assert call_order.index("flush") < call_order.index(
+            "fork"
+        ), f"stdout must be flushed BEFORE fork, got order: {call_order}"
+
     def test_parent_does_not_unlink_socket_outside_lock(self, tmp_path: Path) -> None:
         """cmd_start must NOT unlink the daemon socket in the parent.
 
