@@ -78,13 +78,15 @@ def _self_install_project(root: Path) -> Path:
     return _build_daemon_tree(root)
 
 
-def _run(wrapper: Path, cwd: Path, *args: str) -> list[str]:
-    """Invoke the wrapper from ``cwd`` and return the argv it exec'd.
+def _run_raw(wrapper: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Invoke the wrapper from ``cwd`` and return the completed process.
+
+    Used directly by the refusal tests, which assert on exit code and stderr.
 
     SECURITY: fixed argv built from test-local tmp_path fixtures; no shell and
     no external input.
     """
-    result = subprocess.run(
+    return subprocess.run(
         [str(wrapper), *args],
         cwd=str(cwd),
         capture_output=True,
@@ -92,6 +94,11 @@ def _run(wrapper: Path, cwd: Path, *args: str) -> list[str]:
         timeout=_STUB_TIMEOUT_SECONDS,
         check=False,
     )
+
+
+def _run(wrapper: Path, cwd: Path, *args: str) -> list[str]:
+    """Invoke the wrapper from ``cwd`` and return the argv it exec'd."""
+    result = _run_raw(wrapper, cwd, *args)
     assert result.returncode == 0, f"wrapper failed: {result.stderr}"
     return result.stdout.splitlines()
 
@@ -198,26 +205,68 @@ class TestExplicitOverrideStillWins:
         assert argv[-3:] == ["plan-qa", "--sweep", "--json"]
 
 
-class TestDoesNotBreakUnanchorableLayouts:
-    """Fail-safe: never inject an anchor that would break a working caller."""
+class TestUnanchorableLayoutFailsLoud:
+    """CWD must NEVER select the daemon — not even as a last resort.
 
-    def test_no_anchor_injected_when_derived_root_is_not_a_project(self, tmp_path: Path) -> None:
-        """A daemon tree with no .claude at its derived root keeps CWD behaviour.
+    The wrapper originally fell back to an unanchored exec when it could not
+    derive a project root, on the theory that deferring to the CLI's CWD
+    walk-up was "fail-safe". It is not: the walk-up is the exact mechanism that
+    made a wrapper act on whichever project the caller was standing in, which is
+    the defect this whole file exists to pin. A fallback that silently targets
+    the wrong daemon is worse than an error, because it reports success.
 
-        Injecting a --project-root that fails validation would turn a working
-        invocation into a hard error. Absent a usable anchor, defer to the CLI's
-        existing CWD walk-up and its existing diagnostics.
-        """
+    So an unanchorable layout is now a hard, diagnosable failure.
+    """
+
+    def test_unanchorable_layout_exits_nonzero_without_running_the_cli(
+        self, tmp_path: Path
+    ) -> None:
+        """No .claude at the derived root => refuse, never fall through to CWD."""
         stray = tmp_path / "stray"
         wrapper = _build_daemon_tree(stray)  # no .claude anywhere
         caller = tmp_path / "caller"
         _client_project(caller)
 
-        argv = _run(wrapper, caller, "status")
+        result = _run_raw(wrapper, caller, "status")
 
-        assert (
-            _anchored_root(argv) is None
-        ), f"wrapper injected an unusable anchor instead of deferring. argv={argv}"
+        assert result.returncode != 0, (
+            "wrapper fell through to the CLI's CWD walk-up instead of refusing; "
+            f"stdout={result.stdout!r}"
+        )
+        assert not result.stdout.strip(), (
+            "the stub interpreter ran, so the wrapper exec'd the CLI anyway; "
+            f"stdout={result.stdout!r}"
+        )
+
+    def test_refusal_names_the_expected_layout(self, tmp_path: Path) -> None:
+        """The error must be actionable, not just non-zero."""
+        stray = tmp_path / "stray"
+        wrapper = _build_daemon_tree(stray)
+        caller = tmp_path / "caller"
+        _client_project(caller)
+
+        result = _run_raw(wrapper, caller, "status")
+
+        assert "hooks-daemon" in result.stderr
+        assert str(stray) in result.stderr, (
+            "the refusal must name the root it derived, so the reader can see "
+            f"WHY it failed. stderr={result.stderr!r}"
+        )
+
+    def test_caller_cwd_is_never_used_as_the_anchor(self, tmp_path: Path) -> None:
+        """Regression pin: the caller's own project must not leak in as a target.
+
+        Standing in a perfectly valid client project is exactly the situation
+        where the old fallback silently did the wrong thing.
+        """
+        stray = tmp_path / "stray"
+        wrapper = _build_daemon_tree(stray)
+        caller = tmp_path / "caller"
+        _client_project(caller)
+
+        result = _run_raw(wrapper, caller, "status")
+
+        assert str(caller) not in result.stdout
 
 
 class TestBothCopiesStayIdentical:

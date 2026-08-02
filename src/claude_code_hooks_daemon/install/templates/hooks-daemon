@@ -46,6 +46,13 @@
 #    appended AFTER the derived one, and argparse takes the last occurrence, so
 #    the caller always wins. Env overrides (CLAUDE_HOOKS_SOCKET_PATH etc.) are
 #    read further down the stack and are unaffected.
+#
+#    CWD IS NEVER AN INPUT. The wrapper first shipped with a fallback: if it
+#    could not derive a project root it exec'd unanchored and let the CLI walk
+#    up from $PWD. That was described as "fail-safe", which was wrong — the
+#    walk-up is precisely the mechanism that made a wrapper act on the caller's
+#    project instead of its own. A silent wrong target that exits 0 is worse
+#    than a refusal, so an unanchorable layout now exits 5 with a diagnostic.
 # 2. It performs NO network access. The skill wrappers self-bootstrap against a
 #    release manifest on every invocation, which is unacceptable for hot-path
 #    commands like `plan-qa --lint` and fails closed in offline containers.
@@ -105,14 +112,23 @@ else
     PROJECT_ROOT="$DAEMON_DIR"                          # self-install
 fi
 
-# Only anchor when the derived root really is a project. Injecting a
-# --project-root that fails validation would turn a currently-working
-# invocation into a hard error, so an unanchorable layout defers to the CLI's
-# existing CWD walk-up and its existing diagnostics. Fail-safe, not fail-shut.
-if [ -d "$PROJECT_ROOT/.claude" ]; then
-    # Derived anchor FIRST: argparse takes the last occurrence, so a caller's
-    # own --project-root still overrides it.
-    exec "$PYTHON" -m claude_code_hooks_daemon.daemon.cli --project-root "$PROJECT_ROOT" "$@"
+# An unanchorable layout is a HARD failure. There is deliberately no fallback:
+# the only alternative would be to exec unanchored and let the CLI walk up from
+# $PWD, and that walk-up IS the defect this anchoring exists to remove. A
+# wrapper that quietly manages whichever project the caller happens to be
+# standing in reports success while acting on the wrong daemon — strictly worse
+# than refusing, because nothing tells you it happened.
+if [ ! -d "$PROJECT_ROOT/.claude" ]; then
+    echo "❌ hooks-daemon: cannot anchor to a project" >&2
+    echo "   Derived project root: $PROJECT_ROOT (no .claude/ directory)" >&2
+    echo "   Expected this wrapper at one of:" >&2
+    echo "     <project>/.claude/hooks-daemon/bin/hooks-daemon  (client install)" >&2
+    echo "     <project>/bin/hooks-daemon                       (self-install)" >&2
+    echo "   Refusing to fall back to the working directory: that would target" >&2
+    echo "   whichever project you happen to be standing in." >&2
+    exit 5
 fi
 
-exec "$PYTHON" -m claude_code_hooks_daemon.daemon.cli "$@"
+# Derived anchor FIRST: argparse takes the last occurrence, so a caller's own
+# --project-root still overrides it.
+exec "$PYTHON" -m claude_code_hooks_daemon.daemon.cli --project-root "$PROJECT_ROOT" "$@"

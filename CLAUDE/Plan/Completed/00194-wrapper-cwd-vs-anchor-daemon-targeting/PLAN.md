@@ -173,8 +173,14 @@ the behaviour change is tracked here so the finding is not dropped.
   half fixed there, behaviour tracked here.
 - Behaviour delivered in the Plan 00194 wrapper-anchoring commit: wrapper derives
   its own project root and passes `--project-root`; explicit caller flag still
-  wins via argparse last-occurrence; anchor injected only when the derived root
-  is a real project (fail-safe).
+  wins via argparse last-occurrence.
+- **Follow-up correction (pre-v3.50.1 release review)**: the first cut kept a
+  fallback — an unanchorable layout exec'd unanchored and let the CLI walk up
+  from `$PWD`. That was labelled "fail-safe" and was not: the walk-up IS the
+  defect this plan removes, so the fallback preserved it in the one case where
+  nothing else could catch it. CWD is now never an input; an unanchorable
+  layout exits 5 with a diagnostic. A wrong target that exits 0 is worse than
+  a refusal.
 - Phase 1 enumeration retired the plan's highest-rated risk: hook forwarders do
   NOT use this wrapper (they source `init.sh` and use the socket directly), so
   the highest-traffic path is untouched.
