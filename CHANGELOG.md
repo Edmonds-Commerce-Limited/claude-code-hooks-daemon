@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.51.0] - 2026-08-02
+
+This is a **minor release** that finishes what v3.50.0 started. It is minor
+rather than patch only because of one new CLI flag (`init-config --stdout`);
+everything else is a fix or a documentation correction.
+
+v3.50.0 replaced `$PYTHON -m …daemon.cli` guidance with a deployed
+`bin/hooks-daemon` wrapper, and shipped a QA gate to stop the old form coming
+back. Both had a hole, and the holes were the same shape: **each was scoped
+narrower than the defect it existed to prevent.**
+
+The gate was pointed at `src/` only, with no test asserting where it pointed —
+so 297 occurrences of the exact pattern it exists to catch sat untouched in
+`CLAUDE/`, `docs/` and `examples/` while it reported clean through a release
+that was specifically about this bug. Widening it uncovered a second layer:
+docs were teaching *superseded procedures* — hand-rolled venvs the canonical
+resolver now rejects, the self-deprecated `install.py`, and a `cd` into the
+daemon directory that `daemon_location_guard` blocks. An agent following them
+concludes its install is broken and starts repairing something that was never
+wrong.
+
+The wrapper had the same asymmetry in code: it resolved its *interpreter* from
+its own location but the daemon it *managed* from the working directory. Its own
+design notes asserted the opposite. Verified live, not theorised — a client
+project's wrapper, invoked by absolute path from another project's directory,
+restarted that other project's daemon and reported success.
+
+Nothing here changes configuration or handler behaviour; no action is required
+on upgrade.
+
+### Fixed
+
+- **`bin/hooks-daemon` managed the wrong project's daemon.** The wrapper now
+  derives its own project root from its location and passes `--project-root`,
+  so it acts on *its* project's daemon from any working directory. A caller's
+  explicit `--project-root` still wins (argparse takes the last occurrence).
+  **The working directory is no longer an input at all**: a layout the wrapper
+  cannot anchor exits 5 with a diagnostic instead of falling through to the
+  CLI's directory walk-up. That walk-up is the mechanism that made a wrapper
+  act on the caller's project rather than its own, so a fallback to it would
+  have preserved the defect in the one case where nothing else could catch it.
+- **Daemon start could duplicate buffered output.** `cmd_start` forked without
+  flushing first, so anything already in the stdout/stderr buffers was written
+  twice — once by the parent, once by the daemonised child.
+- **`init-project-handlers` scaffolded a handler its own validator rejects.**
+  The generated example omitted `get_claude_md()`, which has been required
+  since v2.30.0, so the very next `validate-project-handlers` failed on
+  freshly-scaffolded code.
+- **`test-project-handlers` crashed instead of explaining.** It now checks for
+  `pytest` up front and says so when it is absent.
+- **Documentation taught commands that do not exist.** 297 unrunnable
+  invocations plus 65 references to the pre-v3.7.0 `untracked/venv/` layout
+  corrected across 30 files, including five shell scripts that *printed* the
+  bad form at runtime — a spelling that lived in no document at all.
+- **Client-fixture teardown reported success while orphaning a daemon.**
+  `dummy-client-repo.sh destroy` stopped the daemon using the caller's working
+  directory, so run from the daemon repo it targeted the wrong project, said
+  "Daemon not running", and deleted the fixture out from under a live process.
+  Teardown now anchors explicitly and fails loudly rather than orphaning.
+
+### Changed
+
+- **Silent fallbacks to the retired venv layout are now fail-fast.** Seven call
+  sites across the QA runner, the strategy-pattern check, `debug_hooks.sh`,
+  `validate_worktrees.sh`, `detect_location.sh`, `install/rollback.sh` and
+  `install/project_detection.sh` degraded to the pre-v3.7.0
+  `untracked/venv/bin/python` path when the canonical resolver was unavailable.
+  Venvs have been fingerprint-keyed since v3.7.0, so that path exists on no
+  current install: the fallback could never succeed and only converted "the
+  resolver is missing" into a confusing "no such file". Each now names the real
+  problem.
+
+### Added
+
+- **`init-config --stdout`** — print the configuration template for review
+  instead of writing it. Reviewing the available handlers is the common case on
+  an *existing* install, where `init-config` previously refused with "already
+  exists, use `--force` to overwrite". That pushed anyone who just wanted to
+  read the template toward a destructive flag. `--stdout` runs before the
+  exists check, because printing cannot destroy anything.
+- **The `python_var_guidance` gate covers shell assignments, not just printed
+  guidance.** Previously it inspected only `echo`/`printf` lines, so a hardcoded
+  retired venv path in an assignment or conditional was structurally invisible.
+  The new rule flags the path anywhere in a shell file; genuine dual-layout
+  probers declare themselves with an inline, reasoned exemption marker that
+  shows up in the diff. Its scan roots now include `.claude/`, and
+  `TestRepositoryIsClean` pins the scope itself so narrowing it is a test
+  failure rather than a silent loss of coverage.
+
 ## [3.50.0] - 2026-07-31
 
 This is a **minor release** with two themes.
