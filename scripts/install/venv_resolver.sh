@@ -25,8 +25,8 @@
 # Plan 00103 Decision 2/3 contracts (preserved by the canonical library):
 #   - Stderr is NOT silenced — surface real failures (ModuleNotFoundError,
 #     broken venv) instead of hiding them behind generic "venv not found".
-#   - No silent fallback to the unversioned legacy ``untracked/venv/bin/python``
-#     path that v3.7.0 retired.
+#   - No silent fallback to ``untracked/venv/bin/python``  # python-var-guidance-exempt: names the retired path to document its rejection
+#     — the unversioned legacy layout that v3.7.0 retired.
 #   - Venv-resident interpreter is preferred over system ``python3`` for
 #     invoking paths.py (RHEL/CentOS hosts have python3 → 3.9 which crashes
 #     on tomllib import).

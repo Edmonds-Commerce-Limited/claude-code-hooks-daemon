@@ -275,8 +275,8 @@ fi
 #
 # Plan 00103 Decision 2: when none of the above resolve, fail loudly with
 # return 5 + stderr directive. The pre-v3.7.0 unversioned legacy
-# `untracked/venv/bin/python` is no longer accepted as a silent fallback —
-# it hid the v3.9.0 field-bug regression where operators saw "venv not
+# `untracked/venv/bin/python` is no longer a silent fallback  # python-var-guidance-exempt: names the retired path to document its rejection
+# — it hid the v3.9.0 field-bug regression where operators saw "venv not
 # found" while the real cause was a 3.9-vs-3.11 `import tomllib` crash.
 #
 # Plan 00103 Decision 3 Rule A: no `${VAR:-python3}` parameter expansion —

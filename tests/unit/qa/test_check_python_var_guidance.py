@@ -251,6 +251,81 @@ class TestShellScriptGuidance:
         assert data["summary"]["passed"], data["violations"]
 
 
+class TestLegacyVenvPathInNonOutputShellLines:
+    """The retired venv layout is a defect wherever it appears in a `.sh`.
+
+    Plan 00193 Task 7.1. The output-statement rule above deliberately ignores
+    non-output `.sh` lines, which is right for `$PYTHON`-style guidance — a
+    script legitimately assigns and uses an interpreter internally.
+
+    But a HARDCODED ``untracked/venv/bin/python`` is different in kind. That is
+    the pre-v3.7.0 layout; venvs have been fingerprint-keyed since, so the path
+    exists on no live install. An assignment to it is not an internal detail,
+    it is a silent fallback to something that cannot work — and it slipped
+    through because assignments were never examined.
+
+    Real instances found when this rule was added: ``scripts/qa/run_all.sh``,
+    ``run_strategy_pattern_check.sh``, ``debug_hooks.sh``,
+    ``validate_worktrees.sh`` and ``rollback.sh`` each fell back to the retired
+    path when the SSoT resolver was unavailable.
+    """
+
+    def test_flags_hardcoded_legacy_path_in_an_assignment(self, tmp_path: Path) -> None:
+        (tmp_path / "s.sh").write_text('VENV_PYTHON="$ROOT/untracked/venv/bin/python"\n')
+        data = _run_checker(tmp_path)
+        assert not data["summary"]["passed"]
+        assert _violated_lines(data) == [1]
+
+    def test_flags_legacy_path_in_a_conditional(self, tmp_path: Path) -> None:
+        """A silent fallback is usually the `else` arm of a resolver check."""
+        (tmp_path / "s.sh").write_text(
+            "if declare -F resolve_venv_python > /dev/null; then\n"
+            '    PY="$(resolve_venv_python "$ROOT")"\n'
+            "else\n"
+            '    PY="$ROOT/untracked/venv/bin/python"\n'
+            "fi\n"
+        )
+        data = _run_checker(tmp_path)
+        assert not data["summary"]["passed"]
+        assert _violated_lines(data) == [4]
+
+    def test_inline_marker_exempts_a_genuine_resolver_probe(self, tmp_path: Path) -> None:
+        """A resolver that probes BOTH layouts is legitimate and marks itself.
+
+        The skill `install.sh` iterates fingerprint-keyed venvs and the legacy
+        one so an old install can still be discovered and upgraded. That is the
+        one place the retired path SHOULD be named.
+        """
+        (tmp_path / "s.sh").write_text(
+            'for py in "$d"/untracked/venv-*/bin/python "$d"/untracked/venv/bin/python; do\n'
+            "    :  # python-var-guidance-exempt: probes the retired layout to upgrade it\n"
+            "done\n"
+        )
+        # Marker must be on the offending line itself.
+        (tmp_path / "t.sh").write_text(
+            'for py in "$d"/untracked/venv/bin/python; do :; done'
+            "  # python-var-guidance-exempt: probes the retired layout\n"
+        )
+        data = _run_checker(tmp_path)
+        assert _violated_lines(data) == [1], "only the unmarked line is a defect"
+
+    def test_fingerprint_keyed_paths_are_not_flagged(self, tmp_path: Path) -> None:
+        """`venv-*` is the CURRENT layout — it must never be confused with `venv/`."""
+        (tmp_path / "s.sh").write_text(
+            'PY="$ROOT/untracked/venv-workspace-py311-81c29529/bin/python"\n'
+            'for c in "$d"/untracked/venv-*/bin/python; do :; done\n'
+        )
+        data = _run_checker(tmp_path)
+        assert data["summary"]["passed"], data["violations"]
+
+    def test_rule_does_not_leak_into_markdown_handling(self, tmp_path: Path) -> None:
+        """Markdown already had this covered by the main pattern; no double-count."""
+        (tmp_path / "d.md").write_text("Run `untracked/venv/bin/python -m pytest`\n")
+        data = _run_checker(tmp_path)
+        assert not data["summary"]["passed"]
+        assert _violated_lines(data) == [1]
+
+
 class TestRepositoryIsClean:
     """The real trees must stay clean — this is the regression lock."""
 

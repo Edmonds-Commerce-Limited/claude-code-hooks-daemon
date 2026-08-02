@@ -62,7 +62,12 @@ validate_worktree() {
     if declare -F resolve_existing_venv_python > /dev/null; then
         wt_venv_python="$(resolve_existing_venv_python "${wt_dir}")"
     else
-        wt_venv_python="${wt_dir}/untracked/venv/bin/python"
+        # FAIL FAST rather than falling back to the retired pre-v3.7.0
+        # untracked/venv/ layout, which exists on no current install — that
+        # fallback could only ever produce a misleading "NO VENV" verdict.
+        echo -e "${RED}ERROR${NC}: venv resolver not available; cannot validate ${wt_name}" >&2
+        FAILED_WTS+=("${wt_name} (NO RESOLVER)")
+        return 1
     fi
 
     if [[ ! -x "${wt_venv_python}" ]]; then

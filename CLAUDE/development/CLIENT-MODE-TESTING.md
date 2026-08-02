@@ -69,12 +69,33 @@ uncommitted `src/` change does **not** — the venv is built from the worktree.
 exercise the previous version of your Python code and you will conclude a fix
 does not work when it was never installed.
 
-### CWD matters
+### CWD matters — for the CLI, not for the wrapper
 
 The daemon CLI derives socket/PID/log paths from the **current working
-directory's** project root. Querying the fixture daemon from the repo root
-resolves the *self-install* paths and misreports it as down. Always run fixture
-commands via `dummy-client-repo.sh cli`, which handles this.
+directory's** project root. Invoking the CLI module directly from the repo
+root therefore resolves the *self-install* paths and misreports the fixture
+daemon as down — or worse, acts on the wrong project's daemon while reporting
+success.
+
+**`bin/hooks-daemon` is exempt (Plan 00194).** The wrapper derives its own
+project root from its location and passes `--project-root`, so it manages *its*
+project's daemon from any directory:
+
+```bash
+W=untracked/dummy-client-repo/.claude/hooks-daemon/bin/hooks-daemon
+HOSTNAME=dummy-client-repo "$W" status     # the FIXTURE daemon, run from anywhere
+```
+
+Two things the wrapper does **not** do for you:
+
+- **Hostname isolation is a separate axis.** The fixture runs under
+  `HOSTNAME=dummy-client-repo`; without it you get the right project but the
+  wrong socket suffix, and a truthful "NOT RUNNING".
+- **A raw `daemon.cli` invocation is still CWD-bound.** Any script calling the
+  module directly must pass `--project-root` itself — that omission is what
+  orphaned a fixture daemon during teardown (Plan 00193 Task 6.7).
+
+`dummy-client-repo.sh cli` handles both and remains the easiest correct option.
 
 ## When this is required
 

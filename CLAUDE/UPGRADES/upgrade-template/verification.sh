@@ -76,8 +76,8 @@ cd "$DAEMON_DIR"
 
 # Use the deployed wrapper — it resolves the fingerprint-keyed venv itself, so
 # there is no interpreter path to spell out. This previously hand-rolled the
-# resolution and fell back to `untracked/venv/bin/python`, the RETIRED
-# pre-v3.7.0 layout that no current install has (Plan 00193).
+# resolution and fell back to `untracked/venv/bin/python`  # python-var-guidance-exempt: names the retired path to explain its removal
+# — the RETIRED pre-v3.7.0 layout that no current install has (Plan 00193).
 DAEMON_CLI="$DAEMON_DIR/bin/hooks-daemon"
 if [ ! -x "$DAEMON_CLI" ]; then
     fail "Daemon startup" "hooks-daemon wrapper missing or not executable: $DAEMON_CLI"

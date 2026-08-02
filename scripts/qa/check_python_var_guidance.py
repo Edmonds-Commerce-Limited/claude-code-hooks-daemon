@@ -188,6 +188,11 @@ _EXEMPT_SUBPATHS: Final[tuple[str, ...]] = (
     ".claude/hooks.bak",
 )
 
+#: The RETIRED pre-v3.7.0 venv layout. Deliberately anchored on ``venv/`` with a
+#: trailing slash so the CURRENT fingerprint-keyed ``venv-<slug>-py<MM>-<fp>/``
+#: never matches — confusing the two would flag every correct resolver.
+_LEGACY_VENV_PATH: Final[re.Pattern[str]] = re.compile(r"untracked/venv/bin/")
+
 #: Inline escape hatch for a genuine exception, recorded in-place.
 _EXEMPT_MARKER: Final[str] = "python-var-guidance-exempt:"
 
@@ -240,6 +245,23 @@ def scan_file(path: Path) -> list[Violation]:
     violations: list[Violation] = []
     for number, line in enumerate(content.splitlines(), start=1):
         if _EXEMPT_MARKER in line:
+            continue
+        # A hardcoded RETIRED venv path is a defect anywhere in a shell script,
+        # not only in an output statement (Plan 00193 Task 7.1). Venvs have been
+        # fingerprint-keyed since v3.7.0, so `untracked/venv/bin/` exists on no
+        # live install — an assignment to it is a silent fallback to something
+        # that cannot work, which is exactly the shape the output-only rule
+        # could not see. Genuine resolvers that probe the old layout to upgrade
+        # it declare themselves with an inline marker.
+        if is_shell and _LEGACY_VENV_PATH.search(line):
+            violations.append(
+                Violation(
+                    file=str(path),
+                    line=number,
+                    rule=_RULE_NAME,
+                    message=line.strip(),
+                )
+            )
             continue
         if is_shell and not (
             _SHELL_OUTPUT_STATEMENT.match(line) and _SHELL_GUIDANCE_MARKERS.search(line)

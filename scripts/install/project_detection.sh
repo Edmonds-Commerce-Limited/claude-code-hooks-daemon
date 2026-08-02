@@ -232,10 +232,11 @@ get_daemon_dir() {
 #
 # get_venv_python() - Get path to venv Python binary based on mode
 #
-# Resolution delegates to the SSOT helper resolve_existing_venv_python so the
-# fingerprint-keyed layout (v3.7.0+), scan-fallback for fingerprint mismatch
-# (v3.8.1+), and legacy untracked/venv/ (pre-v3.7.0) are all honoured with
-# the same precedence used by skills/hooks-daemon/scripts/_resolve-venv.sh.
+# Resolution delegates to the SSOT helper resolve_existing_venv_python, which
+# honours the fingerprint-keyed layout (v3.7.0+) and the scan-fallback for a
+# fingerprint mismatch (v3.8.1+). The pre-v3.7.0 unversioned layout is NOT
+# honoured — v3.7.0 retired it and Plan 00103 Decision 2 made the resolver
+# fail loudly rather than fall back to it.
 #
 # Args:
 #   $1 - Project root path
@@ -259,14 +260,16 @@ get_venv_python() {
         daemon_dir="$project_root/.claude/hooks-daemon"
     fi
 
-    if declare -F resolve_existing_venv_python > /dev/null; then
-        resolve_existing_venv_python "$daemon_dir"
-    else
-        # Defensive fallback: helper wasn't sourced. Preserve the legacy path
-        # so the caller's own "venv missing" error path still fires rather
-        # than crashing inside this helper.
-        echo "$daemon_dir/untracked/venv/bin/python"
+    # A missing resolver is a programming error in the caller (it failed to
+    # source venv_resolver.sh), so it fail_fasts like the project_root
+    # precondition above. This used to echo the pre-v3.7.0 unversioned path as
+    # a sentinel, on the theory that the caller's own "venv missing" branch
+    # would fire. It did — but naming a layout that v3.7.0 retired sent the
+    # operator to repair a path that was never meant to be there (Plan 00193).
+    if ! declare -F resolve_existing_venv_python > /dev/null; then
+        fail_fast "get_venv_python: resolve_existing_venv_python not available; source scripts/install/venv_resolver.sh first"
     fi
+    resolve_existing_venv_python "$daemon_dir"
 }
 
 #

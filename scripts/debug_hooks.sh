@@ -21,7 +21,10 @@ fi
 if declare -F resolve_existing_venv_python > /dev/null; then
     VENV_PYTHON="$(resolve_existing_venv_python "$PROJECT_ROOT")"
 else
-    VENV_PYTHON="$PROJECT_ROOT/untracked/venv/bin/python"
+    # FAIL FAST rather than falling back to the retired pre-v3.7.0
+    # untracked/venv/ layout, which exists on no current install.
+    echo "ERROR: venv resolver not available; cannot resolve the daemon virtualenv" >&2
+    exit 2
 fi
 
 # Find daemon socket in project's untracked directory

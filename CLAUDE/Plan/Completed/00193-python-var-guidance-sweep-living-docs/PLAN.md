@@ -1,6 +1,6 @@
 # Plan 00193: Extend the `$PYTHON` guidance sweep to living docs
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-31
 **Owner**: joseph
 **Priority**: Medium
@@ -233,12 +233,14 @@ and re-verified end-to-end. Full write-ups in `JOURNAL/` (2026-08-01).
 
 ### Phase 7: Residual gate coverage
 
-- [ ] ⬜ **Task 7.1**: The `.sh` rule fires only on output statements, so a
+- [x] ✅ **Task 7.1**: The `.sh` rule fired only on output statements, so a
   hardcoded legacy venv path in a NON-output shell line (an assignment or
-  default, as in Tasks 4.4) is still ungated. Both known instances are fixed,
-  but the class is not locked. Decide between an assignment-aware rule and an
-  inline-marker exemption for the genuine resolvers
-  (`resolve_venv.sh`, `scripts/install/*.sh`, the skill `install.sh` probe).
+  default, as in Task 4.4) was ungated. Resolved with **both** halves of the
+  choice: an assignment-aware rule (`_LEGACY_VENV_PATH`, checked before the
+  output-statement skip) plus the existing inline marker for genuine
+  resolvers. The new rule surfaced 14 occurrences the old one structurally
+  could not see — 6 real silent fallbacks to the retired pre-v3.7.0 layout
+  (including in `scripts/qa/run_all.sh` itself), 8 legitimate. See Decision 4.
 
 ## Dependencies
 
@@ -276,6 +278,29 @@ failure*, not a silent loss of coverage. Exemptions are same-line and must state
 their reason inline, so silencing a finding is visible in the diff.
 **Date**: 2026-08-01
 
+### Decision 3: Take BOTH halves of the Task 7.1 choice, not one
+
+**Context**: Task 7.1 framed the residual gap as a choice — an assignment-aware
+rule *or* inline-marker exemptions for the genuine resolvers.
+
+**Options Considered**:
+
+1. Marker-only — cheap, but locks nothing: the next unmarked assignment is
+   invisible again. It treats the symptom (today's known sites) not the class.
+2. Rule-only — locks the class, but then flags the resolvers that must probe
+   the retired layout in order to migrate away from it.
+3. Both — the rule fires on any `untracked/venv/bin/` in a shell line
+   regardless of statement kind; the same-line marker is how a genuine prober
+   declares itself, in the diff, with its reason.
+
+**Decision**: Option 3. The two are complements, not alternatives — the rule
+supplies the coverage and the marker supplies the escape hatch that keeps the
+coverage honest. Running it found 14 sites, 6 of them real silent fallbacks to
+a path that exists on no live install. Each became a fail-fast, so "the
+resolver is missing" now says so instead of degrading into "no such file"
+against a retired path. Site-by-site breakdown in JOURNAL/26-08-01.
+**Date**: 2026-08-01
+
 ## Success Criteria
 
 - [ ] Every class-(a) occurrence is corrected; class-(b)/(c) are intact.
@@ -301,5 +326,8 @@ their reason inline, so silencing a finding is visible in the diff.
   at 223 occurrences across 23 files.
 - Phases 1–3 delivered: 297 variant-1/2 occurrences and 65 variant-3 occurrences
   corrected across 30 files; gate widened to `CLAUDE/`, `docs/`, `examples/` and
-  given its first test file; QA 14/14; daemon RUNNING. Phase 4 (client-fixture
-  verification) outstanding.
+  given its first test file; QA 14/14; daemon RUNNING.
+- Phases 4–6 delivered at `73b76462` / `56f5e732`: client-fixture verification
+  found 38 doc violations, 5 skill launchers and 7 real client-mode bugs.
+- Phase 7 delivered: assignment-aware `_LEGACY_VENV_PATH` rule closes the
+  residual class (Decision 3). QA 14/14; daemon RUNNING.

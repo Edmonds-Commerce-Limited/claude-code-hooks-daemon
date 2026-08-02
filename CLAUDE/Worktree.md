@@ -833,13 +833,19 @@ cd /workspace/untracked/worktrees/worktree-plan-00028
 ```
 
 The wrapper anchors to its OWN location, so an absolute path to `/workspace/bin/`
-always resolves the MAIN venv no matter where you are.
+always resolves the MAIN venv — and, since Plan 00194, the MAIN daemon too — no
+matter where you are. Being inside the worktree does not redirect it.
 
-✅ **Solution**: use the worktree's own wrapper — relative, from inside it:
+✅ **Solution**: use the worktree's own wrapper. Its identity selects both the
+venv and the daemon, so an absolute path works just as well as a relative one:
 
 ```bash
+# From inside the worktree
 cd /workspace/untracked/worktrees/worktree-plan-00028
 ./bin/hooks-daemon restart
+
+# Or from anywhere — the wrapper's location is what counts
+/workspace/untracked/worktrees/worktree-plan-00028/bin/hooks-daemon restart
 ```
 
 ### ❌ Creating a Worktree with Bare `git worktree add`

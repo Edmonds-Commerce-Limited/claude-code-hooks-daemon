@@ -1,6 +1,6 @@
 # Plan 00194: `bin/hooks-daemon` targets a daemon by CWD, not by its own anchor
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-08-01
 **Owner**: joseph
 **Priority**: High
@@ -96,34 +96,34 @@ at one call site; this plan is the systemic fix.
 
 ### Phase 1: Establish the intended contract
 
-- [ ] ⬜ **Task 1.1**: Enumerate every caller shape — self-install root wrapper,
+- [x] ✅ **Task 1.1**: Enumerate every caller shape — self-install root wrapper,
   client `.claude/hooks-daemon/bin/`, worktree wrapper, skill `daemon-cli.sh`,
   hook forwarders — and record which daemon each SHOULD target.
-- [ ] ⬜ **Task 1.2**: Decide the rule. Candidate: derive project root from the
+- [x] ✅ **Task 1.2**: Decide the rule. Candidate: derive project root from the
   wrapper's own location (client mode `$DAEMON_DIR/../..`, self-install
   `$DAEMON_DIR`) and pass it as `--project-root` unless the caller supplied one.
   Verify against every shape from 1.1 before adopting it.
-- [ ] ⬜ **Task 1.3**: Confirm precedence stays: explicit `--project-root` >
+- [x] ✅ **Task 1.3**: Confirm precedence stays: explicit `--project-root` >
   env overrides > derived anchor.
 
 ### Phase 2: Implement (TDD)
 
-- [ ] ⬜ **Task 2.1**: Failing tests first — same wrapper, several CWDs, asserting
+- [x] ✅ **Task 2.1**: Failing tests first — same wrapper, several CWDs, asserting
   it targets its own project every time.
-- [ ] ⬜ **Task 2.2**: Implement in BOTH `bin/hooks-daemon` and
+- [x] ✅ **Task 2.2**: Implement in BOTH `bin/hooks-daemon` and
   `src/claude_code_hooks_daemon/install/templates/hooks-daemon`; they must stay
   byte-identical (`tests/unit/install/test_bin_wrapper.py` enforces this).
-- [ ] ⬜ **Task 2.3**: Regression-test the worktree case explicitly — a worktree's
+- [x] ✅ **Task 2.3**: Regression-test the worktree case explicitly — a worktree's
   own wrapper manages the worktree's daemon, and `/workspace`'s manages
   `/workspace`'s, regardless of CWD.
 
 ### Phase 3: Verify in client mode
 
-- [ ] ⬜ **Task 3.1**: Reproduce the original cross-project restart in the fixture
+- [x] ✅ **Task 3.1**: Reproduce the original cross-project restart in the fixture
   and prove it no longer happens.
-- [ ] ⬜ **Task 3.2**: Full QA green; both dogfood and fixture daemons RUNNING and
+- [x] ✅ **Task 3.2**: Full QA green; both dogfood and fixture daemons RUNNING and
   independently controllable.
-- [ ] ⬜ **Task 3.3**: Reconcile `CLIENT-MODE-TESTING.md` — if the behaviour
+- [x] ✅ **Task 3.3**: Reconcile `CLIENT-MODE-TESTING.md` — if the behaviour
   changes, its CWD warning must be updated rather than left contradicting.
 
 ## Dependencies
@@ -151,10 +151,10 @@ the behaviour change is tracked here so the finding is not dropped.
 
 ## Success Criteria
 
-- [ ] Same wrapper + different CWD ⇒ same target daemon, or an explicit refusal.
-- [ ] Worktree and self-install flows unchanged.
-- [ ] Wrapper documentation and `CLIENT-MODE-TESTING.md` agree with behaviour.
-- [ ] Full QA passes; daemon restarts RUNNING.
+- [x] Same wrapper + different CWD ⇒ same target daemon, or an explicit refusal.
+- [x] Worktree and self-install flows unchanged.
+- [x] Wrapper documentation and `CLIENT-MODE-TESTING.md` agree with behaviour.
+- [x] Full QA passes; daemon restarts RUNNING.
 
 ## Risks & Mitigations
 
@@ -171,3 +171,15 @@ the behaviour change is tracked here so the finding is not dropped.
 
 - Found during Plan 00193 Phase 4 client-fixture verification; documentation
   half fixed there, behaviour tracked here.
+- Behaviour delivered in the Plan 00194 wrapper-anchoring commit: wrapper derives
+  its own project root and passes `--project-root`; explicit caller flag still
+  wins via argparse last-occurrence; anchor injected only when the derived root
+  is a real project (fail-safe).
+- Phase 1 enumeration retired the plan's highest-rated risk: hook forwarders do
+  NOT use this wrapper (they source `init.sh` and use the socket directly), so
+  the highest-traffic path is untouched.
+- Verified in the fixture: restarting the FIXTURE daemon while standing in
+  `/workspace` left the dogfood daemon's PID unchanged (1629099), where the same
+  command previously restarted it.
+- Docs reconciled rather than left contradicting: `CLIENT-MODE-TESTING.md`,
+  `Worktree.md`, and the wrapper's own DESIGN NOTE 1.

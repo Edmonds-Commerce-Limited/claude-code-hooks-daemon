@@ -158,9 +158,9 @@ print_test_summary() {
 # Daemon status check
 check_daemon_running() {
     # Use the deployed wrapper — it resolves the fingerprint-keyed venv itself.
-    # This previously defaulted to /workspace/untracked/venv/bin/python: the
-    # daemon repo's OWN path, in the RETIRED pre-v3.7.0 layout, shipped to every
-    # client project where neither exists (Plan 00193).
+    # This previously defaulted to /workspace/untracked/venv/bin/python  # python-var-guidance-exempt: names the retired path to explain its removal
+    # — the daemon repo's OWN path, in the RETIRED pre-v3.7.0 layout, shipped
+    # to every client project where neither exists (Plan 00193).
     local wrapper="${HOOKS_DAEMON_DIR:-$PWD/.claude/hooks-daemon}/bin/hooks-daemon"
     if [ ! -x "$wrapper" ]; then
         log_error "hooks-daemon wrapper not found or not executable: $wrapper"

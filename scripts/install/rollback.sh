@@ -107,15 +107,18 @@ create_state_snapshot() {
     # Capture venv metadata. Use the shared resolver so fingerprint-keyed
     # venvs are picked up (install_mode doesn't affect layout — daemon_dir
     # is already the right base in both modes).
+    # No resolver sourced => no interpreter to record, so python_version stays
+    # "unknown". This used to fall back to the RETIRED pre-v3.7.0 layout, which
+    # exists on no install since venvs became fingerprint-keyed — the `-f` test
+    # below always failed, so the outcome was identical while the manifest's
+    # error path named a path that was never there (Plan 00193).
     local python_version="unknown"
-    local venv_python
+    local venv_python=""
     if declare -F resolve_existing_venv_python > /dev/null; then
         venv_python="$(resolve_existing_venv_python "$daemon_dir")"
-    else
-        venv_python="$daemon_dir/untracked/venv/bin/python"
     fi
 
-    if [ -f "$venv_python" ]; then
+    if [ -n "$venv_python" ] && [ -f "$venv_python" ]; then
         python_version=$("$venv_python" --version 2>&1 | awk '{print $2}')
     fi
 

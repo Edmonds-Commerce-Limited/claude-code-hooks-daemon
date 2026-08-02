@@ -21,7 +21,13 @@ fi
 if declare -F resolve_existing_venv_python > /dev/null; then
     VENV_PYTHON="$(resolve_existing_venv_python "${PROJECT_ROOT}")"
 else
-    VENV_PYTHON="${PROJECT_ROOT}/untracked/venv/bin/python"
+    # FAIL FAST. Was: ${PROJECT_ROOT}/untracked/venv/bin/python  # python-var-guidance-exempt: names the retired path to explain its removal
+    # — the pre-v3.7.0 layout, which exists on no install since venvs became
+    # fingerprint-keyed. The fallback could therefore never succeed; it only
+    # turned "the resolver is missing" into a confusing "no such file".
+    echo "ERROR: venv resolver not available at ${PROJECT_ROOT}/scripts/install/venv_resolver.sh" >&2
+    echo "       Cannot resolve the daemon virtualenv; reinstall or repair the daemon." >&2
+    exit 2
 fi
 
 cd "${PROJECT_ROOT}"

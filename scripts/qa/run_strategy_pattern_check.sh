@@ -35,7 +35,10 @@ fi
 if declare -F resolve_existing_venv_python > /dev/null; then
     PYTHON="$(resolve_existing_venv_python "${PROJECT_ROOT}")"
 else
-    PYTHON="${PROJECT_ROOT}/untracked/venv/bin/python"
+    # FAIL FAST rather than falling back to the retired pre-v3.7.0
+    # untracked/venv/ layout, which exists on no current install.
+    echo -e "${RED}ERROR: venv resolver not available; cannot resolve the daemon virtualenv${NC}" >&2
+    exit 2
 fi
 
 if [ ! -f "$PYTHON" ]; then

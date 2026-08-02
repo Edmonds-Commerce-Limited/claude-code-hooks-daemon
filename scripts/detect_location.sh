@@ -138,14 +138,19 @@ except Exception:
         if declare -F resolve_existing_venv_python > /dev/null; then
             echo "Python: $(resolve_existing_venv_python "$PROJECT_ROOT")" >&2
         else
-            echo "Python: $PROJECT_ROOT/untracked/venv/bin/python" >&2
+            # Never print the retired pre-v3.7.0 path as if it were the
+            # interpreter — a diagnostic that names a nonexistent file sends the
+            # reader to repair something that was never there.
+            echo "Python: UNRESOLVED (venv resolver unavailable)" >&2
         fi
     elif [ -d "$HOOKS_DAEMON_DIR" ]; then
         echo "Mode: normal installation" >&2
         if declare -F resolve_existing_venv_python > /dev/null; then
             echo "Python: $(resolve_existing_venv_python "$HOOKS_DAEMON_DIR")" >&2
         else
-            echo "Python: $HOOKS_DAEMON_DIR/untracked/venv/bin/python" >&2
+            # Same reasoning as the self-install branch above: naming the retired
+            # pre-v3.7.0 path would point the reader at a file no install has.
+            echo "Python: UNRESOLVED (venv resolver unavailable)" >&2
         fi
     fi
 
