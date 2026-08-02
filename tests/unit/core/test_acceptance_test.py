@@ -225,6 +225,57 @@ class TestAcceptanceTestNewFields:
         assert test.requires_main_thread is False
 
 
+class TestHarnessCannotProduceField:
+    """Test the harness_cannot_produce field (Plan 00196).
+
+    Marks a test whose triggering input the Claude Code harness rewrites
+    before the daemon ever sees it, so the playbook must render it as SKIP
+    rather than asking a tester to run something that cannot happen.
+    """
+
+    def test_defaults_to_none(self):
+        """A test is executable unless explicitly marked otherwise."""
+        test = AcceptanceTest(
+            title="Test",
+            command='echo "test"',
+            description="Test description",
+            expected_decision=Decision.DENY,
+            expected_message_patterns=[],
+        )
+        assert test.harness_cannot_produce is None
+
+    def test_carries_the_reason_verbatim(self):
+        """The reason is the payload — it is what the tester ends up reading."""
+        reason = "Claude Code normalises file_path to absolute before dispatch."
+        test = AcceptanceTest(
+            title="Read with relative path",
+            command="Use the Read tool with a relative file_path",
+            description="Blocks relative paths",
+            expected_decision=Decision.DENY,
+            expected_message_patterns=[r"requires absolute path"],
+            harness_cannot_produce=reason,
+        )
+        assert test.harness_cannot_produce == reason
+
+    def test_coexists_with_blocking_type(self):
+        """The test keeps its real type — it is unreachable, not reclassified.
+
+        The handler genuinely blocks; only the route to triggering it is gone.
+        Downgrading test_type would misdescribe the handler.
+        """
+        test = AcceptanceTest(
+            title="Write with relative path",
+            command="Use the Write tool with a relative file_path",
+            description="Blocks relative paths",
+            expected_decision=Decision.DENY,
+            expected_message_patterns=[r"absolute path"],
+            test_type=TestType.BLOCKING,
+            harness_cannot_produce="harness rewrites the input",
+        )
+        assert test.test_type == TestType.BLOCKING
+        assert test.expected_decision == Decision.DENY
+
+
 class TestAcceptanceTestValidation:
     """Test validation of AcceptanceTest fields."""
 

@@ -105,6 +105,22 @@ class AcceptanceTest:
             (not a sub-agent). Required for SessionStart/UserPromptSubmit CONTEXT
             tests and VERIFIED_BY_LOAD tests. BLOCKING and ADVISORY tests can run
             in sub-agents (requires_main_thread=False).
+        harness_cannot_produce: Explanation of why Claude Code cannot produce the
+            input this test needs. When set, the playbook renders the test as SKIP
+            with this reason instead of asking a tester to run it.
+
+            This is the VERIFIED_BY_LOAD idea (trust the daemon + unit tests)
+            applied to a handler whose event type cannot reach that bucket:
+            OBSERVABLE vs VERIFIED_BY_LOAD is derived from the EVENT TYPE, so a
+            PreToolUse handler has no way to declare itself untriggerable.
+
+            Use ONLY when the harness rewrites or intercepts the input before the
+            daemon sees it, making the assertion unreachable by construction —
+            never to excuse a test that is merely awkward or slow. State WHAT
+            rewrites the input, so the claim can be re-checked when Claude Code
+            changes. The handler keeps its real test_type and expected_decision:
+            the behaviour is real, only the route to triggering it is gone, so
+            the deny path must stay covered by unit and/or socket-level tests.
     """
 
     title: str
@@ -120,6 +136,7 @@ class AcceptanceTest:
     required_tools: list[str] | None = None
     recommended_model: RecommendedModel | None = None
     requires_main_thread: bool = False
+    harness_cannot_produce: str | None = None
 
     def __post_init__(self) -> None:
         """Validate fields after initialization."""

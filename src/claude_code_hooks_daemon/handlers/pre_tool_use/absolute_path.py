@@ -78,8 +78,31 @@ class AbsolutePathHandler(Handler):
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """Return acceptance tests for absolute path handler."""
+        """Return acceptance tests for absolute path handler.
+
+        Both tests are marked ``harness_cannot_produce`` (Plan 00196). Claude
+        Code resolves ``file_path`` to an absolute path BEFORE dispatching
+        PreToolUse, so the daemon never receives the relative form and no
+        tester can trigger these blocks through a real tool call. Verified
+        during the v3.51.0 acceptance gate: a Write of the relative path
+        ``untracked/relpath_probe.py`` reached a later handler reporting
+        ``File: /workspace/untracked/relpath_probe.py``, and ``~/...`` is
+        expanded the same way rather than blocked.
+
+        The handler is NOT redundant and must not be removed — a direct socket
+        probe with a relative ``file_path`` still returns ``deny``, which is
+        the behaviour any non-Claude-Code client relies on. That deny path is
+        covered by ``tests/unit/handlers/test_absolute_path.py`` and end to end
+        by ``tests/acceptance/test_absolute_path_socket_deny.py``.
+        """
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+
+        harness_normalises_paths = (
+            "Claude Code resolves file_path to an absolute path before PreToolUse "
+            "dispatch, so the relative form never reaches the daemon. Deny path is "
+            "covered by tests/unit/handlers/test_absolute_path.py and "
+            "tests/acceptance/test_absolute_path_socket_deny.py."
+        )
 
         return [
             AcceptanceTest(
@@ -95,6 +118,7 @@ class AbsolutePathHandler(Handler):
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
+                harness_cannot_produce=harness_normalises_paths,
             ),
             AcceptanceTest(
                 title="Write with relative path",
@@ -108,5 +132,6 @@ class AbsolutePathHandler(Handler):
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
+                harness_cannot_produce=harness_normalises_paths,
             ),
         ]

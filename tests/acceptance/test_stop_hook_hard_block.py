@@ -70,10 +70,7 @@ def _discover_socket() -> Path | None:
 def daemon_running() -> None:
     sock_path = _discover_socket()
     if sock_path is None:
-        pytest.skip(
-            "Daemon not running — start with: "
-            "$PYTHON -m claude_code_hooks_daemon.daemon.cli restart"
-        )
+        pytest.skip("Daemon not running — start with: ./bin/hooks-daemon restart")
 
 
 def _invoke_hook(hook_path: Path, hook_input: dict) -> subprocess.CompletedProcess[str]:

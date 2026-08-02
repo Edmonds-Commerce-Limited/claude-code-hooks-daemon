@@ -158,8 +158,7 @@ def daemon_socket() -> Path:
     if sock_path is None:
         pytest.skip(
             "Daemon not running — no live socket found under untracked/. "
-            "Start the daemon with: "
-            "$PYTHON -m claude_code_hooks_daemon.daemon.cli restart"
+            "Start the daemon with: ./bin/hooks-daemon restart"
         )
     assert sock_path is not None
     return sock_path

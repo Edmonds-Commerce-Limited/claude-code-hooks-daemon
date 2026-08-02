@@ -30,6 +30,43 @@ logger = logging.getLogger(__name__)
 CollectedTests = list[tuple[str, str, int, list[AcceptanceTest], str]]
 
 
+def _skip_block(test: AcceptanceTest) -> list[str]:
+    """Render the SKIP block for a test that must not be executed.
+
+    Returns an empty list when the test should be run normally. Built-in and
+    project handlers share this so a test is never skipped in one section and
+    demanded in the other.
+
+    Two reasons a test is unrunnable, in precedence order:
+
+    1. ``harness_cannot_produce`` — Claude Code rewrites the input before the
+       daemon sees it, so the assertion is unreachable by construction. Checked
+       first: no tool install can make such a test runnable.
+    2. ``required_tools`` — a language toolchain is absent from this machine,
+       so the test is merely unrunnable *here*.
+    """
+    if test.harness_cannot_produce:
+        return [
+            "**⚠️ SKIP**: Claude Code cannot produce the input this test needs.",
+            f"*{test.harness_cannot_produce}*",
+            "",
+            "**Result**: SKIP (unreachable through the harness — verified by unit tests)",
+        ]
+
+    if test.required_tools:
+        missing = [t for t in test.required_tools if not shutil.which(t)]
+        if missing:
+            missing_str = ", ".join(f"`{t}`" for t in missing)
+            return [
+                f"**⚠️ SKIP**: Required tool(s) not installed: {missing_str}",
+                f"*Install {', '.join(missing)} to enable this test.*",
+                "",
+                "**Result**: SKIP (tool not available)",
+            ]
+
+    return []
+
+
 class PlaybookGenerator:
     """Generate acceptance test playbooks from handler definitions."""
 
@@ -482,20 +519,15 @@ class PlaybookGenerator:
                 lines.append(f"#### Test {test_number}: {test.title}")
                 lines.append("")
 
-                # Skip if required tools are not installed
-                if test.required_tools:
-                    missing = [t for t in test.required_tools if not shutil.which(t)]
-                    if missing:
-                        missing_str = ", ".join(f"`{t}`" for t in missing)
-                        lines.append(f"**⚠️ SKIP**: Required tool(s) not installed: {missing_str}")
-                        lines.append(f"*Install {', '.join(missing)} to enable this test.*")
-                        lines.append("")
-                        lines.append("**Result**: SKIP (tool not available)")
-                        lines.append("")
-                        lines.append("---")
-                        lines.append("")
-                        test_number += 1
-                        continue
+                # Skip unrunnable tests (harness-unreachable, or missing tooling)
+                skip_lines = _skip_block(test)
+                if skip_lines:
+                    lines.extend(skip_lines)
+                    lines.append("")
+                    lines.append("---")
+                    lines.append("")
+                    test_number += 1
+                    continue
 
                 # Test details with category annotation for Context tests
                 test_type_str = test.test_type.value.title()
@@ -585,22 +617,15 @@ class PlaybookGenerator:
                     lines.append(f"#### Test {test_number}: {test.title}")
                     lines.append("")
 
-                    # Skip if required tools are not installed
-                    if test.required_tools:
-                        missing = [t for t in test.required_tools if not shutil.which(t)]
-                        if missing:
-                            missing_str = ", ".join(f"`{t}`" for t in missing)
-                            lines.append(
-                                f"**⚠️ SKIP**: Required tool(s) not installed: {missing_str}"
-                            )
-                            lines.append(f"*Install {', '.join(missing)} to enable this test.*")
-                            lines.append("")
-                            lines.append("**Result**: SKIP (tool not available)")
-                            lines.append("")
-                            lines.append("---")
-                            lines.append("")
-                            test_number += 1
-                            continue
+                    # Skip unrunnable tests (harness-unreachable, or missing tooling)
+                    skip_lines = _skip_block(test)
+                    if skip_lines:
+                        lines.extend(skip_lines)
+                        lines.append("")
+                        lines.append("---")
+                        lines.append("")
+                        test_number += 1
+                        continue
 
                     # Test details with category annotation for Context tests
                     test_type_str = test.test_type.value.title()

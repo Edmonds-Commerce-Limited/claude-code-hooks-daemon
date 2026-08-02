@@ -1691,3 +1691,118 @@ def test_generate_markdown_project_handler_with_recommended_model() -> None:
 
     assert "**Recommended Model**: sonnet" in markdown
     assert "**Requires Main Thread**: no" in markdown
+
+
+_UNREACHABLE_REASON = "Claude Code normalises file_path to absolute before dispatch."
+
+
+def test_generate_markdown_skips_test_the_harness_cannot_produce() -> None:
+    """Plan 00196: a harness-unreachable test renders as SKIP, not as work.
+
+    The whole point is that the tester never attempts it — an unreachable
+    test presented as runnable reads as a failure and costs a re-diagnosis
+    on every release.
+    """
+    test = AcceptanceTest(
+        title="Read with relative path",
+        command="Use the Read tool with file_path 'relative/path/file.txt'",
+        description="Blocks Read tool with relative path",
+        expected_decision=Decision.DENY,
+        expected_message_patterns=["requires absolute path"],
+        test_type=TestType.BLOCKING,
+        harness_cannot_produce=_UNREACHABLE_REASON,
+    )
+
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.test_unreach"
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+    config = {"pre_tool_use": {"mock_handler_with_tests": {"enabled": True}}}
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[test]):
+        markdown = generator.generate_markdown()
+
+    assert "SKIP" in markdown
+    assert _UNREACHABLE_REASON in markdown
+    # The command must not be offered — rendering it invites the tester to run
+    # something the harness cannot produce, which is the defect being fixed.
+    assert "Use the Read tool with file_path" not in markdown
+    assert "**Result**: [ ] PASS [ ] FAIL" not in markdown
+
+
+def test_generate_markdown_skips_project_handler_test_the_harness_cannot_produce() -> None:
+    """Project handlers share the skip path — one behaviour, not two."""
+    from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
+
+    test = AcceptanceTest(
+        title="Project unreachable test",
+        command="Use the Write tool with a relative file_path",
+        description="Blocks relative paths",
+        expected_decision=Decision.DENY,
+        expected_message_patterns=["absolute path"],
+        test_type=TestType.BLOCKING,
+        harness_cannot_produce=_UNREACHABLE_REASON,
+    )
+
+    class MockProjectHandlerUnreachable(Handler):
+        def __init__(self) -> None:
+            super().__init__(
+                handler_id=HandlerIDMeta(
+                    class_name="ProjectHandler",
+                    config_key="project",
+                    display_name="project",
+                ),
+                priority=Priority.PLAN_WORKFLOW,
+                terminal=False,
+            )
+
+        def matches(self, hook_input: dict[str, Any]) -> bool:
+            return True
+
+        def handle(self, hook_input: dict[str, Any]) -> HookResult:
+            return HookResult(decision=Decision.ALLOW)
+
+        def get_claude_md(self) -> str | None:
+            return None
+
+        def get_acceptance_tests(self) -> list[AcceptanceTest]:
+            return [test]
+
+    registry = HandlerRegistry()
+    config: dict[str, Any] = {}
+    generator = PlaybookGenerator(
+        config=config,
+        registry=registry,
+        project_handlers=[MockProjectHandlerUnreachable()],
+    )
+
+    markdown = generator.generate_markdown()
+
+    assert "SKIP" in markdown
+    assert _UNREACHABLE_REASON in markdown
+    assert "Use the Write tool with a relative file_path" not in markdown
+
+
+def test_generate_markdown_still_runs_tests_without_the_marker() -> None:
+    """Negative control: the skip path must not swallow ordinary tests."""
+    test = AcceptanceTest(
+        title="Ordinary blocking test",
+        command='echo "git reset --hard"',
+        description="Blocks destructive reset",
+        expected_decision=Decision.DENY,
+        expected_message_patterns=["destroys"],
+        test_type=TestType.BLOCKING,
+    )
+
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.test_normal"
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+    config = {"pre_tool_use": {"mock_handler_with_tests": {"enabled": True}}}
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[test]):
+        markdown = generator.generate_markdown()
+
+    assert "SKIP" not in markdown
+    assert 'echo "git reset --hard"' in markdown
+    assert "**Result**: [ ] PASS [ ] FAIL" in markdown
