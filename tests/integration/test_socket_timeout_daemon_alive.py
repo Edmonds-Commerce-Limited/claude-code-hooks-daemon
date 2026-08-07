@@ -83,7 +83,7 @@ def _start_mock_daemon(tmp_path: Path) -> tuple[subprocess.Popen[str], str]:
     # Wait for the socket file to appear (bind() creates it).
     deadline = time.monotonic() + 5.0
     while time.monotonic() < deadline:
-        if os.path.exists(socket_path):
+        if Path(socket_path).exists():
             return proc, socket_path
         time.sleep(0.02)
     proc.terminate()

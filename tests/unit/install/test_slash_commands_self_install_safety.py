@@ -110,7 +110,7 @@ class TestDeploySlashCommandsSelfInstallSafety:
         )
 
         if command_file.is_symlink():
-            target = os.readlink(command_file)
+            target = command_file.readlink()
             resolved = Path(os.path.normpath(str(command_file.parent / target)))
             assert resolved != Path(
                 os.path.normpath(str(command_file))
@@ -128,9 +128,9 @@ class TestDeploySlashCommandsSelfInstallSafety:
         )
 
         if command_file.is_symlink():
-            target = os.readlink(command_file)
-            assert not target.startswith(
-                "/"
+            target = command_file.readlink()
+            assert (
+                not target.is_absolute()
             ), f"Self-install symlink stores an ABSOLUTE target: {target}"
 
     def test_source_file_survives_single_command_deploy(self, tmp_path: Path) -> None:

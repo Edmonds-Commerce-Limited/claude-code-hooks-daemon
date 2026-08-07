@@ -96,16 +96,16 @@ def _build_diagnostic_fixture(tmp_path: Path) -> tuple[Path, Path]:
 
     lib_target = daemon_dir / "scripts" / "lib" / "resolve_venv.sh"
     lib_target.parent.mkdir(parents=True)
-    os.symlink(CANONICAL_LIB, lib_target)
+    lib_target.symlink_to(CANONICAL_LIB)
 
     paths_target = daemon_dir / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py"
     paths_target.parent.mkdir(parents=True)
-    os.symlink(PATHS_PY, paths_target)
+    paths_target.symlink_to(PATHS_PY)
 
     untracked_dir = daemon_dir / "untracked"
     untracked_dir.mkdir(parents=True)
     venv_target = untracked_dir / "venv-py311-acceptance"
-    os.symlink(_DOGFOOD_VENV_DIR, venv_target)
+    venv_target.symlink_to(_DOGFOOD_VENV_DIR)
 
     return project_root, daemon_dir
 
@@ -128,7 +128,7 @@ def test_write_venv_metadata_records_venv_resident_python_path(tmp_path: Path) -
     venv_bin = venv_path / "bin"
     venv_bin.mkdir(parents=True)
     venv_python = venv_bin / "python"
-    os.symlink(_DOGFOOD_VENV_PYTHON, venv_python)
+    venv_python.symlink_to(_DOGFOOD_VENV_PYTHON)
 
     project_root = tmp_path / "project"
     project_root.mkdir()

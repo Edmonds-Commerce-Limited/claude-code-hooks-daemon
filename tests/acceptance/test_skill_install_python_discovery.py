@@ -177,7 +177,7 @@ def _symlink_coreutils(bin_dir: Path) -> None:
         dst = bin_dir / util
         if dst.exists() or dst.is_symlink():
             continue
-        os.symlink(src, dst)
+        dst.symlink_to(src)
 
 
 def _make_already_installed_project(tmp_path: Path) -> Path:
