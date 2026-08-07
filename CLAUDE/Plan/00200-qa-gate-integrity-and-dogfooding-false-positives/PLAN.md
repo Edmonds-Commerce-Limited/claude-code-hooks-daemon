@@ -194,19 +194,24 @@ plan's own two new test files contribute the difference.)
 
 ### Phase 3: Handler false positives
 
-- [ ] ⬜ **Task 3.1**: `EnforceLlmQaHandler` — match invocation, not mention. Regression tests
+- [x] ✅ **Task 3.1**: `EnforceLlmQaHandler` — match invocation, not mention. Regression tests
   for `cat` / `less` / `grep` / Read against the path.
-- [ ] ⬜ **Task 3.2**: `destructive_git` — stop matching `-f` outside an actual force-push.
-  Regression test for `git tag -f`; assert every real force-push still blocks.
-- [ ] ⬜ **Task 3.3**: `pipe_blocker` — ignore `-m` / `-F` message bodies when parsing.
-- [ ] ⬜ **Task 3.4**: `lsp_enforcement` — do not redirect a grep already scoped to one named
+- [x] ✅ **Task 3.2**: `destructive_git` — already correctly scoped (verified, not weakened);
+  added a permanent regression test pinning `git tag -f` plus a guardrail that a real forced
+  push still blocks.
+- [x] ✅ **Task 3.3**: `pipe_blocker` — ignore `-m` / `-F` message bodies when parsing.
+- [x] ✅ **Task 3.4**: `lsp_enforcement` — do not redirect a grep already scoped to one named
   file.
-- [ ] ⬜ **Task 3.5**: `plan_qa_commit_gate` — `same-commit-plan-doc` fires a false positive on
+- [x] ✅ **Task 3.5**: `plan_qa_commit_gate` — `same-commit-plan-doc` fires a false positive on
   the `git commit <pathspec>` form. That form commits unstaged working-tree changes for the
   named paths, but the check inspects only the staged index, so it advises "does not update its
   PLAN.md" on a commit that demonstrably does. Reproduced on `fad60fa6`, whose `--stat` shows
   `PLAN.md` present. Resolve the pathspec arguments against the working tree, not just the index.
 - [ ] ⬜ **Task 3.6**: Audit sibling handlers for the same mention-vs-invocation confusion.
+
+A sixth instance surfaced alongside Task 6.4 (below): `plan_number_helper` blocked a `find`
+piped to `wc -l` (a plan *count* for a statistics line) as if it were number *discovery* —
+fixed the same session; see `JOURNAL/`.
 
 ### Phase 4: Verification
 
@@ -280,7 +285,7 @@ fix is legitimate backlog; where the cell says **NONE**, the defence is the actu
 | README describes 2 handlers as doing the OPPOSITE of what they do | Doc-vs-generated-truth check          | **NONE**                                               |
 | `CLAUDE.md` claims "10 QA checks"; `run_all.sh` runs 13           | Same                                  | **NONE**                                               |
 | 4 stray root `test_*.sh`, `settings.json.bak`                     | Repo-hygiene check                    | **NONE**                                               |
-| Handler false positives (5 found)                                 | Negative-case acceptance tests        | **NONE** — every handler declares positive cases only  |
+| Handler false positives (6 found)                                 | Negative-case acceptance tests        | **Built** (Task 6.4)                                   |
 
 The four **NONE** rows are the remaining defence work. Note the README one is unusually cheap to
 close: `.claude/HOOKS-DAEMON.md` is already **generated from live config**, so it is trustworthy
@@ -302,10 +307,12 @@ ground truth to diff prose claims against — the data exists, nothing consumes 
   `test_*.sh`; no coverage lost — `test_forwarder_jq_free.py:284` already supersedes the
   control-char case.
 
-- [ ] ⬜ **Task 6.4**: Require a **negative** acceptance case per blocking handler. All five
-  false positives in Phase 3 are one class: handlers assert what they block and never assert
-  what they must NOT block. Make `get_acceptance_tests()` require at least one expected-allow
-  case for any handler that can deny, and enforce it in the playbook generator's own tests.
+- [x] ✅ **Task 6.4**: Require a **negative** acceptance case per blocking handler. Built
+  `find_deny_capable_handlers_without_allow_case()` (`daemon/playbook_generator.py`) plus a
+  dated, shrink-only allowlist test (`tests/integration/test_acceptance_negative_case_requirement.py`)
+  run against the real production handler set (library + project). All six false positives
+  fixed with a pinned regression test each; 16 pre-existing library handlers remain on the
+  allowlist as tracked, deferred work — see `JOURNAL/` for the full inventory and rationale.
 
 - [ ] ⬜ **Task 6.5**: Concurrent-agent isolation advisory (**the upstream fix**). Four agents
   were run in one `/workspace` checkout; the shared `.git/index` produced three incidents
@@ -374,3 +381,7 @@ armed for the next script that captures stdout.
 <!-- Curated milestones + delivery commit hashes only. Narrative goes in JOURNAL/. -->
 
 - Plan created; lint-gate false pass reproduced and root-caused
+- Task 6.4 (negative-case requirement) + six handler false-positive fixes,
+  delivered on worktree branch `agent-aac9d627ef861e2b0-45cd43b6` at
+  `96646410`, `58b64c64`, `70c8d333`, `b2e819dd`, `9d276773` (pending merge
+  into main)

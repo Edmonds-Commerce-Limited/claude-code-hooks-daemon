@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -65,6 +66,53 @@ def _skip_block(test: AcceptanceTest) -> list[str]:
             ]
 
     return []
+
+
+def find_deny_capable_handlers_without_allow_case(
+    tests: Sequence[dict[str, Any]],
+) -> list[str]:
+    """Handler keys that declare a DENY acceptance test but no ALLOW one.
+
+    Plan 00200 Task 6.4. Six false positives (EnforceLlmQaHandler,
+    destructive_git, pipe_blocker, lsp_enforcement, plan_qa_commit_gate,
+    plan_number_helper) traced to one structural gap: a handler's
+    ``get_acceptance_tests()`` declares what it blocks and nothing declares
+    what it must NOT block. A positive-only acceptance-test suite cannot
+    catch over-broad matching by construction — the fix is a requirement,
+    not six one-off patches.
+
+    A handler is "DENY-capable" when any of its OWN declared acceptance
+    tests expects ``deny``. Such a handler must ALSO declare at least one
+    test expecting ``allow`` — a realistic, near-miss command that is
+    superficially similar to what it blocks but is legitimate. A handler
+    that never declares a DENY test (purely advisory/context handlers) has
+    nothing to prove here and is never flagged.
+
+    Consumes the same dict shape :meth:`PlaybookGenerator.generate_json`
+    already produces (``source``, ``event_type``, ``handler_name``,
+    ``expected_decision``), so it sees library, plugin, and project
+    handlers uniformly with zero extra plumbing. CLI-feature entries (no
+    ``handler_name`` key) are not handlers and are skipped.
+
+    Args:
+        tests: Acceptance-test dicts, e.g. from ``generate_json()``.
+
+    Returns:
+        Sorted ``"source:event_type/handler_name"`` keys missing the case.
+    """
+    decisions_by_handler: dict[str, set[str]] = {}
+    for entry in tests:
+        handler_name = entry.get("handler_name")
+        if handler_name is None:
+            continue
+        key = f"{entry['source']}:{entry['event_type']}/{handler_name}"
+        decisions_by_handler.setdefault(key, set()).add(entry["expected_decision"])
+
+    return sorted(
+        key
+        for key, decisions in decisions_by_handler.items()
+        if "deny" in decisions and "allow" not in decisions
+    )
 
 
 class PlaybookGenerator:

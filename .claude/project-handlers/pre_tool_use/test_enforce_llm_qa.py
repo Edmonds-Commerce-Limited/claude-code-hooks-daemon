@@ -28,9 +28,7 @@ class TestEnforceLlmQaHandler:
 
     # ── matches() ──
 
-    def test_matches_run_all_sh(
-        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
-    ) -> None:
+    def test_matches_run_all_sh(self, handler: EnforceLlmQaHandler, bash_hook_input: Any) -> None:
         """Blocks ./scripts/qa/run_all.sh."""
         assert handler.matches(bash_hook_input("./scripts/qa/run_all.sh")) is True
 
@@ -38,25 +36,24 @@ class TestEnforceLlmQaHandler:
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any
     ) -> None:
         """Blocks run_all.sh even with output redirect."""
-        assert handler.matches(
-            bash_hook_input("./scripts/qa/run_all.sh > /tmp/qa.txt 2>&1; tail -20 /tmp/qa.txt")
-        ) is True
+        assert (
+            handler.matches(
+                bash_hook_input("./scripts/qa/run_all.sh > /tmp/qa.txt 2>&1; tail -20 /tmp/qa.txt")
+            )
+            is True
+        )
 
     def test_matches_run_all_sh_absolute_path(
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any
     ) -> None:
         """Blocks run_all.sh with absolute path."""
-        assert handler.matches(
-            bash_hook_input("/workspace/scripts/qa/run_all.sh")
-        ) is True
+        assert handler.matches(bash_hook_input("/workspace/scripts/qa/run_all.sh")) is True
 
     def test_does_not_match_llm_qa(
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any
     ) -> None:
         """Does NOT block llm_qa.py."""
-        assert handler.matches(
-            bash_hook_input("./scripts/qa/llm_qa.py all")
-        ) is False
+        assert handler.matches(bash_hook_input("./scripts/qa/llm_qa.py all")) is False
 
     def test_does_not_match_individual_qa_scripts(
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any
@@ -91,9 +88,9 @@ class TestEnforceLlmQaHandler:
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any
     ) -> None:
         """Does NOT match git commit whose message mentions the script."""
-        assert handler.matches(
-            bash_hook_input('git commit -m "Integrated into run_all.sh"')
-        ) is False
+        assert (
+            handler.matches(bash_hook_input('git commit -m "Integrated into run_all.sh"')) is False
+        )
 
     def test_does_not_match_glob_of_script(
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any
@@ -112,8 +109,46 @@ class TestEnforceLlmQaHandler:
         assert "llm_qa.py" in result.reason
         assert "run_all.sh" in result.reason
 
+    # ── matches() — invocation vs mention (Plan 00200, dogfooding false positive) ──
+
+    def test_does_not_match_cat_of_run_all_sh(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """`cat` inspects the script's contents, it does not execute it."""
+        assert handler.matches(bash_hook_input("cat scripts/qa/run_all.sh")) is False
+
+    def test_does_not_match_less_of_run_all_sh(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        assert handler.matches(bash_hook_input("less scripts/qa/run_all.sh")) is False
+
+    def test_does_not_match_grep_of_run_all_sh(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        assert handler.matches(bash_hook_input('grep -n "check" scripts/qa/run_all.sh')) is False
+
+    def test_does_not_match_head_of_run_all_sh(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        assert handler.matches(bash_hook_input("head -20 scripts/qa/run_all.sh")) is False
+
+    def test_still_matches_bash_invocation_of_run_all_sh(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """Explicit interpreter invocation still executes the script."""
+        assert handler.matches(bash_hook_input("bash scripts/qa/run_all.sh")) is True
+
     # ── Acceptance tests ──
 
     def test_has_acceptance_tests(self, handler: EnforceLlmQaHandler) -> None:
         tests = handler.get_acceptance_tests()
         assert len(tests) > 0
+
+    def test_has_negative_case_for_cat_inspection(self, handler: EnforceLlmQaHandler) -> None:
+        """Plan 00200 Task 6.4: every DENY-capable handler needs a near-miss ALLOW case."""
+        from claude_code_hooks_daemon.core.hook_result import Decision
+
+        tests = handler.get_acceptance_tests()
+        allow_tests = [t for t in tests if t.expected_decision == Decision.ALLOW]
+        assert allow_tests, "Expected at least one ALLOW acceptance test (near-miss case)"
+        assert any("cat " in t.command for t in allow_tests)

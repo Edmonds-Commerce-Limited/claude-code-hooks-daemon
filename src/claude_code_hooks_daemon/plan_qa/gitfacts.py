@@ -15,6 +15,7 @@ Strictly read-only: this module never mutates the repository.
 """
 
 import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -43,12 +44,48 @@ class StagedChange:
 class GitFacts:
     """Read-only git facts for one repository root."""
 
-    def __init__(self, repo_root: Path) -> None:
+    def __init__(self, repo_root: Path, pathspecs: Sequence[str] | None = None) -> None:
+        """Initialise.
+
+        Args:
+            repo_root: Repository root ``git -C`` targets.
+            pathspecs: The commit's explicit pathspec arguments, when the
+                inspected ``git commit`` invocation names paths directly
+                (``git commit <pathspec>...``). ``None``/empty means a bare
+                commit (or ``-a``), which commits the INDEX — the original,
+                unscoped behaviour. See :meth:`staged_changes`.
+        """
         self._repo_root = repo_root
+        self._pathspecs = tuple(pathspecs) if pathspecs else ()
 
     def staged_changes(self) -> tuple[StagedChange, ...]:
-        """Staged (index vs HEAD) changes, with rename/copy detection."""
-        output = self._git_output("diff", "--cached", "--name-status", "-z", "--find-renames")
+        """Changes THIS commit will actually contain.
+
+        A bare ``git commit`` (or ``git commit -a``) commits the INDEX, so
+        this compares the index to HEAD (``git diff --cached``).
+
+        A ``git commit <pathspec>...`` form instead commits the CURRENT
+        WORKING TREE content of exactly the named paths — regardless of
+        whether they are staged — and ignores anything ELSE that happens to
+        be staged; git does not commit "everything staged plus these
+        paths", it commits only these paths' current content. When
+        pathspecs were supplied at construction we mirror that exactly: a
+        working-tree-vs-HEAD diff (not ``--cached``) scoped to those paths,
+        so a modified-but-unstaged path named on the commit line is still
+        seen, and a staged-but-unnamed path is correctly excluded.
+        """
+        if self._pathspecs:
+            output = self._git_output(
+                "diff",
+                "HEAD",
+                "--name-status",
+                "-z",
+                "--find-renames",
+                "--",
+                *self._pathspecs,
+            )
+        else:
+            output = self._git_output("diff", "--cached", "--name-status", "-z", "--find-renames")
         if output is None:
             return ()
         return _parse_name_status_z(output)

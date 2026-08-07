@@ -192,8 +192,19 @@ def staged_context(
     plan_dir_rel: str,
     policy: QaPolicy,
     commit_message: str | None = None,
+    pathspecs: Sequence[str] | None = None,
 ) -> CheckContext:
-    """Build the Stage 2 (COMMIT) context: staged git facts + tree views."""
+    """Build the Stage 2 (COMMIT) context: staged git facts + tree views.
+
+    Args:
+        pathspecs: The commit's explicit pathspec arguments, when the
+            inspected ``git commit`` invocation names paths directly
+            (``git commit <pathspec>...``). Threaded straight into
+            :class:`GitFacts` so ``staged_changes()`` reflects what THIS
+            commit will actually contain — the working tree for those
+            paths, not just the index. ``None`` (a bare commit) preserves
+            the original index-based behaviour.
+    """
     tree, readme = _tree_and_readme(project_root, plan_dir_rel, policy)
     return _with_journal(
         CheckContext(
@@ -207,7 +218,7 @@ def staged_context(
             collision_allowlist=frozenset(policy.collision_allowlist),
             tree=tree,
             readme=readme,
-            gitfacts=GitFacts(project_root),
+            gitfacts=GitFacts(project_root, pathspecs=pathspecs),
             commit_message=commit_message,
         ),
         policy,

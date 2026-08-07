@@ -475,6 +475,45 @@ class TestPlanNumberHelperHandler:
                 hook_input
             ), f"Should NOT match (find on specific folder): {command}"
 
+    def test_ignores_find_piped_to_wc_for_a_count(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        """Regression (Plan 00200): a count of plans is NOT plan-number discovery.
+
+        Bug: ``find CLAUDE/Plan -maxdepth 1 -type d -name '[0-9]*' | wc -l`` (used to
+        compute a statistics line, e.g. "N active plans") was blocked with "Next plan
+        number is X" — a response that makes no sense for a COUNT query. ``wc`` counts
+        lines/words; it can never be part of a "find the latest/highest number" idiom,
+        so a find piped to wc is never plan-number discovery regardless of which other
+        pattern it also happens to match.
+        """
+        false_positives = [
+            "find CLAUDE/Plan -maxdepth 1 -type d -name '[0-9]*' | wc -l",
+            "find CLAUDE/Plan -maxdepth 1 -type d | wc -l",
+            "ls -d CLAUDE/Plan/0* 2>/dev/null | wc -l",
+        ]
+
+        for command in false_positives:
+            hook_input = {
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+            }
+            assert not handler_enabled.matches(
+                hook_input
+            ), f"Should NOT match (counting, not discovery): {command}"
+
+    def test_still_detects_find_with_sort_and_tail_despite_wc_guard(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        """Guardrail: the wc exclusion must not swallow real discovery attempts."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "find CLAUDE/Plan -maxdepth 1 -type d -name '[0-9]*' | sort | tail -1"
+            },
+        }
+        assert handler_enabled.matches(hook_input) is True
+
     def test_ignores_echo_printf_referencing_specific_plan_folder(
         self, handler_enabled: PlanNumberHelperHandler
     ) -> None:

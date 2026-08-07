@@ -119,6 +119,18 @@ _BASH_GREP_EXTRACT = re.compile(
     rf"(?:grep|rg)\s+{_FLAG_SKIP}[\"']([^\"']+)[\"']" rf"|(?:grep|rg)\s+{_FLAG_SKIP}(\S+)"
 )
 
+# Recursive-scan indicators for a Bash grep/rg command. Only the SHORT-flag
+# branch admits any cluster containing r/R (grep's only letter meaning
+# "recursive" — no other GNU grep short option overlaps with it); the
+# negative lookahead after the leading '-' stops that branch from reaching
+# into a LONG flag name that merely happens to contain the letter (e.g.
+# --color). Long flags are matched by exact name only.
+_RECURSIVE_SCAN_FLAG = re.compile(r"(?<![\w-])-(?:-recursive\b|(?!-)[A-Za-z]*[rR][A-Za-z]*\b)")
+
+# Shell segment terminators — a Bash grep/rg invocation's positional
+# arguments stop at the first one of these (or end of string).
+_SEGMENT_TERMINATOR = re.compile(r"&&|\|\||[;|]")
+
 # --- LSP operation mapping ---
 
 _LSP_OP_DEFINITION = "goToDefinition"
@@ -189,12 +201,53 @@ class LspEnforcementHandler(Handler):
         if self._get_no_lsp_mode() == NoLspMode.DISABLE and not self._is_lsp_available():
             return False
 
+        # A Bash grep/rg already scoped to ONE named file is a literal-string
+        # check on a file the caller already knows about, not a project-wide
+        # symbol lookup — LSP's goToDefinition/findReferences/workspaceSymbol
+        # have nothing extra to offer over just reading that one file.
+        if tool_name == ToolName.BASH:
+            command = get_bash_command(hook_input)
+            if command and self._is_single_file_bash_grep(command):
+                return False
+
         # Extract the search pattern
         pattern = self._extract_search_pattern(hook_input, tool_name)
         if not pattern:
             return False
 
         return self._is_symbol_like(pattern)
+
+    def _is_single_file_bash_grep(self, command: str) -> bool:
+        """True when a Bash grep/rg command's target is exactly one named file.
+
+        False (i.e. "still enforce") whenever the scan could plausibly touch
+        more than one file: a recursive flag, a directory-looking target
+        (trailing ``/``, ``.``/``..``), a glob, more than one positional
+        argument, or NO target at all (defaults to the whole cwd/stdin).
+        """
+        match = _BASH_GREP_EXTRACT.search(command)
+        if not match:
+            return False
+        invocation = command[match.start() : match.end()]
+        if _RECURSIVE_SCAN_FLAG.search(invocation):
+            return False
+
+        tail = command[match.end() :]
+        terminator = _SEGMENT_TERMINATOR.search(tail)
+        if terminator:
+            tail = tail[: terminator.start()]
+        targets = tail.split()
+
+        if len(targets) != 1:
+            return False
+        target = targets[0]
+        if target in (".", ".."):
+            return False
+        if target.endswith("/"):
+            return False
+        if any(glob_char in target for glob_char in ("*", "?", "[")):
+            return False
+        return True
 
     def _extract_search_pattern(
         self, hook_input: dict[str, Any], tool_name: str | None
@@ -410,6 +463,22 @@ class LspEnforcementHandler(Handler):
                     r"goToDefinition|workspaceSymbol",
                 ],
                 safety_notes="Uses rg - safe, read-only operation",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="Allow Bash grep scoped to one named file",
+                command='grep -n "hook_input" src/claude_code_hooks_daemon/core/hook_result.py',
+                description=(
+                    "A grep already scoped to a single named file is a literal-"
+                    "string check on a file the caller already knows about, not "
+                    "a project-wide symbol lookup — must NOT be blocked. "
+                    "Regression test for a dogfooding false positive (Plan 00200)."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Uses grep - safe, read-only operation",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,

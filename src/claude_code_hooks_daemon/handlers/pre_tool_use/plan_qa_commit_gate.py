@@ -44,6 +44,30 @@ _MESSAGE_FLAGS: Final[frozenset[str]] = frozenset({"-m", "--message"})
 _MESSAGE_FLAG_PREFIXES: Final[tuple[str, ...]] = ("-m", "--message=")
 _MESSAGE_JOINER: Final[str] = "\n\n"
 
+# git-commit flags that take a SEPARATE value token (not a pathspec). Kept
+# narrow to the flags realistically seen on a commit line — sufficient to
+# stop e.g. the -m message text or an --author value from being mistaken
+# for a path, without attempting a full git-commit(1) CLI parse.
+_VALUE_FLAGS: Final[frozenset[str]] = frozenset(
+    {
+        "-m",
+        "--message",
+        "-F",
+        "--file",
+        "-c",
+        "-C",
+        "--reuse-message",
+        "--reedit-message",
+        "--fixup",
+        "--squash",
+        "--author",
+        "--date",
+        "-u",
+        "--untracked-files",
+    }
+)
+_PATHSPEC_SEPARATOR: Final[str] = "--"
+
 
 def _tokenise(command: str) -> list[str]:
     """Shell-tokenise ``command``; empty list when unparseable."""
@@ -79,6 +103,41 @@ def _extract_commit_message(tokens: list[str]) -> str | None:
             parts.append(token[len(_MESSAGE_FLAG_PREFIXES[1]) :])
         index += 1
     return _MESSAGE_JOINER.join(parts) if parts else None
+
+
+def _extract_commit_pathspecs(tokens: list[str]) -> list[str]:
+    """Trailing pathspec arguments to ``git commit`` (paths, not flags/values).
+
+    A ``git commit <pathspec>...`` form commits the CURRENT WORKING TREE
+    content of exactly those paths, regardless of what is (or isn't)
+    staged for them — different semantics from a bare ``git commit``, which
+    commits the index. Empty when the invocation has no trailing paths (a
+    bare commit, or ``-a``).
+    """
+    try:
+        commit_index = tokens.index(_COMMIT_TOKEN)
+    except ValueError:
+        return []
+
+    pathspecs: list[str] = []
+    seen_separator = False
+    index = commit_index + 1
+    while index < len(tokens):
+        token = tokens[index]
+        if not seen_separator and token == _PATHSPEC_SEPARATOR:
+            seen_separator = True
+            index += 1
+            continue
+        if not seen_separator and token.startswith("-"):
+            flag = token.split("=", 1)[0]
+            if flag in _VALUE_FLAGS and "=" not in token:
+                index += 2  # skip the flag AND its separate value token
+                continue
+            index += 1  # boolean flag, or `flag=value` (no separate token)
+            continue
+        pathspecs.append(token)
+        index += 1
+    return pathspecs
 
 
 class PlanQaCommitGateHandler(Handler):
@@ -118,12 +177,14 @@ class PlanQaCommitGateHandler(Handler):
             return HookResult(decision=Decision.ALLOW, context=[])
 
         command = hook_input.get(HookInputField.TOOL_INPUT, {}).get(_FIELD_COMMAND, "")
+        tokens = _tokenise(command)
         try:
             context = staged_context(
                 project_root=project_root,
                 plan_dir_rel=plan_dir_rel,
                 policy=self._plan_qa,
-                commit_message=_extract_commit_message(_tokenise(command)),
+                commit_message=_extract_commit_message(tokens),
+                pathspecs=_extract_commit_pathspecs(tokens),
             )
         except FileNotFoundError:
             return HookResult(

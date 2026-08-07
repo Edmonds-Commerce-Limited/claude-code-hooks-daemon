@@ -528,6 +528,87 @@ class TestPipeBlockerEdgeCases:
 
 
 # ===================================================================================
+# Phase 12: message-body false positives (Plan 00200, Task 6.4)
+#
+# A live session hit `git commit -m` with a multi-line, heredoc-embedded
+# message that happened to CONTAIN a literal "| tail -20" as prose (e.g.
+# documenting this very handler). The raw `| tail`/`| head` regex search
+# does not distinguish a real shell pipe from that same text sitting inside
+# a commit message's data — -m/-F carry human-authored prose, not shell
+# syntax to execute.
+# ===================================================================================
+
+
+class TestPipeBlockerMessageBodyFalsePositive:
+    """`-m`/`-F` message VALUES are data, never shell syntax to scan for pipes."""
+
+    @pytest.fixture
+    def handler(self) -> PipeBlockerHandler:
+        return PipeBlockerHandler()
+
+    def test_no_match_single_line_dash_m_containing_pipe_to_tail(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": 'git commit -m "See: pytest tests/ 2>&1 | tail -20 is now blocked"'
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_heredoc_embedded_dash_m_containing_pipe_to_tail(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        """The canonical multi-line commit-message idiom used throughout this repo."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": (
+                    "git commit -m \"$(cat <<'EOF'\n"
+                    "Fix: document that `pytest tests/ 2>&1 | tail -20` is blocked\n"
+                    "EOF\n"
+                    ')"'
+                )
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_long_message_flag_containing_pipe_to_head(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'git commit --message "example: docker ps | head -5"'},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_real_pipe_after_message_flag_still_blocked(self, handler: PipeBlockerHandler) -> None:
+        """A real pipe elsewhere in the SAME command must still be caught."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'git commit -m "fix" && pytest tests/ | tail -20'},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_real_pipe_before_message_flag_still_blocked(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'pytest tests/ | tail -20; git commit -m "fix"'},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_handle_reason_uses_raw_command_not_redacted(self, handler: PipeBlockerHandler) -> None:
+        """The block message still shows the FULL real command to the agent."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'git commit -m "fix" && pytest tests/ | tail -20'},
+        }
+        result = handler.handle(hook_input)
+        assert 'git commit -m "fix" && pytest tests/ | tail -20' in result.reason
+
+
+# ===================================================================================
 # Phase 7: handle() method — blacklisted vs unknown messages
 # ===================================================================================
 
@@ -911,6 +992,14 @@ class TestPipeBlockerAcceptanceTests:
         tests = handler.get_acceptance_tests()
         titles = [t.title for t in tests]
         assert any("unknown" in title.lower() for title in titles)
+
+    def test_includes_negative_case_for_message_body(self, handler: PipeBlockerHandler) -> None:
+        """Plan 00200 Task 6.4: at least one near-miss ALLOW case is required."""
+        from claude_code_hooks_daemon.core import Decision
+
+        tests = handler.get_acceptance_tests()
+        allow_tests = [t for t in tests if t.expected_decision == Decision.ALLOW]
+        assert allow_tests, "Expected at least one ALLOW acceptance test (near-miss case)"
 
 
 # ===================================================================================

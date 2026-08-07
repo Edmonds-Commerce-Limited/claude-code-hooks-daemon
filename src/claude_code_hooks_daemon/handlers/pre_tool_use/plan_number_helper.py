@@ -77,6 +77,15 @@ class PlanNumberHelperHandler(Handler):
         # Get the plan directory path (relative to workspace)
         plan_dir = self._track_plans_in_project
 
+        # A command piped to `wc` COUNTS lines/words/bytes; it can never be
+        # part of a "find the latest/highest plan number" idiom (which needs
+        # sort+tail or similar to extract ONE value, not a count). A count
+        # of how many plans exist (e.g. for a statistics line) is a
+        # different, legitimate operation this handler must not misfire on,
+        # regardless of which other discovery-shaped pattern it also matches.
+        if plan_dir in command and re.search(r"\|\s*wc\b", command):
+            return False
+
         # Pattern detection: Commands trying to discover plan numbers
         # These patterns indicate Claude is trying to find the latest plan
 
@@ -231,6 +240,23 @@ class PlanNumberHelperHandler(Handler):
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"plan number"],
                 safety_notes="Handler blocks broken command and provides correct plan number instead.",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="Allow counting plans with wc (not number discovery)",
+                command="find CLAUDE/Plan -maxdepth 1 -type d -name '[0-9]*' | wc -l",
+                description=(
+                    "A count of how many plans exist (e.g. for a statistics "
+                    "line) is not an attempt to discover the NEXT plan number "
+                    "and must NOT be blocked — 'wc' counts, it never extracts "
+                    "a single latest value. Regression test for a dogfooding "
+                    "false positive (Plan 00200)."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Read-only count of tracked directories",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
