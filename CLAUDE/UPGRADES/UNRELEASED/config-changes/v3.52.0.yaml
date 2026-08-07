@@ -33,6 +33,40 @@ config_changes:
         needs to edit a non-today day-file (e.g. scripted backfill), set
         plan_workflow.qa.journal.today_only_mode: advise or off in your
         .claude/hooks-daemon.yaml.
+    - key: handlers.pre_tool_use.sensitive_content
+      recommended: true
+      dormant: true
+      description: >-
+        NEW PreToolUse blocking handler (Plan 00201). Denies a Write/Edit
+        whose content matches either of two independently configurable
+        sources: options.public_patterns (named regexes, safe to name --
+        the deny reason shows the pattern name and the exact matched text)
+        and options.secret_word_list_path (default
+        .claude/block-words.secret, one gitignored term per line, matched
+        literally and case-insensitively). A secret-list match is NEVER
+        disclosed anywhere -- not in the deny reason, not in any daemon
+        log, not in payload capture, not in a PreCompact transcript
+        archive -- the deny reason names only a 1-based index
+        (entry N of M in the secret word list). Both sources are inert by
+        default: public_patterns defaults to an empty list and a missing
+        secret word list file is a silent no-op, so the handler ships
+        dormant until a project populates either. A companion whole-tree
+        QA backstop (scripts/qa/check_sensitive_content.py, wired into
+        run_all.sh / llm_qa.py as check 16) enforces the same two sources
+        against every git-tracked file, for content that never passed
+        through a Write/Edit tool call (git mv, external editors, other
+        agents).
+      migration_note: >-
+        Dormant by default -- no behaviour changes until you populate
+        options.public_patterns and/or create
+        .claude/block-words.secret (see
+        .claude/block-words.secret.example for the file format). The
+        secret word list MUST be gitignored (*.secret / *.secrets are
+        added to the default .gitignore patterns this release,
+        session_start.gitignore_safety_checker will warn if missing) and
+        must never be committed, printed, or pasted into a bug report --
+        only its gitignored file path and a numeric line index are ever
+        surfaced anywhere.
   renamed: []
   removed: []
   changed: []

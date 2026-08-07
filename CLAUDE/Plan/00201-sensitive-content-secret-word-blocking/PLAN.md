@@ -134,13 +134,18 @@ other source.
 
 ### Phase 3: QA backstop
 
-- [ ] ⬜ **Task 3.1**: `scripts/qa/check_sensitive_content.py` — whole
+- [x] ✅ **Task 3.1**: `scripts/qa/check_sensitive_content.py` — whole
   tracked-tree scan (`git ls-files`), same two sources, `file:line` +
   rule-index reporting (never the term), JSON output matching sibling QA
   scripts, non-zero exit on any hit. Excludes `.claude/block-words.secret`
   itself from its own scan output by construction (it is gitignored, so
-  `git ls-files` never lists it — verified, not assumed).
-- [ ] ⬜ **Task 3.2**: Wire into `scripts/qa/run_all.sh` (and `llm_qa.py`).
+  `git ls-files` never lists it — verified by running it with the real file
+  present, not assumed).
+- [ ] 🔄 **Task 3.2**: Wire into `scripts/qa/run_all.sh` (and `llm_qa.py`).
+  Written but deliberately NOT yet committed: the checker reports 35 true
+  violations against the current tree, so wiring it in now would land a
+  knowingly-red gate that blocks every other commit's verification. Lands
+  together with the redaction pass (Task 5.1) so the gate goes in green.
 - [ ] ⬜ **Task 3.3** (opportunistic, only if trivial): correct the "10
   checks" claim in `CLAUDE.md:45` and `RELEASING.md` to match `run_all.sh`
   reality, per team-lead's heads-up — skip if Plan 00200 is actively editing
@@ -157,6 +162,23 @@ other source.
 - [ ] ⬜ **Task 4.5**: Live dogfood — real `block-words.secret` with a
   nonsense term, Write containing it -> deny fires, term appears in no log
   and no payload-capture file (checked directly, not assumed).
+
+### Phase 5: Dogfooding fallout
+
+- [x] ✅ **Task 5.0**: The handler blocked maintenance of its own word list.
+  Found immediately on first real use: the initial `Write` lands (nothing is
+  configured yet, so nothing matches), then every later `Edit` to add or
+  correct an entry is denied — as `entry 8 of 10`, an index deliberately
+  meaningless without the file you are being prevented from opening. The
+  file whose entire purpose is to enumerate blocked terms was the one file
+  that could not contain them. Fixed with `_is_secret_list_itself()`,
+  resolving both sides to absolute paths (the config value is repo-relative;
+  the tool always sends absolute). The tracked `.example` seed is
+  deliberately NOT exempt — it ships, so a real term pasted there would be
+  published. 4 tests, one of which is a control asserting the `.example`
+  stays checked so the fix cannot pass by disabling matching wholesale.
+- [ ] ⬜ **Task 5.1**: Redaction pass — the 35 public-pattern violations the
+  checker reports, including three in shipped source. Ships with Task 3.2.
 
 ## Success Criteria
 

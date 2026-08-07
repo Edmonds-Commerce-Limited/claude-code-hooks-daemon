@@ -240,6 +240,63 @@ class TestExcludePaths:
             assert handler.matches(hook_input) is False
 
 
+class TestSecretListSelfExclusion:
+    """The word list itself is the one file that MUST be allowed to hold the terms.
+
+    Without this, the handler bricks its own configuration: the first Write
+    succeeds (the list is empty, so nothing matches yet), and every subsequent
+    Edit to add, remove, or correct a term is denied by the very terms the file
+    exists to declare. Discovered by dogfooding during Plan 00201 -- adding one
+    term to this repo's own list was blocked as "entry 8 of 10".
+    """
+
+    def test_writing_the_secret_list_itself_is_not_matched(self, tmp_path: Path) -> None:
+        secret_file = tmp_path / "block-words.secret"
+        secret_file.write_text("alpha-term\nbeta-term\n")
+        handler = _handler_with_secret_file(secret_file)
+
+        # Sanity: the same content in ANY other file is still caught, so this
+        # test cannot pass merely because matching is broken.
+        assert handler.matches(_write_input(str(tmp_path / "other.md"), "beta-term")) is True
+
+        assert handler.matches(_write_input(str(secret_file), "alpha-term\nbeta-term\n")) is False
+
+    def test_editing_the_secret_list_to_add_a_term_is_not_matched(self, tmp_path: Path) -> None:
+        secret_file = tmp_path / "block-words.secret"
+        secret_file.write_text("alpha-term\n")
+        handler = _handler_with_secret_file(secret_file)
+
+        hook_input = _edit_input(str(secret_file), "alpha-term\n", "alpha-term\ngamma-term\n")
+        assert handler.matches(hook_input) is False
+
+    def test_relative_configured_path_still_self_excludes(self, tmp_path: Path) -> None:
+        """The config value is repo-relative; the tool always sends an absolute path.
+
+        A naive string comparison would miss, so resolution must happen on both
+        sides before comparing.
+        """
+        secret_file = tmp_path / ".claude" / "block-words.secret"
+        secret_file.parent.mkdir(parents=True)
+        secret_file.write_text("alpha-term\n")
+
+        handler = SensitiveContentHandler()
+        handler._secret_word_list_path = ".claude/block-words.secret"
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
+            return_value=str(tmp_path),
+        ):
+            assert handler.matches(_write_input(str(secret_file), "alpha-term\n")) is False
+
+    def test_example_seed_file_is_still_checked(self, tmp_path: Path) -> None:
+        """`.example` is TRACKED, so a real term pasted into it would be published."""
+        secret_file = tmp_path / "block-words.secret"
+        secret_file.write_text("alpha-term\n")
+        handler = _handler_with_secret_file(secret_file)
+
+        example = tmp_path / "block-words.secret.example"
+        assert handler.matches(_write_input(str(example), "alpha-term\n")) is True
+
+
 class TestGetClaudeMd:
     def test_returns_guidance_mentioning_no_echo(self) -> None:
         handler = SensitiveContentHandler()

@@ -73,14 +73,25 @@ handlers:
 
     # Blocks two independent sources of sensitive content (Plan 00201):
     # public_patterns are safe to name in the deny message (that is what
-    # makes them fixable); a secret_word_list_path entry match is NEVER
-    # named, only a numeric index into the gitignored file. Populated here
-    # per the presentation-quality audit that motivated this handler
+    # makes them fixable) and should stay STRUCTURAL — a shape any reviewer
+    # could describe without seeing the leak itself. A specific identifier
+    # (an employer/client name, a real person's name) is exactly what
+    # secret_word_list_path is for: it is never named anywhere, only a
+    # numeric index into the gitignored file. Populated here per the
+    # presentation-quality audit that motivated this handler
     # (untracked/resume-readiness/REDACTION-MAP.md). Profanity is a
     # supported public_patterns category too, but deliberately not
     # populated here with a literal word list — the handful of historic
     # instances are being paraphrased once via the separate redaction pass
     # rather than held open-ended in a tracked config file.
+    #
+    # A generic "non-placeholder home directory" structural pattern was
+    # tried and dropped: this repo's own test suite uses short synthetic
+    # strings under the home-dir prefix pervasively as fixture data for
+    # unrelated path-parsing tests (e.g. root_recursion_guard, pipe_blocker),
+    # so the heuristic could not distinguish a real leaked path from a
+    # fixture without naming the specific real segments — which belongs in
+    # the secret list, not here.
     sensitive_content:
       enabled: true
       priority: 14
@@ -89,13 +100,22 @@ handlers:
           - name: vhosts-path
             pattern: '/var/www/vhosts'
             description: 'employer/hosting-provider server path convention'
-          - name: non-placeholder-home-dir
-            pattern: '/home/(?!user(?:/|$))[a-zA-Z0-9_.-]+'
-            description: 'a real (non-placeholder) home directory — use /home/user in examples'
           - name: session-uuid
             pattern: '\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b'
             description: 'a real session UUID — use 00000000-0000-0000-0000-000000000000 in examples'
         secret_word_list_path: .claude/block-words.secret
+        exclude_paths:
+          # Confirmed-legitimate synthetic UUID fixtures (REDACTION-MAP.md
+          # item 4) — these generate UUID-shaped strings on purpose as test
+          # data, they do not contain a real session UUID.
+          - 'tests/unit/handlers/status_line/test_thread_registry.py'
+          - 'tests/unit/supervise/test_session_identity.py'
+          # This handler's own source/tests necessarily demonstrate the
+          # public patterns they implement (e.g. the vhosts-path example in
+          # get_acceptance_tests() and unit-test fixtures) — self-referential
+          # documentation of the feature, not a leak.
+          - 'src/claude_code_hooks_daemon/handlers/pre_tool_use/sensitive_content.py'
+          - 'tests/unit/handlers/pre_tool_use/test_sensitive_content.py'
 
     root_recursion_guard:  # Blocks recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME
       enabled: true

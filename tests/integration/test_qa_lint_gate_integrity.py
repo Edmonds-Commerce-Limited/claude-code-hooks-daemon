@@ -142,7 +142,7 @@ def test_lint_parser_reports_violations_from_a_clean_capture(tmp_path: Path) -> 
     )
 
     assert result.returncode == 0, f"parser errored on valid JSON: {result.stderr.strip()}"
-    assert '"total_violations": 1' in result.stdout, (
-        f"Expected the single seeded violation to be reported. Got: {result.stdout.strip()[:400]}"
-    )
+    assert (
+        '"total_violations": 1' in result.stdout
+    ), f"Expected the single seeded violation to be reported. Got: {result.stdout.strip()[:400]}"
     assert '"passed": false' in result.stdout, "A capture with a violation must not report passed"

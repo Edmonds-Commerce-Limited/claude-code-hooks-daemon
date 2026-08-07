@@ -146,6 +146,8 @@ class SensitiveContentHandler(Handler):
         file_path = str(tool_input.get(_FIELD_FILE_PATH, ""))
         if not file_path or self._is_excluded(file_path):
             return False
+        if self._is_secret_list_itself(file_path):
+            return False
 
         content = self._get_content(hook_input)
         if not content:
@@ -166,14 +168,50 @@ class SensitiveContentHandler(Handler):
         overrides never depend on ``ProjectContext``/daemon config being
         initialised.
         """
-        if self._secret_word_list_path:
-            path = Path(self._secret_word_list_path)
-            if not path.is_absolute():
-                project_root = resolve_project_root()
-                if project_root is not None:
-                    path = Path(project_root) / path
+        path = self._resolved_secret_list_path()
+        if path is not None:
             return sr.get_cached_secret_terms(path)
         return sr.get_active_secret_terms()
+
+    def _resolved_secret_list_path(self) -> Path | None:
+        """Absolute path of this handler's configured secret word list, if any.
+
+        The config value is repo-relative but every tool call carries an
+        absolute ``file_path``, so both sides must be resolved before they can
+        be compared (see ``_is_secret_list_itself``).
+        """
+        if not self._secret_word_list_path:
+            return None
+        path = Path(self._secret_word_list_path)
+        if not path.is_absolute():
+            project_root = resolve_project_root()
+            if project_root is not None:
+                path = Path(project_root) / path
+        return path
+
+    def _is_secret_list_itself(self, file_path: str) -> bool:
+        """True when the write targets the word list that defines the terms.
+
+        The list is the one file that MUST be allowed to contain its own
+        terms. Without this the handler bricks its own configuration: the
+        first write lands (nothing is configured yet, so nothing matches),
+        and every later edit to add, remove or correct an entry is denied by
+        the very terms the file exists to declare -- reported only as an
+        opaque index, with no way to act on it. Found by dogfooding.
+
+        Deliberately scoped to the resolved list path alone. The tracked
+        ``.example`` seed is NOT exempt: it ships in the repo, so a real term
+        pasted into it would be published -- exactly what this handler is for.
+        """
+        configured = self._resolved_secret_list_path()
+        if configured is None:
+            return False
+        try:
+            return Path(file_path).resolve() == configured.resolve()
+        except (OSError, ValueError):
+            # An unresolvable path is simply not the list; fall through to
+            # normal scanning rather than failing open on the whole check.
+            return False
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
