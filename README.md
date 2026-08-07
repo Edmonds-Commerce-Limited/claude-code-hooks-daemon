@@ -6,7 +6,19 @@
 ![Tests](https://img.shields.io/badge/tests-10800%2B%20passing-success)
 ![Coverage](https://img.shields.io/badge/coverage-95%25%20required-success)
 
-A better way to build and maintain Claude Code hooks.
+**A better way to build and maintain Claude Code hooks.**
+
+A long-running Python daemon that Claude Code's hook events are forwarded to
+over a Unix socket. Instead of one script per hook, you register one thin
+forwarder per event once, and every rule after that is a Python handler class —
+blocking, advisory or context-injecting — that the daemon dispatches by
+priority. Handlers are hot-reloaded by restarting the daemon, not by restarting
+your session, so you can write and test a hook with Claude Code while Claude
+Code is using it.
+
+Ships with a large set of built-in handlers (destructive-command blocking,
+TDD enforcement, QA-suppression and security-antipattern detection across 11
+languages, plan/journal workflow QA, status line), all opt-in via one YAML file.
 
 ---
 
