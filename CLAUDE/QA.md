@@ -155,7 +155,7 @@ LIBRARY HANDLERS (Generic, Reusable):
 ✅ Reusable by any project
 ✅ NO project-specific references
 
-Examples: destructive_git, tdd_enforcement, sed_blocker, eslint_disable
+Examples: destructive_git, tdd_enforcement, sed_blocker, qa_suppression
 
 PROJECT PLUGINS (Project-Specific):
 ⚠️ Project-specific functionality
@@ -499,7 +499,7 @@ Merge (ONLY after all 4 gates pass)
 - `destructive_git` - Blocks dangerous git operations (generic)
 - `tdd_enforcement` - Enforces test-first development (generic)
 - `sed_blocker` - Blocks sed usage (generic)
-- `eslint_disable` - Prevents ESLint suppressions (generic)
+- `qa_suppression` - Prevents QA suppression annotations across 11 languages (generic)
 
 ### Project Plugins (.claude/hooks/handlers/)
 

@@ -36,7 +36,12 @@ echo "Running black formatter (auto-fixing)..."
 
 # Run black to auto-format files
 # Note: black doesn't output JSON, so we parse text output
-mapfile -t FORMAT_PATHS < <(qa_format_paths)
+# NOT `mapfile` — that is bash 4+, and macOS ships /bin/bash 3.2.57.
+# tests/integration/test_bash32_portability.py enforces this.
+FORMAT_PATHS=()
+while IFS= read -r _scope_path; do
+    FORMAT_PATHS+=("${_scope_path}")
+done < <(qa_format_paths)
 if venv_tool black "${FORMAT_PATHS[@]}" 2>&1 | tee "${OUTPUT_FILE}.raw"; then
     EXIT_CODE=0
 else

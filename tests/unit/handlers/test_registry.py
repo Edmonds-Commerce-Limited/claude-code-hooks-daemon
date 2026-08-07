@@ -595,8 +595,16 @@ class TestRegisterAllEdgeCases:
 
         assert count == 0
 
-    def test_register_all_continues_when_pass2_import_fails(self) -> None:
-        """register_all logs warning and continues when pass 2 import fails (lines 253-255)."""
+    def test_register_all_raises_when_pass2_import_fails(self) -> None:
+        """register_all FAILS FAST when a Pass 2 production handler import fails.
+
+        Regression test: Pass 2 previously swallowed import errors with a bare
+        ``except Exception: continue``, silently disabling protection with no
+        crash and no test-time signal - directly contradicting the FAIL FAST
+        comment already present on Pass 1's identical (bare) import of the
+        same module. A production handler module that fails to import must
+        crash the daemon loudly, exactly like Pass 1 already does.
+        """
         registry = HandlerRegistry()
         router = EventRouter()
 
@@ -615,11 +623,8 @@ class TestRegisterAllEdgeCases:
             "claude_code_hooks_daemon.handlers.registry.importlib.import_module",
             side_effect=counting_import,
         ):
-            # Should not crash - logs warning and continues
-            count = registry.register_all(router)
-
-        # Some modules will fail on pass 2 but code should not crash
-        assert count >= 0
+            with pytest.raises(Exception, match="Import failed in pass 2"):
+                registry.register_all(router)
 
 
 class TestGetConfigKey:

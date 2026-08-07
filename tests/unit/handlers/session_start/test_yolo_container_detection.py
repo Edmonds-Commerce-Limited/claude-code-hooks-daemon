@@ -616,45 +616,15 @@ class TestHandleResumeSession:
 
 
 # ---------------------------------------------------------------------------
-# _is_resume_session()
-# ---------------------------------------------------------------------------
-
-
-class TestIsResumeSession:
-    """_is_resume_session internal method."""
-
-    def test_returns_true_for_large_transcript(self, tmp_path: Path) -> None:
-        handler = YoloContainerDetectionHandler()
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text("x" * 200, encoding="utf-8")
-        assert handler._is_resume_session({"transcript_path": str(transcript)}) is True
-
-    def test_returns_false_for_nonexistent_transcript(self, tmp_path: Path) -> None:
-        handler = YoloContainerDetectionHandler()
-        assert (
-            handler._is_resume_session({"transcript_path": str(tmp_path / "missing.jsonl")})
-            is False
-        )
-
-    def test_returns_false_for_empty_transcript_path(self) -> None:
-        handler = YoloContainerDetectionHandler()
-        assert handler._is_resume_session({"transcript_path": ""}) is False
-
-    def test_returns_false_for_missing_transcript_key(self) -> None:
-        handler = YoloContainerDetectionHandler()
-        assert handler._is_resume_session({}) is False
-
-    def test_returns_false_on_oserror_from_stat(self, tmp_path: Path) -> None:
-        handler = YoloContainerDetectionHandler()
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text("x" * 200, encoding="utf-8")
-        with patch("pathlib.Path.stat", side_effect=OSError("Permission denied")):
-            assert handler._is_resume_session({"transcript_path": str(transcript)}) is False
-
-
-# ---------------------------------------------------------------------------
 # handle() — error handling
 # ---------------------------------------------------------------------------
+
+# is_resume_session is a shared utility (utils/session_helpers.py); patch it
+# where this module imports it. Edge-case coverage for the function itself
+# lives in tests/unit/utils/test_session_helpers.py.
+_IS_RESUME_SESSION = (
+    "claude_code_hooks_daemon.handlers.session_start.yolo_container_detection.is_resume_session"
+)
 
 
 class TestHandleErrorHandling:
@@ -664,9 +634,7 @@ class TestHandleErrorHandling:
         env = _container_env(tmp_path, runtime="docker")
         with patch.dict(os.environ, env, clear=False):
             handler = YoloContainerDetectionHandler()
-            with patch.object(
-                handler, "_is_resume_session", side_effect=OSError("File system error")
-            ):
+            with patch(_IS_RESUME_SESSION, side_effect=OSError("File system error")):
                 result = handler.handle(_SESSION_START_NEW)
         assert result.decision == "allow"
         assert any("detection failed" in c for c in result.context)
@@ -675,7 +643,7 @@ class TestHandleErrorHandling:
         env = _container_env(tmp_path, runtime="docker")
         with patch.dict(os.environ, env, clear=False):
             handler = YoloContainerDetectionHandler()
-            with patch.object(handler, "_is_resume_session", side_effect=RuntimeError("bad state")):
+            with patch(_IS_RESUME_SESSION, side_effect=RuntimeError("bad state")):
                 result = handler.handle(_SESSION_START_NEW)
         assert result.decision == "allow"
         assert any("detection failed" in c for c in result.context)

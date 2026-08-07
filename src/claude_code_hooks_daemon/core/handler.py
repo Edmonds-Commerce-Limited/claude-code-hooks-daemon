@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
+    from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
     from claude_code_hooks_daemon.core.hook_result import HookResult
     from claude_code_hooks_daemon.core.rule import Rule
 
@@ -174,7 +175,7 @@ class Handler(ABC):
         """
 
     @abstractmethod
-    def get_acceptance_tests(self) -> list[Any]:
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
         """Return acceptance tests for this handler.
 
         MANDATORY: Every handler MUST define at least one acceptance test.

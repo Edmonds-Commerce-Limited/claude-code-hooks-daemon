@@ -466,7 +466,7 @@ project_handlers:
 | `tdd_enforcement`    | 15       | Yes      | Require test file before handler implementation |
 | `worktree_file_copy` | 15       | Yes      | Prevent copying files between worktrees         |
 | `git_stash`          | 20       | Yes      | Block git stash creation (dangerous workflow)   |
-| `eslint_disable`     | 30       | Yes      | Block ESLint suppression comments               |
+| `qa_suppression`     | 30       | Yes      | Block QA suppression annotations (11 languages) |
 | `web_search_year`    | 55       | Yes      | Ensure current year in search queries           |
 | `british_english`    | 60       | No       | Warn about American spellings (non-blocking)    |
 

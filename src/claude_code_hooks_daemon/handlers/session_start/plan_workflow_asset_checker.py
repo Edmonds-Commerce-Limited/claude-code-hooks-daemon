@@ -16,10 +16,9 @@ trigger; they are only named as also-missing once ``mkplan.bash`` is gone.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.install.plan_workflow import (
@@ -28,10 +27,9 @@ from claude_code_hooks_daemon.install.plan_workflow import (
     PLAN_JOURNALLING_DOC_NAME,
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
-
-_RESUME_TRANSCRIPT_MIN_BYTES = 100
 
 
 def _deploy_cli_hint() -> str:
@@ -61,18 +59,8 @@ class PlanWorkflowAssetCheckerHandler(Handler):
         # directory (relative) when the workflow is enabled, else None.
         self._track_plans_in_project: str | None = None
 
-    def _is_resume_session(self, hook_input: dict[str, Any]) -> bool:
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        if not transcript_path:
-            return False
-        try:
-            path = Path(transcript_path)
-            return path.exists() and path.stat().st_size > _RESUME_TRANSCRIPT_MIN_BYTES
-        except (OSError, ValueError):
-            return False
-
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        if self._is_resume_session(hook_input):
+        if is_resume_session(hook_input):
             return False
         # None => plan workflow disabled in config => nothing to check.
         return self._track_plans_in_project is not None

@@ -39,7 +39,12 @@ echo "Running ruff linter (auto-fixing)..."
 # NO `2>&1` here (Plan 00200): ruff streams its JSON to stdout, so anything
 # merged into that stream corrupts the capture. Diagnostics stay on stderr and
 # reach the console, where they belong.
-mapfile -t LINT_PATHS < <(qa_lint_paths)
+# NOT `mapfile` — that is bash 4+, and macOS ships /bin/bash 3.2.57.
+# tests/integration/test_bash32_portability.py enforces this.
+LINT_PATHS=()
+while IFS= read -r _scope_path; do
+    LINT_PATHS+=("${_scope_path}")
+done < <(qa_lint_paths)
 if venv_tool ruff check --fix "${LINT_PATHS[@]}" --output-format=json > "${OUTPUT_FILE}.raw"; then
     : # No violations found
 fi

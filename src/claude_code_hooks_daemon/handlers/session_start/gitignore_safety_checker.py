@@ -10,9 +10,10 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,6 @@ _REQUIRED_GITIGNORE_PATTERNS: tuple[tuple[str, str, str], ...] = (
 _GITIGNORE_FILE = ".gitignore"
 _CLAUDE_GITIGNORE_FILE = ".claude/.gitignore"
 _CACHE_FILE_NAME = "gitignore_safety_cache.json"
-_RESUME_TRANSCRIPT_MIN_BYTES = 100
 # A leading '!' in .gitignore negates (un-ignores) a pattern — never coverage.
 _GITIGNORE_NEGATION_PREFIX = "!"
 
@@ -205,18 +205,8 @@ class GitignoreSafetyCheckerHandler(Handler):
     # Handler protocol
     # ------------------------------------------------------------------
 
-    def _is_resume_session(self, hook_input: dict[str, Any]) -> bool:
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        if not transcript_path:
-            return False
-        try:
-            path = Path(transcript_path)
-            return path.exists() and path.stat().st_size > _RESUME_TRANSCRIPT_MIN_BYTES
-        except (OSError, ValueError):
-            return False
-
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        return not self._is_resume_session(hook_input)
+        return not is_resume_session(hook_input)
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Check gitignore safety, using content-hash cache to minimise I/O."""

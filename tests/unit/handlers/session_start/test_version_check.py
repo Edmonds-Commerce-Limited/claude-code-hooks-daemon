@@ -82,53 +82,6 @@ def test_matches_disabled_returns_false(
     assert handler.matches(new_session_input) is False
 
 
-def test_is_resume_session_detects_empty_transcript(
-    handler: VersionCheckHandler, tmp_path: Path
-) -> None:
-    """Empty transcript file is NOT a resume."""
-    transcript = tmp_path / "empty.jsonl"
-    transcript.write_text("")
-
-    hook_input = {"transcript_path": str(transcript)}
-    assert handler._is_resume_session(hook_input) is False
-
-
-def test_is_resume_session_detects_small_transcript(
-    handler: VersionCheckHandler, tmp_path: Path
-) -> None:
-    """Small transcript (<100 bytes) is NOT a resume."""
-    transcript = tmp_path / "small.jsonl"
-    transcript.write_text("A" * 50)
-
-    hook_input = {"transcript_path": str(transcript)}
-    assert handler._is_resume_session(hook_input) is False
-
-
-def test_is_resume_session_detects_large_transcript(
-    handler: VersionCheckHandler, tmp_path: Path
-) -> None:
-    """Large transcript (>100 bytes) IS a resume."""
-    transcript = tmp_path / "large.jsonl"
-    transcript.write_text("A" * 200)
-
-    hook_input = {"transcript_path": str(transcript)}
-    assert handler._is_resume_session(hook_input) is True
-
-
-def test_is_resume_session_handles_missing_transcript(
-    handler: VersionCheckHandler,
-) -> None:
-    """Missing transcript is NOT a resume."""
-    hook_input = {"transcript_path": "/nonexistent/path.jsonl"}
-    assert handler._is_resume_session(hook_input) is False
-
-
-def test_is_resume_session_handles_no_path(handler: VersionCheckHandler) -> None:
-    """No transcript_path field is NOT a resume."""
-    hook_input: dict = {}
-    assert handler._is_resume_session(hook_input) is False
-
-
 def test_compare_versions_detects_outdated(handler: VersionCheckHandler) -> None:
     """Version comparison detects outdated versions."""
     assert handler._compare_versions("2.6.1", "2.7.0") is True
@@ -402,14 +355,6 @@ def test_write_cache_handles_os_error(handler: VersionCheckHandler, tmp_path: Pa
     handler._write_cache(cache_file, {"test": True})
 
 
-def test_is_resume_session_handles_os_error(handler: VersionCheckHandler) -> None:
-    """_is_resume_session returns False on OSError."""
-    with patch("claude_code_hooks_daemon.handlers.session_start.version_check.Path") as mock_path:
-        mock_path.return_value.exists.side_effect = OSError("permission denied")
-        result = handler._is_resume_session({"transcript_path": "/some/path"})
-    assert result is False
-
-
 def test_get_latest_version_skips_empty_lines(handler: VersionCheckHandler) -> None:
     """_get_latest_version skips empty lines in git output."""
     with patch("subprocess.run") as mock_run:
@@ -537,16 +482,6 @@ def test_get_latest_version_no_valid_tags(handler: VersionCheckHandler) -> None:
 
         version = handler._get_latest_version()
         assert version is None
-
-
-def test_is_resume_session_oserror(handler: VersionCheckHandler, tmp_path: Path) -> None:
-    """_is_resume_session returns False on OSError."""
-    transcript = tmp_path / "transcript.jsonl"
-    transcript.write_text("x" * 200)
-
-    hook_input = {"transcript_path": str(transcript)}
-    with patch("pathlib.Path.stat", side_effect=OSError("Permission denied")):
-        assert handler._is_resume_session(hook_input) is False
 
 
 @patch("claude_code_hooks_daemon.handlers.session_start.version_check.__version__", "2.6.1")

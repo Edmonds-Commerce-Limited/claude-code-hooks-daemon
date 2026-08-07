@@ -496,16 +496,6 @@ class TestExceptionPaths:
         with patch.object(Path, "write_text", side_effect=OSError("disk full")):
             handler._write_cache(cache_file, "abc123", [])  # should not raise
 
-    def test_is_resume_session_handles_os_error(
-        self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
-    ) -> None:
-        """OSError from stat() → returns False (treat as new session)."""
-        transcript = tmp_path / "t.json"
-        transcript.write_text("x")
-        with patch.object(Path, "stat", side_effect=OSError("stat failed")):
-            result = handler._is_resume_session({"transcript_path": str(transcript)})
-        assert result is False
-
     def test_handle_returns_allow_when_project_root_none(
         self, handler: GitignoreSafetyCheckerHandler
     ) -> None:

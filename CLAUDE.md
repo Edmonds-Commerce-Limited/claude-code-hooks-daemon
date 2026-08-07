@@ -1286,6 +1286,19 @@ After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-
 
 When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
 
+## project_handler_load_checker — project protection degraded alert
+
+At session start this handler reports any **project handlers** (`.claude/project-handlers/`) that FAILED to load in the running daemon. A skipped handler is a silently-disabled protection — the alert exists so you never assume a guardrail is active when it is not.
+
+### When you see `🚨 PROJECT PROTECTION DEGRADED 🚨`
+
+1. **Do not assume normal guardrails are in force.** The listed handlers are OFF for this session.
+2. **Diagnose** each failure: `/workspace/bin/hooks-daemon validate-project-handlers` names the file, the missing method, and the daemon version that introduced it.
+3. **Fix** the handler(s) — usually adding a required method stub (e.g. `get_claude_md`) that a daemon upgrade made mandatory.
+4. **Restart the daemon** (`/workspace/bin/hooks-daemon restart`). The alert reflects the *running* daemon, so it clears only after a restart reloads the fixed handlers — fixing the file alone is not enough.
+
+The handler is silent when every project handler loads, so seeing this alert always means real action is required.
+
 ## ccy_supervisor_integrity — keep the ccy supervisor properly set up
 
 At session start this handler checks a ccy project (`.claude/ccy/`) whose supervisor is **armed** (`ccy.env` exports `CCY_CLAUDE_WRAPPER` referencing `claude-supervise.py`). It warns — never blocks — when the setup is brick-risky:
@@ -1298,6 +1311,37 @@ At session start this handler checks a ccy project (`.claude/ccy/`) whose superv
 It also detects a **stale running supervisor** (Plan 00164): when a daemon upgrade has put a NEWER `claude-supervise.py` on disk than the live process (compared by source fingerprint, not just version), it advises restarting ccy so the wrapper re-execs the updated supervisor. Nothing is broken meanwhile — the old supervisor keeps working until the session is relaunched.
 
 When you see this alert, fix the listed item(s) and commit the ccy files so the supervisor works for everyone.
+
+## git_upstream_checker — additive fetch + pull/cleanup advice on session start
+
+On each new session the daemon runs an **additive** `git fetch --all` (never `--prune` — it never removes anything automatically) and then:
+
+**If your branch is behind its upstream**, acts on the configured `mode`:
+
+- `warn` (default): strongly advises you to run `git pull`.
+- `agent-pull`: instructs you to run `git pull` as your first action.
+- `auto-pull`: the daemon runs `git pull --ff-only` for you on a clean, non-diverged tree; if it cannot fast-forward (dirty tree or diverged history) it degrades to a warning and you pull manually.
+
+**If local branches track a remote branch that was deleted**, it lists them (marked merged = safe vs not-merged = has unique commits) and asks you to clean up AFTER checking: `git branch -d <name>` for merged branches, ask the human for the rest, and optionally `git fetch --prune` the stale remote-tracking refs. The daemon never prunes or deletes a branch itself; never use `git branch -D`.
+
+It is silent when up to date with no gone branches, not in a git repo, on a detached HEAD, or without an upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
+
+## hook_registration_checker — hooks configuration policy
+
+On every new session this handler audits hook configuration across `.claude/settings.json` and `.claude/settings.local.json`. When it reports issues, fix them — do not ignore the warning.
+
+### Policy
+
+1. **All hooks live in `settings.json`.** That file is tracked in version control, visible to teammates, and is the single source of truth for the daemon.
+2. **`settings.local.json` must contain ZERO `hooks` entries.** It exists for per-developer `permissions` and IDE state only. A `hooks` block there is either (a) invisible to the rest of the team, or (b) duplicated with `settings.json` — in which case the hook fires twice per event.
+3. **Hook commands must invoke the daemon wrapper.** Every registered command must end with `/.claude/hooks/{event}`. Anything else (inline Python, custom shell scripts, bespoke paths) is a legacy setup that bypasses the daemon entirely.
+
+### Remediation
+
+- **Hooks in `settings.local.json`**: move each `hooks` entry to `settings.json`, then delete the `hooks` key from `settings.local.json`. Confirm no duplicates remain.
+- **Legacy-style commands**: replace them with a project-level handler. Run `/workspace/bin/hooks-daemon init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
+- **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
+- **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry and remove the duplicate in `settings.local.json`.
 
 ## plan_qa_sweep — plan-tree drift report at session start
 
@@ -1331,50 +1375,6 @@ At session start, when the plan workflow is enabled but the daemon-owned `mkplan
 ```
 
 The deploy is idempotent (fills gaps only, never overwrites client-owned files). Silent when `mkplan.bash` is present or the workflow is disabled.
-
-## project_handler_load_checker — project protection degraded alert
-
-At session start this handler reports any **project handlers** (`.claude/project-handlers/`) that FAILED to load in the running daemon. A skipped handler is a silently-disabled protection — the alert exists so you never assume a guardrail is active when it is not.
-
-### When you see `🚨 PROJECT PROTECTION DEGRADED 🚨`
-
-1. **Do not assume normal guardrails are in force.** The listed handlers are OFF for this session.
-2. **Diagnose** each failure: `/workspace/bin/hooks-daemon validate-project-handlers` names the file, the missing method, and the daemon version that introduced it.
-3. **Fix** the handler(s) — usually adding a required method stub (e.g. `get_claude_md`) that a daemon upgrade made mandatory.
-4. **Restart the daemon** (`/workspace/bin/hooks-daemon restart`). The alert reflects the *running* daemon, so it clears only after a restart reloads the fixed handlers — fixing the file alone is not enough.
-
-The handler is silent when every project handler loads, so seeing this alert always means real action is required.
-
-## hook_registration_checker — hooks configuration policy
-
-On every new session this handler audits hook configuration across `.claude/settings.json` and `.claude/settings.local.json`. When it reports issues, fix them — do not ignore the warning.
-
-### Policy
-
-1. **All hooks live in `settings.json`.** That file is tracked in version control, visible to teammates, and is the single source of truth for the daemon.
-2. **`settings.local.json` must contain ZERO `hooks` entries.** It exists for per-developer `permissions` and IDE state only. A `hooks` block there is either (a) invisible to the rest of the team, or (b) duplicated with `settings.json` — in which case the hook fires twice per event.
-3. **Hook commands must invoke the daemon wrapper.** Every registered command must end with `/.claude/hooks/{event}`. Anything else (inline Python, custom shell scripts, bespoke paths) is a legacy setup that bypasses the daemon entirely.
-
-### Remediation
-
-- **Hooks in `settings.local.json`**: move each `hooks` entry to `settings.json`, then delete the `hooks` key from `settings.local.json`. Confirm no duplicates remain.
-- **Legacy-style commands**: replace them with a project-level handler. Run `/workspace/bin/hooks-daemon init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
-- **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
-- **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry and remove the duplicate in `settings.local.json`.
-
-## git_upstream_checker — additive fetch + pull/cleanup advice on session start
-
-On each new session the daemon runs an **additive** `git fetch --all` (never `--prune` — it never removes anything automatically) and then:
-
-**If your branch is behind its upstream**, acts on the configured `mode`:
-
-- `warn` (default): strongly advises you to run `git pull`.
-- `agent-pull`: instructs you to run `git pull` as your first action.
-- `auto-pull`: the daemon runs `git pull --ff-only` for you on a clean, non-diverged tree; if it cannot fast-forward (dirty tree or diverged history) it degrades to a warning and you pull manually.
-
-**If local branches track a remote branch that was deleted**, it lists them (marked merged = safe vs not-merged = has unique commits) and asks you to clean up AFTER checking: `git branch -d <name>` for merged branches, ask the human for the rest, and optionally `git fetch --prune` the stale remote-tracking refs. The daemon never prunes or deletes a branch itself; never use `git branch -D`.
-
-It is silent when up to date with no gone branches, not in a git repo, on a detached HEAD, or without an upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
 
 ## idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
 

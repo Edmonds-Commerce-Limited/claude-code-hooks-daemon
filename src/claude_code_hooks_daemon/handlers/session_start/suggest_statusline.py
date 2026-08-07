@@ -5,11 +5,11 @@ if not already configured. Provides example configuration for user reference.
 """
 
 import json
-from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 # Recommended statusLine.refreshInterval (seconds). Claude Code re-runs the
 # status command on this timer in ADDITION to event-driven updates. The status
@@ -37,30 +37,6 @@ class SuggestStatusLineHandler(Handler):
             ],
         )
 
-    def _is_resume_session(self, hook_input: dict[str, Any]) -> bool:
-        """Check if this is a resumed session (transcript exists with content).
-
-        Args:
-            hook_input: SessionStart hook input
-
-        Returns:
-            True if resume, False if new session
-        """
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        if not transcript_path:
-            return False
-
-        try:
-            path = Path(transcript_path)
-            if not path.exists():
-                return False
-
-            # If file exists and has content (>100 bytes), it's a resume
-            return path.stat().st_size > 100
-
-        except (OSError, ValueError):
-            return False
-
     def _is_statusline_configured(self) -> bool:
         """Check if status line is already configured in .claude/settings.json.
 
@@ -85,7 +61,7 @@ class SuggestStatusLineHandler(Handler):
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Only suggest on NEW sessions when status line is NOT configured."""
         # Don't show on resume sessions
-        if self._is_resume_session(hook_input):
+        if is_resume_session(hook_input):
             return False
 
         # Don't show if already configured

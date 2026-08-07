@@ -439,36 +439,6 @@ class TestHandleOutput:
         assert result.context == []
 
 
-class TestIsResumeSessionEdgeCases:
-    """Test _is_resume_session edge cases for coverage."""
-
-    @pytest.fixture
-    def handler(self) -> Any:
-        from claude_code_hooks_daemon.handlers.session_start.optimal_config_checker import (
-            OptimalConfigCheckerHandler,
-        )
-
-        return OptimalConfigCheckerHandler()
-
-    def test_nonexistent_transcript_path_returns_false(self, handler: Any) -> None:
-        """Non-existent transcript path returns False."""
-        hook_input = {HookInputField.TRANSCRIPT_PATH: "/nonexistent/path/transcript.jsonl"}
-        assert handler._is_resume_session(hook_input) is False
-
-    def test_stat_raises_oserror_returns_false(self, handler: Any, tmp_path: Any) -> None:
-        """OSError from path.stat() returns False."""
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text("x" * 200)
-        hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript)}
-        with patch("pathlib.Path.stat", side_effect=OSError("Permission denied")):
-            assert handler._is_resume_session(hook_input) is False
-
-    def test_value_error_returns_false(self, handler: Any) -> None:
-        """ValueError from Path construction returns False."""
-        hook_input = {HookInputField.TRANSCRIPT_PATH: "\x00invalid"}
-        assert handler._is_resume_session(hook_input) is False
-
-
 class TestReadGlobalSettingsEdgeCases:
     """Test _read_global_settings edge cases for coverage."""
 

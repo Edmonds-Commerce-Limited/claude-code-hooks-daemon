@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import (
         DaemonConfig,
+        PlanWorkflowConfig,
         PluginsConfig,
         ProjectHandlersConfig,
     )
@@ -151,7 +152,7 @@ class DaemonController:
         project_languages: list[str] | None = None,
         project_exclude_paths: list[str] | None = None,
         pseudo_events_config: dict[str, dict[str, Any]] | None = None,
-        plan_workflow: Any = None,
+        plan_workflow: "PlanWorkflowConfig | None" = None,
     ) -> None:
         """Initialise the controller with handlers.
 

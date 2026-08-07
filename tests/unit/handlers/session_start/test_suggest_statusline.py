@@ -8,6 +8,13 @@ import pytest
 
 from claude_code_hooks_daemon.handlers.session_start import SuggestStatusLineHandler
 
+# is_resume_session is a shared utility (utils/session_helpers.py); patch it
+# where this module imports it. Edge-case coverage for the function itself
+# lives in tests/unit/utils/test_session_helpers.py.
+_IS_RESUME_SESSION = (
+    "claude_code_hooks_daemon.handlers.session_start.suggest_statusline.is_resume_session"
+)
+
 
 class TestSuggestStatusLineHandler:
     """Tests for SuggestStatusLineHandler."""
@@ -29,7 +36,7 @@ class TestSuggestStatusLineHandler:
     def test_matches_new_session_no_statusline(self, handler: SuggestStatusLineHandler) -> None:
         """Handler matches on new sessions when status line is not configured."""
         with (
-            patch.object(handler, "_is_resume_session", return_value=False),
+            patch(_IS_RESUME_SESSION, return_value=False),
             patch.object(handler, "_is_statusline_configured", return_value=False),
         ):
             assert handler.matches({}) is True
@@ -38,7 +45,7 @@ class TestSuggestStatusLineHandler:
         self, handler: SuggestStatusLineHandler
     ) -> None:
         """Handler does not match on resumed sessions."""
-        with patch.object(handler, "_is_resume_session", return_value=True):
+        with patch(_IS_RESUME_SESSION, return_value=True):
             assert handler.matches({}) is False
 
     def test_matches_returns_false_when_statusline_configured(
@@ -46,7 +53,7 @@ class TestSuggestStatusLineHandler:
     ) -> None:
         """Handler does not match when status line is already configured."""
         with (
-            patch.object(handler, "_is_resume_session", return_value=False),
+            patch(_IS_RESUME_SESSION, return_value=False),
             patch.object(handler, "_is_statusline_configured", return_value=True),
         ):
             assert handler.matches({}) is False
@@ -131,47 +138,6 @@ class TestSuggestStatusLineHandler:
         tests = handler.get_acceptance_tests()
         assert isinstance(tests, list)
         assert len(tests) > 0
-
-
-class TestIsResumeSession:
-    """Tests for _is_resume_session private method."""
-
-    @pytest.fixture
-    def handler(self) -> SuggestStatusLineHandler:
-        """Create handler instance."""
-        return SuggestStatusLineHandler()
-
-    def test_no_transcript_path(self, handler: SuggestStatusLineHandler) -> None:
-        """Returns False when no transcript_path in hook_input."""
-        assert handler._is_resume_session({}) is False
-
-    def test_empty_transcript_path(self, handler: SuggestStatusLineHandler) -> None:
-        """Returns False when transcript_path is empty string."""
-        assert handler._is_resume_session({"transcript_path": ""}) is False
-
-    def test_nonexistent_transcript_file(self, handler: SuggestStatusLineHandler) -> None:
-        """Returns False when transcript file does not exist."""
-        assert handler._is_resume_session({"transcript_path": "/nonexistent/file.jsonl"}) is False
-
-    def test_small_transcript_file(self, handler: SuggestStatusLineHandler, tmp_path: Path) -> None:
-        """Returns False when transcript file is small (new session)."""
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text("small")
-        assert handler._is_resume_session({"transcript_path": str(transcript)}) is False
-
-    def test_large_transcript_file(self, handler: SuggestStatusLineHandler, tmp_path: Path) -> None:
-        """Returns True when transcript file is large (resume session)."""
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text("x" * 200)
-        assert handler._is_resume_session({"transcript_path": str(transcript)}) is True
-
-    def test_oserror_returns_false(self, handler: SuggestStatusLineHandler) -> None:
-        """Returns False when an OSError occurs."""
-        with patch(
-            "claude_code_hooks_daemon.handlers.session_start.suggest_statusline.Path"
-        ) as mock_path:
-            mock_path.return_value.exists.side_effect = OSError("permission denied")
-            assert handler._is_resume_session({"transcript_path": "/some/path"}) is False
 
 
 class TestIsStatusLineConfigured:

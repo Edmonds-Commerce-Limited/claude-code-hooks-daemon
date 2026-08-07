@@ -13,10 +13,9 @@ options.
 
 import logging
 from datetime import date
-from pathlib import Path
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.plan_qa.context import sweep_context
@@ -24,10 +23,9 @@ from claude_code_hooks_daemon.plan_qa.report import format_advisory
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
 from claude_code_hooks_daemon.plan_qa.types import Stage
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
-
-_RESUME_TRANSCRIPT_MIN_BYTES: Final[int] = 100
 _SWEEP_MODE_ADVISE: Final[str] = "advise"
 
 
@@ -58,18 +56,8 @@ class PlanQaSweepHandler(Handler):
         self._track_plans_in_project: str | None = None
         self._plan_qa: Any = None
 
-    def _is_resume_session(self, hook_input: dict[str, Any]) -> bool:
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        if not transcript_path:
-            return False
-        try:
-            path = Path(transcript_path)
-            return path.exists() and path.stat().st_size > _RESUME_TRANSCRIPT_MIN_BYTES
-        except (OSError, ValueError):
-            return False
-
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        if self._is_resume_session(hook_input):
+        if is_resume_session(hook_input):
             return False
         if self._track_plans_in_project is None:
             return False

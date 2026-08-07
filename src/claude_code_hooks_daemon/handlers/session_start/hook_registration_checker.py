@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
@@ -29,15 +28,13 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     validate_hook_commands,
     validate_settings_hooks,
 )
+from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 from claude_code_hooks_daemon.utils.settings_repair import (
     RepairResult,
     repair_settings_registrations,
 )
 
 logger = logging.getLogger(__name__)
-
-# Minimum transcript size (bytes) to consider a session as resumed
-_RESUME_TRANSCRIPT_MIN_BYTES = 100
 
 # Settings file names
 _SETTINGS_FILE = "settings.json"
@@ -88,27 +85,6 @@ class HookRegistrationCheckerHandler(Handler):
         """Apply per-handler config from the daemon's config loader."""
         self.config.update(config)
 
-    def _is_resume_session(self, hook_input: dict[str, Any]) -> bool:
-        """Check if this is a resumed session (transcript has content).
-
-        Args:
-            hook_input: Hook input dictionary
-
-        Returns:
-            True if this appears to be a resumed session
-        """
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        if not transcript_path:
-            return False
-
-        try:
-            path = Path(transcript_path)
-            if not path.exists():
-                return False
-            return path.stat().st_size > _RESUME_TRANSCRIPT_MIN_BYTES
-        except (OSError, ValueError):
-            return False
-
     def _get_project_root(self) -> Path | None:
         """Get the project root directory.
 
@@ -151,7 +127,7 @@ class HookRegistrationCheckerHandler(Handler):
         Returns:
             True for new sessions, False for resumed sessions
         """
-        return not self._is_resume_session(hook_input)
+        return not is_resume_session(hook_input)
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Validate hook registrations and report issues.

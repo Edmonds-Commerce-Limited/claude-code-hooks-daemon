@@ -4330,7 +4330,7 @@ def main() -> int:
     )
     parser_test_ph.set_defaults(func=cmd_test_project_handlers)
 
-    # bug-report command
+    # format-markdown command
     parser_format_md = subparsers.add_parser(
         "format-markdown",
         help="Format markdown files via mdformat + mdformat-gfm (auto-align tables)",
@@ -4377,6 +4377,7 @@ def main() -> int:
     )
     parser_deploy_plan.set_defaults(func=cmd_deploy_plan_workflow)
 
+    # bug-report command
     parser_bug_report = subparsers.add_parser(
         "bug-report",
         help="Generate comprehensive bug report with system diagnostics",

@@ -45,7 +45,12 @@ echo "Running mypy type checker..."
 # clean 378-file run and on a run where mypy aborted before checking anything.
 # The parser below reads that summary line so the count is real, and `passed`
 # now requires a non-zero count (see the FAIL FAST note there).
-mapfile -t TYPE_PATHS < <(qa_type_paths)
+# NOT `mapfile` — that is bash 4+, and macOS ships /bin/bash 3.2.57.
+# tests/integration/test_bash32_portability.py enforces this.
+TYPE_PATHS=()
+while IFS= read -r _scope_path; do
+    TYPE_PATHS+=("${_scope_path}")
+done < <(qa_type_paths)
 if venv_tool mypy "${TYPE_PATHS[@]}" --no-color-output 2>&1 | tee "${OUTPUT_FILE}.raw"; then
     EXIT_CODE=0
 else
