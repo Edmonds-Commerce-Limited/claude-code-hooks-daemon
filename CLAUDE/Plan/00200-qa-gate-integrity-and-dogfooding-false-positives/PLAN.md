@@ -262,12 +262,26 @@ ground truth to diff prose claims against — the data exists, nothing consumes 
   what they must NOT block. Make `get_acceptance_tests()` require at least one expected-allow
   case for any handler that can deny, and enforce it in the playbook generator's own tests.
 
-- [ ] ⬜ **Task 6.5**: Shared-checkout commit-scope guard. Bare `git commit` commits the entire
-  index, not what the caller staged, so concurrent agents in one checkout absorb or clobber each
-  other's staged work. Fired **twice** this session (incidents logged in `JOURNAL/`). The daemon
-  already tracks live agent threads (`handlers/status_line/thread_registry.py`,
-  `multithread_indicator.py`), so a PreToolUse advisory on a bare `git commit` while >1 thread is
-  registered closes it. Advisory, not blocking — single-agent sessions must stay unaffected.
+- [ ] ⬜ **Task 6.5**: Concurrent-agent isolation advisory (**the upstream fix**). Four agents
+  were run in one `/workspace` checkout; the shared `.git/index` produced three incidents
+  (logged in `JOURNAL/`) where staged work was absorbed or lost. The proximate cause is that
+  bare `git commit` commits the whole index, but **the real defect was dispatching concurrent
+  writers into a shared tree at all** — this repo already ships a `worktree_create` handler that
+  makes isolation a one-flag decision.
+
+  Only one of the four agents genuinely needed the shared tree: daemon-restart verification and
+  `dummy-client-repo.sh` client-mode testing are anchored to the project root. The other three
+  (plan authoring, lint fixes, a QA script) were isolatable and were not isolated. A constraint
+  binding one agent was applied to four.
+
+  The daemon already tracks live threads (`handlers/status_line/thread_registry.py`,
+  `multithread_indicator.py`), so it can advise at dispatch time: *"N agents already active in
+  this checkout — use `isolation: worktree` unless this agent needs live daemon verification."*
+  Advisory, not blocking; single-agent sessions unaffected. A narrower fallback (warn on bare
+  `git commit` while >1 thread is live) is worth keeping as a second layer, since pathspec
+  scoping protects the committer but **not** an agent whose staged work a bare-committing peer
+  absorbs — a process rule only works if every writer follows it, which is the argument for a
+  guard.
 
 Task 6.4 is the highest-leverage item here: it converts a recurring class into a structural
 requirement rather than five individual fixes. Task 6.5 is the most *novel* — a defect class
