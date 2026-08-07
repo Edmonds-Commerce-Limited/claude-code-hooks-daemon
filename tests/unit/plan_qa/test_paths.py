@@ -6,6 +6,7 @@ plan documents onto journal files or vice versa.
 """
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -145,7 +146,7 @@ class TestOutside:
 class TestExhaustiveness:
     """Every kind must be reachable, and every file gets exactly one kind."""
 
-    SAMPLES = {
+    SAMPLES: ClassVar[dict[PlanFileKind, str]] = {
         PlanFileKind.PLAN_DOCUMENT: "CLAUDE/Plan/00190-thing/PLAN.md",
         PlanFileKind.PLAN_INDEX: "CLAUDE/Plan/README.md",
         PlanFileKind.JOURNAL_DAYFILE: "CLAUDE/Plan/00190-t/JOURNAL/00190-Journal-26-07-31.md",

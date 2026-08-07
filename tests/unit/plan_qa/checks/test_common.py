@@ -1,6 +1,7 @@
 """Tests for plan_qa.checks.common — shared edit-target helpers (Plan 00144)."""
 
 from pathlib import Path
+from typing import ClassVar
 
 from claude_code_hooks_daemon.plan_qa.checks.common import edit_target, level_for_plan
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level
@@ -58,7 +59,7 @@ class TestEditTarget:
 class TestScopesAreDisjoint:
     """No path may resolve to both a plan-document and a journal target."""
 
-    PATHS = [
+    PATHS: ClassVar[list[str]] = [
         "CLAUDE/Plan/00042-widget/PLAN.md",
         "CLAUDE/Plan/00042-widget/JOURNAL/PLAN.md",
         "CLAUDE/Plan/00042-widget/JOURNAL/00042-Journal-26-07-31.md",

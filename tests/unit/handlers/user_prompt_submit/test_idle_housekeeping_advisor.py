@@ -8,7 +8,7 @@ Beta: opt-in (off by default), report-only.
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import patch
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
@@ -233,7 +233,7 @@ class TestHandle:
 class TestCustomGuidanceDoc:
     """Projects can point the handler at a custom guidance doc (additive/replace)."""
 
-    _MESSAGES = [
+    _MESSAGES: ClassVar[list[TranscriptMessage]] = [
         _user(_TICK),
         _assistant_text("stop"),
         _user(_TICK),
