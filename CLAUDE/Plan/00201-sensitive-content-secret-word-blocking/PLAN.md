@@ -122,14 +122,14 @@ other source.
 
 ### Phase 2: Close the leak vectors
 
-- [ ] ⬜ **Task 2.1**: `daemon/payload_capture.py` — redact `hook_input`
+- [x] ✅ **Task 2.1**: `daemon/payload_capture.py` — redact `hook_input`
   before writing the JSONL line. Test: a payload-capture round trip with a
   secret in the payload produces a capture file not containing the term.
-- [ ] ⬜ **Task 2.2**: `core/router.py` PreToolUse debug log — redact before
+- [x] ✅ **Task 2.2**: `core/router.py` PreToolUse debug log — redact before
   `logger.debug(...)`. Test: log output does not contain the term.
-- [ ] ⬜ **Task 2.3**: `core/front_controller.py::log_error_to_file` — redact
+- [x] ✅ **Task 2.3**: `core/front_controller.py::log_error_to_file` — redact
   `hook_input` before writing to `hook-errors.log`.
-- [ ] ⬜ **Task 2.4**: `handlers/pre_compact/transcript_archiver.py` — redact
+- [x] ✅ **Task 2.4**: `handlers/pre_compact/transcript_archiver.py` — redact
   the transcript text before archiving.
 
 ### Phase 3: QA backstop
