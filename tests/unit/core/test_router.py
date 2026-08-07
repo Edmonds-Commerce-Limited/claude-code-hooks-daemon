@@ -494,9 +494,7 @@ class TestSecretRedactionInDebugLog:
     handler's own decision.
     """
 
-    def test_secret_term_absent_from_debug_log(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_secret_term_absent_from_debug_log(self, caplog: pytest.LogCaptureFixture) -> None:
         import logging
 
         from claude_code_hooks_daemon.core import router as router_module
