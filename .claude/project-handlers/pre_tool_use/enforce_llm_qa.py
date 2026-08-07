@@ -5,6 +5,7 @@ produces ~16 lines instead of 200+. LLM agents should never run the
 verbose run_all.sh directly.
 """
 
+import re
 from typing import Any
 
 from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
@@ -12,6 +13,33 @@ from claude_code_hooks_daemon.core.hook_result import Decision
 
 _BLOCKED_SCRIPT = "run_all.sh"
 _LLM_SCRIPT = "./scripts/qa/llm_qa.py all"
+
+# Commands that read/inspect a file WITHOUT executing it. A path appearing as
+# an argument to one of these is a mention, not an invocation — `cat
+# scripts/qa/run_all.sh` inspects the script's contents, it never runs it.
+# Matched as the first shell word so a compound command's LATER segment can
+# still be a real invocation (e.g. `cat run_all.sh; bash run_all.sh`).
+_INSPECTION_COMMANDS = ("cat", "less", "more", "head", "tail", "grep", "rg", "wc", "bat")
+
+
+def _is_inspection_only(command: str) -> bool:
+    """True when every segment referencing the script only inspects it.
+
+    Splits on common shell separators and checks each segment's leading
+    word (the command being run) against the inspection allowlist. A
+    segment whose leading word is NOT an inspection command (e.g. `bash`,
+    `./scripts/...`, `sh`) is treated as a potential real invocation.
+    """
+    segments = re.split(r"&&|\|\||[;|]", command)
+    for segment in segments:
+        stripped = segment.strip()
+        if not stripped or _BLOCKED_SCRIPT not in stripped:
+            continue
+        leading_word = stripped.split()[0] if stripped.split() else ""
+        leading_word = leading_word.rsplit("/", 1)[-1]  # strip any path prefix
+        if leading_word not in _INSPECTION_COMMANDS:
+            return False
+    return True
 
 
 class EnforceLlmQaHandler(Handler):
@@ -35,7 +63,11 @@ class EnforceLlmQaHandler(Handler):
         # in git commit messages, git add paths, or other non-execution contexts
         if command.startswith(("git ", "gh ")):
             return False
-        return _BLOCKED_SCRIPT in command
+        if _BLOCKED_SCRIPT not in command:
+            return False
+        # A path passed to cat/less/grep/etc. inspects the script; it is
+        # never an execution of it, regardless of output volume.
+        return not _is_inspection_only(command)
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block with guidance to use llm_qa.py instead."""
@@ -64,6 +96,19 @@ class EnforceLlmQaHandler(Handler):
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"llm_qa\.py", r"run_all\.sh"],
                 safety_notes="Uses echo - safe to execute",
+                test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="Allow inspecting run_all.sh with cat (not an execution)",
+                command="cat scripts/qa/run_all.sh",
+                description=(
+                    "cat reads the script's contents; it never executes it, so "
+                    "this must NOT be blocked. Regression test for a real "
+                    "dogfooding false positive (Plan 00200)."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Read-only inspection of a tracked file",
                 test_type=TestType.BLOCKING,
             ),
         ]
