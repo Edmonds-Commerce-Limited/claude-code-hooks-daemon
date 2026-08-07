@@ -158,7 +158,12 @@ plan's own two new test files contribute the difference.)
 - [ ] ⬜ **Task 3.3**: `pipe_blocker` — ignore `-m` / `-F` message bodies when parsing.
 - [ ] ⬜ **Task 3.4**: `lsp_enforcement` — do not redirect a grep already scoped to one named
   file.
-- [ ] ⬜ **Task 3.5**: Audit sibling handlers for the same mention-vs-invocation confusion.
+- [ ] ⬜ **Task 3.5**: `plan_qa_commit_gate` — `same-commit-plan-doc` fires a false positive on
+  the `git commit <pathspec>` form. That form commits unstaged working-tree changes for the
+  named paths, but the check inspects only the staged index, so it advises "does not update its
+  PLAN.md" on a commit that demonstrably does. Reproduced on `fad60fa6`, whose `--stat` shows
+  `PLAN.md` present. Resolve the pathspec arguments against the working tree, not just the index.
+- [ ] ⬜ **Task 3.6**: Audit sibling handlers for the same mention-vs-invocation confusion.
 
 ### Phase 4: Verification
 
