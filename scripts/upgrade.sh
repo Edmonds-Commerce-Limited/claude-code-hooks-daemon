@@ -319,8 +319,22 @@ _info "Stopping daemon (best-effort, PID-only)..."
 _stop_running_daemons "$DAEMON_DIR"
 
 # Step 5: Fetch tags and determine target version
+#
+# --force is REQUIRED, not defensive. Without it, git refuses to update a local
+# tag that already exists but points at a different object ("would clobber
+# existing tag") and exits non-zero — which, under the `set -euo pipefail` at
+# the top of this script, aborts the whole upgrade with an opaque message.
+#
+# That is exactly what an upstream history rewrite produces: every tag keeps its
+# name and changes its hash. A client that has upgraded even once holds all 121
+# tags at their pre-rewrite hashes, so without --force EVERY subsequent upgrade
+# would fail for that client, permanently, with no self-service recovery.
+#
+# This script is fetched fresh from main HEAD by the skill shim on every run
+# (Plan 00109), so this line protects the entire installed base as soon as it
+# lands on main — including clients still running much older daemon versions.
 _info "Fetching latest tags..."
-git -C "$DAEMON_DIR" fetch --tags --quiet
+git -C "$DAEMON_DIR" fetch --tags --force --quiet
 
 if [ -z "$TARGET_VERSION" ]; then
     TARGET_VERSION=$(git -C "$DAEMON_DIR" describe --tags \
