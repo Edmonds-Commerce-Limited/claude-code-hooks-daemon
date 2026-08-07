@@ -221,6 +221,50 @@ required; blind removal would break things and is not the goal.
 - [ ] ⬜ **Task 5.6**: Wire the widened audit into `run_all.sh` so the scope cannot silently
   narrow again, and add a test asserting the audited roots include `scripts/`.
 
+### Phase 6: DBF gap analysis — every finding mapped to the guard that should have caught it
+
+Governing principle (now recorded as `CLAUDE.md` Core Standard 15): **Defence Before Fix.** A
+defect is a symptom; the bug worth fixing is the blind or missing guard. Fixing instances by
+hand leaves the guard blind and the class recurs.
+
+Applying that to the presentation-quality audit findings — where a defence already exists, the
+fix is legitimate backlog; where the cell says **NONE**, the defence is the actual work.
+
+| Finding                                                           | Guard that should have caught it      | State                                                  |
+| ----------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------ |
+| Lint gate blind (47 hidden violations)                            | Gate-integrity test                   | **Built** (`test_qa_lint_gate_integrity.py`, Phase 1)  |
+| Error hiding in `scripts/`                                        | `audit_error_hiding.py`               | **Blind** — being fixed (Phase 5)                      |
+| Tracked absolute/dangling symlinks                                | Symlink-hygiene test                  | **Built** (`test_repo_symlink_hygiene.py`, Plan 00198) |
+| Employer/client identifiers in source                             | `sensitive_content` handler + QA gate | **Being built** (Plan 00201)                           |
+| Journal written to wrong day-file                                 | `journal-dayfile-is-today`            | **Built** (Plan 00197)                                 |
+| Plan-tree drift                                                   | plan QA (edit/commit/sweep)           | **Exists and works**                                   |
+| `coverage.json` (1.4 MB artifact) tracked                         | Tracked-build-artifact check          | **NONE**                                               |
+| README describes 2 handlers as doing the OPPOSITE of what they do | Doc-vs-generated-truth check          | **NONE**                                               |
+| `CLAUDE.md` claims "10 QA checks"; `run_all.sh` runs 13           | Same                                  | **NONE**                                               |
+| 4 stray root `test_*.sh`, `settings.json.bak`                     | Repo-hygiene check                    | **NONE**                                               |
+| Handler false positives (5 found)                                 | Negative-case acceptance tests        | **NONE** — every handler declares positive cases only  |
+
+The four **NONE** rows are the remaining defence work. Note the README one is unusually cheap to
+close: `.claude/HOOKS-DAEMON.md` is already **generated from live config**, so it is trustworthy
+ground truth to diff prose claims against — the data exists, nothing consumes it.
+
+- [ ] ⬜ **Task 6.1**: Tracked-build-artifact check — fail when a generated artifact
+  (`coverage.*`, `htmlcov/`, `*.bak`, `.orig`, `~`) is tracked. Would have caught `coverage.json`
+  and `.claude/settings.json.bak`.
+- [ ] ⬜ **Task 6.2**: Doc-vs-generated-truth check — diff README/`CLAUDE.md` factual claims
+  against `.claude/HOOKS-DAEMON.md` and the handler registry. Start with the two demonstrated
+  failures: inverted handler descriptions, and hardcoded check counts that drift. Prefer
+  removing hardcoded counts from prose over asserting them.
+- [ ] ⬜ **Task 6.3**: Repo-hygiene check — no test scripts outside the test tree, no editor/
+  backup detritus tracked.
+- [ ] ⬜ **Task 6.4**: Require a **negative** acceptance case per blocking handler. All five
+  false positives in Phase 3 are one class: handlers assert what they block and never assert
+  what they must NOT block. Make `get_acceptance_tests()` require at least one expected-allow
+  case for any handler that can deny, and enforce it in the playbook generator's own tests.
+
+Task 6.4 is the highest-leverage item in this plan: it converts a whole recurring class into a
+structural requirement rather than five individual fixes.
+
 ## Technical Decisions
 
 ### Decision 1: Fail loudly on unparseable tool output

@@ -364,6 +364,7 @@ unset HOSTNAME → daemon-work.local.sock   # from socket.gethostname() / `hostn
 12. **TYPE SAFETY** - Full type annotations, strict mypy, no `Any` without justification. Use `Protocol` for interfaces, not `ABC` (structural typing over nominal).
 13. **TEST COVERAGE** - 95% minimum, integration tests for all flows. Each strategy independently TDD-able with its own test file.
 14. **SCHEMA VALIDATION** - Validate all external data at system boundaries.
+15. **DBF — DEFENCE BEFORE FIX** - When a defect is found, the defect is the *symptom*. The bug worth fixing is the **missing or blind guard that failed to catch it**. Always ask "what tooling should have caught this, and why didn't it?" — then fix that first. A defect fixed by hand recurs; a defect fixed by making the guard see it cannot. Fixing 95 instances by hand while leaving the scanner blind is the failure mode this rule exists to prevent. Corollary: a guard that only fires at write time (a PreToolUse handler) does **not** cover what is already on disk — every write-time rule needs a batch equivalent, or everything predating it is permanently unexamined.
 
 ### Design Patterns
 
