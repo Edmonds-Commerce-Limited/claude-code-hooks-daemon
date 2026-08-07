@@ -431,6 +431,102 @@ class TestLspEnforcementMatchesNegative:
         assert handler.matches(hook_input) is False
 
 
+class TestLspEnforcementSingleFileScoping:
+    """A grep already scoped to ONE named file is not a project-wide lookup.
+
+    Plan 00200, Task 6.4: `grep -n "hook_input" <one file>` was blocked as
+    though it were a workspace-wide symbol search. LSP's goToDefinition /
+    findReferences / workspaceSymbol operate across the WORKSPACE; a caller
+    who already knows exactly which file to check is asking "does this
+    literal appear here", something LSP cannot answer any better.
+    """
+
+    @pytest.fixture()
+    def handler(self) -> Any:
+        from claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement import (
+            LspEnforcementHandler,
+        )
+
+        return LspEnforcementHandler()
+
+    def test_no_match_grep_snake_case_scoped_to_one_file(self, handler: Any) -> None:
+        """The exact reported false positive: grep -n <snake_case> <one file>."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": (
+                    'grep -n "hook_input" '
+                    "src/claude_code_hooks_daemon/core/hook_result.py"
+                )
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_rg_snake_case_scoped_to_one_file(self, handler: Any) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": 'rg "get_bash_command" src/claude_code_hooks_daemon/core/utils.py'
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_grep_pascal_case_scoped_to_one_file(self, handler: Any) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'grep -n "FrontController" src/main.py'},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_still_fires_for_directory_target(self, handler: Any) -> None:
+        """Scoped to a DIRECTORY is still a project-wide-ish lookup — must still fire."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'grep -n "hook_input" src/'},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_still_fires_for_recursive_flag(self, handler: Any) -> None:
+        """-r/-R makes it project-wide even without a trailing-slash target."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'grep -rn "hook_input" src'},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_still_fires_for_no_target_at_all(self, handler: Any) -> None:
+        """No path argument at all — searches the whole tree/stdin, still fires."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'grep -n "hook_input"'},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_still_fires_for_multiple_file_targets(self, handler: Any) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'grep -n "hook_input" src/a.py src/b.py'},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_still_fires_for_rg_default_directory_search(self, handler: Any) -> None:
+        """The existing acceptance test's shape: rg scoped to a directory."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'rg "def get_bash_command" src/'},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_grep_tool_with_single_file_path_is_unaffected(self, handler: Any) -> None:
+        """The Grep TOOL (not Bash) is out of scope for this specific fix —
+        it has no equivalent single-file exemption yet, so it still fires."""
+        hook_input = {
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "hook_input", "path": "src/main.py"},
+        }
+        assert handler.matches(hook_input) is True
+
+
 class TestLspEnforcementBlockCount:
     """Test _get_block_count exception handling."""
 
