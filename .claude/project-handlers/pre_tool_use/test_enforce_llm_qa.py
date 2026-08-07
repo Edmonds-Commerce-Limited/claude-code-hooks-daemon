@@ -154,9 +154,7 @@ class TestEnforceLlmQaHandler:
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any
     ) -> None:
         """Moving the exemption per-segment must not blind the guard."""
-        assert (
-            handler.matches(bash_hook_input("cd /workspace; bash scripts/qa/run_all.sh")) is True
-        )
+        assert handler.matches(bash_hook_input("cd /workspace; bash scripts/qa/run_all.sh")) is True
 
     def test_does_not_match_shellcheck_of_run_all_sh(
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any
