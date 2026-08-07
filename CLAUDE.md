@@ -1065,11 +1065,20 @@ update the README row); edits to archived plans; backticked
 `src/...` paths that no longer exist.
 
 **Journal day-files** (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`) are also
-linted (all ADVISE): the name must match the grammar and the
-enclosing plan number with a today/yesterday date
-(`journal-dayfile-naming`), and edits must APPEND — never rewrite or
-remove earlier entries (`journal-append-only`). Corrections are new
-dated entries at the bottom, not edits to old ones.
+linted: the name must match the grammar and the enclosing plan
+number (`journal-dayfile-naming`, ADVISE), and edits must APPEND —
+never rewrite or remove earlier entries (`journal-append-only`,
+ADVISE). Corrections are new dated entries at the bottom, not edits
+to old ones.
+
+**A Write/Edit to a journal day-file dated anything other than
+TODAY is BLOCKED by default** (`journal-dayfile-is-today`) — this
+includes yesterday's date. A session that spans midnight must start
+TODAY's day-file, not keep appending to yesterday's; the block
+message names the exact today-dated filename to write instead.
+Controlled independently of the other journal checks via
+`plan_workflow.qa.journal.today_only_mode` (advise | block | off;
+default block).
 
 A journal is **unbounded by design** — its length is never a problem
 and it must not be tidied or trimmed. It is safe to grow forever
