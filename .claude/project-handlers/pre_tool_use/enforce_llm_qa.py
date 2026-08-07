@@ -5,7 +5,6 @@ produces ~16 lines instead of 200+. LLM agents should never run the
 verbose run_all.sh directly.
 """
 
-import re
 from typing import Any
 
 from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
@@ -21,22 +20,78 @@ _LLM_SCRIPT = "./scripts/qa/llm_qa.py all"
 # still be a real invocation (e.g. `cat run_all.sh; bash run_all.sh`).
 _INSPECTION_COMMANDS = ("cat", "less", "more", "head", "tail", "grep", "rg", "wc", "bat")
 
+# Characters that end one command and begin the next AT THE TOP LEVEL of a
+# shell line. A newline is one of them: `a\nb` runs two commands exactly as
+# `a; b` does, and omitting it let a real invocation on line 2 inherit line 1's
+# leading word. `&` covers both `&&` and backgrounding; splitting on the single
+# character handles both without a second rule.
+_SEGMENT_SEPARATORS = frozenset({";", "|", "&", "\n"})
+
+_QUOTE_CHARS = frozenset({'"', "'"})
+_ESCAPE_CHAR = "\\"
+
+
+def _split_top_level(command: str) -> list[str]:
+    """Split ``command`` into segments on UNQUOTED shell separators.
+
+    A separator inside quotes is data, not syntax. The previous regex split on
+    a bare ``[;|]`` and so cut through a quoted grep alternation
+    (``"a\\|b\\|CHECKS="``), stranding a fragment whose apparent leading word
+    was the tail of the pattern — which matched no allowlist entry and denied
+    an ordinary read of the script.
+
+    Deliberately a scanner, not a shell parser: it tracks quoting and
+    backslash escaping only. Substitutions and heredocs are out of scope
+    because the caller only needs the leading word of each segment, and
+    over-splitting is the failure mode that matters here.
+    """
+    segments: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    escaped = False
+
+    for char in command:
+        if escaped:
+            current.append(char)
+            escaped = False
+            continue
+        if char == _ESCAPE_CHAR:
+            current.append(char)
+            escaped = True
+            continue
+        if quote is not None:
+            current.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in _QUOTE_CHARS:
+            quote = char
+            current.append(char)
+            continue
+        if char in _SEGMENT_SEPARATORS:
+            segments.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+
+    segments.append("".join(current))
+    return segments
+
 
 def _is_inspection_only(command: str) -> bool:
     """True when every segment referencing the script only inspects it.
 
-    Splits on common shell separators and checks each segment's leading
-    word (the command being run) against the inspection allowlist. A
-    segment whose leading word is NOT an inspection command (e.g. `bash`,
-    `./scripts/...`, `sh`) is treated as a potential real invocation.
+    Checks each segment's leading word (the command being run) against the
+    inspection allowlist. A segment whose leading word is NOT an inspection
+    command (e.g. `bash`, `./scripts/...`, `sh`) is treated as a potential
+    real invocation.
     """
-    segments = re.split(r"&&|\|\||[;|]", command)
-    for segment in segments:
+    for segment in _split_top_level(command):
         stripped = segment.strip()
         if not stripped or _BLOCKED_SCRIPT not in stripped:
             continue
-        leading_word = stripped.split()[0] if stripped.split() else ""
-        leading_word = leading_word.rsplit("/", 1)[-1]  # strip any path prefix
+        words = stripped.split()
+        leading_word = words[0].rsplit("/", 1)[-1] if words else ""  # strip any path prefix
         if leading_word not in _INSPECTION_COMMANDS:
             return False
     return True

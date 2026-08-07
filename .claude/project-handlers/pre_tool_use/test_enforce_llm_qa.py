@@ -137,6 +137,42 @@ class TestEnforceLlmQaHandler:
         """Explicit interpreter invocation still executes the script."""
         assert handler.matches(bash_hook_input("bash scripts/qa/run_all.sh")) is True
 
+    # ── matches() — segmentation defects ──
+
+    def test_matches_invocation_on_a_later_LINE_of_a_multiline_command(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """A newline separates commands just as `;` does.
+
+        Regression: segmentation split only on `&&`/`||`/`;`/`|`, so a
+        multi-line command collapsed into ONE segment. The leading word was
+        taken from line 1 -- an inspection command -- and a real invocation on
+        line 2 was waved through. A false NEGATIVE: the block simply did not
+        apply to the shape agents use most (a heredoc-style multi-line script).
+        """
+        command = "grep -n pattern some/file.txt\nbash scripts/qa/run_all.sh"
+        assert handler.matches(bash_hook_input(command)) is True
+
+    def test_does_not_match_grep_whose_PATTERN_contains_a_pipe(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """A `|` inside quotes is data, not a pipeline separator.
+
+        Regression: splitting on a bare `[;|]` cut through a quoted grep
+        alternation, leaving a fragment whose "leading word" was the tail of
+        the pattern (``CHECKS="``). That is in no allowlist, so an ordinary
+        read of the script was denied. A false POSITIVE, and the reason this
+        test exists.
+        """
+        command = 'grep -n "print_result\\|^run_check\\|CHECKS=" scripts/qa/run_all.sh'
+        assert handler.matches(bash_hook_input(command)) is False
+
+    def test_matches_real_pipeline_invocation(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """An UNQUOTED `|` still separates -- the fix must not blind the guard."""
+        assert handler.matches(bash_hook_input("echo hi | bash scripts/qa/run_all.sh")) is True
+
     # ── Acceptance tests ──
 
     def test_has_acceptance_tests(self, handler: EnforceLlmQaHandler) -> None:
