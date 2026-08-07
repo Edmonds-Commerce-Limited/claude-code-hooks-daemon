@@ -10,7 +10,7 @@ the CLI never contain rule logic: they build a :class:`CheckContext`, call
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex
 
 
-class Stage(str, Enum):
+class Stage(StrEnum):
     """When a check runs."""
 
     EDIT = "edit"  # Stage 1: Write/Edit of a single plan file
@@ -28,7 +28,7 @@ class Stage(str, Enum):
     SWEEP = "sweep"  # Stage 3: whole-tree drift sweep (SessionStart / CLI)
 
 
-class Level(str, Enum):
+class Level(StrEnum):
     """Severity of a finding: blocks the action, or advises only."""
 
     BLOCK = "block"

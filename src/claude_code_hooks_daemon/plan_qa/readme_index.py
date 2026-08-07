@@ -19,13 +19,13 @@ tolerates mdformat-gfm output (markdown_table_formatter compatibility).
 
 import re
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
 
 
-class ReadmeSection(str, Enum):
+class ReadmeSection(StrEnum):
     """Which index section a row was found under."""
 
     ACTIVE = "active"

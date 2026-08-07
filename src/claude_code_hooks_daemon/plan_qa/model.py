@@ -26,14 +26,14 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME
 
 
-class PlanStatus(str, Enum):
+class PlanStatus(StrEnum):
     """Allowed ``**Status**:`` tokens for a plan document."""
 
     NOT_STARTED = "Not Started"
@@ -270,7 +270,7 @@ def _count_done_markers(lines: list[str]) -> int:
     return sum(len(_DONE_MARKER_RE.findall(line)) for line in lines)
 
 
-class PlanLocation(str, Enum):
+class PlanLocation(StrEnum):
     """Where a plan folder physically sits relative to the plan root."""
 
     ROOT = "root"
