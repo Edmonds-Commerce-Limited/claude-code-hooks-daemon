@@ -91,18 +91,16 @@ pytest tests/unit/path/to/test_module.py --cov=src/path/to/module.py --cov-repor
 ./scripts/qa/run_all.sh
 ```
 
-**Expected output**:
+**Expected output**: one `✅ PASSED` line per check, then the overall verdict.
+The runner enumerates its own checks — do not hardcode the list or the count
+here, it goes stale as the suite grows.
 
 ```
 ========================================
 QA Summary
 ========================================
   Magic Values        : ✅ PASSED
-  Format Check        : ✅ PASSED
-  Linter              : ✅ PASSED
-  Type Check          : ✅ PASSED
-  Tests               : ✅ PASSED
-  Security Check      : ✅ PASSED
+  ... one line per check the runner ran ...
 
 Overall Status: ✅ ALL CHECKS PASSED
 ```

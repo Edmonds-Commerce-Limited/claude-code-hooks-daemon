@@ -70,19 +70,17 @@ Complete quality assurance for the Claude Code Hooks Daemon consists of **three 
 
 ### Success Criteria
 
-All 7 checks must pass with ZERO failures:
+EVERY check the runner runs must pass, with ZERO failures. `scripts/qa/run_all.sh`
+is the single source of truth for which checks exist — this document deliberately
+does not restate the list or the count, because a hardcoded number here went stale
+the moment a check was added.
 
 ```
 ========================================
 QA Summary
 ========================================
   Magic Values        : ✅ PASSED
-  Format Check        : ✅ PASSED
-  Linter              : ✅ PASSED
-  Type Check          : ✅ PASSED
-  Tests               : ✅ PASSED
-  Security Check      : ✅ PASSED
-  Dependencies        : ✅ PASSED
+  ... one line per check the runner ran ...
 
 Overall Status: ✅ ALL CHECKS PASSED
 ```

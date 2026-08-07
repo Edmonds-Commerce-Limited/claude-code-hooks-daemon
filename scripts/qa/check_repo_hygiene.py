@@ -16,11 +16,33 @@ untracked ``coverage.json`` in a working tree is the normal result of running
 the test suite and must never fail the gate — a check that fired on that would
 be switched off within a day.
 
-Two rule families, deliberately scoped:
+Four rule families, deliberately scoped:
 
 ``tracked-build-artifact``
     Generated reports and editor/merge/backup detritus that should be produced,
     never committed.
+
+``frozen-session-summary``
+    A tracked document that is unedited agent session output — a "Mission
+    Accomplished" heading, a "Next Steps (User's Original Request)" section, or
+    a frozen ``N PASSING / M FAILING`` tally. ``validate_instruction_content``
+    blocks this material at write time, but only for ``CLAUDE.md`` and
+    ``README.md``; two such documents sat tracked at the top of ``CLAUDE/`` for
+    months, one advertising 13 failing tests in its header. This is that
+    handler's batch half.
+
+    Narrative records are exempt BY LOCATION: a plan, its journal, a release
+    note and the changelog are dated accounts of what happened and are supposed
+    to read that way. A rule that flagged them would fire on hundreds of
+    legitimate files and be switched off within a day.
+
+``src-test-stub``
+    A ``test_*.py`` tracked under ``src/``, which pytest can never collect
+    (``testpaths = ["tests"]``). The one instance stated its own purpose:
+    *"This file satisfies the TDD enforcement handler requirement."* No test
+    function, no import, no assertion. A committed decoy that documents
+    bypassing the flagship guardrail is worse than the missing test it stood
+    in for.
 
 ``root-test-script``
     A ``test_*.sh`` stranded at the repository root. Scoped to the root ON
@@ -49,6 +71,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
 import sys
 from dataclasses import dataclass, field
@@ -67,6 +90,50 @@ _TOOL_NAME: Final[str] = "repo_hygiene"
 
 RULE_TRACKED_ARTIFACT: Final[str] = "tracked-build-artifact"
 RULE_ROOT_TEST_SCRIPT: Final[str] = "root-test-script"
+RULE_FROZEN_SUMMARY: Final[str] = "frozen-session-summary"
+RULE_SRC_TEST_STUB: Final[str] = "src-test-stub"
+
+_ALL_RULES: Final[tuple[str, ...]] = (
+    RULE_TRACKED_ARTIFACT,
+    RULE_ROOT_TEST_SCRIPT,
+    RULE_FROZEN_SUMMARY,
+    RULE_SRC_TEST_STUB,
+)
+
+_MARKDOWN_SUFFIXES: Final[tuple[str, ...]] = (".md", ".markdown")
+
+# Path prefixes whose contents are dated narrative BY DESIGN. A plan, its
+# journal, a release note and the changelog are accounts of what happened;
+# "Mission Accomplished" in one of those is the genre, not a defect.
+_NARRATIVE_PREFIXES: Final[tuple[str, ...]] = (
+    "CLAUDE/Plan/",
+    "RELEASES/",
+    "untracked/",
+)
+_NARRATIVE_BASENAMES: Final[frozenset[str]] = frozenset({"CHANGELOG.md"})
+_JOURNAL_DIRNAME: Final[str] = "JOURNAL"
+
+# Phrases that only ever appear in unedited agent session output. Each is
+# anchored tightly enough that prose *about* the problem (this file, the tests,
+# the audit that found them) does not trip it: the markers require the heading
+# or tally form, not a bare mention.
+_SESSION_SUMMARY_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
+    (
+        re.compile(r"^#{1,6}\s+.*Mission Accomplished", re.MULTILINE),
+        'a "Mission Accomplished" heading',
+    ),
+    (
+        re.compile(r"^#{1,6}\s+.*Next Steps \(User's Original Request\)", re.MULTILINE),
+        'a "Next Steps (User\'s Original Request)" heading',
+    ),
+    (
+        re.compile(r"\d+\s+PASSING\s*/\s*\d+\s+FAILING"),
+        "a frozen PASSING/FAILING test tally",
+    ),
+)
+
+_SRC_DIR_PREFIX: Final[str] = "src/"
+_PYTHON_SUFFIX: Final[str] = ".py"
 
 # Exact basenames of generated coverage reports. Matched exactly rather than by
 # a ``coverage.*`` glob so a legitimate source file (``coverage.py``) is safe.
@@ -103,6 +170,18 @@ _REMEDIATION_ROOT_SCRIPT: Final[str] = (
     "keep, otherwise delete it. A test script at the repository root is referenced "
     "by nothing and drifts silently out of date."
 )
+_REMEDIATION_FROZEN_SUMMARY: Final[str] = (
+    "Delete it, or fold the durable part into the doc that owns that topic. A "
+    "session summary is a snapshot of one conversation: its counts freeze, its "
+    "'next steps' are already done or abandoned, and nothing updates it. If the "
+    "narrative matters, it belongs in the relevant plan's JOURNAL/."
+)
+_REMEDIATION_SRC_TEST_STUB: Final[str] = (
+    "Delete it and write the real test under tests/. pytest's testpaths never "
+    "reach src/, so this file runs nowhere — if it exists to satisfy "
+    "tdd_enforcement, fix that handler's test-path resolution or add an "
+    "exclusion. Never commit a bypass."
+)
 
 
 @dataclass(frozen=True)
@@ -134,14 +213,7 @@ class Report:
         return not self.violations
 
     def to_dict(self) -> dict[str, object]:
-        by_rule = {
-            RULE_TRACKED_ARTIFACT: sum(
-                1 for v in self.violations if v.rule == RULE_TRACKED_ARTIFACT
-            ),
-            RULE_ROOT_TEST_SCRIPT: sum(
-                1 for v in self.violations if v.rule == RULE_ROOT_TEST_SCRIPT
-            ),
-        }
+        by_rule = {rule: sum(1 for v in self.violations if v.rule == rule) for rule in _ALL_RULES}
         return {
             "tool": _TOOL_NAME,
             "summary": {
@@ -205,8 +277,50 @@ def _is_root_test_script(rel_path: str) -> bool:
     return rel_path.endswith(_SHELL_SUFFIXES)
 
 
+def _is_narrative_record(rel_path: str) -> bool:
+    """True when ``rel_path`` is a dated account whose genre IS the narrative."""
+    if rel_path.startswith(_NARRATIVE_PREFIXES):
+        return True
+    if rel_path in _NARRATIVE_BASENAMES:
+        return True
+    return _JOURNAL_DIRNAME in rel_path.split("/")[:-1]
+
+
+def _frozen_summary_marker(root: Path, rel_path: str) -> str | None:
+    """Describe why ``rel_path`` reads as frozen session output, or ``None``.
+
+    Reads the file from the WORKING TREE. A tracked path whose content cannot
+    be read (deleted locally, a submodule gitlink, a binary blob) is skipped
+    rather than guessed at — this rule judges prose, and no prose means no
+    verdict to give.
+    """
+    if not rel_path.endswith(_MARKDOWN_SUFFIXES):
+        return None
+    if _is_narrative_record(rel_path):
+        return None
+
+    target = root / rel_path
+    try:
+        content = target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+    for pattern, description in _SESSION_SUMMARY_PATTERNS:
+        if pattern.search(content):
+            return description
+    return None
+
+
+def _is_src_test_stub(rel_path: str) -> bool:
+    """True when ``rel_path`` is a ``test_*.py`` stranded under ``src/``."""
+    if not rel_path.startswith(_SRC_DIR_PREFIX):
+        return False
+    basename = rel_path.rsplit("/", 1)[-1]
+    return basename.startswith(_TEST_SCRIPT_PREFIX) and basename.endswith(_PYTHON_SUFFIX)
+
+
 def scan(root: Path) -> Report:
-    """Check every tracked path in ``root`` against both rule families."""
+    """Check every tracked path in ``root`` against every rule family."""
     report = Report()
     for rel_path in tracked_files(root):
         reason = _is_build_artifact(rel_path)
@@ -227,6 +341,27 @@ def scan(root: Path) -> Report:
                     path=rel_path,
                     message="test script stranded at the repository root",
                     remediation=_REMEDIATION_ROOT_SCRIPT,
+                )
+            )
+            continue
+        if _is_src_test_stub(rel_path):
+            report.violations.append(
+                Violation(
+                    rule=RULE_SRC_TEST_STUB,
+                    path=rel_path,
+                    message="test file under src/, where pytest never collects it",
+                    remediation=_REMEDIATION_SRC_TEST_STUB,
+                )
+            )
+            continue
+        marker = _frozen_summary_marker(root, rel_path)
+        if marker is not None:
+            report.violations.append(
+                Violation(
+                    rule=RULE_FROZEN_SUMMARY,
+                    path=rel_path,
+                    message=f"tracked document carries {marker}",
+                    remediation=_REMEDIATION_FROZEN_SUMMARY,
                 )
             )
     return report

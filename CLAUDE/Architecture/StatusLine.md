@@ -6,9 +6,9 @@
 
 ## Overview
 
-The status line system provides a real-time information display in the Claude Code terminal, showing model name, context window usage, git branch, account identity, and daemon health metrics. It is implemented as a hook event type (`status_line`) processed by the daemon, making it approximately 20x faster than spawning individual processes for each status update.
+The status line system provides a real-time information display in the Claude Code terminal, showing model name, context window usage, git branch, account identity, and daemon health metrics. It is implemented as a hook event type (`status_line`) processed by the daemon, so a render costs one warm socket round-trip instead of a cold Python start per update.
 
-Claude Code calls the status line hook repeatedly during a session to refresh the terminal status bar. Because this runs frequently, performance is critical -- the daemon-based architecture avoids process spawn overhead entirely after the initial warmup.
+Claude Code calls the status line hook repeatedly during a session to refresh the terminal status bar, making it the highest-frequency surface (~0.3 renders/s observed). It is **not** free of process spawning: a render is measured at **62-66 ms, roughly 76% of it client-side spawn cost** (two `jq` spawns plus `python3` in the wrapper), with ~16 ms of git forks daemon-side. The daemon removes the per-render Python import, not the wrapper's spawns — the remaining headroom is in the wrapper. Figures from `CLAUDE/Plan/Completed/00154-daemon-performance-rust-vs-python-research/RESEARCH.md`.
 
 ---
 

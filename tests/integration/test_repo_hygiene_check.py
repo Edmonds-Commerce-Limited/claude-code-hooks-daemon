@@ -114,6 +114,106 @@ def test_flags_test_script_stranded_at_repo_root(tmp_path: Path) -> None:
     assert "test_forwarders.sh" in _paths(report)
 
 
+def test_flags_frozen_session_summary_document(tmp_path: Path) -> None:
+    """A tracked doc that is unedited agent session output.
+
+    DBF: ``validate_instruction_content`` already blocks this material at write
+    time — but only for ``CLAUDE.md`` and ``README.md``, and only for the write
+    that is happening now. Two such documents (``CLAUDE/AGENT_TEAM_EXECUTION_
+    STATUS.md``, ``CLAUDE/TDD_RESPONSE_VALIDATION_SUMMARY.md``) sat tracked at
+    the top of ``CLAUDE/`` for months, one advertising 13 failing tests in its
+    header. Neither was reachable by that handler. This is its batch half.
+    """
+    repo = _make_repo(
+        tmp_path,
+        {
+            "CLAUDE/SUMMARY.md": "# Work\n\n## Mission Accomplished\n\nWe built it.\n",
+            "README.md": "# ok\n",
+        },
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1
+    assert "frozen-session-summary" in _rules(report)
+    assert "CLAUDE/SUMMARY.md" in _paths(report)
+
+
+def test_flags_frozen_summary_reporting_failing_tests(tmp_path: Path) -> None:
+    """A frozen pass/fail tally is the most damaging shape of this class."""
+    repo = _make_repo(
+        tmp_path,
+        {"docs/NOTES.md": "**Test Results**: 1429 PASSING / 13 FAILING\n"},
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1
+    assert "frozen-session-summary" in _rules(report)
+
+
+def test_does_not_flag_session_summary_markers_inside_plan_or_journal(tmp_path: Path) -> None:
+    """NEGATIVE CONTROL — a plan and its journal are SUPPOSED to read like this.
+
+    ``CLAUDE/Plan/**`` and ``RELEASES/**`` are dated, deliberately-narrative
+    records; flagging them would fire on hundreds of legitimate files and the
+    gate would be switched off within a day. The defect class is a frozen
+    session summary tracked as though it were reference documentation.
+    """
+    repo = _make_repo(
+        tmp_path,
+        {
+            "CLAUDE/Plan/00001-x/PLAN.md": "## Mission Accomplished\n",
+            "CLAUDE/Plan/00001-x/JOURNAL/00001-Journal-26-08-07.md": (
+                "**Test Results**: 12 PASSING / 3 FAILING\n"
+            ),
+            "RELEASES/v1.0.0.md": "## Mission Accomplished\n",
+            "CHANGELOG.md": "**Test Results**: 5 PASSING / 1 FAILING\n",
+        },
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, f"narrative record flagged: {report['violations']}"
+
+
+def test_flags_test_stub_under_src(tmp_path: Path) -> None:
+    """A ``test_*.py`` under ``src/`` that pytest can never collect.
+
+    ``src/tests/test_acceptance_test.py`` existed for one reason, stated in its
+    own docstring: *"This file satisfies the TDD enforcement handler
+    requirement."* It had no test function, no import and no assertion, and
+    ``testpaths = ["tests"]`` meant nothing ever ran it. A committed decoy that
+    documents bypassing the project's flagship guardrail is worse than the
+    missing test it stood in for, and no guard could see it.
+    """
+    repo = _make_repo(
+        tmp_path,
+        {"src/tests/test_thing.py": '"""Satisfies TDD enforcement."""\n'},
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1
+    assert "src-test-stub" in _rules(report)
+    assert "src/tests/test_thing.py" in _paths(report)
+
+
+def test_does_not_flag_tests_in_the_real_test_tree(tmp_path: Path) -> None:
+    """NEGATIVE CONTROL — collectable tests are the point of the repo."""
+    repo = _make_repo(
+        tmp_path,
+        {
+            "tests/unit/test_thing.py": "def test_x() -> None:\n    assert True\n",
+            "src/pkg/module.py": "X = 1\n",
+        },
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, f"clean tree flagged: {report['violations']}"
+
+
 def test_does_not_flag_test_scripts_beside_the_code_they_test(tmp_path: Path) -> None:
     """NEGATIVE CONTROL — the rule must discriminate, not just fire.
 

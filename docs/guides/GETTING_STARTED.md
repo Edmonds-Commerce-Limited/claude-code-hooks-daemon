@@ -11,7 +11,7 @@ The Claude Code Hooks Daemon is a background process that intercepts Claude Code
 - **Safety protection** -- blocks destructive commands like `git reset --hard` and `sed -i` before they execute
 - **Code quality enforcement** -- prevents QA suppression comments (`# noqa`, `// eslint-disable`, etc.)
 - **Workflow automation** -- injects git context, enforces TDD, validates plans
-- **20x faster response times** -- a long-running daemon with Unix socket IPC replaces per-hook process spawning
+- **Faster response times** -- a long-running daemon with Unix socket IPC replaces the cold Python start each hook event would otherwise pay: ~45 ms end-to-end against ≥198 ms one-shot (~4.4x), of which daemon-side dispatch is ~1.8 ms. Most of what remains is the bash forwarder spawning `jq` and `python3`, not the daemon
 
 When Claude Code fires a hook event (for example, before running a Bash command), the daemon evaluates it against a chain of handlers and returns a decision: allow, deny, or add context.
 

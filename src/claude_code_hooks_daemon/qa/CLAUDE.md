@@ -273,7 +273,5 @@ python3 -m pytest tests/unit/test_qa_runner.py -v
 
 ---
 
-**Created**: 20 January 2025
 **Module**: claude_code_hooks_daemon.qa.runner
-**Status**: Production ready
 **Python Tools**: ruff, mypy, black, pytest, bandit (optional)

@@ -287,9 +287,13 @@ if event_name in ("Stop", "SubagentStop"):
 
 `_format_stop_response()` only includes `{"decision":"block","reason":"..."}` when `self.decision == Decision.DENY`. For ALLOW it returns `{}`.
 
-If the `FrontController` is constructed with an incorrect `event_name` string (e.g. `"stop"` lowercase), the response falls through to `_format_system_message_response()` which produces `{"systemMessage":"..."}` instead of `{"decision":"block"}`. Claude Code does not recognise `systemMessage` as a blocking signal on Stop events.
+If the event name reaching the dispatcher is not the exact PascalCase token (e.g. `"stop"` lowercase), the response falls through to `_format_system_message_response()` which produces `{"systemMessage":"..."}` instead of `{"decision":"block"}`. Claude Code does not recognise `systemMessage` as a blocking signal on Stop events.
 
-To verify: check the `hooks/stop.py` entry point which constructs `FrontController(event_name="Stop")` — the capital S is required.
+To verify: the event name is not constructed anywhere in Python — it is the `hook_event_name` field Claude Code puts in the payload, forwarded verbatim by `.claude/hooks/stop` and routed by `EventRouter` (`src/claude_code_hooks_daemon/core/router.py`). Probe the live daemon and read back what it thinks the event was:
+
+```bash
+echo '{"hook_event_name":"Stop","stop_hook_active":false}' | .claude/hooks/stop
+```
 
 ### 5. ALLOW Decision Returned by Handler
 

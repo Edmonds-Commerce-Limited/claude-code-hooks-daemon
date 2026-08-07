@@ -195,21 +195,13 @@ Run ALL quality checks before committing:
 ./scripts/qa/run_all.sh
 ```
 
-**Expected output**:
+**Expected output**: one `✅` line per check, then a summary line whose two
+numbers are equal — e.g. `QA: 18/18 PASSED`.
 
-```
-========================================
-QA Summary
-========================================
-  Magic Values        : ✅ PASSED
-  Format Check        : ✅ PASSED
-  Linter              : ✅ PASSED
-  Type Check          : ✅ PASSED
-  Tests               : ✅ PASSED
-  Security Check      : ✅ PASSED
-
-Overall Status: ✅ ALL CHECKS PASSED
-```
+The runner is the single source of truth for WHICH checks exist and how many.
+Do not reproduce the list here: an earlier version of this section hardcoded six
+checks and went stale as the suite grew, so a reader could see a full pass and
+still believe checks were missing.
 
 **If ANY check fails**: Fix issues and re-run full suite.
 
@@ -302,9 +294,9 @@ A feature is DONE when ALL of the following are verified:
 
 ### 5. Full QA Suite
 
-- [ ] All 6 checks pass with ZERO failures
-- [ ] Run: `./scripts/qa/run_all.sh`
-- [ ] Expected output: "ALL CHECKS PASSED"
+- [ ] EVERY check the runner runs passes, with ZERO failures
+- [ ] Run: `./scripts/qa/run_all.sh` (or `./scripts/qa/llm_qa.py all`)
+- [ ] Expected output: "ALL CHECKS PASSED" / an `N/N PASSED` line
 
 ### 5b. Client-Mode Verification (if paths/interpreters/wrappers/assets changed)
 

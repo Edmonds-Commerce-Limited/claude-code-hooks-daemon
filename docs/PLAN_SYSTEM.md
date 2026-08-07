@@ -3,7 +3,6 @@
 A structured planning methodology for organizing development work through numbered folders and standardized documentation. Originally developed for the Claude Code Hooks Daemon but applicable to any software project.
 
 **Version**: 2.0
-**Status**: Production-ready
 **License**: MIT
 
 ---

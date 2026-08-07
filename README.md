@@ -46,7 +46,7 @@ Claude Code's native hook system is powerful but difficult to iterate on. Hooks 
 
 **The daemon changes this fundamentally.**
 
-When installed, your project has just five Claude Code hooks — one per event type. Each is a lightweight shell script that simply forwards events to the daemon over a Unix socket. The daemon is a separate Python process that **you can restart independently of Claude Code**.
+When installed, your project has exactly one Claude Code hook per event type — a lightweight shell script that does nothing but forward the event to the daemon over a Unix socket. Registration is a fixed, one-time cost that never grows with the number of handlers. The daemon is a separate Python process that **you can restart independently of Claude Code**.
 
 This means you can use Claude Code itself to write and modify hook handlers, restart the daemon with a single command, and immediately test your changes — all without leaving your current session. The tool you're using to edit code becomes the tool you use to improve the hooks that govern how you edit code.
 
@@ -84,7 +84,7 @@ The daemon ships with a large library of production handlers spanning every hook
 - **Sed blocker** (`sed_blocker`) — Blocks `sed` used to modify files in place; the Edit tool is the safe alternative
 - **Security antipattern blocker** (`security_antipattern`) — Blocks hardcoded secrets (OWASP A02) and injection patterns (OWASP A03) across 12 language strategies (Secrets, Python, JS/TS, PHP, Go, Ruby, Java, Kotlin, C#, Rust, Swift, Dart)
 - **Absolute path enforcer** (`absolute_path`) — Requires absolute paths for `Read`/`Write`/`Edit`; blocks relative ones
-- **QA suppression blocker** (`qa_suppression`) — Blocks `# type: ignore`, `# noqa`, `eslint-disable`, `//nolint` across 11 languages (Python, JS, TS, PHP, Go, Rust, Java, Ruby, Kotlin, Swift, C#)
+- **QA suppression blocker** (`qa_suppression`) — Blocks `# type: ignore`, `# noqa`, `eslint-disable`, `//nolint` across 11 language strategies (Python, JS/TS, PHP, Go, Rust, Java, Ruby, Kotlin, Swift, C#, Dart)
 
 ### Code Quality (Priority 25–35)
 
@@ -422,7 +422,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-MIT License — Copyright © 2024–2026 Edmonds Commerce
+MIT License — Copyright (c) 2025 Edmonds Commerce Limited. `LICENSE` is authoritative.
 
 **Issues:** https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
 **Email:** hello@edmondscommerce.co.uk

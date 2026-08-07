@@ -74,7 +74,7 @@ To prevent false completion claims discovered in Wave 2 audit, all agent teams M
 **3. QA Agents** (Quality Assurance)
 
 - **See CLAUDE/QA.md for complete QA Agent role definition**
-- Verify all 7 QA checks pass (magic values, format, lint, types, tests, security, dependencies)
+- Verify EVERY QA check passes (`scripts/qa/run_all.sh` enumerates them; do not restate the count)
 - Verify daemon restarts successfully
 - Check coverage meets 95% minimum
 - **Check library/plugin separation** (no project-specific handlers in library)
