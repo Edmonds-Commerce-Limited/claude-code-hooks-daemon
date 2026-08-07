@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING, Any
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.utils.secret_redaction import (
+    get_active_secret_terms,
+    redact_structure,
+)
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.handler import Handler
@@ -142,13 +146,20 @@ class EventRouter:
             len(chain),
         )
 
-        # DEBUG: Log full hook_input for PreToolUse to debug pipe blocker
+        # DEBUG: Log full hook_input for PreToolUse to debug pipe blocker.
+        # Plan 00201: redacted BEFORE serialisation — this fires unconditionally,
+        # ahead of any handler (including sensitive_content) getting a chance to
+        # deny the event, so it is a leak vector independent of the dispatch
+        # decision. get_active_secret_terms() is process-lifetime cached, so
+        # this costs a dict lookup on the hot path, not a file read.
         if event_type == EventType.PRE_TOOL_USE:
             import json
 
+            terms = get_active_secret_terms()
+            payload = redact_structure(hook_input, terms) if terms else hook_input
             logger.debug(
                 "PRE_TOOL_USE hook_input:\n%s",
-                json.dumps(hook_input, indent=2, default=str),
+                json.dumps(payload, indent=2, default=str),
             )
 
         execution_result = chain.execute(hook_input, strict_mode=strict_mode)

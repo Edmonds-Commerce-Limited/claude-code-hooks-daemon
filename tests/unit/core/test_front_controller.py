@@ -797,6 +797,50 @@ class TestLogErrorToFile:
         assert "Cannot determine workspace root" in captured.err
 
 
+class TestLogErrorToFileSecretRedaction:
+    """Plan 00201: a secret term in hook_input must never reach hook-errors.log."""
+
+    @patch("claude_code_hooks_daemon.core.front_controller.get_active_secret_terms")
+    @patch("claude_code_hooks_daemon.core.front_controller.get_workspace_root")
+    @patch("pathlib.Path.open", new_callable=mock_open)
+    @patch("pathlib.Path.exists")
+    @patch("pathlib.Path.mkdir")
+    def test_secret_term_is_redacted_from_written_log(
+        self, mock_mkdir, mock_exists, mock_file, mock_get_root, mock_terms
+    ):
+        mock_get_root.return_value = Path("/workspace")
+        mock_exists.return_value = False
+        mock_terms.return_value = ("zzqx-nonsense-term",)
+
+        exception = ValueError("Test error")
+        hook_input = {"tool_input": {"content": "contains zzqx-nonsense-term here"}}
+
+        log_error_to_file("PreToolUse", exception, hook_input)
+
+        written = "".join(call.args[0] for call in mock_file().write.call_args_list)
+        assert "zzqx-nonsense-term" not in written
+
+    @patch("claude_code_hooks_daemon.core.front_controller.get_active_secret_terms")
+    @patch("claude_code_hooks_daemon.core.front_controller.get_workspace_root")
+    @patch("pathlib.Path.open", new_callable=mock_open)
+    @patch("pathlib.Path.exists")
+    @patch("pathlib.Path.mkdir")
+    def test_no_terms_configured_writes_unredacted(
+        self, mock_mkdir, mock_exists, mock_file, mock_get_root, mock_terms
+    ):
+        mock_get_root.return_value = Path("/workspace")
+        mock_exists.return_value = False
+        mock_terms.return_value = ()
+
+        exception = ValueError("Test error")
+        hook_input = {"tool_input": {"content": "plain content"}}
+
+        log_error_to_file("PreToolUse", exception, hook_input)
+
+        written = "".join(call.args[0] for call in mock_file().write.call_args_list)
+        assert "plain content" in written
+
+
 # get_workspace_root() Tests
 
 

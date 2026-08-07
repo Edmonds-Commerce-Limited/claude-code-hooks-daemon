@@ -13,6 +13,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.retention import prune_directory
+from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms, redact_text
 
 # Subdirectory under the daemon's untracked dir where archives are written.
 _ARCHIVE_SUBDIR = "transcripts"
@@ -110,6 +111,12 @@ class TranscriptArchiverHandler(Handler):
             archive_file = archive_dir / f"transcript_{timestamp}.json"
 
             transcript_content = self._read_transcript(transcript_path)
+
+            # Plan 00201: redact BEFORE embedding — a secret pasted anywhere in
+            # the conversation must not survive into this on-disk archive.
+            secret_terms = get_active_secret_terms()
+            if secret_terms:
+                transcript_content = redact_text(transcript_content, secret_terms)
 
             # Build archive data
             archive_data = {

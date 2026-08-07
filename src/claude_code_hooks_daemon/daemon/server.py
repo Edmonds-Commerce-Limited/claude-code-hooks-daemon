@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
+from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms
 from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
 
 # Global memory log handler - accessible for log queries
@@ -884,6 +885,9 @@ class HooksDaemon:
                 ),
                 event=event,
                 hook_input=hook_input,
+                # Plan 00201: a secret pasted into a Write/Edit payload must
+                # never survive into this dogfooding capture file.
+                secret_terms=get_active_secret_terms(),
             )
         except (OSError, RuntimeError) as exc:
             logger.warning("Payload capture failed for %s: %s", event, exc)

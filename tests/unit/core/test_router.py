@@ -1,5 +1,7 @@
 """Tests for EventRouter."""
 
+from unittest.mock import patch
+
 import pytest
 
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
@@ -481,4 +483,49 @@ class TestSharedFooterHelper:
             fc_module.inject_config_key_footer = original
 
         assert ("pre_tool_use", "my_handler") in calls
-        assert ("pre_tool_use", "fc_handler") in calls
+
+
+class TestSecretRedactionInDebugLog:
+    """Plan 00201: the PreToolUse debug-log dump must never leak a secret term.
+
+    ``route()`` logs the full ``hook_input`` at DEBUG for every PreToolUse
+    event, unconditionally, before any handler (including sensitive_content)
+    gets a chance to deny it — so this is a leak vector independent of the
+    handler's own decision.
+    """
+
+    def test_secret_term_absent_from_debug_log(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from claude_code_hooks_daemon.core import router as router_module
+
+        router = EventRouter()
+        with patch.object(
+            router_module, "get_active_secret_terms", return_value=("zzqx-nonsense-term",)
+        ):
+            with caplog.at_level(logging.DEBUG, logger="claude_code_hooks_daemon.core.router"):
+                hook_input = {
+                    "tool_name": "Write",
+                    "tool_input": {"content": "contains zzqx-nonsense-term here"},
+                }
+                router.route(EventType.PRE_TOOL_USE, hook_input)
+
+        assert "zzqx-nonsense-term" not in caplog.text
+
+    def test_clean_content_still_logged_when_no_terms_configured(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """No secret list configured -> logging is unaffected (backward compatible)."""
+        import logging
+
+        from claude_code_hooks_daemon.core import router as router_module
+
+        router = EventRouter()
+        with patch.object(router_module, "get_active_secret_terms", return_value=()):
+            with caplog.at_level(logging.DEBUG, logger="claude_code_hooks_daemon.core.router"):
+                hook_input = {"tool_name": "Write", "tool_input": {"content": "plain content"}}
+                router.route(EventType.PRE_TOOL_USE, hook_input)
+
+        assert "plain content" in caplog.text

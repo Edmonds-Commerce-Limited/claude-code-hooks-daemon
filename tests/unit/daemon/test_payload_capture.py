@@ -119,3 +119,54 @@ def test_resolve_capture_dir_defaults_to_untracked(tmp_path: Path) -> None:
 
 def test_resolve_capture_dir_uses_configured_dir(tmp_path: Path) -> None:
     assert resolve_capture_dir(str(tmp_path / "custom"), tmp_path) == tmp_path / "custom"
+
+
+class TestSecretRedaction:
+    """Plan 00201: a secret term must never reach a capture file verbatim."""
+
+    def test_default_no_terms_writes_payload_unredacted(self, tmp_path: Path) -> None:
+        """No terms passed = no-op redaction (backward compatible default)."""
+        hook_input = {"tool_input": {"content": "perfectly normal content"}}
+        result = capture_payload(
+            enabled=True,
+            events=[],
+            capture_dir=tmp_path,
+            event="PreToolUse",
+            hook_input=hook_input,
+        )
+        assert result is not None
+        assert json.loads(_read_lines(result)[0]) == hook_input
+
+    def test_secret_term_is_redacted_before_writing(self, tmp_path: Path) -> None:
+        hook_input = {"tool_input": {"content": "contains zzqx-nonsense-term here"}}
+        result = capture_payload(
+            enabled=True,
+            events=[],
+            capture_dir=tmp_path,
+            event="PreToolUse",
+            hook_input=hook_input,
+            secret_terms=("zzqx-nonsense-term",),
+        )
+        assert result is not None
+        raw_bytes = result.read_bytes()
+        assert b"zzqx-nonsense-term" not in raw_bytes
+
+    def test_secret_term_redacted_in_nested_fields(self, tmp_path: Path) -> None:
+        hook_input = {
+            "tool_input": {"file_path": "/tmp/f.txt", "content": "line1\nzzqx-nonsense-term\n"},
+            "session_id": "abc",
+        }
+        result = capture_payload(
+            enabled=True,
+            events=[],
+            capture_dir=tmp_path,
+            event="PreToolUse",
+            hook_input=hook_input,
+            secret_terms=("zzqx-nonsense-term",),
+        )
+        assert result is not None
+        parsed = json.loads(_read_lines(result)[0])
+        assert "zzqx-nonsense-term" not in json.dumps(parsed)
+        # Unrelated fields survive untouched.
+        assert parsed["session_id"] == "abc"
+        assert parsed["tool_input"]["file_path"] == "/tmp/f.txt"

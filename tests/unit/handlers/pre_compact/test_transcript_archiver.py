@@ -159,6 +159,43 @@ class TestTranscriptArchiverHandler:
         assert "Hello" in parsed["transcript"]
         assert "Hi there" in parsed["transcript"]
 
+    def test_handle_redacts_secret_term_from_archived_transcript(
+        self, handler, archive_dir, tmp_path, mock_datetime
+    ):
+        """Plan 00201: a secret pasted into the conversation must not survive archiving."""
+        transcript_path = tmp_path / "session-transcript.jsonl"
+        transcript_path.write_text(
+            '{"role": "user", "content": "contains zzqx-nonsense-term here"}\n'
+        )
+        hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript_path)}
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_compact.transcript_archiver."
+            "get_active_secret_terms",
+            return_value=("zzqx-nonsense-term",),
+        ):
+            handler.handle(hook_input)
+
+        archive_file = archive_dir / f"transcript_{_FIXED_TIMESTAMP}.json"
+        assert "zzqx-nonsense-term" not in archive_file.read_text()
+
+    def test_handle_no_terms_configured_archives_unredacted(
+        self, handler, archive_dir, tmp_path, mock_datetime
+    ):
+        transcript_path = tmp_path / "session-transcript.jsonl"
+        transcript_path.write_text('{"role": "user", "content": "plain content"}\n')
+        hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript_path)}
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_compact.transcript_archiver."
+            "get_active_secret_terms",
+            return_value=(),
+        ):
+            handler.handle(hook_input)
+
+        archive_file = archive_dir / f"transcript_{_FIXED_TIMESTAMP}.json"
+        assert "plain content" in archive_file.read_text()
+
     def test_handle_records_source_path(self, handler, archive_dir, transcript_file, mock_datetime):
         """Should record the originating transcript path in the archive."""
         hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript_file)}

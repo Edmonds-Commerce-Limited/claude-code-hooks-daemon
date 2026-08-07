@@ -22,6 +22,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.utils.secret_redaction import redact_structure
+
 # The ``_system`` envelope is the CLI's own control channel (logs, status,
 # health, handler listing) — never a real Claude Code hook event, so it is never
 # captured regardless of configuration.
@@ -61,6 +63,7 @@ def capture_payload(
     capture_dir: Path,
     event: str,
     hook_input: dict[str, Any],
+    secret_terms: tuple[str, ...] = (),
 ) -> Path | None:
     """Append ``hook_input`` as one JSON line to ``<capture_dir>/<event>.jsonl``.
 
@@ -71,6 +74,12 @@ def capture_payload(
         capture_dir: Directory to write per-event JSONL files into.
         event: The hook event name (e.g. ``"Status"``, ``"PreToolUse"``).
         hook_input: The raw payload Claude Code sent for this event.
+        secret_terms: Terms from the ``sensitive_content`` handler's secret
+            word list (Plan 00201). Every occurrence in any string value —
+            however deeply nested — is replaced before writing, so a secret
+            pasted into a Write/Edit payload can never survive into this
+            dogfooding capture file. Empty (default) is a no-op, preserving
+            prior behaviour for callers that do not pass it.
 
     Returns:
         The file written, or ``None`` when capture was disabled or the event was
@@ -88,8 +97,10 @@ def capture_payload(
     if events and event not in events:
         return None
 
+    payload = redact_structure(hook_input, secret_terms) if secret_terms else hook_input
+
     capture_dir.mkdir(parents=True, exist_ok=True)
     target = capture_dir / f"{_safe_event_name(event)}.jsonl"
     with target.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(hook_input, ensure_ascii=False) + "\n")
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
     return target

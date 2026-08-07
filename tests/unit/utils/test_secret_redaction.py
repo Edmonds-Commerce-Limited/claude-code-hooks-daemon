@@ -202,14 +202,18 @@ class TestActiveSecretTerms:
         secret_file.parent.mkdir(parents=True)
         secret_file.write_text("alpha\n")
 
-        with patch(
-            "claude_code_hooks_daemon.core.project_context.ProjectContext._initialized", True
-        ), patch(
-            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
-            return_value=tmp_path,
-        ), patch(
-            "claude_code_hooks_daemon.core.project_context.ProjectContext.config_path",
-            return_value=tmp_path / ".claude" / "hooks-daemon.yaml",
+        with (
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext._initialized", True
+            ),
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+                return_value=tmp_path,
+            ),
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.config_path",
+                return_value=tmp_path / ".claude" / "hooks-daemon.yaml",
+            ),
         ):
             result = sr.get_active_secret_terms()
         assert result == ("alpha",)
@@ -225,14 +229,18 @@ class TestActiveSecretTerms:
         secret_file = tmp_path / ".claude" / "block-words.secret"
         secret_file.parent.mkdir(parents=True)
         secret_file.write_text("beta\n")
-        with patch(
-            "claude_code_hooks_daemon.core.project_context.ProjectContext._initialized", True
-        ), patch(
-            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
-            return_value=tmp_path,
-        ), patch(
-            "claude_code_hooks_daemon.core.project_context.ProjectContext.config_path",
-            return_value=tmp_path / ".claude" / "hooks-daemon.yaml",
+        with (
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext._initialized", True
+            ),
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+                return_value=tmp_path,
+            ),
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.config_path",
+                return_value=tmp_path / ".claude" / "hooks-daemon.yaml",
+            ),
         ):
             assert sr.get_active_secret_terms() == ("beta",)
 

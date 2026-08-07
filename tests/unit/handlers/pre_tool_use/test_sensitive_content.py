@@ -232,9 +232,7 @@ class TestExcludePaths:
             [{"name": "vhosts-path", "pattern": "/var/www/vhosts", "description": "d"}]
         )
         handler._exclude_paths = ["tests/fixtures/**"]
-        hook_input = _write_input(
-            "/workspace/tests/fixtures/sample.txt", "/var/www/vhosts/example"
-        )
+        hook_input = _write_input("/workspace/tests/fixtures/sample.txt", "/var/www/vhosts/example")
         with patch(
             "claude_code_hooks_daemon.utils.path_exclusion.resolve_project_root",
             return_value="/workspace",
