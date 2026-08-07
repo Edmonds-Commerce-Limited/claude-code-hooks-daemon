@@ -632,6 +632,27 @@ def test_generate_markdown_includes_all_sections() -> None:
     assert "[ ] All tests marked PASS" in markdown
 
 
+def test_generate_markdown_no_hardcoded_stale_test_count_estimate() -> None:
+    """The EXECUTABLE category summary must not assert a hardcoded test count.
+
+    Regression test: the header previously hardcoded "~89 tests" next to a
+    time estimate, a number that drifts from reality every time a handler's
+    acceptance tests change - while the SAME generator function correctly
+    computes the real total a few hundred lines later ("**Total Tests**:").
+    The stale figure must be gone; the computed total must remain accurate.
+    """
+    config: dict[str, Any] = {}
+    registry = HandlerRegistry()
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    markdown = generator.generate_markdown()
+
+    assert "89 tests" not in markdown
+    assert "20-30 minutes" not in markdown
+    # The real, computed count must still be present.
+    assert "**Total Tests**: 0" in markdown
+
+
 def test_generate_markdown_handles_none_handler_class() -> None:
     """Test that None handler classes are skipped gracefully."""
 

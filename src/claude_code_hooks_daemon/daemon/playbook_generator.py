@@ -432,7 +432,6 @@ class PlaybookGenerator:
         lines.append("- **Must be tested** by running commands in main thread")
         lines.append("- PreToolUse handlers that block or provide advisory context")
         lines.append("- Run command, verify expected behaviour (block or advisory message)")
-        lines.append("- **Time**: 20-30 minutes for ~89 tests")
         lines.append("")
         lines.append("### 2. OBSERVABLE Tests (Context - Visible)")
         lines.append("- **Quick check** in system-reminders during normal session")
