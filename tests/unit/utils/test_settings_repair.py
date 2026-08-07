@@ -99,17 +99,15 @@ class TestRepairSettingsRegistrations:
     ) -> None:
         # If the atomic rename fails mid-repair, the live settings.json must be
         # byte-for-byte intact (never truncated) — the merged content only ever
-        # lands via os.replace, never a partial write to the live file.
-        import claude_code_hooks_daemon.utils.settings_repair as repair_mod
-
+        # lands via Path.replace(), never a partial write to the live file.
         settings_path = tmp_path / "settings.json"
         _write(settings_path, {"hooks": {}})
         original_bytes = settings_path.read_text()
 
-        def _boom(src: object, dst: object) -> None:
+        def _boom(self: Path, target: object) -> None:
             raise OSError("simulated rename failure")
 
-        monkeypatch.setattr(repair_mod.os, "replace", _boom)
+        monkeypatch.setattr(Path, "replace", _boom)
 
         result = repair_settings_registrations(settings_path)
 

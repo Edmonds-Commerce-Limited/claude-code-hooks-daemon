@@ -81,7 +81,7 @@ class CompactionSignalHandler(Handler):
 
             payload = {"ts": self._now(), "session_id": session_id}
             tmp_path.write_text(json.dumps(payload), encoding="utf-8")
-            os.replace(tmp_path, final_path)
+            tmp_path.replace(final_path)
         except RuntimeError as e:
             logger.warning("Skipping compaction signal (no project context): %s", e)
         except OSError as e:

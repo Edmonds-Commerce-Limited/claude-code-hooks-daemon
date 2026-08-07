@@ -26,7 +26,7 @@ is that registry, split out as pure functions so the count/rank logic is unit
 
 Per the Plan 00158 Truth #6 thread-safety audit, daemon dispatch runs handler
 chains on a multi-threaded executor pool, so concurrent sessions DO touch this
-registry in parallel. Every write is therefore atomic (``tmp`` + ``os.replace``)
+registry in parallel. Every write is therefore atomic (``tmp`` + ``Path.replace()``)
 and keyed by ``session_id`` — never routed through the shared global
 ``SessionState`` singleton — so a concurrent reader never sees a half-written
 file and two sessions never clobber each other's heartbeat.
@@ -112,7 +112,7 @@ def upsert_heartbeat(
     }
     tmp_path = registry_dir / f".{stem}.{os.getpid()}.tmp"
     tmp_path.write_text(json.dumps(entry), encoding="utf-8")
-    os.replace(tmp_path, path)
+    tmp_path.replace(path)
 
 
 def read_live_entries(

@@ -163,9 +163,10 @@ class ContextSidecarHandler(Handler):
     def _write_sidecar(self, session_id: str, payload: dict[str, Any]) -> None:
         """Atomically write ``payload`` to the per-session sidecar file.
 
-        Atomicity (tmp write + ``os.replace``) guarantees a concurrent reader
-        never sees a half-written JSON document. Failures are logged, never
-        silently swallowed, and never propagated into the status-line render.
+        Atomicity (tmp write + ``Path.replace()``) guarantees a concurrent
+        reader never sees a half-written JSON document. Failures are logged,
+        never silently swallowed, and never propagated into the status-line
+        render.
         """
         try:
             target_dir = ProjectContext.daemon_untracked_dir() / _SIDECAR_SUBDIR
@@ -176,7 +177,7 @@ class ContextSidecarHandler(Handler):
             tmp_path = target_dir / f".{safe_stem}.{os.getpid()}.tmp"
 
             tmp_path.write_text(json.dumps(payload), encoding="utf-8")
-            os.replace(tmp_path, final_path)
+            tmp_path.replace(final_path)
         except RuntimeError as e:
             # ProjectContext not initialised (default-config / standalone
             # entry-point branch). Skip rather than fail the dispatch.

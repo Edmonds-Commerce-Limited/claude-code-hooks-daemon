@@ -1,6 +1,6 @@
 """Tests for the ``.daemon-metadata.json`` schema and atomic read/write.
 
-Plan 00100 Phase 3 (Tasks 3.1–3.2): persist installer-time choices into a
+Plan 00100 Phase 3 (Tasks 3.1-3.2): persist installer-time choices into a
 single atomic JSON file inside each venv so the daemon's startup resolver
 never has to recompute or guess. Metadata schema is validated through a
 Pydantic v2 model; writes are atomic (tmp-file + rename); reads tolerate

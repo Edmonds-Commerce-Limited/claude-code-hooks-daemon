@@ -4,7 +4,6 @@ Covers detection of git's "not set as executable" hint and automatic
 remediation that makes non-executable git hook files executable.
 """
 
-import os
 import stat
 import subprocess  # nosec B404 - git used only to create real repos in test fixtures
 from pathlib import Path
@@ -22,7 +21,7 @@ _GIT_WARNING = (
 
 
 def _is_executable(path: str) -> bool:
-    return bool(os.stat(path).st_mode & stat.S_IXUSR)
+    return bool(Path(path).stat().st_mode & stat.S_IXUSR)
 
 
 def _make_git_repo(tmp_path) -> str:
@@ -39,16 +38,15 @@ def _make_git_repo(tmp_path) -> str:
 
 
 def _write_hook(repo: str, name: str, *, executable: bool) -> str:
-    hooks_dir = os.path.join(repo, ".git", "hooks")
-    os.makedirs(hooks_dir, exist_ok=True)
-    path = os.path.join(hooks_dir, name)
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write("#!/bin/sh\nexit 0\n")
+    hooks_dir = Path(repo) / ".git" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    path = hooks_dir / name
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     # Start as a plain readable/writable file (644)
-    os.chmod(path, 0o644)
+    path.chmod(0o644)
     if executable:
-        os.chmod(path, 0o755)
-    return path
+        path.chmod(0o755)
+    return str(path)
 
 
 class TestGitHooksExecutableFixerHandlerInit:
@@ -174,7 +172,7 @@ class TestGitHooksExecutableFixerHandlerHandle:
     def test_least_privilege_bits(self, handler, tmp_path):
         repo = _make_git_repo(tmp_path)
         hook = _write_hook(repo, "pre-push", executable=False)
-        os.chmod(hook, 0o600)  # owner read/write only
+        Path(hook).chmod(0o600)  # owner read/write only
 
         handler.handle(
             {
@@ -184,7 +182,7 @@ class TestGitHooksExecutableFixerHandlerHandle:
             }
         )
 
-        mode = stat.S_IMODE(os.stat(hook).st_mode)
+        mode = stat.S_IMODE(Path(hook).stat().st_mode)
         # Owner gains execute; group/other (no read) gain nothing -> 0o700
         assert mode == 0o700
 

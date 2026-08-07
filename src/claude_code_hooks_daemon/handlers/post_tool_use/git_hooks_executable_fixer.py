@@ -13,7 +13,6 @@ using least-privilege bits (execute is added only where read is already
 granted).
 """
 
-import os
 import stat
 import subprocess  # nosec B404 - git invoked with a fixed, trusted argument list only
 from pathlib import Path
@@ -171,7 +170,7 @@ class GitHooksExecutableFixerHandler(Handler):
 
             # Least privilege: grant execute only where read is already granted.
             exec_bits = (mode & _READ_BITS_MASK) >> _READ_TO_EXEC_SHIFT
-            os.chmod(entry, mode | exec_bits)
+            entry.chmod(mode | exec_bits)
             fixed.append(entry.name)
 
         return fixed

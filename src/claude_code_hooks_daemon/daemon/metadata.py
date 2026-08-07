@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -79,7 +78,7 @@ class DaemonVenvMetadata(BaseModel):
 def write_daemon_metadata(venv_dir: Path | str, meta: DaemonVenvMetadata) -> None:
     """Atomically persist metadata to ``{venv_dir}/.daemon-metadata.json``.
 
-    Writes to a sibling ``.tmp`` file and ``os.replace``s it into final
+    Writes to a sibling ``.tmp`` file and ``Path.replace()``s it into final
     position so readers never observe a half-written file. Caller owns
     the venv directory layout — if ``venv_dir`` does not exist, the
     write raises; we do not silently create missing parents.
@@ -90,7 +89,7 @@ def write_daemon_metadata(venv_dir: Path | str, meta: DaemonVenvMetadata) -> Non
     final_path = venv_path / _DAEMON_METADATA_FILENAME
     tmp_path = venv_path / f"{_DAEMON_METADATA_FILENAME}.tmp"
     tmp_path.write_text(meta.model_dump_json())
-    os.replace(tmp_path, final_path)
+    tmp_path.replace(final_path)
 
 
 def read_daemon_metadata(venv_dir: Path | str) -> DaemonVenvMetadata | None:
