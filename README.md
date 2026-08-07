@@ -76,7 +76,7 @@ Handlers are Python classes. Strategy patterns, type safety, dependency injectio
 
 ## What's Built In
 
-The daemon ships with 92 production handlers across 15 event types, covering the most common AI-assisted development guardrails:
+The daemon ships with a large library of production handlers spanning every hook event Claude Code emits, covering the most common AI-assisted development guardrails. For the exact set active in a given project, see that project's generated `.claude/HOOKS-DAEMON.md`:
 
 ### Safety (Priority 10–20)
 

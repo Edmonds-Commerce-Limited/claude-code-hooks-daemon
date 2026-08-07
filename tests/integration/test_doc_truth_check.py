@@ -16,14 +16,16 @@ the ground truth did: ``.claude/HOOKS-DAEMON.md`` is generated from live config
 by ``generate-docs`` and simply had no consumer.
 
 Scope is deliberately narrow (the brief's own framing): a full NLP
-claim-checker is not the goal. Three mechanically decidable rules only —
-referenced handlers exist, blocking/advisory claims match the generated
-Behavior column, and enumerated counts match the registry. Everything softer
-stays a human review task; a gate that guesses gets switched off.
+claim-checker is not the goal. Only mechanically decidable claims are checked —
+referenced handlers exist, and blocking/advisory claims match the generated
+Behavior column. Everything softer stays a human review task; a gate that
+guesses gets switched off.
 
-``qa-check-count-hardcoded`` is the inverse case: there is no generated ground
-truth for how many QA checks exist, so the fix is to stop asserting a number
-rather than to assert a better one.
+Counts are handled the other way round. Neither the QA-suite size nor a
+"ships with N handlers" figure has an artifact that substantiates it, so both
+are flagged outright rather than asserted against a better number. See
+``test_flags_any_hardcoded_handler_count`` for why validating the handler
+count against the generated doc was circular.
 """
 
 from __future__ import annotations
@@ -86,7 +88,6 @@ def test_flags_blocking_claim_about_an_advisory_handler(tmp_path: Path) -> None:
     root = _make_docs(
         tmp_path,
         "## What's Built In\n\n"
-        "The daemon ships with 3 production handlers across 2 event types:\n\n"
         "- **Some advisor** (`some_advisor`) — Blocks commits when things are wrong\n",
     )
 
@@ -100,9 +101,7 @@ def test_flags_reference_to_a_handler_that_does_not_exist(tmp_path: Path) -> Non
     """A renamed or deleted handler leaves prose pointing at nothing."""
     root = _make_docs(
         tmp_path,
-        "## What's Built In\n\n"
-        "The daemon ships with 3 production handlers across 2 event types:\n\n"
-        "- **Ghost** (`handler_that_was_deleted`) — Blocks things\n",
+        "## What's Built In\n\n" "- **Ghost** (`handler_that_was_deleted`) — Blocks things\n",
     )
 
     exit_code, report = _run_checker(root)
@@ -111,20 +110,30 @@ def test_flags_reference_to_a_handler_that_does_not_exist(tmp_path: Path) -> Non
     assert "handler-ref-unknown" in _rules(report)
 
 
-def test_flags_handler_count_drift(tmp_path: Path) -> None:
-    """Counts have generated ground truth, so they are asserted, not banned."""
+def test_flags_any_hardcoded_handler_count(tmp_path: Path) -> None:
+    """A "ships with N handlers" claim is unverifiable, so it is flagged outright.
+
+    An earlier version of this rule asserted the claim against the generated
+    doc's section totals. That was wrong twice over: the generated doc is
+    titled "Active Configuration" and counts what is ENABLED IN THIS PROJECT,
+    and its totals include project-local and plugin handlers a client never
+    receives plus handlers registered on two events counted twice. Comparing a
+    "ships with" claim to it asserted agreement between two artifacts sharing
+    one overcount — circular consistency rather than truth.
+
+    The number is genuinely ambiguous: 87, 89, 90 and 92 are each defensible.
+    So no count is accepted, exactly as for the QA-suite size.
+    """
     root = _make_docs(
         tmp_path,
         "## What's Built In\n\n"
-        "The daemon ships with 92 production handlers across 15 event types:\n",
+        "The daemon ships with 3 production handlers across 2 event types:\n",
     )
 
     exit_code, report = _run_checker(root)
 
-    assert exit_code == 1, "a stale handler count must fail"
-    assert "handler-count-drift" in _rules(report)
-    message = " ".join(v["message"] for v in report["violations"])
-    assert "3" in message and "2" in message, f"the finding must name the real counts: {message}"
+    assert exit_code == 1, "a hardcoded handler count must fail even when self-consistent"
+    assert "handler-count-unverifiable" in _rules(report)
 
 
 def test_flags_hardcoded_qa_check_count(tmp_path: Path) -> None:
@@ -135,7 +144,6 @@ def test_flags_hardcoded_qa_check_count(tmp_path: Path) -> None:
     root = _make_docs(
         tmp_path,
         "## What's Built In\n\n"
-        "The daemon ships with 3 production handlers across 2 event types:\n\n"
         "Run the suite and confirm ALL 10 checks pass before committing.\n",
     )
 
@@ -148,14 +156,14 @@ def test_flags_hardcoded_qa_check_count(tmp_path: Path) -> None:
 def test_accurate_prose_passes(tmp_path: Path) -> None:
     """NEGATIVE CONTROL — the check must discriminate, not merely fire.
 
-    Correct counts, a real handler and a matching behaviour claim must produce
-    zero findings. Without this, a checker that flagged everything would
-    satisfy all four positive cases above while being useless.
+    A real handler with a matching behaviour claim, and no hardcoded count,
+    must produce zero findings. Without this, a checker that flagged
+    everything would satisfy all four positive cases above while being
+    useless.
     """
     root = _make_docs(
         tmp_path,
         "## What's Built In\n\n"
-        "The daemon ships with 3 production handlers across 2 event types:\n\n"
         "- **Some blocker** (`some_blocker`) — Blocks dangerous things\n"
         "- **Some advisor** (`some_advisor`) — Advises about things\n",
     )

@@ -22,13 +22,24 @@ claims are checked:
     A bullet whose verb asserts blocking for an ADVISORY/CONTEXT handler, or
     advisory-only behaviour for a BLOCKING/TERMINAL one.
 
-``handler-count-drift``
-    "N production handlers across M event types" must match the registry.
-    Counts have generated ground truth, so they are asserted rather than banned.
+``handler-count-unverifiable``
+    A prose "N production handlers" claim. No artifact substantiates it:
+    ``.claude/HOOKS-DAEMON.md`` is titled **Active Configuration** and counts
+    what is enabled IN THIS PROJECT — including project-local and plugin
+    handlers a client never receives, and counting a handler registered on two
+    events twice. Validating the claim against that total would assert
+    agreement between two artifacts sharing one overcount: circular
+    consistency, not truth, and precisely what this check exists to prevent.
+    The number is genuinely ambiguous — 87, 89, 90 and 92 are each defensible
+    depending on whether you count registrations or classes, and whether
+    repo-local handlers are included. So the fix is to stop asserting one.
 
 ``qa-check-count-hardcoded``
-    The inverse: no generated truth exists for the size of the QA suite, so a
-    hardcoded count is guaranteed to drift. The fix is to stop asserting one.
+    Same treatment for the size of the QA suite, for the same reason.
+
+If ``generate-docs`` ever emits a SHIPPED-inventory figure distinct from the
+active one, ``handler-count-unverifiable`` can become an equality assertion
+against that — real ground truth rather than a restatement of the claim.
 
 Bullets opt in by naming their handler key — ``- **Display name**
 (`handler_key`) — description``. That keeps matching exact (no fuzzy
@@ -71,27 +82,20 @@ _CHECKED_DOCS: Final[tuple[str, ...]] = (
 
 RULE_REF_UNKNOWN: Final[str] = "handler-ref-unknown"
 RULE_CLAIM_MISMATCH: Final[str] = "handler-claim-mismatch"
-RULE_COUNT_DRIFT: Final[str] = "handler-count-drift"
+RULE_COUNT_UNVERIFIABLE: Final[str] = "handler-count-unverifiable"
 RULE_QA_COUNT: Final[str] = "qa-check-count-hardcoded"
 
 # A generated table row: | priority | handler | BEHAVIOR | description |
 _GENERATED_ROW_RE: Final[re.Pattern[str]] = re.compile(
     r"^\|\s*\d+\s*\|\s*(?P<handler>[A-Za-z_][A-Za-z0-9_]*)\s*\|\s*(?P<behavior>[A-Z-]+)\s*\|"
 )
-# A generated event-type section heading: ### PreToolUse (37 handlers)
-_GENERATED_SECTION_RE: Final[re.Pattern[str]] = re.compile(
-    r"^###\s+\S+\s+\((?P<count>\d+)\s+handlers?\)\s*$"
-)
-
 # A doc bullet that opts in by naming its handler key in backticks.
 _BULLET_RE: Final[re.Pattern[str]] = re.compile(
     r"^-\s+\*\*(?P<name>[^*]+)\*\*\s*\(`(?P<key>[a-z][a-z0-9_]*)`\)\s*[—-]\s*(?P<desc>.+)$"
 )
 
-# "92 production handlers across 15 event types"
-_COUNT_CLAIM_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?P<handlers>\d+)\s+production handlers?\s+across\s+(?P<events>\d+)\s+event types?"
-)
+# "92 production handlers", with or without a trailing "across N event types".
+_COUNT_CLAIM_RE: Final[re.Pattern[str]] = re.compile(r"(?P<handlers>\d+)\s+production handlers?")
 
 # A hardcoded QA-suite size, e.g. "ALL 10 checks" / "all 13 checks must pass".
 _QA_COUNT_RE: Final[re.Pattern[str]] = re.compile(r"\bALL\s+(?P<count>\d+)\s+checks?\b", re.I)
@@ -122,9 +126,14 @@ _REMEDIATION_REF_UNKNOWN: Final[str] = (
     "The named handler is not in .claude/HOOKS-DAEMON.md. Correct the key, or "
     "regenerate the doc (`hooks-daemon generate-docs`) if the handler is new."
 )
-_REMEDIATION_COUNT_DRIFT: Final[str] = (
-    "Update the sentence to the generated figures, or drop the numbers. "
-    "Regenerate .claude/HOOKS-DAEMON.md first so it reflects live config."
+_REMEDIATION_COUNT_UNVERIFIABLE: Final[str] = (
+    "Drop the number. No artifact substantiates a 'ships with N handlers' claim: "
+    ".claude/HOOKS-DAEMON.md is titled 'Active Configuration' and counts what is "
+    "ENABLED IN THIS PROJECT — including project-local and plugin handlers a client "
+    "never receives, and counting a handler registered on two events twice. Say "
+    "'a large library of production handlers' and point at the generated doc. If "
+    "generate-docs later emits a SHIPPED-inventory figure distinct from the active "
+    "one, this rule can become an equality assertion against that."
 )
 _REMEDIATION_QA_COUNT: Final[str] = (
     "Do not hardcode the size of the QA suite — there is no generated ground "
@@ -155,22 +164,24 @@ class Violation:
 
 @dataclass
 class GeneratedTruth:
-    """Handler behaviours and counts parsed from the generated doc."""
+    """Per-handler behaviours parsed from the generated doc.
+
+    Deliberately carries NO totals. The generated doc is titled "Active
+    Configuration": its counts describe what is ENABLED IN THIS PROJECT, which
+    is a different claim from what the daemon ships. Its totals also include
+    project-local and plugin handlers a client never receives, and count a
+    handler registered on two events twice. Parsing a total here and comparing
+    it to a "ships with N" claim would assert agreement between two artifacts
+    sharing one overcount — circular consistency, not truth.
+
+    Per-handler BEHAVIOUR is unaffected by any of that, so it stays.
+    """
 
     behaviours: dict[str, str] = field(default_factory=dict)
-    event_type_count: int = 0
-    # Sum of the per-section ``(N handlers)`` headings — i.e. REGISTRATIONS,
-    # not distinct classes. The two differ: `remind_prompt_library` and
-    # `subagent_completion_logger` are each registered on both Stop and
-    # SubagentStop, so the tree holds 92 registrations across 90 classes.
-    # Counting distinct keys here produced a false positive against a README
-    # that was correct — and a check that cries wolf gets switched off, so the
-    # generated doc's own arithmetic is the ground truth.
-    handler_count: int = 0
 
 
 def parse_generated_truth(path: Path) -> GeneratedTruth:
-    """Parse ``.claude/HOOKS-DAEMON.md`` into behaviours plus counts.
+    """Parse ``.claude/HOOKS-DAEMON.md`` into per-handler behaviours.
 
     Raises:
         FileNotFoundError: when the generated doc is absent. FAIL FAST — a
@@ -184,11 +195,6 @@ def parse_generated_truth(path: Path) -> GeneratedTruth:
         )
     truth = GeneratedTruth()
     for raw_line in path.read_text(encoding="utf-8").splitlines():
-        section = _GENERATED_SECTION_RE.match(raw_line)
-        if section is not None:
-            truth.event_type_count += 1
-            truth.handler_count += int(section.group("count"))
-            continue
         row = _GENERATED_ROW_RE.match(raw_line)
         if row is not None:
             truth.behaviours[row.group("handler")] = row.group("behavior")
@@ -264,27 +270,23 @@ def _check_bullet(rel_file: str, line_no: int, line: str, truth: GeneratedTruth)
     return []
 
 
-def _check_counts(rel_file: str, line_no: int, line: str, truth: GeneratedTruth) -> list[Violation]:
+def _check_counts(rel_file: str, line_no: int, line: str) -> list[Violation]:
     violations: list[Violation] = []
 
     count_claim = _COUNT_CLAIM_RE.search(line)
     if count_claim is not None:
-        claimed_handlers = int(count_claim.group("handlers"))
-        claimed_events = int(count_claim.group("events"))
-        if (claimed_handlers, claimed_events) != (truth.handler_count, truth.event_type_count):
-            violations.append(
-                Violation(
-                    rule=RULE_COUNT_DRIFT,
-                    file=rel_file,
-                    line=line_no,
-                    message=(
-                        f"doc claims {claimed_handlers} handlers across "
-                        f"{claimed_events} event types; the generated registry has "
-                        f"{truth.handler_count} across {truth.event_type_count}"
-                    ),
-                    remediation=_REMEDIATION_COUNT_DRIFT,
-                )
+        violations.append(
+            Violation(
+                rule=RULE_COUNT_UNVERIFIABLE,
+                file=rel_file,
+                line=line_no,
+                message=(
+                    f"prose asserts {count_claim.group('handlers')} production handlers; "
+                    "no artifact substantiates a shipped-handler count"
+                ),
+                remediation=_REMEDIATION_COUNT_UNVERIFIABLE,
             )
+        )
 
     qa_claim = _QA_COUNT_RE.search(line)
     if qa_claim is not None:
@@ -311,7 +313,7 @@ def scan(root: Path) -> list[Violation]:
             continue
         for line_no, line in enumerate(doc_path.read_text(encoding="utf-8").splitlines(), 1):
             violations.extend(_check_bullet(rel_file, line_no, line, truth))
-            violations.extend(_check_counts(rel_file, line_no, line, truth))
+            violations.extend(_check_counts(rel_file, line_no, line))
     return violations
 
 
@@ -345,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
                 for rule in (
                     RULE_REF_UNKNOWN,
                     RULE_CLAIM_MISMATCH,
-                    RULE_COUNT_DRIFT,
+                    RULE_COUNT_UNVERIFIABLE,
                     RULE_QA_COUNT,
                 )
             },
