@@ -1,6 +1,6 @@
 # Plan 00197: Journal Day-File Today-Only Guard
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-07
 **Owner**: joseph
 **Priority**: Medium
@@ -69,17 +69,17 @@ same fact).
 - [x] ✅ **Task 2.2**: Add `CLAUDE/UPGRADES/UNRELEASED/config-changes/` entry
   for `plan_workflow.qa.journal.today_only_mode`.
 - [x] ✅ **Task 2.3**: Run `./scripts/qa/llm_qa.py all` — zero failures.
-- [ ] ⬜ **Task 2.4**: Restart the daemon, verify `RUNNING`.
-- [ ] ⬜ **Task 2.5**: Live-dogfood: Edit a stale-dated day-file (denied) and
+- [x] ✅ **Task 2.4**: Restart the daemon, verify `RUNNING`.
+- [x] ✅ **Task 2.5**: Live-dogfood: Edit a stale-dated day-file (denied) and
   a today-dated one (allowed) against the live daemon.
 
 ## Success Criteria
 
-- [ ] New check ships with tests covering every edge case above.
-- [ ] `journal-dayfile-naming` no longer double-reports recency.
-- [ ] QA suite passes with zero suppressions.
-- [ ] Daemon restarts and reports RUNNING with the new code.
-- [ ] Live dogfood confirms both the block and the allow paths.
+- [x] New check ships with tests covering every edge case above.
+- [x] `journal-dayfile-naming` no longer double-reports recency.
+- [x] QA suite passes with zero suppressions.
+- [x] Daemon restarts and reports RUNNING with the new code.
+- [x] Live dogfood confirms both the block and the allow paths.
 
 ## Delivery & Milestones
 
@@ -87,4 +87,7 @@ same fact).
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00197-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- (pending)
+- Implementation delivered at `e5ce3692` (`journal-dayfile-is-today` check,
+  narrowed `journal-dayfile-naming`, `plan_qa_edit` guidance, config-changes
+  manifest, docs). Daemon restarted and live-dogfooded successfully
+  post-delivery (see JOURNAL for the block/allow probe transcript).
