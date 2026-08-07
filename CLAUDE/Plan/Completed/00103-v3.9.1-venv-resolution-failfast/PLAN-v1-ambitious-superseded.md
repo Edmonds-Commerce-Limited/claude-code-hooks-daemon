@@ -267,7 +267,8 @@ Reviewer Review #1 F2 established that the `tomllib` import-time crash is load-b
 
 - Field report received from downstream user during their session at /srv/example-app (snapshot in `context/2026-04-30-field-report.md`).
 - User explicit direction: "if we don't have python 3.11 available we need to fail fast and clear. We absolutely need to be using a single python version all the time — there should be a single source of truth for the correct python version."
-- User reaction to silent `2>/dev/null` redirect: "fuck me i hate shit like this." Endorses removal.
+- User reaction to the silent `2>/dev/null` redirect: strong objection to
+  suppressing errors this way at all. Endorses removal.
 
 ### 2026-04-30 — Review #1 FATAL (Opus 4.6 hostile)
 

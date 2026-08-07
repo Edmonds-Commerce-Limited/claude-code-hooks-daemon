@@ -96,7 +96,7 @@ To prevent false completion claims discovered in Wave 2 audit, all agent teams M
 - **CRITICAL ROLE**: Verify work delivers REAL VALUE, not just "looks complete"
 - **TDD Theater Detection**: Tests that exist but don't prove anything meaningful
 - **Handler Theater Detection**: Handlers that "work" but don't really do what they claim
-- **Lazy Solutions Detection**: Code that works but is shitty/lazy, not proper implementation
+- **Lazy Solutions Detection**: Code that works but is substandard/lazy, not proper implementation
 - **Value Delivery Verification**: Does it actually accomplish the feature goal or just look like it?
 - Check for dead code that's never imported/used
 - Verify handlers are registered in config
@@ -492,7 +492,7 @@ SendMessage(
 
 - Code can pass tests, pass QA, and still be theater if it doesn't deliver real value
 - Tests can exist but not prove anything meaningful (TDD theater)
-- Handlers can "work" but be shitty/lazy implementations
+- Handlers can "work" but be substandard/lazy implementations
 - Features can be "done" but not really solve the problem they claim to solve
 
 **Workflow:**
@@ -501,7 +501,7 @@ SendMessage(
 2. `cd` to developer's worktree
 3. **Perform deep VALUE AUDIT** (not just code existence check)
 4. Question: "Does this ACTUALLY deliver the value implied by the feature?"
-5. Check for lazy/shitty solutions that "work" but aren't proper
+5. Check for lazy/substandard solutions that "work" but aren't proper
 6. Verify tests actually PROVE the feature works (not just exist)
 7. Report "genuine completion" or "theater detected" via `SendMessage`
 
@@ -551,7 +551,7 @@ SendMessage(
 - Verify patterns actually match what they claim to match
 - Check if blocking logic is robust or has obvious bypass holes
 
-**Check 5: Lazy Solution Theater (Works But Is Shitty)**
+**Check 5: Lazy Solution Theater (Works But Is Substandard)**
 
 - **Value Check**: Is this a PROPER solution or a lazy workaround?
 - Example of lazy theater:
@@ -594,7 +594,7 @@ SendMessage(
 - Trust claims without verification
 - Approve partial completion as "theater-free"
 - Accept tests that exist but don't prove anything
-- Accept handlers that "work" but are lazy/shitty implementations
+- Accept handlers that "work" but are lazy/substandard implementations
 
 **You CAN (and SHOULD):**
 
@@ -603,7 +603,7 @@ SendMessage(
 - Reject handlers that "work" but are lazy/incomplete implementations
 - Demand evidence of actual value delivery (not just code existence)
 - Ask: "Would I accept this in code review or reject as lazy/incomplete?"
-- Call out shitty solutions that technically work but aren't proper
+- Call out substandard solutions that technically work but aren't proper
 
 **Report Format (GENUINE):**
 
@@ -644,7 +644,7 @@ THEATER EVIDENCE:
 [Specific findings with code examples]
 - TDD theater: Tests exist but don't prove behavior (examples: ...)
 - Handler theater: Handler 'works' but doesn't really solve problem (examples: ...)
-- Lazy solution: Code works but is shitty/incomplete (examples: ...)
+- Lazy solution: Code works but is substandard/incomplete (examples: ...)
 - Unachieved goals: Plan says X but code doesn't deliver X (examples: ...)
 - Dead code: Modules created but never used (examples: ...)
 
@@ -841,12 +841,12 @@ CRITICAL WORKTREE:
 
 YOUR ROLE (Honesty Checker - Gate 4 - FINAL):
 Verify work delivers REAL VALUE, not just "looks complete".
-Detect theater, lazy solutions, shitty implementations, and false claims.
+Detect theater, lazy solutions, substandard implementations, and false claims.
 
 CRITICAL UNDERSTANDING:
 - Code can pass tests and still be theater if it doesn't deliver real value
 - Tests can exist but not prove anything meaningful (TDD theater)
-- Handlers can "work" but be lazy/shitty implementations
+- Handlers can "work" but be lazy/substandard implementations
 - Features can be "done" but not really solve the problem
 
 YOUR JOB: Ask "Does this ACTUALLY deliver the value implied by the feature?"
@@ -897,7 +897,7 @@ Check 4 - Handler Theater (Handlers That Don't Really Work):
   Is logic properly implemented or just a stub?
   Are patterns robust or have obvious bypass holes?
 
-Check 5 - Lazy Solution Theater (Works But Is Shitty):
+Check 5 - Lazy Solution Theater (Works But Is Substandard):
   VALUE CHECK: Is this a PROPER solution or lazy workaround?
 
   Example lazy theater:
@@ -932,7 +932,7 @@ Check 8 - Integration Theater:
 YOU CAN (and SHOULD):
 - VETO entire branch if theater detected
 - Reject even if tests pass (if tests are theater)
-- Reject handlers that "work" but are lazy/shitty
+- Reject handlers that "work" but are lazy/substandard
 - Call out solutions that technically work but aren't proper
 - Ask: "Is this what I'd accept in code review?"
 
@@ -966,7 +966,7 @@ If THEATER:
     [Specific findings with code examples]
     - TDD theater: Tests don't prove behavior
     - Handler theater: Doesn't really solve problem
-    - Lazy solution: Works but shitty/incomplete
+    - Lazy solution: Works but substandard/incomplete
     - Unachieved goals: Plan says X, code doesn't deliver
 
     VALUE ASSESSMENT:
@@ -1252,7 +1252,7 @@ git status  # Confirm everything clean
 3. **Partial Completion Theater**: Started but not finished, claimed as done (Plan 003)
 4. **TDD Theater**: Tests exist but don't prove feature works (not discovered in Wave 2 but risk exists)
 5. **Handler Theater**: Handlers "work" but don't really solve the problem (not discovered in Wave 2 but risk exists)
-6. **Lazy Solution Theater**: Code works but is shitty/incomplete implementation (not discovered in Wave 2 but risk exists)
+6. **Lazy Solution Theater**: Code works but is substandard/incomplete implementation (not discovered in Wave 2 but risk exists)
 
 **Root Cause**:
 
@@ -1261,7 +1261,7 @@ git status  # Confirm everything clean
 - Team lead trusted agent reports without auditing actual code
 - No theater detection (code exists but accomplishes nothing)
 - No verification of VALUE DELIVERY vs plan goals
-- No check for lazy/shitty implementations that "work" but aren't proper
+- No check for lazy/substandard implementations that "work" but aren't proper
 
 **Solution (This Document)**:
 
@@ -1835,7 +1835,7 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] **Check 2 - Config Registration**: Handler in `.claude/hooks-daemon.yaml` and active?
 - [ ] **Check 3 - TDD Theater**: Count tests (matches claims?) AND read tests (prove behavior or just exist?)
 - [ ] **Check 4 - Handler Theater**: Read handler code - does it actually work correctly or just stub/lazy?
-- [ ] **Check 5 - Lazy Solution**: Is this PROPER solution or shitty workaround? Error handling? Maintainable?
+- [ ] **Check 5 - Lazy Solution**: Is this PROPER solution or substandard workaround? Error handling? Maintainable?
 - [ ] **Check 6 - Goal Achievement**: Plan goals actually achieved (not just code written)?
 - [ ] **Check 7 - Phase Completion**: ALL phases done (not partial)? Verify artifacts for each phase.
 - [ ] **Check 8 - Integration**: Do all pieces work together correctly?
@@ -1843,7 +1843,7 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 **VETO DECISION**:
 
 - [ ] If theater detected: REJECT ENTIRE BRANCH (use nuclear veto)
-- [ ] If lazy/shitty solution: REJECT (demand proper implementation)
+- [ ] If lazy/substandard solution: REJECT (demand proper implementation)
 - [ ] If tests don't prove value: REJECT (even if tests pass technically)
 - [ ] Report "genuine completion" OR "theater detected - REJECT" via `SendMessage`
 

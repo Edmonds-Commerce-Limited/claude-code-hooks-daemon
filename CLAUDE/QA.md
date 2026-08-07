@@ -242,12 +242,12 @@ Task(
 
 YOUR ROLE (Honesty Checker - Gate 4 - FINAL):
 Verify work delivers REAL VALUE, not just "looks complete".
-Detect theater, lazy solutions, shitty implementations, and false claims.
+Detect theater, lazy solutions, substandard implementations, and false claims.
 
 CRITICAL UNDERSTANDING:
 - Code can pass tests and still be theater if it doesn't deliver real value
 - Tests can exist but not prove anything meaningful (TDD theater)
-- Handlers can "work" but be lazy/shitty implementations
+- Handlers can "work" but be lazy/substandard implementations
 - Features can be "done" but not really solve the problem
 
 YOUR JOB: Ask "Does this ACTUALLY deliver the value implied by the feature?"
@@ -288,7 +288,7 @@ Check 4 - Handler Theater (Handlers That Don't Really Work):
   READ the actual handler code (don't just check it exists)
   VALUE CHECK: Does handler actually BLOCK/ALLOW/ADVISE correctly?
 
-Check 5 - Lazy Solution Theater (Works But Is Shitty):
+Check 5 - Lazy Solution Theater (Works But Is Substandard):
   VALUE CHECK: Is this a PROPER solution or lazy workaround?
   Ask: Would I accept this in code review or reject as lazy?
 
@@ -307,7 +307,7 @@ Check 8 - Integration Theater:
 YOU CAN (and SHOULD):
 - VETO entire branch if theater detected
 - Reject even if tests pass (if tests are theater)
-- Reject handlers that "work" but are lazy/shitty
+- Reject handlers that "work" but are lazy/substandard
 - Call out solutions that technically work but aren't proper
 
 REPORT FORMAT (GENUINE):
@@ -339,7 +339,7 @@ SendMessage(type="message", recipient="team-lead",
   [Specific findings with code examples]
   - TDD theater: Tests don't prove behavior
   - Handler theater: Doesn't really solve problem
-  - Lazy solution: Works but shitty/incomplete
+  - Lazy solution: Works but substandard/incomplete
   - Unachieved goals: Plan says X, code doesn't deliver
 
   VALUE ASSESSMENT:

@@ -342,7 +342,7 @@ For each violation found:
 
 **Rationale**:
 
-- User explicitly requested "general audit for other shitness error hiding patterns"
+- User explicitly requested a general audit for other error-hiding patterns
 - Plan 00008 (2026-02-05) missed this pattern - indicates incomplete coverage
 - One violation suggests others exist
 - Better to find and fix ALL patterns now than repeat this process later
@@ -375,7 +375,8 @@ For each violation found:
 
 ### 2026-02-17 - Plan Created
 
-**User Feedback**: "silently disarded is bullshit - why are we doing this? we shuld be failing fast!"
+**User feedback**: silently discarding plugin-handler load errors was rejected
+outright — the requirement is to fail fast and surface the failure.
 
 **Key Requirements**:
 

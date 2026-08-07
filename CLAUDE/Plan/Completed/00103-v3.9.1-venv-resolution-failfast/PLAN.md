@@ -283,7 +283,9 @@ Commits land in this order. Each commit must pass `./scripts/qa/run_all.sh` AND 
 
 - v1 (`PLAN-v1-ambitious-superseded.md`) attempted to combine the patch fix with a DRY consolidation. Three Opus 4.6 hostile reviews returned FATAL (see `context/2026-04-30-review-{1,2,3}-opus*.md`).
 - Review #3 root cause: bundling "patch release" with "structural refactor" introduces irreversibly-coupled implementation bugs that no incremental amendment can patch out. Reviewer recommended split.
-- User confirmation: "fuck me just design a plan that will work, we need to get these fixes live. Split is fine then I guess if that is the only way."
+- User confirmation: approved splitting the plan, on the grounds that shipping
+  the fixes matters more than keeping the work in one piece — a split was
+  acceptable if it was the only route to getting them live.
 - This plan is the patch (v3.9.1, ships in days). Plan 00104 is the structural successor (v3.10.0, ships separately).
 
 ### 2026-04-30 — v3.9.1 narrow plan ready for review

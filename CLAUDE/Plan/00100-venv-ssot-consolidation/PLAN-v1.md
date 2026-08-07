@@ -306,5 +306,5 @@ Total: ~33 hours. Single focused push preferred over interleaving with other wor
 ### 2026-04-23
 
 - Plan created. Origin: user frustration after v3.8.2 still left venv confusion. Three parallel investigation agents (venv-trace, venv-review, venv-test-audit) produced converging diagnoses. This plan is the consolidated response.
-- User directive: "last chance to rectify this stupid situation. No more shitness. absolute correctness."
+- User directive: last attempt to put this right; absolute correctness.
 - Interpretation: zero tolerance for residual split-brain, zero tolerance for missing test coverage, zero tolerance for "probably works" after this release.

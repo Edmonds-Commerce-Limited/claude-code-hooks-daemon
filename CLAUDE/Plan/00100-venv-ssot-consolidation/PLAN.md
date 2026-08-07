@@ -585,7 +585,7 @@ Each phase ships a checkpoint commit; the plan survives context compaction. Sing
 - Hostile Opus review (CRITIQUE-v1.md) identified 3 FATAL and 7 RISKY flaws in v1
 - Three confirming investigations (uv.lock existence, daemon/server.py + cli.py trace, UV_LINK_MODE history) validated the review
 - v2 corrections documented in the "v1 → v2 Changes" table at the top of this document
-- User directive remains: "last chance to rectify this stupid situation. No more shitness. absolute correctness."
+- User directive remains: last attempt to put this right; absolute correctness.
 
 ### 2026-04-23 (v1)
 

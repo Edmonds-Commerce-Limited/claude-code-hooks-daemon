@@ -79,11 +79,20 @@ handlers:
     # secret_word_list_path is for: it is never named anywhere, only a
     # numeric index into the gitignored file. Populated here per the
     # presentation-quality audit that motivated this handler
-    # (untracked/resume-readiness/REDACTION-MAP.md). Profanity is a
-    # supported public_patterns category too, but deliberately not
-    # populated here with a literal word list — the handful of historic
-    # instances are being paraphrased once via the separate redaction pass
-    # rather than held open-ended in a tracked config file.
+    # (untracked/resume-readiness/REDACTION-MAP.md).
+    #
+    # Profanity WAS deliberately left out of this list, on the reasoning that
+    # "the handful of historic instances" would be paraphrased once and did
+    # not warrant a standing rule. That reasoning rested on a count, and the
+    # count was wrong: the hand-audit found 6 instances, a systematic scan
+    # found 27 — 25 of them in the project's own authored voice in live docs,
+    # not in quoted user feedback. A one-off paraphrase pass with no guard
+    # behind it is exactly the shape CLAUDE.md Core Standard 15 (DBF) exists
+    # to reject, so the rule is now populated. A profanity blocklist in a
+    # linter config is ordinary and reads as such; the words below are
+    # deliberately NOT in the secret list, because unlike an employer name
+    # there is nothing sensitive about naming them in a deny message — and
+    # naming them is what makes the block actionable.
     #
     # A generic "non-placeholder home directory" structural pattern was
     # tried and dropped: this repo's own test suite uses short synthetic
@@ -112,8 +121,29 @@ handlers:
           - name: session-uuid
             pattern: '\b(?!([0-9a-fA-F])\1{7}-\1{4}-\1{4}-\1{4}-\1{12}\b)[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b'
             description: 'a real session UUID — use an all-same-digit placeholder (all zeros; or all-a / all-b when two must stay distinguishable)'
+          # Literal stems, case-insensitive, word-bounded. Written literally
+          # ON PURPOSE: the first attempt obfuscated them (`f\w*ck\w*`) to
+          # avoid tripping the live rule while editing this file, and that
+          # `\w*` matched straight through "feedback" and "fallback" — 1,308
+          # false positives on the first scan. The exclude_paths entry for
+          # this file is what makes the literal form possible, and the
+          # literal form is the only one that is actually reviewable.
+          # 'ass' and 'hell' are deliberately absent: assert/assign/hello
+          # make them pure noise, and a rule that cries wolf gets disabled.
+          - name: profanity
+            pattern: '(?i)\b(fuck\w*|shit\w*|bullshit|bollocks|wank(?:er|ers|ing)?|bastard)\b'
+            description: 'profanity in a tracked document — paraphrase it, keeping the engineering point'
         secret_word_list_path: .claude/block-words.secret
         exclude_paths:
+          # A rules file must be able to contain its own rules. This config
+          # DECLARES the patterns above, so it necessarily contains text
+          # matching them — editing the vhosts-path rule was denied for
+          # matching vhosts-path, and the profanity rule could not be added
+          # at all without this. Same principle as the handler's built-in
+          # exemption for its own secret word list: the file that defines
+          # what is blocked is the one file that must be allowed to say it.
+          # Narrow by design — this exempts THIS file, not `.claude/`.
+          - '.claude/hooks-daemon.yaml'
           # Confirmed-legitimate synthetic UUID fixtures (REDACTION-MAP.md
           # item 4) — these generate UUID-shaped strings on purpose as test
           # data, they do not contain a real session UUID.
