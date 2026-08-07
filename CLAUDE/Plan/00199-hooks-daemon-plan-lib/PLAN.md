@@ -9,18 +9,18 @@
 
 ## Source
 
-Specification: `untracked/hooks-daemon-plan-lib.md` (1,226 lines) — read it
-before executing any phase. Assessment, integration points and objections:
+Specification: `untracked/hooks-daemon-plan-lib-v2.md` (1,327 lines) — read it
+before executing any phase. It supersedes v1; every `§` below refers to **v2**
+(numbering differs from §3.5 onward). Assessment, v2 deltas and objections:
 [PROPOSAL-ASSESSMENT.md](PROPOSAL-ASSESSMENT.md).
 
 ## Overview
 
-The daemon owns the plan **lifecycle**: `mkplan.bash` scaffolds folders, a git
-config counter allocates numbers, `plan_qa_edit` lints `PLAN.md` at Write/Edit,
-`plan_qa_commit_gate` enforces cross-file invariants at commit, journals are
-advised. It owns nothing about what happens when a plan needs something **run**.
-That half is hand-rolled per plan, per project, from a ~40-line safety preamble
-copied by hand — and it diverges on every copy.
+The daemon owns the plan **lifecycle** — scaffolding, numbering, `PLAN.md`
+lint at Write/Edit, commit-time invariant gating, journal advisories. It owns
+nothing about what happens when a plan needs something **run**. That half is
+hand-rolled per plan from a ~40-line safety preamble copied by hand, which
+diverges on every copy.
 
 The failure class this addresses is **a control that reports success without
 having done its job**. The originating incident: a `triage.bash` resolved its
@@ -34,10 +34,9 @@ The proposal offers three separable artefacts: a sourced bash library
 (`plan_script_qa`) enforcing that orchestrators are built on the library.
 
 **This plan ships the first two and defers the third.** The library and suite
-stand alone, and the codebase has *already* anticipated this file:
-`config/models.py:544` and `plan_qa/model.py:431` both name `_planlib.bash` as
-the motivating example for `extra_root_files`. The handler is deferred because
-this repo has zero orchestrator scripts to gate (Decision 4).
+stand alone, and the codebase has *already* anticipated this file (Context
+below). The handler is deferred because this repo has zero orchestrator
+scripts to gate (Decision 4).
 
 ## Goals
 
@@ -54,9 +53,9 @@ this repo has zero orchestrator scripts to gate (Decision 4).
 
 - **`plan_script_qa` (proposal artefact 2)** — deferred, see Decision 4
 - A plan-script *generator*, anything that runs plan scripts automatically, or
-  inferring the delegate — the proposal rejects all three (§10)
+  inferring the delegate — the proposal rejects all three (§9)
 - Retro-fitting the three existing in-the-wild variants of this library
-- Bash 3.2 / macOS system bash, Windows, non-bash orchestrators (§11)
+- Bash 3.2 / macOS system bash, Windows, non-bash orchestrators (§10)
 
 ## Context & Background
 
@@ -72,10 +71,10 @@ Three findings shaped the phasing; evidence in PROPOSAL-ASSESSMENT §1-3.
   into the plan directory, overwritten every upgrade "so audit fixes reach
   existing installs" — the exact ownership model a shared library needs, behind
   one gated site (`install/plan_workflow.py:348-387`).
-- **The rule engine exists.** The proposal's §7.1 split (pure rules + thin
-  handler, so CI needs no daemon) describes what `plan_qa/` already is: 30
-  checks, stdlib-only but for `plan_qa/gitfacts.py:23-24`, `Protocol`-bound
-  config, three stages, and a CI-able CLI — hence Decision 1.
+- **The rule engine exists.** The proposal's §6.1 split (pure rules + thin
+  handler, so CI needs no daemon) is what `plan_qa/` already is: 30 checks,
+  stdlib-only but for `plan_qa/gitfacts.py:23-24`, `Protocol`-bound config,
+  three stages, a CI-able CLI — hence Decision 1.
 
 ## Tasks
 
@@ -84,8 +83,8 @@ Three findings shaped the phasing; evidence in PROPOSAL-ASSESSMENT §1-3.
 The suite precedes the library per repo TDD discipline. Decision 2.
 
 - [ ] ⬜ **Task 1.1**: Create `test-planlib.bash` harness with `assert_eq`,
-  `assert_contains`, `assert_not_contains`, tmpdir fixtures and a failure
-  summary that exits non-zero
+  `assert_contains`, `assert_not_contains`, tmpdir fixtures, and a summary
+  reporting an assertion COUNT — not merely a non-zero exit (ASSESSMENT §8)
 - [ ] ⬜ **Task 1.2**: Write failing tests for root resolution — deep subdir
   resolves the root; nested repo with no marker FAILS rather than escaping to
   the outer repo; inner repo WITH a marker resolves to itself; a worktree
@@ -103,14 +102,16 @@ The suite precedes the library per repo TDD discipline. Decision 2.
   `SHA256:AAA`) and `_plan_strip_cr`
 - [ ] ⬜ **Task 1.7**: Add the exit-deviation pin — assert that exactly
   `plan_deploy_leg`, `plan_finish` and `plan_parse_common_flags` call `exit`,
-  so a fourth cannot grow one unnoticed (§3.12)
+  so a fourth cannot grow one unnoticed (§3.13)
 - [ ] ⬜ **Task 1.8**: Add a negative control for every control: perturb ONE
-  thing and require exactly the expected assertion to fail
+  thing and require exactly the expected assertion to fail — a red suite is
+  NOT the same as the right assertion firing. Reproduce §7's two worked
+  perturbations (drop the `HUP` trap line; inject `set -o pipefail`)
 
 ### Phase 2: The library (GREEN)
 
-Carry the load-bearing comments verbatim — they are the ones that stopped
-being copied. Inventory: ASSESSMENT §6.
+Carry the load-bearing comments verbatim — the ones that stopped being
+copied. Inventory: ASSESSMENT §6.
 
 - [ ] ⬜ **Task 2.1**: Header, source guard, `PLANLIB_VERSION`, and the
   configuration seam (`PLANLIB_ROOT_MARKER` with **no** default,
@@ -119,18 +120,19 @@ being copied. Inventory: ASSESSMENT §6.
   convention documented as errexit-safety, not style
 - [ ] ⬜ **Task 2.3**: `_plan_find_repo_root` + `plan_init` (source §3.3-3.4)
 - [ ] ⬜ **Task 2.4**: `plan_mode`, `plan_gate_change`,
-  `_plan_assert_change_allowed` — gate on state change, never target name (§3.8)
+  `_plan_assert_change_allowed` — gate on state change, never target name (§3.9)
 - [ ] ⬜ **Task 2.5**: `plan_start_log`, `_plan_finalize_log`,
-  `_plan_on_signal` — the three subtleties of §3.5, and `wait` before scrub
-- [ ] ⬜ **Task 2.6**: `_plan_scrub_log` + `_plan_quarantine_log` (§3.6)
+  `_plan_on_signal` — the three subtleties of §3.6, and `wait` before scrub
+- [ ] ⬜ **Task 2.6**: `_plan_scrub_log` + `_plan_quarantine_log` (§3.7)
 - [ ] ⬜ **Task 2.7**: `_plan_tty_openable`, `_plan_strip_cr`, `plan_confirm` —
-  the four traps of §3.7
+  the four traps of §3.8
 - [ ] ⬜ **Task 2.8**: `plan_deploy_leg` / `plan_gather_leg` with the
-  `BASH_SUBSHELL` guard (§3.9)
-- [ ] ⬜ **Task 2.9**: `plan_run`, `plan_load_ssh_keys` (ordering enforced at
-  runtime, §6), `plan_list_reports`, `plan_finish`, `plan_parse_common_flags`
-- [ ] ⬜ **Task 2.10**: Confirm every Phase 1 test passes; run `shellcheck` over
-  the library with no suppressions
+  `BASH_SUBSHELL` guard (§3.11)
+- [ ] ⬜ **Task 2.9**: `plan_run` (§3.10), `_plan_agent_listing` +
+  `plan_load_ssh_keys` (ordering enforced at runtime; exit-code triage, §3.5),
+  `plan_list_reports`, `plan_finish`, `plan_parse_common_flags` (§3.12)
+- [ ] ⬜ **Task 2.10**: Confirm every Phase 1 test passes; `shellcheck -x -S style` clean with no suppressions; `bash -n` clean **asserting stderr is
+  empty** — it exits 0 while printing diagnostics (ASSESSMENT §8)
 
 ### Phase 3: Deployment and configuration
 
@@ -149,7 +151,7 @@ being copied. Inventory: ASSESSMENT §6.
   `root_marker` (no default), `delegate`, `check_flag`, `force_color_var`,
   `scrubber`, `track_run_logs`; neutral examples only (ASSESSMENT §5)
 - [ ] ⬜ **Task 3.6**: Add a `config-changes` manifest entry so the new options
-  surface on upgrade, per the release workflow
+  surface on upgrade
 - [ ] ⬜ **Task 3.7**: Deploy the guidance doc — canonical bootstrap (both
   `source-path` directives, and why archiving a plan otherwise turns CI red),
   the §5 skeletons, and the manual TTY checklist
@@ -179,14 +181,14 @@ being copied. Inventory: ASSESSMENT §6.
 ## Dependencies
 
 - Depends on: nothing. Blocks: a future `plan_script_qa` plan
-- Related: Plan 00144 (supplies the catalogue artefact 2 should extend),
-  Plan 00163 (same deployed-asset ownership pattern)
+- Related: Plan 00144 (the catalogue artefact 2 should extend), Plan 00163
+  (same deployed-asset ownership pattern)
 
 ## Technical Decisions
 
 ### Decision 1: Extend the existing check catalogue; do not build a second rule engine
 
-**Context**: The proposal (§7.1) specifies a new `_plan_script_rules.py`
+**Context**: The proposal (§6.1) specifies a new `_plan_script_rules.py`
 importing nothing from the daemon, plus a thin handler — because the daemon
 often sits in a git-ignored directory and so cannot be imported in CI.
 
@@ -207,13 +209,13 @@ against a project without `plan_qa`. Two parallel engines for rules that are
 both "plan QA" is a straight DRY violation.
 
 **Where the fit is imperfect**: `CheckContext` is plan-document-shaped. Script
-content fits the existing `file_content` slot, but R12 needs a file **mode**
-and no slot exists — one additive field, not a reason for a second engine.
+content fits the `file_content` slot, but R12 needs a file **mode** and no
+slot exists — one additive field, not a reason for a second engine.
 
 ### Decision 2: Tests precede the library, inverting the proposal's ordering
 
 **Context**: The proposal orders artefacts by value — library (1), then suite
-(3) — while its §12 adoption order ships them **together** as one step. The
+(3) — while its §11 adoption order ships them **together** as one step. The
 team's suggested phasing was (1) → (3) → (2).
 
 **Options considered**:
@@ -225,7 +227,7 @@ team's suggested phasing was (1) → (3) → (2).
 2. **Suite first (RED), then library (GREEN).** Repo-standard TDD.
 
 **Decision**: Option 2. The apparent conflict with the proposal is not real:
-§12 treats the pair as one deliverable, and CodeLifecycle/Features.md requires
+§11 treats the pair as one deliverable, and CodeLifecycle/Features.md requires
 the failing test first. The negative controls (Task 1.8) are only meaningful
 written before the implementation.
 
@@ -235,17 +237,15 @@ written before the implementation.
 
 - **Filename**: the codebase says `_planlib.bash` (`config/models.py:544`,
   `plan_qa/model.py:431`); the proposal says `_planlib.inc.bash`. Take the
-  proposal's — `.inc.bash` signals "sourced, not executable", the distinction
-  that makes the mode obvious. Both codebase mentions are prose examples with
-  no runtime effect, so updating them is free (Task 3.4).
+  proposal's — `.inc.bash` signals "sourced, not executable", which makes the
+  mode obvious. Both mentions are prose, so updating them is free (Task 3.4).
 - **Mode**: `_deploy_mkplan` uses `0o755` (`install/plan_workflow.py:24`)
-  because `mkplan.bash` is executed. This library is **sourced**, so `0644` is
-  correct — reusing the mkplan constant would ship a misleading execute bit.
-- **Ownership**: `mkplan.bash` is daemon-owned and overwritten every upgrade;
-  `_TEMPLATE_.md` and the journal assets are client-owned and never
-  (`install/plan_workflow.py:232-345`). This must be **daemon-owned** — the
-  premise is that the correct implementation is the only one on offer, and a
-  client-owned copy re-creates the per-copy divergence being eliminated.
+  because `mkplan.bash` is executed. This is **sourced**, so `0644` is correct
+  — reusing the mkplan constant would ship a misleading execute bit.
+- **Ownership**: daemon-owned, like `mkplan.bash` and unlike the client-owned
+  templates (`install/plan_workflow.py:232-345`) — the premise is that the
+  correct implementation is the only one on offer, and a client-owned copy
+  re-creates the per-copy divergence being eliminated.
 
 **Decision**: `_planlib.inc.bash`, mode `0644`, daemon-owned, overwritten on
 every upgrade, deployed via the existing gated decision site.
@@ -253,14 +253,14 @@ every upgrade, deployed via the existing gated decision site.
 ### Decision 4: Defer `plan_script_qa` until it has something to gate
 
 **Context**: The proposal's artefact 2 enforces that orchestrators are built on
-the library. Its §12 adoption order puts it second, in `warn`, seeded with a
+the library. Its §11 adoption order puts it second, in `warn`, seeded with a
 `legacy_script_allowlist`.
 
 **Options considered**:
 
 1. **Ship it now in `warn`.** Completes the proposal. But this repo has zero
    orchestrator scripts: the enforcement surface is empty, the allowlist has no
-   baseline to seed, the ratchet has nothing to ratchet, and all fifteen rules
+   baseline to seed, the ratchet has nothing to ratchet, and all sixteen rules
    would be validated only by unit tests written from the same document that
    specified them — no independent signal.
 2. **Defer with explicit triggers.** Artefacts 1 and 3 deliver full value
@@ -268,26 +268,27 @@ the library. Its §12 adoption order puts it second, in `warn`, seeded with a
 
 **Decision**: Option 2. Deferral is recorded with triggers, not left implicit.
 
-**Reopen when any of these is true**: at least one project has orchestrators
-actually built on the shipped library, so the rules can be validated against
-code not written from their own spec; or a second variant of the library
-appears in the wild; or a `git rev-parse --show-toplevel`-class incident recurs
-in a project that has the library available.
+**Reopen when**: a project has orchestrators actually built on the shipped
+library (so rules can be validated against code not written from their own
+spec); or a second variant appears in the wild; or a
+`git rev-parse --show-toplevel`-class incident recurs where the library was
+available.
 
-**When it is built**: start with the six crisp rules (R1, R2, R3, R5, R9, R12)
-rather than all fifteen. R14 is not mechanically checkable and belongs in docs;
-R15 needs project config that does not exist yet (PROPOSAL-ASSESSMENT §4).
+**When it is built**: start with the seven crisp rules (R1, R2, R3, R5, R7b,
+R9, R12) rather than all sixteen. R7b is v2's best-specified rule and ships
+its own regex; R14 is not mechanically checkable and belongs in docs; R15
+needs project config that does not exist yet (ASSESSMENT §4).
 
 ## Why this might not be worth doing
 
-Argued in full in PROPOSAL-ASSESSMENT §7. In summary: **the daemon would not
-dogfood it** — this is a Python project whose plans ship Python and tests, not
+Argued in full in ASSESSMENT §7. In summary: **the daemon would not dogfood
+it** — this is a Python project whose plans ship Python and tests, not
 orchestrators against live infrastructure, so unlike `mkplan.bash` this asset
 would never be exercised by its own maintainers, and unused code rots
-invisibly. The suite answers that for the *logic* but not the *deployment
-path*. Secondary objections: a dozen primitives with subtle fd plumbing is
-large for a first ship, and the real consumer is in another organisation while
-this repo carries the maintenance.
+invisibly. The suite answers that for the *logic*, not the *deployment path*.
+Secondary: the real consumer is in another organisation while this repo
+carries the maintenance. v2 blunts the "too large for a first ship" objection
+— §3 is now complete, making Phase 2 transcribe-and-verify.
 
 **Where that lands**: it does not kill Phases 1-4 — the daemon already ships
 `mkplan.bash` by this exact mechanism and the config already names this exact
@@ -299,15 +300,16 @@ independently supports deferring artefact 2.
 
 - [ ] `test-planlib.bash` passes; every primitive covered; every control has a
   negative control; the exit-deviation pin holds at exactly three functions
-- [ ] `shellcheck` is clean over library and suite with zero suppressions
+- [ ] `shellcheck -x -S style` clean, zero suppressions; `bash -n` clean with
+  empty stderr
 - [ ] The library lands at the plan root at mode `0644` on a fresh client
   install AND on an upgrade, verified against the dummy-client fixture
-- [ ] The plan-tree sweep does not flag the deployed library as a stray file
+- [ ] The sweep does not flag the deployed library as a stray root file
 - [ ] `PLANLIB_ROOT_MARKER` unset is a hard error at `plan_init`, never a
   fallback
 - [ ] The manual TTY checklist has been walked, results recorded in the JOURNAL
 - [ ] Full QA passes and the daemon restarts to RUNNING
-- [ ] The `plan_script_qa` deferral is recorded with its trigger conditions
+- [ ] The `plan_script_qa` deferral is recorded with its triggers
 
 ## Risks & Mitigations
 
