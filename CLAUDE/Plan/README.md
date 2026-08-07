@@ -4,6 +4,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+### Security / Presentation Audit
+
+- [00201: Sensitive Content Secret-Word Blocking](00201-sensitive-content-secret-word-blocking/PLAN.md) - In Progress (guard against the recurrence of the ~160-place employer/client identifier leak found by a presentation-quality audit — `sensitive_content` PreToolUse handler with two sources: configurable public patterns that name what matched, and a gitignored secret word list whose terms must NEVER appear in a deny reason, daemon log, payload-capture file, or transcript archive. Shared `utils/secret_redaction.py` closes the leak vectors in `payload_capture.py`, `core/router.py`'s debug log, `front_controller.py`'s error log, and `transcript_archiver.py`. Plus a whole-tree QA backstop wired into `run_all.sh`)
+
 ### Core / Hook Coverage
 
 - [00170: Universal Hook Coverage + Hook-Support Enforcement](00170-universal-hook-coverage-and-enforcement/PLAN.md) - In Progress (fundamental: intercepting hook events is the daemon's raison d'être, yet only **10 of the 30** documented Claude Code hook events are wired — 20 are silently unwired, so a client project cannot even attach a handler to them. Establishes the invariant "**wire every hook event unconditionally**; deciding whether to ship a built-in handler is a separate per-event triage". Deliverables: a canonical `EventID` registry of ALL events (metadata: can_block, response_contract, category, spec_version); a completeness TDD/QA gate that FAILS if any event lacks forwarder/installer/settings/router/schema/passthrough (+ orphan check); zero-handler fail-open passthrough wiring for all 21 missing events; drift detection (runtime unknown-event logger + version-pinned spec audit + coverage-degraded alert) + an `add-hook-event` scaffolder. Graduated from Plan 00169's hook-coverage finding; feeds follow-up feature plans F3/F6/F11/F19/F20. Authored + brainstormed; implementation not started)
@@ -1110,9 +1114,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 199 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191 and 00195 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run)
+- **Total Plans Created**: 201 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191 and 00195 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run)
 - **Completed**: 160 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 31 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 33 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
