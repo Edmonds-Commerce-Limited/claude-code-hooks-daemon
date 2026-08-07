@@ -32,7 +32,10 @@ echo "Running ruff linter (auto-fixing)..."
 
 # Run ruff with --fix to auto-fix issues, then check remaining violations
 # Note: ruff outputs JSON natively with --output-format=json
-if venv_tool ruff check --fix src/ tests/ .claude/ccy/claude-supervise.py --output-format=json > "${OUTPUT_FILE}.raw" 2>&1; then
+# NO `2>&1` here (Plan 00200): ruff streams its JSON to stdout, so anything
+# merged into that stream corrupts the capture. Diagnostics stay on stderr and
+# reach the console, where they belong.
+if venv_tool ruff check --fix src/ tests/ .claude/ccy/claude-supervise.py --output-format=json > "${OUTPUT_FILE}.raw"; then
     : # No violations found
 fi
 # Violations (if any) are captured as JSON in the output file for parsing below
@@ -52,9 +55,20 @@ if raw_file.exists() and raw_file.stat().st_size > 0:
             content = f.read().strip()
             if content:
                 ruff_output = json.loads(content)
-    except json.JSONDecodeError:
-        # Empty or invalid JSON means no violations
-        ruff_output = []
+    except json.JSONDecodeError as exc:
+        # FAIL FAST (Plan 00200). This previously swallowed the error into
+        # `ruff_output = []`, which made `passed` True and reported a green
+        # gate over an unreadable capture -- hiding 47 real violations.
+        # Genuinely-empty output is already handled by the st_size guard above,
+        # so anything non-empty and unparseable is a defect, not a clean run.
+        print(
+            "FATAL: ruff output could not be parsed as JSON. The capture is "
+            "corrupted -- something wrote to stdout alongside ruff.\n"
+            f"  parse error: {exc}\n"
+            f"  first 200 bytes: {content[:200]!r}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 # Transform to our format
 violations = []

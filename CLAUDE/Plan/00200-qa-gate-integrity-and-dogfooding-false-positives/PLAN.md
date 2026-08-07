@@ -107,28 +107,47 @@ and did not catch this. Worth understanding why.
 
 ### Phase 1: Lint gate integrity
 
-- [ ] 🔄 **Task 1.1**: Regression test — run `run_lint.sh` against a fixture holding a known
-  violation; assert the emitted JSON reports it. Must FAIL against current HEAD.
-- [ ] ⬜ **Task 1.2**: Move `ensure_venv`'s success banner to stderr (`venv-include.bash:81`)
-  and the sibling stdout echoes at `:109`, `:113`, `:137`, `:168`. Confirm no caller captures
-  them — the comment at `:76-78` asserts this `ensure_venv` is never `$(...)`-captured; verify
-  that, and leave the captured variant in `scripts/install/venv.sh` untouched.
-- [ ] ⬜ **Task 1.3**: Remove `2>&1` from `run_lint.sh:35` so ruff's stderr cannot enter the
-  JSON stream either.
-- [ ] ⬜ **Task 1.4**: Replace the `JSONDecodeError` swallow at `:55-57` with a hard failure
-  that prints the offending bytes and exits non-zero. A gate must never read "I could not parse
-  this" as "clean".
+- [x] ✅ **Task 1.1**: Regression test `tests/integration/test_qa_lint_gate_integrity.py` — three
+  tests: `ensure_venv` writes nothing to stdout; the gate's own embedded parser (extracted from
+  `run_lint.sh` by regex, so it cannot drift) fails non-zero on a banner-corrupted capture; and
+  a control asserting it still reports violations from clean JSON, so a parser that failed
+  unconditionally could not satisfy the suite. Confirmed RED (2 failed, control passed).
+  Deliberately does NOT invoke `run_lint.sh` end to end — it runs `ruff check --fix`, which
+  would rewrite the working tree as a side effect of running the test suite.
+- [x] ✅ **Task 1.2**: Moved `ensure_venv`'s success banner to stderr (`venv-include.bash:81`)
+  and the sibling echoes at `:109`, `:113`, `:137`, `:168`. Verified this `ensure_venv` is never
+  `$(...)`-captured (per the `capture-audit` comment at `:76-78`); the captured variant in
+  `scripts/install/venv.sh` is untouched.
+- [x] ✅ **Task 1.3**: Removed `2>&1` from `run_lint.sh:35`.
+- [x] ✅ **Task 1.4**: Replaced the `JSONDecodeError` swallow with a hard failure printing the
+  parse error and the first 200 bytes of the corrupted capture, then `sys.exit(1)`.
 - [ ] ⬜ **Task 1.5**: Same treatment for `run_dependency_check.sh:74`,
   `run_security_check.sh:56`, `run_smoke_test.sh:150`.
 - [ ] ⬜ **Task 1.6**: Investigate why `run_capture_corruption_check.sh` missed this; extend it
   if it reasonably could have caught it.
 
-### Phase 2: The 47 hidden violations
+### Phase 2: The hidden violations
 
-- [ ] ⬜ **Task 2.1**: Enumerate and categorise (11 auto-fixable, 36 remaining after `--fix`).
-- [ ] ⬜ **Task 2.2**: Apply auto-fixes; review the diff rather than trusting it.
-- [ ] ⬜ **Task 2.3**: Fix the remainder properly. No `noqa` — the `qa_suppression` handler
-  blocks it, correctly.
+With the gate repaired it reports the truth: `total_files_checked: 27, total_violations: 49, passed: false`, exit 1. (49 rather than the 47 first measured — this
+plan's own two new test files contribute the difference.)
+
+- [x] ✅ **Task 2.1**: Enumerated. `ruff --fix` auto-fixes **none** of them — the earlier
+  "11 auto-fixable" estimate did not survive contact. All 49 need manual work, across 27 files:
+
+  | Rules                                | Count | Nature                                               |
+  | ------------------------------------ | ----- | ---------------------------------------------------- |
+  | `PTH211/105/101/118/116/115/110/103` | 28    | `os.path` → `pathlib` migrations                     |
+  | `UP042`                              | 5     | `class X(str, Enum)` → `StrEnum`                     |
+  | `RUF002/001/003`                     | 7     | Ambiguous unicode in docstrings/strings              |
+  | `RUF012`                             | 3     | Mutable class attribute needs `ClassVar`             |
+  | `SIM110`                             | 2     | Loop replaceable by `any()`                          |
+  | `RUF059/022/005`                     | 4     | Unused unpacked var; unsorted `__all__`; list concat |
+
+- [ ] 🔄 **Task 2.2**: Fix the 28 `PTH*` pathlib migrations. Highest count, mechanical, but
+  touches real I/O — verify tests after each file rather than in bulk.
+
+- [ ] ⬜ **Task 2.3**: Fix the 21 remaining. No `noqa` — the `qa_suppression` handler blocks it,
+  correctly.
 
 ### Phase 3: Handler false positives
 

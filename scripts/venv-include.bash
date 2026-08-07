@@ -78,7 +78,13 @@ venv_exists() {
 # scripts/install/venv.sh and returns its venv path through stdout.
 ensure_venv() {
     if venv_exists; then
-        echo -e "${GREEN}✓${NC} Venv exists: ${VENV_DIR}"
+        # >&2 is LOAD-BEARING (Plan 00200). venv_tool() calls ensure_venv on
+        # every invocation, and callers redirect a tool's stdout into files
+        # they then parse (e.g. run_lint.sh captures ruff's JSON). A banner on
+        # stdout corrupts that capture. The error branches below already use
+        # >&2; this success branch was the sole inconsistency, and it silently
+        # blinded the ruff QA gate.
+        echo -e "${GREEN}✓${NC} Venv exists: ${VENV_DIR}" >&2
         return 0
     fi
 
@@ -106,11 +112,11 @@ ensure_venv() {
     python3 -m venv "${VENV_DIR}"
 
     if [[ ! -f "${VENV_PYTHON}" ]]; then
-        echo -e "${RED}✗${NC} Failed to create venv at ${VENV_DIR}"
+        echo -e "${RED}✗${NC} Failed to create venv at ${VENV_DIR}" >&2
         return 1
     fi
 
-    echo -e "${GREEN}✓${NC} Created venv: ${VENV_DIR}"
+    echo -e "${GREEN}✓${NC} Created venv: ${VENV_DIR}" >&2
 }
 
 #
@@ -134,7 +140,7 @@ install_deps() {
         "${VENV_PIP}" install -e ".[dev]" --quiet || return $?
     fi
 
-    echo -e "${GREEN}✓${NC} Dependencies installed"
+    echo -e "${GREEN}✓${NC} Dependencies installed" >&2
 }
 
 #
@@ -165,8 +171,8 @@ venv_tool() {
     local tool_path="${VENV_DIR}/bin/${tool}"
 
     if [[ ! -f "${tool_path}" ]]; then
-        echo -e "${RED}✗${NC} Tool '${tool}' not found in venv"
-        echo -e "    Run: ${VENV_PIP} install ${tool}"
+        echo -e "${RED}✗${NC} Tool '${tool}' not found in venv" >&2
+        echo -e "    Run: ${VENV_PIP} install ${tool}" >&2
         return 1
     fi
 
