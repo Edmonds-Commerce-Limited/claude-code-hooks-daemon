@@ -472,7 +472,7 @@ handlers:
       enabled: true
       priority: 10
 
-    post_clear_auto_execute:  # PROTOTYPE: Inject guidance on first prompt after /clear
+    post_clear_auto_execute:  # Inject guidance on first prompt after /clear
       enabled: true
       priority: 54
 

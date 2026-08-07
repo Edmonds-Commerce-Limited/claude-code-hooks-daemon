@@ -216,18 +216,19 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 disallow_any_generics = false
 
-[tool.bandit]
-targets = ["src"]
-exclude_dirs = ["tests", "build", "dist"]
-skips = [
-    "B101",  # Allow asserts (used in type checking)
-    "B324",  # MD5 hash usage - used for non-security cache keys only
-    "B602",  # subprocess with shell=True - internal QA runner only, trusted commands
-    "B404",  # subprocess module import - legitimate use in handlers
-    "B603",  # subprocess without shell - we use both patterns appropriately
-    "B607",  # Starting process with partial path - intentional for tool execution
-    "B108",  # Temp file/directory usage - standard library patterns, safe usage
-]
+# NOTE: there is deliberately no [tool.bandit] section.
+#
+# Bandit only reads a config file when invoked with `-c`, and NEITHER surface
+# that runs it does: scripts/qa/run_security_check.sh runs
+# `bandit -r src/ .claude/ccy/claude-supervise.py -s B101` and
+# .pre-commit-config.yaml runs `bandit -r src/ -s B101`. A [tool.bandit] block
+# here would therefore be dead configuration that silently disagrees with what
+# actually executes.
+#
+# The single source of truth for filtering is the `-s B101` flag on both
+# surfaces: ONLY B101 (assert statements) is skipped, matching the Security
+# Standards in CLAUDE.md. HIGH, MEDIUM and LOW findings all fail the check.
+# Do not reintroduce a skips list here - fix the finding instead.
 
 [tool.deptry]
 # Exclude non-source directories (regex patterns)
