@@ -4,10 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-### Installer / Packaging
-
-- [00198: Installer Self-Destroying Symlink Fix](00198-installer-self-destroying-symlink-fix/PLAN.md) - In Progress (presentation-quality audit found `.claude/commands/hooks-daemon-update.md` self-referential and `.claude/init.sh` storing the author's absolute `/workspace` path; root cause is the deprecated `install.py`'s self-install deploy helpers having no `source == dest` guard, and the SAME hazard found live in the current `scripts/install/slash_commands.sh`. Removes the dead deploy helper + broken symlink, fixes both symlink generators to be repo-relative, adds a durable git-tracked-symlink regression test)
-
 ### Core / Hook Coverage
 
 - [00170: Universal Hook Coverage + Hook-Support Enforcement](00170-universal-hook-coverage-and-enforcement/PLAN.md) - In Progress (fundamental: intercepting hook events is the daemon's raison d'être, yet only **10 of the 30** documented Claude Code hook events are wired — 20 are silently unwired, so a client project cannot even attach a handler to them. Establishes the invariant "**wire every hook event unconditionally**; deciding whether to ship a built-in handler is a separate per-event triage". Deliverables: a canonical `EventID` registry of ALL events (metadata: can_block, response_contract, category, spec_version); a completeness TDD/QA gate that FAILS if any event lacks forwarder/installer/settings/router/schema/passthrough (+ orphan check); zero-handler fail-open passthrough wiring for all 21 missing events; drift detection (runtime unknown-event logger + version-pinned spec audit + coverage-degraded alert) + an `add-hook-event` scaffolder. Graduated from Plan 00169's hook-coverage finding; feeds follow-up feature plans F3/F6/F11/F19/F20. Authored + brainstormed; implementation not started)
@@ -57,6 +53,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Pure `plan_qa` core (PlanTree/PlanDoc/ReadmeIndex parsers + declarative check registry) consumed by three surfaces: edit-time PreToolUse lint, `git commit` cross-file gate (warn→block ratchet), and whole-tree sweep (SessionStart advisory + `plan-qa` CLI, CI-able)
   - Enforces status-header integrity, index-at-birth, terminal-state atomicity (`git mv` + README row + stats in one commit), number-collision defence, and required archive dirs (`Completed/`/`Cancelled/`, configurable)
   - Config under `plan_workflow.qa`; grandfathering for legacy plans; spec provenance: `untracked/hooks-daemon-plan-verify-qa.md` (31-sin audit catalogue)
+
+- [00199: hooks daemon plan lib — extract the plan subsystem?](00199-hooks-daemon-plan-lib/PLAN.md) - Not Started (investigation complete; recommendation is **do not extract**)
+
+  - Evaluated extracting `plan_qa/` into a standalone reusable library. Found the seam already exists: 42 modules / 4,406 LOC / 30 checks with exactly **two** daemon imports (`plan_qa/gitfacts.py:23-24`), no pydantic, config bound by structural `Protocol`s (`plan_qa/context.py:29-107`) and its own defaults (`types.py:38-59`). Separate packaging buys near-nothing for **zero identified consumers** while costing a permanent second release train — YAGNI
+  - Proposes instead: delete the trivial `Timeout` constant import, fix the one real layering inversion (`plan_qa` importing upward from `handlers/utils/plan_numbering.py`), and enforce the boundary mechanically so it cannot rot. That work is a strict prerequisite for extraction, so it keeps the option open at small one-off cost
+  - Includes a "Why this might not be worth doing" section arguing the case against its own Phases 3-4; evidence with `file:line` in `COUPLING-ANALYSIS.md`
 
 ### Self-Driving / Automation
 
@@ -1099,9 +1101,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 198 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191 and 00195 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run)
+- **Total Plans Created**: 199 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191 and 00195 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run)
 - **Completed**: 159 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 30 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 31 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
