@@ -549,10 +549,12 @@ plan_workflow:
     # Historic pre-counter number collisions (both claimants archived) —
     # tolerated for ever; new collisions still block.
     collision_allowlist: [34, 39, 41]
-    # Per-plan journalling (Plan 00163). All checks ship ADVISE; grandfather at
-    # 163 (the plan that introduces journalling) so the ~160 legacy journal-less
-    # plans are never nagged. freshness_days 3 nags a quiet JOURNAL/ sooner than
-    # the 30-day plan staleness window.
+    # Per-plan journalling (Plan 00163). Grammar/append-only/freshness/entry
+    # checks ship ADVISE; grandfather at 163 (the plan that introduces
+    # journalling) so the ~160 legacy journal-less plans are never nagged.
+    # freshness_days 3 nags a quiet JOURNAL/ sooner than the 30-day plan
+    # staleness window. today_only_mode defaults to block (Plan 00197) and is
+    # left at that default here — a stale-dated day-file edit is denied.
     journal:
       enabled: true
       mode: advise

@@ -95,6 +95,7 @@ class TestRegistryCatalogue:
             "archive-immutability",
             "path-existence",
             "journal-dayfile-naming",
+            "journal-dayfile-is-today",
             "journal-append-only",
             "plan-doc-size",
             # Cross-file tree checks (dual COMMIT+SWEEP registration)
@@ -125,8 +126,9 @@ class TestRegistryCatalogue:
 
         registry = all_checks()
         by_stage = {stage: [spec for spec in registry if spec.stage == stage] for stage in Stage}
-        # 8 original + 2 journal EDIT checks (Plan 00163) + plan-doc-size (Plan 00190)
-        assert len(by_stage[Stage.EDIT]) == 11
+        # 8 original + 2 journal EDIT checks (Plan 00163) + plan-doc-size
+        # (Plan 00190) + journal-dayfile-is-today (Plan 00197)
+        assert len(by_stage[Stage.EDIT]) == 12
         # 5 commit-only + 5 dual tree checks + 2 journal COMMIT checks (Plan 00163)
         # + plan-shrink-without-journal (Plan 00190)
         assert len(by_stage[Stage.COMMIT]) == 13
@@ -152,12 +154,14 @@ class TestRegistryCatalogue:
     def test_every_spec_declares_sins(self) -> None:
         from claude_code_hooks_daemon.plan_qa.checks import all_checks
 
-        # Journal checks (Plan 00163) and plan-doc-size (Plan 00190) are
-        # post-audit feature categories — they defend journalling hygiene and
-        # plan read-cost respectively, not one of the original 31-sin audit
-        # findings, so they legitimately carry no `sins` provenance.
+        # Journal checks (Plan 00163, extended Plan 00197) and plan-doc-size
+        # (Plan 00190) are post-audit feature categories — they defend
+        # journalling hygiene and plan read-cost respectively, not one of the
+        # original 31-sin audit findings, so they legitimately carry no
+        # `sins` provenance.
         post_audit_no_sins = {
             "journal-dayfile-naming",
+            "journal-dayfile-is-today",
             "journal-append-only",
             "journal-folder-present",
             "journal-freshness",

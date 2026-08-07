@@ -47,6 +47,9 @@ class JournalPolicy(Protocol):
     @property
     def grandfather_before(self) -> int: ...
 
+    @property
+    def today_only_mode(self) -> str: ...
+
 
 class PlanDocSizePolicy(Protocol):
     """Structural view of the plan-doc size policy (Plan 00190)."""
@@ -144,6 +147,7 @@ def _with_journal(context: CheckContext, policy: QaPolicy) -> CheckContext:
         journal_freshness_days=journal.freshness_days,
         journal_enforce_on_completion=journal.enforce_on_completion,
         journal_grandfather_before=journal.grandfather_before,
+        journal_today_only_mode=journal.today_only_mode,
         plan_doc_size=PlanDocSizeLimits(
             enabled=size.enabled,
             advisory_bytes=size.advisory_bytes,

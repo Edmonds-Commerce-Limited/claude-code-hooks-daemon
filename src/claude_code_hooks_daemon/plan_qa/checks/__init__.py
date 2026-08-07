@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.plan_qa.checks import (
     index_at_birth,
     journal_append_only,
     journal_completion_entry,
+    journal_dayfile_is_today,
     journal_dayfile_naming,
     journal_entry_with_progress,
     journal_folder_present,
@@ -57,6 +58,7 @@ def all_checks() -> tuple[CheckSpec, ...]:
         path_existence.CHECK,
         plan_doc_size.CHECK,
         journal_dayfile_naming.CHECK,
+        journal_dayfile_is_today.CHECK,
         journal_append_only.CHECK,
         # Cross-file tree checks — dual COMMIT + SWEEP registration
         *no_new_collisions.CHECKS,

@@ -2,15 +2,19 @@
 
 A journal day-file written under a plan's ``JOURNAL/`` directory must be named
 ``NNNNN-Journal-YY-MM-DD.md`` where ``NNNNN`` is the enclosing plan number and
-``YY-MM-DD`` is a real calendar date — today or yesterday when the surface
-knows the date (local midnight rollover mid-session is legitimate, observed in
-this feature's own originating session).
+``YY-MM-DD`` is a real calendar date.
 
-Ships ADVISE (Decision 4); this is the ONLY journal check that may ever ratchet
-to BLOCK via ``plan_workflow.qa.journal.mode: block``.
+Scope is deliberately grammar-only (SRP, Plan 00197): the embedded number must
+match the enclosing plan and the date must be a real calendar date, but WHICH
+date is fresh enough to write is ``journal-dayfile-is-today``'s job — that
+split keeps the two checks from ever giving contradictory advice about one
+file (this check used to tolerate a yesterday-dated name as a "legitimate
+midnight rollover"; that tolerance is exactly the confusion the newer check
+was written to close, so it moved rather than staying duplicated here).
+
+Ships ADVISE (Decision 4); honours ``plan_workflow.qa.journal.mode: block``.
 """
 
-from datetime import timedelta
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.checks.common import journal_edit_target, journal_level
@@ -25,11 +29,9 @@ from claude_code_hooks_daemon.plan_qa.types import (
 
 CHECK_ID: Final[str] = "journal-dayfile-naming"
 
-_ONE_DAY: Final[timedelta] = timedelta(days=1)
-
 _REMEDIATION: Final[str] = (
     "Name journal day-files `NNNNN-Journal-YY-MM-DD.md` where NNNNN is the "
-    "enclosing plan number and YY-MM-DD is today's (or yesterday's) date, e.g. "
+    "enclosing plan number and YY-MM-DD is today's date, e.g. "
     "`00163-Journal-26-07-14.md`. Let `mkplan.bash` scaffold the first one."
 )
 
@@ -64,11 +66,6 @@ def _run(context: CheckContext) -> list[Finding]:
     if not parsed.is_valid_date:
         problems.append(
             f"{parsed.year:04d}-{parsed.month:02d}-{parsed.day:02d} is not a real calendar date"
-        )
-    elif context.today is not None and parsed.date not in (context.today, context.today - _ONE_DAY):
-        problems.append(
-            f"date {parsed.date.isoformat()} is neither today nor yesterday "
-            f"({context.today.isoformat()})"
         )
 
     if not problems:

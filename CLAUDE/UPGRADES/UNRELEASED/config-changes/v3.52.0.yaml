@@ -1,0 +1,38 @@
+version: "3.52.0"
+date: "UNRELEASED"
+breaking: false
+config_changes:
+  added:
+    - key: plan_workflow.qa.journal.today_only_mode
+      recommended: true
+      dormant: false
+      description: >-
+        NEW journal-dayfile-is-today edit-time check (Plan 00197), enabled by
+        default at BLOCK. A Write/Edit targeting a plan JOURNAL/ day-file
+        (NNNNN-Journal-YY-MM-DD.md) whose embedded date is anything other
+        than TODAY -- including yesterday -- is denied, with a remediation
+        naming the exact today-dated filename to write instead. Previously
+        journal-dayfile-naming tolerated a yesterday-dated file as a
+        "legitimate midnight rollover"; that tolerance is exactly the
+        agent-mis-filing confusion this new check closes, so a session
+        spanning midnight must now start today's day-file rather than keep
+        appending to yesterday's. Controlled independently of the existing
+        plan_workflow.qa.journal.mode knob via today_only_mode (advise |
+        block | off; default block) -- unlike the rest of the journalling
+        feature, this check does NOT ship advise-first, since the failure
+        mode it defends against is silent mis-filing, not a rollout risk.
+        Like every plan_qa edit-time blocker it is subordinate to the
+        surface mode: it only denies when plan_workflow.qa.edit_mode is
+        ALSO "block" (the shipped default); under edit_mode: warn it
+        degrades to advisory, and edit_mode: off disables it entirely.
+        Grandfathered plans in legacy_plan_allowlist only ever advise.
+      migration_note: >-
+        No action needed to adopt -- upgrading immediately blocks stale
+        journal day-file edits for any project with plan_workflow enabled
+        and edit_mode: block (the default). If your workflow genuinely
+        needs to edit a non-today day-file (e.g. scripted backfill), set
+        plan_workflow.qa.journal.today_only_mode: advise or off in your
+        .claude/hooks-daemon.yaml.
+  renamed: []
+  removed: []
+  changed: []

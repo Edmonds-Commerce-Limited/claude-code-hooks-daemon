@@ -795,6 +795,7 @@ plan_workflow:
       freshness_days: 3          # nag a plan whose newest day-file is older than N days
       enforce_on_completion: false
       grandfather_before: 0      # plans below this number are never nagged for a JOURNAL/
+      today_only_mode: block     # advise | block | off (Plan 00197; independent of `mode`)
     plan_doc_size:               # tiered read-cost limits on PLAN.md (Plan 00190)
       enabled: true              # master switch for the plan-doc-size check
       advisory_bytes: 18000      # first nudge (~4,500 tokens)
@@ -835,23 +836,35 @@ to prior behaviour.
 
 The `journal` sub-block governs per-plan journalling (Plan 00163): each plan
 folder may carry a `JOURNAL/` of append-only `NNNNN-Journal-YY-MM-DD.md`
-day-files, scaffolded by `mkplan.bash`. Six checks ride the existing plan QA
-surfaces (no new handler) and all ship ADVISE: `journal-dayfile-naming` +
-`journal-append-only` (edit stage), `journal-folder-present` +
-`journal-freshness` (sweep stage), and `journal-entry-with-progress` +
-`journal-completion-entry` (commit stage). `journal-entry-with-progress`
-advises when a commit changes a plan's PLAN.md tasks but stages no journal
-entry; `journal-completion-entry` advises when a commit flips a plan to a
-terminal status without a closing journal entry — the latter is OPT-IN,
-firing only when `enforce_on_completion: true`. Only `journal-dayfile-naming`
-may ratchet to BLOCK via `mode: block`; the rest are advisory forever.
+day-files, scaffolded by `mkplan.bash`. Seven checks ride the existing plan QA
+surfaces (no new handler): `journal-dayfile-naming` + `journal-append-only`
+(edit stage, ADVISE), `journal-folder-present` + `journal-freshness` (sweep
+stage, ADVISE), `journal-entry-with-progress` + `journal-completion-entry`
+(commit stage, ADVISE), and `journal-dayfile-is-today` (edit stage, **BLOCK by
+default** — Plan 00197). `journal-entry-with-progress` advises when a commit
+changes a plan's PLAN.md tasks but stages no journal entry;
+`journal-completion-entry` advises when a commit flips a plan to a terminal
+status without a closing journal entry — the latter is OPT-IN, firing only
+when `enforce_on_completion: true`.
 
-`journal.mode` is a CEILING, not a guarantee — it is **subordinate to the
-surface mode**. A journal blocker only denies when the owning surface mode is
-also `block`: with `edit_mode: warn` (the documented rollout posture)
-`mode: block` degrades to an advisory, and `edit_mode: off` disables both
-journal edit checks outright regardless of `journal.enabled`. Set the surface
-mode first, then ratchet `journal.mode`.
+`journal-dayfile-naming` validates grammar, plan-number coherence and calendar
+validity only; it does NOT judge recency. `journal-dayfile-is-today` owns
+recency exclusively: a Write/Edit to a journal day-file dated anything other
+than TODAY (including yesterday) is blocked, with a remediation naming the
+exact today-dated filename to use instead. The split keeps the two checks from
+ever giving contradictory advice about one file. `journal-dayfile-naming` may
+ratchet to BLOCK via `mode: block`; `journal-dayfile-is-today` has its own
+independent `today_only_mode` knob (default `block`) rather than sharing
+`mode`, because unlike the rest of the journalling feature it does not ship
+advise-first — the failure mode it defends against (an agent silently logging
+against the wrong day) is exactly what "yesterday is fine" used to permit.
+
+`journal.mode` and `journal.today_only_mode` are both a CEILING, not a
+guarantee — each is **subordinate to the surface mode**. A journal blocker
+only denies when the owning surface mode is also `block`: with `edit_mode: warn` (the documented rollout posture) either mode set to `block` degrades to
+an advisory, and `edit_mode: off` disables every journal edit check outright
+regardless of `journal.enabled`. Set the surface mode first, then ratchet
+`journal.mode` / `journal.today_only_mode`.
 
 Set
 `grandfather_before` to the plan number at which your project adopted

@@ -317,6 +317,14 @@ class TestGuidance:
         assert text is not None
         assert "**Status**:" in text
 
+    def test_get_claude_md_documents_journal_today_only_block(self) -> None:
+        # Plan 00197: the resident guidance must tell agents that a stale
+        # (including yesterday-dated) journal day-file edit is blocked.
+        text = PlanQaEditHandler().get_claude_md()
+        assert text is not None
+        assert "journal-dayfile-is-today" in text
+        assert "today_only_mode" in text
+
     def test_acceptance_tests_defined(self) -> None:
         assert len(PlanQaEditHandler().get_acceptance_tests()) >= 2
 

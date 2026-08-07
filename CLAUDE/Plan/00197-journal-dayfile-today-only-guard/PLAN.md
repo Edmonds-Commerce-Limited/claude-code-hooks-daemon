@@ -1,6 +1,6 @@
 # Plan 00197: Journal Day-File Today-Only Guard
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-07
 **Owner**: joseph
 **Priority**: Medium
@@ -53,22 +53,22 @@ same fact).
 
 ### Phase 1: TDD
 
-- [ ] ⬜ **Task 1.1**: Write failing tests for `journal-dayfile-is-today`
+- [x] ✅ **Task 1.1**: Write failing tests for `journal-dayfile-is-today`
   (today/yesterday/future/past/creation/non-journal/malformed-defer/
   today-None/legacy-allowlist/off-mode/block-mode/advise-mode).
-- [ ] ⬜ **Task 1.2**: Implement the check, config field, and context
+- [x] ✅ **Task 1.2**: Implement the check, config field, and context
   threading until tests pass.
-- [ ] ⬜ **Task 1.3**: Narrow `journal-dayfile-naming` to drop the
+- [x] ✅ **Task 1.3**: Narrow `journal-dayfile-naming` to drop the
   today-or-yesterday recency sub-check; update its docstring/tests
   accordingly (no more "only check that may ratchet to BLOCK" claim).
 
 ### Phase 2: Integration
 
-- [ ] ⬜ **Task 2.1**: Update `plan_qa_edit.get_claude_md()` with the new
+- [x] ✅ **Task 2.1**: Update `plan_qa_edit.get_claude_md()` with the new
   rule and the exact block message shape.
-- [ ] ⬜ **Task 2.2**: Add `CLAUDE/UPGRADES/UNRELEASED/config-changes/` entry
+- [x] ✅ **Task 2.2**: Add `CLAUDE/UPGRADES/UNRELEASED/config-changes/` entry
   for `plan_workflow.qa.journal.today_only_mode`.
-- [ ] ⬜ **Task 2.3**: Run `./scripts/qa/llm_qa.py all` — zero failures.
+- [x] ✅ **Task 2.3**: Run `./scripts/qa/llm_qa.py all` — zero failures.
 - [ ] ⬜ **Task 2.4**: Restart the daemon, verify `RUNNING`.
 - [ ] ⬜ **Task 2.5**: Live-dogfood: Edit a stale-dated day-file (denied) and
   a today-dated one (allowed) against the live daemon.

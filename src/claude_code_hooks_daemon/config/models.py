@@ -379,8 +379,11 @@ class PlanWorkflowQaJournalConfig(BaseModel):
     Nested under ``plan_workflow.qa.journal``. Journalling rides the existing
     three plan_qa surfaces (edit / commit / sweep) rather than a new handler,
     so its knobs live beside the rest of the plan QA policy. Every journal
-    check ships ADVISE; only ``journal-dayfile-naming`` may ever ratchet to
-    block via ``mode: block`` after a clean dogfood period.
+    check governed by ``mode`` ships ADVISE; only ``journal-dayfile-naming``
+    may ever ratchet to block via ``mode: block`` after a clean dogfood
+    period. ``journal-dayfile-is-today`` (Plan 00197) is the one exception:
+    it has its OWN ``today_only_mode`` knob and ships BLOCK by default,
+    because write-time recency is not given the same rollout grace period.
 
     SUBORDINATE TO THE SURFACE MODE (Plan 00190). ``mode: block`` is a
     CEILING, not a guarantee: the edit surface re-gates every blocker on
@@ -404,6 +407,12 @@ class PlanWorkflowQaJournalConfig(BaseModel):
             closing journal entry (Phase 3 commit coupling)
         grandfather_before: Plans numbered below this are never nagged to grow
             a JOURNAL/ (no backfill); model default 0, set to 163 in this repo
+        today_only_mode: Enforcement mode for ``journal-dayfile-is-today``
+            (advise | block | off; Plan 00197) — independent of ``mode``,
+            because write-time recency ships BLOCK by default rather than
+            advise-first: an agent appending to a stale day-file is exactly
+            the confusion this check exists to prevent, so it is not given a
+            rollout grace period the way the original journalling checks were
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -428,6 +437,13 @@ class PlanWorkflowQaJournalConfig(BaseModel):
     grandfather_before: Annotated[int, Field(ge=0)] = Field(
         default=0,
         description="Plans numbered below this are never nagged to grow a JOURNAL/",
+    )
+    today_only_mode: Literal["advise", "block", "off"] = Field(
+        default="block",
+        description=(
+            "journal-dayfile-is-today enforcement mode — a Write/Edit to a "
+            "journal day-file dated anything other than today is blocked"
+        ),
     )
 
 

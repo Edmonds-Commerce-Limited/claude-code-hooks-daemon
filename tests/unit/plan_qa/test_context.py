@@ -26,6 +26,7 @@ class _Journal:
     freshness_days: int = 3
     enforce_on_completion: bool = False
     grandfather_before: int = 0
+    today_only_mode: str = "block"
 
 
 @dataclass(frozen=True)
@@ -216,7 +217,13 @@ class TestEditContext:
         # Plan 00163: journal knobs reach every surface as flat values.
         root = _scaffold(tmp_path)
         policy = _Policy(
-            journal=_Journal(mode="block", dir_name="LOG", freshness_days=7, grandfather_before=163)
+            journal=_Journal(
+                mode="block",
+                dir_name="LOG",
+                freshness_days=7,
+                grandfather_before=163,
+                today_only_mode="advise",
+            )
         )
         context = edit_context(
             project_root=root,
@@ -230,6 +237,7 @@ class TestEditContext:
         assert context.journal_dir_name == "LOG"
         assert context.journal_freshness_days == 7
         assert context.journal_grandfather_before == 163
+        assert context.journal_today_only_mode == "advise"
 
     def test_plan_doc_size_policy_threaded(self, tmp_path: Path) -> None:
         # Plan 00190: size thresholds must be configurable, not hardcoded.

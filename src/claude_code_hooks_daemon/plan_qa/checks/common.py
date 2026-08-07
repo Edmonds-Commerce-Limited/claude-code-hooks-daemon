@@ -20,6 +20,11 @@ _PLAN_FOLDER_NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"^(\d{1,5})-[a-zA-Z
 _JOURNAL_MODE_OFF: Final[str] = "off"
 _JOURNAL_MODE_BLOCK: Final[str] = "block"
 
+# journal-dayfile-is-today mode tokens (mirror
+# PlanWorkflowQaJournalConfig.today_only_mode; Plan 00197).
+_JOURNAL_TODAY_ONLY_MODE_OFF: Final[str] = "off"
+_JOURNAL_TODAY_ONLY_MODE_BLOCK: Final[str] = "block"
+
 
 @dataclass(frozen=True)
 class EditTarget:
@@ -121,6 +126,19 @@ def journal_level(context: CheckContext) -> Level:
 def journalling_active(context: CheckContext) -> bool:
     """Whether journal checks should run at all under the current policy."""
     return context.journal_enabled and context.journal_mode != _JOURNAL_MODE_OFF
+
+
+def journal_today_only_level(context: CheckContext) -> Level | None:
+    """Level for ``journal-dayfile-is-today``, or ``None`` when its mode is off.
+
+    Independent of :func:`journal_level` — this check ships BLOCK by default
+    (Plan 00197), not advise-first, so it has its own mode knob rather than
+    piggybacking on ``journal_mode``.
+    """
+    mode = context.journal_today_only_mode
+    if mode == _JOURNAL_TODAY_ONLY_MODE_OFF:
+        return None
+    return Level.BLOCK if mode == _JOURNAL_TODAY_ONLY_MODE_BLOCK else Level.ADVISE
 
 
 # --- COMMIT-stage journal helpers (Plan 00163 Phase 3) --------------------

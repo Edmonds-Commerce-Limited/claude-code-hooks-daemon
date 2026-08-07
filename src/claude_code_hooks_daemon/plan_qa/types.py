@@ -44,6 +44,7 @@ DEFAULT_CANCELLED_DIR_NAME: Final[str] = "Cancelled"
 DEFAULT_JOURNAL_DIR_NAME: Final[str] = "JOURNAL"
 DEFAULT_JOURNAL_FRESHNESS_DAYS: Final[int] = 3
 DEFAULT_JOURNAL_MODE: Final[str] = "advise"
+DEFAULT_JOURNAL_TODAY_ONLY_MODE: Final[str] = "block"
 
 # Plan-document size defaults (Plan 00190 Decision 2). Derived from READ COST,
 # not from percentiles of any one repo: the canonical unit is tokens, with
@@ -118,6 +119,9 @@ class CheckContext:
     journal_freshness_days: int = DEFAULT_JOURNAL_FRESHNESS_DAYS
     journal_enforce_on_completion: bool = False
     journal_grandfather_before: int = 0
+    # journal-dayfile-is-today enforcement mode (Plan 00197). Independent of
+    # journal_mode: this check ships BLOCK by default, not advise-first.
+    journal_today_only_mode: str = DEFAULT_JOURNAL_TODAY_ONLY_MODE
 
     # Plan-document size policy (Plan 00190; mirrors
     # plan_workflow.qa.plan_doc_size.*). One value object rather than six flat

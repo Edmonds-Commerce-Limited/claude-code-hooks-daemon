@@ -1,10 +1,11 @@
 """Tests for the ``journal-dayfile-naming`` EDIT check (Plan 00163).
 
 Validates a journal day-file's basename against ``NNNNN-Journal-YY-MM-DD.md``:
-the embedded number must match the enclosing plan, the date must be a real
-calendar date, and (when ``today`` is supplied) it must be today or yesterday
-(local midnight rollover mid-session is legitimate). Ships ADVISE; honours
-``mode: block`` only for this check.
+the embedded number must match the enclosing plan and the date must be a real
+calendar date. Recency (is the date today?) is NOT this check's concern as of
+Plan 00197 — that moved to the dedicated ``journal-dayfile-is-today`` check so
+the two checks can never give contradictory advice about one file. Ships
+ADVISE; honours ``mode: block``.
 """
 
 from datetime import date
@@ -50,9 +51,13 @@ class TestRun:
     def test_well_formed_name_today_passes(self) -> None:
         assert journal_dayfile_naming.CHECK.run(_ctx("00163-Journal-26-07-14.md")) == []
 
-    def test_yesterday_passes_midnight_rollover(self) -> None:
-        # today=07-14; a 07-13 file written just after midnight is legitimate.
-        assert journal_dayfile_naming.CHECK.run(_ctx("00163-Journal-26-07-13.md")) == []
+    def test_well_formed_past_date_passes_naming(self) -> None:
+        # Recency is journal-dayfile-is-today's concern (Plan 00197); a
+        # well-formed but stale name is still grammatically clean.
+        assert journal_dayfile_naming.CHECK.run(_ctx("00163-Journal-26-07-01.md")) == []
+
+    def test_well_formed_future_date_passes_naming(self) -> None:
+        assert journal_dayfile_naming.CHECK.run(_ctx("00163-Journal-26-12-25.md")) == []
 
     def test_non_journal_file_is_ignored(self) -> None:
         # A PLAN.md edit (not under JOURNAL/) is not this check's concern.
@@ -82,16 +87,6 @@ class TestRun:
         findings = journal_dayfile_naming.CHECK.run(_ctx("00163-Journal-26-13-45.md"))
         assert len(findings) == 1
         assert "calendar date" in findings[0].message
-
-    def test_stale_date_advises_when_today_known(self) -> None:
-        findings = journal_dayfile_naming.CHECK.run(_ctx("00163-Journal-26-07-01.md"))
-        assert len(findings) == 1
-        assert "today" in findings[0].message.lower()
-
-    def test_stale_date_not_flagged_when_today_unknown(self) -> None:
-        # Without today (e.g. lint CLI), recency cannot be judged; the name is
-        # otherwise well-formed, so no finding.
-        assert journal_dayfile_naming.CHECK.run(_ctx("00163-Journal-26-07-01.md", today=None)) == []
 
     def test_block_mode_escalates_level(self) -> None:
         findings = journal_dayfile_naming.CHECK.run(_ctx("bad.md", journal_mode="block"))

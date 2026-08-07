@@ -189,11 +189,20 @@ class PlanQaEditHandler(Handler):
             "`src/...` paths that no longer exist.\n"
             "\n"
             "**Journal day-files** (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`) are also\n"
-            "linted (all ADVISE): the name must match the grammar and the\n"
-            "enclosing plan number with a today/yesterday date\n"
-            "(`journal-dayfile-naming`), and edits must APPEND — never rewrite or\n"
-            "remove earlier entries (`journal-append-only`). Corrections are new\n"
-            "dated entries at the bottom, not edits to old ones.\n"
+            "linted: the name must match the grammar and the enclosing plan\n"
+            "number (`journal-dayfile-naming`, ADVISE), and edits must APPEND —\n"
+            "never rewrite or remove earlier entries (`journal-append-only`,\n"
+            "ADVISE). Corrections are new dated entries at the bottom, not edits\n"
+            "to old ones.\n"
+            "\n"
+            "**A Write/Edit to a journal day-file dated anything other than\n"
+            "TODAY is BLOCKED by default** (`journal-dayfile-is-today`) — this\n"
+            "includes yesterday's date. A session that spans midnight must start\n"
+            "TODAY's day-file, not keep appending to yesterday's; the block\n"
+            "message names the exact today-dated filename to write instead.\n"
+            "Controlled independently of the other journal checks via\n"
+            "`plan_workflow.qa.journal.today_only_mode` (advise | block | off;\n"
+            "default block).\n"
             "\n"
             "A journal is **unbounded by design** — its length is never a problem\n"
             "and it must not be tidied or trimmed. It is safe to grow forever\n"
@@ -242,6 +251,39 @@ class PlanQaEditHandler(Handler):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes="Creates a scratch plan folder; remove it after the test",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="plan-qa edit lint - blocks a stale-dated journal day-file",
+                command=(
+                    "Use the Write tool to write to an existing plan's "
+                    "`JOURNAL/NNNNN-Journal-YY-MM-DD.md` day-file whose date is "
+                    "YESTERDAY (or any other non-today date), not today's"
+                ),
+                description=(
+                    "A journal day-file edit dated anything other than today must be "
+                    "denied with the journal-dayfile-is-today remediation naming the "
+                    "exact today-dated filename to use instead."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"journal-dayfile-is-today", r"not today"],
+                safety_notes="Deny path — no file is written; retry against today's day-file",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="plan-qa edit lint - allows today's journal day-file",
+                command=(
+                    "Use the Write tool to append to (or create) a plan's "
+                    "`JOURNAL/NNNNN-Journal-YY-MM-DD.md` day-file dated TODAY"
+                ),
+                description="A today-dated journal day-file edit passes the recency check.",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Creates/appends a scratch journal entry; remove it after the test",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
