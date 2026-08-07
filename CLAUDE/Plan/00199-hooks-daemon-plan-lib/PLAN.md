@@ -1,283 +1,324 @@
-# Plan 00199: hooks daemon plan lib
+# Plan 00199: planlib — plan-orchestrator tooling in the daemon
 
 **Status**: Not Started
 **Created**: 2026-08-07
 **Owner**: joseph
 **Priority**: Medium
-**Recommended Executor**: Sonnet
-**Execution Strategy**: Sub-Agent Orchestration
+**Recommended Executor**: Opus
+**Execution Strategy**: Sub-Agent Teams
 
-## Interpretation
+## Source
 
-The request was "a plan for hooks-daemon-plan-lib" with no further detail. This
-plan takes that to mean: **evaluate extracting this repo's plan/planning
-subsystem into a standalone reusable library, usable outside the hooks daemon**
-— the "lib" in the name being the operative word. The codebase supports that
-reading: `plan_qa/` is already written as a daemon-decoupled rule engine with
-its own defaults, and its own docstring says so (`plan_qa/types.py:43`,
-`plan_qa/context.py:3-6`).
-
-**If that is the wrong reading, this is the sentence to correct.** Plausible
-alternatives the investigation did not find evidence for: a plan for a *new*
-planning feature; a plan for the `mkplan.bash`/journalling toolchain
-specifically; or documentation work on the plan system.
-
-The investigation reached an answer that is **the opposite of what the name
-implies**, so read the Overview before the Tasks.
+Specification: `untracked/hooks-daemon-plan-lib.md` (1,226 lines) — read it
+before executing any phase. Assessment, integration points and objections:
+[PROPOSAL-ASSESSMENT.md](PROPOSAL-ASSESSMENT.md).
 
 ## Overview
 
-The extraction is **not recommended now**. The evidence for that is not "it
-would be hard" — it is the reverse. `plan_qa/` is already a clean library: 42
-modules, 4,406 LOC, 30 checks, and exactly **two** imports from the rest of the
-daemon, both in one file (`plan_qa/gitfacts.py:23-24`). No pydantic, no
-`Handler`, no `HookResult`, no `ProjectContext`. Config is bound by structural
-`Protocol`s (`plan_qa/context.py:29-107`) rather than imports, and the package
-ships its own policy defaults (`plan_qa/types.py:38-59`) so it runs with no
-config source at all.
+The daemon owns the plan **lifecycle**: `mkplan.bash` scaffolds folders, a git
+config counter allocates numbers, `plan_qa_edit` lints `PLAN.md` at Write/Edit,
+`plan_qa_commit_gate` enforces cross-file invariants at commit, journals are
+advised. It owns nothing about what happens when a plan needs something **run**.
+That half is hand-rolled per plan, per project, from a ~40-line safety preamble
+copied by hand — and it diverges on every copy.
 
-Because the seam already exists, packaging it separately buys almost nothing
-today and costs a permanent second release train, a version-compatibility
-matrix between library and daemon, and a split test suite — for **zero
-identified consumers**. No plan, doc or issue in this repo proposes extraction
-(§10 of the coupling analysis). Under this project's own YAGNI and PROPER NOT
-QUICK principles, that is a make-work migration.
+The failure class this addresses is **a control that reports success without
+having done its job**. The originating incident: a `triage.bash` resolved its
+repo root with `git rev-parse --show-toplevel`, which answers about the *cwd*
+rather than about the script — so run by path from another checkout it operated
+on the wrong repository, checksummed a missing file, and **exited zero**
+(source §1.1).
 
-What *is* worth doing is small and unambiguously valuable: fix the one genuine
-layering defect (`plan_qa` importing upward from `handlers/`), delete the
-trivial constant coupling, and add a QA check that **mechanically enforces** the
-boundary so it cannot silently rot. That work is a strict prerequisite for
-extraction anyway, so it is not throwaway — it converts a boundary that happens
-to be clean today into one that is guaranteed clean tomorrow, and leaves
-extraction as a small, mostly-mechanical follow-up if a real consumer ever
-appears.
+The proposal offers three separable artefacts: a sourced bash library
+(`_planlib.inc.bash`), its test suite (`test-planlib.bash`), and a QA handler
+(`plan_script_qa`) enforcing that orchestrators are built on the library.
 
-Detailed evidence with `file:line` citations: see
-[COUPLING-ANALYSIS.md](COUPLING-ANALYSIS.md).
+**This plan ships the first two and defers the third.** The library and suite
+stand alone, and the codebase has *already* anticipated this file:
+`config/models.py:544` and `plan_qa/model.py:431` both name `_planlib.bash` as
+the motivating example for `extra_root_files`. The handler is deferred because
+this repo has zero orchestrator scripts to gate (Decision 4).
 
 ## Goals
 
-- Decide extract-vs-keep on evidence, and record the decision with its trigger
-  conditions so it can be revisited without re-doing the investigation
-- Remove both cross-package imports from `plan_qa/`, leaving it importing
-  stdlib only
-- Fix the layering inversion: `plan_qa` must not import from `handlers/`
-- Add an automated import-boundary check to the QA suite so the seam is
-  enforced, not merely observed
-- Leave `plan_qa/` in a state where extraction is a mechanical follow-up
+- Ship `_planlib.inc.bash` as a daemon-owned asset, so the correct behaviour of
+  each safety-critical primitive is the only behaviour on offer
+- Ship `test-planlib.bash` covering every primitive, with a negative control on
+  each control and an explicit statement of what it cannot cover
+- Deploy it via the existing plan-workflow mechanism, on install and both
+  upgrade paths, verified in client mode rather than only self-install
+- Add the `plan_workflow.scripts.*` seam with **no** default for `root_marker`
+- Record a defensible position on `plan_script_qa` and its trigger conditions
 
 ## Non-Goals
 
-- Publishing a `plan-qa` package to PyPI, or creating a second repo
-- Splitting the test suite or creating a second release train
-- Changing any check's behaviour, any finding's text, or any config key
-- Refactoring the hook adapters (`plan_qa_edit`, `plan_qa_commit_gate`,
-  `plan_qa_sweep`) — they are already thin (`plan_qa_edit.py:95-124`)
-- De-duplicating `mkplan.bash` against `plan_numbering.py` — real, deliberate,
-  and a separate concern (COUPLING-ANALYSIS.md §8)
-- Extracting the provisioning layer (`install/plan_workflow.py`) — installer
-  plumbing, least extractable and least worth extracting
+- **`plan_script_qa` (proposal artefact 2)** — deferred, see Decision 4
+- A plan-script *generator*, anything that runs plan scripts automatically, or
+  inferring the delegate — the proposal rejects all three (§10)
+- Retro-fitting the three existing in-the-wild variants of this library
+- Bash 3.2 / macOS system bash, Windows, non-bash orchestrators (§11)
 
 ## Context & Background
 
-The plan subsystem is four layers with very different coupling profiles, and
-treating it as one thing is what makes it look tangled:
+Three findings shaped the phasing; evidence in PROPOSAL-ASSESSMENT §1-3.
 
-| Layer                | Location                | Daemon coupling          |
-| -------------------- | ----------------------- | ------------------------ |
-| **A. Rule engine**   | `plan_qa/`              | 2 imports                |
-| **B. Hook adapters** | 9 handlers + advisor    | Total, by definition     |
-| **C. CLI**           | `daemon/cli.py`         | 2 call sites             |
-| **D. Provisioning**  | `install/plan_workflow` | Config model + installer |
-
-Only layer A is library-shaped. Layer B *must* couple — it implements the
-daemon's `Handler` ABC. Layer C (`cli.py:3357-3452`) already accepts an
-explicit `--project-root` and exits 1 on findings, so plan QA is **already**
-usable in CI and as a pre-commit hook today via
-`hooks-daemon plan-qa --sweep`. That materially weakens the strongest argument
-for extraction, because the headline consumer use case is already served.
+- **The config already anticipates the file.** `extra_root_files`
+  (`config/models.py:540-544`) exists so a project can place a sourced
+  `_planlib.bash` at the plan root without the sweep flagging it a stray. If
+  the daemon ships it, it belongs in the built-in `_EXPECTED_ROOT_FILES`
+  (`plan_qa/model.py:306-314`) instead.
+- **The deployment vehicle exists.** `_deploy_mkplan`
+  (`install/plan_workflow.py:277-292`) already writes a daemon-owned bash asset
+  into the plan directory, overwritten every upgrade "so audit fixes reach
+  existing installs" — the exact ownership model a shared library needs, behind
+  one gated site (`install/plan_workflow.py:348-387`).
+- **The rule engine exists.** The proposal's §7.1 split (pure rules + thin
+  handler, so CI needs no daemon) describes what `plan_qa/` already is: 30
+  checks, stdlib-only but for `plan_qa/gitfacts.py:23-24`, `Protocol`-bound
+  config, three stages, and a CI-able CLI — hence Decision 1.
 
 ## Tasks
 
-### Phase 1: Decision and record
+### Phase 1: Test suite first (RED)
 
-- [ ] ⬜ **Task 1.1**: Confirm the interpretation with the requester before any
-  code changes — this plan inverts the outcome the plan name implies
-- [ ] ⬜ **Task 1.2**: Record Decisions 1-3 below as the standing answer, with
-  the revisit triggers, so a future session does not re-litigate from scratch
+The suite precedes the library per repo TDD discipline. Decision 2.
 
-### Phase 2: Remove the coupling (TDD)
+- [ ] ⬜ **Task 1.1**: Create `test-planlib.bash` harness with `assert_eq`,
+  `assert_contains`, `assert_not_contains`, tmpdir fixtures and a failure
+  summary that exits non-zero
+- [ ] ⬜ **Task 1.2**: Write failing tests for root resolution — deep subdir
+  resolves the root; nested repo with no marker FAILS rather than escaping to
+  the outer repo; inner repo WITH a marker resolves to itself; a worktree
+  `.git` **file** bounds the walk
+- [ ] ⬜ **Task 1.3**: Write failing tests for mode/leg semantics — a failing
+  gather leg continues and is recorded by name; a failing deploy leg aborts;
+  the leg runner refuses a mismatched mode
+- [ ] ⬜ **Task 1.4**: Write failing tests for the change gate and the backstop
+  — a deploy-mode command is refused before the gate passes, and the refusal
+  names `plan_gate_change`
+- [ ] ⬜ **Task 1.5**: Write failing tests for delegation — argv is built as an
+  array and never re-derives credentials
+- [ ] ⬜ **Task 1.6**: Write failing tests for the pure predicates —
+  `_plan_fingerprint_present` (space-delimited, so `SHA256:AA` must not match
+  `SHA256:AAA`) and `_plan_strip_cr`
+- [ ] ⬜ **Task 1.7**: Add the exit-deviation pin — assert that exactly
+  `plan_deploy_leg`, `plan_finish` and `plan_parse_common_flags` call `exit`,
+  so a fourth cannot grow one unnoticed (§3.12)
+- [ ] ⬜ **Task 1.8**: Add a negative control for every control: perturb ONE
+  thing and require exactly the expected assertion to fail
 
-- [ ] ⬜ **Task 2.1**: Write a failing test asserting `plan_qa/` imports no
-  `claude_code_hooks_daemon` module outside `plan_qa` (AST-walk over the
-  package; RED against `gitfacts.py:23-24`)
-- [ ] ⬜ **Task 2.2**: Replace the `Timeout` import (`gitfacts.py:23`) with a
-  module-level `Final[int]` constant in `plan_qa`, defaulted to today's value
-- [ ] ⬜ **Task 2.3**: Move the plan-counter reader into `plan_qa` — relocate
-  `read_plan_counter` (`handlers/utils/plan_numbering.py:126-139`) and its
-  git-config accessor so `plan_qa` owns it, and have `plan_numbering` re-export
-  or delegate rather than duplicating
-- [ ] ⬜ **Task 2.4**: Verify no behaviour change — the counter must still
-  resolve `hooksdaemon.latestPlanNumber` identically for `counter-sanity`
-  (`plan_qa/checks/counter_sanity.py`) and `mkplan.bash`
-- [ ] ⬜ **Task 2.5**: Confirm the Task 2.1 test now passes (GREEN)
+### Phase 2: The library (GREEN)
 
-### Phase 3: Enforce the boundary
+Carry the load-bearing comments verbatim — they are the ones that stopped
+being copied. Inventory: ASSESSMENT §6.
 
-- [ ] ⬜ **Task 3.1**: Promote the import-boundary test into the QA suite so a
-  future daemon import into `plan_qa` fails CI, not just review
-- [ ] ⬜ **Task 3.2**: Add a second assertion that `plan_qa` imports no
-  third-party package (it currently uses stdlib only — `pyproject.toml:28-35`
-  lists six runtime deps, none of which `plan_qa` needs)
-- [ ] ⬜ **Task 3.3**: Document the boundary contract in the `plan_qa/__init__`
-  docstring: stdlib only, no daemon imports, config via `Protocol`
+- [ ] ⬜ **Task 2.1**: Header, source guard, `PLANLIB_VERSION`, and the
+  configuration seam (`PLANLIB_ROOT_MARKER` with **no** default,
+  `PLANLIB_PLAN_DIR`, `PLANLIB_DELEGATE`, `PLANLIB_SCRUBBER`)
+- [ ] ⬜ **Task 2.2**: `_plan_err` / `_plan_banner` with the `|| return 1`
+  convention documented as errexit-safety, not style
+- [ ] ⬜ **Task 2.3**: `_plan_find_repo_root` + `plan_init` (source §3.3-3.4)
+- [ ] ⬜ **Task 2.4**: `plan_mode`, `plan_gate_change`,
+  `_plan_assert_change_allowed` — gate on state change, never target name (§3.8)
+- [ ] ⬜ **Task 2.5**: `plan_start_log`, `_plan_finalize_log`,
+  `_plan_on_signal` — the three subtleties of §3.5, and `wait` before scrub
+- [ ] ⬜ **Task 2.6**: `_plan_scrub_log` + `_plan_quarantine_log` (§3.6)
+- [ ] ⬜ **Task 2.7**: `_plan_tty_openable`, `_plan_strip_cr`, `plan_confirm` —
+  the four traps of §3.7
+- [ ] ⬜ **Task 2.8**: `plan_deploy_leg` / `plan_gather_leg` with the
+  `BASH_SUBSHELL` guard (§3.9)
+- [ ] ⬜ **Task 2.9**: `plan_run`, `plan_load_ssh_keys` (ordering enforced at
+  runtime, §6), `plan_list_reports`, `plan_finish`, `plan_parse_common_flags`
+- [ ] ⬜ **Task 2.10**: Confirm every Phase 1 test passes; run `shellcheck` over
+  the library with no suppressions
+
+### Phase 3: Deployment and configuration
+
+- [ ] ⬜ **Task 3.1**: Add the bundled template at
+  `install/templates/_planlib.inc.bash` and extend `package-data` in
+  `pyproject.toml:67-69` so wheel installs carry it
+- [ ] ⬜ **Task 3.2**: Add `_deploy_planlib` to `install/plan_workflow.py`
+  mirroring `_deploy_mkplan` — daemon-owned, overwritten every upgrade, but
+  mode `0644`: the library is **sourced, not executed**
+- [ ] ⬜ **Task 3.3**: Add `_planlib.inc.bash` to `_EXPECTED_ROOT_FILES`
+  (`plan_qa/model.py:306-314`) so the sweep does not flag it and no project
+  needs `extra_root_files` for it
+- [ ] ⬜ **Task 3.4**: Update the two docstrings naming `_planlib.bash`
+  (`config/models.py:544`, `plan_qa/model.py:431`) to the shipped filename
+- [ ] ⬜ **Task 3.5**: Add the `plan_workflow.scripts` config model —
+  `root_marker` (no default), `delegate`, `check_flag`, `force_color_var`,
+  `scrubber`, `track_run_logs`; neutral examples only (ASSESSMENT §5)
+- [ ] ⬜ **Task 3.6**: Add a `config-changes` manifest entry so the new options
+  surface on upgrade, per the release workflow
+- [ ] ⬜ **Task 3.7**: Deploy the guidance doc — canonical bootstrap (both
+  `source-path` directives, and why archiving a plan otherwise turns CI red),
+  the §5 skeletons, and the manual TTY checklist
 
 ### Phase 4: Verification
 
-- [ ] ⬜ **Task 4.1**: Full QA — `./scripts/qa/run_all.sh` (all 10 checks)
-- [ ] ⬜ **Task 4.2**: Daemon restart verification — `./bin/hooks-daemon restart`
-  then `status` shows RUNNING (catches import errors unit tests miss)
-- [ ] ⬜ **Task 4.3**: Exercise all three surfaces against this repo's own plan
-  tree: `plan-qa --sweep`, `--check-staged`, `--lint <PLAN.md>`
-- [ ] ⬜ **Task 4.4**: Confirm the 527 plan-QA tests still pass unchanged — any
-  test edit needed is a signal that behaviour moved, which is out of scope
+- [ ] ⬜ **Task 4.1**: Wire `test-planlib.bash` into the QA suite so the
+  library is gated like any other asset
+- [ ] ⬜ **Task 4.2**: Client-mode verification — `scripts/dummy-client-repo.sh create`, then confirm the library arrives at the plan root with mode `0644`
+  on a fresh install AND on an upgrade from a prior version
+- [ ] ⬜ **Task 4.3**: Confirm the plan-tree sweep does not flag the deployed
+  library as a stray root file
+- [ ] ⬜ **Task 4.4**: Full QA (`./scripts/qa/run_all.sh`) and daemon restart to
+  RUNNING
+- [ ] ⬜ **Task 4.5**: Walk the manual TTY checklist by hand — passphrase
+  prompt ordering, no second prompt when a key is loaded, gate ordering and
+  refusal, and Ctrl-C leaving a complete log
+
+### Phase 5: Decide on `plan_script_qa`
+
+- [ ] ⬜ **Task 5.1**: Record the deferral with its trigger conditions
+  (Decision 4) so it is a decision, not an omission
+- [ ] ⬜ **Task 5.2**: If a trigger fires, open a follow-up plan implementing
+  the rules as `CheckSpec`s in the existing catalogue (Decision 1), starting
+  with the six crisp rules only (PROPOSAL-ASSESSMENT §4)
 
 ## Dependencies
 
-- Depends on: none
-- Blocks: any future extraction plan (Phases 2-3 are its prerequisites)
-- Related: the `mkplan.bash` / `plan_numbering.py` duplication
-  (COUPLING-ANALYSIS.md §8) — deliberate, separate, not addressed here
+- Depends on: nothing. Blocks: a future `plan_script_qa` plan
+- Related: Plan 00144 (supplies the catalogue artefact 2 should extend),
+  Plan 00163 (same deployed-asset ownership pattern)
 
 ## Technical Decisions
 
-### Decision 1: Separate package vs. optional extra vs. in-tree enforced boundary
+### Decision 1: Extend the existing check catalogue; do not build a second rule engine
 
-**Context**: If `plan_qa` is a library, how should it be distributed?
-
-**Options considered**:
-
-1. **Separate distribution** (own repo or own wheel). Real reuse outside the
-   daemon; independently versionable. Costs a second release train, a
-   compatibility matrix against the daemon, split CI, and a split test suite —
-   permanently, for every future change. The daemon would consume its own
-   subsystem across a version boundary, so a check change becomes a two-repo
-   dance with a release in between.
-2. **Optional extra** (`pip install claude-code-hooks-daemon[plan-qa]`).
-   Solves nothing here: the package is *already* dependency-free
-   (stdlib only), so there is no install weight to make optional. Extras exist
-   to gate heavy or conflicting dependencies, and there are none.
-3. **In-tree module with a mechanically enforced boundary**. No packaging cost,
-   no release-train cost, single test suite. Delivers the property that
-   actually matters — the boundary cannot rot — and leaves option 1 open as a
-   near-mechanical follow-up because the package would already be import-clean.
-
-**Decision**: Option 3. Options 1 and 2 both pay a permanent, recurring cost to
-buy a benefit no identified consumer has asked for. Option 3 buys the durable
-part of the benefit (an enforced seam) at small one-off cost, and is a strict
-prerequisite for option 1, so nothing is wasted if the decision later flips.
-
-### Decision 2: Which direction should the dependency run?
-
-**Context**: `plan_qa/gitfacts.py:24` imports `read_plan_counter` from
-`handlers/utils/plan_numbering.py`. Something must move; which way?
+**Context**: The proposal (§7.1) specifies a new `_plan_script_rules.py`
+importing nothing from the daemon, plus a thin handler — because the daemon
+often sits in a git-ignored directory and so cannot be imported in CI.
 
 **Options considered**:
 
-1. **Leave it.** Zero work, but it is a genuine layering inversion — the rule
-   engine reaching upward into the handlers package — and it is the single
-   reason `plan_qa` is not already stdlib-pure. It also blocks any future
-   extraction, since `handlers/` cannot come along.
-2. **Duplicate the counter reader** into `plan_qa`. Removes the edge but
-   creates a third copy of the counter logic (Python × 2 + bash × 1), and the
-   whole point of `plan_numbering.py` is to be the single Python source of
-   truth. Directly violates DRY and SINGLE SOURCE OF TRUTH.
-3. **Move it down into `plan_qa`** and have `plan_numbering` delegate. The
-   dependency then runs handlers → `plan_qa`, matching every other layer.
-   Nothing about `read_plan_counter` is handler-specific — it reads a git
-   config key and parses an int (`plan_numbering.py:126-139`, 14 lines).
+1. **A separate `_plan_script_rules.py`, as proposed.** Honours the CI
+   constraint literally. Costs a second check catalogue, `Finding` shape,
+   report renderer, config block and CLI, permanently parallel to `plan_qa/`.
+2. **Script rules as `CheckSpec`s in `plan_qa/checks/`.** Reuses `Stage`,
+   `Finding`, `Level`, the allowlists, the three surfaces and the CLI. The CI
+   constraint is already met: `plan_qa/` imports two symbols from the daemon
+   (`plan_qa/gitfacts.py:23-24`) and is otherwise stdlib, with `Protocol`-bound
+   config and standalone defaults.
 
-**Decision**: Option 3. It is the only one that both removes the inversion and
-keeps one Python source of truth. The counter is a *plan* concept, not a
-*handler* concept, so `plan_qa` is its correct home; its current location is
-historical.
+**Decision**: Option 2, when artefact 2 is eventually built. The proposal's
+rationale is sound but its premise is already satisfied here — it was written
+against a project without `plan_qa`. Two parallel engines for rules that are
+both "plan QA" is a straight DRY violation.
 
-### Decision 3: Should the daemon consume the library, or the library the daemon?
+**Where the fit is imperfect**: `CheckContext` is plan-document-shaped. Script
+content fits the existing `file_content` slot, but R12 needs a file **mode**
+and no slot exists — one additive field, not a reason for a second engine.
 
-**Context**: Whatever the packaging, the direction of the runtime relationship
-must be explicit, because it decides where config lives.
+### Decision 2: Tests precede the library, inverting the proposal's ordering
+
+**Context**: The proposal orders artefacts by value — library (1), then suite
+(3) — while its §12 adoption order ships them **together** as one step. The
+team's suggested phasing was (1) → (3) → (2).
 
 **Options considered**:
 
-1. **Library consumes daemon config.** Would require `plan_qa` to import
-   pydantic and the `Config` model — exactly the coupling `context.py:3-6`
-   deliberately avoids.
-2. **Daemon consumes library, passing policy as plain values.** Already how it
-   works: `QaPolicy`/`JournalPolicy`/`PlanDocSizePolicy`
-   (`context.py:29-107`) are structural `Protocol`s satisfied by the pydantic
-   models without either side importing the other.
+1. **Library first, suite after.** Matches the value ordering, but inverts the
+   repo's mandatory RED-GREEN-REFACTOR discipline, and a suite written after
+   the fact asserts what the code does rather than what it should — fatal here,
+   where the whole point is primitives whose wrong behaviour looks like success.
+2. **Suite first (RED), then library (GREEN).** Repo-standard TDD.
 
-**Decision**: Option 2, unchanged — this decision is recorded to make an
-existing implicit contract explicit and to stop a future change from
-"simplifying" the Protocols into a direct import. `PlanWorkflowQaConfig`
-(`config/models.py:519-600`) satisfies the Protocol structurally; the daemon
-owns config, the library owns rules, and neither imports the other.
+**Decision**: Option 2. The apparent conflict with the proposal is not real:
+§12 treats the pair as one deliverable, and CodeLifecycle/Features.md requires
+the failing test first. The negative controls (Task 1.8) are only meaningful
+written before the implementation.
+
+### Decision 3: Ship as `_planlib.inc.bash`, mode 0644, daemon-owned
+
+**Context**: Three sub-questions — filename, mode, ownership.
+
+- **Filename**: the codebase says `_planlib.bash` (`config/models.py:544`,
+  `plan_qa/model.py:431`); the proposal says `_planlib.inc.bash`. Take the
+  proposal's — `.inc.bash` signals "sourced, not executable", the distinction
+  that makes the mode obvious. Both codebase mentions are prose examples with
+  no runtime effect, so updating them is free (Task 3.4).
+- **Mode**: `_deploy_mkplan` uses `0o755` (`install/plan_workflow.py:24`)
+  because `mkplan.bash` is executed. This library is **sourced**, so `0644` is
+  correct — reusing the mkplan constant would ship a misleading execute bit.
+- **Ownership**: `mkplan.bash` is daemon-owned and overwritten every upgrade;
+  `_TEMPLATE_.md` and the journal assets are client-owned and never
+  (`install/plan_workflow.py:232-345`). This must be **daemon-owned** — the
+  premise is that the correct implementation is the only one on offer, and a
+  client-owned copy re-creates the per-copy divergence being eliminated.
+
+**Decision**: `_planlib.inc.bash`, mode `0644`, daemon-owned, overwritten on
+every upgrade, deployed via the existing gated decision site.
+
+### Decision 4: Defer `plan_script_qa` until it has something to gate
+
+**Context**: The proposal's artefact 2 enforces that orchestrators are built on
+the library. Its §12 adoption order puts it second, in `warn`, seeded with a
+`legacy_script_allowlist`.
+
+**Options considered**:
+
+1. **Ship it now in `warn`.** Completes the proposal. But this repo has zero
+   orchestrator scripts: the enforcement surface is empty, the allowlist has no
+   baseline to seed, the ratchet has nothing to ratchet, and all fifteen rules
+   would be validated only by unit tests written from the same document that
+   specified them — no independent signal.
+2. **Defer with explicit triggers.** Artefacts 1 and 3 deliver full value
+   without it, as the proposal itself states ("(1) alone is worth having").
+
+**Decision**: Option 2. Deferral is recorded with triggers, not left implicit.
+
+**Reopen when any of these is true**: at least one project has orchestrators
+actually built on the shipped library, so the rules can be validated against
+code not written from their own spec; or a second variant of the library
+appears in the wild; or a `git rev-parse --show-toplevel`-class incident recurs
+in a project that has the library available.
+
+**When it is built**: start with the six crisp rules (R1, R2, R3, R5, R9, R12)
+rather than all fifteen. R14 is not mechanically checkable and belongs in docs;
+R15 needs project config that does not exist yet (PROPOSAL-ASSESSMENT §4).
 
 ## Why this might not be worth doing
 
-The strongest case against this plan:
+Argued in full in PROPOSAL-ASSESSMENT §7. In summary: **the daemon would not
+dogfood it** — this is a Python project whose plans ship Python and tests, not
+orchestrators against live infrastructure, so unlike `mkplan.bash` this asset
+would never be exercised by its own maintainers, and unused code rots
+invisibly. The suite answers that for the *logic* but not the *deployment
+path*. Secondary objections: a dozen primitives with subtle fd plumbing is
+large for a first ship, and the real consumer is in another organisation while
+this repo carries the maintenance.
 
-- **It is a solution looking for a problem.** The boundary is clean *today*
-  with no enforcement. The check in Phase 3 defends against a hypothetical
-  future violation, which is itself a YAGNI risk — the exact charge this plan
-  levels at extraction. Two of the four phases exist to protect a property that
-  has not yet been broken.
-- **The coupling is two lines.** One is a constant. Calling that a "layering
-  inversion" is technically correct but rhetorically inflated; a reviewer could
-  reasonably say the honest fix is a one-line comment, not a four-phase plan.
-- **Task 2.3 touches shared code.** `plan_numbering.py` is used by
-  `plan_number_helper`, `validate_plan_number` and `markdown_organization`.
-  Moving a function out of it to fix a purely aesthetic import direction risks
-  a real regression in working code, trading concrete risk for abstract
-  tidiness — and `mkplan.bash` reads the same counter independently, so a
-  subtle divergence would surface as wrong plan numbers, a loud failure.
-- **Phase 3 could be one grep in an existing check.** A whole new QA check may
-  be more machinery than the invariant deserves.
-
-**Where that leaves it**: the case is strong enough to kill Phases 3-4 as
-standalone work, but not Phase 2 — an inverted dependency is a real defect
-that will otherwise be copied by the next module. The proportionate response
-is Phase 2 plus the cheapest possible enforcement, and to treat Phase 3's
-scope (new check vs. assertion inside an existing one) as a judgement call at
-implementation. If the requester wants extraction *itself*, this plan's answer
-is "not yet, and here is what would have to be true first" — recorded in
-Decision 1 with its revisit triggers, not silently dropped.
+**Where that lands**: it does not kill Phases 1-4 — the daemon already ships
+`mkplan.bash` by this exact mechanism and the config already names this exact
+file, so the alternative is not "no library" but "every project keeps
+hand-copying one". It does harden two constraints (Tasks 4.2 and 4.5) and
+independently supports deferring artefact 2.
 
 ## Success Criteria
 
-- [ ] The extract-vs-keep decision is recorded with explicit revisit triggers
-- [ ] `plan_qa/` imports no `claude_code_hooks_daemon` module outside itself
-- [ ] `plan_qa/` imports no third-party package (stdlib only)
-- [ ] The boundary is enforced by an automated check, not convention
-- [ ] No layering inversion remains: nothing in `plan_qa` imports `handlers/`
-- [ ] All 527 plan-QA tests pass **without modification**
+- [ ] `test-planlib.bash` passes; every primitive covered; every control has a
+  negative control; the exit-deviation pin holds at exactly three functions
+- [ ] `shellcheck` is clean over library and suite with zero suppressions
+- [ ] The library lands at the plan root at mode `0644` on a fresh client
+  install AND on an upgrade, verified against the dummy-client fixture
+- [ ] The plan-tree sweep does not flag the deployed library as a stray file
+- [ ] `PLANLIB_ROOT_MARKER` unset is a hard error at `plan_init`, never a
+  fallback
+- [ ] The manual TTY checklist has been walked, results recorded in the JOURNAL
 - [ ] Full QA passes and the daemon restarts to RUNNING
-- [ ] All three plan-QA surfaces behave identically to before
-
-**Revisit trigger for extraction** — reopen Decision 1 when any of these is
-true: a concrete consumer outside this daemon is identified; a second tool in
-this org needs the checks; or a user asks to run plan QA without installing the
-daemon (note: `plan-qa --sweep --project-root X` may already satisfy this).
+- [ ] The `plan_script_qa` deferral is recorded with its trigger conditions
 
 ## Risks & Mitigations
 
-| Risk                                                               | Impact | Probability | Mitigation                                                                                       |
-| ------------------------------------------------------------------ | ------ | ----------- | ------------------------------------------------------------------------------------------------ |
-| Moving `read_plan_counter` breaks plan numbering                   | High   | Low         | TDD; `plan_numbering` delegates rather than duplicating; verify against `mkplan.bash` (Task 2.4) |
-| Counter behaviour diverges between Python and `mkplan.bash`        | High   | Low         | Task 2.4 explicitly checks both readers resolve the same key identically                         |
-| Boundary check produces false positives on `TYPE_CHECKING` imports | Low    | Medium      | AST-walk must treat `TYPE_CHECKING` blocks correctly (`plan_qa/types.py:17-20` uses them)        |
-| Scope creep into extraction proper                                 | Medium | Medium      | Non-Goals list it explicitly; Decision 1 gates it behind named triggers                          |
-| This plan is judged not worth doing at all                         | Low    | Medium      | "Why this might not be worth doing" argues that case; Phase 1 confirms before any code changes   |
+| Risk                                                          | Impact | Prob. | Mitigation                                              |
+| ------------------------------------------------------------- | ------ | ----- | ------------------------------------------------------- |
+| Run-log drain regresses; logs truncated at the tail           | High   | Med   | Task 1.x pins `wait`-before-scrub; invisible without it |
+| Ships with the execute bit, inviting direct execution         | Med    | Med   | Decision 3 fixes `0644`; Task 4.2 asserts it            |
+| Ansible/`shellscripts/` flavour leaks into defaults           | Med    | Med   | ASSESSMENT §5 lists each; Task 3.5                      |
+| A future `plan_script_qa` grows a 2nd rule engine             | Med    | Med   | Decision 1, recorded before anyone starts               |
+| Deployed but never dogfooded; a client finds the break        | High   | Med   | Tasks 4.2 and 4.5                                       |
+| `_EXPECTED_ROOT_FILES` change breaks `extra_root_files` users | Low    | Low   | Sets layer additively (`plan_qa/model.py:443`)          |
 
 ## Delivery & Milestones
 
@@ -285,4 +326,5 @@ daemon (note: `plan-qa --sweep --project-root X` may already satisfy this).
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00199-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Plan authored; investigation complete, recommendation is **do not extract**
+- Plan authored against the proposal; artefacts 1 + 3 accepted, artefact 2
+  deferred with triggers
