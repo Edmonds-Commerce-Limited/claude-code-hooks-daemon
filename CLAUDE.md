@@ -352,7 +352,7 @@ unset HOSTNAME → daemon-work.local.sock   # from socket.gethostname() / `hostn
 
 ### SOLID Principles
 
-1. **Single Responsibility** - Each class/module has ONE reason to change. Config is config. Strategy is strategy. Handler is handler. Never mix data and behavior in the same class.
+1. **Single Responsibility** - Each class/module has ONE reason to change. Config is config. Strategy is strategy. Handler is handler. Never mix data and behaviour in the same class.
 2. **Open/Closed** - Open for extension, closed for modification. Use Strategy Pattern for language-aware handlers — add new languages by adding new strategy implementations, not by modifying existing if/elif chains.
 3. **Liskov Substitution** - Any strategy implementation must be substitutable for another through the shared Protocol interface. No special-casing by type name.
 4. **Interface Segregation** - Keep Protocol interfaces focused. `TddStrategy` only has TDD methods, not QA suppression methods. Clients should never depend on methods they don't use.
@@ -364,7 +364,7 @@ unset HOSTNAME → daemon-work.local.sock   # from socket.gethostname() / `hostn
 07. **DRY** - Single source of truth for all logic. If you see the same pattern repeated, extract it. Common test directories, directory matching — shared utilities, not copy-paste.
 08. **YAGNI** - Don't build for hypothetical futures. Implement what's needed now, design for extensibility through patterns (Strategy, Protocol), not through premature abstraction.
 09. **NO MAGIC** - Zero magic strings or numbers. Every string literal and numeric value must be a named constant. `"/src/"` in an if-statement is magic — `_SOURCE_DIRECTORIES` tuple is not. Use constants modules, class constants, or module-level named tuples.
-10. **SINGLE SOURCE OF TRUTH** - Config is truth, code reads config, never hardcode. Language configurations define language properties. Strategies define language behavior. Handlers orchestrate.
+10. **SINGLE SOURCE OF TRUTH** - Config is truth, code reads config, never hardcode. Language configurations define language properties. Strategies define language behaviour. Handlers orchestrate.
 11. **PROPER NOT QUICK** - No workarounds, fix root causes. Three similar lines of code is better than a wrong abstraction, but six identical blocks means you need a proper pattern.
 12. **TYPE SAFETY** - Full type annotations, strict mypy, no `Any` without justification. Use `Protocol` for interfaces, not `ABC` (structural typing over nominal).
 13. **TEST COVERAGE** - 95% minimum, integration tests for all flows. Each strategy independently TDD-able with its own test file.
@@ -593,7 +593,7 @@ daemon:
 - ✅ Single-user development machines
 - ❌ Shared servers with multiple users/projects
 
-**Behavior**:
+**Behaviour**:
 
 - Container: Terminates **stale/duplicate** `hooks-daemon` processes serving the same project root (SIGTERM → SIGKILL); spares a healthy incumbent that owns the current socket (reused, not killed); leaves other projects' daemons alone
 - Non-container: Only removes stale PID files for current project
