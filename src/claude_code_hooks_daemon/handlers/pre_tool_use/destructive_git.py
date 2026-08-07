@@ -340,4 +340,20 @@ class DestructiveGitHandler(Handler):
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
+            AcceptanceTest(
+                title="git tag -f is not a force push",
+                command='echo "git tag -f v1.0.0-test-safe NONEXISTENT_SAFE_TEST_SHA"',
+                description=(
+                    "git tag -f force-moves a tag; it has nothing to do with "
+                    "git push --force and must NOT be blocked. Regression test "
+                    "for a dogfooding false positive (Plan 00200) where -f was "
+                    "matched too broadly outside the git push segment."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Uses echo - command is not actually executed",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
         ]

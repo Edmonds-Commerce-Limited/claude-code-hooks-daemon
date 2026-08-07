@@ -41,6 +41,38 @@ _ECHD_CAPTURE_DEFAULT_LINES = 20
 _ECHD_CAPTURE_NAME = "echd-capture"
 _ECHD_CAPTURE_REL_PARTS = ("scripts", _ECHD_CAPTURE_NAME)
 
+# Redaction placeholder substituted for a -m/-F message VALUE before pipe
+# detection. Deliberately contains no "|" so it can never itself trigger a
+# false match.
+_MESSAGE_BODY_PLACEHOLDER = "<REDACTED>"
+
+# Matches a `-m`/`--message`/`-F`/`--file` flag immediately followed by its
+# VALUE, so the value's content can be excluded from pipe detection: these
+# flags carry human-authored prose (a commit/tag message, or a message-file
+# path), never shell syntax to execute. A literal "| tail" inside that prose
+# — e.g. this very handler's own CLAUDE.md example, quoted in a commit
+# message describing a fix for it — is DATA, not a pipe operator.
+#
+# Three value shapes, tried in order (DOTALL so "." spans newlines, needed
+# for the heredoc alternative's body):
+#   1. The canonical heredoc-embedded message idiom used throughout this
+#      repo: -m "$(cat <<'EOF' ... EOF)" (leading whitespace before the
+#      closing delimiter is tolerated — messages are often re-indented).
+#   2. A single- or double-quoted string (may itself span multiple literal
+#      newlines — bash allows that inside quotes).
+#   3. A bare word (e.g. -F commit-msg.txt) as a fallback.
+_MESSAGE_BODY_PATTERN = re.compile(
+    r"(?P<flag>(?<![\w-])(?:-m|--message|-F|--file))"
+    r"(?P<sep>=|\s+)"
+    r"(?P<value>"
+    r"\"\$\(cat\s+<<-?\s*'?(?P<delim>\w+)'?\s*\n.*?\n[ \t]*(?P=delim)[ \t]*\n?\s*\)\""
+    r"|'(?:[^'\\]|\\.)*'"
+    r'|"(?:[^"\\]|\\.)*"'
+    r"|\S+"
+    r")",
+    re.DOTALL,
+)
+
 
 class PipeBlockerHandler(Handler):
     """Block expensive commands piped to tail/head to prevent information loss.
@@ -104,6 +136,22 @@ class PipeBlockerHandler(Handler):
         if effective_languages:
             self._registry.filter_by_languages(effective_languages)
 
+    @staticmethod
+    def _strip_message_bodies(command: str) -> str:
+        """Blank out `-m`/`--message`/`-F`/`--file` VALUES before pipe scanning.
+
+        These flags carry human-authored prose (a commit/tag message, or a
+        message-file path), never shell syntax to execute. A literal
+        "| tail" inside that prose — e.g. a commit message documenting this
+        very handler — must never be mistaken for a real pipe operator.
+        Everything else in the command (including a REAL pipe elsewhere) is
+        left untouched.
+        """
+        return _MESSAGE_BODY_PATTERN.sub(
+            lambda m: f"{m.group('flag')}{m.group('sep')}{_MESSAGE_BODY_PLACEHOLDER}",
+            command,
+        )
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if command pipes a non-whitelisted operation to tail/head.
 
@@ -124,17 +172,23 @@ class PipeBlockerHandler(Handler):
         if not command:
             return False
 
-        if not self._pipe_pattern.search(command):
+        # -m/-F message VALUES are data, not shell syntax — scan a copy with
+        # them blanked out so prose inside a commit message can never be
+        # mistaken for a real pipe. A real pipe elsewhere in the SAME
+        # command is untouched and still detected.
+        scan_target = self._strip_message_bodies(command)
+
+        if not self._pipe_pattern.search(scan_target):
             return False
 
         # Allow tail -f (follow mode) and head -c (byte count)
-        if self._tail_follow_pattern.search(command):
+        if self._tail_follow_pattern.search(scan_target):
             return False
-        if self._head_bytes_pattern.search(command):
+        if self._head_bytes_pattern.search(scan_target):
             return False
 
         # Extract full source segment before pipe to tail/head
-        source_segment = self._extract_source_segment(command)
+        source_segment = self._extract_source_segment(scan_target)
 
         # Step 1: Whitelist check — if whitelisted, always allow
         if self._matches_whitelist(source_segment):
@@ -431,7 +485,11 @@ class PipeBlockerHandler(Handler):
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block with blacklisted or unknown message based on pattern match and block count."""
         command = get_bash_command(hook_input) or "unknown command"
-        source_segment = self._extract_source_segment(command)
+        # Extract the segment from a message-blanked copy so a fake pipe
+        # inside a -m/-F value earlier in the string can never be mistaken
+        # for the real one that triggered the block. The displayed COMMAND
+        # below still shows the full, un-redacted original.
+        source_segment = self._extract_source_segment(self._strip_message_bodies(command))
         block_count = self._get_block_count()
 
         # Differentiate: known expensive vs unrecognized, verbose vs terse
@@ -559,6 +617,26 @@ class PipeBlockerHandler(Handler):
                     r"extra_whitelist",
                 ],
                 safety_notes="No-op: [[ ... ]] evaluates to false (exit 1), no side effects",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="commit message quoting a pipe example is not a real pipe",
+                command=(
+                    'git commit -m "docs: pytest tests/ 2>&1 | tail -20 is now blocked" '
+                    "--dry-run --allow-empty"
+                ),
+                description=(
+                    "A commit message that quotes a '| tail' example as prose (e.g. "
+                    "documenting this very handler) must NOT be treated as a real "
+                    "pipe. Regression test for a dogfooding false positive "
+                    "(Plan 00200) where -m message VALUES were scanned as shell "
+                    "syntax instead of data. --dry-run never creates a commit."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="--dry-run --allow-empty: no commit is created, no side effects",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

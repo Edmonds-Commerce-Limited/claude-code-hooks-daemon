@@ -893,3 +893,43 @@ class TestDestructiveGitPushForceSeparatorScoping:
         reason = handler._match_reason("git push --force origin main")
         assert reason is not None
         assert "overwrite remote history" in reason
+
+
+class TestDestructiveGitTagForceNotBlocked:
+    """Plan 00200 (Task 6.4): pin the `git tag -f` false positive forever.
+
+    A live session reported `git tag -f v1.0.0 <sha>` blocked with the
+    "git push --force" reason despite no push being present — the `-f` flag
+    was matched too broadly. The push-force pattern is already scoped to the
+    `git push` sub-command segment (see `_GIT_PUSH_FORCE_PATTERN`), so this
+    class pins that scoping as a permanent regression test rather than
+    re-deriving it from first principles each time.
+    """
+
+    @pytest.fixture
+    def handler(self):
+        return DestructiveGitHandler()
+
+    def test_git_tag_force_not_blocked(self, handler):
+        """`git tag -f` (force-move a tag) is unrelated to force-push and must ALLOW."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git tag -f v1.0.0 abc123def456"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_match_reason_none_for_git_tag_force(self, handler):
+        assert handler._match_reason("git tag -f v1.0.0 abc123def456") is None
+
+    def test_git_tag_force_short_alone_not_blocked(self, handler):
+        assert handler.matches(
+            {"tool_name": "Bash", "tool_input": {"command": "git tag -f v2.0.0"}}
+        ) is False
+
+    def test_real_force_push_still_blocked_alongside_tag_force(self, handler):
+        """Guardrail: a real force-push must NEVER be weakened by this fix."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push --force origin main"},
+        }
+        assert handler.matches(hook_input) is True
