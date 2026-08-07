@@ -444,20 +444,25 @@ deploy_slash_commands "$PROJECT_ROOT" "$DAEMON_DIR" "normal"
 
 log_step "10" "Deploying user-facing skills"
 
-"$VENV_PYTHON" -c "
+# Values reach Python as ARGV entries and are never spliced into the
+# generated source. A path containing a quote would otherwise close the
+# Python string literal and raise SyntaxError instead of deploying.
+"$VENV_PYTHON" - "$DAEMON_DIR" "$PROJECT_ROOT" <<'DEPLOY_SKILLS_PY'
+import sys
 from pathlib import Path
+
 from claude_code_hooks_daemon.install.skills import deploy_skills
 
-daemon_source = Path('$DAEMON_DIR')
-project_root = Path('$PROJECT_ROOT')
+daemon_source = Path(sys.argv[1])
+project_root = Path(sys.argv[2])
 
 try:
     deploy_skills(daemon_source, project_root)
-    print('✓ Skills deployed to .claude/skills/hooks-daemon/')
+    print("✓ Skills deployed to .claude/skills/hooks-daemon/")
 except Exception as e:
-    print(f'✗ Skill deployment failed: {e}')
-    exit(1)
-"
+    print(f"✗ Skill deployment failed: {e}")
+    sys.exit(1)
+DEPLOY_SKILLS_PY
 
 # ============================================================
 # Step 10b: Deploy the hooks-daemon bin wrapper (Plan 00192)
@@ -471,17 +476,19 @@ except Exception as e:
 
 log_step "10b" "Deploying hooks-daemon CLI wrapper"
 
-"$VENV_PYTHON" -c "
+"$VENV_PYTHON" - "$DAEMON_DIR" <<'DEPLOY_BIN_WRAPPER_PY'
+import sys
 from pathlib import Path
+
 from claude_code_hooks_daemon.install.bin_wrapper import deploy_bin_wrapper
 
 try:
-    target = deploy_bin_wrapper(Path('$DAEMON_DIR'))
-    print(f'✓ CLI wrapper deployed to {target}')
+    target = deploy_bin_wrapper(Path(sys.argv[1]))
+    print(f"✓ CLI wrapper deployed to {target}")
 except Exception as e:
-    print(f'✗ CLI wrapper deployment failed: {e}')
-    exit(1)
-"
+    print(f"✗ CLI wrapper deployment failed: {e}")
+    sys.exit(1)
+DEPLOY_BIN_WRAPPER_PY
 
 # ============================================================
 # Step 11: Start daemon and verify
@@ -519,14 +526,16 @@ fi
 
 log_step "14" "Deploying plan workflow (if enabled in config)"
 
-if "$VENV_PYTHON" -c "
+if "$VENV_PYTHON" - "$PROJECT_ROOT" "$TARGET_CONFIG" <<'DEPLOY_PLAN_WORKFLOW_PY'; then
+import sys
 from pathlib import Path
+
 from claude_code_hooks_daemon.install.plan_workflow import deploy_plan_workflow_if_enabled
 
-result = deploy_plan_workflow_if_enabled(Path('$PROJECT_ROOT'), Path('$TARGET_CONFIG'))
+result = deploy_plan_workflow_if_enabled(Path(sys.argv[1]), Path(sys.argv[2]))
 for msg in result.messages:
-    print(f'  -> {msg}')
-"; then
+    print(f"  -> {msg}")
+DEPLOY_PLAN_WORKFLOW_PY
     print_success "Plan workflow deployment complete"
 else
     print_warning "Plan workflow deployment had issues (non-fatal)"
@@ -544,16 +553,20 @@ fi
 
 log_step "14b" "Deploying + arming ccy supervisor (if a .claude/ccy/ project)"
 
-if "$VENV_PYTHON" -c "
+if "$VENV_PYTHON" - "$DAEMON_DIR" "$PROJECT_ROOT" "$TARGET_CONFIG" <<'DEPLOY_CCY_PY'; then
+import sys
 from pathlib import Path
+
 from claude_code_hooks_daemon.install.ccy_supervisor import deploy_ccy_supervisor_if_enabled
 
-result = deploy_ccy_supervisor_if_enabled(Path('$DAEMON_DIR'), Path('$PROJECT_ROOT'), Path('$TARGET_CONFIG'))
+result = deploy_ccy_supervisor_if_enabled(
+    Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+)
 for msg in result.messages:
-    print(f'  -> {msg}')
+    print(f"  -> {msg}")
 if result.recommend_enable:
-    print('  -> TIP: set ccy.deploy_supervisor: true in .claude/hooks-daemon.yaml to keep this on')
-"; then
+    print("  -> TIP: set ccy.deploy_supervisor: true in .claude/hooks-daemon.yaml to keep this on")
+DEPLOY_CCY_PY
     print_success "ccy supervisor deployment complete"
 else
     print_warning "ccy supervisor deployment had issues (non-fatal)"
@@ -568,18 +581,21 @@ HANDLER_PROFILE="${HANDLER_PROFILE:-minimal}"
 if [ "$HANDLER_PROFILE" != "minimal" ]; then
     log_step "15" "Applying handler profile: $HANDLER_PROFILE"
 
-    if "$VENV_PYTHON" -c "
+    if "$VENV_PYTHON" - "$TARGET_CONFIG" "$HANDLER_PROFILE" <<'APPLY_PROFILE_PY'; then
+import sys
 from pathlib import Path
+
 from claude_code_hooks_daemon.install.handler_profiles import apply_profile
 
-config_path = Path('$TARGET_CONFIG')
+config_path = Path(sys.argv[1])
+profile_name = sys.argv[2]
 try:
-    count = apply_profile(config_path, '$HANDLER_PROFILE')
-    print(f'  Enabled {count} additional handler(s)')
+    count = apply_profile(config_path, profile_name)
+    print(f"  Enabled {count} additional handler(s)")
 except ValueError as e:
-    print(f'Error: {e}')
-    exit(1)
-"; then
+    print(f"Error: {e}")
+    sys.exit(1)
+APPLY_PROFILE_PY
         print_success "Profile '$HANDLER_PROFILE' applied"
     else
         print_warning "Profile application had issues (non-fatal)"

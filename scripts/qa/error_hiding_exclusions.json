@@ -724,19 +724,13 @@
     },
     {
       "file": "scripts/upgrade_version.sh",
-      "lines": [319],
+      "lines": [330],
       "rule": "shell-|| true",
       "reason": "Plan 00200 Task 5.4: `run_pre_install_checks ... \"false\" || true`. The function's own documented contract (fail_on_error=false): 'returns non-zero but doesn't exit', and it already prints any warnings found. The trailing `|| true` exists only to stop `set -e` treating that documented non-fatal return as script-terminating -- the function's own visible warnings are the diagnostic, not this line."
     },
     {
       "file": "scripts/upgrade_version.sh",
-      "lines": [484],
-      "rule": "shell-|| true",
-      "reason": "Plan 00200 Task 5.4: same shape as scripts/install/config_preserve.sh::preserve_config_for_upgrade -- wraps an embedded Python step with its own top-level `except Exception as e: print(f'WARNING: ... failed: {e}', file=sys.stderr)`, so failures are already visible; `|| true` only guards against a catastrophic pre-try failure aborting the whole upgrade over a best-effort documentation step."
-    },
-    {
-      "file": "scripts/upgrade_version.sh",
-      "lines": [611],
+      "lines": [684],
       "rule": "shell-&>/dev/null",
       "reason": "Plan 00200 Task 5.4: `if ! git ... rev-parse \"$TARGET_VERSION\" &>/dev/null; then fail_fast \"Version $TARGET_VERSION not found...\"` -- exit code explicitly checked, specific error printed on failure."
     },
