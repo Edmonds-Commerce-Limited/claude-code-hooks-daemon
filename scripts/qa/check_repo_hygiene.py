@@ -113,6 +113,35 @@ _NARRATIVE_PREFIXES: Final[tuple[str, ...]] = (
 _NARRATIVE_BASENAMES: Final[frozenset[str]] = frozenset({"CHANGELOG.md"})
 _JOURNAL_DIRNAME: Final[str] = "JOURNAL"
 
+# Directory names holding deliberate specimens. Freezing the real pre-fix
+# documents as evidence (``tests/fixtures/repo_hygiene/pre_fix_*.md``) puts two
+# deliberately-awful documents in the tracked tree; without this the rule would
+# flag its own proof, and the only way to keep the gate green would be to
+# delete that proof. Declared locally rather than shared with
+# ``check_british_english.py``: each QA script in this directory is
+# self-contained by design, and a shared-constants module for one frozenset
+# would couple them for no gain.
+_FIXTURE_DIRNAMES: Final[frozenset[str]] = frozenset({"fixtures", "test-files", "__fixtures__"})
+
+# The plan-workflow task-status icons. In a plan they belong in a TASK LIST
+# (`- [ ] ⬜ **Task 1.1**`); leading a HEADING that also names a lifecycle STATE
+# they mark a per-session progress board, which is what
+# ``CLAUDE/AGENT_TEAM_EXECUTION_STATUS.md`` was
+# (`## 🔄 READY: Plan 003 - Planning Mode Integration (25-30% done)`).
+#
+# The icon ALONE is not enough, and an earlier draft that stopped there flagged
+# nine legitimate documents: `## ❌ Working in Wrong Directory` and
+# `# ✅ RIGHT - Use parentheses` are ordinary do-this/not-that pedagogy, and a
+# rule that forbade it would be unusable. What distinguishes a board is the
+# lifecycle token and the colon: it is tracking a work ITEM's state, not
+# marking an example good or bad.
+_STATUS_ICONS: Final[str] = "✅🔄⬜🚫❌⏸️👁️"
+_LIFECYCLE_TOKENS: Final[str] = (
+    "COMPLETE|COMPLETED|DONE|READY|IN PROGRESS|BLOCKED|PENDING|NEXT|TODO|WIP"
+)
+
+_FENCE_MARKER: Final[str] = "```"
+
 # Phrases that only ever appear in unedited agent session output. Each is
 # anchored tightly enough that prose *about* the problem (this file, the tests,
 # the audit that found them) does not trip it: the markers require the heading
@@ -129,6 +158,13 @@ _SESSION_SUMMARY_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (
         re.compile(r"\d+\s+PASSING\s*/\s*\d+\s+FAILING"),
         "a frozen PASSING/FAILING test tally",
+    ),
+    (
+        re.compile(
+            rf"^#{{1,6}}\s+[{_STATUS_ICONS}]\s*\**\s*(?:{_LIFECYCLE_TOKENS})\b[^\n]*:",
+            re.MULTILINE,
+        ),
+        "a status-icon lifecycle heading (a per-session progress board)",
     ),
 )
 
@@ -278,12 +314,39 @@ def _is_root_test_script(rel_path: str) -> bool:
 
 
 def _is_narrative_record(rel_path: str) -> bool:
-    """True when ``rel_path`` is a dated account whose genre IS the narrative."""
+    """True when ``rel_path`` is exempt: a dated account, or a frozen specimen.
+
+    A plan, its journal, a release note and the changelog are accounts of what
+    happened and are SUPPOSED to read this way. A fixture is a deliberately-bad
+    document kept as evidence that the rule fires.
+    """
     if rel_path.startswith(_NARRATIVE_PREFIXES):
         return True
     if rel_path in _NARRATIVE_BASENAMES:
         return True
-    return _JOURNAL_DIRNAME in rel_path.split("/")[:-1]
+    directories = rel_path.split("/")[:-1]
+    if _JOURNAL_DIRNAME in directories:
+        return True
+    return bool(_FIXTURE_DIRNAMES.intersection(directories))
+
+
+def _strip_fenced_blocks(content: str) -> str:
+    """Drop fenced code blocks, keeping line numbering irrelevant to the caller.
+
+    Every marker here describes PROSE. Inside a fence the same characters are
+    code: `# ❌ WRONG - Line too long` is a Python comment in a style guide, and
+    a doc quoting `## Mission Accomplished` as an example of what not to write
+    would otherwise convict itself.
+    """
+    kept: list[str] = []
+    in_fence = False
+    for line in content.split("\n"):
+        if line.strip().startswith(_FENCE_MARKER):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            kept.append(line)
+    return "\n".join(kept)
 
 
 def _frozen_summary_marker(root: Path, rel_path: str) -> str | None:
@@ -304,7 +367,7 @@ def _frozen_summary_marker(root: Path, rel_path: str) -> str | None:
     target = root / rel_path
     if not target.is_file():
         return None
-    content = target.read_text(encoding="utf-8")
+    content = _strip_fenced_blocks(target.read_text(encoding="utf-8"))
 
     for pattern, description in _SESSION_SUMMARY_PATTERNS:
         if pattern.search(content):

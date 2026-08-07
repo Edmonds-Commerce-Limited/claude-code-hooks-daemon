@@ -26,6 +26,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECKER = REPO_ROOT / "scripts" / "qa" / "check_repo_hygiene.py"
+FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "repo_hygiene"
 _TIMEOUT_SECONDS = 60
 
 
@@ -175,6 +176,90 @@ def test_does_not_flag_session_summary_markers_inside_plan_or_journal(tmp_path: 
     exit_code, report = _run_checker(repo)
 
     assert exit_code == 0, f"narrative record flagged: {report['violations']}"
+
+
+def test_pre_fix_documents_are_caught(tmp_path: Path) -> None:
+    """The centrepiece: the rule must catch the REAL documents, not a synthetic
+    approximation of them.
+
+    Both files are frozen byte-for-byte from ``52d3e9cf~1``, the commit that
+    deleted them. Modelled on
+    ``TestPreFixRunLintFixtureIsCaught`` in ``test_audit_error_hiding.py``, and
+    for the same reason: *if it cannot catch the bug that motivated this work,
+    it is not fixed.*
+
+    This test earned its keep immediately. The rule shipped with three markers
+    derived from ``TDD_RESPONSE_VALIDATION_SUMMARY.md`` alone, and
+    ``AGENT_TEAM_EXECUTION_STATUS.md`` has NONE of them -- no "Mission
+    Accomplished", no "Next Steps (User's Original Request)", no PASSING/FAILING
+    tally. It is a per-session progress BOARD (`## 🔄 READY: Plan 003 ...
+    (25-30% done)`), and it was invisible to its own rule. Synthetic fixtures
+    could never have shown that; only the real artefact could.
+    """
+    fixtures = sorted(FIXTURE_DIR.glob("pre_fix_*.md"))
+    assert len(fixtures) == 2, f"expected both frozen documents, found {fixtures}"
+
+    repo = _make_repo(
+        tmp_path,
+        {f"docs/{path.name}": path.read_text(encoding="utf-8") for path in fixtures},
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1
+    flagged = _paths(report)
+    for path in fixtures:
+        assert f"docs/{path.name}" in flagged, (
+            f"{path.name} was NOT caught. The rule does not cover the shape of a "
+            "document it was written to catch."
+        )
+
+
+def test_does_not_flag_do_this_not_that_pedagogy(tmp_path: Path) -> None:
+    """NEGATIVE CONTROL -- ✅/❌ headings are ordinary teaching, not a board.
+
+    A first draft matched the status ICON alone and flagged NINE legitimate
+    documents, including `CLAUDE/Worktree.md`'s `### ❌ Merging Without
+    Approval` and forty-plus `# ✅ RIGHT - ...` comments inside code fences in
+    `CLAUDE/development/QA.md`. A rule that forbids the repo's own house style
+    is not a hygiene rule.
+
+    What distinguishes a progress board is the LIFECYCLE token and the colon --
+    it tracks a work item's state, rather than marking an example good or bad.
+    """
+    repo = _make_repo(
+        tmp_path,
+        {
+            "docs/style.md": (
+                "### ❌ Working in the Wrong Directory\n\n"
+                "Do not do this.\n\n"
+                "### ✅ Correct Order\n\n"
+                "```python\n"
+                "# ❌ WRONG - line too long\n"
+                "# ✅ RIGHT - wrap it\n"
+                "```\n"
+            ),
+        },
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, f"pedagogy flagged: {report['violations']}"
+
+
+def test_does_not_flag_the_frozen_fixtures_in_this_repo() -> None:
+    """NEGATIVE CONTROL -- a fixture of a bad document must be allowed to be bad.
+
+    Freezing the real artefacts puts two deliberately-awful documents in the
+    tracked tree. Without a fixture exemption the rule would flag its own
+    evidence, and the only way to keep the gate green would be to delete the
+    proof that it works.
+    """
+    exit_code, report = _run_checker(REPO_ROOT)
+
+    assert exit_code == 0, "real repo flagged:\n" + "\n".join(
+        f"  [{v['rule']}] {v['path']}: {v['message']}" for v in report["violations"]
+    )
 
 
 def test_flags_test_stub_under_src(tmp_path: Path) -> None:
