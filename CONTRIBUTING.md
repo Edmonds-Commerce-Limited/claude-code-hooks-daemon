@@ -60,11 +60,18 @@ We use several tools to maintain code quality:
 
 #### Pre-commit Hooks
 
-Install pre-commit hooks to run checks automatically:
+Install pre-commit hooks to run checks automatically. `pre-commit` ships in the
+`dev` extras, so it is present once the project is installed:
 
 ```bash
 pre-commit install
+pre-commit run --all-files   # verify the hooks work before relying on them
 ```
+
+The black/ruff/mypy/bandit hooks run the tools from **this** environment rather
+than from upstream mirror repos, so their versions and configuration come from
+`uv.lock` and `pyproject.toml` — the same ones `scripts/qa/` uses. See the note
+at the top of `.pre-commit-config.yaml` for why.
 
 ### Dependency Lockfile (`uv.lock`)
 
@@ -128,45 +135,54 @@ class TestMyHandler:
 
 ### 3. Implement Handler
 
+Identity comes from the constants modules, never from string and integer
+literals. `HandlerID` gives the handler its stable config key, `Priority` places
+it in a documented band, and `HandlerTag` describes it — `terminal` is derived
+from `HandlerTag.TERMINAL` rather than passed separately.
+
 ```python
 # src/claude_code_hooks_daemon/handlers/pre_tool_use/my_handler.py
-from claude_code_hooks_daemon.core import Handler, HookResult
+from typing import Any
+
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command
+
 
 class MyHandler(Handler):
     """Short description of what this handler does."""
 
     def __init__(self) -> None:
         super().__init__(
-            name="my-handler",
-            priority=50,
-            terminal=True  # Set False for advisory/non-blocking handlers
+            handler_id=HandlerID.MY_HANDLER,
+            priority=Priority.MY_HANDLER,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
 
-    def matches(self, hook_input: dict) -> bool:
+    def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this handler should execute."""
         command = get_bash_command(hook_input)
         if not command:
             return False
         return "target" in command
 
-    def handle(self, hook_input: dict) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Execute handler logic."""
         return HookResult(
-            decision="deny",
-            reason="Explanation of why operation was blocked"
+            decision=Decision.DENY,
+            reason="Explanation of why the operation was blocked, and what to do instead",
         )
 ```
 
+`Handler.__init__` still accepts a bare `name=` string; it is a deprecated alias
+kept for older tests and must not be used in new handlers.
+
 ### 4. Register Handler
 
-Add to the appropriate entry point module:
-
-- `src/claude_code_hooks_daemon/hooks/pre_tool_use.py`
-
-And to the daemon controller:
-
-- `src/claude_code_hooks_daemon/daemon/controller.py`
+Handlers are **discovered**, not wired by hand. Add the `HandlerID` and
+`Priority` members, drop the module in the event-type package under
+`src/claude_code_hooks_daemon/handlers/<event_type>/`, and
+`handlers/registry.py` picks it up. There is no entry-point module to edit.
 
 ### 5. Add Configuration
 
@@ -198,17 +214,29 @@ backward compatibility with pre-Layer-2 tags. It is not the source of truth.)
 
 ### Error Handling
 
-Handlers should **fail open** - never block operations due to internal errors:
+**Let exceptions propagate.** Degradation policy belongs to the dispatcher, and
+a handler that swallows its own errors takes that decision away from it.
 
-```python
-def handle(self, hook_input: dict) -> HookResult:
-    try:
-        # Handler logic
-        return HookResult(decision="deny", reason="...")
-    except Exception:
-        # Fail open on errors
-        return HookResult(decision="allow")
-```
+`HandlerChain.execute()` (`core/chain.py:244`) is the single place that decides
+what a crash means:
+
+- default (`strict_mode=False`) — logs the exception, appends
+  `Handler exception: <Type>: <message>` to the accumulated context so the
+  failure is **visible**, and continues the chain;
+- `strict_mode=True` — fails closed: the operation is denied with
+  `SYSTEM ERROR: Handler <name> crashed - blocking for safety`.
+
+A `try/except Exception: return allow` inside a handler defeats both. It looks
+like fail-open but is strictly worse: the exception never reaches the log, no
+context is surfaced, strict mode silently stops being strict, and the handler
+reports a clean ALLOW for a check it never actually performed — a guard that is
+off while appearing on. This project treats that as the primary failure mode
+(**FAIL FAST**, `CLAUDE.md`), and ships `error_hiding_blocker` plus
+`scripts/qa/audit_error_hiding.py` to prevent it.
+
+Catch narrowly and only where you can genuinely recover — a missing optional
+file, a subprocess timeout — and always surface what happened in the result's
+`context`.
 
 ## Pull Request Process
 

@@ -1,6 +1,26 @@
+# Pre-commit configuration.
+#
+# The four toolchain hooks (black, ruff, mypy, bandit) deliberately use
+# `repo: local` with `language: system` instead of the upstream mirror repos.
+#
+# Why: a mirror repo pins its OWN tool version, giving the project a SECOND
+# version source that drifts from `uv.lock`. It did: black was pinned at
+# 23.12.1 against a locked 26.x, ruff at 0.1.11 against 0.15.x, mypy at 1.8.0
+# against 2.x. Black 23 and black 26 have different stable styles, so the hook
+# reformatted code AGAINST the QA gate; and `pyproject.toml` ignores rule codes
+# (TC001-TC003, RUF043) that did not exist in ruff 0.1.11, so that hook failed
+# on every run. Two years of silent rot, in the repo's only committed
+# automation.
+#
+# Running the tools from the ambient environment removes the second source
+# entirely: the version is whatever `uv.lock` installed, and the configuration
+# is whatever `pyproject.toml` says. There is nothing left to keep in sync.
+#
+# Requires the project venv to be active (or the dev extras installed):
+#     uv sync --all-extras && pre-commit install
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -11,32 +31,38 @@ repos:
       - id: debug-statements
       - id: mixed-line-ending
 
-  - repo: https://github.com/psf/black
-    rev: 23.12.1
+  - repo: local
     hooks:
       - id: black
-        language_version: python3.11
+        name: black (project toolchain)
+        entry: black
+        language: system
+        types: [python]
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.11
-    hooks:
       - id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
+        name: ruff (project toolchain)
+        entry: ruff check --fix --exit-non-zero-on-fix
+        language: system
+        types: [python]
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.8.0
-    hooks:
       - id: mypy
-        additional_dependencies: [types-PyYAML]
-        args: [--strict, --ignore-missing-imports]
-        exclude: ^tests/
+        name: mypy (project toolchain)
+        # Scope and flags come from pyproject.toml; passing filenames would
+        # bypass its per-module overrides and follow-imports settings.
+        entry: mypy
+        args: [src/]
+        language: system
+        pass_filenames: false
+        types: [python]
 
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.6
-    hooks:
       - id: bandit
-        # Filter ONLY B101 (asserts), matching scripts/qa/run_security_check.sh.
-        # Do NOT reintroduce -ll: it suppresses LOW-severity findings, and the
-        # Security Standards in CLAUDE.md treat HIGH, MEDIUM and LOW alike.
+        name: bandit (project toolchain)
+        # Filter ONLY B101 (asserts), matching scripts/qa/run_security_check.sh
+        # and .github/workflows/qa.yml. Do NOT reintroduce -ll: it suppresses
+        # LOW-severity findings, and the Security Standards in CLAUDE.md treat
+        # HIGH, MEDIUM and LOW alike.
+        entry: bandit
         args: [-r, src/, -s, B101]
-        exclude: ^tests/
+        language: system
+        pass_filenames: false
+        types: [python]

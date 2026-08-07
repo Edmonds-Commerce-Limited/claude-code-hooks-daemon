@@ -50,6 +50,11 @@ dev = [
     "types-jsonschema>=4.0",
     "types-psutil>=5.9",
     "deptry>=0.20",
+    # CONTRIBUTING.md instructs `pre-commit install`; without this the command
+    # is not found on a fresh dev setup. The hooks themselves run the tools
+    # above from this same environment (see .pre-commit-config.yaml), so there
+    # is exactly one version source.
+    "pre-commit>=3.5",
 ]
 
 [project.urls]
