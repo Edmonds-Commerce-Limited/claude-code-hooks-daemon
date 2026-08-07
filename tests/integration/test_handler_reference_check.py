@@ -115,8 +115,7 @@ def test_flags_a_section_heading_naming_a_handler_that_does_not_exist(tmp_path: 
     """
     root = _make_root(
         tmp_path,
-        _ACCURATE_SECTION
-        + """
+        _ACCURATE_SECTION + """
 #### python_qa_suppression_blocker
 
 | Property       | Value                           |
@@ -281,7 +280,9 @@ def test_check_is_wired_into_the_llm_qa_runner() -> None:
     sys.path.insert(0, str(REPO_ROOT / "scripts" / "qa"))
     import llm_qa
 
-    assert _TOOL_KEY in llm_qa.TOOL_REGISTRY, f"missing from TOOL_REGISTRY: {list(llm_qa.TOOL_REGISTRY)}"
+    assert (
+        _TOOL_KEY in llm_qa.TOOL_REGISTRY
+    ), f"missing from TOOL_REGISTRY: {list(llm_qa.TOOL_REGISTRY)}"
     assert _TOOL_KEY in llm_qa.SUMMARIZERS, "TOOL_REGISTRY entry has no summarizer"
     assert llm_qa.TOOL_REGISTRY[_TOOL_KEY].json_file == "handler_reference.json"
     assert list(llm_qa.TOOL_REGISTRY)[-1] == "smoke_test", (

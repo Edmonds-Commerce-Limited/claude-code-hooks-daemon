@@ -407,9 +407,7 @@ def scan_reference_doc(doc_path: Path, rel_file: str, truth: GroundTruth) -> lis
                         rule=RULE_REF_UNKNOWN,
                         file=rel_file,
                         line=line_no,
-                        message=(
-                            f"summary table lists handler `{key}`, which does not exist"
-                        ),
+                        message=(f"summary table lists handler `{key}`, which does not exist"),
                         remediation=_REMEDIATION_REF_UNKNOWN,
                     )
                 )
@@ -438,9 +436,7 @@ def scan_reference_doc(doc_path: Path, rel_file: str, truth: GroundTruth) -> lis
                         rule=RULE_CONFIG_KEY_MISMATCH,
                         file=rel_file,
                         line=line_no,
-                        message=(
-                            f"section `{current_key}` declares config key `{declared}`"
-                        ),
+                        message=(f"section `{current_key}` declares config key `{declared}`"),
                         remediation=_REMEDIATION_CONFIG_KEY_MISMATCH,
                     )
                 )

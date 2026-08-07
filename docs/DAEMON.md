@@ -272,8 +272,8 @@ handlers:
     absolute_path: {enabled: true, priority: 12}
     worktree_file_copy: {enabled: true, priority: 15}
     git_stash: {enabled: true, priority: 20}
-    eslint_disable: {enabled: true, priority: 30}
-    tdd_enforcement: {enabled: true, priority: 35}
+    qa_suppression: {enabled: true, priority: 30}
+    tdd_enforcement: {enabled: true, priority: 15}
     web_search_year: {enabled: true, priority: 55}
     british_english: {enabled: true, priority: 60}
 

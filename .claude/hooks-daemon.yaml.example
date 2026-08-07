@@ -87,9 +87,11 @@ handlers:
       enabled: true
       priority: 18
 
-    git_stash:             # Warns about git stash (stashes can be lost)
-      enabled: true
+    git_stash:             # BLOCKS git stash creation by default (stashes get lost).
+      enabled: true        # Escape hatch: MUST_STASH_BECAUSE="reason"; git stash
       priority: 17
+      # options:
+      #   mode: deny       # deny (default) | warn (advisory only)
 
     lock_file_edit_blocker: # Prevents editing package lock files
       enabled: true
