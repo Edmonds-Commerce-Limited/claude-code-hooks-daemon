@@ -158,6 +158,55 @@ class TestHandleWarnMode:
         assert result.decision == Decision.ALLOW
         assert "same-commit-plan-doc" in "\n".join(result.context)
 
+    def test_pathspec_commit_sees_unstaged_plan_doc_update(self, repo: Path) -> None:
+        """Plan 00200 (Task 3.5): `git commit <pathspec>` false positive.
+
+        A `git commit <pathspec>...` form commits the WORKING TREE content
+        of exactly the named paths, whether staged or not. A commit that
+        names BOTH the src change AND the (unstaged) PLAN.md update must NOT
+        get a same-commit-plan-doc advisory — the PLAN.md update
+        demonstrably IS part of this commit.
+        """
+        (repo / "src").mkdir()
+        (repo / "src" / "thing.py").write_text("VALUE = 1\n")
+        _git(repo, "add", "src/thing.py")
+
+        plan_md = repo / _PLAN_DIR_REL / "00001-first/PLAN.md"
+        plan_md.write_text(
+            "# Plan 00001: first\n\n**Status**: In Progress\n\n"
+            "- [x] ✅ **Task 1.1**: x\n"
+        )
+        # Deliberately NOT staged — only named on the commit line.
+
+        with _patched_root(repo):
+            result = _handler("warn").handle(
+                _bash_input(
+                    'git commit -m "Plan 00001: implement the thing" '
+                    "src/thing.py CLAUDE/Plan/00001-first/PLAN.md"
+                )
+            )
+
+        assert result.decision == Decision.ALLOW
+        assert "same-commit-plan-doc" not in "\n".join(result.context)
+
+    def test_pathspec_commit_excluding_plan_doc_still_advises(self, repo: Path) -> None:
+        """Guardrail: a pathspec commit that genuinely omits PLAN.md still warns."""
+        (repo / "src").mkdir()
+        (repo / "src" / "thing.py").write_text("VALUE = 1\n")
+        _git(repo, "add", "-A")
+
+        plan_md = repo / _PLAN_DIR_REL / "00001-first/PLAN.md"
+        plan_md.write_text("# Plan 00001: first\n\n**Status**: In Progress\n")
+        # PLAN.md is modified but NOT named on the commit line below.
+
+        with _patched_root(repo):
+            result = _handler("warn").handle(
+                _bash_input('git commit -m "Plan 00001: implement the thing" src/thing.py')
+            )
+
+        assert result.decision == Decision.ALLOW
+        assert "same-commit-plan-doc" in "\n".join(result.context)
+
 
 class TestHandleBlockMode:
     def test_terminal_flip_without_move_denies_with_todo(self, repo: Path) -> None:

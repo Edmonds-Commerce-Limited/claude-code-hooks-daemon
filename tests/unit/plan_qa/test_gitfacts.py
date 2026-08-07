@@ -86,6 +86,49 @@ class TestStagedChanges:
         assert under_plan == ("CLAUDE/Plan/README.md",)
 
 
+class TestStagedChangesWithPathspecs:
+    """Plan 00200 (Task 3.5): `git commit <pathspec>` commits WORKING TREE
+
+    content for exactly the named paths, regardless of whether they are
+    staged, and ignores anything ELSE that happens to be staged. When the
+    caller supplies the commit's pathspec arguments, `staged_changes()` must
+    reflect that — not the raw index — or a cross-file check reading it
+    concludes a path "wasn't touched" when it demonstrably was.
+    """
+
+    def test_unstaged_pathspec_change_is_reported(self, repo: Path) -> None:
+        """A file modified but NEVER `git add`ed still counts when pathspec-scoped."""
+        plan_md = repo / "CLAUDE/Plan/00001-first/PLAN.md"
+        plan_md.write_text("# Plan 00001: first\n\n**Status**: Complete\n")
+        # Deliberately NOT staged.
+        changes = GitFacts(repo, pathspecs=("CLAUDE/Plan/00001-first/PLAN.md",)).staged_changes()
+        assert len(changes) == 1
+        assert changes[0].path == "CLAUDE/Plan/00001-first/PLAN.md"
+        assert changes[0].status == "M"
+
+    def test_staged_change_outside_pathspec_is_excluded(self, repo: Path) -> None:
+        """Something ELSE staged but not named in the pathspec is not part of THIS commit."""
+        (repo / "CLAUDE/Plan/README.md").write_text("# Plans Index (edited)\n")
+        _git(repo, "add", "-A")
+        plan_md = repo / "CLAUDE/Plan/00001-first/PLAN.md"
+        plan_md.write_text("# Plan 00001: first\n\n**Status**: Complete\n")
+        # PLAN.md is unstaged; README.md IS staged. Pathspec names only PLAN.md.
+        changes = GitFacts(repo, pathspecs=("CLAUDE/Plan/00001-first/PLAN.md",)).staged_changes()
+        paths = {c.path for c in changes}
+        assert paths == {"CLAUDE/Plan/00001-first/PLAN.md"}
+
+    def test_no_pathspecs_falls_back_to_index(self, repo: Path) -> None:
+        """No pathspecs supplied (the default) preserves the original index-based behaviour."""
+        (repo / "CLAUDE/Plan/README.md").write_text("# Plans Index (edited)\n")
+        _git(repo, "add", "-A")
+        assert GitFacts(repo).staged_changes() == GitFacts(repo, pathspecs=None).staged_changes()
+
+    def test_empty_pathspecs_tuple_falls_back_to_index(self, repo: Path) -> None:
+        (repo / "CLAUDE/Plan/README.md").write_text("# Plans Index (edited)\n")
+        _git(repo, "add", "-A")
+        assert GitFacts(repo, pathspecs=()).staged_changes() == GitFacts(repo).staged_changes()
+
+
 class TestFileTexts:
     def test_staged_file_text_reads_index_version(self, repo: Path) -> None:
         (repo / "CLAUDE/Plan/README.md").write_text("staged content\n")

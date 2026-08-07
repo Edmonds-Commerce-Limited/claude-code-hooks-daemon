@@ -177,6 +177,52 @@ class TestStagedContext:
         assert context.tree is not None
         assert context.readme is not None
 
+    def test_pathspecs_scope_gitfacts_to_working_tree(self, tmp_path: Path) -> None:
+        """Plan 00200 (Task 3.5): pathspecs thread through to GitFacts so a
+        `git commit <pathspec>` sees an UNSTAGED change to that pathspec.
+        """
+
+        def _git(repo: Path, *args: str) -> None:
+            subprocess.run(
+                ["git", "-C", str(repo), *args],
+                capture_output=True,
+                check=True,
+                timeout=Timeout.GIT_CONTEXT,
+            )
+
+        root = _scaffold(tmp_path)
+        _git(root, "init")
+        _git(root, "config", "user.email", "t@example.com")
+        _git(root, "config", "user.name", "T")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-m", "initial")
+
+        plan_md = root / "CLAUDE/Plan/00001-first/PLAN.md"
+        plan_md.write_text("# Plan 00001: first\n\n**Status**: Complete\n")
+        # Deliberately NOT staged — only named as a commit pathspec.
+
+        context = staged_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=_Policy(),
+            commit_message="Plan 00001: done",
+            pathspecs=("CLAUDE/Plan/00001-first/PLAN.md",),
+        )
+
+        assert context.gitfacts is not None
+        paths = {c.path for c in context.gitfacts.staged_changes()}
+        assert paths == {"CLAUDE/Plan/00001-first/PLAN.md"}
+
+    def test_no_pathspecs_is_index_based_as_before(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        context = staged_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=_Policy(),
+        )
+        assert context.gitfacts is not None
+        assert context.gitfacts.staged_changes() == ()
+
 
 class TestEditContext:
     def test_carries_file_slot_values(self, tmp_path: Path) -> None:
