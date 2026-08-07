@@ -455,8 +455,7 @@ class TestLspEnforcementSingleFileScoping:
             "tool_name": "Bash",
             "tool_input": {
                 "command": (
-                    'grep -n "hook_input" '
-                    "src/claude_code_hooks_daemon/core/hook_result.py"
+                    'grep -n "hook_input" ' "src/claude_code_hooks_daemon/core/hook_result.py"
                 )
             },
         }

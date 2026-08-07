@@ -922,9 +922,10 @@ class TestDestructiveGitTagForceNotBlocked:
         assert handler._match_reason("git tag -f v1.0.0 abc123def456") is None
 
     def test_git_tag_force_short_alone_not_blocked(self, handler):
-        assert handler.matches(
-            {"tool_name": "Bash", "tool_input": {"command": "git tag -f v2.0.0"}}
-        ) is False
+        assert (
+            handler.matches({"tool_name": "Bash", "tool_input": {"command": "git tag -f v2.0.0"}})
+            is False
+        )
 
     def test_real_force_push_still_blocked_alongside_tag_force(self, handler):
         """Guardrail: a real force-push must NEVER be weakened by this fix."""

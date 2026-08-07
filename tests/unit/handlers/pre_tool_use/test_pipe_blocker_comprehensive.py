@@ -583,9 +583,7 @@ class TestPipeBlockerMessageBodyFalsePositive:
         }
         assert handler.matches(hook_input) is False
 
-    def test_real_pipe_after_message_flag_still_blocked(
-        self, handler: PipeBlockerHandler
-    ) -> None:
+    def test_real_pipe_after_message_flag_still_blocked(self, handler: PipeBlockerHandler) -> None:
         """A real pipe elsewhere in the SAME command must still be caught."""
         hook_input = {
             "tool_name": "Bash",
@@ -593,18 +591,14 @@ class TestPipeBlockerMessageBodyFalsePositive:
         }
         assert handler.matches(hook_input) is True
 
-    def test_real_pipe_before_message_flag_still_blocked(
-        self, handler: PipeBlockerHandler
-    ) -> None:
+    def test_real_pipe_before_message_flag_still_blocked(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": 'pytest tests/ | tail -20; git commit -m "fix"'},
         }
         assert handler.matches(hook_input) is True
 
-    def test_handle_reason_uses_raw_command_not_redacted(
-        self, handler: PipeBlockerHandler
-    ) -> None:
+    def test_handle_reason_uses_raw_command_not_redacted(self, handler: PipeBlockerHandler) -> None:
         """The block message still shows the FULL real command to the agent."""
         hook_input = {
             "tool_name": "Bash",
@@ -999,9 +993,7 @@ class TestPipeBlockerAcceptanceTests:
         titles = [t.title for t in tests]
         assert any("unknown" in title.lower() for title in titles)
 
-    def test_includes_negative_case_for_message_body(
-        self, handler: PipeBlockerHandler
-    ) -> None:
+    def test_includes_negative_case_for_message_body(self, handler: PipeBlockerHandler) -> None:
         """Plan 00200 Task 6.4: at least one near-miss ALLOW case is required."""
         from claude_code_hooks_daemon.core import Decision
 

@@ -173,8 +173,7 @@ class TestHandleWarnMode:
 
         plan_md = repo / _PLAN_DIR_REL / "00001-first/PLAN.md"
         plan_md.write_text(
-            "# Plan 00001: first\n\n**Status**: In Progress\n\n"
-            "- [x] ✅ **Task 1.1**: x\n"
+            "# Plan 00001: first\n\n**Status**: In Progress\n\n" "- [x] ✅ **Task 1.1**: x\n"
         )
         # Deliberately NOT staged — only named on the commit line.
 
