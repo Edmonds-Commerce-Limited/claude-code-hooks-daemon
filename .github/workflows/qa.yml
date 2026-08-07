@@ -1,0 +1,150 @@
+name: QA
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qa:
+    name: QA (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # pyproject declares requires-python = ">=3.11".
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # The tools are invoked directly rather than through scripts/qa/run_all.sh.
+      # That script resolves its interpreter via the daemon's fingerprint-keyed
+      # venv resolver, which only exists on an installed daemon — it is a
+      # self-install-mode entrypoint, not a CI one. These steps run the same
+      # tools against the same pyproject configuration.
+
+      - name: Format (black)
+        run: black --check src/ tests/
+
+      - name: Lint (ruff)
+        run: ruff check src/ tests/
+
+      - name: Types (mypy)
+        run: mypy src/
+
+      # 95% is the threshold CLAUDE.md and CONTRIBUTING.md both state, so CI
+      # enforces it rather than merely reporting it — an unenforced claim is
+      # the gap this workflow exists to close. Measured at 95.59% on a clean
+      # checkout with no daemon running, so the margin is real but thin;
+      # a drop below 95 is a genuine signal, not CI flake.
+      - name: Tests + coverage
+        run: >
+          pytest tests/
+          --cov=src
+          --cov-report=term-missing
+          --cov-report=xml
+          --cov-fail-under=95
+
+      - name: Upload coverage
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+
+      - name: Security (bandit)
+        run: bandit -c pyproject.toml -r src/
+
+      - name: Dependencies (deptry)
+        run: deptry src/
+
+  shell:
+    name: Shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          # Scope and flags deliberately mirror scripts/qa/run_shell_check.sh:
+          # scripts/ + src/ only, with -x so `source` directives are followed
+          # (.shellcheckrc sets source-path=SCRIPTDIR).
+          #
+          # CLAUDE/UPGRADES/ and tests/fixtures/ are outside that scope by the
+          # project's existing policy, not to hide findings: the former are
+          # frozen v2-era migration scripts, and the latter are byte-exact
+          # snapshots of known-bad code used as regression fixtures — "fixing"
+          # a fixture would destroy the very defect it pins.
+          find scripts src \( -name '*.sh' -o -name '*.bash' \) -print0 \
+            | sort -z \
+            | xargs -0 -r shellcheck -x
+
+  daemon-load:
+    name: Daemon load
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # CLAUDE/CodeLifecycle/*.md name daemon-load as the check unit tests
+      # cannot substitute for: it is what catches import errors, circular
+      # imports and registration failures. A real `hooks-daemon restart` needs
+      # an installed daemon, so asserting every handler module imports is the
+      # CI-safe equivalent — and it is precisely the check that would have
+      # caught the historical 5-handler wrong-import-path outage.
+      - name: All handler modules import
+        run: |
+          python - <<'PY'
+          import importlib
+          import pkgutil
+          import sys
+
+          import claude_code_hooks_daemon.handlers as handlers
+
+          failures = []
+          for mod in pkgutil.walk_packages(handlers.__path__, handlers.__name__ + "."):
+              try:
+                  importlib.import_module(mod.name)
+              # Broad by intent: collect EVERY import failure so one run names
+              # all of them, instead of stopping at the first and needing a
+              # push per broken module.
+              except Exception as exc:
+                  failures.append((mod.name, exc))
+
+          for name, exc in failures:
+              print(f"FAILED to import {name}: {exc!r}", file=sys.stderr)
+
+          if failures:
+              print(f"{len(failures)} handler module(s) failed to import.", file=sys.stderr)
+              sys.exit(1)
+
+          print("All handler modules imported cleanly.")
+          PY

@@ -137,6 +137,35 @@ def hook_result_validator(response_validator):
     return HookResultValidator(response_validator)
 
 
+#: Runtime-path overrides that take precedence over every computed daemon path
+#: (see CLAUDE.md, "Environment Overrides"). Because they win unconditionally,
+#: a developer or CI runner that happens to export one silently changes what
+#: the path-generation tests compute.
+_DAEMON_PATH_OVERRIDE_VARS = (
+    "CLAUDE_HOOKS_SOCKET_PATH",
+    "CLAUDE_HOOKS_PID_PATH",
+    "CLAUDE_HOOKS_LOG_PATH",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolate_daemon_path_overrides(monkeypatch):
+    """Unset the daemon path-override env vars for every test.
+
+    These three variables override the computed socket/PID/log paths, so a
+    shell that exports any of them makes 17 tests in ``tests/daemon/test_paths.py``
+    fail with assertions about a path the test never chose. That is an
+    environment leak, not a defect in the code under test — and it would be
+    diagnosed as CI flake precisely because it depends on who is running it.
+
+    Tests that WANT an override still set it explicitly (``patch.dict`` /
+    ``monkeypatch.setenv``); this only removes ambient values, so it cannot
+    mask a test's own intent.
+    """
+    for var in _DAEMON_PATH_OVERRIDE_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture(autouse=True)
 def reset_project_context():
     """Reset ProjectContext singleton after each test.

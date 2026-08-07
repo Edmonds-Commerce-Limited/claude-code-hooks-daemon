@@ -157,8 +157,12 @@ dmypy.json
 .DS_Store
 Thumbs.db
 
-# GitHub workflows (requires OAuth scope we don't have)
-.github/workflows/
+# NOTE: `.github/workflows/` was ignored here with the comment "requires OAuth
+# scope we don't have". That is no longer true — the configured token carries
+# the `workflow` scope — and the entry had become self-defeating: the repo
+# documented a blocking QA suite and a 95% coverage gate while ignoring the
+# one file that would let anyone verify either claim. CI now lives in
+# .github/workflows/qa.yml and is tracked.
 
 # Temporary/generated docs (keep only final summaries)
 COVERAGE_REPORT.md

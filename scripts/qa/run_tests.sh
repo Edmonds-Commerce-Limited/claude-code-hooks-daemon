@@ -183,8 +183,19 @@ print()
 EOF
 fi
 
-# Clean up raw file
-rm -f "${OUTPUT_FILE}.raw"
+# Keep the raw pytest log when the run FAILED. Deleting it unconditionally
+# meant a red gate reported "1 failed" and then destroyed the only record of
+# WHICH test failed — the JSON summary carries counts, not names. Diagnosing
+# a failure then required re-running the whole suite and hoping it reproduced,
+# which for an order- or environment-dependent failure it may not.
+if [ "${EXIT_CODE}" -eq 0 ]; then
+    rm -f "${OUTPUT_FILE}.raw"
+else
+    echo "" >&2
+    echo "Raw pytest output retained for diagnosis:" >&2
+    echo "  ${OUTPUT_FILE}.raw" >&2
+    echo "  grep -a 'FAILED' '${OUTPUT_FILE}.raw'" >&2
+fi
 
 # Print summary
 echo ""
