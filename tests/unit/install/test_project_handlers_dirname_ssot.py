@@ -124,12 +124,11 @@ class TestEventJsonKeyDerivation:
             if derived != meta.json_key:
                 mismatches.append((meta.config_key, derived, meta.json_key))
 
-        assert not mismatches, (
-            "install.py's event-name derivation disagrees with EventID for: "
-            + ", ".join(
-                f"{key}: derived {derived!r} != json_key {actual!r}"
-                for key, derived, actual in mismatches
-            )
+        assert (
+            not mismatches
+        ), "install.py's event-name derivation disagrees with EventID for: " + ", ".join(
+            f"{key}: derived {derived!r} != json_key {actual!r}"
+            for key, derived, actual in mismatches
         )
 
     def test_derivation_is_exercised_by_real_events(self) -> None:
@@ -138,9 +137,7 @@ class TestEventJsonKeyDerivation:
         A dir()/isinstance filter that silently matched nothing would make the
         test above pass vacuously — green because it checked zero things.
         """
-        found = sum(
-            1 for name in dir(EventID) if isinstance(getattr(EventID, name), EventIDMeta)
-        )
+        found = sum(1 for name in dir(EventID) if isinstance(getattr(EventID, name), EventIDMeta))
 
         assert found > 0, "No EventIDMeta constants found — the guard is inspecting nothing."
 

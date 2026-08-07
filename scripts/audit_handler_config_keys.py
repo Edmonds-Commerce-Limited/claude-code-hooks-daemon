@@ -35,14 +35,17 @@ def to_snake_case(name: str) -> str:
     return snake
 
 
-def audit_handler_keys() -> dict[str, dict[str, str]]:
+def audit_handler_keys() -> dict[str, dict[str, dict[str, str]]]:
     """Audit all HandlerID constants vs auto-generated keys.
 
     Returns:
-        Dict with keys: 'matches', 'mismatches'
-        Each containing handler_name -> {constant, auto_generated, status}
+        Dict with keys: 'matches', 'mismatches'. Each maps a handler name to an
+        info dict (``class_name``, ``constant``, ``auto_generated``,
+        ``display_name``) — three levels, not two. The annotation previously
+        claimed ``dict[str, dict[str, str]]``, which made every ``info[...]``
+        read in ``main()`` look like indexing a string.
     """
-    results = {
+    results: dict[str, dict[str, dict[str, str]]] = {
         "matches": {},
         "mismatches": {},
     }
@@ -109,7 +112,7 @@ def main() -> None:
     match_count = len(results["matches"])
     mismatch_count = len(results["mismatches"])
 
-    print(f"\nSummary:")
+    print("\nSummary:")
     print(f"  Total handlers:     {total}")
     print(f"  Matches:            {match_count}")
     print(f"  Mismatches:         {mismatch_count}")

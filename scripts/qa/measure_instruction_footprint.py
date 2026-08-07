@@ -279,7 +279,13 @@ def load_baseline(path: Path | None = None) -> dict[str, Any] | None:
     if not target.exists():
         logger.debug("No baseline file found at %s", target)
         return None
-    return json.loads(target.read_text(encoding="utf-8"))
+    loaded = json.loads(target.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise TypeError(
+            f"Baseline at {target} must be a JSON object, got {type(loaded).__name__}. "
+            f"Delete it and regenerate rather than hand-editing."
+        )
+    return loaded
 
 
 # ---------------------------------------------------------------------------

@@ -183,8 +183,7 @@ class ErrorHidingVisitor(ast.NodeVisitor):
                         if isinstance(stmt, ast.Return):
                             # Check if returning None
                             if stmt.value is None or (
-                                isinstance(stmt.value, ast.Constant)
-                                and stmt.value.value is None
+                                isinstance(stmt.value, ast.Constant) and stmt.value.value is None
                             ):
                                 self._add_violation(
                                     child,
@@ -371,9 +370,7 @@ def _enclosing_bash_function(content: str, line: int) -> str | None:
     return current
 
 
-def audit_shell_patterns(
-    filepath: Path, strategy: ErrorHidingStrategy
-) -> list[dict[str, Any]]:
+def audit_shell_patterns(filepath: Path, strategy: ErrorHidingStrategy) -> list[dict[str, Any]]:
     """Scan a shell file for language-level error-hiding patterns.
 
     Reuses ``strategy.patterns`` (Plan 00200 Phase 5 Task 5.3) instead of
@@ -499,7 +496,11 @@ def load_exclusions(script_dir: Path) -> list[dict[str, Any]]:
     try:
         with open(exclusions_file, encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("exclusions", [])
+        exclusions = data.get("exclusions", []) if isinstance(data, dict) else []
+        # Only well-formed entries are honoured. A malformed one is dropped
+        # rather than trusted, which can only make the audit STRICTER — the
+        # safe direction for a check whose job is to find hidden errors.
+        return [entry for entry in exclusions if isinstance(entry, dict)]
     except Exception as e:
         print(f"Warning: could not load exclusions file: {e}", file=sys.stderr)
         return []

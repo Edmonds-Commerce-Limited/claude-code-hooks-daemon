@@ -16,8 +16,9 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, NamedTuple
+from typing import Any, NamedTuple, TypeAlias
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPTS_DIR = PROJECT_ROOT / "scripts" / "qa"
@@ -28,8 +29,13 @@ VENV_PYTHON = PROJECT_ROOT / "untracked" / "venv" / "bin" / "python"
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 
+# A QA tool's parsed JSON report. Every tool writes its own schema, so the
+# value type is genuinely open — but the mapping itself is not, and a bare
+# ``dict`` disables checking on every summarizer that reads one.
+QaReport: TypeAlias = dict[str, Any]
+
 # Type alias for summarizer functions
-Summarizer = Callable[[dict], str]
+Summarizer = Callable[[QaReport], str]
 
 
 class ToolConfig(NamedTuple):
@@ -40,9 +46,14 @@ class ToolConfig(NamedTuple):
     jq_hint: str
 
 
-def _python(script: str) -> list[str]:
-    """Build command to run a Python script via the project venv."""
-    return [str(VENV_PYTHON), str(SCRIPTS_DIR / script)]
+def _python(script: str, *args: str) -> list[str]:
+    """Build command to run a Python script via the project venv.
+
+    Extra ``args`` are appended to the invocation, so a caller writes
+    ``_python("check_x.py", "--json")`` rather than concatenating a list onto
+    the result.
+    """
+    return [str(VENV_PYTHON), str(SCRIPTS_DIR / script), *args]
 
 
 def _bash(script: str) -> list[str]:
@@ -54,7 +65,7 @@ def _bash(script: str) -> list[str]:
 # Order matches run_all.sh for consistency.
 TOOL_REGISTRY: dict[str, ToolConfig] = {
     "magic_values": ToolConfig(
-        command=_python("check_magic_values.py") + ["--json"],
+        command=_python("check_magic_values.py", "--json"),
         json_file="magic_values.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
@@ -89,17 +100,17 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         jq_hint="jq '.issues[]'",
     ),
     "error_hiding": ToolConfig(
-        command=_python("audit_error_hiding.py") + ["--json"],
+        command=_python("audit_error_hiding.py", "--json"),
         json_file="error_hiding.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
     "shell_audit": ToolConfig(
-        command=_python("audit_shell.py") + ["--json"],
+        command=_python("audit_shell.py", "--json"),
         json_file="shell_audit.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
     "skill_refs": ToolConfig(
-        command=_python("check_skill_references.py") + ["--json"],
+        command=_python("check_skill_references.py", "--json"),
         json_file="skill_references.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
@@ -109,7 +120,7 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         jq_hint="jq '.violations[]'",
     ),
     "python_var_guidance": ToolConfig(
-        command=_python("check_python_var_guidance.py") + ["--json"],
+        command=_python("check_python_var_guidance.py", "--json"),
         json_file="python_var_guidance.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
@@ -119,17 +130,17 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         jq_hint="jq '.violations[] | {file, line, function, rule, message}'",
     ),
     "repo_hygiene": ToolConfig(
-        command=_python("check_repo_hygiene.py") + ["--json"],
+        command=_python("check_repo_hygiene.py", "--json"),
         json_file="repo_hygiene.json",
         jq_hint="jq '.violations[] | {rule, path, message}'",
     ),
     "doc_truth": ToolConfig(
-        command=_python("check_doc_truth.py") + ["--json"],
+        command=_python("check_doc_truth.py", "--json"),
         json_file="doc_truth.json",
         jq_hint="jq '.violations[] | {rule, file, line, message}'",
     ),
     "sensitive_content": ToolConfig(
-        command=_python("check_sensitive_content.py") + ["--json"],
+        command=_python("check_sensitive_content.py", "--json"),
         json_file="sensitive_content.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
@@ -150,17 +161,17 @@ ALL_TOOL_NAMES = list(TOOL_REGISTRY)
 # ── Summarizers ────────────────────────────────────────────────────
 
 
-def _summarize_magic_values(data: dict) -> str:
+def _summarize_magic_values(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
 
 
-def _summarize_format(data: dict) -> str:
+def _summarize_format(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} files need reformatting"
 
 
-def _summarize_lint(data: dict) -> str:
+def _summarize_lint(data: QaReport) -> str:
     s = data.get("summary", {})
     total = s.get("total_violations", 0)
     if total == 0:
@@ -170,12 +181,12 @@ def _summarize_lint(data: dict) -> str:
     return f"{total} violations ({errors} errors, {warnings} warnings)"
 
 
-def _summarize_type_check(data: dict) -> str:
+def _summarize_type_check(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_errors", 0)
     return f"{total} errors"
 
 
-def _summarize_tests(data: dict) -> str:
+def _summarize_tests(data: QaReport) -> str:
     s = data.get("summary", {})
     passed = s.get("passed", 0)
     failed = s.get("failed", 0)
@@ -184,32 +195,32 @@ def _summarize_tests(data: dict) -> str:
     return f"{passed} passed, {failed} failed, {skipped} skipped | coverage: {cov:.1f}%"
 
 
-def _summarize_security(data: dict) -> str:
+def _summarize_security(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_issues", 0)
     return f"{total} issues"
 
 
-def _summarize_dependencies(data: dict) -> str:
+def _summarize_dependencies(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_issues", 0)
     return f"{total} issues"
 
 
-def _summarize_error_hiding(data: dict) -> str:
+def _summarize_error_hiding(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
 
 
-def _summarize_shell_audit(data: dict) -> str:
+def _summarize_shell_audit(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
 
 
-def _summarize_skill_refs(data: dict) -> str:
+def _summarize_skill_refs(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
 
 
-def _summarize_smoke_test(data: dict) -> str:
+def _summarize_smoke_test(data: QaReport) -> str:
     s = data.get("summary", {})
     passed = s.get("passed_probes", 0)
     total = s.get("total_probes", 0)
@@ -219,32 +230,32 @@ def _summarize_smoke_test(data: dict) -> str:
     return f"{passed}/{total} probes passed ({failed} failed)"
 
 
-def _summarize_canonical_callers(data: dict) -> str:
+def _summarize_canonical_callers(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
 
 
-def _summarize_capture_corruption(data: dict) -> str:
+def _summarize_capture_corruption(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
 
 
-def _summarize_python_var_guidance(data: dict) -> str:
+def _summarize_python_var_guidance(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
 
 
-def _summarize_repo_hygiene(data: dict) -> str:
+def _summarize_repo_hygiene(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
 
 
-def _summarize_doc_truth(data: dict) -> str:
+def _summarize_doc_truth(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
 
 
-def _summarize_sensitive_content(data: dict) -> str:
+def _summarize_sensitive_content(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
 
@@ -273,7 +284,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
 # ── Core logic ─────────────────────────────────────────────────────
 
 
-def _is_passed(data: dict) -> bool:
+def _is_passed(data: QaReport) -> bool:
     """Determine pass/fail from JSON data (handles both schemas)."""
     summary = data.get("summary", {})
     # tests.json uses "passed_all", everything else uses "passed"
@@ -314,13 +325,12 @@ def summarize_tool(name: str, exit_code: int | None = None) -> tuple[bool, str]:
         data = json.load(f)
 
     json_passed = _is_passed(data)
-    # Tool exit code is authoritative - if non-zero, it's a failure
-    # even if JSON claims success (e.g. mypy finds errors but JSON
-    # parser misses them)
-    if exit_code is not None and exit_code != 0:
-        passed = False
-    else:
-        passed = json_passed
+    # Tool exit code is authoritative - if non-zero, it's a failure even if
+    # JSON claims success (e.g. mypy finds errors but the JSON parser misses
+    # them). Both conditions must hold for a PASS, so neither source can
+    # unilaterally declare success.
+    tool_reported_failure = exit_code is not None and exit_code != 0
+    passed = json_passed and not tool_reported_failure
 
     icon = "\u2705" if passed else "\u274c"
     summarizer = SUMMARIZERS[name]

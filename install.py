@@ -28,8 +28,8 @@ import os
 import subprocess
 import sys
 import tomllib
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 # The [project].name this repository declares in its own pyproject.toml. Used as
@@ -99,14 +99,16 @@ def is_hooks_daemon_repo(directory: Path) -> bool:
         return False
 
 
-def _load_config_safe(project_root: Path) -> dict | None:
+def _load_config_safe(project_root: Path) -> dict[str, Any] | None:
     """Safely load config file without raising exceptions.
 
     Args:
         project_root: Project root directory
 
     Returns:
-        Config dict or None if loading fails
+        Config dict, or None if the file is absent, unreadable, malformed, or
+        does not parse to a mapping (a YAML file whose top level is a list or
+        scalar is not a config).
     """
     import yaml
 
@@ -116,7 +118,8 @@ def _load_config_safe(project_root: Path) -> dict | None:
 
     try:
         with config_file.open() as f:
-            return yaml.safe_load(f)
+            loaded = yaml.safe_load(f)
+        return loaded if isinstance(loaded, dict) else None
     except (OSError, yaml.YAMLError) as exc:
         # FAIL FAST (Plan 00200 Task 5.5): callers already treat a falsy
         # return as "no config" and fall back to a safe default, so the
@@ -347,13 +350,16 @@ _DAEMON_FORWARDER_HOOKS: dict[str, str] = {
 _HOOKS_WITH_TIMEOUT: frozenset[str] = frozenset({"pre-tool-use", "post-tool-use"})
 
 
-def create_forwarder_script(hooks_dir: Path, hook_name: str, event_name: str) -> None:
+def create_forwarder_script(hooks_dir: Path, hook_name: str, event_name: str) -> Path:
     """Create a forwarder script that routes to daemon via Unix socket.
 
     Args:
         hooks_dir: Path to .claude/hooks directory
         hook_name: Hook filename (e.g., 'pre-tool-use')
         event_name: Event name for JSON (e.g., 'PreToolUse')
+
+    Returns:
+        Path to the created forwarder script.
     """
     hook_file = hooks_dir / hook_name
 
@@ -565,7 +571,7 @@ def update_git_index_executable(project_root: Path, hook_files: list[Path]) -> t
         # First check if any files are actually tracked in git
         # git ls-files returns tracked files
         result = subprocess.run(
-            ["git", "ls-files"] + relative_paths,
+            ["git", "ls-files", *relative_paths],
             cwd=project_root,
             capture_output=True,
             text=True,
@@ -578,7 +584,7 @@ def update_git_index_executable(project_root: Path, hook_files: list[Path]) -> t
 
         # Files are tracked, update the index
         subprocess.run(
-            ["git", "update-index", "--chmod=+x"] + relative_paths,
+            ["git", "update-index", "--chmod=+x", *relative_paths],
             cwd=project_root,
             capture_output=True,
             text=True,
@@ -598,7 +604,6 @@ def copy_init_script(project_root: Path, daemon_dir: Path, self_install: bool = 
         daemon_dir: Path to daemon repository
         self_install: If True, create symlink instead of copying
     """
-    import os
     import shutil
 
     source_init = daemon_dir / "init.sh"
@@ -616,11 +621,11 @@ def copy_init_script(project_root: Path, daemon_dir: Path, self_install: bool = 
             dest_init.unlink()
         relative_target = os.path.relpath(source_init, start=dest_init.parent)
         dest_init.symlink_to(relative_target)
-        print(f"   ✅ Symlinked init.sh")
+        print("   ✅ Symlinked init.sh")
     else:
         shutil.copy2(source_init, dest_init)
         dest_init.chmod(0o755)  # Make executable
-        print(f"   ✅ Copied init.sh")
+        print("   ✅ Copied init.sh")
 
 
 def create_all_hooks(hooks_dir: Path) -> list[Path]:
@@ -632,7 +637,7 @@ def create_all_hooks(hooks_dir: Path) -> list[Path]:
     print("\n📝 Creating hook forwarder scripts...")
 
     # All hooks now use daemon forwarder pattern (SSoT: _DAEMON_FORWARDER_HOOKS)
-    hook_files = []
+    hook_files: list[Path] = []
     for hook_name, event_name in _DAEMON_FORWARDER_HOOKS.items():
         hook_file = create_forwarder_script(hooks_dir, hook_name, event_name)
         hook_files.append(hook_file)
@@ -641,7 +646,7 @@ def create_all_hooks(hooks_dir: Path) -> list[Path]:
     # Create status-line script (custom logic, not a standard forwarder)
     status_line_file = create_status_line_script(hooks_dir)
     hook_files.append(status_line_file)
-    print(f"   ✅ status-line")
+    print("   ✅ status-line")
 
     return hook_files
 
@@ -992,7 +997,7 @@ See individual event README files for examples and templates.
 For general handler development, see:
 .claude/hooks-daemon/README.md
 """)
-        print(f"   ✅ Created main README")
+        print("   ✅ Created main README")
 
     # Create subdirectory for each event
     for event in hook_events:
@@ -1170,7 +1175,7 @@ class TestExampleHandler:
 ''')
 
     print(f"   ✅ Created {len(hook_events)} event directories with README files")
-    print(f"   ✅ Created example handler and test templates in pre_tool_use/")
+    print("   ✅ Created example handler and test templates in pre_tool_use/")
 
 
 def verify_installation(project_root: Path) -> bool:
@@ -1200,16 +1205,16 @@ def verify_installation(project_root: Path) -> bool:
     # Validate .gitignore CONTENT (not just existence)
     gitignore_valid, missing = verify_gitignore_content(project_root)
     if gitignore_valid:
-        print(f"   ✅ .gitignore (with required patterns)")
+        print("   ✅ .gitignore (with required patterns)")
     else:
-        print(f"   ❌ .gitignore INVALID")
+        print("   ❌ .gitignore INVALID")
         if missing == ["File does not exist"]:
-            print(f"      File does not exist")
+            print("      File does not exist")
         elif missing == ["File is empty"]:
-            print(f"      File is empty")
+            print("      File is empty")
         else:
             print(f"      Missing required patterns: {', '.join(missing)}")
-        print(f"      See instructions above for required content")
+        print("      See instructions above for required content")
         all_good = False
 
     return all_good
@@ -1290,12 +1295,12 @@ def show_gitignore_instructions(project_root: Path, daemon_dir: Path) -> None:
 
         # Read and display template - FATAL if missing
         if not template_gitignore.exists():
-            print(f"\n❌ FATAL ERROR: Template .gitignore not found")
+            print("\n❌ FATAL ERROR: Template .gitignore not found")
             print(f"   Expected at: {template_gitignore}")
-            print(f"   This file is required for installation.")
-            print(f"\n   The daemon repository is corrupted or incomplete.")
+            print("   This file is required for installation.")
+            print("\n   The daemon repository is corrupted or incomplete.")
             print(
-                f"   Please clone from: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon"
+                "   Please clone from: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon"
             )
             sys.exit(1)
 
@@ -1424,7 +1429,7 @@ def main() -> int:
             print("      git commit -m 'chore: Make Claude hook dispatcher scripts executable'")
         elif success:
             # Files not yet tracked - need to add them first
-            print("\n   ℹ️  Hook files are not yet tracked by git")
+            print("\n   💡 Hook files are not yet tracked by git")
             print("\n   ⚠️  ACTION REQUIRED:")
             print("      1. Add hook files to git:")
             print("         git add .claude/hooks/*")

@@ -192,8 +192,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--socket", required=True, help="Path to live daemon socket")
     parser.add_argument("--iterations", type=int, default=300)
-    parser.add_argument("--status-iterations", type=int, default=100,
-                        help="Fewer iterations for subprocess-heavy events")
+    parser.add_argument(
+        "--status-iterations",
+        type=int,
+        default=100,
+        help="Fewer iterations for subprocess-heavy events",
+    )
     parser.add_argument("--out", required=True, help="JSON results output path")
     args = parser.parse_args()
 
@@ -208,8 +212,11 @@ def main() -> int:
 
     for name, request in events.items():
         payload = (json.dumps(request) + "\n").encode("utf-8")
-        iterations = args.status_iterations if name in (
-            "status_line", "user_prompt_submit") else args.iterations
+        iterations = (
+            args.status_iterations
+            if name in ("status_line", "user_prompt_submit")
+            else args.iterations
+        )
 
         # Warmup (not recorded)
         for _ in range(WARMUP_ITERATIONS):
@@ -230,9 +237,11 @@ def main() -> int:
         except json.JSONDecodeError as exc:
             summary["response_decode_error"] = str(exc)
         results["events"][name] = summary
-        print(f"{name:28s} n={summary['n']:4d} req={len(payload):8d}B "
-              f"p50={summary['p50_ms']:8.2f}ms p95={summary['p95_ms']:8.2f}ms "
-              f"p99={summary['p99_ms']:8.2f}ms max={summary['max_ms']:8.2f}ms")
+        print(
+            f"{name:28s} n={summary['n']:4d} req={len(payload):8d}B "
+            f"p50={summary['p50_ms']:8.2f}ms p95={summary['p95_ms']:8.2f}ms "
+            f"p99={summary['p99_ms']:8.2f}ms max={summary['max_ms']:8.2f}ms"
+        )
 
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(results, fh, indent=2)

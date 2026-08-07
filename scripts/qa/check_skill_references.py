@@ -70,22 +70,19 @@ _SCAN_DIRS = {
 # ── Patterns ──────────────────────────────────────────────────────
 
 # Pattern 1: bare python -m claude_code_hooks_daemon (in a string context)
-_BARE_PYTHON_MODULE = re.compile(
-    r"python\s+-m\s+claude_code_hooks_daemon"
-)
+_BARE_PYTHON_MODULE = re.compile(r"python\s+-m\s+claude_code_hooks_daemon")
 
 # Pattern 2: /hooks-daemon as a command (not as part of a file path)
 # Matches: /hooks-daemon, /hooks-daemon restart, /hooks-daemon health
 # Does NOT match: .claude/hooks-daemon/, /hooks-daemon/ (directory paths)
-_SLASH_COMMAND = re.compile(
-    r"(?<![.\w/])\/hooks-daemon(?!\s*/|/)"
-)
+_SLASH_COMMAND = re.compile(r"(?<![.\w/])\/hooks-daemon(?!\s*/|/)")
 
 
 # ── Violation dataclass ───────────────────────────────────────────
 
+
 class _Violation:
-    __slots__ = ("file", "line", "rule", "message")
+    __slots__ = ("file", "line", "message", "rule")
 
     def __init__(self, file: str, line: int, rule: str, message: str) -> None:
         self.file = file
@@ -93,7 +90,7 @@ class _Violation:
         self.rule = rule
         self.message = message
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, object]:
         return {
             "file": self.file,
             "line": self.line,
@@ -103,6 +100,7 @@ class _Violation:
 
 
 # ── Python scanner (AST-based) ───────────────────────────────────
+
 
 class _PythonStringVisitor(ast.NodeVisitor):
     """Visit string literals in Python AST and check for violations."""
@@ -124,7 +122,12 @@ class _PythonStringVisitor(ast.NodeVisitor):
         self._skip_docstring(node)
         self.generic_visit(node)
 
-    visit_AsyncFunctionDef = visit_FunctionDef
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        # Spelled out rather than aliased to visit_FunctionDef: the two node
+        # types are unrelated to a type checker, so the alias silently declared
+        # a method whose signature contradicted the base class.
+        self._skip_docstring(node)
+        self.generic_visit(node)
 
     def _skip_docstring(self, node: ast.AST) -> None:
         """Mark docstring nodes so they're skipped during checking."""
@@ -196,6 +199,7 @@ def _scan_python(filepath: Path) -> list[_Violation]:
 
 # ── Bash scanner (line-based) ─────────────────────────────────────
 
+
 def _scan_bash(filepath: Path) -> list[_Violation]:
     """Scan a bash script for violations in string contexts (not comments)."""
     violations: list[_Violation] = []
@@ -238,6 +242,7 @@ def _scan_bash(filepath: Path) -> list[_Violation]:
 
 
 # ── Markdown scanner (line-based, skip code blocks) ──────────────
+
 
 def _scan_markdown(filepath: Path) -> list[_Violation]:
     """Scan markdown for violations outside of code blocks."""
@@ -282,6 +287,7 @@ def _scan_markdown(filepath: Path) -> list[_Violation]:
 
 
 # ── File discovery ────────────────────────────────────────────────
+
 
 def _should_exclude(path: Path, include_filter: str | None = None) -> bool:
     """Check if a file should be excluded from scanning."""
@@ -341,10 +347,9 @@ def _collect_files(directory: Path, include_filter: str | None = None) -> list[P
             files.extend(directory.rglob(f"*{ext}"))
 
     return [
-        f for f in files
-        if not _should_exclude(f, include_filter)
-        and not f.is_symlink()
-        and f.suffix in _SCANNERS
+        f
+        for f in files
+        if not _should_exclude(f, include_filter) and not f.is_symlink() and f.suffix in _SCANNERS
     ]
 
 
@@ -368,6 +373,7 @@ def scan_directory(
 
 
 # ── Main ──────────────────────────────────────────────────────────
+
 
 def main() -> int:
     json_mode = "--json" in sys.argv
@@ -397,9 +403,7 @@ def main() -> int:
             "passed": len(violations) == 0,
             "total_violations": len(violations),
             "by_rule": {
-                "bare-python-module": sum(
-                    1 for v in violations if v.rule == "bare-python-module"
-                ),
+                "bare-python-module": sum(1 for v in violations if v.rule == "bare-python-module"),
                 "slash-command-syntax": sum(
                     1 for v in violations if v.rule == "slash-command-syntax"
                 ),

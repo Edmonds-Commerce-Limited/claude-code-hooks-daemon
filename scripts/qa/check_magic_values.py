@@ -27,9 +27,24 @@ from __future__ import annotations
 import ast
 import json
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Protocol
+
+
+class _PositionedNode(Protocol):
+    """An AST node that carries source position.
+
+    ``ast.AST`` itself declares neither ``lineno`` nor ``col_offset`` — they
+    live on the concrete statement and expression subclasses. Typing the
+    reporter against ``ast.AST`` therefore claimed access to attributes the
+    declared type does not have. A structural Protocol says exactly what is
+    required (matching the project's "Protocol over ABC" rule) without having
+    to enumerate every node class that happens to be reported on.
+    """
+
+    lineno: int
+    col_offset: int
 
 
 @dataclass(frozen=True)
@@ -44,91 +59,99 @@ class Violation:
 
 
 # Known config keys that should use ConfigKey constants
-CONFIG_KEYS: frozenset[str] = frozenset({
-    "enabled",
-    "priority",
-    "options",
-    "enable_tags",
-    "disable_tags",
-    "idle_timeout_seconds",
-    "log_level",
-    "socket_path",
-    "pid_file_path",
-    "log_buffer_size",
-    "request_timeout_seconds",
-    "self_install_mode",
-    "enable_hello_world_handlers",
-    "input_validation",
-})
+CONFIG_KEYS: frozenset[str] = frozenset(
+    {
+        "enabled",
+        "priority",
+        "options",
+        "enable_tags",
+        "disable_tags",
+        "idle_timeout_seconds",
+        "log_level",
+        "socket_path",
+        "pid_file_path",
+        "log_buffer_size",
+        "request_timeout_seconds",
+        "self_install_mode",
+        "enable_hello_world_handlers",
+        "input_validation",
+    }
+)
 
 # Known decision strings
-DECISION_STRINGS: frozenset[str] = frozenset({
-    "allow",
-    "deny",
-    "ask",
-    "continue",
-})
+DECISION_STRINGS: frozenset[str] = frozenset(
+    {
+        "allow",
+        "deny",
+        "ask",
+        "continue",
+    }
+)
 
 # Known event type strings
-EVENT_TYPE_STRINGS: frozenset[str] = frozenset({
-    "pre_tool_use",
-    "post_tool_use",
-    "session_start",
-    "session_end",
-    "stop",
-    "subagent_stop",
-    "pre_compact",
-    "notification",
-    "permission_request",
-    "user_prompt_submit",
-})
+EVENT_TYPE_STRINGS: frozenset[str] = frozenset(
+    {
+        "pre_tool_use",
+        "post_tool_use",
+        "session_start",
+        "session_end",
+        "stop",
+        "subagent_stop",
+        "pre_compact",
+        "notification",
+        "permission_request",
+        "user_prompt_submit",
+    }
+)
 
 # Known handler display names (kebab-case handler IDs)
-HANDLER_DISPLAY_NAMES: frozenset[str] = frozenset({
-    "pipe-blocker",
-    "destructive-git",
-    "sed-blocker",
-    "absolute-path",
-    "worktree-file-copy",
-    "git-stash",
-    "eslint-disable",
-    "tdd-enforcement",
-    "python-qa-suppression-blocker",
-    "php-qa-suppression-blocker",
-    "go-qa-suppression-blocker",
-    "markdown-organization",
-    "validate-plan-number",
-    "plan-time-estimates",
-    "plan-workflow",
-    "plan-number-helper",
-    "npm-command",
-    "gh-issue-comments",
-    "web-search-year",
-    "british-english",
-    "bash-error-detector",
-    "validate-eslint-on-write",
-    "validate-sitemap",
-    "workflow-state-restoration",
-    "workflow-state-pre-compact",
-    "yolo-container-detection",
-    "suggest-statusline",
-    "transcript-archiver",
-    "cleanup",
-    "task-completion-checker",
-    "auto-continue-stop",
-    "subagent-completion-logger",
-    "remind-validator",
-    "remind-prompt-library",
-    "git-context-injector",
-    "auto-approve-reads",
-    "notification-logger",
-    "status-git-repo-name",
-    "status-account-display",
-    "status-model-context",
-    "status-usage-tracking",
-    "status-git-branch",
-    "status-daemon-stats",
-})
+HANDLER_DISPLAY_NAMES: frozenset[str] = frozenset(
+    {
+        "pipe-blocker",
+        "destructive-git",
+        "sed-blocker",
+        "absolute-path",
+        "worktree-file-copy",
+        "git-stash",
+        "eslint-disable",
+        "tdd-enforcement",
+        "python-qa-suppression-blocker",
+        "php-qa-suppression-blocker",
+        "go-qa-suppression-blocker",
+        "markdown-organization",
+        "validate-plan-number",
+        "plan-time-estimates",
+        "plan-workflow",
+        "plan-number-helper",
+        "npm-command",
+        "gh-issue-comments",
+        "web-search-year",
+        "british-english",
+        "bash-error-detector",
+        "validate-eslint-on-write",
+        "validate-sitemap",
+        "workflow-state-restoration",
+        "workflow-state-pre-compact",
+        "yolo-container-detection",
+        "suggest-statusline",
+        "transcript-archiver",
+        "cleanup",
+        "task-completion-checker",
+        "auto-continue-stop",
+        "subagent-completion-logger",
+        "remind-validator",
+        "remind-prompt-library",
+        "git-context-injector",
+        "auto-approve-reads",
+        "notification-logger",
+        "status-git-repo-name",
+        "status-account-display",
+        "status-model-context",
+        "status-usage-tracking",
+        "status-git-branch",
+        "status-daemon-stats",
+    }
+)
 
 
 class MagicValueChecker(ast.NodeVisitor):
@@ -140,7 +163,7 @@ class MagicValueChecker(ast.NodeVisitor):
         self._in_handler_init = False
         self._current_class_bases: list[str] = []
 
-    def _add(self, node: ast.AST, rule: str, message: str) -> None:
+    def _add(self, node: _PositionedNode, rule: str, message: str) -> None:
         self.violations.append(
             Violation(
                 file=str(self.filepath),
@@ -154,17 +177,14 @@ class MagicValueChecker(ast.NodeVisitor):
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         """Track class bases to know if we're in a Handler subclass."""
         old_bases = self._current_class_bases
-        self._current_class_bases = [
-            _get_name(b) for b in node.bases
-        ]
+        self._current_class_bases = [_get_name(b) for b in node.bases]
         self.generic_visit(node)
         self._current_class_bases = old_bases
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         """Track if we're inside __init__ of a Handler subclass."""
-        is_handler_init = (
-            node.name == "__init__"
-            and "Handler" in " ".join(self._current_class_bases)
+        is_handler_init = node.name == "__init__" and "Handler" in " ".join(
+            self._current_class_bases
         )
         old = self._in_handler_init
         self._in_handler_init = is_handler_init
@@ -187,14 +207,22 @@ class MagicValueChecker(ast.NodeVisitor):
     def _check_handler_init_keywords(self, node: ast.Call) -> None:
         """Check Handler.__init__ keyword args for magic values."""
         for kw in node.keywords:
-            if kw.arg == "name" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+            if (
+                kw.arg == "name"
+                and isinstance(kw.value, ast.Constant)
+                and isinstance(kw.value.value, str)
+            ):
                 self._add(
                     kw.value,
                     "magic-handler-name",
                     f'Magic handler name "{kw.value.value}" - use handler_id=HandlerID.XXX',
                 )
 
-            elif kw.arg == "priority" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, (int, float)):
+            elif (
+                kw.arg == "priority"
+                and isinstance(kw.value, ast.Constant)
+                and isinstance(kw.value.value, (int, float))
+            ):
                 self._add(
                     kw.value,
                     "magic-priority",
@@ -213,7 +241,11 @@ class MagicValueChecker(ast.NodeVisitor):
     def _check_hook_result_keywords(self, node: ast.Call) -> None:
         """Check HookResult() for magic decision strings."""
         for kw in node.keywords:
-            if kw.arg == "decision" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+            if (
+                kw.arg == "decision"
+                and isinstance(kw.value, ast.Constant)
+                and isinstance(kw.value.value, str)
+            ):
                 val = kw.value.value
                 if val in DECISION_STRINGS:
                     self._add(
@@ -246,13 +278,21 @@ class MagicValueChecker(ast.NodeVisitor):
             # "Bash" == tool_name (reversed)
             if len(node.comparators) == 1:
                 comp_name = _get_name(node.comparators[0])
-                if comp_name == "tool_name" and isinstance(node.left, ast.Constant) and isinstance(node.left.value, str):
+                if (
+                    comp_name == "tool_name"
+                    and isinstance(node.left, ast.Constant)
+                    and isinstance(node.left.value, str)
+                ):
                     self._add(
                         node.left,
                         "magic-tool-name",
                         f'Magic tool name "{node.left.value}" - use ToolName.XXX constant',
                     )
-                if comp_name in ("event_type", "event_name", "hook_event") and isinstance(node.left, ast.Constant) and isinstance(node.left.value, str):
+                if (
+                    comp_name in ("event_type", "event_name", "hook_event")
+                    and isinstance(node.left, ast.Constant)
+                    and isinstance(node.left.value, str)
+                ):
                     val = node.left.value
                     if val in EVENT_TYPE_STRINGS:
                         self._add(
@@ -270,7 +310,11 @@ class MagicValueChecker(ast.NodeVisitor):
 
                 # IN TEST FILES: Check when attribute is on the left in "in" comparisons
                 # Catches: "pipe-blocker" in result.handlers_matched
-                if self._is_test_file() and isinstance(node.left, ast.Constant) and isinstance(node.left.value, str):
+                if (
+                    self._is_test_file()
+                    and isinstance(node.left, ast.Constant)
+                    and isinstance(node.left.value, str)
+                ):
                     if isinstance(node.comparators[0], ast.Attribute):
                         attr_name = node.comparators[0].attr
                         if attr_name in ("handlers_matched", "terminated_by"):
@@ -307,7 +351,11 @@ class MagicValueChecker(ast.NodeVisitor):
                 )
         elif isinstance(node, (ast.List, ast.Tuple, ast.Set)):
             for elt in node.elts:
-                if isinstance(elt, ast.Constant) and isinstance(elt.value, str) and elt.value in EVENT_TYPE_STRINGS:
+                if (
+                    isinstance(elt, ast.Constant)
+                    and isinstance(elt.value, str)
+                    and elt.value in EVENT_TYPE_STRINGS
+                ):
                     self._add(
                         elt,
                         "magic-event-type",
@@ -462,9 +510,14 @@ def main() -> int:
             if pyfile.name == "test_qa_runner.py":
                 continue
             # Skip daemon/core tests that create mock handlers for testing daemon internals
-            if pyfile.name in ("test_server.py", "test_log_level_override.py", "test_handler.py",
-                               "test_handler_config_blocking.py", "test_daemon_smoke.py",
-                               "test_init_config.py"):
+            if pyfile.name in (
+                "test_server.py",
+                "test_log_level_override.py",
+                "test_handler.py",
+                "test_handler_config_blocking.py",
+                "test_daemon_smoke.py",
+                "test_init_config.py",
+            ):
                 continue
             violations.extend(check_file(pyfile))
 

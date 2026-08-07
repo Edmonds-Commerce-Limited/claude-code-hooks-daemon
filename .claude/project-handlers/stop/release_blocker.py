@@ -18,7 +18,7 @@ Terminal: True (blocks session ending when release detected)
 """
 
 import subprocess
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.constants.timeout import Timeout

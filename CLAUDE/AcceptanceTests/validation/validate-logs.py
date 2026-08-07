@@ -6,7 +6,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
@@ -20,9 +20,9 @@ class LogValidator:
             self.expected_responses = yaml.safe_load(f)
 
         self.handlers = self.expected_responses.get("handlers", {})
-        self.test_results: List[Dict[str, Any]] = []
+        self.test_results: list[dict[str, Any]] = []
 
-    def parse_daemon_log(self, log_path: Path) -> List[Dict[str, Any]]:
+    def parse_daemon_log(self, log_path: Path) -> list[dict[str, Any]]:
         """
         Parse daemon debug log to extract handler execution events.
 
@@ -45,9 +45,7 @@ class LogValidator:
         # Pattern to extract handler execution from logs
         # This is a simplified pattern - adjust based on actual log format
         handler_pattern = re.compile(
-            r"Handler: (\S+).*?"
-            r"Decision: (\w+).*?"
-            r"Reason: (.+?)(?:\n|$)",
+            r"Handler: (\S+).*?" r"Decision: (\w+).*?" r"Reason: (.+?)(?:\n|$)",
             re.MULTILINE | re.DOTALL,
         )
 
@@ -67,8 +65,8 @@ class LogValidator:
         return events
 
     def validate_handler_response(
-        self, handler_name: str, actual_events: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+        self, handler_name: str, actual_events: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         """
         Validate handler responses against expected behavior.
 
@@ -168,7 +166,7 @@ class LogValidator:
             "failures": failures,
         }
 
-    def validate_all(self, log_path: Path) -> Dict[str, Any]:
+    def validate_all(self, log_path: Path) -> dict[str, Any]:
         """
         Validate all handlers against daemon log.
 
@@ -204,7 +202,7 @@ class LogValidator:
             "results": results,
         }
 
-    def generate_report(self, validation_results: Dict[str, Any]) -> str:
+    def generate_report(self, validation_results: dict[str, Any]) -> str:
         """Generate human-readable validation report."""
         summary = validation_results["summary"]
         results = validation_results["results"]
@@ -236,11 +234,8 @@ class LogValidator:
             else:
                 tests_run = result["tests_run"]
                 tests_passed = result["tests_passed"]
-                tests_failed = result["tests_failed"]
 
-                report_lines.append(
-                    f"{status} {handler} ({tests_passed}/{tests_run} tests passed)"
-                )
+                report_lines.append(f"{status} {handler} ({tests_passed}/{tests_run} tests passed)")
 
                 if not passed and result.get("failures"):
                     for failure in result["failures"]:
@@ -248,9 +243,7 @@ class LogValidator:
                         report_lines.append(f"      Pattern: {failure['pattern']}")
                         report_lines.append(f"      Reason: {failure['reason']}")
                         if "actual_reason" in failure:
-                            report_lines.append(
-                                f"      Actual: {failure['actual_reason']}"
-                            )
+                            report_lines.append(f"      Actual: {failure['actual_reason']}")
 
         report_lines.append("")
         report_lines.append("=" * 80)
@@ -258,9 +251,7 @@ class LogValidator:
         if summary["handlers_failed"] == 0:
             report_lines.append("✓ ALL TESTS PASSED")
         else:
-            report_lines.append(
-                f"✗ {summary['handlers_failed']} HANDLER(S) FAILED"
-            )
+            report_lines.append(f"✗ {summary['handlers_failed']} HANDLER(S) FAILED")
 
         report_lines.append("=" * 80)
 
@@ -272,9 +263,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Validate daemon logs against expected handler responses"
     )
-    parser.add_argument(
-        "log_file", type=Path, help="Path to daemon debug log file"
-    )
+    parser.add_argument("log_file", type=Path, help="Path to daemon debug log file")
     parser.add_argument(
         "--expected",
         type=Path,
@@ -310,10 +299,7 @@ def main():
     results = validator.validate_all(args.log_file)
 
     # Generate output
-    if args.json:
-        output = json.dumps(results, indent=2)
-    else:
-        output = validator.generate_report(results)
+    output = json.dumps(results, indent=2) if args.json else validator.generate_report(results)
 
     # Write output
     if args.output:

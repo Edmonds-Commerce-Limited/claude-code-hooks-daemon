@@ -3,7 +3,6 @@
 from typing import Any
 
 import pytest
-
 from enforce_llm_qa import EnforceLlmQaHandler
 
 

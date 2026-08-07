@@ -44,9 +44,7 @@ def write_hook_input():
 def edit_hook_input():
     """Factory fixture for creating Edit tool hook inputs."""
 
-    def _make(
-        file_path: str, old_string: str = "", new_string: str = ""
-    ) -> dict[str, Any]:
+    def _make(file_path: str, old_string: str = "", new_string: str = "") -> dict[str, Any]:
         return {
             "tool_name": "Edit",
             "tool_input": {

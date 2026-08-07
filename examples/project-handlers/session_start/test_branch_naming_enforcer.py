@@ -1,8 +1,9 @@
 """Tests for branch naming enforcer handler."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from branch_naming_enforcer import BranchNamingEnforcerHandler
+
 from claude_code_hooks_daemon.core.hook_result import Decision
 
 
@@ -63,6 +64,7 @@ class TestBranchNamingEnforcerHandler:
 
     def test_allows_on_timeout(self) -> None:
         import subprocess
+
         with patch(
             "branch_naming_enforcer.subprocess.run",
             side_effect=subprocess.TimeoutExpired(cmd="git", timeout=5),

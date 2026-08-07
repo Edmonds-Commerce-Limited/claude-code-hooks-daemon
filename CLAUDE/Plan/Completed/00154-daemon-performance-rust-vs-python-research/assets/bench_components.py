@@ -27,7 +27,8 @@ import argparse
 import json
 import sys
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 MIN_DURATION_SEC = 0.2
 MIN_REPS = 20
@@ -228,12 +229,8 @@ def main() -> int:
             entry: dict[str, Any] = {"module": cls.__module__}
             try:
                 handler = cls()
-                entry["bash_matches"] = bench(
-                    lambda h=handler, hi=bash_input: h.matches(hi)
-                )
-                entry["write10k_matches"] = bench(
-                    lambda h=handler, hi=write_input: h.matches(hi)
-                )
+                entry["bash_matches"] = bench(lambda h=handler, hi=bash_input: h.matches(hi))
+                entry["write10k_matches"] = bench(lambda h=handler, hi=write_input: h.matches(hi))
             except Exception as exc:
                 entry["error"] = f"{type(exc).__name__}: {exc}"
             chain_results[class_name] = entry

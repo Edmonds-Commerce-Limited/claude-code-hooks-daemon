@@ -17,6 +17,10 @@ OUTPUT_FILE="${PROJECT_ROOT}/untracked/qa/format.json"
 # shellcheck source=../venv-include.bash
 source "${PROJECT_ROOT}/scripts/venv-include.bash"
 
+# Source the shared gate scope (SSoT for which paths are examined)
+# shellcheck source=./gate-scope.bash
+source "${PROJECT_ROOT}/scripts/qa/gate-scope.bash"
+
 cd "${PROJECT_ROOT}"
 
 # Ensure venv and deps
@@ -32,7 +36,8 @@ echo "Running black formatter (auto-fixing)..."
 
 # Run black to auto-format files
 # Note: black doesn't output JSON, so we parse text output
-if venv_tool black src/ tests/ .claude/ccy/claude-supervise.py 2>&1 | tee "${OUTPUT_FILE}.raw"; then
+mapfile -t FORMAT_PATHS < <(qa_format_paths)
+if venv_tool black "${FORMAT_PATHS[@]}" 2>&1 | tee "${OUTPUT_FILE}.raw"; then
     EXIT_CODE=0
 else
     EXIT_CODE=$?

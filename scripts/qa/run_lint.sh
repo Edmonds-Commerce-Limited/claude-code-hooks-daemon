@@ -17,6 +17,10 @@ OUTPUT_FILE="${PROJECT_ROOT}/untracked/qa/lint.json"
 # shellcheck source=../venv-include.bash
 source "${PROJECT_ROOT}/scripts/venv-include.bash"
 
+# Source the shared gate scope (SSoT for which paths are examined)
+# shellcheck source=./gate-scope.bash
+source "${PROJECT_ROOT}/scripts/qa/gate-scope.bash"
+
 cd "${PROJECT_ROOT}"
 
 # Ensure venv and deps
@@ -35,7 +39,8 @@ echo "Running ruff linter (auto-fixing)..."
 # NO `2>&1` here (Plan 00200): ruff streams its JSON to stdout, so anything
 # merged into that stream corrupts the capture. Diagnostics stay on stderr and
 # reach the console, where they belong.
-if venv_tool ruff check --fix src/ tests/ .claude/ccy/claude-supervise.py --output-format=json > "${OUTPUT_FILE}.raw"; then
+mapfile -t LINT_PATHS < <(qa_lint_paths)
+if venv_tool ruff check --fix "${LINT_PATHS[@]}" --output-format=json > "${OUTPUT_FILE}.raw"; then
     : # No violations found
 fi
 # Violations (if any) are captured as JSON in the output file for parsing below

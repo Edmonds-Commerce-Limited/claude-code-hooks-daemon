@@ -67,6 +67,12 @@ where = ["src"]
 [tool.setuptools.package-data]
 # Bundle the plan-scaffolding script so wheel installs can deploy it.
 "claude_code_hooks_daemon.install" = ["templates/*.bash"]
+# PEP 561 marker. This package is checked under `mypy --strict`, but without
+# this file no consumer can see that: every `from claude_code_hooks_daemon...`
+# import resolves to Any and silently loses type checking. The repo's own
+# scripts/ were the first victims — 12 `import-untyped` errors surfaced the
+# moment the type gate was widened past src/.
+"claude_code_hooks_daemon" = ["py.typed"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"

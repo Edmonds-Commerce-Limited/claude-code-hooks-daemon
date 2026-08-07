@@ -13,7 +13,7 @@ If output_file not specified, writes to stdout.
 
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -35,7 +35,9 @@ class DebugInfoGenerator:
         # clone. Previously this was Path(__file__).parent.parent which, in a
         # client install, points at {client}/.claude/hooks-daemon — the clone —
         # so every path below resolved against the wrong directory.
-        self.project_root = project_root if project_root is not None else self._detect_project_root()
+        self.project_root = (
+            project_root if project_root is not None else self._detect_project_root()
+        )
 
         # Colors (disabled if writing to file)
         if output_file:
@@ -178,7 +180,7 @@ class DebugInfoGenerator:
         """Generate full debug report."""
         self.output(f"{self.BOLD}# Claude Code Hooks Daemon - Debug Information{self.RESET}")
         self.output()
-        self.output(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        self.output(f"Generated: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}")
         self.output()
 
         # System Information

@@ -14,9 +14,7 @@ from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, T
 from claude_code_hooks_daemon.core.hook_result import Decision
 
 # Adapt these patterns to your project's branch naming conventions
-_ALLOWED_BRANCH_PATTERN = re.compile(
-    r"^(feature|fix|chore|docs|plan)/.*$"
-)
+_ALLOWED_BRANCH_PATTERN = re.compile(r"^(feature|fix|chore|docs|plan)/.*$")
 
 _ALLOWED_SPECIAL_BRANCHES = frozenset({"main", "master", "develop", "staging"})
 

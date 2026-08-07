@@ -34,7 +34,7 @@ except ImportError:
 class HandlerStatusReporter:
     """Generate handler status report."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize reporter and detect paths."""
         # Detect project root (walks up from script location)
         script_dir = Path(__file__).parent
@@ -67,7 +67,7 @@ class HandlerStatusReporter:
         self_install_config = self.daemon_root / ".claude" / "hooks-daemon.yaml"
         if self_install_config.exists():
             try:
-                with open(self_install_config, "r") as f:
+                with open(self_install_config) as f:
                     config = yaml.safe_load(f)
                     if config and config.get("daemon", {}).get("self_install_mode"):
                         return True
@@ -93,7 +93,7 @@ class HandlerStatusReporter:
             return {"handlers": {}}
 
         try:
-            with open(self.config_path, "r") as f:
+            with open(self.config_path) as f:
                 config = yaml.safe_load(f)
                 return config or {"handlers": {}}
         except Exception as e:
@@ -103,10 +103,10 @@ class HandlerStatusReporter:
     def discover_handlers(self) -> dict[str, list[dict[str, Any]]]:
         """Discover all available handlers using HandlerRegistry."""
         try:
+            from claude_code_hooks_daemon.core.handler import Handler
             from claude_code_hooks_daemon.handlers.registry import (
                 EVENT_TYPE_MAPPING,
             )
-            from claude_code_hooks_daemon.core.handler import Handler
         except ImportError as e:
             print(f"ERROR: Cannot import daemon modules: {e}", file=sys.stderr)
             sys.exit(1)
@@ -142,7 +142,9 @@ class HandlerStatusReporter:
                                     "name": instance.name,
                                     "priority": instance.priority,
                                     "terminal": instance.terminal,
-                                    "tags": list(instance.tags) if hasattr(instance, "tags") else [],
+                                    "tags": (
+                                        list(instance.tags) if hasattr(instance, "tags") else []
+                                    ),
                                     "doc": (
                                         (attr.__doc__ or "").strip().split("\n")[0]
                                         if attr.__doc__
