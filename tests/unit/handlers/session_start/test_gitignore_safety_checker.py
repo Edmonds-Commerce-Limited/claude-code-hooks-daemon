@@ -120,6 +120,7 @@ class TestFindMissingEntries:
         gitignore = tmp_path / ".gitignore"
         gitignore.write_text(
             ".claude/worktrees/\n.CLAUDE.md.pre-inject\n.claude/scheduled_tasks.lock\n"
+            "*.secret\n*.secrets\n"
         )
         missing = handler._find_missing_entries(tmp_path)
         assert missing == []
@@ -141,6 +142,41 @@ class TestFindMissingEntries:
         gitignore = tmp_path / ".gitignore"
         gitignore.write_text(
             ".claude/worktrees/\n.CLAUDE.md.pre-inject\n.claude/scheduled_tasks.lock\n"
+            "*.secret\n*.secrets\n"
+        )
+        missing = handler._find_missing_entries(tmp_path)
+        assert missing == []
+
+    def test_secret_glob_pattern_is_required(
+        self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
+    ) -> None:
+        """Regression: *.secret must be in required patterns (sensitive_content secret list)."""
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text(
+            ".claude/worktrees/\n.CLAUDE.md.pre-inject\n.claude/scheduled_tasks.lock\n"
+        )
+        missing = handler._find_missing_entries(tmp_path)
+        assert any("*.secret" in m for m in missing)
+
+    def test_secrets_glob_pattern_is_required(
+        self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
+    ) -> None:
+        """Regression: *.secrets must be in required patterns (sensitive_content secret list)."""
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text(
+            ".claude/worktrees/\n.CLAUDE.md.pre-inject\n.claude/scheduled_tasks.lock\n*.secret\n"
+        )
+        missing = handler._find_missing_entries(tmp_path)
+        assert any("*.secrets" in m for m in missing)
+
+    def test_secret_patterns_satisfied_in_root_gitignore(
+        self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
+    ) -> None:
+        """*.secret / *.secrets entries in root .gitignore satisfy the requirement."""
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text(
+            ".claude/worktrees/\n.CLAUDE.md.pre-inject\n.claude/scheduled_tasks.lock\n"
+            "*.secret\n*.secrets\n"
         )
         missing = handler._find_missing_entries(tmp_path)
         assert missing == []

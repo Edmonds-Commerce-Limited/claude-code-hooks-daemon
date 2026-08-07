@@ -166,3 +166,9 @@ CLAUDE/AcceptanceTests/results/*
 
 # ClaudeMdInjector backup (written before each injection to enable recovery)
 .CLAUDE.md.pre-inject
+
+# Secret word lists for the sensitive_content handler — never tracked. A
+# term in one of these files must never reach git history; this rule ships
+# BEFORE any such file is created so a broad `git add` can never catch one.
+*.secret
+*.secrets

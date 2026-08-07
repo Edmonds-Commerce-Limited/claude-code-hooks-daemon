@@ -36,6 +36,16 @@ _REQUIRED_GITIGNORE_PATTERNS: tuple[tuple[str, str, str], ...] = (
         "scheduled_tasks.lock",
         ".claude/scheduled_tasks.lock (ScheduleWakeup/cron runtime lock — never commit)",
     ),
+    (
+        "*.secret",
+        "*.secret",
+        "*.secret (sensitive_content handler's secret word list — must never be committed)",
+    ),
+    (
+        "*.secrets",
+        "*.secrets",
+        "*.secrets (sensitive_content handler's secret word list — must never be committed)",
+    ),
 )
 
 _GITIGNORE_FILE = ".gitignore"
