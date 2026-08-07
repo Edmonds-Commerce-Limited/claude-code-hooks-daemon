@@ -118,11 +118,6 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="capture_corruption.json",
         jq_hint="jq '.violations[] | {file, line, function, rule, message}'",
     ),
-    "smoke_test": ToolConfig(
-        command=_bash("run_smoke_test.sh"),
-        json_file="smoke_test.json",
-        jq_hint="jq '.probes[] | {name, passed, expected, actual_decision}'",
-    ),
     "repo_hygiene": ToolConfig(
         command=_python("check_repo_hygiene.py") + ["--json"],
         json_file="repo_hygiene.json",
@@ -133,12 +128,27 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="doc_truth.json",
         jq_hint="jq '.violations[] | {rule, file, line, message}'",
     ),
+    "sensitive_content": ToolConfig(
+        command=_python("check_sensitive_content.py") + ["--json"],
+        json_file="sensitive_content.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
+    # smoke_test MUST stay last: it probes the live daemon, so it belongs
+    # after every static check has had its say. Pinned by
+    # test_smoke_test_is_last_in_registry -- three tools were appended below
+    # it before that test caught the drift.
+    "smoke_test": ToolConfig(
+        command=_bash("run_smoke_test.sh"),
+        json_file="smoke_test.json",
+        jq_hint="jq '.probes[] | {name, passed, expected, actual_decision}'",
+    ),
 }
 
 ALL_TOOL_NAMES = list(TOOL_REGISTRY)
 
 
 # ── Summarizers ────────────────────────────────────────────────────
+
 
 def _summarize_magic_values(data: dict) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
@@ -234,6 +244,11 @@ def _summarize_doc_truth(data: dict) -> str:
     return f"{total} violations"
 
 
+def _summarize_sensitive_content(data: dict) -> str:
+    total = data.get("summary", {}).get("total_violations", 0)
+    return f"{total} violations"
+
+
 SUMMARIZERS: dict[str, Summarizer] = {
     "magic_values": _summarize_magic_values,
     "format": _summarize_format,
@@ -251,10 +266,12 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "smoke_test": _summarize_smoke_test,
     "repo_hygiene": _summarize_repo_hygiene,
     "doc_truth": _summarize_doc_truth,
+    "sensitive_content": _summarize_sensitive_content,
 }
 
 
 # ── Core logic ─────────────────────────────────────────────────────
+
 
 def _is_passed(data: dict) -> bool:
     """Determine pass/fail from JSON data (handles both schemas)."""
@@ -320,6 +337,7 @@ def summarize_tool(name: str, exit_code: int | None = None) -> tuple[bool, str]:
 
 
 # ── CLI ────────────────────────────────────────────────────────────
+
 
 def main() -> int:
     """Entry point."""

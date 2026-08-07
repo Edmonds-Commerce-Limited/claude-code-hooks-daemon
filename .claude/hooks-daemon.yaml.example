@@ -65,6 +65,16 @@ handlers:
       enabled: true
       priority: 15
 
+    sensitive_content:     # Blocks configured public patterns + a gitignored secret word list
+      enabled: true         # Inert until configured: public_patterns defaults to [] and the
+      priority: 14          # secret word list path defaults to a file that does not exist yet.
+      # options:
+      #   public_patterns:
+      #     - name: example-pattern
+      #       pattern: 'some-safe-to-name-regex'
+      #       description: 'shown in the deny reason -- keep this STRUCTURAL, never a specific identifier'
+      #   secret_word_list_path: .claude/block-words.secret  # gitignored; a match here NEVER discloses the term
+
     root_recursion_guard:  # Blocks recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME
       enabled: true
       priority: 16

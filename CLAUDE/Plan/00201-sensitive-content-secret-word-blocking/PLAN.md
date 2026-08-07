@@ -49,8 +49,9 @@ Two independent sources of blocked content:
 
 ## Non-Goals
 
-- The actual history redaction (renaming `host-a` -> `host-a` etc. across
-  the tree/history) — tracked separately per `REDACTION-MAP.md` /
+- The actual history redaction (renaming employer/client host and account
+  identifiers to neutral placeholders such as `host-a` across the
+  tree/history) — tracked separately per `REDACTION-MAP.md` /
   `REWRITE-PROCEDURE.md`, not this plan.
 - A built-in, shipped-by-default `public_patterns` list for client projects.
   The four categories this repo cares about (vhosts paths, home dirs, session
@@ -177,8 +178,38 @@ other source.
   deliberately NOT exempt — it ships, so a real term pasted there would be
   published. 4 tests, one of which is a control asserting the `.example`
   stays checked so the fix cannot pass by disabling matching wholesale.
-- [ ] ⬜ **Task 5.1**: Redaction pass — the 35 public-pattern violations the
-  checker reports, including three in shipped source. Ships with Task 3.2.
+- [ ] 🔄 **Task 5.1**: Redaction pass — the 165 violations the checker
+  reports (35 public-pattern, 130 secret-term) across 52 files, including
+  shipped source. Ships with Task 3.2.
+- [x] ✅ **Task 5.2**: The `session-uuid` public pattern blocked the
+  placeholder its own deny message recommended. It matched any UUID shape,
+  so "use an all-zeros placeholder instead" was itself denied — the only
+  advertised remediation was unusable, and the redaction could not be
+  completed at all. Worse, the fix could not be typed into
+  `.claude/hooks-daemon.yaml` until the pattern was relaxed, because the
+  comment explaining it tripped the live rule. Now exempts UUIDs whose hex
+  digits are all the same character (all-zeros, all-a, all-f). Uniformity is
+  the test rather than "starts with zeros", so a near-miss with one odd
+  digit is still caught. `tests/integration/test_sensitive_content_uuid_placeholders.py`
+  reads the pattern out of the real config so deleting the lookahead fails
+  the suite, and includes a control asserting real UUIDs are still matched.
+- [x] ✅ **Task 5.3**: `today_only_mode` has no exemption for a SECURITY
+  redaction of a historical journal day-file. Its premise is right for
+  narrative — a correction belongs in a new dated entry — but appending "the
+  15 July entry contained a real session UUID" does not remove the UUID. Used
+  the handler's own supported config control (flip to `advise`, four edits,
+  flip straight back, verified restored by probing the live daemon socket)
+  rather than working around the check. Rationale recorded in the config; if
+  it recurs the fix is a first-class `MUST_..._BECAUSE` escape hatch, not a
+  standing relaxation.
+- [ ] ⬜ **Task 5.4**: A live-dogfood step overwrote the operational
+  `.claude/block-words.secret` with a single throwaway term. Nothing failed:
+  the guard silently stopped guarding and the QA scanner began reporting a
+  cleaner tree than reality — exactly the failure mode that would let a
+  redaction be declared finished while identifiers remained. Restored by
+  hand. The durable fix is that a dogfood MUST point
+  `secret_word_list_path` at a temp file (the handler already supports the
+  override) and never write the real list.
 
 ## Success Criteria
 

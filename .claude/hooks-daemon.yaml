@@ -100,9 +100,18 @@ handlers:
           - name: vhosts-path
             pattern: '/var/www/vhosts'
             description: 'employer/hosting-provider server path convention'
+          # The leading negative lookahead exempts UUIDs whose hex digits are
+          # all the SAME character (all-zeros, all-a, all-f, ...). Without it
+          # the rule blocked the exact placeholder its own deny message tells
+          # you to use, so the only advertised remediation was itself denied.
+          # Found the first time this rule was used to redact a real UUID --
+          # and the fix could not even be typed into this file until the
+          # pattern was relaxed, because the explanatory comment tripped it.
+          # Uniformity is the test, not "starts with zeros": a placeholder
+          # with one odd digit is still real-shaped and is still caught.
           - name: session-uuid
-            pattern: '\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b'
-            description: 'a real session UUID — use 00000000-0000-0000-0000-000000000000 in examples'
+            pattern: '\b(?!([0-9a-fA-F])\1{7}-\1{4}-\1{4}-\1{4}-\1{12}\b)[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b'
+            description: 'a real session UUID — use an all-same-digit placeholder (all zeros; or all-a / all-b when two must stay distinguishable)'
         secret_word_list_path: .claude/block-words.secret
         exclude_paths:
           # Confirmed-legitimate synthetic UUID fixtures (REDACTION-MAP.md
@@ -608,6 +617,16 @@ plan_workflow:
       freshness_days: 3
       enforce_on_completion: false
       grandfather_before: 163
+      # Left at the `block` default. Noted during the Plan 00201 redaction
+      # pass: today_only_mode has no exemption for a SECURITY redaction of a
+      # historical day-file. Its premise is right for narrative — a
+      # correction belongs in a new dated entry, not an edit to an old one —
+      # but appending "the 15 July entry contained a real session UUID" does
+      # not remove the UUID. That pass flipped this to `advise` for four
+      # edits and flipped it straight back; if it recurs, the fix is a
+      # first-class escape hatch in the handler (the `MUST_..._BECAUSE`
+      # idiom used by git_stash / root_recursion_guard), not a standing
+      # relaxation here.
 
 project_handlers:
   enabled: true

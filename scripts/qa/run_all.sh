@@ -191,6 +191,16 @@ else
 fi
 echo ""
 
+echo "16. Running Sensitive Content Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_sensitive_content.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Sensitive content check FAILED"
+else
+    echo "✅ Sensitive content check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -213,6 +223,9 @@ results = {
     "Shell Audit": "untracked/qa/shell_audit.json",
     "Canonical Callers": "untracked/qa/canonical_callers.json",
     "Capture Corruption": "untracked/qa/capture_corruption.json",
+    "Repo Hygiene": "untracked/qa/repo_hygiene.json",
+    "Doc Truth": "untracked/qa/doc_truth.json",
+    "Sensitive Content": "untracked/qa/sensitive_content.json",
 }
 
 all_passed = True

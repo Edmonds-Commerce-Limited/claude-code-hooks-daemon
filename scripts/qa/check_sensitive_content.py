@@ -180,7 +180,7 @@ def filter_excluded_files(
 
 def _compile_public_patterns(
     patterns: list[dict[str, str]],
-) -> list[tuple[dict[str, str], "re.Pattern[str]"]]:
+) -> list[tuple[dict[str, str], re.Pattern[str]]]:
     compiled: list[tuple[dict[str, str], re.Pattern[str]]] = []
     for entry in patterns:
         pattern = entry.get(_PATTERN_KEY_PATTERN, "")
@@ -195,7 +195,7 @@ def _compile_public_patterns(
 
 def scan_file(
     path: Path,
-    compiled_patterns: list[tuple[dict[str, str], "re.Pattern[str]"]],
+    compiled_patterns: list[tuple[dict[str, str], re.Pattern[str]]],
     secret_terms: tuple[str, ...],
 ) -> list[Violation]:
     """Every violation in one file — public patterns, then the secret list."""
