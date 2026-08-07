@@ -1,22 +1,37 @@
 """Tests for PostClearAutoExecuteHandler.
 
-PROTOTYPE tests: Validates that the handler correctly detects first prompts
-of new sessions and injects execution guidance.
+Validates that the handler correctly detects first prompts of new sessions
+and injects execution guidance.
 """
 
+from claude_code_hooks_daemon.constants import HandlerID
 from claude_code_hooks_daemon.core import Decision
 
 
 class TestPostClearAutoExecuteInit:
     """Test handler initialisation."""
 
-    def test_handler_id(self) -> None:
+    def test_handler_id_comes_from_the_registry(self) -> None:
+        """The handler must take its identity from HandlerID, not a local literal.
+
+        Regression guard: this handler previously hardcoded its own
+        ``_HANDLER_ID`` string and so bypassed the HandlerID registry
+        entirely. That left it as the only handler whose reported name was
+        ``post_clear_auto_execute`` (underscores) while every registered
+        sibling reports a hyphenated display name.
+        """
         from claude_code_hooks_daemon.handlers.user_prompt_submit.post_clear_auto_execute import (
             PostClearAutoExecuteHandler,
         )
 
         handler = PostClearAutoExecuteHandler()
-        assert handler.name == "post_clear_auto_execute"
+        assert handler.name == HandlerID.POST_CLEAR_AUTO_EXECUTE.display_name
+        assert handler.name == "post-clear-auto-execute"
+
+    def test_registry_entry_matches_the_config_key(self) -> None:
+        """The registry config_key must match the key used in hooks-daemon.yaml."""
+        assert HandlerID.POST_CLEAR_AUTO_EXECUTE.config_key == "post_clear_auto_execute"
+        assert HandlerID.POST_CLEAR_AUTO_EXECUTE.class_name == "PostClearAutoExecuteHandler"
 
     def test_is_non_terminal(self) -> None:
         from claude_code_hooks_daemon.handlers.user_prompt_submit.post_clear_auto_execute import (

@@ -393,6 +393,11 @@ class HandlerID:
     )
 
     # Advisory handlers (Priority: 55-60)
+    POST_CLEAR_AUTO_EXECUTE = HandlerIDMeta(
+        class_name="PostClearAutoExecuteHandler",
+        config_key="post_clear_auto_execute",
+        display_name="post-clear-auto-execute",
+    )
     CRITICAL_THINKING_ADVISORY = HandlerIDMeta(
         class_name="CriticalThinkingAdvisoryHandler",
         config_key="critical_thinking_advisory",

@@ -222,18 +222,26 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 disallow_any_generics = false
 
-[tool.bandit]
-targets = ["src"]
-exclude_dirs = ["tests", "build", "dist"]
-skips = [
-    "B101",  # Allow asserts (used in type checking)
-    "B324",  # MD5 hash usage - used for non-security cache keys only
-    "B602",  # subprocess with shell=True - internal QA runner only, trusted commands
-    "B404",  # subprocess module import - legitimate use in handlers
-    "B603",  # subprocess without shell - we use both patterns appropriately
-    "B607",  # Starting process with partial path - intentional for tool execution
-    "B108",  # Temp file/directory usage - standard library patterns, safe usage
-]
+# NOTE: there is deliberately no [tool.bandit] section.
+#
+# Three surfaces run bandit, and all three now pass their filtering explicitly
+# on the command line so they cannot drift apart:
+#   scripts/qa/run_security_check.sh  bandit -r src/ <supervisor> -s B101
+#   .pre-commit-config.yaml           bandit -r src/ -s B101
+#   .github/workflows/qa.yml          bandit -r src/ <supervisor> -s B101
+#
+# A [tool.bandit] block here previously carried a skips list exempting B108,
+# B324, B602, B603, B607 and B404. Bandit only reads a config file when invoked
+# with `-c`, so the two local surfaces ignored it entirely - but CI DID pass
+# `-c pyproject.toml`, which made CI the LOOSEST of the three while appearing
+# to be the strictest. The justification for the B602 skip also described
+# `shell=True` usage that does not exist anywhere in src/.
+#
+# The single source of truth for filtering is the `-s B101` flag: ONLY B101
+# (assert statements) is skipped, matching the Security Standards in CLAUDE.md.
+# HIGH, MEDIUM and LOW findings all fail the check. Do not reintroduce a skips
+# list here, and do not add `-c pyproject.toml` back to any surface - fix the
+# finding instead.
 
 [tool.deptry]
 # Exclude non-source directories (regex patterns)

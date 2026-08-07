@@ -35,5 +35,8 @@ repos:
     rev: 1.7.6
     hooks:
       - id: bandit
-        args: [-ll, -r, src/]
+        # Filter ONLY B101 (asserts), matching scripts/qa/run_security_check.sh.
+        # Do NOT reintroduce -ll: it suppresses LOW-severity findings, and the
+        # Security Standards in CLAUDE.md treat HIGH, MEDIUM and LOW alike.
+        args: [-r, src/, -s, B101]
         exclude: ^tests/

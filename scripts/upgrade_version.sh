@@ -254,31 +254,38 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ]; then
 
     deploy_slash_commands "$PROJECT_ROOT" "$DAEMON_DIR" "normal"
 
-    "$VENV_PYTHON" -c "
+    # Values reach Python as ARGV entries and are never spliced into the
+    # generated source. A path containing a quote would otherwise close the
+    # Python string literal and raise SyntaxError instead of deploying.
+    "$VENV_PYTHON" - "$DAEMON_DIR" "$PROJECT_ROOT" <<'REDEPLOY_SKILLS_PY'
+import sys
 from pathlib import Path
+
 from claude_code_hooks_daemon.install.skills import deploy_skills
 
-daemon_source = Path('$DAEMON_DIR')
-project_root = Path('$PROJECT_ROOT')
+daemon_source = Path(sys.argv[1])
+project_root = Path(sys.argv[2])
 
 try:
     deploy_skills(daemon_source, project_root)
-    print('✓ Skills redeployed to .claude/skills/hooks-daemon/')
+    print("✓ Skills redeployed to .claude/skills/hooks-daemon/")
 except Exception as e:
-    print(f'✗ Skill redeployment failed: {e}')
-    exit(1)
-"
+    print(f"✗ Skill redeployment failed: {e}")
+    sys.exit(1)
+REDEPLOY_SKILLS_PY
 
     # Plan 00136: deploy plan workflow (config-driven SSoT) on the idempotent
     # fast path too, so already-at-target re-runs also deliver mkplan.bash.
-    if "$VENV_PYTHON" -c "
+    if "$VENV_PYTHON" - "$PROJECT_ROOT" "$TARGET_CONFIG" <<'FASTPATH_PLAN_WORKFLOW_PY'; then
+import sys
 from pathlib import Path
+
 from claude_code_hooks_daemon.install.plan_workflow import deploy_plan_workflow_if_enabled
 
-result = deploy_plan_workflow_if_enabled(Path('$PROJECT_ROOT'), Path('$TARGET_CONFIG'))
+result = deploy_plan_workflow_if_enabled(Path(sys.argv[1]), Path(sys.argv[2]))
 for msg in result.messages:
-    print(f'  -> {msg}')
-"; then
+    print(f"  -> {msg}")
+FASTPATH_PLAN_WORKFLOW_PY
         print_success "Plan workflow deployment complete"
     else
         print_warning "Plan workflow deployment had issues (non-fatal)"
@@ -287,16 +294,20 @@ for msg in result.messages:
     # Plan 00147/00148: refresh AND arm the ccy supervisor on the idempotent fast
     # path too, so already-at-target re-runs deliver the current claude-supervise.py
     # and ensure ccy.env exports CCY_CLAUDE_WRAPPER (an existing wrapper is kept).
-    if "$VENV_PYTHON" -c "
+    if "$VENV_PYTHON" - "$DAEMON_DIR" "$PROJECT_ROOT" "$TARGET_CONFIG" <<'FASTPATH_CCY_PY'; then
+import sys
 from pathlib import Path
+
 from claude_code_hooks_daemon.install.ccy_supervisor import deploy_ccy_supervisor_if_enabled
 
-result = deploy_ccy_supervisor_if_enabled(Path('$DAEMON_DIR'), Path('$PROJECT_ROOT'), Path('$TARGET_CONFIG'))
+result = deploy_ccy_supervisor_if_enabled(
+    Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+)
 for msg in result.messages:
-    print(f'  -> {msg}')
+    print(f"  -> {msg}")
 if result.recommend_enable:
-    print('  -> TIP: set ccy.deploy_supervisor: true in .claude/hooks-daemon.yaml to keep this on')
-"; then
+    print("  -> TIP: set ccy.deploy_supervisor: true in .claude/hooks-daemon.yaml to keep this on")
+FASTPATH_CCY_PY
         print_success "ccy supervisor deployment complete"
     else
         print_warning "ccy supervisor deployment had issues (non-fatal)"
@@ -320,70 +331,93 @@ if [ -f "$VENV_PYTHON" ]; then
 fi
 
 # Pre-upgrade compatibility check (validates BEFORE any changes)
+#
+# The checker writes its whole report to stderr, so nothing here captures its
+# output — it streams straight to the operator. The previous shape captured it
+# with `2>&1` into a variable that was only echoed on failure, and under
+# `set -e` a non-zero exit from that command substitution killed the script
+# before the echo ever ran: an incompatible config aborted the upgrade with no
+# explanation at all, and the --force branch below was unreachable.
+#
+# Every value the checker needs arrives as an ARGV entry, never spliced into
+# the generated Python source (a quote in any path or version string produced
+# a SyntaxError, which the blanket `except Exception` then reported as a vague
+# one-line warning).
+#
+# Exit codes from the embedded checker:
+#   0                          - compatible, or nothing to check
+#   COMPAT_INCOMPATIBLE_STATUS - incompatibilities found; honour --force
+#   anything else              - the checker itself crashed. Its traceback is
+#                                already on stderr; warn loudly and continue,
+#                                preserving the long-standing contract that a
+#                                broken check must not block an upgrade.
+COMPAT_INCOMPATIBLE_STATUS=3
 if [ -f "$TARGET_CONFIG" ] && [ -f "$VENV_PYTHON" ]; then
     print_info "Checking config compatibility with target version..."
 
-    COMPAT_RESULT=$("$VENV_PYTHON" -c "
-import json
+    COMPAT_EXIT=0
+    "$VENV_PYTHON" - "$DAEMON_DIR" "$TARGET_CONFIG" "$CURRENT_VERSION" "$TARGET_VERSION" \
+        "$COMPAT_INCOMPATIBLE_STATUS" <<'COMPAT_CHECK_PY' || COMPAT_EXIT=$?
 import sys
 from pathlib import Path
 
-try:
-    from claude_code_hooks_daemon.install.upgrade_compatibility import CompatibilityChecker
+import yaml
 
-    changelog_path = Path('$DAEMON_DIR/CHANGELOG.md')
-    if not changelog_path.exists():
-        print('WARNING: CHANGELOG.md not found, skipping compatibility check', file=sys.stderr)
-        sys.exit(0)
+from claude_code_hooks_daemon.install.upgrade_compatibility import CompatibilityChecker
 
-    # Load user config
-    import yaml
-    with open('$TARGET_CONFIG') as f:
-        user_config = yaml.safe_load(f)
+daemon_dir = Path(sys.argv[1])
+target_config = Path(sys.argv[2])
+current_version = sys.argv[3]
+target_version = sys.argv[4]
+incompatible_status = int(sys.argv[5])
 
-    # Check compatibility
-    checker = CompatibilityChecker(
-        changelog_path=changelog_path,
-        current_version='$CURRENT_VERSION',
-        target_version='$TARGET_VERSION'
-    )
-
-    report = checker.check_compatibility(user_config)
-
-    if not report.is_compatible:
-        print(checker.generate_user_friendly_report(report), file=sys.stderr)
-        print('', file=sys.stderr)
-        print('INCOMPATIBILITIES DETECTED', file=sys.stderr)
-        print('', file=sys.stderr)
-        print('Your config references handlers that are incompatible with $TARGET_VERSION.', file=sys.stderr)
-        print('', file=sys.stderr)
-        print('OPTIONS:', file=sys.stderr)
-        print('  1. Fix config issues manually and re-run upgrade', file=sys.stderr)
-        print('  2. Use --force to proceed anyway (config will be updated automatically)', file=sys.stderr)
-        print('', file=sys.stderr)
-
-        # Check for --force flag
-        import os
-        if '--force' not in os.environ.get('UPGRADE_FLAGS', ''):
-            sys.exit(1)
-        else:
-            print('--force flag detected, proceeding with upgrade...', file=sys.stderr)
-    else:
-        print('✓ All handlers compatible with target version', file=sys.stderr)
-
-except Exception as e:
-    print(f'WARNING: Compatibility check failed: {e}', file=sys.stderr)
+changelog_path = daemon_dir / "CHANGELOG.md"
+if not changelog_path.exists():
+    print("WARNING: CHANGELOG.md not found, skipping compatibility check", file=sys.stderr)
     sys.exit(0)
-" 2>&1)
-    COMPAT_EXIT=$?
 
-    if [ $COMPAT_EXIT -ne 0 ]; then
-        echo "$COMPAT_RESULT"
-        if [[ "$*" == *"--force"* ]]; then
-            print_warning "Proceeding despite incompatibilities (--force flag)"
+with target_config.open() as handle:
+    user_config = yaml.safe_load(handle)
+
+checker = CompatibilityChecker(
+    changelog_path=changelog_path,
+    current_version=current_version,
+    target_version=target_version,
+)
+
+report = checker.check_compatibility(user_config)
+
+if report.is_compatible:
+    print("✓ All handlers compatible with target version", file=sys.stderr)
+    sys.exit(0)
+
+print(checker.generate_user_friendly_report(report), file=sys.stderr)
+print("", file=sys.stderr)
+print("INCOMPATIBILITIES DETECTED", file=sys.stderr)
+print("", file=sys.stderr)
+print(
+    f"Your config references handlers that are incompatible with {target_version}.",
+    file=sys.stderr,
+)
+print("", file=sys.stderr)
+print("OPTIONS:", file=sys.stderr)
+print("  1. Fix config issues manually and re-run upgrade", file=sys.stderr)
+print("  2. Use --force to proceed anyway (config will be updated automatically)", file=sys.stderr)
+print("", file=sys.stderr)
+sys.exit(incompatible_status)
+COMPAT_CHECK_PY
+
+    if [ "$COMPAT_EXIT" -eq "$COMPAT_INCOMPATIBLE_STATUS" ]; then
+        # --force is accepted from either channel the old code honoured: the
+        # script's own arguments, and the UPGRADE_FLAGS env var Layer 1 sets.
+        if [[ "$*" == *"--force"* ]] || [[ "${UPGRADE_FLAGS:-}" == *"--force"* ]]; then
+            print_warning "Proceeding despite incompatibilities (--force detected)"
         else
             fail_fast "Config compatibility check failed. Use --force to proceed anyway."
         fi
+    elif [ "$COMPAT_EXIT" -ne 0 ]; then
+        print_error "Config compatibility check crashed (exit $COMPAT_EXIT) - traceback above."
+        print_warning "Continuing without a compatibility verdict; review $TARGET_CONFIG after the upgrade."
     fi
 fi
 
@@ -437,108 +471,147 @@ fi
 if [ -f "$TARGET_CONFIG" ] && [ -f "$OLD_DEFAULT_CONFIG" ] && [ -f "$VENV_PYTHON" ]; then
     print_info "Analyzing config for breaking changes..."
 
-    # Run config diff analyzer
-    DIFF_RESULT=$("$SCRIPT_DIR/install/config_diff_analyzer.sh" "$TARGET_CONFIG" "$OLD_DEFAULT_CONFIG" 2>&1 || echo "{}")
+    # Run config diff analyzer.
+    #
+    # Capture its STDOUT only: stdout is the JSON payload, stderr is
+    # diagnostics. The previous `2>&1` folded the two together, so a single
+    # warning line corrupted the JSON — and the `|| echo "{}"` fallback then
+    # hid that corruption behind an empty result indistinguishable from a
+    # clean "no breaking changes" run. Failures are now reported explicitly.
+    DIFF_EXIT=0
+    DIFF_RESULT=$("$SCRIPT_DIR/install/config_diff_analyzer.sh" \
+        "$TARGET_CONFIG" "$OLD_DEFAULT_CONFIG") || DIFF_EXIT=$?
 
-    # Parse diff result and detect breaking changes
-    "$VENV_PYTHON" -c "
+    if [ "$DIFF_EXIT" -ne 0 ]; then
+        print_error "config_diff_analyzer.sh failed (exit $DIFF_EXIT) - its stderr is above."
+        print_warning "Skipping breaking-changes detection; review $TARGET_CONFIG after the upgrade."
+    elif [ -z "$DIFF_RESULT" ]; then
+        print_error "config_diff_analyzer.sh produced no output - expected a JSON object on stdout."
+        print_warning "Skipping breaking-changes detection; review $TARGET_CONFIG after the upgrade."
+    else
+        # The diff JSON and the daemon dir arrive as ARGV entries, never
+        # spliced into the generated Python source: a value containing a quote
+        # used to produce a SyntaxError that the old blanket suppression at the
+        # end of this block then swallowed whole.
+        BREAKING_CHANGES_EXIT=0
+        "$VENV_PYTHON" - "$DAEMON_DIR" "$DIFF_RESULT" <<'BREAKING_CHANGES_PY' || BREAKING_CHANGES_EXIT=$?
 import json
 import sys
 from pathlib import Path
 
-try:
-    from claude_code_hooks_daemon.install.breaking_changes_detector import BreakingChangesDetector
+from claude_code_hooks_daemon.install.breaking_changes_detector import BreakingChangesDetector
 
-    changelog_path = Path('$DAEMON_DIR/CHANGELOG.md')
-    if not changelog_path.exists():
-        sys.exit(0)
+daemon_dir = Path(sys.argv[1])
+diff_json = sys.argv[2]
 
-    # Parse diff result
-    diff_data = json.loads('''$DIFF_RESULT''')
-    removed_handlers = diff_data.get('removed', [])
-    renamed_handlers = diff_data.get('renamed', {})
+changelog_path = daemon_dir / "CHANGELOG.md"
+if not changelog_path.exists():
+    sys.exit(0)
 
-    if not removed_handlers and not renamed_handlers:
-        sys.exit(0)
+diff_data = json.loads(diff_json)
+removed_handlers = diff_data.get("removed", [])
+renamed_handlers = diff_data.get("renamed", {})
 
-    # Generate warnings for breaking changes
-    detector = BreakingChangesDetector(changelog_path)
-    warnings = detector.generate_warnings(
-        removed_handlers=removed_handlers,
-        renamed_handlers=renamed_handlers
-    )
+if not removed_handlers and not renamed_handlers:
+    sys.exit(0)
 
-    if warnings:
-        print('', file=sys.stderr)
-        print('⚠️  BREAKING CHANGES DETECTED IN CONFIG', file=sys.stderr)
-        print('=' * 70, file=sys.stderr)
-        for warning in warnings:
-            print(warning, file=sys.stderr)
-            print('', file=sys.stderr)
-        print('Your config will be automatically updated during merge.', file=sys.stderr)
-        print('Review the config after upgrade completes.', file=sys.stderr)
-        print('', file=sys.stderr)
+detector = BreakingChangesDetector(changelog_path)
+warnings = detector.generate_warnings(
+    removed_handlers=removed_handlers,
+    renamed_handlers=renamed_handlers,
+)
 
-except Exception as e:
-    print(f'WARNING: Breaking changes detection failed: {e}', file=sys.stderr)
-" || true
+if warnings:
+    print("", file=sys.stderr)
+    print("⚠️  BREAKING CHANGES DETECTED IN CONFIG", file=sys.stderr)
+    print("=" * 70, file=sys.stderr)
+    for warning in warnings:
+        print(warning, file=sys.stderr)
+        print("", file=sys.stderr)
+    print("Your config will be automatically updated during merge.", file=sys.stderr)
+    print("Review the config after upgrade completes.", file=sys.stderr)
+    print("", file=sys.stderr)
+BREAKING_CHANGES_PY
+
+        if [ "$BREAKING_CHANGES_EXIT" -ne 0 ]; then
+            print_error "Breaking-changes detection crashed (exit $BREAKING_CHANGES_EXIT) - traceback above."
+            print_warning "Continuing the upgrade; review $TARGET_CONFIG after it completes."
+        fi
+    fi
 fi
 
 # ============================================================
 # Step 5a: Upgrade guide reading enforcement
 # ============================================================
 
-# Detect version jump and list required upgrade guides
+# Detect version jump and list required upgrade guides.
+#
+# Nothing is captured here: the checker's report goes to stderr and streams
+# straight to the operator. The previous shape captured stdout+stderr into
+# GUIDE_CHECK purely to grep it for a sentinel string, which meant the
+# "REQUIRED READING" report the user was meant to act on was swallowed by the
+# capture and never printed. The sentinel is now an EXIT CODE, and every value
+# the checker needs is an ARGV entry rather than text spliced into the
+# generated Python source.
+GUIDES_FOUND_STATUS=4
+UPGRADE_GUIDES_LIST="/tmp/upgrade_guides_list.txt"
 if [ "$CURRENT_VERSION" != "unknown" ] && [ -f "$VENV_PYTHON" ]; then
     print_info "Checking for required upgrade guides..."
 
-    GUIDE_CHECK=$("$VENV_PYTHON" -c "
+    GUIDE_CHECK_EXIT=0
+    "$VENV_PYTHON" - "$DAEMON_DIR" "$CURRENT_VERSION" "$TARGET_VERSION" \
+        "$UPGRADE_GUIDES_LIST" "$GUIDES_FOUND_STATUS" <<'GUIDE_CHECK_PY' || GUIDE_CHECK_EXIT=$?
 import sys
 from pathlib import Path
 
-try:
-    from claude_code_hooks_daemon.install.upgrade_compatibility import CompatibilityChecker
+from claude_code_hooks_daemon.install.upgrade_compatibility import CompatibilityChecker
 
-    changelog_path = Path('$DAEMON_DIR/CHANGELOG.md')
-    if not changelog_path.exists():
-        sys.exit(0)
+daemon_dir = Path(sys.argv[1])
+current_version = sys.argv[2]
+target_version = sys.argv[3]
+guides_list_path = Path(sys.argv[4])
+guides_found_status = int(sys.argv[5])
 
-    checker = CompatibilityChecker(
-        changelog_path=changelog_path,
-        current_version='$CURRENT_VERSION',
-        target_version='$TARGET_VERSION'
-    )
-
-    # Get suggested upgrade guides
-    guides = checker.suggest_upgrade_guides(Path('$DAEMON_DIR'))
-
-    if not guides:
-        sys.exit(0)
-
-    print('', file=sys.stderr)
-    print('📚 REQUIRED READING: Upgrade Guides', file=sys.stderr)
-    print('=' * 70, file=sys.stderr)
-    print(f'Upgrading from v{checker.current_version} to v{checker.target_version}', file=sys.stderr)
-    print(f'You are skipping {len(guides)} intermediate version(s).', file=sys.stderr)
-    print('', file=sys.stderr)
-    print('Please review the following upgrade guides:', file=sys.stderr)
-    for guide in guides:
-        print(f'  • {guide}', file=sys.stderr)
-    print('', file=sys.stderr)
-
-    # Write guide list to temp file for bash to read
-    with open('/tmp/upgrade_guides_list.txt', 'w') as f:
-        for guide in guides:
-            f.write(str(guide) + '\n')
-
-    print('GUIDES_FOUND', file=sys.stderr)
-
-except Exception as e:
-    print(f'WARNING: Upgrade guide check failed: {e}', file=sys.stderr)
+changelog_path = daemon_dir / "CHANGELOG.md"
+if not changelog_path.exists():
     sys.exit(0)
-" 2>&1)
 
-    if echo "$GUIDE_CHECK" | grep -q "GUIDES_FOUND"; then
+checker = CompatibilityChecker(
+    changelog_path=changelog_path,
+    current_version=current_version,
+    target_version=target_version,
+)
+
+guides = checker.suggest_upgrade_guides(daemon_dir)
+
+if not guides:
+    sys.exit(0)
+
+print("", file=sys.stderr)
+print("📚 REQUIRED READING: Upgrade Guides", file=sys.stderr)
+print("=" * 70, file=sys.stderr)
+print(f"Upgrading from v{checker.current_version} to v{checker.target_version}", file=sys.stderr)
+print(f"You are skipping {len(guides)} intermediate version(s).", file=sys.stderr)
+print("", file=sys.stderr)
+print("Please review the following upgrade guides:", file=sys.stderr)
+for guide in guides:
+    print(f"  • {guide}", file=sys.stderr)
+print("", file=sys.stderr)
+
+# Hand the guide list to bash, which drives the interactive confirmation.
+with guides_list_path.open("w") as handle:
+    for guide in guides:
+        handle.write(str(guide) + "\n")
+
+sys.exit(guides_found_status)
+GUIDE_CHECK_PY
+
+    if [ "$GUIDE_CHECK_EXIT" -ne 0 ] && [ "$GUIDE_CHECK_EXIT" -ne "$GUIDES_FOUND_STATUS" ]; then
+        print_error "Upgrade-guide check crashed (exit $GUIDE_CHECK_EXIT) - traceback above."
+        print_warning "Continuing without a guide list; review $DAEMON_DIR/CLAUDE/UPGRADES/ manually."
+    fi
+
+    if [ "$GUIDE_CHECK_EXIT" -eq "$GUIDES_FOUND_STATUS" ]; then
         # Skip interactive prompt when:
         # - --skip-reading-confirmation flag is set, OR
         # - stdin is not a terminal (non-interactive mode, e.g. run by CI or Claude Code agent)
@@ -550,7 +623,7 @@ except Exception as e:
                 print_info "--skip-reading-confirmation flag detected, skipping guide confirmation"
             fi
             print_info "Review upgrade guides after upgrade: $DAEMON_DIR/CLAUDE/UPGRADES/"
-            rm -f /tmp/upgrade_guides_list.txt
+            rm -f "$UPGRADE_GUIDES_LIST"
         else
             echo ""
             echo "Have you read all upgrade guides? (yes/no/show)"
@@ -564,7 +637,7 @@ except Exception as e:
                         ;;
                     show|s|S)
                         # Display guides using pager
-                        if [ -f /tmp/upgrade_guides_list.txt ]; then
+                        if [ -f "$UPGRADE_GUIDES_LIST" ]; then
                             while IFS= read -r guide_path; do
                                 if [ -f "$guide_path" ]; then
                                     echo ""
@@ -573,7 +646,7 @@ except Exception as e:
                                     echo "========================================="
                                     ${PAGER:-less} "$guide_path"
                                 fi
-                            done < /tmp/upgrade_guides_list.txt
+                            done < "$UPGRADE_GUIDES_LIST"
                         fi
                         echo ""
                         echo "Have you read all upgrade guides? (yes/no/show)"
@@ -593,7 +666,7 @@ except Exception as e:
             done
 
             # Cleanup temp file
-            rm -f /tmp/upgrade_guides_list.txt
+            rm -f "$UPGRADE_GUIDES_LIST"
         fi
     fi
 fi
@@ -719,20 +792,22 @@ deploy_slash_commands "$PROJECT_ROOT" "$DAEMON_DIR" "normal"
 
 log_step "13" "Redeploying user-facing skills"
 
-"$VENV_PYTHON" -c "
+"$VENV_PYTHON" - "$DAEMON_DIR" "$PROJECT_ROOT" <<'SLOWPATH_SKILLS_PY'
+import sys
 from pathlib import Path
+
 from claude_code_hooks_daemon.install.skills import deploy_skills
 
-daemon_source = Path('$DAEMON_DIR')
-project_root = Path('$PROJECT_ROOT')
+daemon_source = Path(sys.argv[1])
+project_root = Path(sys.argv[2])
 
 try:
     deploy_skills(daemon_source, project_root)
-    print('✓ Skills redeployed to .claude/skills/hooks-daemon/')
+    print("✓ Skills redeployed to .claude/skills/hooks-daemon/")
 except Exception as e:
-    print(f'✗ Skill redeployment failed: {e}')
-    exit(1)
-"
+    print(f"✗ Skill redeployment failed: {e}")
+    sys.exit(1)
+SLOWPATH_SKILLS_PY
 
 # ============================================================
 # Step 13b: Redeploy the hooks-daemon bin wrapper (Plan 00192)
@@ -746,17 +821,19 @@ except Exception as e:
 
 log_step "13b" "Redeploying hooks-daemon CLI wrapper"
 
-"$VENV_PYTHON" -c "
+"$VENV_PYTHON" - "$DAEMON_DIR" <<'REDEPLOY_BIN_WRAPPER_PY'
+import sys
 from pathlib import Path
+
 from claude_code_hooks_daemon.install.bin_wrapper import deploy_bin_wrapper
 
 try:
-    target = deploy_bin_wrapper(Path('$DAEMON_DIR'))
-    print(f'✓ CLI wrapper redeployed to {target}')
+    target = deploy_bin_wrapper(Path(sys.argv[1]))
+    print(f"✓ CLI wrapper redeployed to {target}")
 except Exception as e:
-    print(f'✗ CLI wrapper redeployment failed: {e}')
-    exit(1)
-"
+    print(f"✗ CLI wrapper redeployment failed: {e}")
+    sys.exit(1)
+REDEPLOY_BIN_WRAPPER_PY
 
 # ============================================================
 # Step 14: Deploy plan workflow (config-driven SSoT — Plan 00136)
@@ -769,14 +846,16 @@ except Exception as e:
 
 log_step "14" "Deploying plan workflow (if enabled in config)"
 
-if "$VENV_PYTHON" -c "
+if "$VENV_PYTHON" - "$PROJECT_ROOT" "$TARGET_CONFIG" <<'SLOWPATH_PLAN_WORKFLOW_PY'; then
+import sys
 from pathlib import Path
+
 from claude_code_hooks_daemon.install.plan_workflow import deploy_plan_workflow_if_enabled
 
-result = deploy_plan_workflow_if_enabled(Path('$PROJECT_ROOT'), Path('$TARGET_CONFIG'))
+result = deploy_plan_workflow_if_enabled(Path(sys.argv[1]), Path(sys.argv[2]))
 for msg in result.messages:
-    print(f'  -> {msg}')
-"; then
+    print(f"  -> {msg}")
+SLOWPATH_PLAN_WORKFLOW_PY
     print_success "Plan workflow deployment complete"
 else
     print_warning "Plan workflow deployment had issues (non-fatal)"
@@ -794,16 +873,20 @@ fi
 
 log_step "14b" "Deploying + arming ccy supervisor (if a .claude/ccy/ project)"
 
-if "$VENV_PYTHON" -c "
+if "$VENV_PYTHON" - "$DAEMON_DIR" "$PROJECT_ROOT" "$TARGET_CONFIG" <<'SLOWPATH_CCY_PY'; then
+import sys
 from pathlib import Path
+
 from claude_code_hooks_daemon.install.ccy_supervisor import deploy_ccy_supervisor_if_enabled
 
-result = deploy_ccy_supervisor_if_enabled(Path('$DAEMON_DIR'), Path('$PROJECT_ROOT'), Path('$TARGET_CONFIG'))
+result = deploy_ccy_supervisor_if_enabled(
+    Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+)
 for msg in result.messages:
-    print(f'  -> {msg}')
+    print(f"  -> {msg}")
 if result.recommend_enable:
-    print('  -> TIP: set ccy.deploy_supervisor: true in .claude/hooks-daemon.yaml to keep this on')
-"; then
+    print("  -> TIP: set ccy.deploy_supervisor: true in .claude/hooks-daemon.yaml to keep this on")
+SLOWPATH_CCY_PY
     print_success "ccy supervisor deployment complete"
 else
     print_warning "ccy supervisor deployment had issues (non-fatal)"

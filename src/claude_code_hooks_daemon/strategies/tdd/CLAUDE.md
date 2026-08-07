@@ -21,7 +21,8 @@ TddEnforcementHandler (Orchestrator)
     │       │
     │       └── TddStrategy (Protocol Interface)
     │               │
-    │               │  Contract: 7 methods, structural typing
+    │               │  Contract: 7 members (2 properties + 5 methods),
+    │               │  structural typing
     │               │
     │               ├── PythonTddStrategy
     │               ├── GoTddStrategy
@@ -70,7 +71,7 @@ class TddStrategy(Protocol):
 
     def is_production_source(self, file_path: str) -> bool: ...
 
-    def should_skip(self, file_path: str) -> bool: ...
+    def should_skip(self, file_path: str, content: str = "") -> bool: ...
 
     def compute_test_filename(self, source_filename: str) -> str: ...
 
@@ -119,10 +120,14 @@ class TddStrategy(Protocol):
 - Should exclude language-specific init/config files (e.g., Python's `__init__.py`)
 - Called by handler's `matches()` to identify files that need TDD enforcement
 
-#### `should_skip(file_path: str) -> bool`
+#### `should_skip(file_path: str, content: str = "") -> bool`
 
 - Returns `True` if the file should be skipped entirely (no TDD enforcement)
 - Checks for vendor dirs, build output, virtual environments, etc.
+- The optional `content` argument enables content-based skipping where the path
+  alone is not decisive (e.g. PHP interface declarations). Strategies that do
+  not need it still MUST accept it — the parameter is part of the contract, so
+  the handler can call every strategy identically
 - Called by handler's `matches()` before any other checks
 
 #### `compute_test_filename(source_filename: str) -> str`
@@ -261,7 +266,9 @@ class [Language]TddStrategy:
         # Check source directories
         return matches_directory(file_path, _SOURCE_DIRECTORIES)
 
-    def should_skip(self, file_path: str) -> bool:
+    def should_skip(self, file_path: str, content: str = "") -> bool:
+        # Accept `content` even when unused - it is part of the Protocol contract
+        # so the handler can call every strategy with the same arguments.
         return matches_directory(file_path, _SKIP_DIRECTORIES)
 
     def compute_test_filename(self, source_filename: str) -> str:
@@ -466,7 +473,7 @@ registry.register({Language}TddStrategy())
 
 #### 6. Update registry tests
 
-Edit `tests/unit/strategies/tdd/test_registry.py`:
+Edit `tests/unit/strategies/tdd/test_tdd_strategy_registry.py`:
 
 - Add language to `test_create_default_registers_all_languages` expected list
 - Add extension test case to `test_get_strategy_returns_correct_strategy`
@@ -512,8 +519,8 @@ Edit `tests/unit/strategies/tdd/test_registry.py`:
 
 - **S** (Single Responsibility): Each strategy handles exactly one language. Handler handles only workflow. Registry handles only lookup. Common handles only shared utilities.
 - **O** (Open/Closed): Adding a language = adding a file + one registry line. Zero changes to handler, protocol, common, or other strategies.
-- **L** (Liskov Substitution): Every strategy is substitutable through the Protocol. Handler calls the same 6 methods regardless of language.
-- **I** (Interface Segregation): The Protocol has exactly 7 methods - no more. Every strategy uses all 7.
+- **L** (Liskov Substitution): Every strategy is substitutable through the Protocol. Handler uses the same 7 members regardless of language.
+- **I** (Interface Segregation): The Protocol has exactly 7 members - 2 properties (`language_name`, `extensions`) and 5 methods (`is_test_file`, `is_production_source`, `should_skip`, `compute_test_filename`, `get_acceptance_tests`) - no more. Every strategy implements all 7.
 - **D** (Dependency Inversion): Handler depends on Protocol (abstraction), not on any concrete strategy class.
 
 ### DRY
@@ -671,25 +678,28 @@ strategies/tdd/
 └── dart_strategy.py            # Dart strategy
 
 tests/unit/strategies/tdd/
-├── test_protocol.py            # Protocol conformance tests
-├── test_common.py              # Shared utility tests
-├── test_registry.py            # Registry tests
-├── test_acceptance_tests.py    # Acceptance test provision tests (127 tests)
-├── test_python_strategy.py     # Python strategy tests
-├── test_go_strategy.py         # Go strategy tests
-├── test_javascript_strategy.py # JS/TS strategy tests
-├── test_php_strategy.py        # PHP strategy tests
-├── test_rust_strategy.py       # Rust strategy tests
-├── test_java_strategy.py       # Java strategy tests
-├── test_csharp_strategy.py     # C# strategy tests
-├── test_kotlin_strategy.py     # Kotlin strategy tests
-├── test_ruby_strategy.py       # Ruby strategy tests
-├── test_swift_strategy.py      # Swift strategy tests
-└── test_dart_strategy.py       # Dart strategy tests
+├── test_protocol.py               # Protocol conformance tests
+├── test_protocol_isinstance.py    # @runtime_checkable isinstance() checks
+├── test_common.py                 # Shared utility tests
+├── test_tdd_strategy_registry.py  # Registry tests
+├── test_acceptance_tests.py       # Acceptance test provision tests
+├── test_python_strategy.py        # Python strategy tests
+├── test_go_strategy.py            # Go strategy tests
+├── test_javascript_strategy.py    # JS/TS strategy tests
+├── test_php_strategy.py           # PHP strategy tests
+├── test_rust_strategy.py          # Rust strategy tests
+├── test_java_strategy.py          # Java strategy tests
+├── test_csharp_strategy.py        # C# strategy tests
+├── test_kotlin_strategy.py        # Kotlin strategy tests
+├── test_ruby_strategy.py          # Ruby strategy tests
+├── test_swift_strategy.py         # Swift strategy tests
+└── test_dart_strategy.py          # Dart strategy tests
 ```
 
 ---
 
 **Pattern Source**: GoF Strategy Pattern adapted for Python Protocol typing
 **Languages**: 11 (Python, Go, JS/TS, PHP, Rust, Java, C#, Kotlin, Ruby, Swift, Dart)
-**Tests**: 175 strategy tests + 127 acceptance tests + 87 handler tests = 389 total
+**Tests**: counts are deliberately not recorded here - a number frozen into a
+document is stale the next time a test is added. Ask the test runner instead:
+`pytest tests/unit/strategies/tdd/ tests/unit/handlers/test_tdd_enforcement.py --collect-only -q`

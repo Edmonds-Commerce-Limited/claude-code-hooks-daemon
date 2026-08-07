@@ -1,8 +1,5 @@
 """PostClearAutoExecuteHandler - auto-execute instructions after /clear.
 
-PROTOTYPE: Testing whether injecting guidance on the first prompt of a new
-session can solve the "/clear <instruction>" idle agent problem.
-
 When users run `/clear execute plan 85`, the session clears and the text
 appears as a submitted message, but the agent often sits idle instead of
 executing. This handler detects the first prompt of a new session and
@@ -11,11 +8,10 @@ injects strong guidance to execute it immediately.
 
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 # Handler identity
-_HANDLER_ID: Final[str] = "post_clear_auto_execute"
 _HANDLER_PRIORITY: Final[int] = (
     Priority.CRITICAL_THINKING_ADVISORY - 1
 )  # Fire before critical thinking
@@ -43,7 +39,7 @@ class PostClearAutoExecuteHandler(Handler):
     def __init__(self) -> None:
         """Initialise handler."""
         super().__init__(
-            handler_id=_HANDLER_ID,
+            handler_id=HandlerID.POST_CLEAR_AUTO_EXECUTE,
             priority=_HANDLER_PRIORITY,
             terminal=False,
             tags=[HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
@@ -100,9 +96,9 @@ class PostClearAutoExecuteHandler(Handler):
                 title="Post-clear auto-execute injects guidance on first prompt",
                 command='echo "test"',
                 description=(
-                    "PROTOTYPE: Detects first prompt of new session and injects"
-                    " guidance to execute it immediately. Test by running /clear"
-                    " followed by an instruction and verifying the agent acts on it."
+                    "Detects first prompt of new session and injects guidance to"
+                    " execute it immediately. Test by running /clear followed by an"
+                    " instruction and verifying the agent acts on it."
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"POST-CLEAR INSTRUCTION DETECTED"],
