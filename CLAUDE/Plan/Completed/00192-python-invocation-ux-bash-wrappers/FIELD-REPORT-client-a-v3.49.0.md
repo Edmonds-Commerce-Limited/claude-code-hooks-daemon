@@ -2,7 +2,7 @@
 
 **Upstream:** https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon
 **Installed version:** 3.49.0
-**Reporter context:** client-a infra repo, ccy (Podman) container, project root `/workspace`.
+**Reporter context:** ClientA infra repo, ccy (Podman) container, project root `/workspace`.
 **Date filed to `untracked/`:** 2026-07-31
 
 ---

@@ -9,7 +9,7 @@
 
 ## Overview
 
-A downstream client (client-a / supplier-integration) filed a detailed bug
+A downstream client (ClientA / supplier-integration) filed a detailed bug
 report (`untracked/mac-issues/2026-06-11-macos-incompatibility.md`) showing the
 daemon is non-functional on macOS. Six defects were identified and all six
 have been reproduced/confirmed against the source. The most severe (BUG 1) is

@@ -18,8 +18,8 @@
 
 ```json
 {
-  "session_id": "b49f6c51-140e-4cd0-9827-9bb65ef504b8",
-  "transcript_path": "/root/.claude/projects/-workspace/b49f6c51-140e-4cd0-9827-9bb65ef504b8.jsonl",
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "transcript_path": "/root/.claude/projects/-workspace/00000000-0000-0000-0000-000000000000.jsonl",
   "cwd": "/workspace",
   "permission_mode": "acceptEdits",
   "hook_event_name": "PostToolUse",

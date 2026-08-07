@@ -89,6 +89,7 @@ This plan implements those principles via a single canonical bash library (`scri
 **Context**: Today the env var is read by every resolver via `${HOOKS_DAEMON_PYTHON:-python3}`. This is wrong on two counts: (a) post-bootstrap there is no need for it (the venv is canonical), (b) it composes with the `:-python3` fallback to create the diceroll Decision 6 forbids.
 
 **Decision**:
+
 - Bootstrap entry points (`skills/hooks-daemon/scripts/install.sh`, `skills/hooks-daemon/scripts/upgrade.sh`) MAY honour `HOOKS_DAEMON_PYTHON` as an explicit operator override — and only when the override interpreter passes `--version` and is `>= 3.11`. Failure = abort with directive.
 - Post-bootstrap sites (canonical library + all four shims) IGNORE `HOOKS_DAEMON_PYTHON` entirely. Existence of a venv is sufficient.
 - Enforced by static-check QA script (`scripts/qa/check_canonical_callers.sh`, see A14).
@@ -117,6 +118,7 @@ resolve_venv_dir <daemon_dir>
 ```
 
 **Constraints**:
+
 - NEVER returns the legacy unversioned path `<daemon_dir>/untracked/venv` — function refuses to emit it even if the directory exists.
 - Sources `scripts/lib/python_fingerprint.sh` from a stable path that works in both deploy locations (repo source + skill bundle).
 - Preserves the fingerprint cache `untracked/.python-cmd-cache` that `init.sh::_resolve_python_cmd` writes today.
@@ -142,12 +144,13 @@ resolve_venv_dir <daemon_dir>
 
 **Decision**:
 
-| Context | Rule |
-|---|---|
-| Bootstrap (no venv yet) | Explicitly probe in order: `python3.13`, `python3.12`, `python3.11`. Honour `HOOKS_DAEMON_PYTHON` if set AND `>= 3.11` (Decision 4). None found = FAIL FAST with directive listing the three versioned commands. **No bare `python3` invocation.** |
-| Post-bootstrap (venv exists) | Use venv `bin/python` exclusively, via the canonical library. **No env-var fallback.** **No bare `python3`.** |
+| Context                      | Rule                                                                                                                                                                                                                                               |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bootstrap (no venv yet)      | Explicitly probe in order: `python3.13`, `python3.12`, `python3.11`. Honour `HOOKS_DAEMON_PYTHON` if set AND `>= 3.11` (Decision 4). None found = FAIL FAST with directive listing the three versioned commands. **No bare `python3` invocation.** |
+| Post-bootstrap (venv exists) | Use venv `bin/python` exclusively, via the canonical library. **No env-var fallback.** **No bare `python3`.**                                                                                                                                      |
 
 **Implications**:
+
 - `skills/hooks-daemon/scripts/install.sh:40-89` (FAIL-FAST template) currently includes a `python3` step in its probe list. This step is REMOVED — replaced with a hard-fail when none of `3.13/3.12/3.11` is present.
 - Same change in `skills/hooks-daemon/scripts/upgrade.sh:86-110` (`find_compatible_python`).
 - Static-check `scripts/qa/check_canonical_callers.sh` greps the entire repo for `${[A-Z_]*:-python3}` patterns and fails CI if any are found outside the explicitly-allowed bootstrap probe block.
@@ -246,23 +249,23 @@ Reviewer Review #1 F2 established that the `tomllib` import-time crash is load-b
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-| --- | --- | --- | --- |
-| Removing the silent legacy fallback breaks pre-v3.7.0 installs | Medium | Low | v3.7.0 retired the legacy path; Plan 00100 added eager cleanup. No supported install can still be on it. Release notes for v3.9.1 explicitly call this out. |
-| Glob-based discovery picks the "wrong" venv when multiple exist on a multi-Python host | Medium | Low | Decision 2 composes expected dir from all three dimensions inline; glob is fallback only; tiebreak via venv-resident Python invocation of `paths.py`. Test 3.10 covers the multi-host hostname case explicitly. |
-| Phase 5.5 `upgrade.sh` preflight has subtle false-positives | Medium | Medium | Scope to *tracked-in-target-ref AND untracked-in-current-state* — the precise collision class. Tests include false-positive negatives (e.g. local `untracked/.gitignore` modification carrying over). |
-| Test for "deferred tomllib import" is hard to write portably (CI runs 3.13) | High | High | **Promoted from Low/High after Review #1 F2.** Two-mechanism approach: `unittest.mock.patch.dict(sys.modules, {'tomllib': None}) + importlib.reload` for unit; Docker `python:3.10-slim` for integration in Phase 5.4. The "skip if neither works" mitigation is REJECTED — the test must pass. |
-| Stripping `${HOOKS_DAEMON_PYTHON:-python3}` from bootstrap removes a documented operator override | Medium | Low | Decision 4: bootstrap STILL honours `HOOKS_DAEMON_PYTHON` when it points to a `>= 3.11` interpreter. We only strip the silent `python3` fallback, not the explicit override. |
-| Skill-bundle deploy ordering: canonical library not present when wrappers fire | High | Medium | Review #2 F10. Phase 4 Task 4.8 verifies install order; Task 5.3 contract test simulates partial-deploy failure mode and asserts wrappers fail LOUDLY (exit 6, "daemon source corrupt"). |
-| Static-check `check_canonical_callers.sh` produces false-positives in vendored code | Low | Medium | Scope to repo source paths; exclude `vendor/`, `node_modules/`, `untracked/`, and the test fixture directory. Allowlist the bootstrap probe block by exact line-anchor match. |
-| Self-install dogfooding: developer's own venv breaks while applying this plan | High | Medium | This repo IS a self-install. Document recovery in PR body: keep the existing venv working until Phase 4 Task 4.5 lands, validate `init.sh` shim against the live daemon before commit. Revert plan: `git revert` any commit that breaks `daemon-cli.sh status`. |
-| Opus review #3 surfaces a fundamental design objection | High | Low | Two reviews already amended this plan; the contract is now explicit. If review #3 returns FATAL, the plan needs structural rewrite, not patches — escalate to user. |
+| Risk                                                                                              | Impact | Probability | Mitigation                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------- | ------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Removing the silent legacy fallback breaks pre-v3.7.0 installs                                    | Medium | Low         | v3.7.0 retired the legacy path; Plan 00100 added eager cleanup. No supported install can still be on it. Release notes for v3.9.1 explicitly call this out.                                                                                                                                     |
+| Glob-based discovery picks the "wrong" venv when multiple exist on a multi-Python host            | Medium | Low         | Decision 2 composes expected dir from all three dimensions inline; glob is fallback only; tiebreak via venv-resident Python invocation of `paths.py`. Test 3.10 covers the multi-host hostname case explicitly.                                                                                 |
+| Phase 5.5 `upgrade.sh` preflight has subtle false-positives                                       | Medium | Medium      | Scope to *tracked-in-target-ref AND untracked-in-current-state* — the precise collision class. Tests include false-positive negatives (e.g. local `untracked/.gitignore` modification carrying over).                                                                                           |
+| Test for "deferred tomllib import" is hard to write portably (CI runs 3.13)                       | High   | High        | **Promoted from Low/High after Review #1 F2.** Two-mechanism approach: `unittest.mock.patch.dict(sys.modules, {'tomllib': None}) + importlib.reload` for unit; Docker `python:3.10-slim` for integration in Phase 5.4. The "skip if neither works" mitigation is REJECTED — the test must pass. |
+| Stripping `${HOOKS_DAEMON_PYTHON:-python3}` from bootstrap removes a documented operator override | Medium | Low         | Decision 4: bootstrap STILL honours `HOOKS_DAEMON_PYTHON` when it points to a `>= 3.11` interpreter. We only strip the silent `python3` fallback, not the explicit override.                                                                                                                    |
+| Skill-bundle deploy ordering: canonical library not present when wrappers fire                    | High   | Medium      | Review #2 F10. Phase 4 Task 4.8 verifies install order; Task 5.3 contract test simulates partial-deploy failure mode and asserts wrappers fail LOUDLY (exit 6, "daemon source corrupt").                                                                                                        |
+| Static-check `check_canonical_callers.sh` produces false-positives in vendored code               | Low    | Medium      | Scope to repo source paths; exclude `vendor/`, `node_modules/`, `untracked/`, and the test fixture directory. Allowlist the bootstrap probe block by exact line-anchor match.                                                                                                                   |
+| Self-install dogfooding: developer's own venv breaks while applying this plan                     | High   | Medium      | This repo IS a self-install. Document recovery in PR body: keep the existing venv working until Phase 4 Task 4.5 lands, validate `init.sh` shim against the live daemon before commit. Revert plan: `git revert` any commit that breaks `daemon-cli.sh status`.                                 |
+| Opus review #3 surfaces a fundamental design objection                                            | High   | Low         | Two reviews already amended this plan; the contract is now explicit. If review #3 returns FATAL, the plan needs structural rewrite, not patches — escalate to user.                                                                                                                             |
 
 ## Notes & Updates
 
 ### 2026-04-30 — Plan created
 
-- Field report received from downstream user during their session at /srv/example-app/checkout (snapshot in `context/2026-04-30-field-report.md`).
+- Field report received from downstream user during their session at /srv/example-app (snapshot in `context/2026-04-30-field-report.md`).
 - User explicit direction: "if we don't have python 3.11 available we need to fail fast and clear. We absolutely need to be using a single python version all the time — there should be a single source of truth for the correct python version."
 - User reaction to silent `2>/dev/null` redirect: "fuck me i hate shit like this." Endorses removal.
 

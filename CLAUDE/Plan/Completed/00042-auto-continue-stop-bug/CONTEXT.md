@@ -9,7 +9,7 @@ The `auto_continue_stop` handler is configured and enabled but FAILED to fire wh
 ### Stop Hook Fired (timestamp 2026-02-10T06:47:59)
 
 ```json
-{"type":"progress","data":{"type":"hook_progress","hookEvent":"Stop","hookName":"Stop","command":".claude/hooks/stop"},"parentToolUseID":"31bade47-30b6-402b-a0e8-29faffc59d7e","toolUseID":"31bade47-30b6-402b-a0e8-29faffc59d7e","timestamp":"2026-02-10T06:47:59.514Z"}
+{"type":"progress","data":{"type":"hook_progress","hookEvent":"Stop","hookName":"Stop","command":".claude/hooks/stop"},"parentToolUseID":"00000000-0000-0000-0000-000000000000","toolUseID":"00000000-0000-0000-0000-000000000000","timestamp":"2026-02-10T06:47:59.514Z"}
 ```
 
 ### Stop Hook Summary - NOT BLOCKED

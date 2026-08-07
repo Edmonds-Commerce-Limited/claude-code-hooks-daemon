@@ -121,13 +121,12 @@ and did not catch this. Worth understanding why.
 - [x] ✅ **Task 1.3**: Removed `2>&1` from `run_lint.sh:35`.
 - [x] ✅ **Task 1.4**: Replaced the `JSONDecodeError` swallow with a hard failure printing the
   parse error and the first 200 bytes of the corrupted capture, then `sys.exit(1)`.
-- [ ] ⬜ **Task 1.5**: Same treatment for `run_dependency_check.sh:74`,
-  `run_security_check.sh:56`, `run_smoke_test.sh:150`. Already applied (uncommitted) by the
-  Phase 5 agent's widened `audit_error_hiding.py` triage as a natural side effect (plus a 4th,
-  `run_shell_check.sh`, not in the original list) — see JOURNAL 09:05/09:34 entries. Deliberately
-  not re-touched or re-committed here to avoid duplicating/conflicting with in-flight work in
-  this shared checkout; already flagged to team-lead for dedup. Leaving unticked until that
-  lands under its rightful commit.
+- [x] ✅ **Task 1.5**: Same treatment for `run_dependency_check.sh:74`,
+  `run_security_check.sh:56`, `run_smoke_test.sh:150` — plus a 4th the original list missed,
+  `run_shell_check.sh`. Delivered by the Phase 5 agent's widened `audit_error_hiding.py` triage
+  as a natural side effect, and shipped in `24b2e918`. This is the DBF principle paying out
+  literally: nobody hand-swept for the sibling swallows; widening the *guard* surfaced all four
+  and one the humans had not listed. See JOURNAL 09:05/09:34.
 - [x] ✅ **Task 1.6**: Root cause: the auditor only recognised `$(...)`/backtick capture as risky
   stdout consumption, with no regex for a `cmd > file` redirect — exactly the shape that broke
   `run_lint.sh`. Extended `audit_capture_corruption.py` with redirect-consumption detection +

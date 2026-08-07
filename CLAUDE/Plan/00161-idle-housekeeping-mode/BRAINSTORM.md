@@ -1,7 +1,7 @@
 # Plan 00161 — Idle Housekeeping Mode: Brainstorm
 
 **Type**: Divergent ideation (Phase 1, Task 1.1)
-**Sources**: this session's transcript (`5ba5bdfc-cf08-443d-bf5d-acd43589022e.jsonl`) + repo handlers/docs. No code or config changed.
+**Sources**: this session's transcript (`00000000-0000-0000-0000-000000000000.jsonl`) + repo handlers/docs. No code or config changed.
 
 ---
 

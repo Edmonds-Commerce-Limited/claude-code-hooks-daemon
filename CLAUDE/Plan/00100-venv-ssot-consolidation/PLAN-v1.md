@@ -11,7 +11,7 @@
 
 ## Field Evidence (2026-04-23)
 
-A project agent running `/hooks-daemon upgrade` on `/srv/example-app/front` (Fedora, `python3`=3.9 incompatible, `python3.13` compatible) reported three **new** failure modes not caught by the code-review agents. See `/workspace/untracked/hooks-daemon-upgrade-problems-python-version.md` for the full timeline. The fingerprint venv dir `venv-py313-956ed987` was created correctly and the daemon eventually ran — but the upgrade script declared failure twice along the way, leaving the user to manually recover. Specifics:
+A project agent running `/hooks-daemon upgrade` on `/srv/example-app` (Fedora, `python3`=3.9 incompatible, `python3.13` compatible) reported three **new** failure modes not caught by the code-review agents. See `/workspace/untracked/hooks-daemon-upgrade-problems-python-version.md` for the full timeline. The fingerprint venv dir `venv-py313-956ed987` was created correctly and the daemon eventually ran — but the upgrade script declared failure twice along the way, leaving the user to manually recover. Specifics:
 
 - **`verify_venv` race on `uv sync` file visibility**: `uv sync` exits 0, writes `bin/python`, but the immediate `[ ! -f "$venv_python" ]` check returns "not found" under `UV_LINK_MODE=copy` on overlay/NFS/slow disk. No retry. The file was present seconds later.
 - **`restart_daemon_verified` false negative**: daemon log confirms `Daemon listening on ...daemon-host-d.sock` at 14:51:37, but the script's PID-file poll timed out fractionally earlier and declared failure. The daemon was running (confirmed PID 5323) when the script aborted.
@@ -267,7 +267,7 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
 - [ ] Phase 0: `verify_venv` retries successfully on delayed-visibility filesystems (test passes)
 - [ ] Phase 0: `restart_daemon_verified` succeeds when the daemon writes socket before PID (test passes)
 - [ ] Phase 0: Skill wrapper emits a clear pre-check error + exact `HOOKS_DAEMON_PYTHON=...` command when `python3` < 3.11, without touching daemon state
-- [ ] Phase 0: The exact scenario reported on `/srv/example-app/front` (2026-04-23) runs clean end-to-end against HEAD
+- [ ] Phase 0: The exact scenario reported on `/srv/example-app` (2026-04-23) runs clean end-to-end against HEAD
 - [ ] Grep: exactly one implementation of venv precedence lookup across the tree (Python, in `paths.py`)
 - [ ] Grep: zero production references to `untracked/venv/` as a write target
 - [ ] Grep: zero calls to `create_venv` or `recreate_venv`

@@ -29,14 +29,14 @@ canonical hash-based name resolved it.
 
 ## Environment
 
-| Item          | Value                                                                              |
-| ------------- | ---------------------------------------------------------------------------------- |
-| Project       | `/srv/example-app/product-data-api`                                |
-| Host          | `host-c`                                                                  |
-| From → To     | daemon `v3.47.0` → `v3.48.0`                                                       |
-| Python / venv | 3.13.11, `untracked/venv-srv_example-app_prod-f2c9-py313-956ed987` |
-| Runtime dir   | `/run/user/1000/`                                                                  |
-| project_hash  | `aee977c2` (`md5(abs project path)[:8]`)                                           |
+| Item          | Value                                                         |
+| ------------- | ------------------------------------------------------------- |
+| Project       | `/srv/example-app`                                            |
+| Host          | `host-c`                                                      |
+| From → To     | daemon `v3.47.0` → `v3.48.0`                                  |
+| Python / venv | 3.13.11, `untracked/venv-srv_example-app-f2c9-py313-956ed987` |
+| Runtime dir   | `/run/user/1000/`                                             |
+| project_hash  | `aee977c2` (`md5(abs project path)[:8]`)                      |
 
 ## Symptoms
 
@@ -69,7 +69,7 @@ canonical hash-based name resolved it.
 4. **Read `paths.py` (v3.48.0)** and probed it directly:
 
    - `get_project_hash(project)` → `aee977c2`
-   - `get_project_name(project)` → `product-data-api` (never `pda`)
+   - `get_project_name(project)` → `example-api` (never `pda`)
    - `get_socket_path(project)` with env unset →
      `/run/user/1000/hooks-daemon-aee977c2.sock`
 
@@ -102,9 +102,10 @@ AF_UNIX 108-byte socket-path limit. Its own comment stated:
 > Python daemon has auto-fallback to `/run/user/{uid}/` but bash init.sh does NOT.
 > Both must agree on the same path, so we set it explicitly here.
 
-At that time the hand-picked short name `-pda` (initials of `product-data-api`)
-made both sides agree. In v3.48.0 the Python side derives the relocated name
-**deterministically** from `project_hash` (`hooks-daemon-aee977c2.sock`), and
+At that time the hand-picked short name `-pda` (an ad-hoc abbreviation of the
+project name) made both sides agree. In v3.48.0 the Python side derives the
+relocated name **deterministically** from `project_hash`
+(`hooks-daemon-aee977c2.sock`), and
 `init.sh` now has its own discovery-file fallback. The hardcoded `-pda` value no
 longer matches what the Python management CLI computes, so the two halves of the
 install diverged.
@@ -120,7 +121,8 @@ Empirically verified against v3.48.0:
   (`CLAUDE_HOOKS_SOCKET_PATH="$SOCKET_PATH" … cli … start`).
 - On a first boot with no discovery file yet, `SOCKET_PATH` defaults to the
   full-length path
-  (`…/.claude/hooks-daemon/untracked/daemon-host-c.sock`, 108 chars),
+  (`…/.claude/hooks-daemon/untracked/daemon-host-c.sock`, 108 chars at the
+  project's real, deeply-nested path),
   which exceeds the AF_UNIX limit → bind would fail.
 
 So the env override is still needed to hand bash a **valid short path** — it just

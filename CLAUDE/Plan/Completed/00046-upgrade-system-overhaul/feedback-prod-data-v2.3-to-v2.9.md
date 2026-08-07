@@ -2,7 +2,7 @@
 
 **Date**: 2026-02-11
 **Environment**: Fedora 42 (Linux 6.18.7), Python 3.9.21 (system default) / Python 3.13.11 (available)
-**Project path**: `/srv/example-app/product-data-api/` (deeply nested, 57 chars)
+**Project path**: `/srv/example-app/` (redacted; the real path was deeply nested, 57 chars)
 **Upgrading from**: v2.3.0 (no venv existed, no hooks-daemon.yaml existed)
 **Upgrading to**: v2.9.0
 
@@ -90,10 +90,11 @@ fi
 
 ### 4. AF_UNIX socket path too long
 
-**What happened**: The project is at a deeply nested path:
+**What happened**: The project is at a deeply nested path (redacted below; at the
+real path the full socket path was ~110 bytes):
 
 ```
-/srv/example-app/product-data-api/.claude/hooks-daemon/untracked/daemon-host-c.sock
+/srv/example-app/.claude/hooks-daemon/untracked/daemon-host-c.sock
 ```
 
 This exceeds the Unix socket path limit (108 bytes on Linux). The daemon crashed with:

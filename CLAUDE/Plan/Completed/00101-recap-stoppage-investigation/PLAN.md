@@ -1,7 +1,7 @@
 # Plan 00101: Recap-Stoppage Investigation
 
 **Status**: Complete
-**Re-opened**: 2026-05-14 — silent stop recurred in session `2f5c600c` while
+**Re-opened**: 2026-05-14 — silent stop recurred in session `aaaaaaaa` while
 fixing `hooks-daemon-niggles.md` Issue 2. Same exact signature as the
 2026-05-12 incident (preventedContinuation=False, level=suggestion, daemon
 blocked correctly but Claude Code delivered the block as advisory context
@@ -405,7 +405,7 @@ _To be populated during Phase 3 after hypothesis validated._
 - Main thread continues Task 3.0.5 work in parallel; Phase 1.2+ of this
   plan awaits sub-agent completion
 
-### Incident — 2026-04-24 (post-compaction Task 3.3 work, session `4879d13b`)
+### Incident — 2026-04-24 (post-compaction Task 3.3 work, session `bbbbbbbb`)
 
 **Timestamp**: approximately the end of a Task 3.3 GREEN-phase loop in the
 second (post-compaction) half of the 2026-04-24 session, transcript line
@@ -486,7 +486,7 @@ is a distinct loop variant — not a silent-stop-after-Edit but a
 generates a plan to call Edit but the tool selection resolves to Read
 instead). This warrants a note in the hypothesis refinement below.
 
-### Incident — 2026-04-29 (Plan 00102 Phase 2 work, session `6c8042e2`)
+### Incident — 2026-04-29 (Plan 00102 Phase 2 work, session `cccccccc`)
 
 **Verified root cause: handler bug, not model bug.**
 
@@ -495,7 +495,7 @@ This incident, plus a live socket probe, **disproved** the prior
 `auto_continue_stop.matches()` — its re-entry guard.
 
 **Timestamp**: 2026-04-29T14:24:01Z, transcript line 1394
-(session `6c8042e2-05ca-4b1e-9553-6bfd06524bfc.jsonl`).
+(session `cccccccc-cccc-cccc-cccc-cccccccccccc.jsonl`).
 
 **Trigger sequence**:
 
@@ -579,7 +579,7 @@ matters is whether the assistant's next turn is empty/tool-only AND whether
   socket probe with `stop_hook_active=true` + empty transcript now returns
   block instead of `{}`.
 
-### Incident — 2026-04-29 (post-compaction continuation, session `6c8042e2`)
+### Incident — 2026-04-29 (post-compaction continuation, session `cccccccc`)
 
 **Same bug, same session — observed AGAIN during the very fix.** User flagged
 another silent stop after an Edit. This is the third in this session and the
@@ -605,7 +605,7 @@ should disappear.
 
 ### Incident — 2026-05-01 (silent stop after Bash exit-code-2, NEW signature)
 
-Transcript: `/root/.claude/projects/-workspace/bf5c972d-32f0-49e9-af1e-1d49db20c98e.jsonl`,
+Transcript: `/root/.claude/projects/-workspace/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee.jsonl`,
 session opened on a fresh `/clear`. User pointed at
 `untracked/hooks-daemon-upgrade-issues.md`. Two stops occurred:
 
@@ -649,13 +649,13 @@ model halted instead.
 **Status**: not yet actioned. Captured here for the next pass on
 `auto_continue_stop` heuristics.
 
-### Incident — 2026-05-12 (Plan 00086 work, session `85d0a98e`)
+### Incident — 2026-05-12 (Plan 00086 work, session `dddddddd`)
 
 **Same shape as L685/L1301/L1394, with a new discriminator.** Mid-Plan 00086
 implementation, after renaming `test_handle_write_creates_plan_folder_and_returns_deny`
 → `test_handle_write_creates_plan_folder_and_returns_allow`. Sub-agent
 `a402113c9708beaf1` (transcript-inspector) analysed lines 1657–1678 of
-session `85d0a98e-d0c4-4f3d-8b3d-c3b741a51539.jsonl`:
+session `dddddddd-dddd-dddd-dddd-dddddddddddd.jsonl`:
 
 1. **First stop (L1657–L1665)** — assistant text `"Now updating unit tests to match new ALLOW behavior:"` followed by a single `Edit`. Edit succeeded
    with no error. Zero output on the post-tool turn.
@@ -691,7 +691,7 @@ suggestion".
 
 ### Incident — 2026-05-14 (re-opens this plan; suggestion-level delivery gap unresolved)
 
-**Session**: `2f5c600c-e580-4b90-9db4-7f39ecc43ff4.jsonl`. Mid-fix on
+**Session**: `aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jsonl`. Mid-fix on
 `hooks-daemon-niggles.md` Issue 2 (adding `--count` flag to
 `daemon.cli handlers`). User flagged via "DOG FOODING ALERT — you've done
 the random stop thing again — you always seem to do it in this repo
@@ -732,7 +732,7 @@ is True. This is the **original Plan 00101 signature** (successful Edit →
 silent next turn), not the Wave 6 variant Branch 2.5 was designed for.
 
 **Match against prior signatures**: exact match to the 2026-05-12 incident
-(L1657 in session `85d0a98e`). That incident's findings (PLAN.md lines
+(L1657 in session `dddddddd`). That incident's findings (PLAN.md lines
 653–673) identified this as the **suggestion-level delivery gap**: the
 daemon returns `decision=block` correctly, but Claude Code filters it as
 advisory context for the next user turn rather than a hard blocking re-entry

@@ -56,7 +56,7 @@ Verified ground truth in a live agent shell (2026-07-31):
 | `plan-qa --sweep` via that interpreter         | works (exit 1, 1 advisory finding)                   |
 
 Independently corroborated by a field report from a **separate client install**
-(client-a infra repo, ccy/Podman, daemon v3.49.0) — see
+(ClientA infra repo, ccy/Podman, daemon v3.49.0) — see
 `FIELD-REPORT-client-a-v3.49.0.md` in this folder. That report reproduces the
 same root cause on a different layout, Python version and venv fingerprint,
 confirming this is install-independent rather than a quirk of self-install mode.

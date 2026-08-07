@@ -74,7 +74,7 @@ User-driven corrections after re-examining the fingerprint scheme against real c
 
 ## Field Evidence (2026-04-23)
 
-A project agent running `/hooks-daemon upgrade` on `/srv/example-app/front` (Fedora, `python3`=3.9 incompatible, `python3.13` compatible) reported three **new** failure modes not caught by the code-review agents. See `/workspace/untracked/hooks-daemon-upgrade-problems-python-version.md`. The fingerprint venv dir `venv-py313-956ed987` was created correctly and the daemon eventually ran — but the upgrade script declared failure twice along the way, leaving the user to manually recover:
+A project agent running `/hooks-daemon upgrade` on `/srv/example-app` (Fedora, `python3`=3.9 incompatible, `python3.13` compatible) reported three **new** failure modes not caught by the code-review agents. See `/workspace/untracked/hooks-daemon-upgrade-problems-python-version.md`. The fingerprint venv dir `venv-py313-956ed987` was created correctly and the daemon eventually ran — but the upgrade script declared failure twice along the way, leaving the user to manually recover:
 
 - **`verify_venv` race on `uv sync` file visibility**: `uv sync` exits 0, writes `bin/python`, but the immediate `[ ! -f "$venv_python" ]` check returns "not found" under `UV_LINK_MODE=copy`. The file was present seconds later. **Root cause** (v2): `UV_LINK_MODE=copy` does copy-then-rename; no post-uv `sync` call.
 - **`restart_daemon_verified` false negative**: daemon log confirms `Daemon listening on ...` at 14:51:37, but the script's PID-file poll timed out fractionally earlier. **Root cause** (v2): `cli.py:341` uses a fixed `time.sleep(0.5)` before polling — insufficient for startup overhead on slow hosts. The real bottleneck is the child's startup time (imports + config load + handler init), not the PID/socket file ordering.
@@ -534,7 +534,7 @@ Any fail → daemon surfaces actionable structured error + emits a SessionStart 
 - [ ] Phase 0: `verify_venv` succeeds on delayed-visibility filesystems without a retry loop (test passes)
 - [ ] Phase 0: `restart_daemon_verified` succeeds when daemon child takes 1200ms to write PID (test passes)
 - [ ] Phase 0: Skill wrapper emits actionable error + exact `HOOKS_DAEMON_PYTHON=...` command when `python3` < minimum, without touching daemon state
-- [ ] Phase 0: The exact scenario on `/srv/example-app/front` (2026-04-23) runs clean end-to-end against HEAD
+- [ ] Phase 0: The exact scenario on `/srv/example-app` (2026-04-23) runs clean end-to-end against HEAD
 - [ ] Phase 3: `uv.lock` committed; CI `uv lock --check` passes
 - [ ] Phase 3: Resolver falls back gracefully when persisted Python is missing (test passes)
 - [ ] Phase 3 (v3): Path slug in venv dir name — host view and container view of same project get distinct venv dirs even when Python fingerprints collide (test passes)

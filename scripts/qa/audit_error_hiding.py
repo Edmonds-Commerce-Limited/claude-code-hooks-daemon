@@ -86,7 +86,9 @@ _DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
 _SHELL_EXTENSIONS: tuple[str, ...] = (".sh", ".bash")
 
 # Matches a heredoc start line invoking python (python/python3, or a shell
-# variable whose name contains PYTHON, e.g. ${VENV_PYTHON}, ${PYTHON_BIN}).
+# variable whose name contains PYTHON, e.g. ${VENV_PYTHON}, ${PYTHON_BIN}).  # python-var-guidance-exempt: describes what the regex DETECTS, not how to invoke python
+# The marker above must sit on the offending line itself — the check is
+# line-scoped, so a nearby explanatory comment does not exempt anything.
 # Group 1: "-" for the tab-stripping <<- form, else "".
 # Group 2: the (optional) quote character wrapping the delimiter.
 # Group 3: the heredoc delimiter itself.
@@ -275,7 +277,7 @@ def extract_heredoc_python_blocks(content: str) -> list[tuple[int, str]]:
     original file (see ``audit_heredoc_python``).
 
     Only heredocs whose start line invokes python (``python``/``python3``, or
-    a shell variable containing ``PYTHON`` such as ``${VENV_PYTHON}``) are
+    a shell variable containing ``PYTHON`` such as ``${VENV_PYTHON}``) are  python-var-guidance-exempt: the shape DETECTED, not a recommendation
     extracted. A heredoc feeding some other command (``cat <<EOF``, or a
     ``while read ... done <<EOF`` loop) is left alone.
     """

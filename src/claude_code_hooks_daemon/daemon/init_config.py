@@ -130,6 +130,12 @@ class ConfigTemplate:
             "    absolute_path: {enabled: true, priority: 12}     # Require absolute paths\n"
             "    error_hiding_blocker: {enabled: true, priority: 13}  # Block error-hiding patterns (|| true, except: pass, catch(e){})\n"
             "    security_antipattern: {enabled: true, priority: 15}  # Block hardcoded secrets and injection patterns\n"
+            # Inert until configured: public_patterns defaults to empty and the
+            # secret word list defaults to a gitignored path that does not exist
+            # in a fresh project. Registered enabled anyway so that adding terms
+            # is a one-line config edit rather than also discovering the handler
+            # exists -- a guard nobody knows about protects nobody.
+            "    sensitive_content: {enabled: true, priority: 14}  # Block configured public patterns + gitignored secret word list\n"
             "    root_recursion_guard: {enabled: true, priority: 16}  # Block recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME\n"
             "    pipe_blocker: {enabled: true, priority: 15}      # Block dangerous pipe patterns\n"
             "    worktree_file_copy: {enabled: true, priority: 15}  # Prevent worktree file copies\n"

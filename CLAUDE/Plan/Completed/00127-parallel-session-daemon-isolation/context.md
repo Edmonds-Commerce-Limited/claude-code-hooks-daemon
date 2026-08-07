@@ -147,8 +147,8 @@ in PLAN.md Phase 4. Marker paths must be env-overridable (mirroring the existing
 
 ### Real LXC signals captured (host-a, 2026-06-17)
 
-Run on a genuine **unprivileged LXC/LXD container, cgroup v2** (a UK web server
-running Claude Code), as a **non-root** user (`balli`):
+Run on a genuine **unprivileged LXC/LXD container, cgroup v2** (a remote web
+server running Claude Code), as a **non-root** user:
 
 | Signal                                                            | Result                                 | Usable            |
 | ----------------------------------------------------------------- | -------------------------------------- | ----------------- |

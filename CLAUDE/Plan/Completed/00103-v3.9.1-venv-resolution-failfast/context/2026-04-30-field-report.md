@@ -1,9 +1,8 @@
 # Hooks Daemon — Instability & v3.9.0 Upgrade Report
 
 Generated: 2026-04-30 (during session `00000000-0000-0000-0000-000000000000`)
-Project: `/srv/example-app/checkout`
+Project: `/srv/example-app`
 Daemon version: was `v3.8.2`, now `v3.9.0`
-Transcript source: `/home/user/.claude/projects/-var-www-vhosts-green-checkout/00000000-0000-0000-0000-000000000000.jsonl`
 
 ## TL;DR
 
@@ -66,7 +65,7 @@ Manual restart output:
 Daemon not running
 Daemon not running
 Daemon started successfully (PID: 76955)
-Socket: /srv/example-app/checkout/.claude/hooks-daemon/untracked/daemon-host-b.sock
+Socket: /srv/example-app/.claude/hooks-daemon/untracked/daemon-host-b.sock
 ```
 
 The `Daemon not running` × 2 confirms the prior process had vanished — this wasn't a "stuck socket" or hung process; it was a true exit.
@@ -81,18 +80,18 @@ After v3.9.0 was deployed and the daemon was confirmed running, both diagnostic 
 
 ```text
 $ bash .claude/skills/hooks-daemon/scripts/health-check.sh
-❌ Python venv not found: /srv/example-app/checkout/.claude/hooks-daemon/untracked/venv/bin/python
+❌ Python venv not found: /srv/example-app/.claude/hooks-daemon/untracked/venv/bin/python
 Daemon installation may be corrupted. Try reinstalling.
 
 $ bash .claude/skills/hooks-daemon/scripts/daemon-cli.sh status
-❌ Python venv not found: /srv/example-app/checkout/.claude/hooks-daemon/untracked/venv/bin/python
+❌ Python venv not found: /srv/example-app/.claude/hooks-daemon/untracked/venv/bin/python
 Daemon installation may be corrupted. Try reinstalling.
 ```
 
 Yet `pgrep -af 'hooks_daemon|hooks-daemon'` returns:
 
 ```text
-104610 /srv/example-app/checkout/.claude/hooks-daemon/untracked/venv-py313-956ed987/bin/python -m claude_code_hooks_daemon.daemon.cli start
+104610 /srv/example-app/.claude/hooks-daemon/untracked/venv-py313-956ed987/bin/python -m claude_code_hooks_daemon.daemon.cli start
 ```
 
 …and every Bash/Read/Edit tool call in the live session is decorated with `✅ PreToolUse hook system active` / `✅ PostToolUse hook system active`. The daemon is genuinely healthy.
@@ -159,8 +158,8 @@ OK Checked out v3.9.0
 Step 2: Pre-upgrade checks
 ✗ Virtual environment Python not found:
 ✗ Venv version mismatch: have v3.8.2, need v3.9.0
-→ ensure_venv: stamp mismatch — rebuilding /srv/example-app/checkout/.claude/hooks-daemon/untracked/venv-py313-956ed987
-/srv/example-app/checkout/.claude/hooks-daemon/untracked/venv-py313-956ed987/bin/python
+→ ensure_venv: stamp mismatch — rebuilding /srv/example-app/.claude/hooks-daemon/untracked/venv-py313-956ed987
+/srv/example-app/.claude/hooks-daemon/untracked/venv-py313-956ed987/bin/python
 ✗ Virtual environment verification failed
 
 Operation aborted.
@@ -238,9 +237,9 @@ This must be present in the env Claude inherits — adding it to your shell prof
 
 ```text
 Daemon PID:      104610
-Venv path:       /srv/example-app/checkout/.claude/hooks-daemon/untracked/venv-py313-956ed987
+Venv path:       /srv/example-app/.claude/hooks-daemon/untracked/venv-py313-956ed987
 Venv python:     symlink → /usr/bin/python3.13 (Python 3.13.11)
-Socket:          /srv/example-app/checkout/.claude/hooks-daemon/untracked/daemon-host-b.sock
+Socket:          /srv/example-app/.claude/hooks-daemon/untracked/daemon-host-b.sock
 Daemon git ref:  v3.9.0 (HEAD detached)
 Skills version:  redeployed during this upgrade
 System python3:  /usr/bin/python3 → Python 3.9.21 (cannot run paths.py SSOT)

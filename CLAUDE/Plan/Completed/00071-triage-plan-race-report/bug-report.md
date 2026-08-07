@@ -106,7 +106,7 @@ After multiple failed attempts to edit the plan file, Claude:
 
 ## Environment
 
-- Claude Code running in podman container (`<project>_yolo`)
+- Claude Code running in podman container (`lts-example-project_yolo`)
 - Hooks daemon: `.claude/hooks-daemon/`
 - Plan file: `/root/.claude/plans/iterative-sauteeing-cerf.md`
 - Date: 2026-02-27
