@@ -71,8 +71,21 @@ if raw_file.exists() and raw_file.stat().st_size > 0:
             content = f.read().strip()
             if content:
                 issues_raw = json.loads(content)
-    except json.JSONDecodeError:
-        issues_raw = []
+    except json.JSONDecodeError as exc:
+        # FAIL FAST (Plan 00200 Task 1.5 / Phase 5 self-scan). This
+        # previously swallowed the error into `issues_raw = []`, which made
+        # `passed` True over an unreadable capture -- the same shape as the
+        # run_lint.sh swallow that started this plan. Genuinely-empty output
+        # is already handled by the st_size guard above, so anything
+        # non-empty and unparseable is a defect, not a clean run.
+        print(
+            "FATAL: deptry output could not be parsed as JSON. The capture "
+            "is corrupted -- something wrote to stdout alongside deptry.\n"
+            f"  parse error: {exc}\n"
+            f"  first 200 bytes: {content[:200]!r}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 # Transform to our format
 issues = []

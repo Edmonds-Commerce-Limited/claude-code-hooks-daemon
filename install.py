@@ -96,7 +96,13 @@ def _load_config_safe(project_root: Path) -> dict | None:
     try:
         with config_file.open() as f:
             return yaml.safe_load(f)
-    except Exception:
+    except (OSError, yaml.YAMLError) as exc:
+        # FAIL FAST (Plan 00200 Task 5.5): callers already treat a falsy
+        # return as "no config" and fall back to a safe default, so the
+        # return-None contract stays -- but a silent bare `except: return
+        # None` couldn't distinguish "no config" from "config exists but is
+        # malformed", which is exactly the confusing case worth a diagnostic.
+        print(f"⚠️  Could not read/parse {config_file}: {exc}", file=sys.stderr)
         return None
 
 

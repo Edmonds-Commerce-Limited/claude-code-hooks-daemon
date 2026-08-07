@@ -7,6 +7,18 @@ This script uses AST analysis to detect patterns like:
 - Returning None on errors (instead of raising)
 - Warning instead of error in critical paths
 - Empty except blocks with just logging
+- A single-statement handler that assigns a fallback value with no logging
+  and no re-raise ("silent-fallback")
+
+Scope (Plan 00200 Phase 5): this auditor originally scanned ``src/`` only,
+commented "production code only" — which left the QA scripts that IMPLEMENT
+the gates permanently exempt from the gate they enforce. That is how the
+``run_lint.sh`` ``JSONDecodeError`` swallow (fixed in ``fad60fa6``) went
+undetected: it lived in ``scripts/``, not ``src/``, AND inside Python
+embedded in a ``.sh`` heredoc, AND its shape (bare assignment, not
+pass/continue/log) had no matching rule. All three gaps are closed here —
+see ``AUDITED_DIRECTORIES``, ``AUDITED_ROOT_FILES``,
+``extract_heredoc_python_blocks``, and the ``silent-fallback`` rule below.
 
 Usage:
     python scripts/qa/audit_error_hiding.py [--fix]
@@ -18,9 +30,15 @@ Exit codes:
 
 import ast
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
+
+from claude_code_hooks_daemon.strategies.error_hiding.protocol import ErrorHidingStrategy
+from claude_code_hooks_daemon.strategies.error_hiding.shell_strategy import (
+    ShellErrorHidingStrategy,
+)
 
 # Violation types
 VIOLATION_TYPES = {
@@ -30,7 +48,60 @@ VIOLATION_TYPES = {
     "log-and-continue": "Logs error but continues execution",
     "bare-except": "Bare except clause without specific exception type",
     "warning-instead-of-error": "Uses logger.warning() for critical failures",
+    "silent-fallback": (
+        "Exception handler assigns a fallback value with no logging or "
+        "re-raise - failure becomes indistinguishable from success"
+    ),
 }
+
+# Directories audited recursively for BOTH Python (*.py) and shell (*.sh,
+# *.bash) error-hiding patterns. Widened beyond "src" in Plan 00200 Phase 5:
+# the QA scripts that implement the gates must themselves be in scope.
+AUDITED_DIRECTORIES: tuple[str, ...] = ("src", "scripts")
+
+# Root-level files (not inside an AUDITED_DIRECTORIES tree) audited
+# individually. install.py is the installer entry point; the *.sh scripts
+# are the actual bootstrap/wrapper scripts a client's shell executes.
+# (The root test_*.sh scripts formerly listed here were removed from the
+# repo as part of a concurrent repo-hygiene pass; is_file() below already
+# skips missing entries, but there is no reason to keep dead references.)
+AUDITED_ROOT_FILES: tuple[str, ...] = (
+    "install.py",
+    "daemon.sh",
+    "init.sh",
+    "install.sh",
+)
+
+_DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
+    "untracked/",
+    ".venv/",
+    "venv/",
+    "__pycache__/",
+    ".git/",
+    "build/",
+    "dist/",
+    ".eggs/",
+)
+
+_SHELL_EXTENSIONS: tuple[str, ...] = (".sh", ".bash")
+
+# Matches a heredoc start line invoking python (python/python3, or a shell
+# variable whose name contains PYTHON, e.g. ${VENV_PYTHON}, ${PYTHON_BIN}).
+# Group 1: "-" for the tab-stripping <<- form, else "".
+# Group 2: the (optional) quote character wrapping the delimiter.
+# Group 3: the heredoc delimiter itself.
+# Deliberately NOT anchored to end-of-line: a redirect commonly trails the
+# delimiter on the same line (e.g. `python3 << 'EOF' > "${OUTPUT_FILE}"`).
+_PYTHON_HEREDOC_START_RE = re.compile(
+    r"(?:\bpython3?\b|\$\{\w*PYTHON\w*\})[^\n]*?<<(-?)\s*(['\"]?)([A-Za-z_]\w*)\2"
+)
+
+# Best-effort bash function boundary detector, used only to populate the
+# "function" field on shell-pattern violations for drift-proof exclusion
+# matching (mirrors this project's `name() {` / `}` at column 0 convention,
+# see scripts/venv-include.bash). Falls back to None (module-level) when the
+# convention isn't followed — exclusions.json's "lines" matching covers that.
+_BASH_FUNCTION_START_RE = re.compile(r"^([A-Za-z_]\w*)\s*\(\)\s*\{?\s*$")
 
 
 class ErrorHidingVisitor(ast.NodeVisitor):
@@ -72,6 +143,21 @@ class ErrorHidingVisitor(ast.NodeVisitor):
                         node,
                         "silent-continue",
                         "Exception silently skipped with continue",
+                    )
+
+                # Pattern: try/except/<bare assignment> - the exception is
+                # replaced by a fallback value with no logging and no
+                # re-raise, so the caller can never distinguish "clean run"
+                # from "the check that produced this value never ran".
+                # This is the exact shape of the run_lint.sh JSONDecodeError
+                # swallow that motivated Plan 00200.
+                elif isinstance(stmt, ast.Assign):
+                    self._add_violation(
+                        node,
+                        "silent-fallback",
+                        "Exception handler assigns a fallback value with no "
+                        "logging or re-raise - failure becomes indistinguishable "
+                        "from success",
                     )
 
             # Check for log-and-continue pattern
@@ -163,20 +249,10 @@ def audit_file(filepath: Path) -> list[dict[str, Any]]:
         return []
 
 
-def audit_directory(directory: Path, exclude_patterns: list[str] | None = None) -> list[dict[str, Any]]:
+def audit_directory(
+    directory: Path, exclude_patterns: tuple[str, ...] = _DEFAULT_EXCLUDE_PATTERNS
+) -> list[dict[str, Any]]:
     """Audit all Python files in a directory."""
-    if exclude_patterns is None:
-        exclude_patterns = [
-            "untracked/",
-            ".venv/",
-            "venv/",
-            "__pycache__/",
-            ".git/",
-            "build/",
-            "dist/",
-            ".eggs/",
-        ]
-
     all_violations = []
 
     for py_file in directory.rglob("*.py"):
@@ -188,6 +264,203 @@ def audit_directory(directory: Path, exclude_patterns: list[str] | None = None) 
         all_violations.extend(violations)
 
     return all_violations
+
+
+def extract_heredoc_python_blocks(content: str) -> list[tuple[int, str]]:
+    """Find python-invocation heredocs in shell source; return their bodies.
+
+    Each result is ``(body_start_line, source)`` where ``body_start_line`` is
+    the 1-based line number of the FIRST line of the heredoc body within
+    ``content`` — callers use it to offset AST line numbers back onto the
+    original file (see ``audit_heredoc_python``).
+
+    Only heredocs whose start line invokes python (``python``/``python3``, or
+    a shell variable containing ``PYTHON`` such as ``${VENV_PYTHON}``) are
+    extracted. A heredoc feeding some other command (``cat <<EOF``, or a
+    ``while read ... done <<EOF`` loop) is left alone.
+    """
+    lines = content.splitlines()
+    blocks: list[tuple[int, str]] = []
+    total = len(lines)
+    i = 0
+    while i < total:
+        match = _PYTHON_HEREDOC_START_RE.search(lines[i])
+        if match is None:
+            i += 1
+            continue
+
+        strip_leading_whitespace = match.group(1) == "-"
+        delimiter = match.group(3)
+
+        body_start_index = i + 1  # 0-based index of the first body line
+        body_lines: list[str] = []
+        j = body_start_index
+        terminated = False
+        while j < total:
+            candidate = lines[j].strip() if strip_leading_whitespace else lines[j]
+            if candidate == delimiter:
+                terminated = True
+                break
+            body_lines.append(lines[j])
+            j += 1
+
+        if terminated:
+            blocks.append((body_start_index + 1, "\n".join(body_lines)))
+            i = j + 1
+        else:
+            # Unterminated heredoc (e.g. a truncated/malformed file) — there
+            # is nothing coherent to audit; move past the start line only.
+            i += 1
+
+    return blocks
+
+
+def audit_heredoc_python(filepath: Path) -> list[dict[str, Any]]:
+    """Extract and audit Python embedded in shell heredocs (Plan 00200 Phase 5).
+
+    This closes the exact hiding place of the ``run_lint.sh``
+    ``JSONDecodeError`` swallow that motivated this plan: Python logic living
+    inside a ``python3 << 'EOF'`` heredoc in a ``.sh`` file was invisible to
+    the ``*.py``-only auditor twice over (wrong file extension, wrong
+    directory). Violations are reported against the ORIGINAL ``.sh`` file
+    with line numbers offset onto the real file, not the extracted fragment.
+    """
+    try:
+        content = filepath.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(f"could not read {filepath}: {exc}") from exc
+
+    violations: list[dict[str, Any]] = []
+    for body_start_line, source in extract_heredoc_python_blocks(content):
+        try:
+            tree = ast.parse(source, filename=str(filepath))
+        except SyntaxError:
+            # Unquoted heredocs allow shell ${VAR} interpolation inside the
+            # body, which is not valid Python until the shell expands it.
+            # Skip rather than false-positive on an unparseable fragment —
+            # audit_file() already treats a genuine SyntaxError the same way.
+            continue
+        ast.increment_lineno(tree, body_start_line - 1)
+        visitor = ErrorHidingVisitor(filepath)
+        visitor.visit(tree)
+        violations.extend(visitor.violations)
+
+    return violations
+
+
+def _enclosing_bash_function(content: str, line: int) -> str | None:
+    """Best-effort nearest-preceding ``name() {`` for a given line number.
+
+    Approximate by design: it does not track brace depth, relying instead on
+    this project's convention of closing shell functions with a bare ``}``
+    at column 0 (see scripts/venv-include.bash). Used only to populate the
+    "function" field on shell-pattern violations for drift-proof exclusion
+    matching; a violation with no function context lands at module level,
+    which exclusions.json's "lines" matching already supports.
+    """
+    lines = content.splitlines()
+    current: str | None = None
+    for lineno in lines[: max(line - 1, 0)]:
+        match = _BASH_FUNCTION_START_RE.match(lineno)
+        if match:
+            current = match.group(1)
+        elif lineno == "}":
+            current = None
+    return current
+
+
+def audit_shell_patterns(
+    filepath: Path, strategy: ErrorHidingStrategy
+) -> list[dict[str, Any]]:
+    """Scan a shell file for language-level error-hiding patterns.
+
+    Reuses ``strategy.patterns`` (Plan 00200 Phase 5 Task 5.3) instead of
+    reimplementing the regex list, so the write-time ``error_hiding_blocker``
+    handler and this batch auditor can never disagree about what counts as
+    shell error-hiding.
+    """
+    try:
+        content = filepath.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(f"could not read {filepath}: {exc}") from exc
+
+    violations: list[dict[str, Any]] = []
+    seen: set[tuple[int, str]] = set()
+    for pattern in strategy.patterns:
+        for match in re.finditer(pattern.regex, content, re.MULTILINE):
+            line = content.count("\n", 0, match.start()) + 1
+            rule = f"shell-{pattern.name}"
+            key = (line, rule)
+            if key in seen:
+                continue
+            seen.add(key)
+            violations.append(
+                {
+                    "file": str(filepath),
+                    "line": line,
+                    "function": _enclosing_bash_function(content, line),
+                    "rule": rule,
+                    "message": pattern.suggestion,
+                    "description": f"Shell error-hiding pattern ({pattern.name}): {pattern.example}",
+                }
+            )
+
+    return violations
+
+
+def collect_shell_files(
+    workspace: Path, exclude_patterns: tuple[str, ...] = _DEFAULT_EXCLUDE_PATTERNS
+) -> list[Path]:
+    """Gather every ``.sh`` / ``.bash`` file under the audited roots."""
+    files: list[Path] = []
+
+    for rel in AUDITED_DIRECTORIES:
+        directory = workspace / rel
+        if not directory.is_dir():
+            continue
+        for pattern in ("*.sh", "*.bash"):
+            for shell_file in directory.rglob(pattern):
+                if any(excl in str(shell_file) for excl in exclude_patterns):
+                    continue
+                files.append(shell_file)
+
+    for rel in AUDITED_ROOT_FILES:
+        candidate = workspace / rel
+        if candidate.suffix in _SHELL_EXTENSIONS and candidate.is_file():
+            files.append(candidate)
+
+    return sorted(files)
+
+
+def collect_python_violations(workspace: Path) -> list[dict[str, Any]]:
+    """Audit every ``.py`` file under the audited roots (dirs + root files)."""
+    violations: list[dict[str, Any]] = []
+
+    for rel in AUDITED_DIRECTORIES:
+        directory = workspace / rel
+        if directory.is_dir():
+            violations.extend(audit_directory(directory))
+
+    for rel in AUDITED_ROOT_FILES:
+        candidate = workspace / rel
+        if candidate.suffix == ".py" and candidate.is_file():
+            violations.extend(audit_file(candidate))
+
+    return violations
+
+
+def collect_shell_violations(workspace: Path) -> list[dict[str, Any]]:
+    """Audit every shell file under the audited roots: embedded Python heredocs
+    (Task 5.2) plus shell-language patterns reused from the write-time
+    handler's strategy (Task 5.3)."""
+    shell_strategy = ShellErrorHidingStrategy()
+    violations: list[dict[str, Any]] = []
+
+    for shell_file in collect_shell_files(workspace):
+        violations.extend(audit_heredoc_python(shell_file))
+        violations.extend(audit_shell_patterns(shell_file, shell_strategy))
+
+    return violations
 
 
 def format_violation_report(violations: list[dict[str, Any]]) -> str:
@@ -295,25 +568,27 @@ def main() -> int:
         print("Auditing codebase for error hiding patterns...")
         print(f"Workspace: {workspace}\n")
 
-    # Audit src/ directory (production code only)
-    src_violations = audit_directory(workspace / "src")
+    # Audit AUDITED_DIRECTORIES + AUDITED_ROOT_FILES (Plan 00200 Phase 5:
+    # widened beyond "production code only" src/, which left the QA scripts
+    # that IMPLEMENT the gates permanently exempt from the gate they enforce).
+    all_violations = collect_python_violations(workspace) + collect_shell_violations(workspace)
 
     # Apply exclusions for intentional patterns (documented in error_hiding_exclusions.json)
     script_dir = Path(__file__).parent
     exclusions = load_exclusions(script_dir)
-    src_violations = apply_exclusions(src_violations, exclusions)
+    all_violations = apply_exclusions(all_violations, exclusions)
 
     if json_mode:
         output_path = workspace / "untracked" / "qa" / "error_hiding.json"
-        write_json_output(src_violations, output_path)
+        write_json_output(all_violations, output_path)
     else:
         # Print report
-        print(format_violation_report(src_violations))
+        print(format_violation_report(all_violations))
 
     # Summary
-    if src_violations:
+    if all_violations:
         if not json_mode:
-            print(f"\n⚠️  Action Required: Fix {len(src_violations)} violation(s)")
+            print(f"\n⚠️  Action Required: Fix {len(all_violations)} violation(s)")
             print("These patterns violate FAIL FAST principles.")
         return 1
 

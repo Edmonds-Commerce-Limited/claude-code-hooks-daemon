@@ -105,7 +105,15 @@ else
         cd "$DAEMON_DIR"
         mkdir -p untracked
         echo "/untracked/" > untracked/.gitignore
-        UV_PROJECT_ENVIRONMENT="$(pwd)/untracked/venv" uv sync --project . >/dev/null 2>&1 || true
+        # Best-effort pre-warm (Plan 00200 Task 5.5): install.py below is the
+        # legacy flow's real venv setup, so a failure here isn't fatal -- but
+        # it must not be SILENT the way the previous unconditional-success
+        # suppression made it (both streams AND the exit code discarded, no
+        # trace at all). Only stdout is suppressed here; stderr still reaches
+        # the terminal so a real failure is visible in addition to the warning.
+        if ! UV_PROJECT_ENVIRONMENT="$(pwd)/untracked/venv" uv sync --project . >/dev/null; then
+            _warn "uv sync pre-warm failed in legacy install flow; continuing (install.py verifies/creates the venv)"
+        fi
         cd - >/dev/null
     fi
 

@@ -327,8 +327,13 @@ class DebugInfoGenerator:
                     )
                 self.output("```")
                 self.output()
-            except Exception:
-                pass
+            except Exception as exc:
+                # FAIL FAST (Plan 00200 Task 5.5): a bare `except: pass` here
+                # previously dropped the whole "Process Details" section with
+                # no trace of why -- silent in a tool whose entire purpose is
+                # producing a diagnostic report. Mirrors the sibling PID-read
+                # failure above (line ~286), which already surfaces its error.
+                self.output(f"Unable to determine process details: {exc}")
 
         # Configuration Files
         self.output(f"{self.BOLD}## Configuration Files{self.RESET}")

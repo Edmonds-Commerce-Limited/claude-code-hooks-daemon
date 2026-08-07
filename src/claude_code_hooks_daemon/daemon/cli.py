@@ -2971,7 +2971,14 @@ def cmd_validate_project_handlers(args: argparse.Namespace) -> int:
     config_path = project_path / ".claude" / "hooks-daemon.yaml"
     try:
         config = Config.load(config_path) if config_path.exists() else Config()
-    except Exception:
+    except Exception as exc:
+        # FAIL FAST (Plan 00200 Task 5.5): a bare `except: config = Config()`
+        # previously fell back to defaults on ANY config error -- including a
+        # malformed hooks-daemon.yaml -- with no indication, so this command
+        # could silently validate/test the WRONG project_handlers.path. Still
+        # falls back (this diagnostic command must not crash on bad config),
+        # but the reason is now visible.
+        print(f"⚠️  Could not load {config_path}, using defaults: {exc}", file=sys.stderr)
         config = Config()
 
     handlers_path = Path(config.project_handlers.path)
@@ -3080,7 +3087,14 @@ def cmd_test_project_handlers(args: argparse.Namespace) -> int:
     config_path = project_path / ".claude" / "hooks-daemon.yaml"
     try:
         config = Config.load(config_path) if config_path.exists() else Config()
-    except Exception:
+    except Exception as exc:
+        # FAIL FAST (Plan 00200 Task 5.5): a bare `except: config = Config()`
+        # previously fell back to defaults on ANY config error -- including a
+        # malformed hooks-daemon.yaml -- with no indication, so this command
+        # could silently validate/test the WRONG project_handlers.path. Still
+        # falls back (this diagnostic command must not crash on bad config),
+        # but the reason is now visible.
+        print(f"⚠️  Could not load {config_path}, using defaults: {exc}", file=sys.stderr)
         config = Config()
 
     handlers_path = Path(config.project_handlers.path)

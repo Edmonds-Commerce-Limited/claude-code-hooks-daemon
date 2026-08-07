@@ -147,8 +147,24 @@ probes = []
 for defn, raw in zip(probe_defs, raw_responses):
     try:
         response = json.loads(raw)
-    except json.JSONDecodeError:
-        response = {}
+    except json.JSONDecodeError as exc:
+        # FAIL FAST (Plan 00200 Task 1.5 / Phase 5 self-scan). This
+        # previously swallowed the error into `response = {}`, which the
+        # "stop_loop_guard" probe's check (`d.get("decision") != "block"`)
+        # then reads as a PASS against an empty dict -- the same
+        # green-gate-over-garbage shape as the run_lint.sh swallow that
+        # started this plan. `capture_hook_stdout` already returns a valid
+        # `"{}"` for the genuinely-empty-stdout case (daemon down), so
+        # reaching this branch means the hook returned non-empty content
+        # that isn't JSON -- a real anomaly, not a clean run.
+        print(
+            f"FATAL: probe {defn['name']!r} response could not be parsed as "
+            "JSON -- the daemon/hook returned something unexpected.\n"
+            f"  parse error: {exc}\n"
+            f"  raw response (first 200 bytes): {raw[:200]!r}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     passed = defn["check"](response)
     probes.append({
         "name": defn["name"],

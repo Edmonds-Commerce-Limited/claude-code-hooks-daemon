@@ -517,6 +517,246 @@
       "function": "_resolve_echd_capture_path",
       "rule": "log-and-continue",
       "reason": "Best-effort self-heal of the echd-capture helper's executable bit (e.g. a client checkout with git core.fileMode=false). A chmod OSError is logged at warning level, never swallowed, and the resolver degrades to returning None so the caller falls back to the temp-file guidance rather than crashing a pipe-block message. Same fail-open contract as handlers/status_line/context_sidecar.py \u2014 recommending a capture helper is advisory, never a critical path."
+    },
+    {
+      "file": "handlers/pre_tool_use/pipe_blocker.py",
+      "function": "_resolve_echd_capture_path",
+      "rule": "silent-fallback",
+      "reason": "Plan 00200 Task 5.4: try/except RuntimeError around ProjectContext.daemon_untracked_dir(), falling back to None. Documented inline as 'an expected branch, not an error' (ProjectContext not initialised: default-config/standalone entry point/unit tests). The caller already handles None by falling back to temp-file guidance."
+    },
+    {
+      "file": "handlers/pre_tool_use/tdd_enforcement.py",
+      "function": "_map_fallback_test_path",
+      "rule": "silent-fallback",
+      "reason": "Plan 00200 Task 5.4: path_parts.index(\"controller\") raising ValueError when \"controller\" is absent is the EXPECTED case for a fallback path mapper (most source trees don't have a controller/ segment), not a bug -- falls back to a parent-directory-derived test path."
+    },
+    {
+      "file": "handlers/pre_tool_use/sensitive_content.py",
+      "function": "_compiled_public_pattern",
+      "rule": "silent-fallback",
+      "reason": "Plan 00200 Task 5.4: re.error from compiling a client-configured public_pattern is a documented no-match (see docstring: 'A pattern that fails to compile is a documented no-match -- never crashes the handler'), cached as None so a broken client config is not re-attempted every event."
+    },
+    {
+      "file": "handlers/session_start/optimal_config_checker.py",
+      "function": "_check_max_output_tokens",
+      "rule": "silent-fallback",
+      "reason": "Plan 00200 Task 5.4: ValueError parsing the CLAUDE_CODE_MAX_OUTPUT_TOKENS env var falls back to 0, which correctly reads as 'not optimally configured' (0 < 64000 threshold) -- exactly the right advisory outcome for a garbage/empty env var, not an error being hidden."
+    },
+    {
+      "file": "handlers/status_line/daemon_stats.py",
+      "lines": [21],
+      "rule": "silent-fallback",
+      "reason": "Plan 00200 Task 5.4: module-level `try: import psutil except ImportError: psutil = None` -- the standard optional-dependency idiom. Matches this directory's documented CLAUDE.md rule #2 ('Reads are fail-silent and defensive... never raise -- see daemon_stats.py'). No function context at module scope, hence line-based match per the documented legacy-fallback convention."
+    },
+    {
+      "file": "handlers/status_line/thread_registry.py",
+      "function": "upsert_heartbeat",
+      "rule": "silent-fallback",
+      "reason": "Plan 00200 Task 5.4: reading a prior heartbeat file on the status-line hot path. Comment at the site: 'No prior heartbeat, or it was unreadable/garbled -- this render becomes first_seen. Not an error worth surfacing on the status hot path.' Matches this directory's documented fail-silent-reads convention (status_line/CLAUDE.md)."
+    },
+    {
+      "file": "handlers/user_prompt_submit/git_context_injector.py",
+      "function": "handle",
+      "rule": "silent-fallback",
+      "reason": "Plan 00200 Task 5.4: RuntimeError from ProjectContext.project_root() (daemon not initialised, e.g. running standalone) falls back to using cwd -- documented inline as the intended fallback, not a hidden error."
+    },
+    {
+      "file": "plan_qa/paths.py",
+      "function": "_outside",
+      "rule": "silent-fallback",
+      "reason": "Plan 00200 Task 5.4: Path.relative_to() raising ValueError when a path is genuinely outside the project root is the expected case for this helper (it exists specifically to describe OUTSIDE paths) -- falls back to the absolute path for messages, per the inline comment."
+    },
+    {
+      "file": "utils/cli_command.py",
+      "function": "daemon_path",
+      "rule": "silent-fallback",
+      "reason": "Plan 00200 Task 5.4: RuntimeError from daemon_root() when ProjectContext is not initialised falls back to a client-relative path segment tuple. Docstring: 'a path-builder must never take its caller down over cosmetics.'"
+    },
+    {
+      "file": "utils/cli_command.py",
+      "function": "daemon_cli_command",
+      "rule": "silent-fallback",
+      "reason": "Plan 00200 Task 5.4: same ProjectContext-not-initialised fallback as daemon_path() in this module -- a command-string builder must never crash its caller over cosmetics."
+    },
+    {
+      "file": "utils/secret_redaction.py",
+      "function": "get_cached_secret_terms",
+      "rule": "silent-fallback",
+      "reason": "Plan 00200 Task 5.4: path.stat() raising OSError for a missing secret-word-list file is cached via a documented sentinel (see docstring: 'A missing file is cached too... so repeated lookups for an absent file are a dict lookup, not a repeated stat()'). The feature is opt-in and inert until a project creates the file."
+    },
+    {
+      "file": "daemon/cli.py",
+      "function": "cmd_start",
+      "rule": "silent-fallback",
+      "reason": "Plan 00200 Task 5.4: FileNotFoundError loading an optional hooks-daemon.yaml falls back to Config() defaults -- same shape as the existing config/models.py::load_or_default exclusion above. A missing config file is the expected/common case, not an error."
+    },
+    {
+      "file": "install.py",
+      "function": "_load_config_safe",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00200 Task 5.4/5.5: documented safe-load helper (docstring: 'Safely load config file without raising exceptions... Returns: Config dict or None if loading fails'). Both call sites already treat a falsy return as 'config missing/unreadable' and fall back to a safe default. The OSError/YAMLError path now also prints a stderr diagnostic (Task 5.5), so the failure is visible even though the return-None contract itself is intentional -- same precedent as core/claude_md_injector.py::inject above."
+    },
+    {
+      "file": "install.py",
+      "function": "update_git_index_executable",
+      "rule": "silent-continue",
+      "reason": "Plan 00200 Task 5.4: ValueError from Path.relative_to() only fires when a hook_file isn't under project_root -- an expected input-filtering case (a hook file from a different tree), not a failure. The inline comment already documents why ('File not under project_root, skip'); no information is lost, the file is simply excluded from the relative_paths list being built."
+    },
+    {
+      "file": "scripts/qa/audit_error_hiding.py",
+      "function": "audit_heredoc_python",
+      "rule": "silent-continue",
+      "reason": "Plan 00200 Task 5.4: this auditor's own heredoc-extraction path. A heredoc body that fails ast.parse is most commonly an unquoted heredoc using shell variable interpolation, which is not valid Python syntax until the shell expands it -- skipped exactly like audit_file()'s existing `except SyntaxError: return []` handles the same situation for whole files."
+    },
+    {
+      "file": "scripts/qa/check_python_var_guidance.py",
+      "function": "_is_exempt_path",
+      "rule": "silent-fallback",
+      "reason": "Plan 00200 Task 5.4: Path.relative_to() raising ValueError when a path is outside the repo root falls back to using the path as-is for prefix matching -- the same relative-path-fallback shape as plan_qa/paths.py::_outside above."
+    },
+    {
+      "file": "scripts/qa/check_skill_references.py",
+      "function": "scan_directory",
+      "rule": "silent-continue",
+      "reason": "Plan 00200 Task 5.4: batch scanner over many files; an individual file's OSError (broken symlink, permission error) must not abort the whole scan. Documented inline: 'Skip unreadable files (broken symlinks, permission errors)'."
+    },
+    {
+      "file": "scripts/qa/measure_instruction_footprint.py",
+      "function": "_load_all_handler_instances",
+      "rule": "log-and-continue",
+      "reason": "Plan 00200 Task 5.4: best-effort handler discovery for a metrics/reporting script (docstring: 'Skips handlers that cannot be imported or instantiated, logging the reason'). Covers all three sites in this function (module import, attribute introspection, instantiation) -- each is logged at debug level and the scan continues with the handlers that DID load."
+    },
+    {
+      "file": "init.sh",
+      "function": "emit_hook_error",
+      "rule": "shell-&>/dev/null",
+      "reason": "Plan 00200 Task 5.4: `if command -v jq &>/dev/null; then` -- exit code is explicitly checked by the if; output is suppressed only because a tool-presence probe's own output is noise, not diagnostic content."
+    },
+    {
+      "file": "/install.sh",
+      "lines": [55, 100, 103],
+      "rule": "shell-&>/dev/null",
+      "reason": "Plan 00200 Task 5.4: `command -v uv &>/dev/null` probes inside an `if`/compound-`if` condition (legacy install flow) -- exit code explicitly checked, output suppressed because a presence probe's own output is noise. Module-level (no enclosing function in this script), hence line-based match."
+    },
+    {
+      "file": "/install.sh",
+      "lines": [83, 101],
+      "rule": "shell->/dev/null 2>&1",
+      "reason": "Plan 00200 Task 5.4: line 83 is `if ! git clone ... >/dev/null 2>&1; then _fail ...` (explicit failure handling). Line 101 is the curl-based uv installer inside a compound `if` condition, whose success is verified afterward via a fresh `command -v uv` check rather than trusting curl's own exit code -- a deliberate self-verifying fallback, not error hiding. Module-level, hence line-based match."
+    },
+    {
+      "file": "scripts/detect_location.sh",
+      "lines": [117],
+      "rule": "shell-&>/dev/null",
+      "reason": "Plan 00200 Task 5.4: `if command -v python3 &>/dev/null; then` -- exit code explicitly checked. Module-level (no enclosing function at this call site), hence line-based match."
+    },
+    {
+      "file": "scripts/install/config_preserve.sh",
+      "function": "preserve_config_for_upgrade",
+      "rule": "shell-|| true",
+      "reason": "Plan 00200 Task 5.4: wraps an embedded Python breaking-changes-documentation step. The Python code has its OWN top-level `except Exception as e: print(f'WARNING: ... failed: {e}', file=sys.stderr)`, so a failure is already visible; the outer `|| true` only stops a truly catastrophic failure (e.g. a syntax error before the try) from aborting the whole upgrade over a best-effort, purely informational step."
+    },
+    {
+      "file": "scripts/install/hooks_deploy.sh",
+      "function": "git_force_executable",
+      "rule": "shell->/dev/null 2>&1",
+      "reason": "Plan 00200 Task 5.4: `if ! git ... rev-parse --is-inside-work-tree >/dev/null 2>&1; then print_verbose \"Not a git repository, skipping...\"`. Exit code explicitly checked; comment at the site already documents why output is suppressed ('expected to fail outside git repos')."
+    },
+    {
+      "file": "scripts/install/prerequisites.sh",
+      "function": "check_git",
+      "rule": "shell-&>/dev/null",
+      "reason": "Plan 00200 Task 5.4: `command -v git &>/dev/null`-style presence probe inside an explicit if/exit-code check."
+    },
+    {
+      "file": "scripts/install/prerequisites.sh",
+      "function": "check_uv",
+      "rule": "shell-&>/dev/null",
+      "reason": "Plan 00200 Task 5.4: `command -v uv &>/dev/null`-style presence probes inside explicit if/exit-code checks (two sites in this function)."
+    },
+    {
+      "file": "scripts/install/prerequisites.sh",
+      "function": "check_uv",
+      "rule": "shell->/dev/null 2>&1",
+      "reason": "Plan 00200 Task 5.4: version-probe command inside an explicit if/exit-code check within the same function as the &>/dev/null presence probes above."
+    },
+    {
+      "file": "scripts/install/prerequisites.sh",
+      "function": "get_python_version",
+      "rule": "shell-&>/dev/null",
+      "reason": "Plan 00200 Task 5.4: interpreter presence/version probe inside an explicit if/exit-code check."
+    },
+    {
+      "file": "scripts/install/prerequisites.sh",
+      "function": "get_python_major_minor",
+      "rule": "shell-&>/dev/null",
+      "reason": "Plan 00200 Task 5.4: interpreter presence probe inside an explicit if/exit-code check."
+    },
+    {
+      "file": "scripts/install/project_detection.sh",
+      "function": "detect_install_mode",
+      "rule": "shell-&>/dev/null",
+      "reason": "Plan 00200 Task 5.4: `if ! command -v python3 &>/dev/null; then echo \"normal\"` -- exit code explicitly checked, falls back to a safe default detection result."
+    },
+    {
+      "file": "scripts/install/venv.sh",
+      "function": "verify_venv",
+      "rule": "shell->/dev/null 2>&1",
+      "reason": "Plan 00200 Task 5.4: `if ! \"$venv_python\" --version > /dev/null 2>&1; then print_error \"Virtual environment Python failed to run...\"` -- exit code explicitly checked and a specific error printed on failure."
+    },
+    {
+      "file": "scripts/install/venv.sh",
+      "function": "install_package_editable",
+      "rule": "shell->/dev/null 2>&1",
+      "reason": "Plan 00200 Task 5.4: `if $pip_cmd > /dev/null 2>&1; then print_success ...` (quiet-mode branch) -- exit code explicitly checked; the non-quiet branch (same function) runs the command with output visible."
+    },
+    {
+      "file": "scripts/qa/run_shell_check.sh",
+      "lines": [21],
+      "rule": "shell-&>/dev/null",
+      "reason": "Plan 00200 Task 5.4: `if ! command -v shellcheck &>/dev/null; then echo \"shellcheck not installed\"` -- exit code explicitly checked, specific error printed on failure. Module-level, hence line-based match."
+    },
+    {
+      "file": "scripts/upgrade.sh",
+      "lines": [352],
+      "rule": "shell-&>/dev/null",
+      "reason": "Plan 00200 Task 5.4: `git rev-parse \"$TARGET_VERSION\" &>/dev/null || _fail \"Version $TARGET_VERSION not found\"` -- explicit failure handling via `_fail`, output suppressed only because git's own \"unknown revision\" noise is not the diagnostic (the _fail message is). Module-level, hence line-based match."
+    },
+    {
+      "file": "scripts/upgrade_version.sh",
+      "lines": [319],
+      "rule": "shell-|| true",
+      "reason": "Plan 00200 Task 5.4: `run_pre_install_checks ... \"false\" || true`. The function's own documented contract (fail_on_error=false): 'returns non-zero but doesn't exit', and it already prints any warnings found. The trailing `|| true` exists only to stop `set -e` treating that documented non-fatal return as script-terminating -- the function's own visible warnings are the diagnostic, not this line."
+    },
+    {
+      "file": "scripts/upgrade_version.sh",
+      "lines": [484],
+      "rule": "shell-|| true",
+      "reason": "Plan 00200 Task 5.4: same shape as scripts/install/config_preserve.sh::preserve_config_for_upgrade -- wraps an embedded Python step with its own top-level `except Exception as e: print(f'WARNING: ... failed: {e}', file=sys.stderr)`, so failures are already visible; `|| true` only guards against a catastrophic pre-try failure aborting the whole upgrade over a best-effort documentation step."
+    },
+    {
+      "file": "scripts/upgrade_version.sh",
+      "lines": [611],
+      "rule": "shell-&>/dev/null",
+      "reason": "Plan 00200 Task 5.4: `if ! git ... rev-parse \"$TARGET_VERSION\" &>/dev/null; then fail_fast \"Version $TARGET_VERSION not found...\"` -- exit code explicitly checked, specific error printed on failure."
+    },
+    {
+      "file": "scripts/validate_worktrees.sh",
+      "lines": [126, 139],
+      "rule": "shell-|| true",
+      "reason": "Plan 00200 Task 5.4: `validate_worktree \"$wt\" || true` inside a loop -- deliberately continues validating remaining worktrees after one fails. validate_worktree() records the failure in FAILED_WTS BEFORE returning 1, and the script's own final summary exits 1 if FAILED_WTS is non-empty -- the opposite of hiding: every failure is aggregated and the overall exit code reflects it. The `|| true` exists only to stop `set -e` short-circuiting the loop on the first failure."
+    },
+    {
+      "file": "scripts/qa/check_sensitive_content.py",
+      "function": "resolve_secret_word_list_file",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00200 Task 5.4: ImportError when the daemon package isn't importable in whatever interpreter ran this QA script -- documented inline as matching audit_error_hiding.py's own precedent of importing the daemon package from a QA script (see this file's docstrings, and this exclusions file's daemon/cli.py::cmd_start entry for the general shape)."
+    },
+    {
+      "file": "scripts/qa/check_sensitive_content.py",
+      "function": "_compile_public_patterns",
+      "rule": "silent-continue",
+      "reason": "Plan 00200 Task 5.4: re.error compiling one client-configured public_pattern while building a list of several -- skips the invalid entry and continues with the rest. Same shape as handlers/pre_tool_use/sensitive_content.py::_compiled_public_pattern above."
     }
   ]
 }

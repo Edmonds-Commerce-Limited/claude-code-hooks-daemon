@@ -83,8 +83,25 @@ if raw_file.exists() and raw_file.stat().st_size > 0:
         content = raw_file.read_text().strip()
         if content:
             sc_output = json.loads(content)
-    except (json.JSONDecodeError, ValueError):
-        sc_output = []
+    except (json.JSONDecodeError, ValueError) as exc:
+        # FAIL FAST (Plan 00200 Task 1.5 / Phase 5 self-scan). This
+        # previously swallowed the error into an empty sc_output list, which
+        # made the passed flag True over an unreadable capture -- the same
+        # shape as the run_lint.sh swallow that started this plan.
+        # Genuinely-empty output is already handled by the st_size guard
+        # above, so anything non-empty and unparseable is a defect, not a
+        # clean run. (Note: this heredoc uses an UNQUOTED delimiter, so
+        # shellcheck parses these comments as shell -- no backticks/backtick
+        # command substitution here.)
+        print(
+            "FATAL: shellcheck output could not be parsed as JSON. The "
+            "capture is corrupted -- something wrote to stdout alongside "
+            "shellcheck.\n"
+            f"  parse error: {exc}\n"
+            f"  first 200 bytes: {content[:200]!r}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 severity_map = {"error": "error", "warning": "warning", "info": "info", "style": "info"}
 

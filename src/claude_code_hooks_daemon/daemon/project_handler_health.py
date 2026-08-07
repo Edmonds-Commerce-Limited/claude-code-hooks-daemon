@@ -183,7 +183,16 @@ def read_load_failures_at(untracked_dir: Path) -> ProjectHandlerHealthState:
     ]
     try:
         loaded_count = int(data.get(_KEY_LOADED_COUNT, 0))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        # Plan 00200 Task 5.5: match the visibility already given to the two
+        # parse failures above (JSON decode / non-dict payload) rather than
+        # silently defaulting the summary count to 0.
+        logger.warning(
+            "project-handler health state at %s has a malformed %s field: %s",
+            path,
+            _KEY_LOADED_COUNT,
+            exc,
+        )
         loaded_count = 0
 
     return ProjectHandlerHealthState(failures=failures, loaded_count=loaded_count)

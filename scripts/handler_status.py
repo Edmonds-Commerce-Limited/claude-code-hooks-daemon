@@ -71,8 +71,16 @@ class HandlerStatusReporter:
                     config = yaml.safe_load(f)
                     if config and config.get("daemon", {}).get("self_install_mode"):
                         return True
-            except Exception:
-                pass
+            except (OSError, yaml.YAMLError) as exc:
+                # FAIL FAST (Plan 00200 Task 5.5): a bare `except: pass` here
+                # previously hid unreadable/malformed config silently, always
+                # falling through to "client project" with no visibility.
+                # Still falls through to the same safe default below, but now
+                # the failure is surfaced instead of swallowed.
+                print(
+                    f"⚠️  Could not read/parse {self_install_config}: {exc}",
+                    file=sys.stderr,
+                )
 
         # If not self-install, it must be a client project
         # (daemon is installed at .claude/hooks-daemon/)
