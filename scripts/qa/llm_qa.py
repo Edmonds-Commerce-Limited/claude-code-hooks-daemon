@@ -123,6 +123,16 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="smoke_test.json",
         jq_hint="jq '.probes[] | {name, passed, expected, actual_decision}'",
     ),
+    "repo_hygiene": ToolConfig(
+        command=_python("check_repo_hygiene.py") + ["--json"],
+        json_file="repo_hygiene.json",
+        jq_hint="jq '.violations[] | {rule, path, message}'",
+    ),
+    "doc_truth": ToolConfig(
+        command=_python("check_doc_truth.py") + ["--json"],
+        json_file="doc_truth.json",
+        jq_hint="jq '.violations[] | {rule, file, line, message}'",
+    ),
 }
 
 ALL_TOOL_NAMES = list(TOOL_REGISTRY)
@@ -214,6 +224,16 @@ def _summarize_python_var_guidance(data: dict) -> str:
     return f"{total} violations"
 
 
+def _summarize_repo_hygiene(data: dict) -> str:
+    total = data.get("summary", {}).get("total_violations", 0)
+    return f"{total} violations"
+
+
+def _summarize_doc_truth(data: dict) -> str:
+    total = data.get("summary", {}).get("total_violations", 0)
+    return f"{total} violations"
+
+
 SUMMARIZERS: dict[str, Summarizer] = {
     "magic_values": _summarize_magic_values,
     "format": _summarize_format,
@@ -229,6 +249,8 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "capture_corruption": _summarize_capture_corruption,
     "python_var_guidance": _summarize_python_var_guidance,
     "smoke_test": _summarize_smoke_test,
+    "repo_hygiene": _summarize_repo_hygiene,
+    "doc_truth": _summarize_doc_truth,
 }
 
 

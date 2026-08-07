@@ -247,7 +247,10 @@ Approved -> proceed. Issues found -> agent fixes docs, re-submit until approved.
 
 Main Claude runs: `./scripts/qa/run_all.sh`
 
-All 10 checks must pass. ANY failure = ABORT.
+Every check the script runs must pass. ANY failure = ABORT.
+
+The script is the single source of truth for which checks exist — do not
+restate the count here. It previously said "10" while the suite ran 13.
 
 ---
 

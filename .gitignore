@@ -41,6 +41,11 @@ htmlcov/
 .cache
 nosetests.xml
 coverage.xml
+# Plan 00200 Task 6.1: coverage.json leaked through the gap its siblings above
+# already covered — 1.4 MB of stale report tracked since v2.16.0.
+coverage.json
+coverage.lcov
+coverage.info
 *.cover
 *.py,cover
 .hypothesis/
@@ -108,6 +113,17 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Editor / merge / backup detritus (Plan 00200 Task 6.1).
+# `.bak.*` is load-bearing, not belt-and-braces: the daemon itself writes
+# `settings.json.bak.pre-registration-repair` at runtime
+# (utils/settings_repair.py:34), so this shape appears in real working trees
+# and would otherwise be swept in by a `git add -A`.
+*.bak
+*.bak.*
+*.orig
+*.rej
+*~
 
 # Spyder project settings
 .spyderproject

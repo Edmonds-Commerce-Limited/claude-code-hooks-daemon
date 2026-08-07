@@ -171,6 +171,26 @@ else
 fi
 echo ""
 
+echo "14. Running Repo-Hygiene Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_repo_hygiene.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Repo-hygiene check FAILED"
+else
+    echo "✅ Repo-hygiene check PASSED"
+fi
+echo ""
+
+echo "15. Running Doc-Truth Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_doc_truth.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Doc-truth check FAILED"
+else
+    echo "✅ Doc-truth check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"

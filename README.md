@@ -80,30 +80,30 @@ The daemon ships with 92 production handlers across 15 event types, covering the
 
 ### Safety (Priority 10–20)
 
-- **Destructive git blocker** — Prevents `git push --force`, `git reset --hard`, `git clean -f`, `git branch -D`
-- **Sed blocker** — Encourages the Edit tool over sed; avoids dangerous in-place edits
-- **Security antipattern blocker** — Blocks hardcoded secrets (OWASP A02) and injection patterns (OWASP A03) across 12 language strategies (Secrets, Python, JS/TS, PHP, Go, Ruby, Java, Kotlin, C#, Rust, Swift, Dart)
-- **Absolute path enforcer** — Prevents absolute paths in tool calls
-- **QA suppression blocker** — Blocks `# type: ignore`, `# noqa`, `eslint-disable`, `//nolint` across 11 languages (Python, JS, TS, PHP, Go, Rust, Java, Ruby, Kotlin, Swift, C#)
+- **Destructive git blocker** (`destructive_git`) — Prevents `git push --force`, `git reset --hard`, `git clean -f`, `git branch -D`
+- **Sed blocker** (`sed_blocker`) — Blocks `sed` used to modify files in place; the Edit tool is the safe alternative
+- **Security antipattern blocker** (`security_antipattern`) — Blocks hardcoded secrets (OWASP A02) and injection patterns (OWASP A03) across 12 language strategies (Secrets, Python, JS/TS, PHP, Go, Ruby, Java, Kotlin, C#, Rust, Swift, Dart)
+- **Absolute path enforcer** (`absolute_path`) — Requires absolute paths for `Read`/`Write`/`Edit`; blocks relative ones
+- **QA suppression blocker** (`qa_suppression`) — Blocks `# type: ignore`, `# noqa`, `eslint-disable`, `//nolint` across 11 languages (Python, JS, TS, PHP, Go, Rust, Java, Ruby, Kotlin, Swift, C#)
 
 ### Code Quality (Priority 25–35)
 
-- **TDD enforcement** — Requires test files alongside implementation; 11 language strategies
-- **ESLint disable blocker** — Prevents `@ts-ignore`, `@ts-nocheck` without justification
-- **Lock file protection** — Prevents editing generated lock files
+- **TDD enforcement** (`tdd_enforcement`) — Blocks creating a production file before its test exists; 11 language strategies
+- **ESLint on write** (`validate_eslint_on_write`) — Warns on ESLint findings in TypeScript/TSX files after a write
+- **Lock file protection** (`lock_file_edit_blocker`) — Prevents editing generated lock files
 
 ### Workflow (Priority 36–55)
 
-- **Planning enforcer** — Requires documented plans for non-trivial work
-- **Daemon restart verifier** — Blocks commits if the daemon cannot restart cleanly
-- **Pipe blocker** — Prevents expensive commands piped to `head`/`tail`
-- **Web search year** — Ensures searches include the current year
-- **Git context injector** — Adds git status to every prompt
+- **Plan workflow guidance** (`plan_workflow`) — Advises on plan structure and conventions when plan files are written
+- **Daemon restart verifier** (`daemon_restart_verifier`) — Recommends verifying a clean daemon restart before committing
+- **Pipe blocker** (`pipe_blocker`) — Prevents expensive commands piped to `head`/`tail`
+- **Web search year** (`web_search_year`) — Warns when a search query carries an outdated year
+- **Git context injector** (`git_context_injector`) — Injects current git status as context on each prompt
 
 ### Session Management
 
-- **YOLO container detection** — Identifies container environments with confidence scoring
-- **Version checker** — Alerts when the daemon is out of date
+- **YOLO container detection** (`yolo_container_detection`) — Identifies container environments from OS-level markers
+- **Version checker** (`version_check`) — Alerts when the daemon is out of date
 
 ---
 
@@ -415,7 +415,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 2. Create a feature branch
 3. Write failing tests first (TDD)
 4. Implement the feature
-5. Run `./scripts/qa/run_all.sh` — all 8 checks must pass
+5. Run `./scripts/qa/run_all.sh` — every check must pass
 6. Submit a pull request
 
 ---
