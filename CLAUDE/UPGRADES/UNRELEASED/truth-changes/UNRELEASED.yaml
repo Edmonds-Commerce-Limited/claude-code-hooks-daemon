@@ -1,0 +1,27 @@
+# NOTE: rename to v{X.Y.Z}.yaml at release time; the release skill moves it
+# into CLAUDE/UPGRADES/truth-changes/.
+version: "UNRELEASED"
+truth_changes:
+  - was: >
+      The "lint_on_edit" handler only runs a linter that is on your PATH. If it
+      reports "lint tool not found (ruff) - install to enable lint checking",
+      the tool is missing and the remedy is to install it. A project can treat
+      that message as informational.
+    now: >
+      The handler resolves a linter in the project virtualenv's "bin/"
+      directory FIRST, then falls back to PATH. A Python project keeps ruff in
+      its venv and not on PATH, so the previous behaviour meant lint-on-edit
+      was silently INERT in the normal case — including in the daemon's own
+      repository — while reporting a "not found" message that advised
+      installing software the project already had. Two consequences on upgrade:
+      (1) the guard now actually runs, so a Write/Edit that introduces a lint
+      violation is DENIED where it previously sailed through with an advisory;
+      (2) the "not found" message now names the directories that were searched,
+      so it is actionable when a tool genuinely is absent. If your project has
+      accumulated lint violations while the guard was inert, expect edits to
+      those files to start failing — that is the guard working, not a
+      regression. Fix the violations, or set
+      "handlers.post_tool_use.lint_on_edit.enabled: false" while you do.
+      A linter that cannot be found anywhere is still ADVISORY and never blocks:
+      resolution deliberately happens before execution so that "tool absent"
+      cannot be mistaken for "tool found problems".

@@ -311,7 +311,14 @@ class TestCommandOverrides:
 
     @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
     def test_default_command_override(self, mock_subprocess: MagicMock, tmp_path: Path) -> None:
-        """Test that default command can be overridden via config."""
+        """Test that default command can be overridden via config.
+
+        ``custom-lint`` does not exist on this machine, and the handler now
+        resolves a tool to a real path before running it (so venv-installed
+        linters are found rather than reported missing). The resolver is stubbed
+        to pass names through, so this test keeps exercising what it is about —
+        that the OVERRIDE is the command that runs — rather than resolution.
+        """
         handler = LintOnEditHandler()
         handler._command_overrides = {"Python": {"default": "custom-lint {file}", "extended": None}}
 
@@ -328,7 +335,8 @@ class TestCommandOverrides:
             "tool_name": "Write",
             "tool_input": {"file_path": str(test_file)},
         }
-        result = handler.handle(hook_input)
+        with patch.object(handler, "_resolve_executable", side_effect=lambda name: name):
+            result = handler.handle(hook_input)
         assert result.decision.value == "allow"
 
         # Verify custom command was used (only called once since extended is None)
@@ -338,7 +346,12 @@ class TestCommandOverrides:
 
     @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
     def test_extended_command_override(self, mock_subprocess: MagicMock, tmp_path: Path) -> None:
-        """Test that extended command can be overridden via config."""
+        """Test that extended command can be overridden via config.
+
+        Resolver stubbed for the same reason as the default-override test:
+        ``custom-shellcheck`` is not installed, and tool resolution now happens
+        before execution.
+        """
         handler = LintOnEditHandler()
         handler._command_overrides = {"Shell": {"extended": "custom-shellcheck {file}"}}
 
@@ -357,7 +370,8 @@ class TestCommandOverrides:
             "tool_name": "Write",
             "tool_input": {"file_path": str(test_file)},
         }
-        result = handler.handle(hook_input)
+        with patch.object(handler, "_resolve_executable", side_effect=lambda name: name):
+            result = handler.handle(hook_input)
         assert result.decision.value == "allow"
 
         # Should call subprocess twice (default + extended)

@@ -4,9 +4,11 @@ Uses Strategy Pattern: all language-specific logic is delegated to LintStrategy
 implementations. The handler itself has ZERO language awareness.
 """
 
+import shutil
 import subprocess  # nosec B404 - subprocess used for lint validation only (trusted tools)
+import sys
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -24,6 +26,11 @@ from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegist
 
 # Placeholder for file path in lint commands
 _FILE_PLACEHOLDER = "{file}"
+
+# Directory holding the console scripts of the environment running the daemon.
+# ``sys.executable`` is the project venv's interpreter, and a venv's ``ruff`` /
+# ``black`` / ``mypy`` entry points sit beside it. Resolved once at import.
+_INTERPRETER_BIN_DIR: Final[Path] = Path(sys.executable).parent
 
 
 class LintOnEditHandler(Handler):
@@ -159,6 +166,38 @@ class LintOnEditHandler(Handler):
         "Go": "go.mod",
     }
 
+    def _resolve_executable(self, executable: str) -> str | None:
+        """Resolve a lint tool name to a runnable path, or None if absent.
+
+        ``subprocess.run`` without a shell resolves a bare name against ``PATH``
+        only. A Python project keeps its tooling in a virtualenv, so ``ruff``
+        lives in ``<venv>/bin/ruff`` and is NOT on ``PATH`` — the daemon's own
+        repo included. Every ``.py`` edit therefore raised ``FileNotFoundError``
+        and degraded to "lint tool not found (ruff) - install to enable lint
+        checking": the guard silently inert, and the advice wrong, because ruff
+        was already installed.
+
+        Looks in the interpreter's own ``bin`` directory first (that IS the
+        project venv), then falls back to ``PATH`` for tools installed system
+        wide (``golangci-lint``, ``shellcheck``, ``phpstan``).
+
+        Returning None rather than guessing is deliberate: the caller turns it
+        into an advisory ALLOW. Invoking a missing tool some other way — e.g.
+        rewriting the command to ``python -m ruff`` — would exit NON-ZERO
+        instead of raising, and a non-zero lint result DENIES the user's edit.
+        A tool that is not installed must never block anyone.
+        """
+        # An absolute path (e.g. sys.executable in the default Python command)
+        # is already resolved; do not second-guess it.
+        if Path(executable).is_absolute():
+            return executable
+
+        candidate = _INTERPRETER_BIN_DIR / executable
+        if candidate.is_file():
+            return str(candidate)
+
+        return shutil.which(executable)
+
     def _run_lint_command(
         self, command_template: str, file_path: str, language_name: str
     ) -> HookResult | None:
@@ -187,6 +226,23 @@ class LintOnEditHandler(Handler):
         # Split command into list for subprocess
         # SECURITY: These are trusted lint tools defined in strategy constants
         command_parts = command.split()
+
+        # Resolve the executable BEFORE running it. Strategies name their tools
+        # bare (``ruff check {file}``) so they stay environment-independent; it
+        # is this handler's job to find that name in the project venv or on
+        # PATH. Without this the guard is inert wherever tooling lives in a
+        # venv, which is the normal case for a Python project.
+        resolved = self._resolve_executable(command_parts[0])
+        if resolved is None:
+            return HookResult(
+                decision=Decision.ALLOW,
+                context=[
+                    f"⚠️ {language_name} lint tool not found ({command_parts[0]}) "
+                    f"- looked in {_INTERPRETER_BIN_DIR} and on PATH. "
+                    f"Install it to enable lint checking."
+                ],
+            )
+        command_parts[0] = resolved
 
         try:
             result = subprocess.run(  # nosec B603 - lint tools are trusted, file path from hook
