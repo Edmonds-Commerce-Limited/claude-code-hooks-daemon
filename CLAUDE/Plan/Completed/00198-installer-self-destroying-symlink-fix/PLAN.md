@@ -1,6 +1,6 @@
 # Plan 00198: Installer Self-Destroying Symlink Fix
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-07
 **Owner**: joseph
 **Priority**: High
@@ -86,7 +86,7 @@ left as a landmine.
 - [x] ✅ **Task 3.1**: Full unit + integration suite green (10,838 tests).
 - [x] ✅ **Task 3.2**: `./scripts/qa/llm_qa.py all` — 14/14 PASSED.
 - [x] ✅ **Task 3.3**: `./bin/hooks-daemon restart` -> RUNNING, clean logs.
-- [ ] ⬜ **Task 3.4**: `scripts/dummy-client-repo.sh create` against the
+- [x] ✅ **Task 3.4**: `scripts/dummy-client-repo.sh create` against the
   committed fix, verify a clean client-mode install, `destroy` the fixture.
 
 ## Success Criteria
@@ -95,7 +95,7 @@ left as a landmine.
 - [x] `install.py`'s dead/dangerous slash-command deploy helper is gone.
 - [x] The same hazard class is closed in the live `scripts/install/*.sh`.
 - [x] New regression tests fail against the pre-fix code and pass after.
-- [ ] A real client-mode install still deploys cleanly.
+- [x] A real client-mode install still deploys cleanly.
 
 ## Delivery & Milestones
 
@@ -103,4 +103,9 @@ left as a landmine.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00198-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- (pending)
+- Delivered at `9afd566d` (symlink fixes, both deploy helpers, two new
+  regression suites). Client-mode verified post-delivery via
+  `scripts/dummy-client-repo.sh create`/`destroy`: clean install, daemon
+  RUNNING, `.claude/commands/` correctly absent (no source files to
+  deploy), `.claude/init.sh` deployed as a real file (normal-mode copy,
+  unaffected by the self-install symlink fix).
