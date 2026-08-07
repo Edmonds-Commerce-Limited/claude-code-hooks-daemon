@@ -2,7 +2,12 @@
 
 ## What This Is
 
-A high-performance daemon for Claude Code hooks using Unix socket IPC. Eliminates process spawn overhead (20x faster after warmup).
+A daemon for Claude Code hooks using Unix socket IPC. It replaces a cold Python
+start per hook event with a warm socket round-trip: measured at **~45 ms
+end-to-end vs ≥198 ms** for the one-shot path (**~4.4x**), of which daemon-side
+dispatch is **~1.8 ms (~100x)**. The remaining ~43 ms is the bash forwarder
+spawning `jq` and `python3`, not the daemon — see
+`CLAUDE/Plan/Completed/00154-daemon-performance-rust-vs-python-research/RESEARCH.md`.
 
 ## 🚨 CRITICAL: RELEASE WORKFLOW (ABSOLUTE REQUIREMENT)
 
