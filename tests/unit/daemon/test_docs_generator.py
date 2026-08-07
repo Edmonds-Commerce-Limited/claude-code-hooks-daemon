@@ -151,8 +151,14 @@ class TestDocsGeneratorHandlerCollection:
         assert "Priority" in output
         assert "| 10 " in output
 
-    def test_handler_table_has_behavior_column(self) -> None:
-        """Handler tables should include behavior column derived from tags."""
+    def test_handler_table_has_behaviour_column(self) -> None:
+        """Handler tables should include behaviour column derived from tags.
+
+        The header is British-spelled: the generated `.claude/HOOKS-DAEMON.md`
+        is a tracked doc, and this project ships a handler that enforces
+        British spelling on every doc write. Sixteen of the repo's own
+        American spellings came from this one column header.
+        """
         from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
 
         handler_cls = _make_handler_class(
@@ -165,7 +171,8 @@ class TestDocsGeneratorHandlerCollection:
         config = _make_config("pre_tool_use", {})
         gen = DocsGenerator(config=config, registry=registry)
         output = gen.generate_markdown()
-        assert "Behavior" in output
+        assert "Behaviour" in output
+        assert "Behavior" not in output, "the column header must not regress to US spelling"
         assert "BLOCKING" in output
 
     def test_handler_table_has_description_from_docstring(self) -> None:

@@ -1,12 +1,12 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-08-02 (v3.51.0) by `generate-docs`. Regenerate: `/workspace/bin/hooks-daemon generate-docs`
+> Generated on 2026-08-07 (v3.51.0) by `generate-docs`. Regenerate: `/workspace/bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (37 handlers)
+### PreToolUse (38 handlers)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | destructive_git | BLOCKING | Block destructive git commands that permanently destroy data |
 | 11 | daemon_location_guard | BLOCKING | Prevent agents from cd-ing into .claude/hooks-daemon and running commands |
@@ -14,6 +14,7 @@
 | 12 | absolute_path | BLOCKING | Require absolute paths for Read/Write/Edit tool file_path parameters |
 | 13 | error_hiding_blocker | BLOCKING | Block error-hiding patterns in code written via Write or Edit tools |
 | 14 | security_antipattern | BLOCKING | Block Write/Edit of files containing security antipatterns |
+| 14 | sensitive_content | BLOCKING | Block Write/Edit content matching configured public patterns or a secret word list |
 | 15 | root_recursion_guard | BLOCKING | Block recursive scanners (grep -r, find, fd, rg, ...) rooted at ``/``/home/etc |
 | 15 | worktree_file_copy | BLOCKING | Prevent copying files between worktrees and main repo |
 | 16 | curl_pipe_shell | TERMINAL | Block curl/wget piped to shell commands |
@@ -48,7 +49,7 @@
 
 ### PostToolUse (7 handlers)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | bash_error_detector | ADVISORY | Detect errors and warnings in Bash command output |
 | 20 | validate_eslint_on_write | ADVISORY | Run ESLint validation on TypeScript/TSX files after write |
@@ -60,7 +61,7 @@
 
 ### SessionStart (12 handlers)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | yolo_container_detection | ADVISORY | Detects YOLO container environments using precise OS-level container markers |
 | 50 | project_handler_load_checker | ADVISORY | Loudly alert at session start when project handlers failed to load |
@@ -77,20 +78,20 @@
 
 ### SessionEnd (1 handler)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | cleanup | NON-TERMINAL | Clean up temporary files when session ends |
 
 ### PreCompact (2 handlers)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | transcript_archiver | NON-TERMINAL | Archive conversation transcript before compaction |
 | 20 | compaction_signal | NON-TERMINAL | Write a ``<session>.compacting`` signal on PreCompact for the supervisor |
 
 ### UserPromptSubmit (4 handlers)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | git_context_injector | CONTEXT | Inject current git status as context when user submits a prompt |
 | 54 | post_clear_auto_execute | ADVISORY | Inject execution guidance on the first prompt of a new session |
@@ -99,19 +100,19 @@
 
 ### PermissionRequest (1 handler)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | auto_approve_reads | TERMINAL | Auto-approve read-only tool permission requests |
 
 ### Notification (1 handler)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | notification_logger | NON-TERMINAL | Log all notification events to a JSONL file |
 
 ### Stop (6 handlers)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | auto_continue_stop | TERMINAL | Intercept Stop events and enforce explicit stop reasons or auto-continue |
 | 20 | task_completion_checker | ADVISORY | Remind agent to verify task completion before stopping |
@@ -122,17 +123,17 @@
 
 ### SubagentStop (2 handlers)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | subagent_completion_logger | NON-TERMINAL | Log subagent completion events to a JSONL file |
 | 20 | remind_prompt_library | ADVISORY | Remind to capture successful prompts to the library |
 
 ### Status (14 handlers)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 2 | multithread_indicator | NON-TERMINAL | Show this thread's rank among live Agent-View threads (``🧵 Y/X``) |
-| 10 | model_context | NON-TERMINAL | Format model name with effort level and color-coded context percentage |
+| 10 | model_context | NON-TERMINAL | Format model name with effort level and colour-coded context percentage |
 | 11 | environment_indicator | NON-TERMINAL | Show 💻 (desktop/host) or a container icon (🐳 docker / 📦 podman / 🧊 lxc) |
 | 12 | context_sidecar | NON-TERMINAL | Write an observe-only context-state sidecar for the PTY supervisor |
 | 13 | supervisor_indicator | NON-TERMINAL | Show whether the ccy PTY supervisor is overseeing the session |
@@ -148,25 +149,25 @@
 
 ### WorktreeCreate (1 handler)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 50 | worktree_create | TERMINAL | Create a git worktree at a semantic path and return its absolute path |
 
 ### WorktreeRemove (1 handler)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 50 | worktree_remove | TERMINAL | Prune stale worktree registrations (and remove a named worktree) |
 
 ### Plugin (1 handler)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 2 | DogfoodingReminderHandler | ADVISORY | Reminds developers of dogfooding workflow and bug handling protocol |
 
 ### Project (2 handlers)
 
-| Priority | Handler | Behavior | Description |
+| Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 12 | ReleaseBlockerHandler | BLOCKING | Blocks Stop event during releases until acceptance tests complete |
 | 41 | EnforceLlmQaHandler | BLOCKING | Block run_all.sh and direct LLM agents to llm_qa.py |

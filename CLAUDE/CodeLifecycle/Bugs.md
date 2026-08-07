@@ -27,7 +27,7 @@ Rigorous process to fix bugs with confidence that they won't return.
 
    - Bug report/GitHub issue details
    - Steps to reproduce
-   - Expected vs actual behavior
+   - Expected vs actual behaviour
    - Environment details
 
 2. **Reproduce locally**:
@@ -135,7 +135,7 @@ from claude_code_hooks_daemon.core import Decision
 
 - Verify matches() and handle() alignment
 - Check Decision.ALLOW vs Decision.DENY
-- Verify terminal flag behavior
+- Verify terminal flag behaviour
 
 ## Phase 4: Regression Testing
 

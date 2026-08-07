@@ -13,7 +13,7 @@ These documents prevent shipping broken code by enforcing a complete testing pyr
 - Unit tests (TDD, 95%+ coverage)
 - Integration tests (component interactions)
 - **Daemon load verification** (catches import errors)
-- Acceptance tests (real-world behavior)
+- Acceptance tests (real-world behaviour)
 - Live testing (actual Claude Code sessions)
 
 ## Documents

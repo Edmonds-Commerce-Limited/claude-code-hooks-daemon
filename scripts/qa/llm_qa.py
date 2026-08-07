@@ -149,6 +149,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="handler_reference.json",
         jq_hint="jq '.violations[] | {rule, file, line, message}'",
     ),
+    "british_english": ToolConfig(
+        command=_python("check_british_english.py", "--json"),
+        json_file="british_english.json",
+        jq_hint="jq '.violations[] | {file, line, american, british}'",
+    ),
     # smoke_test MUST stay last: it probes the live daemon, so it belongs
     # after every static check has had its say. Pinned by
     # test_smoke_test_is_last_in_registry -- three tools were appended below
@@ -270,6 +275,11 @@ def _summarize_handler_reference(data: QaReport) -> str:
     return f"{total} violations"
 
 
+def _summarize_british_english(data: QaReport) -> str:
+    total = data.get("summary", {}).get("total_violations", 0)
+    return f"{total} violations"
+
+
 SUMMARIZERS: dict[str, Summarizer] = {
     "magic_values": _summarize_magic_values,
     "format": _summarize_format,
@@ -289,6 +299,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "doc_truth": _summarize_doc_truth,
     "sensitive_content": _summarize_sensitive_content,
     "handler_reference": _summarize_handler_reference,
+    "british_english": _summarize_british_english,
 }
 
 

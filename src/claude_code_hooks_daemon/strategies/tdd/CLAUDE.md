@@ -4,7 +4,7 @@
 **Pattern**: Strategy Pattern (GoF) with Protocol interface
 **Purpose**: Language-specific TDD enforcement with zero coupling to the handler
 
-This module is the **canonical archetype** for all language-aware strategy implementations in the hooks daemon. Any future handler that needs language-specific behavior MUST follow this pattern exactly.
+This module is the **canonical archetype** for all language-aware strategy implementations in the hooks daemon. Any future handler that needs language-specific behaviour MUST follow this pattern exactly.
 
 ---
 
@@ -299,7 +299,7 @@ class [Language]TddStrategy:
 3. **Always use `common.matches_directory()`** for directory matching - DRY
 4. **No imports from other strategies** - Each strategy is fully independent
 5. **No imports from the handler** - Strategies know nothing about handlers
-6. **No imports from LanguageConfig** - Config is config, strategy is behavior (SRP)
+6. **No imports from LanguageConfig** - Config is config, strategy is behaviour (SRP)
 7. **Class does NOT inherit from anything** - Protocol is structural, not nominal
 8. **One file per language** - Named `{language}_strategy.py`
 

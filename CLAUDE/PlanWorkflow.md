@@ -356,7 +356,7 @@ This project enforces Test-Driven Development. All implementation work must foll
 
 ### TDD Workflow
 
-1. **Red**: Write a failing test that defines the expected behavior
+1. **Red**: Write a failing test that defines the expected behaviour
 2. **Green**: Write the minimum code to make the test pass
 3. **Refactor**: Clean up the code while keeping tests green
 4. **Verify**: Run full QA suite
@@ -620,7 +620,7 @@ class [HandlerName]Handler(Handler):
         pass
 
     def handle(self, hook_input: dict) -> HookResult:
-        # Handler behavior
+        # Handler behaviour
         pass
 ```
 
@@ -708,7 +708,7 @@ class [HandlerName]Handler(Handler):
 
 ### Refactoring Plan Template
 
-Use this template when improving existing code without changing behavior.
+Use this template when improving existing code without changing behaviour.
 
 ```markdown
 # Plan XXX: Refactor [Component/Area]
@@ -923,7 +923,7 @@ When Claude Code (or other AI agents) work on this project:
     - **Haiku**: Default to Single-Threaded
 04. **Debug hook events first** - Before writing handlers:
     - Use `scripts/debug_hooks.sh` to capture event flow
-    - Analyze logs to understand what events fire
+    - Analyse logs to understand what events fire
     - See CLAUDE/DEBUGGING_HOOKS.md for complete guide
 05. **Follow TDD workflow** - Write failing tests before implementation
 06. **Update task status in real-time** as you work
@@ -959,7 +959,7 @@ Agent:
 
 1. Identify scenario ("enforce TDD", "block destructive git", etc.)
 2. **Use `scripts/debug_hooks.sh` to capture event flow**
-3. Analyze logs to determine which event type and what data is available
+3. Analyse logs to determine which event type and what data is available
 4. Write tests first (TDD)
 5. Implement handler
 6. Run QA suite

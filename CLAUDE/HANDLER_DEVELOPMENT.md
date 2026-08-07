@@ -264,9 +264,9 @@ Identify which Claude Code tools the handler works with:
 
 - `git`, `npm`, `bash`, `write`, `edit`
 
-#### Behavior Tags
+#### Behaviour Tags
 
-Describe handler behavior:
+Describe handler behaviour:
 
 - `terminal` - Stops dispatch chain
 - `non-terminal` - Allows fall-through
@@ -287,7 +287,7 @@ When creating a handler, add tags that answer:
 1. **What language?** (if applicable)
 2. **What function?** (safety, qa-enforcement, workflow, etc.)
 3. **What tool?** (if specific to git, npm, bash, etc.)
-4. **What behavior?** (terminal/non-terminal, blocking)
+4. **What behaviour?** (terminal/non-terminal, blocking)
 5. **How specific?** (generic, project-specific, ec-specific)
 
 ### Examples
@@ -426,7 +426,7 @@ class BlockingHandler(Handler):
         return HookResult(decision="deny", reason="Blocked!")
 ```
 
-**Behavior**:
+**Behaviour**:
 
 - Stops dispatch immediately
 - Decision becomes final result
@@ -448,7 +448,7 @@ class AdvisoryHandler(Handler):
         )
 ```
 
-**Behavior**:
+**Behaviour**:
 
 - Provides context/guidance
 - Allows subsequent handlers to run

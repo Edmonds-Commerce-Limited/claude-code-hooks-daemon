@@ -56,11 +56,11 @@ git commit -m "Description"
 - Keep changes focused and atomic
 - One logical change per commit
 - Don't mix refactoring with feature work
-- Update tests when changing behavior
+- Update tests when changing behaviour
 
 ### Step 2: Update Tests
 
-If you changed code behavior:
+If you changed code behaviour:
 
 - Update existing tests
 - Add new tests if needed
@@ -231,7 +231,7 @@ def handler_b():
 - [ ] Extract common patterns
 - [ ] Update all callers
 - [ ] Maintain test coverage
-- [ ] Verify behavior unchanged
+- [ ] Verify behaviour unchanged
 - [ ] Run full QA
 
 ### Documentation Updates
@@ -385,7 +385,7 @@ changes
 
 **Remember**: Even "simple" changes need:
 
-1. ✅ Tests updated (if behavior changes)
+1. ✅ Tests updated (if behaviour changes)
 2. ✅ QA suite passes
 3. ✅ **Daemon restarts successfully** ← **CRITICAL**
 4. ✅ Clear commit message

@@ -30,43 +30,23 @@ Complete quality assurance for the Claude Code Hooks Daemon consists of **three 
 ./scripts/qa/run_all.sh
 ```
 
-### The 7 Automated Checks
+### The Automated Checks
 
-1. **Magic Values Check** (`check_magic_values.py`)
+`scripts/qa/run_all.sh` is the single source of truth for **which** checks exist
+and how many. Run it, or `./scripts/qa/llm_qa.py all` for the LLM-optimised
+output, to see the current set. The notes below cover the ones with
+requirements a reader needs to know in advance; they are not the full list, and
+this section deliberately carries no count — an earlier version claimed seven
+while the runner ran considerably more.
 
-   - Detects hardcoded strings/numbers that should be constants
-   - Enforces single source of truth for all values
-   - Rules: handler names, priorities, tool names, event types, tags
-
-2. **Format Check** (Black)
-
-   - Code formatting (line length 100)
-   - Auto-fixes with `./scripts/qa/run_autofix.sh`
-
-3. **Linter** (Ruff)
-
-   - Style violations, code smells, common bugs
-   - Auto-fixes with `./scripts/qa/run_autofix.sh`
-
-4. **Type Check** (MyPy)
-
-   - Strict mode type checking
-   - All functions must have type annotations
-
-5. **Tests** (Pytest)
-
-   - Minimum 95% code coverage required
-   - Unit tests + integration tests
-
-6. **Security Check** (Bandit)
-
-   - Scans for security vulnerabilities
-   - Zero HIGH/MEDIUM/LOW issues allowed
-
-7. **Dependency Check** (Deptry)
-
-   - Missing dependencies (DEP001)
-   - Misplaced dependencies (DEP004)
+- **Magic Values** (`check_magic_values.py`) — hardcoded strings/numbers that
+  should be constants: handler names, priorities, tool names, event types, tags
+- **Format** (Black) / **Linter** (Ruff) — both auto-fix via
+  `./scripts/qa/run_autofix.sh`
+- **Type Check** (MyPy) — strict mode; every function annotated
+- **Tests** (Pytest) — **95% coverage minimum**
+- **Security** (Bandit) — zero HIGH/MEDIUM/LOW issues; only B101 is filtered
+- **Dependencies** (Deptry) — missing (DEP001) and misplaced (DEP004)
 
 ### Success Criteria
 
@@ -123,7 +103,7 @@ Verify code meets quality standards (format, lint, types, coverage, security).
 
 WORKFLOW:
 1. cd to target directory
-2. Run: ./scripts/qa/run_all.sh (all 7 checks)
+2. Run: ./scripts/qa/run_all.sh (every check it runs)
 3. Verify daemon: ./bin/hooks-daemon restart && status
 4. Check coverage: MUST be 95%+ (shown in QA output)
 5. Verify no security issues (Bandit must pass)
@@ -131,7 +111,7 @@ WORKFLOW:
 7. Report "QA verified" OR "QA failed with details"
 
 PASS CRITERIA:
-- All 7 QA checks pass (magic values, format, lint, types, tests, security, dependencies)
+- EVERY QA check the runner runs passes (it enumerates them; do not assume a count)
 - Coverage ≥ 95%
 - Daemon restarts successfully
 - No security issues
@@ -171,7 +151,7 @@ VIOLATION DETECTION:
 
 REPORT FORMAT (PASS):
 SendMessage(type="message", recipient="team-lead",
-  content="QA complete. All 7 checks pass. Coverage: XX%. Daemon restarts. Library/plugin separation verified: no violations. Ready for review.",
+  content="QA complete. All checks pass. Coverage: XX%. Daemon restarts. Library/plugin separation verified: no violations. Ready for review.",
   summary="QA verified - pass")
 
 REPORT FORMAT (FAIL):
@@ -366,7 +346,7 @@ Acceptance testing is **agentic** - AI agents execute real-world test scenarios:
 
 - Test definitions are in handler code (`get_acceptance_tests()` method)
 - Playbooks are generated fresh from code (ephemeral, never committed)
-- **AI agents execute the playbook** and validate behavior
+- **AI agents execute the playbook** and validate behaviour
 - Tests cover real-world usage scenarios
 - Triple-layer safety (echo commands, hook blocking, fail-safe arguments)
 
@@ -563,7 +543,7 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 **Required before production releases:**
 
 - ✅ New handler implementations
-- ✅ Handler behavior changes
+- ✅ Handler behaviour changes
 - ✅ Major features
 - ✅ Release candidates
 - ✅ After significant changes to core functionality

@@ -96,10 +96,10 @@ All status line handlers are **non-terminal** (`terminal=False`). They all retur
 
 #### ModelContextHandler (Priority 10)
 
-- **Purpose**: Shows model display name, effort-level signal bars, and color-coded context window usage
+- **Purpose**: Shows model display name, effort-level signal bars, and colour-coded context window usage
 - **Data source**: `hook_input["model"]["display_name"]` and `hook_input["context_window"]["used_percentage"]`
 - **Output format**: `{model} {effort_bars} | Ctx: {colored_percentage}`
-- **Color coding** (ANSI escape codes, traffic light system):
+- **Colour coding** (ANSI escape codes, traffic light system):
   - 0-40%: Green background, black text
   - 41-60%: Yellow background, black text
   - 61-80%: Orange background, black text

@@ -9,7 +9,7 @@ This document provides a complete reference for the Claude Code hooks system, co
 
 ## 1. What Are Claude Code Hooks?
 
-Hooks are user-defined shell commands (or LLM prompts) that execute at specific points in Claude Code's lifecycle. They provide **deterministic control** over Claude Code's behavior -- unlike prompt instructions that the LLM may or may not follow, hooks execute as application-level code every time their trigger conditions are met.
+Hooks are user-defined shell commands (or LLM prompts) that execute at specific points in Claude Code's lifecycle. They provide **deterministic control** over Claude Code's behaviour -- unlike prompt instructions that the LLM may or may not follow, hooks execute as application-level code every time their trigger conditions are met.
 
 ### How They Work
 
@@ -388,13 +388,13 @@ Hooks communicate back to Claude Code through two mechanisms: exit codes and JSO
 
 ### Exit Code Protocol
 
-| Exit Code | Meaning            | stdout behavior                                  | stderr behavior                      |
+| Exit Code | Meaning            | stdout behaviour                                  | stderr behaviour                      |
 | --------- | ------------------ | ------------------------------------------------ | ------------------------------------ |
 | **0**     | Success            | Parsed as JSON if valid; context for some events | Ignored                              |
 | **2**     | Blocking error     | **Ignored** (JSON not processed)                 | Used as error message, fed to Claude |
 | **Other** | Non-blocking error | Ignored                                          | Shown to user in verbose mode        |
 
-**Exit code 2 behavior by event:**
+**Exit code 2 behaviour by event:**
 
 | Event               | Effect                                         |
 | ------------------- | ---------------------------------------------- |
@@ -639,7 +639,7 @@ from claude_code_hooks_daemon.core.utils import (
 **Debug first, develop second.** Always:
 
 1. Run `./scripts/debug_hooks.sh start "scenario"` to capture real events
-2. Analyze logs to understand event flow and data
+2. Analyse logs to understand event flow and data
 3. Write failing tests (TDD red phase)
 4. Implement handler (TDD green phase)
 5. Refactor

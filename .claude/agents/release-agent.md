@@ -78,7 +78,7 @@ Run these checks in order:
 
 ### 2. Version Detection & Strategy
 
-Analyze commits since last tag to determine version bump:
+Analyse commits since last tag to determine version bump:
 
 **Semantic Versioning Rules:**
 
@@ -286,7 +286,7 @@ If any of the following detected, flag as breaking change:
 - Configuration field removed/renamed
 - API signature changed
 - Minimum version requirement changed
-- Default behavior changed (marked as BREAKING)
+- Default behaviour changed (marked as BREAKING)
 
 #### Part B: Upgrade Guide Generation
 

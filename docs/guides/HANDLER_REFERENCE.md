@@ -733,6 +733,63 @@ handlers:
 
 ---
 
+#### sensitive_content
+
+| Property       | Value               |
+| -------------- | ------------------- |
+| **Config key** | `sensitive_content` |
+| **Priority**   | 14                  |
+| **Type**       | Blocking            |
+| **Event**      | PreToolUse          |
+
+**Description:** Blocks a Write/Edit whose ADDED text matches a configured
+sensitive pattern or a term in a gitignored secret word list. Only added text
+is checked — on `Edit` that is `new_string` — so removing sensitive content is
+never blocked.
+
+Two sources, with **deliberately different disclosure rules**:
+
+- **Public patterns** (`public_patterns`) — named regexes that are safe to name.
+  The deny reason shows the pattern's name and the exact matched text, so the
+  writer can fix it directly.
+- **Secret word list** (`secret_word_list_path`) — a gitignored file of terms
+  that must never be echoed. A matched term appears nowhere: not in the deny
+  reason, not in any log, not in payload capture, not in an archived
+  transcript. The deny reason names only a position (`entry N of M in the secret word list`), which is meaningless without the gitignored file. Read
+  that file, or ask the operator — do not try to guess what matched.
+
+A missing, empty or comments-only secret file makes that source silently inert
+by design, so a checkout without the file still works.
+
+**Options:**
+
+| Option                  | Type         | Default                      | Description                                                                                                                 |
+| ----------------------- | ------------ | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `public_patterns`       | `list[dict]` | `[]`                         | Named regexes: `{name, pattern, description}`. Safe to name, so matches are reported in full.                               |
+| `secret_word_list_path` | `str`        | `.claude/block-words.secret` | Path to the gitignored term list, one per line; `#` comments ignored. Matches are reported by index only, never by content. |
+| `exclude_paths`         | `list[str]`  | `[]`                         | Gitignore-style globs exempting files from scanning. Unioned with `daemon.exclude_paths` and the built-in defaults.         |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    sensitive_content:
+      enabled: true
+      priority: 14
+      options:
+        public_patterns:
+          - name: internal-host-prefix
+            pattern: "internal\\.example\\.corp"
+            description: "Internal hostname convention — do not commit"
+        secret_word_list_path: ".claude/block-words.secret"
+```
+
+Add the secret list to `.gitignore` (`*.secret` covers it) so the terms it
+protects are never committed alongside the rule that blocks them.
+
+---
+
 #### error_hiding_blocker
 
 | Property       | Value                  |
@@ -1390,7 +1447,7 @@ handlers:
 | **Type**       | Advisory          |
 | **Event**      | PreToolUse        |
 
-**Description:** Warns about American English spellings in content files (.md, .ejs, .html, .txt). Checks for common American spellings and suggests British equivalents (e.g., "color" to "colour", "organize" to "organise"). Non-blocking -- allows the operation but adds a warning.
+**Description:** Warns about American English spellings in content files (.md, .ejs, .html, .txt). Checks for common American spellings and suggests British equivalents (e.g. `color` to `colour`, `organize` to `organise`). Non-blocking -- allows the operation but adds a warning.
 
 **Checked directories:** `private_html`, `docs`, `CLAUDE`
 

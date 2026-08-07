@@ -352,7 +352,7 @@ SendMessage(
 3. Run full test suite: `./scripts/qa/run_tests.sh`
 4. Execute acceptance tests from PLAN.md (if applicable)
 5. Test actual functionality (run commands that should trigger handler)
-6. Verify behavior matches plan's expected behavior
+6. Verify behaviour matches plan's expected behaviour
 7. Report "tests verified" or "tests failed" via `SendMessage`
 
 **You CANNOT:**
@@ -525,7 +525,7 @@ SendMessage(
 
 - Count actual test functions: `grep -c "def test_" tests/path/to/test_file.py`
 - Compare to claimed test count (if mismatch → THEATER)
-- **READ THE ACTUAL TESTS** - do they test real behavior or just existence?
+- **READ THE ACTUAL TESTS** - do they test real behaviour or just existence?
 - Example of TDD theater:
   ```python
   def test_handler_exists():
@@ -1280,7 +1280,7 @@ git status  # Confirm everything clean
 - Check if code is actually imported/used (not dead code)
 - Verify handlers are registered in config
 - **READ THE ACTUAL CODE** - don't just check files exist
-- **READ THE ACTUAL TESTS** - do they prove behavior or just exist?
+- **READ THE ACTUAL TESTS** - do they prove behaviour or just exist?
 - Verify plan goals actually achieved (not just code written)
 - Ask: "Does this deliver REAL VALUE or is it theater?"
 - Ask: "Would I accept this in code review or reject as lazy?"
@@ -1797,7 +1797,7 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] Run full test suite: `./scripts/qa/run_tests.sh`
 - [ ] Execute acceptance tests from PLAN.md
 - [ ] Test actual functionality (trigger handler)
-- [ ] Verify behavior matches plan
+- [ ] Verify behaviour matches plan
 - [ ] Report "tests verified" (pass) OR "tests failed" (reject) via `SendMessage`
 
 ### QA Agent Checklist (Gate 2)
@@ -1826,14 +1826,14 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] Ask: "Does this ACTUALLY deliver the value implied by the feature?"
 - [ ] Read PLAN.md - what value should be delivered?
 - [ ] **READ THE ACTUAL CODE** - don't just check files exist
-- [ ] **READ THE ACTUAL TESTS** - do they prove behavior or just exist?
+- [ ] **READ THE ACTUAL TESTS** - do they prove behaviour or just exist?
 - [ ] Ask: "Would I accept this in code review or reject as lazy/incomplete?"
 
 **THEATER DETECTION CHECKS**:
 
 - [ ] **Check 1 - Dead Code**: Search for imports - is code actually used in application flow?
 - [ ] **Check 2 - Config Registration**: Handler in `.claude/hooks-daemon.yaml` and active?
-- [ ] **Check 3 - TDD Theater**: Count tests (matches claims?) AND read tests (prove behavior or just exist?)
+- [ ] **Check 3 - TDD Theater**: Count tests (matches claims?) AND read tests (prove behaviour or just exist?)
 - [ ] **Check 4 - Handler Theater**: Read handler code - does it actually work correctly or just stub/lazy?
 - [ ] **Check 5 - Lazy Solution**: Is this PROPER solution or substandard workaround? Error handling? Maintainable?
 - [ ] **Check 6 - Goal Achievement**: Plan goals actually achieved (not just code written)?

@@ -253,7 +253,7 @@ Test fails → Fix with TDD → Full QA → Daemon restart → RESTART ALL TESTS
 Test in real Claude Code session:
 
 1. Trigger handler with real commands
-2. Verify blocking/advisory behavior
+2. Verify blocking/advisory behaviour
 3. Check for false positives
 4. Check for false negatives
 5. Document any edge cases found
@@ -318,7 +318,7 @@ Self-install mode is NOT representative of a real client install.
 ### 7. Live Testing
 
 - [ ] Handler tested in real Claude Code session
-- [ ] Expected behavior verified (blocks/allows correctly)
+- [ ] Expected behaviour verified (blocks/allows correctly)
 - [ ] No false positives or negatives observed
 
 ## Common Pitfalls

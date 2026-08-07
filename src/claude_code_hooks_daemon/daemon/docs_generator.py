@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Behavior tag constants for classification
+# Behaviour tag constants for classification
 _BEHAVIOR_BLOCKING = "blocking"
 _BEHAVIOR_ADVISORY = "advisory"
 _BEHAVIOR_CONTEXT = "context-injection"
@@ -185,7 +185,7 @@ class DocsGenerator:
         count = len(handlers)
         count_label = f"{count} handler{'s' if count != 1 else ''}"
         lines.append(f"\n### {heading} ({count_label})\n")
-        lines.append("| Priority | Handler | Behavior | Description |")
+        lines.append("| Priority | Handler | Behaviour | Description |")
         lines.append("|----------|---------|----------|-------------|")
 
         for handler_info in handlers:
@@ -361,7 +361,7 @@ class DocsGenerator:
             instance: Handler instance
 
         Returns:
-            Behavior string (e.g., "BLOCKING", "ADVISORY", "CONTEXT", "TERMINAL")
+            Behaviour string (e.g., "BLOCKING", "ADVISORY", "CONTEXT", "TERMINAL")
         """
         tags = getattr(instance, "tags", []) or []
 

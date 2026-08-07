@@ -111,7 +111,26 @@ class BritishEnglishHandler(Handler):
         return HookResult(decision=Decision.ALLOW, context=["".join(warning_parts)])
 
     def _check_british_english(self, content: str) -> list[dict[str, Any]]:
-        """Check content for American spellings, skipping code blocks."""
+        """Check content for American spellings, skipping code blocks.
+
+        Deprecated alias for :meth:`find_american_spellings`, kept because the
+        handler's own tests call it by this name.
+        """
+        return self.find_american_spellings(content)
+
+    def find_american_spellings(self, content: str) -> list[dict[str, Any]]:
+        """Find American spellings in ``content``, skipping fenced code blocks.
+
+        Public so the batch equivalent of this rule
+        (``scripts/qa/check_british_english.py``) can share the implementation
+        rather than reimplement it. The word list lives in
+        :attr:`SPELLING_CHECKS`, which that checker imports by identity — one
+        definition of the rule, two surfaces enforcing it.
+
+        Returns:
+            One dict per finding with ``line``, ``american``, ``british`` and a
+            truncated ``text`` excerpt.
+        """
         issues = []
         lines = content.split("\n")
         in_code_block = False

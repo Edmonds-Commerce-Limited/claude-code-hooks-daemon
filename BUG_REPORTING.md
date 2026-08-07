@@ -136,7 +136,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"echo test"}}' | .claude/hooks
 
 ### "Daemon status says NOT RUNNING but hooks work"
 
-This is **normal behavior** with lazy startup:
+This is **normal behaviour** with lazy startup:
 
 - Daemon starts on first hook call
 - Auto-shuts down after 10 minutes idle

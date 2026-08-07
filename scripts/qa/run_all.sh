@@ -211,6 +211,16 @@ else
 fi
 echo ""
 
+echo "18. Running British-English Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_british_english.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ British-english check FAILED"
+else
+    echo "✅ British-english check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -237,6 +247,7 @@ results = {
     "Doc Truth": "untracked/qa/doc_truth.json",
     "Sensitive Content": "untracked/qa/sensitive_content.json",
     "Handler Reference": "untracked/qa/handler_reference.json",
+    "British English": "untracked/qa/british_english.json",
 }
 
 all_passed = True

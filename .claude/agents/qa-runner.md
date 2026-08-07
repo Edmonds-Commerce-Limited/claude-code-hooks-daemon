@@ -155,7 +155,7 @@ Expected runtime: 30-60 seconds for full suite.
 - ❌ Fix lint violations
 - ❌ Fix type errors
 - ❌ Fix failing tests
-- ❌ Analyze root causes
+- ❌ Analyse root causes
 - ❌ Suggest fixes
 - ❌ Modify any files
 

@@ -29,7 +29,7 @@ View or change the daemon's operating mode. Supports `default` (normal operation
 
 ## Modes
 
-| Mode         | Behavior                                                                       |
+| Mode         | Behaviour                                                                       |
 | ------------ | ------------------------------------------------------------------------------ |
 | `default`    | Normal operation - all handlers process events as configured                   |
 | `unattended` | Blocks Stop events unconditionally to keep Claude working without interruption |

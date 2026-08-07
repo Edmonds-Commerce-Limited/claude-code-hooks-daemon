@@ -61,7 +61,7 @@ Claude Code Hooks Daemon is a reusable, configurable hook system for Claude Code
 ✅ **Context analysis requiring reasoning**
 
 - Read session transcripts to detect agent context
-- Analyze git state and commit history
+- Analyse git state and commit history
 - Evaluate whether changes align with project standards
 
 ✅ **Multi-turn investigation**
@@ -508,7 +508,7 @@ These remain in individual projects due to project-specific logic:
 
 ### Terminal Handlers (default)
 
-**Behavior**:
+**Behaviour**:
 
 - Stop dispatch immediately after execution
 - Decision becomes final result (allow/deny/ask)
@@ -530,7 +530,7 @@ class DestructiveGitHandler(Handler):
 
 ### Non-Terminal Handlers
 
-**Behavior**:
+**Behaviour**:
 
 - Provide context/guidance but allow dispatch to continue
 - Decision is ignored (treated as "allow")

@@ -289,10 +289,12 @@ def _is_narrative_record(rel_path: str) -> bool:
 def _frozen_summary_marker(root: Path, rel_path: str) -> str | None:
     """Describe why ``rel_path`` reads as frozen session output, or ``None``.
 
-    Reads the file from the WORKING TREE. A tracked path whose content cannot
-    be read (deleted locally, a submodule gitlink, a binary blob) is skipped
-    rather than guessed at — this rule judges prose, and no prose means no
-    verdict to give.
+    Reads the file from the WORKING TREE. A tracked path with no regular file
+    behind it (a sparse checkout, a submodule gitlink) has no prose to judge
+    and is skipped by an explicit ``is_file()`` test — NOT by catching the read
+    error. FAIL FAST: a genuinely unreadable or non-UTF-8 ``.md`` in the index
+    is a broken tree, and this check must say so rather than quietly report the
+    file clean.
     """
     if not rel_path.endswith(_MARKDOWN_SUFFIXES):
         return None
@@ -300,10 +302,9 @@ def _frozen_summary_marker(root: Path, rel_path: str) -> str | None:
         return None
 
     target = root / rel_path
-    try:
-        content = target.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    if not target.is_file():
         return None
+    content = target.read_text(encoding="utf-8")
 
     for pattern, description in _SESSION_SUMMARY_PATTERNS:
         if pattern.search(content):

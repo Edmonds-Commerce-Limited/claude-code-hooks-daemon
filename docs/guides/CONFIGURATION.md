@@ -78,7 +78,7 @@ daemon:
 | Setting                        | Default | Description                                                                                                               |
 | ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `idle_timeout_seconds`         | `600`   | Daemon shuts down after this many seconds without a hook call. It restarts automatically on the next call (lazy startup). |
-| `log_level`                    | `INFO`  | Controls how much detail appears in daemon logs. Use `DEBUG` when troubleshooting handler behavior.                       |
+| `log_level`                    | `INFO`  | Controls how much detail appears in daemon logs. Use `DEBUG` when troubleshooting handler behaviour.                       |
 | `enable_hello_world_handlers`  | `false` | Activates simple test handlers that add context to every event. Useful for confirming hooks are connected.                |
 | `strict_mode`                  | `false` | When `true`, the daemon crashes on any unexpected error instead of continuing. Recommended for development/testing.       |
 | `self_install_mode`            | `false` | Used when the daemon runs from the project root instead of `.claude/hooks-daemon/`. Only needed for daemon development.   |
@@ -403,7 +403,7 @@ plugins:
 
 ## Environment Variables
 
-These environment variables affect daemon behavior. They are typically set in `.claude/hooks-daemon.env`, which is sourced before the daemon starts.
+These environment variables affect daemon behaviour. They are typically set in `.claude/hooks-daemon.env`, which is sourced before the daemon starts.
 
 | Variable                   | Description                                                                                                                             |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |

@@ -176,7 +176,7 @@ All destructive commands use non-existent refs/paths/files that would fail harml
 **Why All Three Layers?**
 
 - Layer 1 (echo): Zero risk even if hooks completely fail
-- Layer 2 (hooks): Tests the actual blocking behavior
+- Layer 2 (hooks): Tests the actual blocking behaviour
 - Layer 3 (fail-safe args): Defense-in-depth - even catastrophic failure is harmless
 
 **Even with these protections, ALWAYS use echo for destructive commands.**
@@ -449,7 +449,7 @@ When creating new handlers:
 
 ### Updating Handlers
 
-When modifying handler behavior:
+When modifying handler behaviour:
 
 1. Update `get_acceptance_tests()` if needed
 2. Regenerate playbook (fresh from code)

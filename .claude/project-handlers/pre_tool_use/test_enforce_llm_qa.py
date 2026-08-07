@@ -137,6 +137,44 @@ class TestEnforceLlmQaHandler:
         """Explicit interpreter invocation still executes the script."""
         assert handler.matches(bash_hook_input("bash scripts/qa/run_all.sh")) is True
 
+    def test_does_not_match_git_commit_preceded_by_cd(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """The git exemption must survive a leading `cd`.
+
+        Regression: the exemption tested `command.startswith("git ")` against
+        the WHOLE string, so the ubiquitous `cd /workspace; git commit -m ...`
+        lost it entirely and a commit message mentioning the script was denied.
+        The exemption belongs to the segment, like every other verdict here.
+        """
+        command = 'cd /workspace; git commit -m "wired the check into run_all.sh"'
+        assert handler.matches(bash_hook_input(command)) is False
+
+    def test_still_matches_invocation_after_a_cd(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """Moving the exemption per-segment must not blind the guard."""
+        assert (
+            handler.matches(bash_hook_input("cd /workspace; bash scripts/qa/run_all.sh")) is True
+        )
+
+    def test_does_not_match_shellcheck_of_run_all_sh(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """A static analyser READS the script; it never runs it.
+
+        Regression for a real dogfooding false positive: `shellcheck -x
+        scripts/qa/run_all.sh` -- the canonical way to verify an edit to that
+        very script -- was denied with "run_all.sh produces 200+ lines of
+        verbose output", which shellcheck does not produce and would not cause.
+        """
+        assert handler.matches(bash_hook_input("shellcheck -x scripts/qa/run_all.sh")) is False
+
+    def test_does_not_match_diff_of_run_all_sh(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        assert handler.matches(bash_hook_input("diff scripts/qa/run_all.sh /tmp/old.sh")) is False
+
     # ── matches() — segmentation defects ──
 
     def test_matches_invocation_on_a_later_LINE_of_a_multiline_command(

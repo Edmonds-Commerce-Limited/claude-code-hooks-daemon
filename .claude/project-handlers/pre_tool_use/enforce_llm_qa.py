@@ -18,7 +18,31 @@ _LLM_SCRIPT = "./scripts/qa/llm_qa.py all"
 # scripts/qa/run_all.sh` inspects the script's contents, it never runs it.
 # Matched as the first shell word so a compound command's LATER segment can
 # still be a real invocation (e.g. `cat run_all.sh; bash run_all.sh`).
-_INSPECTION_COMMANDS = ("cat", "less", "more", "head", "tail", "grep", "rg", "wc", "bat")
+#
+# Static analysers belong here for the same reason readers do: `shellcheck -x
+# scripts/qa/run_all.sh` is the canonical way to VERIFY an edit to that script,
+# and denying it with "produces 200+ lines of verbose output" describes an
+# execution that never happens.
+_INSPECTION_COMMANDS = (
+    "cat",
+    "less",
+    "more",
+    "head",
+    "tail",
+    "grep",
+    "rg",
+    "wc",
+    "bat",
+    "shellcheck",
+    "shfmt",
+    "diff",
+    "stat",
+    "file",
+)
+
+# Version-control commands take the script's path as DATA — a commit message,
+# a staged path, a pathspec. None of them executes it.
+_VCS_COMMANDS = ("git", "gh")
 
 # Characters that end one command and begin the next AT THE TOP LEVEL of a
 # shell line. A newline is one of them: `a\nb` runs two commands exactly as
@@ -82,17 +106,23 @@ def _is_inspection_only(command: str) -> bool:
     """True when every segment referencing the script only inspects it.
 
     Checks each segment's leading word (the command being run) against the
-    inspection allowlist. A segment whose leading word is NOT an inspection
-    command (e.g. `bash`, `./scripts/...`, `sh`) is treated as a potential
-    real invocation.
+    inspection and VCS allowlists. A segment whose leading word is NOT in
+    either (e.g. `bash`, `./scripts/...`, `sh`) is treated as a potential real
+    invocation.
+
+    The VCS exemption is applied PER SEGMENT for the same reason every other
+    verdict here is: it used to test ``command.startswith("git ")`` against the
+    whole string, so the ubiquitous ``cd /workspace; git commit -m ...`` lost
+    it and a commit message mentioning the script was denied.
     """
+    allowed = _INSPECTION_COMMANDS + _VCS_COMMANDS
     for segment in _split_top_level(command):
         stripped = segment.strip()
         if not stripped or _BLOCKED_SCRIPT not in stripped:
             continue
         words = stripped.split()
         leading_word = words[0].rsplit("/", 1)[-1] if words else ""  # strip any path prefix
-        if leading_word not in _INSPECTION_COMMANDS:
+        if leading_word not in allowed:
             return False
     return True
 
@@ -114,14 +144,12 @@ class EnforceLlmQaHandler(Handler):
             return False
         tool_input = hook_input.get("tool_input", {})
         command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
-        # Only match when the script is being executed, not when mentioned
-        # in git commit messages, git add paths, or other non-execution contexts
-        if command.startswith(("git ", "gh ")):
-            return False
         if _BLOCKED_SCRIPT not in command:
             return False
-        # A path passed to cat/less/grep/etc. inspects the script; it is
-        # never an execution of it, regardless of output volume.
+        # A path passed to cat/less/grep/shellcheck/git inspects or records the
+        # script; none of them executes it, regardless of output volume. The
+        # verdict is per segment, so `cat run_all.sh; bash run_all.sh` still
+        # matches on the second half.
         return not _is_inspection_only(command)
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:

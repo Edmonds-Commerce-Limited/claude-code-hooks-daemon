@@ -81,7 +81,7 @@ Can be directed to review:
 - Unclear naming that requires comments to understand
 - Complex conditionals that need multiple readings
 - Magic numbers/strings without constants
-- Implicit behavior that surprises readers
+- Implicit behaviour that surprises readers
 - Non-obvious side effects
 - Functions that lie (name says one thing, does another)
 
@@ -94,7 +94,7 @@ Can be directed to review:
 
 **What to look for:**
 - Code without corresponding tests
-- Tests that test implementation, not behavior
+- Tests that test implementation, not behaviour
 - Tests that always pass regardless of code changes
 - Tests that rely on implementation details
 - Missing edge case tests
@@ -103,7 +103,7 @@ Can be directed to review:
 **Questions to ask:**
 - Were tests written first?
 - Would these tests catch a regression?
-- Do tests document intended behavior?
+- Do tests document intended behaviour?
 
 ### 4. TDD Theatre Detection
 
@@ -113,7 +113,7 @@ Can be directed to review:
 - Tests with no assertions
 - Tests that mock the thing being tested
 - Tests that pass by accident
-- Coverage gaming (tests touch code but don't verify behavior)
+- Coverage gaming (tests touch code but don't verify behaviour)
 - Tests that test the test setup, not the code
 
 **Example of TDD Theatre:**
@@ -197,7 +197,7 @@ Read each changed file completely. Understand:
 - How it fits into the system
 - What it's supposed to achieve
 
-### Step 3: Analyze Against Criteria
+### Step 3: Analyse Against Criteria
 
 For each category above, systematically check:
 - Does this code have dead code?

@@ -118,7 +118,7 @@ Examples:
 ./scripts/debug_hooks.sh stop
 ```
 
-### Step 3: Analyze Logs
+### Step 3: Analyse Logs
 
 Look for:
 
@@ -229,7 +229,7 @@ We want to inject custom context when Claude enters planning mode.
 ./scripts/debug_hooks.sh stop
 ```
 
-### Analyze Output
+### Analyse Output
 
 ```
 [DEBUG] Routing PreToolUse event to chain with 17 handlers
@@ -480,7 +480,7 @@ See [HANDLER_DEVELOPMENT.md](./HANDLER_DEVELOPMENT.md) for full handler creation
 
 1. Identify scenario (e.g., "enforce TDD")
 2. **Debug the scenario** (this doc)
-3. Analyze event flow
+3. Analyse event flow
 4. Write tests (TDD)
 5. Implement handler
 6. **Debug the handler** to verify it intercepts correctly

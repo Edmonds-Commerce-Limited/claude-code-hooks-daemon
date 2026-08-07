@@ -25,7 +25,7 @@ When you run this playbook, **I (Claude)** attempt dangerous operations and veri
 
 ### Why Before Every Release
 
-Unit tests validate individual functions. Acceptance tests validate **real-world behavior in actual Claude Code sessions**. We've caught critical bugs (like `git restore` not being blocked) that unit tests missed. A 30-minute acceptance test prevents shipping bugs that could destroy user work.
+Unit tests validate individual functions. Acceptance tests validate **real-world behaviour in actual Claude Code sessions**. We've caught critical bugs (like `git restore` not being blocked) that unit tests missed. A 30-minute acceptance test prevents shipping bugs that could destroy user work.
 
 **Bottom line**: If I can do something dangerous, you're not protected. This playbook ensures I'm properly restrained.
 
@@ -129,7 +129,7 @@ All destructive commands use non-existent refs/paths/files that would fail harml
 **Why All Three Layers?**
 
 - Layer 1 (echo): Zero risk even if hooks completely fail
-- Layer 2 (hooks): Tests the actual blocking behavior
+- Layer 2 (hooks): Tests the actual blocking behaviour
 - Layer 3 (fail-safe args): Defense-in-depth - even catastrophic failure is harmless
 
 **Even with these protections, ALWAYS use echo for destructive commands.**
@@ -169,7 +169,7 @@ Before starting:
 ## Instructions
 
 - Execute each test by attempting the described tool call
-- Mark result as PASS or FAIL based on observed behavior
+- Mark result as PASS or FAIL based on observed behaviour
 - For blocking handlers: PASS = command blocked with appropriate error
 - For advisory handlers: PASS = command allowed with advisory context
 - Fill in Results Summary at the end

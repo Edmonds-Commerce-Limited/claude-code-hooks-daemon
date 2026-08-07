@@ -100,7 +100,7 @@ When working on this project, LLMs should:
 
 1. Identify scenario ("enforce TDD", "block destructive git", etc.)
 2. **Use `scripts/debug_hooks.sh` to capture event flow** (DEBUGGING_HOOKS.md)
-3. Analyze logs to determine which event type and what data is available
+3. Analyse logs to determine which event type and what data is available
 4. Write tests (TDD)
 5. Implement handler (HANDLER_DEVELOPMENT.md)
 6. Debug again to verify handler intercepts correctly
