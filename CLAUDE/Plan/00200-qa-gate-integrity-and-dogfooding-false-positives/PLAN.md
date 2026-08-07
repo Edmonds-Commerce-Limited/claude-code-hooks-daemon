@@ -159,8 +159,28 @@ plan's own two new test files contribute the difference.)
   relevant test file(s) after each file's edit, not in bulk. Verified with ruff
   clean on every touched file.
 
-- [ ] ⬜ **Task 2.3**: Fix the 21 remaining. No `noqa` — the `qa_suppression` handler blocks it,
-  correctly.
+- [x] ✅ **Task 2.3**: Fixed all 21 remaining. `UP042` (5x) — `class X(str, Enum)` -> `StrEnum`
+  for `PlanStatus`/`PlanLocation`/`Stage`/`Level`/`ReadmeSection`; audited every use site first
+  (equality/membership/dict-keys only, plus one explicit `.value` in `report.py`), confirmed
+  empirically in-venv that `str, Enum` and `StrEnum` differ in `str()`/`format()` output but not
+  in equality/JSON/`.value`, so no call site changes behaviour. `RUF002/RUF003` (4 of 6) — replaced
+  the multiplication sign with ASCII `x` in prose (`protocol.py`, `process_verification.py`,
+  `test_restart_verified_slow_startup.py`, `test_verify_venv_file_visibility.py`). `RUF001` (the
+  remaining 2, both in `readme_index.py`) — these flagged an EN DASH inside the
+  `[-en dash-em dash]` status-separator regex class, which is load-bearing (matches README rows
+  using an en dash as the status separator, per the adjacent comment). Root-caused a genuinely
+  proper fix rather than a suppression or a semantics-changing edit: extracted the (previously
+  duplicated) character class into one `_STATUS_SEP_CHARS` constant built from escapes instead of
+  literal glyphs, so the ambiguous characters are named in source and ruff has nothing to flag;
+  verified by hand the regex still matches hyphen/en dash/em dash identically. `RUF012` (3x) —
+  annotated 3 shared test-class constants (`_MESSAGES`, `PATHS`, `SAMPLES`) as `ClassVar`.
+  `SIM110` (2x) — collapsed 2 scan-and-return loops to `any()`. `RUF059`/`RUF022`/`RUF005` (4x) —
+  prefixed 2 unused unpacked test variables with `_`; hand-applied `constants/__init__.py`'s
+  `__all__` isort-style sort (ruff's own fix is unsafe here since it would strip 2 helper
+  functions out of their category-comment grouping — moved them by hand to a new trailing
+  comment section instead); rewrote a `+` list-concat as unpacking in `git_upstream_checker.py`.
+  No `noqa` anywhere — every fix is a real code change, verified with the relevant test file(s)
+  after each edit and a final `ruff check` per touched file.
 
 ### Phase 3: Handler false positives
 
