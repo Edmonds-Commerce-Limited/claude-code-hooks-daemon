@@ -49,14 +49,23 @@ _SECTION_KEYWORDS: Final[tuple[tuple[str, ReadmeSection], ...]] = (
 
 _H2_RE: Final[re.Pattern[str]] = re.compile(r"^##(?!#)\s+(.+?)\s*$")
 
+# Status-separator character class shared by _LINKED_ROW_RE/_BOLD_ROW_RE below:
+# hyphen, EN DASH (U+2013), EM DASH (U+2014) -- prose (and mdformat) vary in
+# which one they use. Built from \N-style escapes rather than the literal
+# glyphs so the visually-ambiguous characters are named in source, not
+# indistinguishable from '-' (ruff RUF001).
+_STATUS_SEP_CHARS: Final[str] = "-\u2013\u2014"
+
 # ``- [NNNNN<decoration>: Title](link) - status``; status separator accepts
 # hyphen and en/em dashes because prose (and mdformat) vary.
 _LINKED_ROW_RE: Final[re.Pattern[str]] = re.compile(
-    r"^- \[(\d{1,5})([^\]]*)\]\(([^)]+)\)\s*(?:[-–—]\s*(.*?))?\s*$"
+    r"^- \[(\d{1,5})([^\]]*)\]\(([^)]+)\)\s*(?:[" + _STATUS_SEP_CHARS + r"]\s*(.*?))?\s*$"
 )
 
 # ``- **00008** - status`` / ``- **00032, 00034, 00035** - status``
-_BOLD_ROW_RE: Final[re.Pattern[str]] = re.compile(r"^- \*\*([^*]+)\*\*\s*(?:[-–—]\s*(.*?))?\s*$")
+_BOLD_ROW_RE: Final[re.Pattern[str]] = re.compile(
+    r"^- \*\*([^*]+)\*\*\s*(?:[" + _STATUS_SEP_CHARS + r"]\s*(.*?))?\s*$"
+)
 
 # ``- **Label**: 42 (free text)`` — statistics bullets.
 _STAT_RE: Final[re.Pattern[str]] = re.compile(r"^- \*\*([^*]+)\*\*\s*:\s*(\d+)")
