@@ -251,6 +251,11 @@ class HandlerID:
         config_key="security_antipattern",
         display_name="block-security-antipatterns",
     )
+    SENSITIVE_CONTENT = HandlerIDMeta(
+        class_name="SensitiveContentHandler",
+        config_key="sensitive_content",
+        display_name="block-sensitive-content",
+    )
     GIT_STASH = HandlerIDMeta(
         class_name="GitStashHandler",
         config_key="git_stash",

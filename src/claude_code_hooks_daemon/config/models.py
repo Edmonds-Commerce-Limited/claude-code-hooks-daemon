@@ -732,7 +732,7 @@ class DaemonConfig(BaseModel):
     )
     exclude_paths: list[str] = Field(
         default_factory=list,
-        description="Project-level glob patterns exempted from the content-scanning blockers (security_antipattern, qa_suppression, error_hiding_blocker). Gitignore-style globs (*, ?, **). Inherited by all three handlers in addition to their own exclude_paths option and built-in defaults.",
+        description="Project-level glob patterns exempted from the content-scanning blockers (security_antipattern, qa_suppression, error_hiding_blocker, sensitive_content). Gitignore-style globs (*, ?, **). Inherited by all four handlers in addition to their own exclude_paths option and built-in defaults.",
     )
     enforce_single_daemon_process: bool = Field(
         default=False,

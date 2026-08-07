@@ -71,6 +71,32 @@ handlers:
       enabled: true
       priority: 14
 
+    # Blocks two independent sources of sensitive content (Plan 00201):
+    # public_patterns are safe to name in the deny message (that is what
+    # makes them fixable); a secret_word_list_path entry match is NEVER
+    # named, only a numeric index into the gitignored file. Populated here
+    # per the presentation-quality audit that motivated this handler
+    # (untracked/resume-readiness/REDACTION-MAP.md). Profanity is a
+    # supported public_patterns category too, but deliberately not
+    # populated here with a literal word list — the handful of historic
+    # instances are being paraphrased once via the separate redaction pass
+    # rather than held open-ended in a tracked config file.
+    sensitive_content:
+      enabled: true
+      priority: 14
+      options:
+        public_patterns:
+          - name: vhosts-path
+            pattern: '/var/www/vhosts'
+            description: 'employer/hosting-provider server path convention'
+          - name: non-placeholder-home-dir
+            pattern: '/home/(?!user(?:/|$))[a-zA-Z0-9_.-]+'
+            description: 'a real (non-placeholder) home directory — use /home/user in examples'
+          - name: session-uuid
+            pattern: '\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b'
+            description: 'a real session UUID — use 00000000-0000-0000-0000-000000000000 in examples'
+        secret_word_list_path: .claude/block-words.secret
+
     root_recursion_guard:  # Blocks recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME
       enabled: true
       priority: 15
