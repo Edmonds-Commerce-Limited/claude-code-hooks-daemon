@@ -143,8 +143,21 @@ plan's own two new test files contribute the difference.)
   | `SIM110`                             | 2     | Loop replaceable by `any()`                          |
   | `RUF059/022/005`                     | 4     | Unused unpacked var; unsorted `__all__`; list concat |
 
-- [ ] 🔄 **Task 2.2**: Fix the 28 `PTH*` pathlib migrations. Highest count, mechanical, but
-  touches real I/O — verify tests after each file rather than in bulk.
+- [x] ✅ **Task 2.2**: Fixed the 28 `PTH*` pathlib migrations across 11 files (6 src, 5 test).
+  `os.replace`/`os.chmod` -> `Path.replace()`/`Path.chmod()` in src (metadata.py,
+  git_hooks_executable_fixer.py, compaction_signal.py, context_sidecar.py,
+  thread_registry.py, settings_repair.py); `os.symlink`/`os.readlink`/`os.path.exists`
+  -> `Path.symlink_to()`/`Path.readlink()`/`Path(...).exists()` in tests
+  (test_diagnostic_scripts.py, test_skill_install_python_discovery.py,
+  test_v391_field_regression.py, test_socket_timeout_daemon_alive.py,
+  test_slash_commands_self_install_safety.py). One test that monkeypatched
+  `settings_repair.os.replace` directly needed updating to patch `Path.replace`
+  (the `AttributeError` once the now-unused `import os` was dropped); the two
+  sibling `os.replace`-patching tests in `context_sidecar`/`compaction_signal`
+  needed no change — `pathlib.Path.replace()` calls `os.replace()` internally via
+  the same shared `os` module object, so those patches remain effective. Ran the
+  relevant test file(s) after each file's edit, not in bulk. Verified with ruff
+  clean on every touched file.
 
 - [ ] ⬜ **Task 2.3**: Fix the 21 remaining. No `noqa` — the `qa_suppression` handler blocks it,
   correctly.
