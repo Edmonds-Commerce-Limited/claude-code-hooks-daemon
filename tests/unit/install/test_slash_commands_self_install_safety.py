@@ -13,10 +13,12 @@ with no guard against that collapse.
 Today neither real orchestrator (``install_version.sh``, ``upgrade_version.sh``)
 ever calls these with ``self-install`` — both refuse to run in self-install
 mode at all (``mode_guard.sh``) — so the defect is latent, not yet observed
-in production. It is still a live landmine in tested, documented library
-code (the self-install branch is explicitly exercised by
-``scripts/install/test_slash_commands_manual.sh``), so it is fixed here
-rather than left for the day something wires self-install through.
+in production. It is still a live landmine in documented library code, so it
+is fixed here rather than left for the day something wires self-install
+through — and THIS file is now the only thing exercising that branch. A
+hand-run ``test_slash_commands_manual.sh`` used to nominally cover it; it had
+no callers and was removed, which is precisely why the coverage had to become
+an automated test rather than a script nobody ran.
 """
 
 import os

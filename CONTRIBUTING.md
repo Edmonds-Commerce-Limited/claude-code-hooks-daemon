@@ -170,7 +170,16 @@ And to the daemon controller:
 
 ### 5. Add Configuration
 
-Add handler config to default YAML template in `install.py`.
+Add the handler to the default config template in
+`src/claude_code_hooks_daemon/daemon/init_config.py` — that is what every new
+install is generated from, so a handler missing there ships dormant in every
+client project. `tests/integration/test_dogfooding_config.py` enforces this.
+
+Then enable it in this repo's own `.claude/hooks-daemon.yaml` so it is
+dogfooded.
+
+(The deprecated root `install.py` carries its own copy of the template for
+backward compatibility with pre-Layer-2 tags. It is not the source of truth.)
 
 ## Handler Guidelines
 

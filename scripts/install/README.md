@@ -71,7 +71,14 @@ Locates project root by walking up directory tree looking for `.claude/hooks-dae
 ### venv.sh - Virtual Environment Management
 
 Provisions and verifies fingerprint-keyed Python virtual environments
-(`untracked/venv-py{MM}-{fingerprint}/`, introduced in v3.7.0).
+(`untracked/venv-{slug}-py{MM}-{fingerprint}/`, introduced in v3.7.0; the
+project-path `{slug}` was added in v3.19.1).
+
+The `{fingerprint}` keys the venv to the interpreter, so containers built from
+one image share a venv. The `{slug}` keys it to the project path, so a host view
+(`/home/user/project`) and a container view (`/workspace`) of the SAME
+bind-mounted project never collide on one venv even when their fingerprints
+match. Never hardcode the directory — resolve it via `scripts/lib/resolve_venv.sh`.
 
 | Function                   | Args                               | Description                                             |
 | -------------------------- | ---------------------------------- | ------------------------------------------------------- |
@@ -179,19 +186,22 @@ Internally calls `$venv_python -m claude_code_hooks_daemon.daemon.cli config-dif
 using the interpreter it has already resolved. Readers driving the daemon
 themselves should use the `bin/hooks-daemon` wrapper instead.
 
-## Test Modules
+## Testing
 
-Test files (`test_*.sh`) provide manual verification for each module. They are not part of the library and should not be sourced by orchestrators.
+These modules are exercised by the automated suites, not by hand-run scripts:
 
-| File                            | Tests                                         |
-| ------------------------------- | --------------------------------------------- |
-| `test_output_manual.sh`         | All output functions with color               |
-| `test_prerequisites_manual.sh`  | Prerequisite detection                        |
-| `test_venv_manual.sh`           | Venv creation/verification                    |
-| `test_gitignore_manual.sh`      | Gitignore setup/verification                  |
-| `test_validation_manual.sh`     | Pre/post install checks                       |
-| `test_slash_commands_manual.sh` | Slash command deployment                      |
-| `test_helpers.sh`               | Shared test utilities (assertions, temp dirs) |
+| Surface                                           | Covered by                                                           |
+| ------------------------------------------------- | -------------------------------------------------------------------- |
+| The full install path, end to end                 | `tests/acceptance/test_install_sh_end_to_end.py`                     |
+| `ensure_venv` / `verify_venv` / venv metadata     | `tests/acceptance/test_diagnostic_scripts.py`                        |
+| Interpreter discovery on awkward hosts            | `tests/acceptance/test_skill_install_python_discovery.py`            |
+| Shell correctness of every module                 | `scripts/qa/run_shell_check.sh` (shellcheck `-x`)                    |
+| A real client install, against the real installer | `scripts/dummy-client-repo.sh create` — see `CLIENT-MODE-TESTING.md` |
+
+A previous set of six hand-run `test_*_manual.sh` scripts lived here. They had
+no callers, two of them documented a path that did not exist, and one entry in
+this table (`test_venv_manual.sh`) described a file that was never present — so
+the table asserted coverage the repo did not have. Run the suites above instead.
 
 ## Usage Pattern
 

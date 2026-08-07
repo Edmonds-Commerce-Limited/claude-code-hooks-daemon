@@ -38,6 +38,27 @@ from typing import Any
 # daemon into .claude/hooks-daemon/ as a dependency (Issue #3).
 _DAEMON_PACKAGE_NAME = "claude-code-hooks-daemon"
 
+# Directory this installer scaffolds project-level handlers into. MUST stay in
+# lockstep with ``ProjectHandlersConfig.directory``'s default in
+# ``src/claude_code_hooks_daemon/config/models.py`` — that model is the SSoT for
+# where the daemon actually SCANS. Guarded by
+# ``tests/unit/install/test_project_handlers_dirname_ssot.py``: this constant
+# previously read ``.claude/hooks/handlers``, a path nothing ever loaded, so a
+# client that scaffolded handlers here got silence rather than an error.
+_PROJECT_HANDLERS_DIRNAME = ".claude/project-handlers"
+
+
+def _event_json_key(config_key: str) -> str:
+    """Convert a snake_case event config key to its PascalCase JSON key.
+
+    ``pre_tool_use`` -> ``PreToolUse``. Mirrors ``EventIDMeta.json_key`` in
+    ``src/claude_code_hooks_daemon/constants/events.py``; derived here rather
+    than imported because this installer must run before the package is
+    importable. The scaffolder previously used ``config_key.replace("_", "")``,
+    which produced ``pretooluse`` — a name matching nothing in the docs.
+    """
+    return "".join(part.title() for part in config_key.split("_"))
+
 
 class InstallationError(Exception):
     """Error during installation validation."""
@@ -776,9 +797,9 @@ handlers:
       priority: 20
 
     # CODE QUALITY HANDLERS (Priority 25-45)
-    eslint_disable:        # Prevents ESLint suppression comments
-      enabled: true
-      priority: 30
+    qa_suppression:        # Blocks QA suppression annotations in every supported
+      enabled: true        # language (noqa, type: ignore, eslint-disable, nolint,
+      priority: 30         # @SuppressWarnings, pragma warning disable, allow(...))
 
     tdd_enforcement:       # Enforces test-first development
       enabled: true
@@ -829,15 +850,8 @@ handlers:
       show_detailed_indicators: true   # Show detected indicators in context
       show_workflow_tips: true     # Show container workflow implications
 
-    # workflow_state_restoration:  # Restores workflow state after compaction
-    #   enabled: false              # Optional - enable for workflow state management
-    #   priority: 10
-
   # PreCompact handlers (run before conversation compaction)
-  pre_compact:
-    # workflow_state_pre_compact:  # Saves workflow state before compaction
-    #   enabled: false              # Optional - enable for workflow state management
-    #   priority: 10
+  pre_compact: {}
 
   # SessionEnd handlers (run when session ends)
   session_end: {}
@@ -846,13 +860,10 @@ handlers:
   subagent_stop:
     # remind_prompt_library:  # Reminds about prompt library after agent work
     #   enabled: false         # Optional - enable for prompt library reminders
-    #   priority: 10
+    #   priority: 20
 
   # UserPromptSubmit handlers (run when user submits prompt)
-  user_prompt_submit:
-    # auto_continue:  # Auto-continues on 'continue' keyword
-    #   enabled: false # Optional - enable for auto-continue behavior
-    #   priority: 10
+  user_prompt_submit: {}
 
   # Other hook events
   permission_request: {}
@@ -888,15 +899,19 @@ plugins:
 def create_project_handler_structure(project_root: Path) -> None:
     """Create project-level handler directory structure with examples.
 
-    Creates .claude/hooks/handlers/ with subdirectories for each hook event,
+    Creates .claude/project-handlers/ with subdirectories for each hook event,
     README files, and example handler templates.
+
+    The directory name must match ``ProjectHandlersConfig.directory``'s default
+    in ``config/models.py``. It previously read ``.claude/hooks/handlers``, which
+    the daemon never scans — handlers scaffolded there loaded for nobody.
 
     Args:
         project_root: Path to project root directory
     """
     print("\n📝 Creating project handler structure...")
 
-    handlers_root = project_root / ".claude" / "hooks" / "handlers"
+    handlers_root = project_root / _PROJECT_HANDLERS_DIRNAME
     handlers_root.mkdir(parents=True, exist_ok=True)
 
     # Hook events. Clients may attach project handlers to any wired event —
@@ -988,30 +1003,37 @@ For general handler development, see:
         tests_dir = event_dir / "tests"
         tests_dir.mkdir(exist_ok=True)
 
-        # Create event-specific README
+        # Create event-specific README.
+        #
+        # This previously emitted "[TODO: Describe when this hook event is
+        # triggered]" plus "- [Example 1/2/3]" into EVERY event directory of
+        # EVERY client project — unfilled placeholders the installer had no way
+        # to fill and the client had no reason to. Point at the canonical docs
+        # instead of shipping brackets nobody will ever complete.
         event_readme = event_dir / "README.md"
         if not event_readme.exists():
-            event_readme.write_text(f"""# {event.replace('_', ' ').title()} Handlers
+            json_key = _event_json_key(event)
+            event_readme.write_text(f"""# {json_key} Handlers
 
-Project-level handlers for the **{event.replace('_', '')}** hook event.
+Project-level handlers for the **{json_key}** hook event.
 
 ## When This Hook Fires
 
-[TODO: Describe when this hook event is triggered]
+See the {json_key} section of the hook system reference:
+`.claude/hooks-daemon/CLAUDE/Code/HooksSystem.md`
 
-## Example Use Cases
-
-- [Example 1]
-- [Example 2]
-- [Example 3]
+Claude Code itself defines the event contract — that document tracks it, and
+`.claude/hooks-daemon/scripts/debug_hooks.sh` captures the real payload this
+event delivers in your project.
 
 ## Creating a Handler
 
-See `example_handler.py.example` for a complete template.
+See `example_handler.py.example` for a complete template, and
+`.claude/hooks-daemon/CLAUDE/PROJECT_HANDLERS.md` for the full guide.
 
 ## Testing
 
-All handlers MUST have tests in `tests/` directory.
+All handlers MUST have tests in the `tests/` directory.
 Minimum 95% coverage required.
 """)
 

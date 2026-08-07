@@ -177,6 +177,8 @@ daemon:
 
 ## References
 
-- Benchmark script: `/workspace/scripts/benchmark_validation.py`
+- Benchmark script: `scripts/benchmark_validation.py` — a one-off spike, deleted
+  once its recommendation (full `Draft7Validator` validation) had been adopted.
+  Recoverable from git history if the measurement ever needs repeating.
 - Existing response schemas: `/workspace/src/claude_code_hooks_daemon/core/response_schemas.py`
 - Server integration point: `/workspace/src/claude_code_hooks_daemon/daemon/server.py:409`

@@ -117,16 +117,17 @@ def test_flags_test_script_stranded_at_repo_root(tmp_path: Path) -> None:
 def test_does_not_flag_test_scripts_beside_the_code_they_test(tmp_path: Path) -> None:
     """NEGATIVE CONTROL — the rule must discriminate, not just fire.
 
-    ``scripts/install/test_helpers.sh`` and its five siblings are tracked,
-    referenced, and sit beside the installer they exercise. A rule broad enough
-    to flag them would cry wolf on six legitimate files, and a gate that cries
-    wolf gets switched off. The defect class is *stranded at the root*, so that
-    is exactly what the rule targets.
+    A rule broad enough to flag every ``test_*.sh`` anywhere in the tree would
+    be a naming-convention rule wearing a hygiene rule's name, and would fire on
+    shell tests that legitimately sit next to the code they exercise. A gate
+    that cries wolf gets switched off. The defect class is *stranded at the
+    repository root* — a location where a test script has no owning context —
+    so that is exactly what the rule targets, and this asserts it stays there.
     """
     repo = _make_repo(
         tmp_path,
         {
-            "scripts/install/test_helpers.sh": "#!/bin/bash\n",
+            "scripts/install/test_venv.sh": "#!/bin/bash\n",
             "tests/integration/test_thing.py": "",
         },
     )

@@ -24,10 +24,17 @@ Two rule families, deliberately scoped:
 
 ``root-test-script``
     A ``test_*.sh`` stranded at the repository root. Scoped to the root ON
-    PURPOSE: ``scripts/install/test_helpers.sh`` and its five siblings are
-    tracked, referenced and sit beside the installer they exercise. A rule wide
-    enough to flag those would cry wolf on six legitimate files. The root is the
-    one location where a test script has no owning context.
+    PURPOSE: a rule wide enough to flag every ``test_*.sh`` anywhere would be a
+    naming-convention rule, not a hygiene one, and would fire on shell tests
+    that legitimately sit beside the code they exercise. The root is the one
+    location where a test script has no owning context.
+
+    An earlier version of this note cited ``scripts/install/test_helpers.sh``
+    and its five siblings as the legitimate files this narrow scope protected.
+    They were not legitimate — all six had zero callers and were removed. The
+    justification was true about the *shape* of the rule and false about its
+    example, which is exactly the kind of claim a guard should not assert
+    without checking. The scope stands on the reasoning above alone.
 
 Usage:
     python scripts/qa/check_repo_hygiene.py [--json] [--root DIR] [--report-stdout]
