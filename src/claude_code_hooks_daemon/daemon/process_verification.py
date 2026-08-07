@@ -265,7 +265,4 @@ def _is_daemon_server_process(cmdline: list[str] | None) -> bool:
 
     # A launch subcommand must appear AFTER the module token (global flags such
     # as ``--project-root PATH`` may sit between the module and the subcommand).
-    for token in cmdline[module_index + 1 :]:
-        if token in _DAEMON_LAUNCH_SUBCOMMANDS:
-            return True
-    return False
+    return any(token in _DAEMON_LAUNCH_SUBCOMMANDS for token in cmdline[module_index + 1 :])

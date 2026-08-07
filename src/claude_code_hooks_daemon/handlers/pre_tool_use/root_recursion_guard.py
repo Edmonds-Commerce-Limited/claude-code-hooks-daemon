@@ -81,10 +81,7 @@ def _is_dangerous_root(token: str) -> bool:
         return True
     if token in _DEFAULT_EXACT_ROOTS:
         return True
-    for root in _DEFAULT_PREFIX_ROOTS:
-        if token == root or token.startswith(root + "/"):
-            return True
-    return False
+    return any(token == root or token.startswith(root + "/") for root in _DEFAULT_PREFIX_ROOTS)
 
 
 def _tokenize(segment: str) -> list[str]:
