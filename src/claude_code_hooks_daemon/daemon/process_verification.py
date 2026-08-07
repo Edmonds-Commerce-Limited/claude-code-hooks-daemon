@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # for a daemon server.
 _DAEMON_CLI_MODULE = "claude_code_hooks_daemon.daemon.cli"
 
-# The ONLY subcommands that daemonize. Daemonization (os.fork ×2, os.setsid,
+# The ONLY subcommands that daemonize. Daemonization (os.fork x2, os.setsid,
 # HooksDaemon(...), asyncio.run(daemon.start())) lives solely in cmd_start,
 # reachable only from the ``start`` subcommand and from cmd_restart (the
 # ``restart`` subcommand), which calls cmd_start. os.fork does not rewrite argv,

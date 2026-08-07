@@ -143,7 +143,7 @@ class SocketLimit:
     The daemon's request channel is newline-delimited JSON read with
     ``asyncio.StreamReader.readline()``. asyncio's default StreamReader buffer
     limit is 64KiB; a single PostToolUse Edit on this repo's own ``cli.py``
-    (~102KB source × 2 for old_string+new_string) blows past that and
+    (~102KB source x2 for old_string+new_string) blows past that and
     ``readline()`` raises ``LimitOverrunError`` ("Separator is found, but
     chunk is longer than limit"). The bare ``except Exception`` in
     ``_handle_client`` then returns ``{"error": ...}`` and the hook's advisory

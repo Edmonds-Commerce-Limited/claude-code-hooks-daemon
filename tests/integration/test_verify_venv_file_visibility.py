@@ -117,7 +117,7 @@ def test_create_venv_at_path_retries_copy_on_hardlink_failure() -> None:
 def test_verify_venv_has_no_retry_loop() -> None:
     """verify_venv must not treat the visibility race with a retry loop.
 
-    v1 proposed a 3×500ms retry loop; v2 rejects that as symptom-treatment.
+    v1 proposed a 3x500ms retry loop; v2 rejects that as symptom-treatment.
     The fix belongs in create_venv_at_path (sync flush), not in verify_venv.
     """
     content = _read_venv_sh()

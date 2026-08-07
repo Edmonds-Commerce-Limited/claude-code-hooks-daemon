@@ -7,7 +7,7 @@ for startup overhead on slow hosts.
 
 v2 fix:
   1. Replace the fixed 0.5s sleep in cli.py with a polling loop:
-     100ms interval × 50 iterations = 5s ceiling, exit early on PID-file
+     100ms interval x 50 iterations = 5s ceiling, exit early on PID-file
      appearance.
   2. daemon_control.sh:restart_daemon_verified must extend the overall
      timeout to 15s and — on timeout — fall back to `get_daemon_status`
