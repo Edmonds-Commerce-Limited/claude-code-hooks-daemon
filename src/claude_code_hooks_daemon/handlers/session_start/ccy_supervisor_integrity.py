@@ -19,9 +19,10 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.config.models import Config
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,6 @@ _CONFIG_REL_PARTS: tuple[str, str] = (".claude", "hooks-daemon.yaml")
 _WRAPPER_EXPORT_KEY = "CCY_CLAUDE_WRAPPER"
 _COMMENT_PREFIX = "#"
 _GIT_CHECK_IGNORE_TIMEOUT_SECONDS = 5
-_RESUME_TRANSCRIPT_MIN_BYTES = 100
 # git check-ignore exits 0 when the path IS ignored, 1 when it is NOT.
 _GIT_IGNORED_RETURNCODE = 0
 
@@ -78,16 +78,6 @@ class CcySupervisorIntegrityHandler(Handler):
         except RuntimeError:
             logger.debug("ProjectContext not initialised; using cwd for ccy integrity check")
             return Path.cwd()
-
-    def _is_resume_session(self, hook_input: dict[str, Any]) -> bool:
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        if not transcript_path:
-            return False
-        try:
-            path = Path(transcript_path)
-            return path.exists() and path.stat().st_size > _RESUME_TRANSCRIPT_MIN_BYTES
-        except (OSError, ValueError):
-            return False
 
     # ------------------------------------------------------------------
     # Integrity checks
@@ -303,7 +293,7 @@ class CcySupervisorIntegrityHandler(Handler):
     # ------------------------------------------------------------------
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        return not self._is_resume_session(hook_input)
+        return not is_resume_session(hook_input)
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         project_root = self._get_project_root()

@@ -15,7 +15,6 @@ container".
 
 import logging
 import os
-from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -26,6 +25,7 @@ from claude_code_hooks_daemon.utils.container_detection import (
     in_container,
     is_yolo_sandbox,
 )
+from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +35,6 @@ _RUNTIME_LXC = "lxc"
 _ICON_DOCKER = "🐳"
 _ICON_LXC = "🧊"
 _ICON_CONTAINER = "📦"  # podman + generic
-
-# Transcript size threshold: files larger than this are treated as resume sessions
-_RESUME_TRANSCRIPT_MIN_BYTES = 100
 
 # Config key names (no magic strings)
 _CFG_SHOW_DETAILED_INDICATORS = "show_detailed_indicators"
@@ -113,27 +110,6 @@ class YoloContainerDetectionHandler(Handler):
         """
         self.config.update(config)
 
-    def _is_resume_session(self, hook_input: dict[str, Any]) -> bool:
-        """Check if this is a resumed session (transcript exists with content).
-
-        Args:
-            hook_input: SessionStart hook input
-
-        Returns:
-            True if resume, False if new session
-        """
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        if not transcript_path:
-            return False
-
-        try:
-            path = Path(transcript_path)
-            if not path.exists():
-                return False
-            return path.stat().st_size > _RESUME_TRANSCRIPT_MIN_BYTES
-        except (OSError, ValueError):
-            return False
-
     def _build_indicators(self, runtime: str) -> list[str]:
         """Build the list of honest container indicators.
 
@@ -208,7 +184,7 @@ class YoloContainerDetectionHandler(Handler):
             (for expected OS/runtime errors) or DENY (for unexpected errors).
         """
         try:
-            is_resume = self._is_resume_session(hook_input)
+            is_resume = is_resume_session(hook_input)
 
             runtime = detect_container_runtime() or _FALLBACK_RUNTIME_LABEL
             icon = _runtime_icon(runtime)

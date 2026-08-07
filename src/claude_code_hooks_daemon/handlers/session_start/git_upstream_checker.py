@@ -31,12 +31,12 @@ from typing import Any
 from claude_code_hooks_daemon.constants import (
     HandlerID,
     HandlerTag,
-    HookInputField,
     Priority,
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils import git_sync
+from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,6 @@ _ICON = "⬇️"
 _GONE_ICON = "🧹"
 _MERGED_MARK = "✓"
 _UNMERGED_MARK = "⚠"
-_RESUME_TRANSCRIPT_MIN_BYTES = 100
 _FAST_FORWARD_DETAIL = "fast-forwarded"
 
 
@@ -78,16 +77,6 @@ class GitUpstreamCheckerHandler(Handler):
     # Session / repo helpers
     # ------------------------------------------------------------------
 
-    def _is_resume_session(self, hook_input: dict[str, Any]) -> bool:
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        if not transcript_path:
-            return False
-        try:
-            path = Path(transcript_path)
-            return path.exists() and path.stat().st_size > _RESUME_TRANSCRIPT_MIN_BYTES
-        except (OSError, ValueError):
-            return False
-
     def _get_project_root(self) -> Path:
         try:
             return ProjectContext.project_root()
@@ -110,7 +99,7 @@ class GitUpstreamCheckerHandler(Handler):
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Run on new sessions only (skip resumes to avoid re-fetch churn)."""
-        return not self._is_resume_session(hook_input)
+        return not is_resume_session(hook_input)
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         root = self._get_project_root()

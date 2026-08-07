@@ -4,6 +4,7 @@ When llm: commands exist in package.json, runs ESLint validation (enforcement mo
 When llm: commands do NOT exist, skips validation and advises about creating llm:lint.
 """
 
+import logging
 import os
 import subprocess  # nosec B404 - subprocess used for eslint validation only (trusted tool)
 from pathlib import Path
@@ -22,6 +23,8 @@ from claude_code_hooks_daemon.core import Decision, Handler, HookResult, Project
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
+
+logger = logging.getLogger(__name__)
 
 
 class ValidateEslintOnWriteHandler(Handler):
@@ -109,7 +112,7 @@ class ValidateEslintOnWriteHandler(Handler):
                 ],
             )
 
-        print(f"\n🔍 Running ESLint validation on {file_path_obj.name}...")
+        logger.info("Running ESLint validation on %s...", file_path_obj.name)
 
         # Check if this is a worktree file (either manually managed or Claude Code managed)
         is_worktree = any(
@@ -137,7 +140,7 @@ class ValidateEslintOnWriteHandler(Handler):
                 env["PATH"] = str(bin_path) + os.pathsep + env.get("PATH", "")
 
             if is_worktree:
-                print("  [Detected worktree file - using ESLint wrapper for consistent config]")
+                logger.info("Detected worktree file - using ESLint wrapper for consistent config")
 
             result = (
                 subprocess.run(  # nosec B603 - eslint/npx are trusted tools, file path validated
@@ -172,7 +175,7 @@ class ValidateEslintOnWriteHandler(Handler):
 
                 return HookResult(decision=Decision.DENY, reason=error_message)
 
-            print(f"✅ ESLint validation passed for {file_path_obj.name}\n")
+            logger.info("ESLint validation passed for %s", file_path_obj.name)
             return HookResult(decision=Decision.ALLOW)
 
         except subprocess.TimeoutExpired:

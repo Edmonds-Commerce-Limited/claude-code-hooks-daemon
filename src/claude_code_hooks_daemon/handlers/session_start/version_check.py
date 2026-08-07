@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Handler, HookResult, ProjectContext
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 from claude_code_hooks_daemon.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -151,30 +152,6 @@ class VersionCheckHandler(Handler):
             logger.debug("Failed to fetch latest version: %s", e)
             return None
 
-    def _is_resume_session(self, hook_input: dict[str, Any]) -> bool:
-        """Check if this is a resumed session (transcript exists with content).
-
-        Args:
-            hook_input: SessionStart hook input
-
-        Returns:
-            True if resume, False if new session
-        """
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        if not transcript_path:
-            return False
-
-        try:
-            path = Path(transcript_path)
-            if not path.exists():
-                return False
-
-            # If file exists and has content (>100 bytes), it's a resume
-            return path.stat().st_size > 100
-
-        except (OSError, ValueError):
-            return False
-
     def matches(self, hook_input: dict[str, Any] | None) -> bool:
         """Check if handler should run.
 
@@ -191,7 +168,7 @@ class VersionCheckHandler(Handler):
             return False
 
         # Only run on new sessions (not resume)
-        return not self._is_resume_session(hook_input)
+        return not is_resume_session(hook_input)
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Check daemon version and advise upgrade if outdated.

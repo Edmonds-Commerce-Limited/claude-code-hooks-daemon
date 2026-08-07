@@ -21,8 +21,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
 
@@ -51,27 +52,6 @@ class OptimalConfigCheckerHandler(Handler):
                 HandlerTag.ENVIRONMENT,
             ],
         )
-
-    def _is_resume_session(self, hook_input: dict[str, Any]) -> bool:
-        """Check if this is a resumed session (transcript has content).
-
-        Args:
-            hook_input: SessionStart hook input
-
-        Returns:
-            True if resume, False if new session
-        """
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        if not transcript_path:
-            return False
-
-        try:
-            path = Path(transcript_path)
-            if not path.exists():
-                return False
-            return path.stat().st_size > 100
-        except (OSError, ValueError):
-            return False
 
     def _get_settings_path(self) -> Path:
         """Get path to Claude global settings file.
@@ -335,7 +315,7 @@ class OptimalConfigCheckerHandler(Handler):
         Returns:
             True for new sessions, False for resumes
         """
-        return not self._is_resume_session(hook_input)
+        return not is_resume_session(hook_input)
 
     def _enforce_settings_sync(self) -> list[str]:
         """Ensure critical settings exist in ~/.claude/settings.json.

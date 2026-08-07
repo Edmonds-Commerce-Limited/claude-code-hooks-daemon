@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 
 if TYPE_CHECKING:
+    from claude_code_hooks_daemon.config.models import PlanWorkflowConfig
     from claude_code_hooks_daemon.core.router import EventRouter
 
 logger = logging.getLogger(__name__)
@@ -188,7 +189,7 @@ class HandlerRegistry:
         workspace_root: Path | None = None,
         project_languages: list[str] | None = None,
         project_exclude_paths: list[str] | None = None,
-        plan_workflow: Any = None,
+        plan_workflow: "PlanWorkflowConfig | None" = None,
         enable_hello_world_handlers: bool = False,
     ) -> int:
         """Register all discovered handlers with the router.
@@ -290,11 +291,12 @@ class HandlerRegistry:
 
                 module_name = f"claude_code_hooks_daemon.handlers.{dir_name}.{py_file.stem}"
 
-                try:
-                    module = importlib.import_module(module_name)
-                except Exception as e:
-                    logger.warning("Failed to import %s: %s", module_name, e)
-                    continue
+                # FAIL FAST: same contract as Pass 1's import of this module - a
+                # production handler that fails to import is a critical error and
+                # must crash the daemon loudly, not be silently disabled. Project
+                # handlers use a separate tolerant loader
+                # (handlers/project_loader.py) that is unaffected by this.
+                module = importlib.import_module(module_name)
 
                 # Find Handler subclasses in the module
                 for attr_name in dir(module):

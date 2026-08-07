@@ -1,5 +1,6 @@
 """Tests for ValidateEslintOnWriteHandler."""
 
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -507,6 +508,79 @@ class TestValidateEslintOnWriteHandler:
 
         assert result.decision == Decision.ALLOW
         mock_run.assert_called_once()
+
+
+class TestNoStdoutPrinting:
+    """Regression: the daemon's protocol is JSON-on-stdout, so a handler must
+    never print() progress messages directly to stdout - it must log them
+    instead (and/or surface them via the returned HookResult context).
+    """
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> ValidateEslintOnWriteHandler:
+        """Create handler with temporary workspace."""
+        return ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+
+    @patch("subprocess.run")
+    def test_success_path_writes_nothing_to_stdout(
+        self,
+        mock_run: MagicMock,
+        handler: ValidateEslintOnWriteHandler,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A passing ESLint run must not print anything to stdout."""
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        hook_input = {"tool_name": "Write", "tool_input": {"file_path": str(test_file)}}
+        handler.handle(hook_input)
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    @patch("subprocess.run")
+    def test_worktree_detection_writes_nothing_to_stdout(
+        self,
+        mock_run: MagicMock,
+        handler: ValidateEslintOnWriteHandler,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The worktree-detection notice must not print anything to stdout."""
+        worktree_dir = tmp_path / "untracked" / "worktrees" / "test"
+        worktree_dir.mkdir(parents=True)
+        test_file = worktree_dir / "test.ts"
+        test_file.write_text("const x = 1;")
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        hook_input = {"tool_name": "Write", "tool_input": {"file_path": str(test_file)}}
+        handler.handle(hook_input)
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    @patch("subprocess.run")
+    def test_success_path_logs_instead_of_printing(
+        self,
+        mock_run: MagicMock,
+        handler: ValidateEslintOnWriteHandler,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Progress messages go through the standard logging module."""
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        hook_input = {"tool_name": "Write", "tool_input": {"file_path": str(test_file)}}
+        with caplog.at_level(logging.INFO):
+            handler.handle(hook_input)
+
+        messages = "\n".join(record.message for record in caplog.records)
+        assert "Running ESLint validation" in messages
+        assert "ESLint validation passed" in messages
 
 
 class TestNodeModulesBinPath:
