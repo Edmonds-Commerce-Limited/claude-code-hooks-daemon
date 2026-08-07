@@ -71,7 +71,11 @@ jobs:
           path: coverage.xml
 
       - name: Security (bandit)
-        run: bandit -c pyproject.toml -r src/
+        # Filter ONLY B101 (asserts) - identical to scripts/qa/run_security_check.sh
+        # and .pre-commit-config.yaml. Do NOT reintroduce `-c pyproject.toml`: that
+        # used to pull in a skips list which silently exempted B108/B324/B602/B603/
+        # B607/B404 in CI only, making CI the loosest of the three surfaces.
+        run: bandit -r src/ .claude/ccy/claude-supervise.py -s B101
 
       - name: Dependencies (deptry)
         run: deptry src/
