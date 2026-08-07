@@ -571,6 +571,7 @@ def copy_init_script(project_root: Path, daemon_dir: Path, self_install: bool = 
         daemon_dir: Path to daemon repository
         self_install: If True, create symlink instead of copying
     """
+    import os
     import shutil
 
     source_init = daemon_dir / "init.sh"
@@ -580,49 +581,19 @@ def copy_init_script(project_root: Path, daemon_dir: Path, self_install: bool = 
         raise FileNotFoundError(f"init.sh not found at {source_init}")
 
     if self_install:
-        # For self-installation, create symlink to avoid duplication
+        # For self-installation, create symlink to avoid duplication. The
+        # target MUST be repo-relative, not absolute: an absolute symlink
+        # bakes in this machine's checkout path (e.g. /workspace/init.sh)
+        # and dangles on every other clone (MT-1, Plan 00198).
         if dest_init.exists() or dest_init.is_symlink():
             dest_init.unlink()
-        dest_init.symlink_to(source_init)
+        relative_target = os.path.relpath(source_init, start=dest_init.parent)
+        dest_init.symlink_to(relative_target)
         print(f"   ✅ Symlinked init.sh")
     else:
         shutil.copy2(source_init, dest_init)
         dest_init.chmod(0o755)  # Make executable
         print(f"   ✅ Copied init.sh")
-
-
-def copy_slash_commands(project_root: Path, daemon_dir: Path, self_install: bool = False) -> None:
-    """Copy slash commands to .claude/commands directory.
-
-    Args:
-        project_root: Project root directory
-        daemon_dir: Path to daemon repository
-        self_install: If True, create symlink instead of copying
-    """
-    import shutil
-
-    # Create .claude/commands directory if it doesn't exist
-    commands_dir = project_root / ".claude" / "commands"
-    commands_dir.mkdir(parents=True, exist_ok=True)
-
-    # Copy hooks-daemon-update command
-    source_cmd = daemon_dir / ".claude" / "commands" / "hooks-daemon-update.md"
-    dest_cmd = commands_dir / "hooks-daemon-update.md"
-
-    if not source_cmd.exists():
-        # Command file doesn't exist in daemon - skip silently
-        # This allows older daemon versions to work without the command
-        return
-
-    if self_install:
-        # For self-installation, create symlink to avoid duplication
-        if dest_cmd.exists() or dest_cmd.is_symlink():
-            dest_cmd.unlink()
-        dest_cmd.symlink_to(source_cmd)
-        print(f"   ✅ Symlinked /hooks-daemon-update command")
-    else:
-        shutil.copy2(source_cmd, dest_cmd)
-        print(f"   ✅ Copied /hooks-daemon-update command")
 
 
 def create_all_hooks(hooks_dir: Path) -> list[Path]:
@@ -1404,9 +1375,6 @@ def main() -> int:
     # Copy init.sh to .claude directory
     print("\n📝 Copying lifecycle scripts...")
     copy_init_script(project_root, daemon_dir, self_install=self_install)
-
-    # Copy slash commands
-    copy_slash_commands(project_root, daemon_dir, self_install=self_install)
 
     # Create all hook files
     hooks_dir = project_root / ".claude" / "hooks"

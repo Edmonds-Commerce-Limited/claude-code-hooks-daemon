@@ -1,1 +1,1 @@
-/workspace/init.sh
+../init.sh

@@ -1,1 +1,0 @@
-/workspace/.claude/commands/hooks-daemon-update.md

@@ -72,6 +72,19 @@ deploy_slash_commands() {
         local target_file="$target_commands_dir/$file_name"
 
         if [ "$install_mode" = "self-install" ]; then
+            # CRITICAL: in self-install mode daemon_dir == project_root, so
+            # source_file and target_file are the SAME path. Unlinking then
+            # symlinking unconditionally destroyed the real file and replaced
+            # it with a dangling self-referential symlink (MT-1a, Plan 00198
+            # — the exact defect that shipped in the now-removed deprecated
+            # install.py). Use bash's `-ef` (same device+inode, resolves
+            # symlinks) rather than a string compare, matching the guard
+            # already proven in deploy_init_script.
+            if [ -e "$target_file" ] && [ "$source_file" -ef "$target_file" ]; then
+                print_verbose "Self-install mode: $file_name already in place, skipping"
+                deployed_count=$((deployed_count + 1))
+                continue
+            fi
             # Self-install mode: create symlinks
             if [ -L "$target_file" ] || [ -f "$target_file" ]; then
                 rm -f "$target_file"
@@ -246,6 +259,13 @@ deploy_single_slash_command() {
     mkdir -p "$target_dir"
 
     if [ "$install_mode" = "self-install" ]; then
+        # CRITICAL: in self-install mode daemon_dir == project_root, so
+        # source_file and target_file are the SAME path — see the identical
+        # guard (and its rationale) in deploy_slash_commands() above.
+        if [ -e "$target_file" ] && [ "$source_file" -ef "$target_file" ]; then
+            print_verbose "Self-install mode: $command_name already in place, skipping"
+            return 0
+        fi
         # Self-install mode: create symlink
         if [ -L "$target_file" ] || [ -f "$target_file" ]; then
             rm -f "$target_file"
