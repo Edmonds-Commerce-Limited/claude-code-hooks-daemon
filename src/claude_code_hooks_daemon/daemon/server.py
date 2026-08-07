@@ -21,7 +21,7 @@ import sys
 import time
 from functools import partial
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, runtime_checkable
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
@@ -32,7 +32,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
-from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms
+from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms, redact_text
 from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
 
 # Global memory log handler - accessible for log queries
@@ -51,6 +51,69 @@ _LOG_LEVEL_NUMBERS: dict[str, int] = {
     "CRITICAL": logging.CRITICAL,
 }
 _VALID_LOG_LEVEL_NAMES = frozenset(_LOG_LEVEL_NUMBERS)
+
+# How much of a blocking response is written to the DEBUG log. Enough to
+# diagnose a block, bounded so one response cannot flood the log.
+BLOCKING_RESPONSE_LOG_CHARS: Final[int] = 1000
+
+
+def redacted_blocking_response(response_json: str) -> str:
+    """Prepare a blocking response for the DEBUG log: redacted, then truncated.
+
+    Plan 00201 closed four secret-leak vectors (payload capture, the router's
+    PreToolUse dump, the front controller's error log, transcript archives).
+    This was the fifth and it survived the pass.
+
+    The response is NOT safe by construction. ``sensitive_content`` keeps the
+    matched term out of its own deny reason on purpose — but every other
+    blocking handler quotes the offending content back so the block is
+    actionable (``error_hiding_blocker`` and ``security_antipattern`` both echo
+    the matched line). A secret pasted into a Write that one of those denies
+    therefore reached this log verbatim.
+
+    Redaction runs BEFORE truncation, deliberately: cutting first and redacting
+    the window would let a term straddling the boundary leave its head behind,
+    and half a credential in a log is still a credential in a log.
+    """
+    terms = get_active_secret_terms()
+    if not terms:
+        return response_json[:BLOCKING_RESPONSE_LOG_CHARS]
+
+    # Redact a WINDOW, not the whole response. Redaction cost is linear in
+    # length — measured at 0.94ms for 8KB, 8.2ms for 64KB and 30ms for 256KB
+    # with 12 terms — and a SessionStart response carrying the full resident
+    # guidance is comfortably in that top bracket. Redacting all of it to log
+    # its first 1000 characters made every such response pay for text that was
+    # discarded a line later.
+    #
+    # The window is the log limit plus the longest term, which is exactly
+    # enough: any term STARTING inside the limit ends inside the window, so it
+    # is redacted whole before the cut. Truncating to the limit first and
+    # redacting that would let a term straddling the boundary leave its head
+    # behind, and half a credential in a log is still a credential in a log.
+    window = BLOCKING_RESPONSE_LOG_CHARS + max(len(term) for term in terms)
+    return redact_text(response_json[:window], terms)[:BLOCKING_RESPONSE_LOG_CHARS]
+
+
+def log_blocking_response(response_json: str, debug_enabled: bool) -> None:
+    """Log a blocking response at DEBUG, redacting only if it will be emitted.
+
+    The guard is load-bearing, not defensive. ``logger.debug(fmt, expensive(x))``
+    evaluates ``expensive(x)`` EAGERLY — logging skips the formatting of a
+    discarded record, never the evaluation of its arguments. Redaction was
+    measured at ~0.97ms on an 8KB response with 12 terms configured, against a
+    daemon-side dispatch budget of ~1.8ms, so calling it unconditionally would
+    have added roughly half again to every deny/block response at INFO level to
+    produce a string that is then thrown away.
+
+    ``debug_enabled`` is passed in rather than read here so the decision is
+    testable without reaching into logging internals.
+    """
+    if not debug_enabled:
+        return
+    logger.debug("BLOCKING RESPONSE: %s", redacted_blocking_response(response_json))
+
+
 _LOG_NO_LOGS_AVAILABLE = "No logs available - daemon not initialised"
 _LOG_INVALID_LEVEL_PREFIX = "Invalid log level: "
 
@@ -839,7 +902,9 @@ class HooksDaemon:
                 or "block" in response_json
                 or "permissionDecision" in response_json
             ):
-                logger.debug("BLOCKING RESPONSE: %s", response_json[:1000])
+                log_blocking_response(
+                    response_json, debug_enabled=logger.isEnabledFor(logging.DEBUG)
+                )
 
             writer.write(response_json.encode())
             await writer.drain()
