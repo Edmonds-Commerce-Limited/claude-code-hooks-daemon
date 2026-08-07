@@ -175,35 +175,19 @@ plan's own two new test files contribute the difference.)
 
 ### Phase 5: The error-hiding guard does not guard the guards
 
-The lint-gate swallow (Phase 1) was a textbook error-hiding bug in a repo that ships **two**
-defences against exactly that. Neither fired. Understanding why matters more than the one fix,
-because the same blind spot hides everything else in this phase.
+The Phase 1 swallow was textbook error hiding in a repo shipping **two** defences against
+exactly that, and neither fired. Root cause in brief — full analysis in `JOURNAL/`:
 
-**Why `audit_error_hiding.py` missed it** — two independent reasons, either sufficient:
+- `audit_error_hiding.py:298-299` scans `src/` only, commented *"production code only"*, so the
+  QA scripts that **implement the gates** are exempt from the gate. `:182` globs `*.py` only,
+  and the swallow lived in Python inside a bash heredoc — invisible twice over.
+- `error_hiding_blocker` + `shell_strategy` do know the shell patterns, but fire only on
+  **Write/Edit**. Nothing sweeps what is already on disk.
 
-- `scripts/qa/audit_error_hiding.py:298-299` scans `workspace / "src"` only, commented
-  *"production code only"*. The QA scripts that **implement the gates** are therefore exempt
-  from the gate. The tooling is outside its own jurisdiction.
-- `:182` globs `*.py` only. The swallow lived in Python embedded in a bash heredoc inside a
-  `.sh` file, so it was invisible a second time over.
-
-**Why `error_hiding_blocker` missed it**: the handler and its `shell_strategy`
-(`strategies/error_hiding/shell_strategy.py`, which does know `.sh`/`.bash` and does match
-`|| true`) only fire on **Write/Edit**. Nothing sweeps files already on disk. Everything
-predating the handler, or written outside a Claude session, is permanently unexamined.
-
-**What the blind spot is currently hiding** (counts, not yet triaged):
-
-| Pattern            | Count | Where                                                                                                                      |
-| ------------------ | ----- | -------------------------------------------------------------------------------------------------------------------------- |
-| `2>/dev/null`      | 77    | `scripts/**`, `init.sh`, `install.sh`                                                                                      |
-| `\|\| true`        | 6     | same                                                                                                                       |
-| Broad `except`     | 12    | `scripts/*.py` (`debug_info.py` 5, `handler_status.py` 3, `audit_error_hiding.py` 3, `measure_instruction_footprint.py` 1) |
-| Confirmed swallows | 2     | `scripts/handler_status.py:74`, `scripts/debug_info.py:330`                                                                |
-
-**These counts are not a defect count.** Many `2>/dev/null` uses are legitimate — probing with
-`command -v`, suppressing expected noise from a tool that writes to stderr on success. Triage is
-required; blind removal would break things and is not the goal.
+Blind-spot inventory: 77 `2>/dev/null`, 6 `|| true`, 12 broad `except` in `scripts/*.py`, 2
+confirmed swallows (`handler_status.py:74`, `debug_info.py:330`). **Not a defect count** — many
+`2>/dev/null` uses are legitimate `command -v` probes. Triage required; blind removal breaks
+things.
 
 - [ ] ⬜ **Task 5.1**: Widen `audit_error_hiding.py` beyond `src/` to cover `scripts/` and
   root-level `install.py`. Expect it to surface the 12 broad excepts and 2 swallows above.
@@ -251,19 +235,30 @@ ground truth to diff prose claims against — the data exists, nothing consumes 
 - [ ] ⬜ **Task 6.1**: Tracked-build-artifact check — fail when a generated artifact
   (`coverage.*`, `htmlcov/`, `*.bak`, `.orig`, `~`) is tracked. Would have caught `coverage.json`
   and `.claude/settings.json.bak`.
+
 - [ ] ⬜ **Task 6.2**: Doc-vs-generated-truth check — diff README/`CLAUDE.md` factual claims
   against `.claude/HOOKS-DAEMON.md` and the handler registry. Start with the two demonstrated
   failures: inverted handler descriptions, and hardcoded check counts that drift. Prefer
   removing hardcoded counts from prose over asserting them.
+
 - [ ] ⬜ **Task 6.3**: Repo-hygiene check — no test scripts outside the test tree, no editor/
   backup detritus tracked.
+
 - [ ] ⬜ **Task 6.4**: Require a **negative** acceptance case per blocking handler. All five
   false positives in Phase 3 are one class: handlers assert what they block and never assert
   what they must NOT block. Make `get_acceptance_tests()` require at least one expected-allow
   case for any handler that can deny, and enforce it in the playbook generator's own tests.
 
-Task 6.4 is the highest-leverage item in this plan: it converts a whole recurring class into a
-structural requirement rather than five individual fixes.
+- [ ] ⬜ **Task 6.5**: Shared-checkout commit-scope guard. Bare `git commit` commits the entire
+  index, not what the caller staged, so concurrent agents in one checkout absorb or clobber each
+  other's staged work. Fired **twice** this session (incidents logged in `JOURNAL/`). The daemon
+  already tracks live agent threads (`handlers/status_line/thread_registry.py`,
+  `multithread_indicator.py`), so a PreToolUse advisory on a bare `git commit` while >1 thread is
+  registered closes it. Advisory, not blocking — single-agent sessions must stay unaffected.
+
+Task 6.4 is the highest-leverage item here: it converts a recurring class into a structural
+requirement rather than five individual fixes. Task 6.5 is the most *novel* — a defect class
+created by the agent-orchestration model itself, which no single-developer tooling would surface.
 
 ## Technical Decisions
 
