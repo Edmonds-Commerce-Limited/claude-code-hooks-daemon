@@ -144,6 +144,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="sensitive_content.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "handler_reference": ToolConfig(
+        command=_python("check_handler_reference.py", "--json"),
+        json_file="handler_reference.json",
+        jq_hint="jq '.violations[] | {rule, file, line, message}'",
+    ),
     # smoke_test MUST stay last: it probes the live daemon, so it belongs
     # after every static check has had its say. Pinned by
     # test_smoke_test_is_last_in_registry -- three tools were appended below
@@ -260,6 +265,11 @@ def _summarize_sensitive_content(data: QaReport) -> str:
     return f"{total} violations"
 
 
+def _summarize_handler_reference(data: QaReport) -> str:
+    total = data.get("summary", {}).get("total_violations", 0)
+    return f"{total} violations"
+
+
 SUMMARIZERS: dict[str, Summarizer] = {
     "magic_values": _summarize_magic_values,
     "format": _summarize_format,
@@ -278,6 +288,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "repo_hygiene": _summarize_repo_hygiene,
     "doc_truth": _summarize_doc_truth,
     "sensitive_content": _summarize_sensitive_content,
+    "handler_reference": _summarize_handler_reference,
 }
 
 

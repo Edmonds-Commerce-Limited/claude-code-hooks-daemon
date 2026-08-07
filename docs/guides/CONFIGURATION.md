@@ -190,7 +190,7 @@ Priorities determine the order handlers execute within an event type. **Lower nu
 | ----- | ------------ | ------------------------------ | ------------------------------------------------------------------ |
 | 0-9   | Test         | Test and debug handlers        | `hello_world` (5)                                                  |
 | 10-20 | Safety       | Prevent destructive operations | `destructive_git` (10), `sed_blocker` (10), `curl_pipe_shell` (15) |
-| 25-35 | Code Quality | Enforce development standards  | `eslint_disable` (30), `tdd_enforcement` (35)                      |
+| 25-35 | Code Quality | Enforce development standards  | `lint_on_edit` (25), `qa_suppression` (30)                         |
 | 36-55 | Workflow     | Process and tool guidance      | `plan_workflow` (45), `npm_command` (50), `web_search_year` (55)   |
 | 56-60 | Advisory     | Non-blocking suggestions       | `british_english` (60)                                             |
 | 100+  | Logging      | Metrics and audit trails       | `notification_logger` (100)                                        |
@@ -315,7 +315,7 @@ handlers:
     enable_tags: [python]
 
     # This handler matches the python tag but is explicitly disabled
-    python_qa_suppression_blocker:
+    qa_suppression:
       enabled: false
 ```
 
@@ -568,9 +568,9 @@ handlers:
     pip_break_system: {enabled: true, priority: 20}
     sudo_pip: {enabled: true, priority: 20}
 
-    # Python quality
-    python_qa_suppression_blocker: {enabled: true, priority: 26}
-    tdd_enforcement: {enabled: true, priority: 35}
+    # Code quality (qa_suppression covers every supported language)
+    qa_suppression: {enabled: true, priority: 30}
+    tdd_enforcement: {enabled: true, priority: 15}
 
     # Workflow
     web_search_year: {enabled: true, priority: 55}
@@ -603,11 +603,11 @@ handlers:
     absolute_path: {enabled: true, priority: 12}
     lock_file_edit_blocker: {enabled: true, priority: 20}
 
-    # JS/TS quality
-    eslint_disable: {enabled: true, priority: 30}
+    # Code quality (qa_suppression covers eslint-disable / @ts-ignore too)
+    qa_suppression: {enabled: true, priority: 30}
 
     # Workflow
-    global_npm_advisor: {enabled: true, priority: 42}
+    global_npm_advisor: {enabled: true, priority: 40}
     npm_command: {enabled: true, priority: 50}
     web_search_year: {enabled: true, priority: 55}
 

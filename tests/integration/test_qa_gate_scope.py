@@ -163,7 +163,7 @@ class TestTypeGateCannotPassWithoutAnalysing:
         """
         text = (_QA_DIR / "run_type_check.sh").read_text(encoding="utf-8")
 
-        assert 'len(errors) == 0 and bool(analysed_count)' in text, (
+        assert "len(errors) == 0 and bool(analysed_count)" in text, (
             "run_type_check.sh no longer conjoins `passed` with the analysed "
             "file count. Restore it: without that term the gate reports PASSED "
             "when mypy fails before checking a single file."
@@ -176,9 +176,7 @@ class TestTypeGateCannotPassWithoutAnalysing:
         # Inspect executable lines only. The file's own commentary explains why
         # the flag is absent, so a naive whole-file substring search matches the
         # explanation and fails on a correct script.
-        live_lines = [
-            line for line in text.splitlines() if not line.lstrip().startswith("#")
-        ]
+        live_lines = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
         offenders = [line for line in live_lines if "--no-error-summary" in line]
         assert not offenders, (
             f"run_type_check.sh passes --no-error-summary again: {offenders}. "

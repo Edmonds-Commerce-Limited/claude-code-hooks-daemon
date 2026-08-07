@@ -201,6 +201,16 @@ else
 fi
 echo ""
 
+echo "17. Running Handler-Reference Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_handler_reference.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Handler-reference check FAILED"
+else
+    echo "✅ Handler-reference check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -226,6 +236,7 @@ results = {
     "Repo Hygiene": "untracked/qa/repo_hygiene.json",
     "Doc Truth": "untracked/qa/doc_truth.json",
     "Sensitive Content": "untracked/qa/sensitive_content.json",
+    "Handler Reference": "untracked/qa/handler_reference.json",
 }
 
 all_passed = True

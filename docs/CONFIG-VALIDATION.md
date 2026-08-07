@@ -321,7 +321,7 @@ handlers:
     # absolute_path: {enabled: false, priority: 12}
     # web_search_year: {enabled: false, priority: 55}
     # british_english: {enabled: false, priority: 60}
-    # eslint_disable: {enabled: false, priority: 15}
+    # qa_suppression: {enabled: false, priority: 30}
     # sed_blocker: {enabled: false, priority: 25}
     # worktree_file_copy: {enabled: false, priority: 30}
     # tdd_enforcement: {enabled: false, priority: 35}

@@ -1,6 +1,14 @@
 # Handler Reference
 
-Complete reference for all built-in handlers in the Claude Code Hooks Daemon. Each handler intercepts specific Claude Code events and either blocks dangerous operations or provides advisory context.
+Per-handler options, values and defaults for the Claude Code Hooks Daemon. Each handler intercepts specific Claude Code events and either blocks dangerous operations or provides advisory context.
+
+**Scope**: this page documents every **PreToolUse blocking** handler plus the handlers that carry configurable options — not every handler that ships. For the full inventory of handlers active in *your* project, generate it from live config:
+
+```bash
+.claude/hooks-daemon/bin/hooks-daemon generate-docs   # writes .claude/HOOKS-DAEMON.md
+```
+
+**About the Priority column**: the number shown for each handler is its **shipped default**, taken from `src/claude_code_hooks_daemon/constants/priority.py` — the single source of truth for handler priorities. A project's `.claude/hooks-daemon.yaml` may set a different `priority:` for any handler; that override is local to the project and is never a reason to edit this page. `scripts/qa/check_handler_reference.py` fails the QA suite if any number here drifts from the code, or if a section names a handler that does not exist.
 
 ## How Handlers Work
 
@@ -55,7 +63,7 @@ handlers:
 
 These handlers run **before** Claude Code executes a tool call. They can block dangerous operations or inject advisory context.
 
-### Safety Handlers (Priority 10-23)
+### Safety Handlers (Priority 10-20)
 
 Safety handlers protect against destructive or dangerous operations. Most are blocking.
 
@@ -79,6 +87,8 @@ Safety handlers protect against destructive or dangerous operations. Most are bl
 - `git restore <file>` -- discards working tree changes (allows `--staged`)
 - `git stash drop` / `git stash clear` -- permanently destroys stashed changes
 - `git push --force` -- overwrites remote history
+- `git branch -D` -- force-deletes a branch without checking it is merged (lowercase `-d` is allowed)
+- `git commit --amend` -- rewrites the previous commit; create a new commit instead
 
 **Example trigger:**
 
@@ -107,17 +117,21 @@ handlers:
 | **Type**       | Blocking      |
 | **Event**      | PreToolUse    |
 
-**Description:** Blocks `sed` command usage. Claude frequently gets sed syntax wrong, which can cause large-scale file corruption, especially with `find -exec sed`. The Edit tool is the safe alternative for file modifications.
+**Description:** Blocks `sed` used to **modify files**. Claude frequently gets sed syntax wrong, and a single mistake can silently corrupt hundreds of files with no recovery — especially via `find -exec sed` or `xargs sed -i`. The Edit tool is the safe alternative for file modifications.
+
+This is **not** a blanket ban on the word `sed`: read-only pipelines that only transform stdout are explicitly allowed.
 
 **What it blocks (strict mode, default):**
 
-- Bash commands containing `sed` (direct execution)
-- Shell scripts (.sh/.bash) being written that contain `sed`
+- In-place editing -- `sed -i`, `sed -e` invoked to rewrite a file
+- Mass modification -- `grep -rl X | xargs sed -i ...`
+- Shell scripts (`.sh`/`.bash`) written via the Write tool that contain `sed`
 
 **What it allows:**
 
+- Read-only pipelines that transform stdout only -- `cat file | sed 's/x/y/' | grep z`
 - Markdown files mentioning sed (documentation)
-- Git commit messages mentioning sed
+- Git commit messages and PR bodies mentioning sed
 - `grep` commands searching for the word "sed"
 - `echo` commands mentioning sed (without sed command patterns)
 - GitHub CLI commands with sed in text content
@@ -135,7 +149,7 @@ handlers:
   pre_tool_use:
     sed_blocker:
       enabled: true
-      priority: 11
+      priority: 10
 ```
 
 **Options:**
@@ -187,6 +201,87 @@ handlers:
 
 ---
 
+#### daemon_location_guard
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `daemon_location_guard` |
+| **Priority**   | 11                      |
+| **Type**       | Blocking                |
+| **Event**      | PreToolUse              |
+
+**Description:** Blocks Bash commands that `cd` into `.claude/hooks-daemon/` (or into a daemon-internal subdirectory and then run something). The daemon is an upstream dependency: anything edited inside that directory is overwritten by the next upgrade, and a shell rooted there resolves project-relative paths against the wrong tree.
+
+**Do this instead:** run the daemon CLI from the project root — it works regardless of the current directory.
+
+```bash
+.claude/hooks-daemon/bin/hooks-daemon status
+.claude/hooks-daemon/bin/hooks-daemon restart
+.claude/hooks-daemon/bin/hooks-daemon logs
+```
+
+To inspect daemon source for debugging, use the `Read` tool with an absolute path rather than changing directory into it.
+
+**Example trigger:**
+
+```bash
+cd .claude/hooks-daemon && ./bin/hooks-daemon status
+```
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    daemon_location_guard:
+      enabled: true
+      priority: 11
+```
+
+---
+
+#### ask_user_question_blocker
+
+| Property       | Value                       |
+| -------------- | --------------------------- |
+| **Config key** | `ask_user_question_blocker` |
+| **Priority**   | 10                          |
+| **Type**       | Terminal                    |
+| **Event**      | PreToolUse                  |
+
+**Description:** Allows an `AskUserQuestion` tool call only when **every** `question` string begins with the required justification prefix. Pausing the session for a human is a privilege that should carry declared intent — the convention mirrors the Stop handler's `STOPPING BECAUSE:` pattern.
+
+Mixing prefixed and unprefixed questions in one call still blocks: prefix all, or none.
+
+**Allowed:**
+
+```
+ASKING BECAUSE: the two schemas are equally valid and the choice is a product decision.
+Which storage backend should we use?
+```
+
+**Blocked:** tautological or rhetorical questions with one obvious answer ("Should I continue?", "Would you like me to proceed?"), and any question whose options reduce to good-vs-bad. State the assumption in plain output and proceed instead.
+
+**Options:**
+
+| Option            | Type  | Default           | Description                                                                                      |
+| ----------------- | ----- | ----------------- | ------------------------------------------------------------------------------------------------ |
+| `required_prefix` | `str` | `ASKING BECAUSE:` | The prefix every question must start with. Matched case-sensitively; leading whitespace is fine. |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    ask_user_question_blocker:
+      enabled: true
+      priority: 10
+      options:
+        required_prefix: "ASKING BECAUSE:"
+```
+
+---
+
 #### worktree_file_copy
 
 | Property       | Value                |
@@ -221,7 +316,7 @@ handlers:
 | Property       | Value             |
 | -------------- | ----------------- |
 | **Config key** | `curl_pipe_shell` |
-| **Priority**   | 16                |
+| **Priority**   | 10                |
 | **Type**       | Blocking          |
 | **Event**      | PreToolUse        |
 
@@ -240,6 +335,44 @@ handlers:
   pre_tool_use:
     curl_pipe_shell:
       enabled: true
+      priority: 10
+```
+
+---
+
+#### root_recursion_guard
+
+| Property       | Value                  |
+| -------------- | ---------------------- |
+| **Config key** | `root_recursion_guard` |
+| **Priority**   | 16                     |
+| **Type**       | Blocking               |
+| **Event**      | PreToolUse             |
+
+**Description:** Blocks a recursive scanner whose path argument resolves to a catastrophic root location. Such a scan walks the entire filesystem, can pin every CPU core for hours, and almost never returns what was actually wanted.
+
+**Blocked** (recursive scanner **and** dangerous root path):
+
+- Scanners: `grep -r`/`-R`/`-rl`, `ugrep -r`, `rgrep`, `find`, `fd`/`fdfind`, `rg`
+- Roots: `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`
+
+**Allowed:** the same scanners scoped to the project — `rg -l "x" /path/to/project`, `grep -rl "x" "$CLAUDE_PROJECT_DIR"`, `grep -rl x src/`, `find . -name y`. A non-recursive `grep x /etc/hosts` is never affected.
+
+**Note:** piping to `head` does NOT bound a `-l`/`-rl` scan. A producer that matches nothing never writes, so it never receives `SIGPIPE` and runs to completion across the whole disk.
+
+**Escape hatch** (a genuinely necessary whole-disk scan):
+
+```bash
+MUST_SCAN_ROOT_BECAUSE="explain why"; grep -rl x /
+```
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    root_recursion_guard:
+      enabled: true
       priority: 16
 ```
 
@@ -250,7 +383,7 @@ handlers:
 | Property       | Value          |
 | -------------- | -------------- |
 | **Config key** | `pipe_blocker` |
-| **Priority**   | 17             |
+| **Priority**   | 15             |
 | **Type**       | Blocking       |
 | **Event**      | PreToolUse     |
 
@@ -275,7 +408,28 @@ handlers:
   pre_tool_use:
     pipe_blocker:
       enabled: true
-      priority: 17
+      priority: 15
+```
+
+**Options:**
+
+| Option            | Type        | Default | Description                                                                                                                                     |
+| ----------------- | ----------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `extra_whitelist` | `list[str]` | `[]`    | Additional regex patterns for commands that are CHEAP to re-run and may therefore be piped to `tail`/`head`. Matched case-insensitively.        |
+| `extra_blacklist` | `list[str]` | `[]`    | Additional command substrings that must NEVER be piped to `tail`/`head`, even if a whitelist pattern would otherwise have allowed them through. |
+
+`extra_whitelist` is the option the block message itself tells you to set, so it is the usual reason to configure this handler at all:
+
+```yaml
+handlers:
+  pre_tool_use:
+    pipe_blocker:
+      enabled: true
+      options:
+        extra_whitelist:
+          - "^my-fast-tool"      # cheap to re-run, safe to truncate
+        extra_blacklist:
+          - "terraform plan"     # expensive, never truncate
 ```
 
 ---
@@ -285,7 +439,7 @@ handlers:
 | Property       | Value                   |
 | -------------- | ----------------------- |
 | **Config key** | `dangerous_permissions` |
-| **Priority**   | 18                      |
+| **Priority**   | 15                      |
 | **Type**       | Blocking                |
 | **Event**      | PreToolUse              |
 
@@ -304,7 +458,7 @@ handlers:
   pre_tool_use:
     dangerous_permissions:
       enabled: true
-      priority: 18
+      priority: 15
 ```
 
 ---
@@ -314,18 +468,28 @@ handlers:
 | Property       | Value                                        |
 | -------------- | -------------------------------------------- |
 | **Config key** | `git_stash`                                  |
-| **Priority**   | 19                                           |
+| **Priority**   | 20                                           |
 | **Type**       | Blocking (deny mode) or Advisory (warn mode) |
 | **Event**      | PreToolUse                                   |
 
-**Description:** Warns about or blocks git stash creation commands. Stashes can be lost, forgotten, or accidentally dropped. Supports two modes configurable via handler options.
+**Description:** Blocks (or, in `warn` mode, advises against) git stash creation commands. Stashes get forgotten, lost, and block `git pull`. Use `git commit -m 'WIP: ...'` instead — WIP commits are acceptable.
 
-**Modes:**
+**Options:**
 
-- `warn` (default) -- Allows with advisory warning suggesting alternatives
-- `deny` -- Hard blocks with no exceptions
+| Option | Values         | Default | Description                                                       |
+| ------ | -------------- | ------- | ----------------------------------------------------------------- |
+| `mode` | `deny`, `warn` | `deny`  | `deny` hard-blocks stash creation; `warn` allows with an advisory |
 
-**Allows:** `git stash pop`, `git stash apply`, `git stash list`, `git stash show` (recovery/query operations)
+- **`deny`** (default) -- Blocks `git stash`, `git stash push`, `git stash save`. This is the shipped default; a stash is not a safe place to leave work.
+- **`warn`** -- Allows the command through with an advisory warning suggesting alternatives.
+
+**Escape hatch (deny mode):** prefix the command with a non-empty `MUST_STASH_BECAUSE` reason and the handler stands aside:
+
+```bash
+MUST_STASH_BECAUSE="explain why commit won't work"; git stash
+```
+
+**Always allowed:** `git stash pop`, `git stash apply`, `git stash list`, `git stash show` (recovery/query operations). Note that `git stash drop` and `git stash clear` are blocked by [`destructive_git`](#destructive_git), not by this handler.
 
 **Example trigger:**
 
@@ -341,9 +505,9 @@ handlers:
   pre_tool_use:
     git_stash:
       enabled: true
-      priority: 19
+      priority: 20
       options:
-        mode: "warn"  # or "deny"
+        mode: "deny"  # default; use "warn" for advisory-only
 ```
 
 ---
@@ -353,7 +517,7 @@ handlers:
 | Property       | Value                    |
 | -------------- | ------------------------ |
 | **Config key** | `lock_file_edit_blocker` |
-| **Priority**   | 20                       |
+| **Priority**   | 10                       |
 | **Type**       | Blocking                 |
 | **Event**      | PreToolUse               |
 
@@ -374,7 +538,7 @@ handlers:
   pre_tool_use:
     lock_file_edit_blocker:
       enabled: true
-      priority: 20
+      priority: 10
 ```
 
 ---
@@ -384,7 +548,7 @@ handlers:
 | Property       | Value              |
 | -------------- | ------------------ |
 | **Config key** | `pip_break_system` |
-| **Priority**   | 21                 |
+| **Priority**   | 10                 |
 | **Type**       | Blocking           |
 | **Event**      | PreToolUse         |
 
@@ -403,7 +567,7 @@ handlers:
   pre_tool_use:
     pip_break_system:
       enabled: true
-      priority: 21
+      priority: 10
 ```
 
 ---
@@ -413,7 +577,7 @@ handlers:
 | Property       | Value      |
 | -------------- | ---------- |
 | **Config key** | `sudo_pip` |
-| **Priority**   | 22         |
+| **Priority**   | 10         |
 | **Type**       | Blocking   |
 | **Event**      | PreToolUse |
 
@@ -432,7 +596,7 @@ handlers:
   pre_tool_use:
     sudo_pip:
       enabled: true
-      priority: 22
+      priority: 10
 ```
 
 ---
@@ -442,7 +606,7 @@ handlers:
 | Property       | Value                     |
 | -------------- | ------------------------- |
 | **Config key** | `daemon_restart_verifier` |
-| **Priority**   | 23                        |
+| **Priority**   | 10                        |
 | **Type**       | Advisory                  |
 | **Event**      | PreToolUse                |
 
@@ -461,25 +625,41 @@ handlers:
   pre_tool_use:
     daemon_restart_verifier:
       enabled: true
-      priority: 23
+      priority: 10
 ```
 
 ---
 
-### Code Quality Handlers (Priority 26-35)
+### Code Quality Handlers
 
 Code quality handlers prevent QA suppression comments and enforce development practices.
 
-#### python_qa_suppression_blocker
+#### qa_suppression
 
-| Property       | Value                           |
-| -------------- | ------------------------------- |
-| **Config key** | `python_qa_suppression_blocker` |
-| **Priority**   | 26                              |
-| **Type**       | Blocking                        |
-| **Event**      | PreToolUse                      |
+| Property       | Value            |
+| -------------- | ---------------- |
+| **Config key** | `qa_suppression` |
+| **Priority**   | 30               |
+| **Type**       | Blocking         |
+| **Event**      | PreToolUse       |
 
-**Description:** Blocks QA suppression comments in Python code written via Write or Edit tools. Prevents adding comments like `# noqa`, `# type: ignore`, `# pragma: no cover`, and `# pylint: disable` that hide code quality issues instead of fixing them.
+**Description:** Blocks QA suppression annotations in code written via the Write or Edit tools, across **every supported language**. Suppressions hide real problems and accumulate as technical debt — fix the underlying issue instead.
+
+> **Migration note:** this single handler replaces the former per-language handlers `python_qa_suppression_blocker`, `php_qa_suppression_blocker`, `go_qa_suppression_blocker` and `eslint_disable`. Those config keys no longer exist; a config that still names one fails validation with `Unknown handler '...'`. Delete them and configure `qa_suppression` instead. Language coverage is now added by registering a new strategy (Strategy Pattern), not by adding a handler.
+
+**Blocked annotations, by language:**
+
+| Language              | Blocked annotations                                                     |
+| --------------------- | ----------------------------------------------------------------------- |
+| Python                | `# noqa`, `# type: ignore`                                              |
+| JavaScript/TypeScript | `eslint-disable` inline directives                                      |
+| Go                    | `//nolint` directives (golangci-lint)                                   |
+| PHP                   | `@phpstan-ignore`, `@psalm-suppress`                                    |
+| Java / Kotlin         | `@SuppressWarnings`, `@Suppress`                                        |
+| C#                    | `#pragma warning disable`                                               |
+| Rust                  | `allow(...)` attributes anywhere in the file (`#[allow]` / `#![allow]`) |
+
+Ruby, Swift and Dart strategies are also registered — see the supported-language table in the project `CLAUDE.md` for the authoritative list.
 
 **Example trigger:**
 
@@ -487,103 +667,109 @@ Code quality handlers prevent QA suppression comments and enforce development pr
 x = some_func()  # type: ignore
 ```
 
-**Config example:**
+**Options:**
 
-```yaml
-handlers:
-  pre_tool_use:
-    python_qa_suppression_blocker:
-      enabled: true
-      priority: 26
-```
+| Option          | Type        | Default        | Description                                                                                                                   |
+| --------------- | ----------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `exclude_paths` | `list[str]` | `[]`           | Gitignore-style globs exempting files from scanning. Unioned with `daemon.exclude_paths` and the built-in defaults.           |
+| `languages`     | `list[str]` | all registered | Restrict enforcement to specific languages. Empty/unset enforces every registered strategy; falls back to `daemon.languages`. |
 
----
-
-#### php_qa_suppression_blocker
-
-| Property       | Value                        |
-| -------------- | ---------------------------- |
-| **Config key** | `php_qa_suppression_blocker` |
-| **Priority**   | 27                           |
-| **Type**       | Blocking                     |
-| **Event**      | PreToolUse                   |
-
-**Description:** Blocks QA suppression comments in PHP code. Prevents adding comments like `@phpstan-ignore`, `@codeCoverageIgnore`, `@SuppressWarnings`, and similar annotations that hide code quality issues.
-
-**Example trigger:**
-
-```php
-/** @phpstan-ignore-next-line */
-```
+**Built-in exclusions:** per-language vendor / build / `node_modules` directories are always skipped. Use `exclude_paths` for fixtures that must legitimately contain suppression annotations, rather than disabling the handler — see [Content-Blocker Path Exclusion](#content-blocker-path-exclusion-exclude_paths).
 
 **Config example:**
 
 ```yaml
 handlers:
   pre_tool_use:
-    php_qa_suppression_blocker:
-      enabled: true
-      priority: 27
-```
-
----
-
-#### go_qa_suppression_blocker
-
-| Property       | Value                       |
-| -------------- | --------------------------- |
-| **Config key** | `go_qa_suppression_blocker` |
-| **Priority**   | 28                          |
-| **Type**       | Blocking                    |
-| **Event**      | PreToolUse                  |
-
-**Description:** Blocks QA suppression comments in Go code. Prevents adding comments like `//nolint`, `//go:nosplit`, and similar directives that bypass linting and static analysis.
-
-**Example trigger:**
-
-```go
-//nolint:errcheck
-```
-
-**Config example:**
-
-```yaml
-handlers:
-  pre_tool_use:
-    go_qa_suppression_blocker:
-      enabled: true
-      priority: 28
-```
-
----
-
-#### eslint_disable
-
-| Property       | Value            |
-| -------------- | ---------------- |
-| **Config key** | `eslint_disable` |
-| **Priority**   | 30               |
-| **Type**       | Blocking         |
-| **Event**      | PreToolUse       |
-
-**Description:** Blocks ESLint and TypeScript suppression comments in JavaScript/TypeScript files written via Write or Edit tools. Prevents `eslint-disable`, `@ts-ignore`, `@ts-nocheck`, and `@ts-expect-error` comments.
-
-**Checked file extensions:** `.ts`, `.tsx`, `.js`, `.jsx`
-
-**Example trigger:**
-
-```typescript
-// eslint-disable-next-line no-unused-vars
-```
-
-**Config example:**
-
-```yaml
-handlers:
-  pre_tool_use:
-    eslint_disable:
+    qa_suppression:
       enabled: true
       priority: 30
+      options:
+        exclude_paths:
+          - "tests/fixtures/**"
+```
+
+---
+
+#### security_antipattern
+
+| Property       | Value                  |
+| -------------- | ---------------------- |
+| **Config key** | `security_antipattern` |
+| **Priority**   | 14                     |
+| **Type**       | Blocking               |
+| **Event**      | PreToolUse             |
+
+**Description:** Blocks Write/Edit of files containing OWASP-class security antipatterns, across every supported language. Fix the code to use the safe pattern instead.
+
+**Blocked categories:**
+
+- **SQL injection** -- building queries by string concatenation (use parameterised queries)
+- **Command injection** -- passing unvalidated input to a subprocess (use argument lists, never `shell=True`)
+- **Hardcoded credentials** -- API keys, passwords and tokens embedded in source
+- **Weak cryptography** -- MD5 or SHA1 used for password hashing (use bcrypt/argon2)
+- **Path traversal** -- unvalidated user input used to build a file path
+
+**Options:**
+
+| Option          | Type        | Default | Description                                                                                            |
+| --------------- | ----------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `exclude_paths` | `list[str]` | `[]`    | Gitignore-style globs exempting files from scanning. Unioned with `daemon.exclude_paths` and defaults. |
+
+**Built-in exclusions:** `vendor/`, `node_modules/`, `tests/fixtures/`, `tests/assets/`, docs and rule-definition directories.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    security_antipattern:
+      enabled: true
+      priority: 14
+      options:
+        exclude_paths:
+          - "samples/insecure/**"
+```
+
+---
+
+#### error_hiding_blocker
+
+| Property       | Value                  |
+| -------------- | ---------------------- |
+| **Config key** | `error_hiding_blocker` |
+| **Priority**   | 13                     |
+| **Type**       | Blocking               |
+| **Event**      | PreToolUse             |
+
+**Description:** Blocks code written via Write/Edit that silently swallows errors. Silent suppression masks bugs and makes debugging impossible — handle errors explicitly: log them, return them, or propagate them.
+
+**Blocked patterns (examples):**
+
+- **Python** -- bare `except` clauses with an empty body; catching and discarding all exceptions
+- **Shell** -- redirecting stderr to `/dev/null` to silence a failure; `|| true` to suppress a non-zero exit
+- **JavaScript/TypeScript** -- empty `catch` blocks
+- **Go** -- `_ = err` (discarding an error return without handling it)
+
+**Options:**
+
+| Option          | Type        | Default | Description                                                                                            |
+| --------------- | ----------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `exclude_paths` | `list[str]` | `[]`    | Gitignore-style globs exempting files from scanning. Unioned with `daemon.exclude_paths` and defaults. |
+
+**Built-in exclusions:** `vendor/`, `node_modules/`, `tests/fixtures/`, `tests/assets/`, `__fixtures__/`. Use `exclude_paths` for fixtures of deliberately-broken code instead of disabling the handler.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    error_hiding_blocker:
+      enabled: true
+      priority: 13
+      options:
+        exclude_paths:
+          - "generated/**"
 ```
 
 ---
@@ -593,20 +779,34 @@ handlers:
 | Property       | Value             |
 | -------------- | ----------------- |
 | **Config key** | `tdd_enforcement` |
-| **Priority**   | 35                |
+| **Priority**   | 15                |
 | **Type**       | Blocking          |
 | **Event**      | PreToolUse        |
 
-**Description:** Enforces test-driven development by blocking Write operations to production Python files (in `src/` or `handlers/` directories) when no corresponding test file exists. Ensures tests are written before implementation code.
+**Description:** Enforces test-driven development by blocking creation of a production source file until a corresponding test file exists. Write the test first (RED), then the source (GREEN), then refactor.
 
-**Excludes:** `__init__.py` files, test files, files in `tests/` directories.
+**This handler is NOT Python-only.** It delegates to per-language strategies (Strategy Pattern) and currently covers **11 languages**: Python, Go, JavaScript/TypeScript, PHP, Rust, Java, C#, Kotlin, Ruby, Swift and Dart. Each strategy knows its own test-file conventions.
+
+**Test file locations checked** (any one satisfies the block):
+
+- Separate mirror tree -- `tests/unit/{subdir}/test_{module}.py`
+- Collocated -- `{source_dir}/{module}.test.ts` (JS/TS projects)
+- Test subdirectory -- `{source_dir}/__tests__/{module}.test.ts`
+
+**Allowed through without blocking:** vendor directories, `node_modules`, build outputs, generated files, and any extension with no registered strategy.
 
 **Example trigger:**
 
 ```
 Write tool creating src/handlers/pre_tool_use/new_handler.py
-(when tests/handlers/pre_tool_use/test_new_handler.py does not exist)
+(when tests/unit/handlers/pre_tool_use/test_new_handler.py does not exist)
 ```
+
+**Options:**
+
+| Option      | Type        | Default        | Description                                                                                                                                                                          |
+| ----------- | ----------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `languages` | `list[str]` | all registered | Restrict TDD enforcement to specific languages. Unset or empty enforces EVERY registered language. Takes precedence over the project-wide `daemon.languages` list when both are set. |
 
 **Config example:**
 
@@ -615,12 +815,14 @@ handlers:
   pre_tool_use:
     tdd_enforcement:
       enabled: true
-      priority: 35
+      priority: 15
+      options:
+        languages: ["python", "typescript"]  # omit to enforce all 11
 ```
 
 ---
 
-### Workflow Handlers (Priority 33-55)
+### Workflow Handlers (Priority 30-55)
 
 Workflow handlers enforce development practices, provide guidance, and manage project structure.
 
@@ -629,7 +831,7 @@ Workflow handlers enforce development practices, provide guidance, and manage pr
 | Property       | Value                |
 | -------------- | -------------------- |
 | **Config key** | `plan_number_helper` |
-| **Priority**   | 33                   |
+| **Priority**   | 30                   |
 | **Type**       | Blocking             |
 | **Event**      | PreToolUse           |
 
@@ -642,7 +844,7 @@ handlers:
   pre_tool_use:
     plan_number_helper:
       enabled: true
-      priority: 33
+      priority: 30
       options:
         track_plans_in_project: "CLAUDE/Plan"
 ```
@@ -654,7 +856,7 @@ handlers:
 | Property       | Value              |
 | -------------- | ------------------ |
 | **Config key** | `task_tdd_advisor` |
-| **Priority**   | 36                 |
+| **Priority**   | 45                 |
 | **Type**       | Advisory           |
 | **Event**      | PreToolUse         |
 
@@ -667,7 +869,52 @@ handlers:
   pre_tool_use:
     task_tdd_advisor:
       enabled: true
-      priority: 36
+      priority: 45
+```
+
+---
+
+#### lsp_enforcement
+
+| Property       | Value             |
+| -------------- | ----------------- |
+| **Config key** | `lsp_enforcement` |
+| **Priority**   | 38                |
+| **Type**       | Blocking          |
+| **Event**      | PreToolUse        |
+
+**Description:** Redirects `Grep` (and Bash `grep`/`rg`) *symbol* lookups to the LSP tools, which are faster and semantically accurate — a text search for a class name matches comments, strings and unrelated files; `goToDefinition` does not.
+
+**Prefer LSP for:**
+
+| Intent                                | LSP operation     |
+| ------------------------------------- | ----------------- |
+| Where is this class/function defined? | `goToDefinition`  |
+| Where is this symbol used?            | `findReferences`  |
+| What is this symbol's type/docs?      | `hover`           |
+| What symbols does this file define?   | `documentSymbol`  |
+| Find a symbol across the project      | `workspaceSymbol` |
+
+**Grep is still correct for:** text patterns in content, log searching, and finding strings in config files. Those are never blocked.
+
+**Options:**
+
+| Option        | Values                             | Default      | Description                                                                                                                                        |
+| ------------- | ---------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`        | `block_once`, `advisory`, `strict` | `block_once` | `block_once` denies the first symbol-lookup grep per session with guidance and allows retries; `strict` denies every one; `advisory` never denies. |
+| `no_lsp_mode` | `block`, `advisory`, `disable`     | `block`      | Behaviour when no LSP server is configured. `disable` switches the handler off entirely in that case.                                              |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    lsp_enforcement:
+      enabled: true
+      priority: 38
+      options:
+        mode: block_once
+        no_lsp_mode: disable  # no LSP configured? stay out of the way
 ```
 
 ---
@@ -701,12 +948,41 @@ handlers:
 
 ---
 
+#### gh_pr_comments
+
+| Property       | Value            |
+| -------------- | ---------------- |
+| **Config key** | `gh_pr_comments` |
+| **Priority**   | 40               |
+| **Type**       | Blocking         |
+| **Event**      | PreToolUse       |
+
+**Description:** Ensures `gh pr view` always includes the `--comments` flag. PR comments carry review feedback, reviewer requests and decisions that never appear in the PR body; reading the body alone routinely misses the reason the PR is open.
+
+**Blocked:** `gh pr view 123`, `gh pr view 123 --repo owner/repo`
+
+**Allowed:** `gh pr view 123 --comments`, `gh pr view 123 --json title,body,comments`
+
+When using `--json`, include `comments` in the field list instead of adding `--comments`.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    gh_pr_comments:
+      enabled: true
+      priority: 40
+```
+
+---
+
 #### validate_plan_number
 
 | Property       | Value                  |
 | -------------- | ---------------------- |
 | **Config key** | `validate_plan_number` |
-| **Priority**   | 41                     |
+| **Priority**   | 30                     |
 | **Type**       | Blocking               |
 | **Event**      | PreToolUse             |
 
@@ -719,7 +995,7 @@ handlers:
   pre_tool_use:
     validate_plan_number:
       enabled: true
-      priority: 41
+      priority: 30
 ```
 
 ---
@@ -729,7 +1005,7 @@ handlers:
 | Property       | Value                |
 | -------------- | -------------------- |
 | **Config key** | `global_npm_advisor` |
-| **Priority**   | 42                   |
+| **Priority**   | 40                   |
 | **Type**       | Advisory             |
 | **Event**      | PreToolUse           |
 
@@ -748,7 +1024,7 @@ handlers:
   pre_tool_use:
     global_npm_advisor:
       enabled: true
-      priority: 42
+      priority: 40
 ```
 
 ---
@@ -926,7 +1202,7 @@ handlers:
 | Property       | Value                 |
 | -------------- | --------------------- |
 | **Config key** | `plan_time_estimates` |
-| **Priority**   | 45                    |
+| **Priority**   | 40                    |
 | **Type**       | Blocking              |
 | **Event**      | PreToolUse            |
 
@@ -939,7 +1215,7 @@ handlers:
   pre_tool_use:
     plan_time_estimates:
       enabled: true
-      priority: 45
+      priority: 40
 ```
 
 ---
@@ -949,7 +1225,7 @@ handlers:
 | Property       | Value           |
 | -------------- | --------------- |
 | **Config key** | `plan_workflow` |
-| **Priority**   | 46              |
+| **Priority**   | 45              |
 | **Type**       | Advisory        |
 | **Event**      | PreToolUse      |
 
@@ -962,7 +1238,7 @@ handlers:
   pre_tool_use:
     plan_workflow:
       enabled: true
-      priority: 46
+      priority: 45
 ```
 
 ---
@@ -972,7 +1248,7 @@ handlers:
 | Property       | Value                     |
 | -------------- | ------------------------- |
 | **Config key** | `plan_completion_advisor` |
-| **Priority**   | 48                        |
+| **Priority**   | 50                        |
 | **Type**       | Advisory                  |
 | **Event**      | PreToolUse                |
 
@@ -985,7 +1261,7 @@ handlers:
   pre_tool_use:
     plan_completion_advisor:
       enabled: true
-      priority: 48
+      priority: 50
 ```
 
 ---
@@ -995,7 +1271,7 @@ handlers:
 | Property       | Value         |
 | -------------- | ------------- |
 | **Config key** | `npm_command` |
-| **Priority**   | 49            |
+| **Priority**   | 50            |
 | **Type**       | Blocking      |
 | **Event**      | PreToolUse    |
 
@@ -1008,7 +1284,7 @@ handlers:
   pre_tool_use:
     npm_command:
       enabled: true
-      priority: 49
+      priority: 50
 ```
 
 ---
@@ -1018,13 +1294,35 @@ handlers:
 | Property       | Value                   |
 | -------------- | ----------------------- |
 | **Config key** | `markdown_organization` |
-| **Priority**   | 50                      |
+| **Priority**   | 35                      |
 | **Type**       | Blocking                |
 | **Event**      | PreToolUse              |
 
 **Full documentation:** [`docs/guides/handlers/markdown_organization.md`](handlers/markdown_organization.md)
 
 Enforces markdown file organization rules, plan tracking, allowed paths, and monorepo support. To allow extra locations, prefer the additive `extra_allowed_markdown_paths` option over the legacy `allowed_markdown_paths` full override. See per-handler docs for all options, monorepo interaction, and examples.
+
+**Key options** (the full set is in the per-handler doc linked above):
+
+| Option                          | Type        | Default | Description                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------- | ----------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `extra_allowed_markdown_paths`  | `list[str]` | `[]`    | Additive allowlist of extra locations where markdown may be written. Prefer this over the legacy full override.                                                                                                                                                                                                                                               |
+| `allowed_markdown_paths`        | `list[str]` | builtin | Legacy FULL override of the allowed-location list. Setting it discards the built-in defaults.                                                                                                                                                                                                                                                                 |
+| `allow_untracked_claude_memory` | `bool`      | `false` | **Blocking behaviour switch.** When `false` (default), writing to Claude auto-memory files (`~/.claude/projects/*/memory/*.md`) is BLOCKED — via Write/Edit *and* via bash redirect/`tee` side-doors. Reading memory stays allowed so existing memory can be migrated out. Set `true` to restore the pre-policy behaviour and permit untracked memory writes. |
+
+The default of `false` is deliberate: durable knowledge belongs in tracked project docs (`CLAUDE.md`, `.claude/rules/*.md`, `docs/`), where teammates and code review can see it — not in per-developer untracked memory.
+
+```yaml
+handlers:
+  pre_tool_use:
+    markdown_organization:
+      enabled: true
+      priority: 35
+      options:
+        allow_untracked_claude_memory: false
+        extra_allowed_markdown_paths:
+          - "design-notes/**"
+```
 
 ---
 
@@ -1117,7 +1415,7 @@ These handlers run **after** a tool call completes. They analyse output and prov
 | Property       | Value                 |
 | -------------- | --------------------- |
 | **Config key** | `bash_error_detector` |
-| **Priority**   | 10                    |
+| **Priority**   | 50                    |
 | **Type**       | Advisory              |
 | **Event**      | PostToolUse           |
 
@@ -1130,7 +1428,7 @@ handlers:
   post_tool_use:
     bash_error_detector:
       enabled: true
-      priority: 10
+      priority: 50
 ```
 
 ---
@@ -1140,7 +1438,7 @@ handlers:
 | Property       | Value                      |
 | -------------- | -------------------------- |
 | **Config key** | `validate_eslint_on_write` |
-| **Priority**   | 20                         |
+| **Priority**   | 10                         |
 | **Type**       | Advisory                   |
 | **Event**      | PostToolUse                |
 
@@ -1155,7 +1453,7 @@ handlers:
   post_tool_use:
     validate_eslint_on_write:
       enabled: true
-      priority: 20
+      priority: 10
 ```
 
 ---
@@ -1169,7 +1467,7 @@ These handlers run when a new Claude Code session begins. They provide environme
 | Property       | Value                      |
 | -------------- | -------------------------- |
 | **Config key** | `yolo_container_detection` |
-| **Priority**   | 10                         |
+| **Priority**   | 40                         |
 | **Type**       | Advisory                   |
 | **Event**      | SessionStart               |
 
@@ -1182,7 +1480,7 @@ handlers:
   session_start:
     yolo_container_detection:
       enabled: true
-      priority: 10
+      priority: 40
 ```
 
 ---
@@ -1261,7 +1559,7 @@ handlers:
 | Property       | Value           |
 | -------------- | --------------- |
 | **Config key** | `version_check` |
-| **Priority**   | 56              |
+| **Priority**   | 55              |
 | **Type**       | Advisory        |
 | **Event**      | SessionStart    |
 
@@ -1274,7 +1572,7 @@ handlers:
   session_start:
     version_check:
       enabled: true
-      priority: 56
+      priority: 55
 ```
 
 ---
@@ -1356,7 +1654,7 @@ handlers:
 | Property       | Value      |
 | -------------- | ---------- |
 | **Config key** | `cleanup`  |
-| **Priority**   | 10         |
+| **Priority**   | 100        |
 | **Type**       | Advisory   |
 | **Event**      | SessionEnd |
 
@@ -1369,7 +1667,7 @@ handlers:
   session_end:
     cleanup:
       enabled: true
-      priority: 10
+      priority: 100
 ```
 
 ---
@@ -1383,7 +1681,7 @@ These handlers run when Claude stops generating a response.
 | Property       | Value                |
 | -------------- | -------------------- |
 | **Config key** | `auto_continue_stop` |
-| **Priority**   | 10                   |
+| **Priority**   | 15                   |
 | **Type**       | Blocking             |
 | **Event**      | Stop                 |
 
@@ -1402,7 +1700,7 @@ handlers:
   stop:
     auto_continue_stop:
       enabled: true
-      priority: 10
+      priority: 15
       options:
         continue_on_errors: true  # default: auto-continue on errors too
 ```
@@ -1414,7 +1712,7 @@ handlers:
 | Property       | Value                     |
 | -------------- | ------------------------- |
 | **Config key** | `task_completion_checker` |
-| **Priority**   | 20                        |
+| **Priority**   | 50                        |
 | **Type**       | Advisory                  |
 | **Event**      | Stop                      |
 
@@ -1427,7 +1725,7 @@ handlers:
   stop:
     task_completion_checker:
       enabled: true
-      priority: 20
+      priority: 50
 ```
 
 ---
@@ -1464,7 +1762,7 @@ These handlers run when a subagent (Task tool agent) completes.
 | Property       | Value                        |
 | -------------- | ---------------------------- |
 | **Config key** | `subagent_completion_logger` |
-| **Priority**   | 10                           |
+| **Priority**   | 100                          |
 | **Type**       | Advisory                     |
 | **Event**      | SubagentStop                 |
 
@@ -1483,7 +1781,7 @@ handlers:
   subagent_stop:
     subagent_completion_logger:
       enabled: true
-      priority: 10
+      priority: 100
       options:
         max_log_bytes: 5242880
 ```
@@ -1495,7 +1793,7 @@ handlers:
 | Property       | Value                   |
 | -------------- | ----------------------- |
 | **Config key** | `remind_prompt_library` |
-| **Priority**   | 20                      |
+| **Priority**   | 100                     |
 | **Type**       | Advisory                |
 | **Event**      | SubagentStop            |
 
@@ -1508,7 +1806,7 @@ handlers:
   subagent_stop:
     remind_prompt_library:
       enabled: true
-      priority: 20
+      priority: 100
 ```
 
 ---
@@ -1522,7 +1820,7 @@ These handlers run when the user submits a prompt.
 | Property       | Value                  |
 | -------------- | ---------------------- |
 | **Config key** | `git_context_injector` |
-| **Priority**   | 10                     |
+| **Priority**   | 20                     |
 | **Type**       | Advisory               |
 | **Event**      | UserPromptSubmit       |
 
@@ -1535,7 +1833,7 @@ handlers:
   user_prompt_submit:
     git_context_injector:
       enabled: true
-      priority: 10
+      priority: 20
 ```
 
 ---
@@ -1547,7 +1845,7 @@ handlers:
 | Property       | Value                 |
 | -------------- | --------------------- |
 | **Config key** | `notification_logger` |
-| **Priority**   | 10                    |
+| **Priority**   | 100                   |
 | **Type**       | Advisory              |
 | **Event**      | Notification          |
 
@@ -1566,7 +1864,7 @@ handlers:
   notification:
     notification_logger:
       enabled: true
-      priority: 10
+      priority: 100
       options:
         max_log_bytes: 5242880
 ```
@@ -1697,77 +1995,73 @@ handlers:
 
 ---
 
-#### stats_cache_reader
-
-| Property       | Value                |
-| -------------- | -------------------- |
-| **Config key** | `stats_cache_reader` |
-| **Priority**   | 20                   |
-| **Type**       | Advisory             |
-| **Event**      | StatusLine           |
-
-**Description:** Utility handler for reading `~/.claude/stats-cache.json`, used by the `usage_tracking` handler.
-
----
+> **Note:** `stats_cache_reader` is a helper **module** used by `usage_tracking` to read `~/.claude/stats-cache.json`. It is not a handler, has no config key, and cannot be enabled, disabled or prioritised.
 
 ## Quick Reference Table
 
 ### All Blocking Handlers
 
-| Config Key                      | Event             | Priority | What It Blocks                                 |
-| ------------------------------- | ----------------- | -------- | ---------------------------------------------- |
-| `destructive_git`               | PreToolUse        | 10       | git reset --hard, clean -f, push --force, etc. |
-| `sed_blocker`                   | PreToolUse        | 10       | All sed commands                               |
-| `absolute_path`                 | PreToolUse        | 12       | Relative paths in Read/Write/Edit              |
-| `worktree_file_copy`            | PreToolUse        | 15       | cp/mv/rsync between worktrees                  |
-| `curl_pipe_shell`               | PreToolUse        | 16       | curl/wget piped to bash/sh                     |
-| `pipe_blocker`                  | PreToolUse        | 17       | Expensive commands piped to tail/head          |
-| `dangerous_permissions`         | PreToolUse        | 18       | chmod 777, chmod a+rwx                         |
-| `git_stash`                     | PreToolUse        | 19       | git stash creation (configurable)              |
-| `lock_file_edit_blocker`        | PreToolUse        | 20       | Direct editing of lock files                   |
-| `pip_break_system`              | PreToolUse        | 21       | pip --break-system-packages                    |
-| `sudo_pip`                      | PreToolUse        | 22       | sudo pip install                               |
-| `python_qa_suppression_blocker` | PreToolUse        | 26       | # noqa, # type: ignore, etc.                   |
-| `php_qa_suppression_blocker`    | PreToolUse        | 27       | @phpstan-ignore, etc.                          |
-| `go_qa_suppression_blocker`     | PreToolUse        | 28       | //nolint, etc.                                 |
-| `eslint_disable`                | PreToolUse        | 30       | eslint-disable, @ts-ignore, etc.               |
-| `plan_number_helper`            | PreToolUse        | 33       | Broken plan number discovery commands          |
-| `tdd_enforcement`               | PreToolUse        | 35       | Production code without tests                  |
-| `gh_issue_comments`             | PreToolUse        | 40       | gh issue view without --comments               |
-| `validate_plan_number`          | PreToolUse        | 41       | Invalid plan numbering                         |
-| `plan_time_estimates`           | PreToolUse        | 45       | Time estimates in plan docs                    |
-| `npm_command`                   | PreToolUse        | 49       | Non-llm: npm commands                          |
-| `markdown_organization`         | PreToolUse        | 50       | Disorganised markdown files                    |
-| `validate_instruction_content`  | PreToolUse        | 50       | Ephemeral content in CLAUDE.md                 |
-| `auto_continue_stop`            | Stop              | 10       | Stops after confirmation questions             |
-| `auto_approve_reads`            | PermissionRequest | 10       | (Approves) file read permissions               |
+Priorities below are the **shipped defaults** from `constants/priority.py`. Several handlers share a priority; ties run in registration order.
+
+| Config Key                     | Event             | Priority | What It Blocks                                              |
+| ------------------------------ | ----------------- | -------- | ----------------------------------------------------------- |
+| `destructive_git`              | PreToolUse        | 10       | git reset --hard, clean -f, push --force, branch -D, etc.   |
+| `sed_blocker`                  | PreToolUse        | 10       | sed used to MODIFY files (read-only pipelines are allowed)  |
+| `curl_pipe_shell`              | PreToolUse        | 10       | curl/wget piped to bash/sh                                  |
+| `lock_file_edit_blocker`       | PreToolUse        | 10       | Direct editing of lock files                                |
+| `pip_break_system`             | PreToolUse        | 10       | pip --break-system-packages                                 |
+| `sudo_pip`                     | PreToolUse        | 10       | sudo pip install                                            |
+| `ask_user_question_blocker`    | PreToolUse        | 10       | AskUserQuestion without an `ASKING BECAUSE:` prefix         |
+| `daemon_location_guard`        | PreToolUse        | 11       | cd into .claude/hooks-daemon/                               |
+| `absolute_path`                | PreToolUse        | 12       | Relative paths in Read/Write/Edit                           |
+| `error_hiding_blocker`         | PreToolUse        | 13       | Code that silently swallows errors                          |
+| `security_antipattern`         | PreToolUse        | 14       | OWASP antipatterns (SQLi, hardcoded creds, weak crypto)     |
+| `worktree_file_copy`           | PreToolUse        | 15       | cp/mv/rsync between worktrees                               |
+| `pipe_blocker`                 | PreToolUse        | 15       | Expensive commands piped to tail/head                       |
+| `dangerous_permissions`        | PreToolUse        | 15       | chmod 777, chmod a+rwx                                      |
+| `tdd_enforcement`              | PreToolUse        | 15       | Production code without tests (11 languages)                |
+| `root_recursion_guard`         | PreToolUse        | 16       | Recursive scans rooted at /, /home, $HOME, ...              |
+| `git_stash`                    | PreToolUse        | 20       | git stash creation (deny by default; configurable)          |
+| `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs) |
+| `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                       |
+| `validate_plan_number`         | PreToolUse        | 30       | Invalid plan numbering                                      |
+| `markdown_organization`        | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes       |
+| `lsp_enforcement`              | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                   |
+| `gh_issue_comments`            | PreToolUse        | 40       | gh issue view without --comments                            |
+| `gh_pr_comments`               | PreToolUse        | 40       | gh pr view without --comments                               |
+| `plan_time_estimates`          | PreToolUse        | 40       | Time estimates in plan docs                                 |
+| `npm_command`                  | PreToolUse        | 50       | Non-llm: npm commands                                       |
+| `validate_instruction_content` | PreToolUse        | 50       | Ephemeral content in CLAUDE.md                              |
+| `auto_continue_stop`           | Stop              | 15       | Stops after confirmation questions                          |
+| `auto_approve_reads`           | PermissionRequest | 10       | (Approves) read-only tools in bypassPermissions mode        |
 
 ### All Advisory Handlers
 
 | Config Key                   | Event            | Priority | What It Does                           |
 | ---------------------------- | ---------------- | -------- | -------------------------------------- |
-| `daemon_restart_verifier`    | PreToolUse       | 23       | Suggests daemon restart before commits |
-| `task_tdd_advisor`           | PreToolUse       | 36       | Reminds about TDD workflow             |
-| `global_npm_advisor`         | PreToolUse       | 42       | Suggests npx over global installs      |
-| `plan_workflow`              | PreToolUse       | 46       | Guidance for plan creation             |
-| `plan_completion_advisor`    | PreToolUse       | 48       | Reminds about plan completion steps    |
+| `daemon_restart_verifier`    | PreToolUse       | 10       | Suggests daemon restart before commits |
+| `global_npm_advisor`         | PreToolUse       | 40       | Suggests npx over global installs      |
+| `task_tdd_advisor`           | PreToolUse       | 45       | Reminds about TDD workflow             |
+| `plan_workflow`              | PreToolUse       | 45       | Guidance for plan creation             |
+| `plan_completion_advisor`    | PreToolUse       | 50       | Reminds about plan completion steps    |
 | `web_search_year`            | PreToolUse       | 55       | Warns about outdated search years      |
 | `british_english`            | PreToolUse       | 60       | Warns about American spellings         |
-| `bash_error_detector`        | PostToolUse      | 10       | Detects errors in bash output          |
-| `validate_eslint_on_write`   | PostToolUse      | 20       | Runs ESLint after .ts/.tsx writes      |
-| `yolo_container_detection`   | SessionStart     | 10       | Detects container environments         |
+| `validate_eslint_on_write`   | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes      |
+| `bash_error_detector`        | PostToolUse      | 50       | Detects errors in bash output          |
+| `yolo_container_detection`   | SessionStart     | 40       | Detects container environments         |
 | `optimal_config_checker`     | SessionStart     | 52       | Audits Claude Code settings            |
 | `git_filemode_checker`       | SessionStart     | 53       | Warns when core.fileMode=false         |
 | `suggest_status_line`        | SessionStart     | 55       | Suggests status line setup             |
-| `version_check`              | SessionStart     | 56       | Checks for daemon updates              |
+| `version_check`              | SessionStart     | 55       | Checks for daemon updates              |
+| `plan_qa_sweep`              | SessionStart     | 57       | Reports plan-tree drift once a session |
 | `transcript_archiver`        | PreCompact       | 10       | Archives transcripts                   |
-| `cleanup`                    | SessionEnd       | 10       | Cleans up temp files                   |
-| `task_completion_checker`    | Stop             | 20       | Reminds about task completion          |
+| `git_context_injector`       | UserPromptSubmit | 20       | Injects git status context             |
 | `hedging_language_detector`  | Stop             | 30       | Detects guessing language              |
-| `subagent_completion_logger` | SubagentStop     | 10       | Logs subagent completions              |
-| `remind_prompt_library`      | SubagentStop     | 20       | Reminds about prompt library           |
-| `git_context_injector`       | UserPromptSubmit | 10       | Injects git status context             |
-| `notification_logger`        | Notification     | 10       | Logs notifications                     |
+| `task_completion_checker`    | Stop             | 50       | Reminds about task completion          |
+| `remind_prompt_library`      | SubagentStop     | 100      | Reminds about prompt library           |
+| `subagent_completion_logger` | SubagentStop     | 100      | Logs subagent completions              |
+| `notification_logger`        | Notification     | 100      | Logs notifications                     |
+| `cleanup`                    | SessionEnd       | 100      | Cleans up temp files                   |
 
 ---
 
@@ -1786,13 +2080,13 @@ handlers:
 
 Priority determines execution order. Lower numbers run first.
 
-| Range | Category        | Examples                                              |
-| ----- | --------------- | ----------------------------------------------------- |
-| 5     | Test            | hello_world (disabled by default)                     |
-| 10-23 | Safety          | destructive_git, sed_blocker, pip_break_system        |
-| 25-35 | Code Quality    | eslint_disable, tdd_enforcement                       |
-| 36-55 | Workflow        | gh_issue_comments, npm_command, markdown_organization |
-| 56-60 | Advisory        | british_english                                       |
-| 100   | Logging/Cleanup | notification_logger, cleanup                          |
+| Range | Category        | Examples                                            |
+| ----- | --------------- | --------------------------------------------------- |
+| 5     | Test            | hello_world (disabled by default)                   |
+| 10-20 | Safety          | destructive_git, sed_blocker, pip_break_system      |
+| 25-35 | Code Quality    | qa_suppression, lint_on_edit, markdown_organization |
+| 36-55 | Workflow        | lsp_enforcement, gh_issue_comments, npm_command     |
+| 56-60 | Advisory        | british_english, dismissive_language_detector       |
+| 100   | Logging/Cleanup | notification_logger, cleanup                        |
 
 When two handlers have the same priority, they run in registration order.
