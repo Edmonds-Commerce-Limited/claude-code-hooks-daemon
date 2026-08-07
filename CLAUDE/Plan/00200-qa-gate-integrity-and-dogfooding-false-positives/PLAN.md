@@ -173,6 +173,54 @@ plan's own two new test files contribute the difference.)
   "ALL 10 checks" and name a "Smoke Test"; `run_all.sh` runs 13 and has no such check. Prefer
   removing the hardcoded count so it cannot drift again.
 
+### Phase 5: The error-hiding guard does not guard the guards
+
+The lint-gate swallow (Phase 1) was a textbook error-hiding bug in a repo that ships **two**
+defences against exactly that. Neither fired. Understanding why matters more than the one fix,
+because the same blind spot hides everything else in this phase.
+
+**Why `audit_error_hiding.py` missed it** — two independent reasons, either sufficient:
+
+- `scripts/qa/audit_error_hiding.py:298-299` scans `workspace / "src"` only, commented
+  *"production code only"*. The QA scripts that **implement the gates** are therefore exempt
+  from the gate. The tooling is outside its own jurisdiction.
+- `:182` globs `*.py` only. The swallow lived in Python embedded in a bash heredoc inside a
+  `.sh` file, so it was invisible a second time over.
+
+**Why `error_hiding_blocker` missed it**: the handler and its `shell_strategy`
+(`strategies/error_hiding/shell_strategy.py`, which does know `.sh`/`.bash` and does match
+`|| true`) only fire on **Write/Edit**. Nothing sweeps files already on disk. Everything
+predating the handler, or written outside a Claude session, is permanently unexamined.
+
+**What the blind spot is currently hiding** (counts, not yet triaged):
+
+| Pattern            | Count | Where                                                                                                                      |
+| ------------------ | ----- | -------------------------------------------------------------------------------------------------------------------------- |
+| `2>/dev/null`      | 77    | `scripts/**`, `init.sh`, `install.sh`                                                                                      |
+| `\|\| true`        | 6     | same                                                                                                                       |
+| Broad `except`     | 12    | `scripts/*.py` (`debug_info.py` 5, `handler_status.py` 3, `audit_error_hiding.py` 3, `measure_instruction_footprint.py` 1) |
+| Confirmed swallows | 2     | `scripts/handler_status.py:74`, `scripts/debug_info.py:330`                                                                |
+
+**These counts are not a defect count.** Many `2>/dev/null` uses are legitimate — probing with
+`command -v`, suppressing expected noise from a tool that writes to stderr on success. Triage is
+required; blind removal would break things and is not the goal.
+
+- [ ] ⬜ **Task 5.1**: Widen `audit_error_hiding.py` beyond `src/` to cover `scripts/` and
+  root-level `install.py`. Expect it to surface the 12 broad excepts and 2 swallows above.
+- [ ] ⬜ **Task 5.2**: Teach it to extract and audit Python embedded in shell heredocs — the
+  exact hiding place of the Phase 1 bug. Without this, the fix that started this plan could
+  recur undetected.
+- [ ] ⬜ **Task 5.3**: Add shell error-hiding detection to the audit, reusing
+  `strategies/error_hiding/shell_strategy.py` rather than reimplementing its patterns (DRY —
+  the strategy already encodes them for the write-time handler).
+- [ ] ⬜ **Task 5.4**: Triage the surfaced findings into genuine error hiding vs. legitimate
+  suppression. Fix the former; for the latter add a narrow, **individually justified**
+  exclusion — never a blanket directory exemption, which is how this blind spot formed.
+- [ ] ⬜ **Task 5.5**: Fix the two confirmed swallows at `scripts/handler_status.py:74` and
+  `scripts/debug_info.py:330`.
+- [ ] ⬜ **Task 5.6**: Wire the widened audit into `run_all.sh` so the scope cannot silently
+  narrow again, and add a test asserting the audited roots include `scripts/`.
+
 ## Technical Decisions
 
 ### Decision 1: Fail loudly on unparseable tool output
