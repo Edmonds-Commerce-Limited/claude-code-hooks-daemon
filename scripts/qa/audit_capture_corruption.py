@@ -77,12 +77,18 @@ _REDIRECT_STDERR_RE = re.compile(r">\s*&\s*2\b")
 _REDIRECT_FILE_RE = re.compile(r"(?<!\d)(?<!&)>{1,2}\s*[^&\s]")
 _PIPE_RE = re.compile(r"\|(?!\|)")
 
-_CAPTURE_CALL_RE = re.compile(
-    r"\$\(\s*([a-zA-Z_][a-zA-Z0-9_]*)(?:\s|\)|$)"
-)
-_BACKTICK_CAPTURE_RE = re.compile(
-    r"`\s*([a-zA-Z_][a-zA-Z0-9_]*)\b"
-)
+_CAPTURE_CALL_RE = re.compile(r"\$\(\s*([a-zA-Z_][a-zA-Z0-9_]*)(?:\s|\)|$)")
+_BACKTICK_CAPTURE_RE = re.compile(r"`\s*([a-zA-Z_][a-zA-Z0-9_]*)\b")
+
+# Plan 00200 Task 1.6: a `cmd > file` / `cmd >> file` redirect is as risky as
+# `$(cmd)` -- the run_lint.sh capture that started this plan was corrupted by
+# exactly this shape (`venv_tool ruff ... > "${OUTPUT_FILE}.raw"`), which the
+# original two rules had no regex to recognise at all. Scoped to a KNOWN
+# function name as the line's first word so it never misfires on unrelated
+# `>` usage elsewhere in the codebase -- e.g. `[[ "$a" > "$b" ]]` string
+# comparison, whose first token is `[[`, never a function name.
+_LEADING_KEYWORD_RE = re.compile(r"^\s*(?:if|elif|while|!)\s+")
+_FIRST_WORD_RE = re.compile(r"^\s*([a-zA-Z_][a-zA-Z0-9_]*)\b")
 
 _LOG_HELPER_PREFIXES = (
     "print_",
@@ -259,6 +265,121 @@ def _collect_captured_function_names(lines: list[str]) -> set[str]:
     return names
 
 
+def _collect_redirect_consumed_names(lines: list[str], known_functions: set[str]) -> set[str]:
+    """Known function names invoked on a line that redirects stdout to a file.
+
+    ``>``/``>>`` only -- never ``>&2``, via the same ``_REDIRECT_FILE_RE``
+    used to decide whether an individual echo/printf line writes to stdout.
+    """
+    names: set[str] = set()
+    for line in lines:
+        code = _strip_inline_comment(line)
+        if not _REDIRECT_FILE_RE.search(code):
+            continue
+        stripped = _LEADING_KEYWORD_RE.sub("", code, count=1)
+        match = _FIRST_WORD_RE.match(stripped)
+        if match and match.group(1) in known_functions:
+            names.add(match.group(1))
+    return names
+
+
+def _collect_bare_calls(body_lines: list[str], known_functions: set[str]) -> set[str]:
+    """Known function names invoked as the first word of a line in a body.
+
+    Deliberately excludes ``$(...)``/backtick captures: their first token is
+    the assignment's LHS variable (if any), never the called function name,
+    so those are naturally not matched here -- they're already independently
+    classified by ``_collect_captured_function_names``. Also does not follow
+    a call appearing after an ``&&``/``||`` chain on the same line (a known,
+    documented scope limit; see Plan 00200 Task 1.6 journal entry).
+    """
+    names: set[str] = set()
+    for line in body_lines:
+        code = _strip_inline_comment(line)
+        stripped = _LEADING_KEYWORD_RE.sub("", code, count=1)
+        match = _FIRST_WORD_RE.match(stripped)
+        if match and match.group(1) in known_functions:
+            names.add(match.group(1))
+    return names
+
+
+def _resolve_definitions(names: set[str], func_defs: list[FunctionDef]) -> set[tuple[str, str]]:
+    """Resolve bare names to specific ``(file, name)`` definitions.
+
+    A name defined in exactly one file resolves unambiguously. A name
+    defined in MORE THAN ONE file (this codebase has one such collision:
+    two unrelated ``ensure_venv`` functions, in ``venv-include.bash`` and
+    ``scripts/install/venv.sh``) is deliberately left unresolved here rather
+    than guessed at -- a purely regex-based auditor cannot know which
+    definition a given call site's shell would actually resolve to without
+    tracking source order, and guessing wrong manufactures a false positive
+    against a same-named function that was never actually at risk (Plan
+    00200 Task 1.6 journal entry). Ambiguous names reachable ONLY by
+    propagation are still resolved correctly by ``_propagate_redirect_consumption``,
+    which has caller-file context this function does not.
+    """
+    by_name: dict[str, list[FunctionDef]] = {}
+    for f in func_defs:
+        by_name.setdefault(f.name, []).append(f)
+
+    resolved: set[tuple[str, str]] = set()
+    for name in names:
+        candidates = by_name.get(name, [])
+        if len(candidates) == 1:
+            resolved.add((candidates[0].file, name))
+    return resolved
+
+
+def _propagate_redirect_consumption(
+    redirect_consumed: set[tuple[str, str]],
+    func_defs: list[FunctionDef],
+) -> set[tuple[str, str]]:
+    """Fixed-point closure over the caller graph of redirect-consumed functions.
+
+    A function invoked (bare, not ``$(...)``) from within the body of an
+    already redirect-consumed function inherits the same zero-tolerance
+    stdout requirement: its output shares the same redirected stream as its
+    caller's. This is what's needed to catch the actual historical shape --
+    ``venv_tool`` is redirected, and it calls ``ensure_venv`` (whose stray
+    echo was the real bug) by bare name, not ``$(...)``.
+
+    Resolves each callee PREFERRING a definition in the SAME FILE as the
+    caller (the only scoping signal a cross-file, name-based regex auditor
+    can safely use) before falling back to a global unambiguous match; a
+    name that is ambiguous AND has no same-file candidate is left
+    unresolved rather than guessed at, for the same reason
+    ``_resolve_definitions`` does -- this is exactly what keeps the
+    ``ensure_venv`` name collision from flagging the unrelated,
+    never-redirected ``scripts/install/venv.sh`` definition.
+    """
+    by_file_name: dict[tuple[str, str], FunctionDef] = {(f.file, f.name): f for f in func_defs}
+    by_name: dict[str, list[FunctionDef]] = {}
+    for f in func_defs:
+        by_name.setdefault(f.name, []).append(f)
+    known_functions = set(by_name)
+
+    consumed = set(redirect_consumed)
+    changed = True
+    while changed:
+        changed = False
+        for file, name in list(consumed):
+            func = by_file_name.get((file, name))
+            if func is None:
+                continue
+            for called in _collect_bare_calls(func.body_lines, known_functions):
+                if (file, called) in by_file_name:
+                    target = (file, called)
+                else:
+                    candidates = by_name.get(called, [])
+                    if len(candidates) != 1:
+                        continue  # ambiguous, no same-file candidate -- skip
+                    target = (candidates[0].file, called)
+                if target not in consumed:
+                    consumed.add(target)
+                    changed = True
+    return consumed
+
+
 def _is_log_helper_name(name: str) -> bool:
     return any(name.startswith(prefix) for prefix in _LOG_HELPER_PREFIXES)
 
@@ -337,13 +458,22 @@ def _audit_function_body(
     *,
     enforce_terminal: bool,
     enforce_all_stderr: bool,
+    is_log_helper: bool,
 ) -> list[Violation]:
     """Walk a function body and emit violations.
 
-    - ``enforce_terminal``: function is captured. Stdout writes are OK
-      only at terminal-return positions.
-    - ``enforce_all_stderr``: function is a log helper. Stdout writes are
-      never OK regardless of position.
+    - ``enforce_terminal``: function is ``$(...)``-captured. Stdout writes
+      are OK only at terminal-return positions -- the privileged "this is
+      the function's intended return value" position.
+    - ``enforce_all_stderr``: no privileged position exists. Stdout writes
+      are never OK regardless of position -- true for log helpers (their
+      whole purpose is diagnostics, never a return value) AND for functions
+      whose stdout is consumed via ``>``/``>>`` redirect (a redirect
+      concatenates the ENTIRE stream, including whatever runs after this
+      function returns, so there is no "last echo is the payload" escape
+      the way there is for a single ``$(...)`` capture -- Plan 00200 Task
+      1.6). ``is_log_helper`` only selects which of those two the message
+      names; the enforcement is identical either way.
     """
     violations: list[Violation] = []
     body = func.body_lines
@@ -375,17 +505,29 @@ def _audit_function_body(
             continue
 
         if enforce_all_stderr:
+            if is_log_helper:
+                rule = "log-helper-stdout"
+                message = (
+                    f"log helper '{func.name}' writes to stdout; redirect "
+                    "with '>&2' so it doesn't corrupt VAR=$(captured-func) "
+                    "callers (v3.10.0 SEV-1 root cause)"
+                )
+            else:
+                rule = "capture-corruption"
+                message = (
+                    f"function '{func.name}' is invoked with its stdout "
+                    "redirected to a file elsewhere (directly, or via a "
+                    "caller that is) -- ANY stdout write here, not just a "
+                    "non-terminal one, lands in that file. Redirect with "
+                    "'>&2', or add '# capture-audit: allow -- <reason>'"
+                )
             violations.append(
                 Violation(
                     file=func.file,
                     line=absolute_lineno,
                     function=func.name,
-                    rule="log-helper-stdout",
-                    message=(
-                        f"log helper '{func.name}' writes to stdout; redirect "
-                        "with '>&2' so it doesn't corrupt VAR=$(captured-func) "
-                        "callers (v3.10.0 SEV-1 root cause)"
-                    ),
+                    rule=rule,
+                    message=message,
                 )
             )
             continue
@@ -412,31 +554,62 @@ def _audit_function_body(
 def _audit_with_known_functions(
     func_defs: list[FunctionDef],
     captured_names: set[str],
+    redirect_consumed_defs: set[tuple[str, str]],
 ) -> list[Violation]:
     violations: list[Violation] = []
     for func in func_defs:
         is_captured = func.name in captured_names
+        is_redirect_consumed = (func.file, func.name) in redirect_consumed_defs
         is_log_helper = _is_log_helper_name(func.name)
 
+        # Plan 00200 Task 1.6 journal entry: the function-level marker is
+        # deliberately scoped to `is_captured` ONLY, never `is_redirect_consumed`.
+        # It exists to rebut a specific, stated reason (typically the name
+        # collision this same-named function has with an unrelated $(...)
+        # -captured definition elsewhere) -- it says nothing about redirect
+        # risk, which is a different, independently-derived signal (real
+        # call-graph analysis, not a name collision). Blanket-clearing both
+        # from one marker is exactly the "guard exists but doesn't cover it"
+        # shape this rule was added to close: it is what let the historical
+        # ensure_venv bug ship even in a repo that already HAD a marker
+        # convention. A genuine redirect-consumption false positive still has
+        # an escape hatch -- the per-line ``# capture-audit: allow -- <reason>``
+        # marker works uniformly across all three rules.
         if func.function_level_marker:
             is_captured = False
 
-        if not (is_captured or is_log_helper):
+        if not (is_captured or is_redirect_consumed or is_log_helper):
             continue
+
+        # Redirect consumption and log-helper status both mean "zero
+        # tolerance, no privileged terminal position" (Plan 00200 Task 1.6);
+        # a bare $(...) capture alone keeps the lenient terminal-position
+        # check. When both apply, zero tolerance wins -- it is the stricter
+        # requirement.
+        zero_tolerance = is_redirect_consumed or is_log_helper
+
         violations.extend(
             _audit_function_body(
                 func,
                 enforce_terminal=is_captured,
-                enforce_all_stderr=is_log_helper,
+                enforce_all_stderr=zero_tolerance,
+                is_log_helper=is_log_helper,
             )
         )
     return violations
 
 
 def audit_files(paths: list[Path]) -> list[Violation]:
-    """Audit a list of shell file paths together (cross-file capture detection)."""
+    """Audit a list of shell file paths together (cross-file capture detection).
+
+    Two passes over the files: the first extracts every function definition
+    (needed to build the known-function-name universe redirect-consumption
+    detection scopes against, Plan 00200 Task 1.6); the second collects the
+    ``$(...)``-captured and redirect-consumed name sets now that the known
+    set exists, then closes the redirect-consumed set over the caller graph.
+    """
+    per_file_lines: list[list[str]] = []
     all_func_defs: list[FunctionDef] = []
-    all_captured: set[str] = set()
 
     for path in paths:
         try:
@@ -445,10 +618,21 @@ def audit_files(paths: list[Path]) -> list[Violation]:
             raise RuntimeError(f"could not read {path}: {exc}") from exc
         raw_lines = source.splitlines()
         lines = _strip_heredoc_bodies(raw_lines)
+        per_file_lines.append(lines)
         all_func_defs.extend(_extract_functions(lines, str(path)))
-        all_captured.update(_collect_captured_function_names(lines))
 
-    return _audit_with_known_functions(all_func_defs, all_captured)
+    known_functions = {f.name for f in all_func_defs}
+
+    all_captured: set[str] = set()
+    redirect_consumed_names: set[str] = set()
+    for lines in per_file_lines:
+        all_captured.update(_collect_captured_function_names(lines))
+        redirect_consumed_names.update(_collect_redirect_consumed_names(lines, known_functions))
+
+    redirect_consumed_defs = _resolve_definitions(redirect_consumed_names, all_func_defs)
+    redirect_consumed_defs = _propagate_redirect_consumption(redirect_consumed_defs, all_func_defs)
+
+    return _audit_with_known_functions(all_func_defs, all_captured, redirect_consumed_defs)
 
 
 _EXCLUDE_DIR_PARTS = {

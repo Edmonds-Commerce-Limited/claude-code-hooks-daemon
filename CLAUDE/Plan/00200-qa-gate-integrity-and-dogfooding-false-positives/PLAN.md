@@ -122,9 +122,20 @@ and did not catch this. Worth understanding why.
 - [x] ✅ **Task 1.4**: Replaced the `JSONDecodeError` swallow with a hard failure printing the
   parse error and the first 200 bytes of the corrupted capture, then `sys.exit(1)`.
 - [ ] ⬜ **Task 1.5**: Same treatment for `run_dependency_check.sh:74`,
-  `run_security_check.sh:56`, `run_smoke_test.sh:150`.
-- [ ] ⬜ **Task 1.6**: Investigate why `run_capture_corruption_check.sh` missed this; extend it
-  if it reasonably could have caught it.
+  `run_security_check.sh:56`, `run_smoke_test.sh:150`. Already applied (uncommitted) by the
+  Phase 5 agent's widened `audit_error_hiding.py` triage as a natural side effect (plus a 4th,
+  `run_shell_check.sh`, not in the original list) — see JOURNAL 09:05/09:34 entries. Deliberately
+  not re-touched or re-committed here to avoid duplicating/conflicting with in-flight work in
+  this shared checkout; already flagged to team-lead for dedup. Leaving unticked until that
+  lands under its rightful commit.
+- [x] ✅ **Task 1.6**: Root cause: the auditor only recognised `$(...)`/backtick capture as risky
+  stdout consumption, with no regex for a `cmd > file` redirect — exactly the shape that broke
+  `run_lint.sh`. Extended `audit_capture_corruption.py` with redirect-consumption detection +
+  bare-call-graph propagation (zero-tolerance, no terminal-position exemption); fixed two real
+  bugs surfaced while building it (a cross-file name-collision false positive, and an
+  over-broad function-level-marker suppression that was hiding a genuine still-shipping latent
+  bug at `venv-include.bash:106`, now fixed). Verified against the actual pre-fix historical
+  files, not just synthetic fixtures. Full analysis in JOURNAL 09:34.
 
 ### Phase 2: The hidden violations
 
@@ -222,21 +233,32 @@ confirmed swallows (`handler_status.py:74`, `debug_info.py:330`). **Not a defect
 `2>/dev/null` uses are legitimate `command -v` probes. Triage required; blind removal breaks
 things.
 
-- [ ] ⬜ **Task 5.1**: Widen `audit_error_hiding.py` beyond `src/` to cover `scripts/` and
-  root-level `install.py`. Expect it to surface the 12 broad excepts and 2 swallows above.
-- [ ] ⬜ **Task 5.2**: Teach it to extract and audit Python embedded in shell heredocs — the
-  exact hiding place of the Phase 1 bug. Without this, the fix that started this plan could
-  recur undetected.
-- [ ] ⬜ **Task 5.3**: Add shell error-hiding detection to the audit, reusing
-  `strategies/error_hiding/shell_strategy.py` rather than reimplementing its patterns (DRY —
-  the strategy already encodes them for the write-time handler).
-- [ ] ⬜ **Task 5.4**: Triage the surfaced findings into genuine error hiding vs. legitimate
-  suppression. Fix the former; for the latter add a narrow, **individually justified**
-  exclusion — never a blanket directory exemption, which is how this blind spot formed.
-- [ ] ⬜ **Task 5.5**: Fix the two confirmed swallows at `scripts/handler_status.py:74` and
-  `scripts/debug_info.py:330`.
-- [ ] ⬜ **Task 5.6**: Wire the widened audit into `run_all.sh` so the scope cannot silently
-  narrow again, and add a test asserting the audited roots include `scripts/`.
+- [x] ✅ **Task 5.1**: Widened `audit_error_hiding.py` beyond `src/` via named constants
+  `AUDITED_DIRECTORIES = ("src", "scripts")` and `AUDITED_ROOT_FILES` (`install.py`, `daemon.sh`,
+  `init.sh`, `install.sh`, root `test_*.sh`).
+- [x] ✅ **Task 5.2**: Added `extract_heredoc_python_blocks()` / `audit_heredoc_python()` — finds
+  python/python3/`${VENV_PYTHON}`-style heredocs in `.sh` files, `ast.parse`s the body, offsets
+  line numbers via `ast.increment_lineno` so violations point at the real file:line. Also added a
+  third rule, `silent-fallback` (single-statement `except X: <bare assign>`) — the pre-fix
+  visitor had no rule matching the run_lint.sh swallow's shape, so scope alone wasn't enough.
+- [x] ✅ **Task 5.3**: Added `audit_shell_patterns()`, reusing `ShellErrorHidingStrategy.patterns`
+  directly (no reimplementation).
+- [x] ✅ **Task 5.4**: Triaged 61 surfaced findings: ~53 legitimate (if-checked probes, documented
+  fallback contracts) got narrow function/line-based exclusions in `error_hiding_exclusions.json`;
+  8 genuine swallows fixed (see Task 5.5 + `daemon/project_handler_health.py`,
+  `daemon/cli.py::cmd_validate_project_handlers`/`cmd_test_project_handlers`,
+  `init.sh::start_daemon`'s discarded launcher diagnostics).
+- [x] ✅ **Task 5.5**: Fixed the two confirmed swallows (`handler_status.py::_detect_self_install_mode`,
+  `debug_info.py` process-details block) plus the same shape found by the widened audit in
+  `run_dependency_check.sh`, `run_security_check.sh`, `run_shell_check.sh` (not in the original
+  list), and `run_smoke_test.sh` — all four sibling QA scripts now hard-fail with a diagnostic
+  instead of silently defaulting on unparseable capture, matching the `fad60fa6` `run_lint.sh` fix.
+- [x] ✅ **Task 5.6**: `run_all.sh` already invoked `audit_error_hiding.py --json`, so the widened
+  scope is enforced automatically; added `TestAuditedRootsCannotSilentlyNarrow` asserting
+  `"scripts" in AUDITED_DIRECTORIES`. Centrepiece regression:
+  `TestPreFixRunLintFixtureIsCaught` points the fixed auditor at the exact pre-fix
+  `run_lint.sh` content (`tests/fixtures/error_hiding/pre_fix_run_lint.sh`, recovered via
+  `git show fad60fa6^:...`) and requires it to flag the swallow.
 
 ### Phase 6: DBF gap analysis — every finding mapped to the guard that should have caught it
 
@@ -265,17 +287,21 @@ The four **NONE** rows are the remaining defence work. Note the README one is un
 close: `.claude/HOOKS-DAEMON.md` is already **generated from live config**, so it is trustworthy
 ground truth to diff prose claims against — the data exists, nothing consumes it.
 
-- [ ] ⬜ **Task 6.1**: Tracked-build-artifact check — fail when a generated artifact
-  (`coverage.*`, `htmlcov/`, `*.bak`, `.orig`, `~`) is tracked. Would have caught `coverage.json`
-  and `.claude/settings.json.bak`.
+- [x] ✅ **Task 6.1**: Tracked-build-artifact rule, in `scripts/qa/check_repo_hygiene.py`
+  (merged with 6.3 — one `git ls-files` scan, two rule families; see JOURNAL). Surfaced and
+  fixed `coverage.json` (1.4 MB) and `.claude/settings.json.bak`; `.gitignore` now covers both
+  plus the daemon's own runtime `.bak.*` shape.
 
-- [ ] ⬜ **Task 6.2**: Doc-vs-generated-truth check — diff README/`CLAUDE.md` factual claims
-  against `.claude/HOOKS-DAEMON.md` and the handler registry. Start with the two demonstrated
-  failures: inverted handler descriptions, and hardcoded check counts that drift. Prefer
-  removing hardcoded counts from prose over asserting them.
+- [x] ✅ **Task 6.2**: `scripts/qa/check_doc_truth.py` — four rules against generated truth
+  (`handler-ref-unknown`, `handler-claim-mismatch`, `handler-count-drift`,
+  `qa-check-count-hardcoded`). Surfaced 3 hardcoded QA counts (README, `CLAUDE.md`,
+  `RELEASING.md`), all replaced with "every check". Hand-audit of the 15 README bullets found
+  **5** wrong descriptions, not the 2 reported; all fixed and each bullet now names its handler
+  key so the claim rule engages.
 
-- [ ] ⬜ **Task 6.3**: Repo-hygiene check — no test scripts outside the test tree, no editor/
-  backup detritus tracked.
+- [x] ✅ **Task 6.3**: Root-test-script rule (same script as 6.1). Deleted the four stray root
+  `test_*.sh`; no coverage lost — `test_forwarder_jq_free.py:284` already supersedes the
+  control-char case.
 
 - [ ] ⬜ **Task 6.4**: Require a **negative** acceptance case per blocking handler. All five
   false positives in Phase 3 are one class: handlers assert what they block and never assert

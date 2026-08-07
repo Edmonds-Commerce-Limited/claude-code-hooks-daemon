@@ -143,6 +143,160 @@ class TestCapturedFunctionRule:
         assert violations == []
 
 
+# ── Redirect-consumption rule (Plan 00200 Task 1.6) ───────────────
+
+
+class TestRedirectConsumptionRule:
+    """A ``cmd > file`` / ``cmd >> file`` redirect is as risky as ``$(cmd)``.
+
+    Reproduces the exact historical miss: ``run_lint.sh`` corrupted its
+    ruff JSON capture via ``venv_tool ruff ... > "${OUTPUT_FILE}.raw"`` --
+    a plain file redirect, not a ``$(...)``/backtick command substitution.
+    The pre-fix auditor had no regex recognising ``>``/``>>`` as a risky
+    consumption context at all, so ``venv_tool`` (and, transitively,
+    ``ensure_venv`` which it calls) was never audited.
+    """
+
+    def test_redirected_function_stdout_emit_fails(self, tmp_path: Path) -> None:
+        defn = _write(
+            tmp_path,
+            "lib.sh",
+            "#!/bin/bash\n" "run_tool() {\n" '    echo "banner"\n' '    "$1"\n' "}\n",
+        )
+        caller = _write(tmp_path, "use.sh", '#!/bin/bash\nrun_tool ruff > "${OUT}.raw"\n')
+        violations = audit_files([defn, caller])
+        assert "capture-corruption" in _rules(violations)
+        assert any(v.function == "run_tool" for v in violations)
+
+    def test_redirected_function_has_no_terminal_position_exemption(self, tmp_path: Path) -> None:
+        """Unlike ``$(...)`` capture, a redirect has no privileged 'last echo'.
+
+        A redirect concatenates the ENTIRE stdout stream of everything that
+        runs before the redirect closes -- including whatever the tool
+        invoked immediately afterwards also writes. So even an echo
+        immediately before ``return`` (which the captured-function rule's
+        terminal-position heuristic treats as safe -- it looks like the
+        function's intended ``$(...)`` return value) is NOT safe here:
+        anything else that runs later in the same redirected pipeline still
+        lands in the file after it.
+        """
+        defn = _write(
+            tmp_path,
+            "lib.sh",
+            "#!/bin/bash\n" "run_tool() {\n" '    echo "banner"\n' "    return 0\n" "}\n",
+        )
+        caller = _write(tmp_path, "use.sh", '#!/bin/bash\nrun_tool > "${OUT}.raw"\n')
+        violations = audit_files([defn, caller])
+        assert "capture-corruption" in _rules(violations)
+
+    def test_append_redirect_is_also_detected(self, tmp_path: Path) -> None:
+        defn = _write(
+            tmp_path,
+            "lib.sh",
+            "#!/bin/bash\n" "run_tool() {\n" '    echo "banner"\n' "}\n",
+        )
+        caller = _write(tmp_path, "use.sh", '#!/bin/bash\nrun_tool >> "${OUT}.raw"\n')
+        violations = audit_files([defn, caller])
+        assert "capture-corruption" in _rules(violations)
+
+    def test_redirect_to_stderr_is_not_a_redirect_consumption(self, tmp_path: Path) -> None:
+        """``cmd 2>&1`` alone (no ``>``) does not send stdout to a file."""
+        defn = _write(
+            tmp_path,
+            "lib.sh",
+            "#!/bin/bash\n" "run_tool() {\n" '    echo "banner"\n' "}\n",
+        )
+        caller = _write(tmp_path, "use.sh", "#!/bin/bash\nrun_tool 2>&1\n")
+        violations = audit_files([defn, caller])
+        assert violations == []
+
+    def test_callee_of_a_redirected_function_is_also_audited(self, tmp_path: Path) -> None:
+        """Reproduces the actual historical shape: the redirected function
+        (``venv_tool``) delegates its own stdout hygiene to a callee
+        (``ensure_venv``) that it invokes by bare name, not ``$(...)``. The
+        redirect on the OUTER call must propagate one level into the callee
+        for this class of bug to be caught at all.
+        """
+        defn = _write(
+            tmp_path,
+            "lib.sh",
+            "#!/bin/bash\n"
+            "ensure_venv() {\n"
+            '    echo "Venv exists"\n'
+            "    return 0\n"
+            "}\n"
+            "venv_tool() {\n"
+            "    ensure_venv || return 1\n"
+            '    "$1"\n'
+            "}\n",
+        )
+        caller = _write(tmp_path, "use.sh", '#!/bin/bash\nvenv_tool ruff > "${OUT}.raw"\n')
+        violations = audit_files([defn, caller])
+        assert "capture-corruption" in _rules(violations)
+        assert any(v.function == "ensure_venv" for v in violations)
+
+    def test_name_collision_across_files_does_not_leak_risk_to_the_other_definition(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression: two files defining a same-named function must not
+        cross-contaminate. This reproduces a false positive found while
+        implementing the redirect rule: the real repo has TWO unrelated
+        ``ensure_venv`` functions (``venv-include.bash`` and
+        ``scripts/install/venv.sh``). Flagging by bare name alone -- rather
+        than the specific ``(file, name)`` definition -- caused the
+        propagation step to wrongly mark the SECOND, entirely unrelated
+        (and never redirect-consumed) ``ensure_venv`` as zero-tolerance too,
+        purely because a function of the same name, in a DIFFERENT file, was
+        legitimately at risk.
+        """
+        risky_file = _write(
+            tmp_path,
+            "risky.sh",
+            "#!/bin/bash\n"
+            "ensure_venv() {\n"
+            '    echo "banner"\n'
+            "    return 0\n"
+            "}\n"
+            "venv_tool() {\n"
+            "    ensure_venv || return 1\n"
+            '    "$1"\n'
+            "}\n",
+        )
+        unrelated_file = _write(
+            tmp_path,
+            "unrelated.sh",
+            "#!/bin/bash\n"
+            "ensure_venv() {\n"
+            '    echo "$resolved_path"\n'  # legitimate $(...) terminal return
+            "}\n",
+        )
+        caller1 = _write(tmp_path, "use1.sh", '#!/bin/bash\nvenv_tool ruff > "${OUT}.raw"\n')
+        caller2 = _write(tmp_path, "use2.sh", "#!/bin/bash\nVAR=$(ensure_venv /a)\n")
+
+        violations = audit_files([risky_file, unrelated_file, caller1, caller2])
+
+        risky_violations = [v for v in violations if v.file == str(risky_file)]
+        unrelated_violations = [v for v in violations if v.file == str(unrelated_file)]
+        assert "capture-corruption" in _rules(
+            risky_violations
+        ), "The redirect-consumed ensure_venv (risky.sh) must still be caught"
+        assert unrelated_violations == [], (
+            "The unrelated, never-redirected ensure_venv (unrelated.sh) must NOT "
+            f"be flagged just because a same-named function elsewhere is at risk: "
+            f"{unrelated_violations}"
+        )
+
+    def test_clean_redirected_function_passes(self, tmp_path: Path) -> None:
+        defn = _write(
+            tmp_path,
+            "lib.sh",
+            "#!/bin/bash\n" 'run_tool() {\n    echo "banner" >&2\n    "$1"\n}\n',
+        )
+        caller = _write(tmp_path, "use.sh", '#!/bin/bash\nrun_tool ruff > "${OUT}.raw"\n')
+        violations = audit_files([defn, caller])
+        assert violations == []
+
+
 # ── Log-helper rule ────────────────────────────────────────────────
 
 

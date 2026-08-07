@@ -103,7 +103,15 @@ ensure_venv() {
         return 1
     fi
 
-    echo -e "${YELLOW}⚠${NC}  Venv not found, creating..."
+    # >&2 is LOAD-BEARING here too (Plan 00200 Task 1.6): this path runs
+    # inside ensure_venv, which venv_tool calls before running the real
+    # tool with its stdout redirected to a file (e.g. run_lint.sh). A
+    # stdout write here corrupts that capture exactly like the :87 banner
+    # did -- it just only fires on a FRESH venv creation, not the common
+    # "venv already exists" path, which is why it wasn't caught the first
+    # time. Found by extending the capture-corruption auditor to also
+    # recognise `cmd > file` (not just `$(cmd)`) as risky consumption.
+    echo -e "${YELLOW}⚠${NC}  Venv not found, creating..." >&2
 
     # Create venv directory structure
     mkdir -p "$(dirname "${VENV_DIR}")"
