@@ -107,17 +107,18 @@ other source.
 
 ### Phase 1: Redaction utility + handler (TDD)
 
-- [ ] ⬜ **Task 1.1**: `utils/secret_redaction.py` — path resolution, cached
+- [x] ✅ **Task 1.1**: `utils/secret_redaction.py` — path resolution, cached
   term loading, literal case-insensitive matching, `redact_text`,
-  `redact_structure`, `reset_cache()`. Tests first: missing file inert,
-  empty/comments-only file inert, regex-metacharacter term matched
-  literally, cache invalidation via `reset_cache()`.
-- [ ] ⬜ **Task 1.2**: `sensitive_content` PreToolUse handler — public
+  `redact_structure`, `reset_terms_cache()`/`reset_active_path_cache()`.
+  34 tests, TDD RED confirmed before implementation.
+- [x] ✅ **Task 1.2**: `sensitive_content` PreToolUse handler — public
   patterns (named regex list from config, deny names the match) and secret
-  list (deny names only an index). Tests assert `term not in result.reason`
-  directly for every secret-list scenario.
-- [ ] ⬜ **Task 1.3**: `.claude/block-words.secret.example` (tracked) +
-  dogfood `public_patterns` config in `.claude/hooks-daemon.yaml`.
+  list (deny names only an index). 24 tests, including direct
+  `term not in result.reason` assertions for every secret-list scenario.
+- [x] ✅ **Task 1.3**: dogfood `public_patterns` config in
+  `.claude/hooks-daemon.yaml` (vhosts-path, non-placeholder-home-dir,
+  session-uuid — profanity deliberately not populated, see journal).
+  `.claude/block-words.secret.example` still pending (Phase 4).
 
 ### Phase 2: Close the leak vectors
 
