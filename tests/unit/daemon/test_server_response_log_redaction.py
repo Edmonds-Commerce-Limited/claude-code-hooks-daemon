@@ -28,6 +28,96 @@ from claude_code_hooks_daemon.daemon import server as server_module
 SECRET = "zzqx-nonsense-term"
 
 
+class TestIsBlockingResponse:
+    """Which responses count as blocking — decided structurally, not by substring.
+
+    The original test was ``"deny" in response_json or "block" in response_json
+    or "permissionDecision" in response_json`` against the SERIALISED response.
+    That matches any response whose text happens to contain those letters, and
+    the status line does: `🛡️ 1 blocks`. Every status render was therefore
+    written to the log labelled "BLOCKING RESPONSE" — which is how an account
+    name ended up in a log about blocking decisions in the first place.
+
+    Each event type states its decision in a different place (Claude Code's
+    contract, mirrored in ``core/response_schemas.py``), so all three are read
+    explicitly.
+    """
+
+    def test_pre_tool_use_deny_is_blocking(self) -> None:
+        assert server_module.is_blocking_response(
+            {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny"}}
+        )
+
+    def test_pre_tool_use_ask_is_blocking(self) -> None:
+        """`ask` interrupts the user exactly as `deny` does."""
+        assert server_module.is_blocking_response(
+            {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask"}}
+        )
+
+    def test_pre_tool_use_allow_is_not_blocking(self) -> None:
+        assert not server_module.is_blocking_response(
+            {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}
+        )
+
+    def test_top_level_block_decision_is_blocking(self) -> None:
+        """PostToolUse / Stop / SubagentStop / UserPromptSubmit shape."""
+        assert server_module.is_blocking_response({"decision": "block", "reason": "no"})
+
+    def test_permission_request_nested_behavior_is_blocking(self) -> None:
+        assert server_module.is_blocking_response(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PermissionRequest",
+                    "decision": {"behavior": "deny"},
+                }
+            }
+        )
+
+    def test_permission_request_allow_behavior_is_not_blocking(self) -> None:
+        assert not server_module.is_blocking_response(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PermissionRequest",
+                    "decision": {"behavior": "allow"},
+                }
+            }
+        )
+
+    def test_status_line_containing_the_word_blocks_is_not_blocking(self) -> None:
+        """THE regression. This exact shape put an account name in the log.
+
+        The status line reports how many handlers are blocking, so its rendered
+        text contains "blocks" on every render — roughly three times a second.
+        """
+        status = {"text": "🤖 Opus 5 | 📁 my-repo | 🛡️ 1 blocks | 👤 someone"}
+
+        assert not server_module.is_blocking_response(status)
+
+    def test_advisory_context_mentioning_deny_is_not_blocking(self) -> None:
+        """Handler guidance routinely explains what gets DENIED. That is prose."""
+        assert not server_module.is_blocking_response(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "SessionStart",
+                    "additionalContext": "This handler will deny a git reset and block a stash.",
+                }
+            }
+        )
+
+    def test_empty_response_is_not_blocking(self) -> None:
+        assert not server_module.is_blocking_response({})
+
+    def test_malformed_shapes_do_not_raise(self) -> None:
+        """A log predicate must never be able to break dispatch."""
+        for malformed in (
+            {"hookSpecificOutput": "not-a-dict"},
+            {"hookSpecificOutput": {"decision": "not-a-dict"}},
+            {"decision": {"unexpected": "shape"}},
+            {"decision": None},
+        ):
+            assert not server_module.is_blocking_response(malformed)
+
+
 def test_secret_term_is_redacted_from_the_blocking_response_log() -> None:
     response = {
         "hookSpecificOutput": {

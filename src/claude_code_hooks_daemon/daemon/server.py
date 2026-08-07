@@ -56,6 +56,11 @@ _VALID_LOG_LEVEL_NAMES = frozenset(_LOG_LEVEL_NUMBERS)
 # diagnose a block, bounded so one response cannot flood the log.
 BLOCKING_RESPONSE_LOG_CHARS: Final[int] = 1000
 
+# The decision values that stop the user. ``ask`` sits beside ``deny`` because
+# it interrupts just as a block does.
+_DECISION_BLOCK: Final[str] = "block"
+_INTERRUPTING_DECISIONS: Final[frozenset[str]] = frozenset({"deny", "ask"})
+
 
 def redacted_blocking_response(response_json: str) -> str:
     """Prepare a blocking response for the DEBUG log: redacted, then truncated.
@@ -93,6 +98,48 @@ def redacted_blocking_response(response_json: str) -> str:
     # behind, and half a credential in a log is still a credential in a log.
     window = BLOCKING_RESPONSE_LOG_CHARS + max(len(term) for term in terms)
     return redact_text(response_json[:window], terms)[:BLOCKING_RESPONSE_LOG_CHARS]
+
+
+def is_blocking_response(response: dict[str, Any]) -> bool:
+    """True when ``response`` actually blocks or interrupts the user.
+
+    Read STRUCTURALLY, from the field each event type states its decision in
+    (Claude Code's contract, mirrored in ``core/response_schemas.py``):
+
+    - PreToolUse -> ``hookSpecificOutput.permissionDecision``
+    - PostToolUse / Stop / SubagentStop / UserPromptSubmit -> ``decision``
+    - PermissionRequest -> ``hookSpecificOutput.decision.behavior``
+
+    The predecessor was a substring test over the SERIALISED response —
+    ``"deny" in response_json or "block" in response_json or
+    "permissionDecision" in response_json`` — which matched any response whose
+    text merely contained those letters. The status line does: it reports how
+    many handlers are blocking (`🛡️ 1 blocks`), so every render, roughly three
+    a second, was written to the log labelled "BLOCKING RESPONSE". That is how
+    an account name came to sit in a log about blocking decisions. Handler
+    guidance explaining what gets DENIED tripped it just as easily.
+
+    ``ask`` counts alongside ``deny``: it interrupts the user just as a block
+    does, and a log of interruptions that omitted it would be misleading.
+
+    Never raises. This decides whether to write a DEBUG line, and a log
+    predicate that could throw would take dispatch down with it — so a
+    malformed shape is simply not blocking.
+    """
+    if response.get("decision") == _DECISION_BLOCK:
+        return True
+
+    hook_specific = response.get("hookSpecificOutput")
+    if not isinstance(hook_specific, dict):
+        return False
+
+    if hook_specific.get("permissionDecision") in _INTERRUPTING_DECISIONS:
+        return True
+
+    nested = hook_specific.get("decision")
+    if isinstance(nested, dict):
+        return bool(nested.get("behavior") in _INTERRUPTING_DECISIONS)
+    return False
 
 
 def log_blocking_response(response_json: str, debug_enabled: bool) -> None:
@@ -896,12 +943,11 @@ class HooksDaemon:
             # Send response
             response_json = json.dumps(response) + "\n"
 
-            # DEBUG: Log ALL responses with deny/block decisions
-            if (
-                "deny" in response_json
-                or "block" in response_json
-                or "permissionDecision" in response_json
-            ):
+            # DEBUG: log responses that actually block or interrupt the user.
+            # Read structurally from the decision fields — see
+            # is_blocking_response for why a substring test over the serialised
+            # response is not the same question.
+            if is_blocking_response(response):
                 log_blocking_response(
                     response_json, debug_enabled=logger.isEnabledFor(logging.DEBUG)
                 )
