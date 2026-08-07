@@ -119,7 +119,7 @@ def _run_create_venv(
 
 def test_overlay_fs_uses_copy_mode_up_front_no_warning(tmp_path: Path) -> None:
     """On overlay-fs the first (and only) sync uses copy mode; no warning."""
-    result, log_lines = _run_create_venv(tmp_path, fs_type="overlayfs")
+    result, _log_lines = _run_create_venv(tmp_path, fs_type="overlayfs")
 
     assert result.returncode == 0, (
         f"create_venv_at_path must succeed on overlay-fs.\n"
@@ -146,7 +146,7 @@ def test_overlay_fs_uses_copy_mode_up_front_no_warning(tmp_path: Path) -> None:
 
 def test_normal_fs_uses_hardlink_first(tmp_path: Path) -> None:
     """On a normal disk the first sync is hardlink mode (no copy-mode detection)."""
-    result, log_lines = _run_create_venv(tmp_path, fs_type="ext2/ext3")
+    result, _log_lines = _run_create_venv(tmp_path, fs_type="ext2/ext3")
 
     assert result.returncode == 0, (
         f"create_venv_at_path must succeed on a normal fs.\n"

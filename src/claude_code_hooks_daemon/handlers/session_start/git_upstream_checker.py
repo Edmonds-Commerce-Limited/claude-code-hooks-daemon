@@ -132,7 +132,7 @@ class GitUpstreamCheckerHandler(Handler):
 
         if gones:
             gone_ctx = self._gone_branch_context(gones)
-            context = context + [""] + gone_ctx if context else gone_ctx
+            context = [*context, "", *gone_ctx] if context else gone_ctx
 
         # Silent when up to date with no gone branches (or not a repo / detached).
         return HookResult(decision=Decision.ALLOW, context=context)

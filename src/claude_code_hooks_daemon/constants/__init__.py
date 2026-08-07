@@ -70,8 +70,6 @@ __all__ = [
     "EventID",
     "EventIDMeta",
     "EventKey",
-    "all_event_metas",
-    "wired_event_metas",
     # Formatting limit constants
     "FormatLimit",
     # Handler constants
@@ -99,4 +97,7 @@ __all__ = [
     "ToolNameLiteral",
     # Validation limit constants
     "ValidationLimit",
+    # Event helper functions
+    "all_event_metas",
+    "wired_event_metas",
 ]
