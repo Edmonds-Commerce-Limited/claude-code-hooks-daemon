@@ -216,7 +216,7 @@ Blocking handlers match patterns in the full Bash command string, including git 
 
 **Purpose**: Track development work in numbered folders (`CLAUDE/Plan/00001-`, `00002-`, etc.)
 
-**Documentation**: [docs/PLAN_SYSTEM.md](../docs/PLAN_SYSTEM.md)
+**Documentation**: [docs/PLAN_SYSTEM.md](docs/PLAN_SYSTEM.md)
 
 **Structure**: Numbered folders with `PLAN.md` files containing tasks, goals, status
 
@@ -483,7 +483,6 @@ src/claude_code_hooks_daemon/
 ├── handlers/       # All handler implementations (by event type)
 ├── config/         # YAML/JSON config loading
 ├── constants/      # Handler IDs, priorities, tags, tool names
-├── hooks/          # Entry point modules (one per event)
 ├── install/        # Installer logic
 ├── plugins/        # Plugin system for custom handlers
 ├── qa/             # QA runner utilities
