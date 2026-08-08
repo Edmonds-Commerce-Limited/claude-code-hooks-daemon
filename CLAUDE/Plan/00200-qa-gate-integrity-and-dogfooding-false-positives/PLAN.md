@@ -195,13 +195,15 @@ plan's own two new test files contribute the difference.)
   inherited a whitelisted one and the handler was bypassed outright. That last one is the
   audit's real yield. Delivered in `a92d2931`, `fc65f8cf`; full narrative in `JOURNAL/`.
 
-- [ ] ⬜ **Task 3.7**: Consolidate the two shell segmentation scanners. `enforce_llm_qa` grew a
-  quote-**and-escape**-aware splitter; `pipe_blocker` grew a quote-only one, and the missing
-  escape handling was exactly the bypass above. Two independent parsers for one grammar diverge
-  by construction, so the fix that stops this recurring is one shared scanner — not a third
-  careful implementation. Deferred rather than dropped because it crosses the
-  project-handler/library boundary (a project handler importing a library util) and that is a
-  design decision, not a mechanical refactor.
+- [x] ✅ **Task 3.7**: Consolidated both scanners into `utils/shell_segmentation.split_unquoted`
+  (17 tests, both production bypass shapes pinned). This was initially deferred as a "design
+  decision"; probing showed that was wrong twice over. The boundary objection was weak — project
+  handlers already import `core`, `constants.timeout` and `constants.tags`, and `utils/` is an
+  established 20-module package. And it was never tidiness: the two scanners held **opposite**
+  halves of the escape rule and each produced the *same* bypass. `enforce_llm_qa` escaped inside
+  single quotes (where bash treats `\` as literal), so a trailing backslash in a single-quoted
+  argument swallowed the closing quote, nothing split, and `run_all.sh` rode through on an
+  allowlisted leading word — **still live until this task**. Delivered in `5b8eb887`.
 
 A sixth instance surfaced alongside Task 6.4 (below): `plan_number_helper` blocked a `find`
 piped to `wc -l` (a plan *count* for a statistics line) as if it were number *discovery* —
