@@ -1121,6 +1121,16 @@ Writing time estimates into a plan document is blocked — that is any `CLAUDE/P
 
 **Instead:** break work into concrete tasks and implementation steps, and let the user decide scheduling. Technical durations that describe a feature (cache TTL, session timeout, retention window) are allowed — only work/effort estimates are blocked.
 
+## agent_isolation_advisor — isolate concurrent agents
+
+When more than one agent thread is live in this checkout, spawning another Agent without isolation is flagged (advisory, never blocked).
+
+Agents in one working tree share a single `.git/index`, so a peer's bare `git commit` can silently absorb another agent's staged work.
+
+**Prefer**: `isolation: "worktree"` on the Agent tool, then `git merge` or `git cherry-pick` to bring work back.
+
+**Keep the shared tree** for agents that need the real project root — daemon restart verification and client-mode testing do not work in a worktree.
+
 ## plan_workflow — PLAN.md and JOURNAL/ obey OPPOSITE contracts
 
 Confusing these two is the single most common plan-hygiene failure: narrative gets appended to `PLAN.md` until it is tens of KB of stale log. Each file has a WRITE contract and a READ contract, and the read contract is what justifies the write contract.
