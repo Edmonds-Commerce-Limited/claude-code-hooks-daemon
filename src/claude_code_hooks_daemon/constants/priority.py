@@ -111,6 +111,10 @@ class Priority:
     PLAN_QA_COMMIT_GATE = 44
     PLAN_WORKFLOW = 45
     TASK_TDD_ADVISOR = 45
+    # Sits beside TASK_TDD_ADVISOR: both are advisory PreToolUse handlers on the
+    # Task tool, and neither is terminal, so relative order does not change any
+    # verdict — only the order the two advisories appear in accumulated context.
+    AGENT_ISOLATION_ADVISOR = 46
 
     NPM_COMMAND = 50
     PLAN_COMPLETION_ADVISOR = 50

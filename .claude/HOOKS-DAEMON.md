@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-08-07 (v3.51.0) by `generate-docs`. Regenerate: `/workspace/bin/hooks-daemon generate-docs`
+> Generated on 2026-08-08 (v3.51.0) by `generate-docs`. Regenerate: `/workspace/bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (38 handlers)
+### PreToolUse (39 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -38,6 +38,7 @@
 | 44 | plan_qa_commit_gate | NON-TERMINAL | Warn-first cross-file plan QA gate on git commit |
 | 44 | plan_qa_edit | NON-TERMINAL | Blocking/advisory edit-time lint for plan documents |
 | 45 | plan_time_estimates | ADVISORY | Block time estimates in plan documents |
+| 46 | agent_isolation_advisor | ADVISORY | Advise ``isolation: worktree`` when peers are already active in this checkout |
 | 46 | plan_workflow | ADVISORY | Provide guidance when creating plan files |
 | 48 | plan_completion_advisor | ADVISORY | Advise when a plan is being marked as complete |
 | 49 | npm_command | ADVISORY | Enforce llm: prefixed npm commands and block direct npx tool usage |

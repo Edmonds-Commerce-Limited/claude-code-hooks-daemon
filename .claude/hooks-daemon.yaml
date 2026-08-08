@@ -259,6 +259,9 @@ handlers:
     task_tdd_advisor:      # Advises on TDD workflow for tasks
       enabled: true
       priority: 36
+    agent_isolation_advisor:  # Advises worktree isolation for concurrent agents
+      enabled: true
+      priority: 46
 
     gh_issue_comments:     # Requires --comments flag for gh issue view
       enabled: true

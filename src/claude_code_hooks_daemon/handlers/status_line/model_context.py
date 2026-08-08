@@ -134,7 +134,7 @@ _MODEL_VERSION_PATTERN = re.compile(r"claude-(?:opus|sonnet|haiku)-(\d+)-")
 
 
 class ModelContextHandler(Handler):
-    """Format model name with effort level and color-coded context percentage."""
+    """Format model name with effort level and colour-coded context percentage."""
 
     def __init__(self) -> None:
         super().__init__(

@@ -149,6 +149,9 @@ handlers:
     task_tdd_advisor:      # Advises on TDD workflow for tasks
       enabled: false       # Enable for TDD guidance
       priority: 36
+    agent_isolation_advisor:  # Advises worktree isolation when agents share a checkout
+      enabled: false          # Enable if you dispatch concurrent agents
+      priority: 46
 
     gh_issue_comments:     # Requires --comments flag for gh issue view
       enabled: true

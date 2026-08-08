@@ -55,6 +55,7 @@ _RECOMMENDED_HANDLERS: Final[list[str]] = [
     "task_completion_checker",
     "critical_thinking_advisory",
     "task_tdd_advisor",
+    "agent_isolation_advisor",
 ]
 
 _STRICT_ONLY_HANDLERS: Final[list[str]] = [

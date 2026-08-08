@@ -189,6 +189,7 @@ class ConfigTemplate:
             "    global_npm_advisor: {enabled: true, priority: 40}  # Advise on npm install -g (non-blocking)\n"
             "    plan_workflow: {enabled: true, priority: 45}     # Guidance when creating plans\n"
             "    task_tdd_advisor: {enabled: true, priority: 45}  # Advise on TDD workflow for Task agents (non-blocking)\n"
+            "    agent_isolation_advisor: {enabled: true, priority: 46}  # Advise worktree isolation for concurrent agents (non-blocking)\n"
             "    npm_command: {enabled: true, priority: 50}       # Restrict npm commands to approved list\n"
             "    plan_completion_advisor: {enabled: true, priority: 50}  # Advise on plan completion steps\n"
             "    validate_instruction_content: {enabled: true, priority: 50}  # Block ephemeral content in CLAUDE.md/README.md\n"

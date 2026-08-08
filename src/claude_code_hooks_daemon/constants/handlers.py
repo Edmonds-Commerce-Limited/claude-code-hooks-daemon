@@ -346,6 +346,11 @@ class HandlerID:
         config_key="task_tdd_advisor",
         display_name="task-tdd-advisor",
     )
+    AGENT_ISOLATION_ADVISOR = HandlerIDMeta(
+        class_name="AgentIsolationAdvisorHandler",
+        config_key="agent_isolation_advisor",
+        display_name="agent-isolation-advisor",
+    )
     BASH_ERROR_DETECTOR = HandlerIDMeta(
         class_name="BashErrorDetectorHandler",
         config_key="bash_error_detector",
