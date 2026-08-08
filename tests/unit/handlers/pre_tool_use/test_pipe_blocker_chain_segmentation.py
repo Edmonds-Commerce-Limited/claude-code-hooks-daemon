@@ -107,6 +107,60 @@ class TestChainSplitIsQuoteAware:
         assert _matches('pytest -k "a;b" | head -20')
 
 
+class TestEscapedQuotesCannotHideAChain:
+    """A backslash-escaped quote must not desynchronise the scanner.
+
+    This one is a false NEGATIVE — a bypass, not an annoyance. A scanner blind
+    to ``\\"`` flips its in-double-quote flag on the escaped quote and never
+    leaves quoted state, so every later separator looks like data. Prefix an
+    expensive command with a whitelisted one containing an escaped quote and the
+    chain separator is never seen::
+
+        echo "\\"" ; pytest tests/ | head -20   -> producer resolved to `echo ...`
+
+    The whitelist then matched the leading ``echo`` and the pipe blocker allowed
+    a full pytest run. The sibling splitter in the project's `enforce_llm_qa`
+    handler already tracked escapes; this one did not, which is exactly the
+    divergence two independent parsers produce.
+
+    Bash rule being implemented: a backslash escapes the next character
+    everywhere EXCEPT inside single quotes, where it is literal.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            r'echo "\"" ; pytest tests/ | head -20',
+            r'grep -E "a\"b" bar.py ; pytest tests/ | head -20',
+            'echo "\\"" \n pytest tests/ | head -20',
+            r'echo "\"" && pytest tests/ | head -20',
+        ],
+    )
+    def test_escaped_quote_cannot_launder_an_expensive_producer(self, command: str) -> None:
+        assert _matches(
+            command
+        ), "an escaped quote must not hide the chain separator that precedes pytest"
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            r'grep -E "a\"b" bar.py | head -20',
+            r"grep -E 'a\b' bar.py | head -20",
+        ],
+    )
+    def test_escaped_quote_does_not_break_a_legitimate_allow(self, command: str) -> None:
+        """Escape handling must not swing the other way into false positives."""
+        assert not _matches(command)
+
+    def test_backslash_is_literal_inside_single_quotes(self) -> None:
+        """Bash does not honour escapes inside single quotes; nor may the scanner.
+
+        If the scanner wrongly treated the backslash as escaping the closing
+        quote, it would stay 'in quotes' and miss the `;` before pytest.
+        """
+        assert _matches(r"grep -E 'a\' bar.py ; pytest tests/ | head -20")
+
+
 class TestSourceSegmentResolution:
     """Directly pin what the producer resolves to, not just the verdict."""
 

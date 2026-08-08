@@ -58,6 +58,14 @@ _CHAIN_SEPARATORS: tuple[str, ...] = ("&&", "||", ";", "\n")
 # split must run AFTER the chain split has narrowed to the final command.
 _PIPE_SEPARATORS: tuple[str, ...] = ("|",)
 
+# Backslash. A scanner blind to it flips its quote state on an ESCAPED quote and
+# never leaves quoted state, so every later separator looks like data — which
+# turned `echo "\"" ; pytest tests/ | head` into an allow, because the producer
+# resolved to the whitelisted `echo` instead of `pytest`. That is a bypass, not
+# a cosmetic issue. Per bash, a backslash escapes the next character everywhere
+# EXCEPT inside single quotes, where it is literal.
+_ESCAPE_CHAR = "\\"
+
 # Matches a `-m`/`--message`/`-F`/`--file` flag immediately followed by its
 # VALUE, so the value's content can be excluded from pipe detection: these
 # flags carry human-authored prose (a commit/tag message, or a message-file
@@ -234,6 +242,15 @@ class PipeBlockerHandler(Handler):
         index = 0
         while index < len(text):
             char = text[index]
+            if char == _ESCAPE_CHAR and not in_single:
+                # Consume the backslash AND whatever it escapes, so an escaped
+                # quote cannot flip the quote state.
+                current.append(char)
+                index += 1
+                if index < len(text):
+                    current.append(text[index])
+                    index += 1
+                continue
             if char == "'" and not in_double:
                 in_single = not in_single
             elif char == '"' and not in_single:
