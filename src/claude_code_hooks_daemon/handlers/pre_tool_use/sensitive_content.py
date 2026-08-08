@@ -319,7 +319,14 @@ class SensitiveContentHandler(Handler):
                 expected_message_patterns=[r"entry \d+ of \d+", r"deliberately not shown"],
                 safety_notes=(
                     "Deny path — no file is written. Verify manually that the deny "
-                    "reason does not contain the actual secret term."
+                    "reason does not contain the actual secret term.\n"
+                    "NEVER write to the operational secret list to set this test up. "
+                    "Point `secret_word_list_path` at a TEMP file with a throwaway "
+                    "term, restart, test, then restore the path. Overwriting the real "
+                    "list fails silently: the guard simply stops guarding and the QA "
+                    "scanner starts reporting a cleaner tree than reality, which is "
+                    "exactly how a redaction gets declared finished with identifiers "
+                    "still in it."
                 ),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.SONNET,

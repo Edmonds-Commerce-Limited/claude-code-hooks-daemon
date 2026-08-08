@@ -1,6 +1,6 @@
 # Plan 00201: Sensitive Content Secret-Word Blocking
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-07
 **Owner**: joseph
 **Priority**: High
@@ -142,27 +142,33 @@ other source.
   itself from its own scan output by construction (it is gitignored, so
   `git ls-files` never lists it — verified by running it with the real file
   present, not assumed).
-- [ ] 🔄 **Task 3.2**: Wire into `scripts/qa/run_all.sh` (and `llm_qa.py`).
-  Written but deliberately NOT yet committed: the checker reports 35 true
-  violations against the current tree, so wiring it in now would land a
-  knowingly-red gate that blocks every other commit's verification. Lands
-  together with the redaction pass (Task 5.1) so the gate goes in green.
-- [ ] ⬜ **Task 3.3** (opportunistic, only if trivial): correct the "10
-  checks" claim in `CLAUDE.md:45` and `RELEASING.md` to match `run_all.sh`
-  reality, per team-lead's heads-up — skip if Plan 00200 is actively editing
-  those exact lines concurrently.
+- [x] ✅ **Task 3.2**: Wired into both `run_all.sh` and `llm_qa.py`, and it went
+  in **green** as intended — the gate landed with the redaction pass rather
+  than before it, so it never blocked another commit's verification. Verified
+  live: `sensitive_content: 0 violations` in the QA suite.
+- [x] ✅ **Task 3.3**: Done, by Plan 00200's `qa-check-count-hardcoded` rule
+  rather than by hand — the hardcoded counts in `CLAUDE.md`, `RELEASING.md` and
+  `README.md` were replaced with "every check", so the runner is the single
+  source of truth and the number cannot drift again. The concurrency worry was
+  real and the two plans did land on the same lines; deferring to 00200's guard
+  was the right call.
 
 ### Phase 4: Docs, manifest, verification
 
-- [ ] ⬜ **Task 4.1**: `get_claude_md()` + `get_acceptance_tests()` on the
-  handler.
-- [ ] ⬜ **Task 4.2**: Config-changes manifest entry
-  (`CLAUDE/UPGRADES/UNRELEASED/config-changes/`).
-- [ ] ⬜ **Task 4.3**: `docs/guides/HANDLER_REFERENCE.md` entry.
-- [ ] ⬜ **Task 4.4**: Full QA green, daemon restart -> RUNNING.
-- [ ] ⬜ **Task 4.5**: Live dogfood — real `block-words.secret` with a
-  nonsense term, Write containing it -> deny fires, term appears in no log
-  and no payload-capture file (checked directly, not assumed).
+- [x] ✅ **Task 4.1**: Both present on the handler; the resident guidance names
+  the two disclosure rules (public patterns are quoted, secret-list hits give
+  only an index).
+- [x] ✅ **Task 4.2**: `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.52.0.yaml`.
+- [x] ✅ **Task 4.3**: `docs/guides/HANDLER_REFERENCE.md` entry present.
+- [x] ✅ **Task 4.4**: QA 19/19, 11,139 tests, coverage 95.3%, daemon RUNNING.
+- [x] ✅ **Task 4.5**: Live dogfood done end to end against the running daemon,
+  and — per Task 5.4's lesson — against a **temp** list, never the operational
+  one. A `Write` containing the sentinel term returned `deny`; the reason named
+  only `entry 1 of 1`; and a scan of **every** file under `untracked/` (daemon
+  log, payload captures, everything) found the term in **nothing**. Both halves
+  of the contract hold: a handler that blocked the term but logged it would
+  have moved the leak, not closed it. Afterwards the real list was confirmed
+  byte-intact (12 entries), still gitignored and still untracked.
 
 ### Phase 5: Dogfooding fallout
 
@@ -178,9 +184,15 @@ other source.
   deliberately NOT exempt — it ships, so a real term pasted there would be
   published. 4 tests, one of which is a control asserting the `.example`
   stays checked so the fix cannot pass by disabling matching wholesale.
-- [ ] 🔄 **Task 5.1**: Redaction pass — the 165 violations the checker
-  reports (35 public-pattern, 130 secret-term) across 52 files, including
-  shipped source. Ships with Task 3.2.
+
+- [x] ✅ **Task 5.1**: Redaction pass complete — 165 violations (35
+  public-pattern, 130 secret-term) across 52 files, including shipped source,
+  with 2 file renames and both reference-chased. Shipped together with Task 3.2
+  so the gate landed green. The checker now reports **0 violations** over the
+  whole tracked tree. Far more than the 55+ first projected, because the map
+  counted term occurrences while the guard counts *lines*, and the secret word
+  list caught families the hand-audit had missed.
+
 - [x] ✅ **Task 5.2**: The `session-uuid` public pattern blocked the
   placeholder its own deny message recommended. It matched any UUID shape,
   so "use an all-zeros placeholder instead" was itself denied — the only
@@ -193,6 +205,7 @@ other source.
   digit is still caught. `tests/integration/test_sensitive_content_uuid_placeholders.py`
   reads the pattern out of the real config so deleting the lookahead fails
   the suite, and includes a control asserting real UUIDs are still matched.
+
 - [x] ✅ **Task 5.3**: `today_only_mode` has no exemption for a SECURITY
   redaction of a historical journal day-file. Its premise is right for
   narrative — a correction belongs in a new dated entry — but appending "the
@@ -202,29 +215,48 @@ other source.
   rather than working around the check. Rationale recorded in the config; if
   it recurs the fix is a first-class `MUST_..._BECAUSE` escape hatch, not a
   standing relaxation.
-- [ ] ⬜ **Task 5.4**: A live-dogfood step overwrote the operational
+
+- [x] ✅ **Task 5.4**: A live-dogfood step overwrote the operational
   `.claude/block-words.secret` with a single throwaway term. Nothing failed:
   the guard silently stopped guarding and the QA scanner began reporting a
   cleaner tree than reality — exactly the failure mode that would let a
-  redaction be declared finished while identifiers remained. Restored by
-  hand. The durable fix is that a dogfood MUST point
-  `secret_word_list_path` at a temp file (the handler already supports the
-  override) and never write the real list.
+  redaction be declared finished while identifiers remained. Restored by hand.
+
+  Durable fix applied where it will actually be read: the rule now lives in the
+  `safety_notes` of the very acceptance test that tempts an agent to touch the
+  real list — point `secret_word_list_path` at a temp file, restart, test,
+  restore — together with *why* (the failure is silent, so nothing will tell
+  you). Guidance at the point of use, not a note in a plan nobody re-reads.
+
+  No stronger guard is available and it is worth being explicit about why: the
+  file is deliberately untracked and gitignored, so git cannot detect the
+  overwrite, and it must stay hand-editable, so it cannot be made read-only.
+  Task 4.5 was then executed under exactly this rule and the operational list
+  was verified untouched afterwards.
 
 ## Success Criteria
 
-- [ ] Public-pattern deny messages name what matched; secret-list deny
-  messages never contain the term or surrounding text — asserted directly
-  in tests, not just eyeballed.
-- [ ] Every identified leak vector (payload capture, router debug log,
-  front-controller error log, transcript archiver) redacts secret terms
-  before they reach disk/log — each with a round-trip test.
-- [ ] `scripts/qa/check_sensitive_content.py` scans the whole tracked tree
-  and is wired into `run_all.sh`.
-- [ ] Missing/empty/comments-only secret file -> handler and redaction
-  utility are both inert, no crash.
-- [ ] QA 14/14 (or current count), daemon RUNNING, live dogfood confirms the
-  block fires and the term is absent from logs/captures.
+- [x] ✅ Public-pattern deny messages name what matched; secret-list deny
+  messages never contain the term or surrounding text — asserted directly in
+  tests (86 passing across the handler, redaction utility, UUID-placeholder and
+  response-log suites), and confirmed live in Task 4.5.
+- [x] ✅ Every identified leak vector redacts secret terms before they reach
+  disk/log, each with a round-trip test. **Five, not the four scoped**: the
+  original list (payload capture, router debug log, front-controller error log,
+  transcript archiver) missed the daemon's blocking-response debug log in
+  `server.py`, found later by re-reading the log sites rather than trusting the
+  list. Closed in `ceddf020`, with `60412be2` fixing the substring predicate
+  that was mislabelling ordinary status renders as blocking responses — which
+  is *how* an identifier reached a log about blocking decisions in the first
+  place.
+- [x] ✅ `scripts/qa/check_sensitive_content.py` scans the whole tracked tree
+  (`git ls-files`) and is wired into both `run_all.sh` and `llm_qa.py`;
+  currently 0 violations.
+- [x] ✅ Missing/empty/comments-only secret file -> handler and redaction
+  utility are both inert, no crash (covered in `test_secret_redaction.py`).
+- [x] ✅ QA **19/19** (the count moved from 14 as the suite grew), daemon
+  RUNNING, and the live dogfood confirmed both halves: the block fires, and the
+  term is absent from every log and capture under `untracked/`.
 
 ## Delivery & Milestones
 

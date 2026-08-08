@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Security / Presentation Audit
 
-- [00201: Sensitive Content Secret-Word Blocking](00201-sensitive-content-secret-word-blocking/PLAN.md) - In Progress (guard against the recurrence of the ~160-place employer/client identifier leak found by a presentation-quality audit — `sensitive_content` PreToolUse handler with two sources: configurable public …)
-
 ### Core / Hook Coverage
 
 - [00170: Universal Hook Coverage + Hook-Support Enforcement](00170-universal-hook-coverage-and-enforcement/PLAN.md) - In Progress (fundamental: intercepting hook events is the daemon's raison d'être, yet only **10 of the 30** documented Claude Code hook events are wired — 20 are silently unwired, so a client project cannot even …)
@@ -173,6 +171,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00201: Sensitive Content Secret-Word Blocking](Completed/00201-sensitive-content-secret-word-blocking/PLAN.md) - Complete (guard against recurrence of the ~160-place employer/client identifier leak found by the presentation-quality audit; five leak vectors closed, not the four scoped, and the live dogfood confirms the term reaches no log or capture.)
 
 - [00200: QA Gate Integrity and Dogfooding False Positives](Completed/00200-qa-gate-integrity-and-dogfooding-false-positives/PLAN.md) - Complete (began as "a QA gate reports PASSED while checking nothing" and ended having found 11 handler defects, two of them live bypasses rather than the false positives the brief anticipated; durable outcome is the guards, not the fixes.)
 
@@ -1122,8 +1122,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 201 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191 and 00195 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run)
-- **Completed**: 161 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 31 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 162 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 30 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
