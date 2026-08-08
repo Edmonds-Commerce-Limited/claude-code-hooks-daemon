@@ -329,6 +329,15 @@ ground truth to diff prose claims against — the data exists, nothing consumes 
   The daemon already tracks live threads (`handlers/status_line/thread_registry.py`,
   `multithread_indicator.py`), so it can advise at dispatch time: *"N agents already active in
   this checkout — use `isolation: worktree` unless this agent needs live daemon verification."*
+
+  **Integration verified, so this starts warm** (2026-08-08): `task_tdd_advisor.py` is a working
+  template for a `ToolName.TASK` PreToolUse advisory; thread count comes from
+  `read_live_entries(ProjectContext.daemon_untracked_dir() / _REGISTRY_SUBDIR, now)`. One caveat
+  found while checking: heartbeats are written by the **status-line** handler, so the registry
+  reflects threads that have rendered a status line — fine in practice (live sessions render
+  constantly) but it means the count is *observed*, not authoritative, and the advisory must read
+  as a prompt rather than a fact. Stay silent at ≤1 live thread so single-agent sessions are
+  untouched.
   Advisory, not blocking; single-agent sessions unaffected. A narrower fallback (warn on bare
   `git commit` while >1 thread is live) is worth keeping as a second layer, since pathspec
   scoping protects the committer but **not** an agent whose staged work a bare-committing peer
