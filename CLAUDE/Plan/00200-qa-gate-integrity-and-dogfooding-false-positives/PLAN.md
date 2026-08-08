@@ -153,61 +153,55 @@ plan's own two new test files contribute the difference.)
   | `SIM110`                             | 2     | Loop replaceable by `any()`                          |
   | `RUF059/022/005`                     | 4     | Unused unpacked var; unsorted `__all__`; list concat |
 
-- [x] ✅ **Task 2.2**: Fixed the 28 `PTH*` pathlib migrations across 11 files (6 src, 5 test).
-  `os.replace`/`os.chmod` -> `Path.replace()`/`Path.chmod()` in src (metadata.py,
-  git_hooks_executable_fixer.py, compaction_signal.py, context_sidecar.py,
-  thread_registry.py, settings_repair.py); `os.symlink`/`os.readlink`/`os.path.exists`
-  -> `Path.symlink_to()`/`Path.readlink()`/`Path(...).exists()` in tests
-  (test_diagnostic_scripts.py, test_skill_install_python_discovery.py,
-  test_v391_field_regression.py, test_socket_timeout_daemon_alive.py,
-  test_slash_commands_self_install_safety.py). One test that monkeypatched
-  `settings_repair.os.replace` directly needed updating to patch `Path.replace`
-  (the `AttributeError` once the now-unused `import os` was dropped); the two
-  sibling `os.replace`-patching tests in `context_sidecar`/`compaction_signal`
-  needed no change — `pathlib.Path.replace()` calls `os.replace()` internally via
-  the same shared `os` module object, so those patches remain effective. Ran the
-  relevant test file(s) after each file's edit, not in bulk. Verified with ruff
-  clean on every touched file.
+- [x] ✅ **Task 2.2**: The 28 `PTH*` pathlib migrations, across 11 files (6 src, 5 test). The one
+  subtlety worth keeping here: a test monkeypatching `settings_repair.os.replace` had to move to
+  patching `Path.replace`, while two sibling tests needed no change because `Path.replace()`
+  calls `os.replace()` via the same shared module object.
 
-- [x] ✅ **Task 2.3**: Fixed all 21 remaining. `UP042` (5x) — `class X(str, Enum)` -> `StrEnum`
-  for `PlanStatus`/`PlanLocation`/`Stage`/`Level`/`ReadmeSection`; audited every use site first
-  (equality/membership/dict-keys only, plus one explicit `.value` in `report.py`), confirmed
-  empirically in-venv that `str, Enum` and `StrEnum` differ in `str()`/`format()` output but not
-  in equality/JSON/`.value`, so no call site changes behaviour. `RUF002/RUF003` (4 of 6) — replaced
-  the multiplication sign with ASCII `x` in prose (`protocol.py`, `process_verification.py`,
-  `test_restart_verified_slow_startup.py`, `test_verify_venv_file_visibility.py`). `RUF001` (the
-  remaining 2, both in `readme_index.py`) — these flagged an EN DASH inside the
-  `[-en dash-em dash]` status-separator regex class, which is load-bearing (matches README rows
-  using an en dash as the status separator, per the adjacent comment). Root-caused a genuinely
-  proper fix rather than a suppression or a semantics-changing edit: extracted the (previously
-  duplicated) character class into one `_STATUS_SEP_CHARS` constant built from escapes instead of
-  literal glyphs, so the ambiguous characters are named in source and ruff has nothing to flag;
-  verified by hand the regex still matches hyphen/en dash/em dash identically. `RUF012` (3x) —
-  annotated 3 shared test-class constants (`_MESSAGES`, `PATHS`, `SAMPLES`) as `ClassVar`.
-  `SIM110` (2x) — collapsed 2 scan-and-return loops to `any()`. `RUF059`/`RUF022`/`RUF005` (4x) —
-  prefixed 2 unused unpacked test variables with `_`; hand-applied `constants/__init__.py`'s
-  `__all__` isort-style sort (ruff's own fix is unsafe here since it would strip 2 helper
-  functions out of their category-comment grouping — moved them by hand to a new trailing
-  comment section instead); rewrote a `+` list-concat as unpacking in `git_upstream_checker.py`.
-  No `noqa` anywhere — every fix is a real code change, verified with the relevant test file(s)
-  after each edit and a final `ruff check` per touched file.
+- [x] ✅ **Task 2.3**: The remaining 21 (`UP042`, `RUF001/002/003/005/012/022/059`, `SIM110`).
+  The one that mattered: `RUF001` flagged an EN DASH inside a **load-bearing** regex character
+  class, so the proper fix was extracting it into a `_STATUS_SEP_CHARS` constant built from
+  escapes — naming the ambiguous characters in source rather than suppressing or changing
+  semantics. **No `noqa` anywhere**; every fix is a real code change.
+
+  Full per-file detail for both tasks is relocated to `JOURNAL/`.
 
 ### Phase 3: Handler false positives
 
 - [x] ✅ **Task 3.1**: `EnforceLlmQaHandler` — match invocation, not mention. Regression tests
   for `cat` / `less` / `grep` / Read against the path.
+
 - [x] ✅ **Task 3.2**: `destructive_git` — already correctly scoped (verified, not weakened);
   added a permanent regression test pinning `git tag -f` plus a guardrail that a real forced
   push still blocks.
+
 - [x] ✅ **Task 3.3**: `pipe_blocker` — ignore `-m` / `-F` message bodies when parsing.
+
 - [x] ✅ **Task 3.4**: `lsp_enforcement` — do not redirect a grep already scoped to one named
   file.
+
 - [x] ✅ **Task 3.5**: `plan_qa_commit_gate` — `same-commit-plan-doc` fires a false positive on
   the `git commit <pathspec>` form. That form commits unstaged working-tree changes for the
   named paths, but the check inspects only the staged index, so it advises "does not update its
   PLAN.md" on a commit that demonstrably does. Reproduced on `fad60fa6`, whose `--stat` shows
   `PLAN.md` present. Resolve the pathspec arguments against the working tree, not just the index.
-- [ ] ⬜ **Task 3.6**: Audit sibling handlers for the same mention-vs-invocation confusion.
+
+- [x] ✅ **Task 3.6**: Audited every handler resolving an invoked command from a Bash string.
+  Only **two** segment at all — `pipe_blocker` and the project's `enforce_llm_qa` (verified by
+  search; the other first-word uses are message-builders that cannot misfire). Found three more
+  defects in `pipe_blocker`: newline missing from the chain separators and a non-quote-aware
+  chain split (both false **positives**), and a quote scanner blind to the backslash — a false
+  **negative** that let an escaped quote hide a chain separator, so an expensive producer
+  inherited a whitelisted one and the handler was bypassed outright. That last one is the
+  audit's real yield. Delivered in `a92d2931`, `fc65f8cf`; full narrative in `JOURNAL/`.
+
+- [ ] ⬜ **Task 3.7**: Consolidate the two shell segmentation scanners. `enforce_llm_qa` grew a
+  quote-**and-escape**-aware splitter; `pipe_blocker` grew a quote-only one, and the missing
+  escape handling was exactly the bypass above. Two independent parsers for one grammar diverge
+  by construction, so the fix that stops this recurring is one shared scanner — not a third
+  careful implementation. Deferred rather than dropped because it crosses the
+  project-handler/library boundary (a project handler importing a library util) and that is a
+  design decision, not a mechanical refactor.
 
 A sixth instance surfaced alongside Task 6.4 (below): `plan_number_helper` blocked a `find`
 piped to `wc -l` (a plan *count* for a statistics line) as if it were number *discovery* —
@@ -215,11 +209,15 @@ fixed the same session; see `JOURNAL/`.
 
 ### Phase 4: Verification
 
-- [ ] ⬜ **Task 4.1**: Full QA green — with lint genuinely checking files this time.
-- [ ] ⬜ **Task 4.2**: Daemon restart RUNNING.
-- [ ] ⬜ **Task 4.3**: Correct `CLAUDE.md:45` and `CLAUDE/development/RELEASING.md` — both claim
-  "ALL 10 checks" and name a "Smoke Test"; `run_all.sh` runs 13 and has no such check. Prefer
-  removing the hardcoded count so it cannot drift again.
+- [x] ✅ **Task 4.1**: Full QA green — **19/19, 11,105 tests, 0 failed, coverage 95.3%**, with
+  `lint` genuinely reporting a non-zero file count rather than the false pass it began as.
+- [x] ✅ **Task 4.2**: Daemon restart RUNNING, verified after every handler change (the fixes are
+  invisible until restart, which is this repo's most common dogfooding failure).
+- [x] ✅ **Task 4.3**: Done via Task 6.2's `qa-check-count-hardcoded` rule — the hardcoded counts
+  in `CLAUDE.md`, `RELEASING.md` and `README.md` were replaced with "every check", so the runner
+  is the single source of truth and the number cannot drift again. Verified: the sole surviving
+  mention of "10" is the sentence *explaining* the historical drift, and the rule reports 0
+  violations. Removing the count beat correcting it, exactly as the task proposed.
 
 ### Phase 5: The error-hiding guard does not guard the guards
 
@@ -381,7 +379,10 @@ armed for the next script that captures stdout.
 <!-- Curated milestones + delivery commit hashes only. Narrative goes in JOURNAL/. -->
 
 - Plan created; lint-gate false pass reproduced and root-caused
-- Task 6.4 (negative-case requirement) + six handler false-positive fixes,
-  delivered on worktree branch `agent-aac9d627ef861e2b0-45cd43b6` at
-  `96646410`, `58b64c64`, `70c8d333`, `b2e819dd`, `9d276773` (pending merge
-  into main)
+- Task 6.4 (negative-case requirement) + six handler false-positive fixes, at
+  `96646410`, `58b64c64`, `70c8d333`, `b2e819dd`, `9d276773` — **all verified
+  present in `main`** (they were authored on a worktree branch and the earlier
+  "pending merge" note here was stale)
+- Task 3.6 sibling audit + the three `pipe_blocker` segmentation defects it
+  found, at `a92d2931` and `fc65f8cf`. Phase 4 verified and closed at the same
+  point: QA 19/19, 11,105 tests, coverage 95.3%, daemon RUNNING
