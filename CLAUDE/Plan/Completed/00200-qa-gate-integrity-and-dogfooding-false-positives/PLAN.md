@@ -1,6 +1,6 @@
 # Plan 00200: QA Gate Integrity and Dogfooding False Positives
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-07
 **Owner**: joseph
 **Priority**: High
@@ -314,35 +314,27 @@ ground truth to diff prose claims against — the data exists, nothing consumes 
   fixed with a pinned regression test each; 16 pre-existing library handlers remain on the
   allowlist as tracked, deferred work — see `JOURNAL/` for the full inventory and rationale.
 
-- [ ] ⬜ **Task 6.5**: Concurrent-agent isolation advisory (**the upstream fix**). Four agents
-  were run in one `/workspace` checkout; the shared `.git/index` produced three incidents
-  (logged in `JOURNAL/`) where staged work was absorbed or lost. The proximate cause is that
-  bare `git commit` commits the whole index, but **the real defect was dispatching concurrent
-  writers into a shared tree at all** — this repo already ships a `worktree_create` handler that
-  makes isolation a one-flag decision.
+- [x] ✅ **Task 6.5**: `agent_isolation_advisor` shipped (`69341ea5`) — the upstream fix for the
+  three lost-work incidents. Four agents shared one `/workspace` checkout and a peer's bare
+  `git commit` absorbed staged work. A process rule ("scope your commits") protects the
+  *committer*, not the agent whose work is absorbed — which is exactly why this needed a guard
+  rather than a convention.
 
-  Only one of the four agents genuinely needed the shared tree: daemon-restart verification and
-  `dummy-client-repo.sh` client-mode testing are anchored to the project root. The other three
-  (plan authoring, lint fixes, a QA script) were isolatable and were not isolated. A constraint
-  binding one agent was applied to four.
+  Fires only when a Task spawn joins an already-shared checkout, and the **negatives carry the
+  design**: silent for a lone agent, silent when `isolation: worktree` is already set (nagging
+  someone who did the right thing teaches them to ignore it), never blocking, and never raising
+  — the thread count is read from disk and every failure mode degrades to 0, so a guard that
+  cannot read its input goes quiet instead of advising on every spawn. The advice names the
+  exception too (daemon-restart and client-mode verification need the real project root), so it
+  cannot push work into a worktree where it does not run. 15 tests; PreToolUse now 39 handlers.
 
-  The daemon already tracks live threads (`handlers/status_line/thread_registry.py`,
-  `multithread_indicator.py`), so it can advise at dispatch time: *"N agents already active in
-  this checkout — use `isolation: worktree` unless this agent needs live daemon verification."*
+  One caveat, recorded because it bounds the advisory's authority: heartbeats are written by the
+  **status-line** handler, so the count reflects threads that have rendered a status line. Fine
+  in practice, but it is *observed*, not authoritative — hence advisory phrasing, not a claim.
 
-  **Integration verified, so this starts warm** (2026-08-08): `task_tdd_advisor.py` is a working
-  template for a `ToolName.TASK` PreToolUse advisory; thread count comes from
-  `read_live_entries(ProjectContext.daemon_untracked_dir() / _REGISTRY_SUBDIR, now)`. One caveat
-  found while checking: heartbeats are written by the **status-line** handler, so the registry
-  reflects threads that have rendered a status line — fine in practice (live sessions render
-  constantly) but it means the count is *observed*, not authoritative, and the advisory must read
-  as a prompt rather than a fact. Stay silent at ≤1 live thread so single-agent sessions are
-  untouched.
-  Advisory, not blocking; single-agent sessions unaffected. A narrower fallback (warn on bare
-  `git commit` while >1 thread is live) is worth keeping as a second layer, since pathspec
-  scoping protects the committer but **not** an agent whose staged work a bare-committing peer
-  absorbs — a process rule only works if every writer follows it, which is the argument for a
-  guard.
+  Deliberately **not** done: the mooted second layer warning on bare `git commit` while peers are
+  live. The upstream advisory addresses the cause; a second guard on the symptom is speculative
+  until the first is shown insufficient.
 
 Task 6.4 is the highest-leverage item here: it converts a recurring class into a structural
 requirement rather than five individual fixes. Task 6.5 is the most *novel* — a defect class
@@ -409,3 +401,7 @@ armed for the next script that captures stdout.
 - Task 3.6 sibling audit + the three `pipe_blocker` segmentation defects it
   found, at `a92d2931` and `fc65f8cf`. Phase 4 verified and closed at the same
   point: QA 19/19, 11,105 tests, coverage 95.3%, daemon RUNNING
+- Task 3.7 shared shell scanner at `5b8eb887`, closing a second live bypass in
+  `enforce_llm_qa` that the consolidation itself surfaced
+- Task 6.5 `agent_isolation_advisor` at `69341ea5`. Plan complete: QA 19/19,
+  11,139 tests, 0 failed, coverage 95.3%, daemon RUNNING, PreToolUse 39 handlers

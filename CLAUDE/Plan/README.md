@@ -30,7 +30,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00159: Status Writers Thread-Safe Tmp Naming](00159-status-writers-thread-safe-tmp-naming/PLAN.md) - Not Started (v3.39.0 code-review follow-up: the four `.{stem}.{pid}.tmp` atomic writers key on PID not thread — harmless today, hardening only)
 
-- [00168: Supervisor Compaction Injection Not Firing](00168-supervisor-compaction-injection-not-firing/PLAN.md) - In Progress (high-value: user reports the ccy supervisor stopped auto-`/compact`-ing at COMPACT NOW; live diagnostic verified the supervisor armed+running, not stale, session-isolation working single-session  …)
+- [00168: Supervisor Compaction Injection Not Firing](00168-supervisor-compaction-injection-not-firing/PLAN.md) - In Progress (high-value: user reports the ccy supervisor stopped auto-`/compact`-ing at COMPACT NOW; live diagnostic verified the supervisor armed+running, not stale, session-isolation working single-session …)
 
 ### Code Quality / Handler Configuration
 
@@ -61,15 +61,19 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00199: planlib — plan-orchestrator tooling in the daemon](00199-hooks-daemon-plan-lib/PLAN.md) - Not Started (implements the upstream proposal at `untracked/hooks-daemon-plan-lib-v2.md`, which supersedes the v1 document and renumbers its sections from §3.5 onward.)
 
   - Ships proposal artefacts **1 + 3**: `_planlib.inc.bash`, a sourced bash library of safety-critical primitives (script-relative boundary-bounded root resolution; a run log with a *waitable* drain so …
+
   - **Defers artefact 2** (`plan_script_qa`): this repo has zero orchestrator scripts, so it would ship as a gate with an empty enforcement surface, an unseedable allowlist, and 16 rules validated only …
-  - Two grounding finds: the codebase **already anticipated this file** — `config/models.py:544` and `plan_qa/model.py:431` both name `_planlib.bash` as the motivating example for `extra_root_files`  …
+
+  - Two grounding finds: the codebase **already anticipated this file** — `config/models.py:544` and `plan_qa/model.py:431` both name `_planlib.bash` as the motivating example for `extra_root_files` …
+
   - Dissent recorded: when artefact 2 is built its rules belong in the **existing** `plan_qa` catalogue, not a second parallel engine as the proposal's §6.1 specifies — that section was written against a …
+
   - v2 also supplies two verification techniques the plan adopts: `bash -n` **exits 0 while printing diagnostics**, so a syntax gate must assert stderr is empty (otherwise it is itself "a control that …
 
-- [00200: QA Gate Integrity and Dogfooding False Positives](00200-qa-gate-integrity-and-dogfooding-false-positives/PLAN.md) - In Progress (two dogfooding defect classes surfaced by the presentation-quality audit.)
-
   - Verified the blast radius rather than assuming it: security/type_check/dependencies/format are all **honest** (their tools write JSON to a file via `-o`/`--json-output`, so `2>&1` cannot corrupt …
-  - Second class: four handler false positives hit during ordinary work — `EnforceLlmQaHandler` blocking `cat` of `run_all.sh` (matches the filename, not the invocation); `destructive_git` reporting `git …
+
+  - Second class: four handler false positives hit during ordinary work — `EnforceLlmQaHandler` blocking `cat` of `run_all.sh` (matches the filename, not the invocation); `destructive_git` reporting \`git …
+
   - Includes a "Why this might not be worth doing" section arguing the case against its own Phases 3-4; evidence with `file:line` in `COUPLING-ANALYSIS.md`
 
 ### Self-Driving / Automation
@@ -146,7 +150,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00100 (v3): Venv SSOT Consolidation](00100-venv-ssot-consolidation/PLAN.md) - Dormant (residue scope awaits a dedicated release)
 
   - Phases 0–3.9 **shipped** in v3.9.0 / v3.10.0 / v3.11.0 (canonical SSOT resolver, `.daemon-metadata.json` writers, dead-code removal, path slug, eager upgrade cleanup, H-1 gate coverage)
-  - **Residue deferred from v3.12.0** (Plan 00107 Wave 4): Phase 3.5.2–3.5.7 (bootstrap-fallback wiring), Phase 4 (flock concurrency), Phase 5 (parameterised upgrade-cycle test), Phase 6 (docs)  …
+  - **Residue deferred from v3.12.0** (Plan 00107 Wave 4): Phase 3.5.2–3.5.7 (bootstrap-fallback wiring), Phase 4 (flock concurrency), Phase 5 (parameterised upgrade-cycle test), Phase 6 (docs) …
 
 - [00102: Hook Executable-Bit Defense](00102-hook-exec-bit-defense/PLAN.md) - Dormant (only Task 5.3 remains — release-time acceptance gate, executes with the next /release)
 
@@ -169,6 +173,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00200: QA Gate Integrity and Dogfooding False Positives](Completed/00200-qa-gate-integrity-and-dogfooding-false-positives/PLAN.md) - Complete (began as "a QA gate reports PASSED while checking nothing" and ended having found 11 handler defects, two of them live bypasses rather than the false positives the brief anticipated; durable outcome is the guards, not the fixes.)
 
 - [00198: Installer Self-Destroying Symlink Fix](Completed/00198-installer-self-destroying-symlink-fix/PLAN.md) - Complete (presentation-quality audit found two git-tracked symlinks with absolute, author-local `/workspace` targets, one self-referential and dangling right now.)
 
@@ -202,7 +208,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00182: supervisor compact stacking / double-inject](Completed/00182-supervisor-compact-stacking-double-inject/PLAN.md) - Complete (live dogfooding bug: the ccy PTY supervisor injected TWO `/compact` commands back-to-back — the second no-op'd with "Not enough messages to compact." Code-VERIFIED root cause (review sub-agent + …)
 
-- [00180: supervisor injection cap — reset on successful compaction](Completed/00180-supervisor-injection-cap-lifetime-reset/PLAN.md) - Complete (dogfooding bug caught live on a ~6.5h production session via its `decision.log`: the ccy PTY supervisor stopped driving `/compact` at CRITICAL context, logging `noop: injection cap reached …)
+- [00180: supervisor injection cap — reset on successful compaction](Completed/00180-supervisor-injection-cap-lifetime-reset/PLAN.md) - Complete (dogfooding bug caught live on a ~6.5h production session via its `decision.log`: the ccy PTY supervisor stopped driving `/compact` at CRITICAL context, logging \`noop: injection cap reached …)
 
 - [00179: git upstream — drop auto-prune, add gone-branch advisory](Completed/00179-git-upstream-no-autoprune-gone-branch-advisory/PLAN.md) - Complete (follow-up to 00178: a session-start handler must never do anything potentially lossy automatically.)
 
@@ -325,7 +331,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
   - Follow-up to v3.19.1: container installs/upgrades printed the `uv hardlink failed (likely overlay-fs) — retrying with UV_LINK_MODE=copy` warning on every run
   - Root cause: `create_venv_at_path`'s proactive copy-mode detection probed only the TARGET fs type (`overlay`/`nfs`); in a container the target is bind-mounted from the host (a normal fs) while uv's …
-  - Fix: added `_uv_in_container` helper (signals: `container` env var, `/run/.containerenv`, `/.dockerenv`; marker paths overridable for tests) and wired it into the `first_link_mode` decision  …
+  - Fix: added `_uv_in_container` helper (signals: `container` env var, `/run/.containerenv`, `/.dockerenv`; marker paths overridable for tests) and wired it into the `first_link_mode` decision …
   - 4 new tests; QA 13/13 (8543 tests, 95.1%); live-verified detection in the Podman dev container
 
 - [00124: ensure_venv missing project-path slug](Completed/00124-ensure-venv-missing-slug/PLAN.md) - Complete
@@ -439,7 +445,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
   - Re-opened post-v3.13.0 after silent stop recurred with `preventedContinuation: false, level: suggestion` — same signature Phases 5/6/7 thought they had closed
   - **Phase 9** (commit `f08a2ff`) — bash wrappers `.claude/hooks/stop` and `.claude/hooks/subagent-stop` now translate daemon JSON `decision: block` into exit code 2 + reason on stderr (the contract …
-  - **Phase 10** (commit `4c2688f`) — `SocketLimit.REQUEST_BUFFER_BYTES = 16 MiB` passed as `limit=` kwarg to `asyncio.start_unix_server` in `server.py`; eliminates `LimitOverrunError("Separator is …
+  - **Phase 10** (commit `4c2688f`) — `SocketLimit.REQUEST_BUFFER_BYTES = 16 MiB` passed as `limit=` kwarg to `asyncio.start_unix_server` in `server.py`; eliminates \`LimitOverrunError("Separator is …
   - Closes the suggestion-level delivery gap and the PostToolUse separator-error class — both regression vectors that landed silent stops on top of Phases 5/6/7's `tool_use_error` Branch 2.5
 
 - [00107: Batch Delivery Meta Plan — v3.12.0 Release Bundle](Completed/00107-batch-delivery-meta/PLAN.md) - Complete
@@ -1116,8 +1122,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 201 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191 and 00195 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run)
-- **Completed**: 160 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 161 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 31 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
