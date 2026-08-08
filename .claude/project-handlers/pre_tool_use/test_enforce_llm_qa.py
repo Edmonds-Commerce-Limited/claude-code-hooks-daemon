@@ -209,6 +209,35 @@ class TestEnforceLlmQaHandler:
         """An UNQUOTED `|` still separates -- the fix must not blind the guard."""
         assert handler.matches(bash_hook_input("echo hi | bash scripts/qa/run_all.sh")) is True
 
+    def test_single_quoted_trailing_backslash_cannot_hide_the_invocation(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        r"""Plan 00200 Task 3.7 — a real bypass, closed by the shared scanner.
+
+        This handler's own splitter applied backslash escaping INSIDE single
+        quotes, where bash treats it as a literal character. A trailing ``\``
+        in a single-quoted argument therefore swallowed the closing quote, the
+        scanner never left quoted state, nothing split, and the whole command
+        was judged by its allowlisted leading word (``grep``/``cat``) — letting
+        the guarded script through untouched.
+
+        The sibling scanner in ``pipe_blocker`` had the mirror-image bug
+        (blind to the backslash entirely). Both now share one implementation.
+        """
+        for command in (
+            r"grep -n 'a\' README.md ; ./scripts/qa/run_all.sh",
+            r"cat 'x\' ; ./scripts/qa/run_all.sh",
+        ):
+            assert (
+                handler.matches(bash_hook_input(command)) is True
+            ), f"escaped quote must not hide the invocation: {command}"
+
+    def test_single_quoted_backslash_still_allows_a_genuine_inspection(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """The escape fix must not swing into denying ordinary reads."""
+        assert handler.matches(bash_hook_input(r"grep -n 'a\' scripts/qa/run_all.sh")) is False
+
     # ── Acceptance tests ──
 
     def test_has_acceptance_tests(self, handler: EnforceLlmQaHandler) -> None:

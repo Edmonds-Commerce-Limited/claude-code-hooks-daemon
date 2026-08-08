@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.core import (
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.strategies.pipe_blocker.common import UNIVERSAL_WHITELIST_PATTERNS
 from claude_code_hooks_daemon.strategies.pipe_blocker.registry import PipeBlockerStrategyRegistry
+from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +58,6 @@ _CHAIN_SEPARATORS: tuple[str, ...] = ("&&", "||", ";", "\n")
 # The shell pipe. Split separately from the chain separators because the pipe
 # split must run AFTER the chain split has narrowed to the final command.
 _PIPE_SEPARATORS: tuple[str, ...] = ("|",)
-
-# Backslash. A scanner blind to it flips its quote state on an ESCAPED quote and
-# never leaves quoted state, so every later separator looks like data — which
-# turned `echo "\"" ; pytest tests/ | head` into an allow, because the producer
-# resolved to the whitelisted `echo` instead of `pytest`. That is a bypass, not
-# a cosmetic issue. Per bash, a backslash escapes the next character everywhere
-# EXCEPT inside single quotes, where it is literal.
-_ESCAPE_CHAR = "\\"
 
 # Matches a `-m`/`--message`/`-F`/`--file` flag immediately followed by its
 # VALUE, so the value's content can be excluded from pipe detection: these
@@ -217,56 +210,6 @@ class PipeBlockerHandler(Handler):
         # Steps 2 & 3: Blacklisted or unknown → block
         return True
 
-    @staticmethod
-    def _split_unquoted(text: str, separators: tuple[str, ...]) -> list[str]:
-        """Split ``text`` on ``separators`` that are NOT inside single/double quotes.
-
-        A separator inside a quoted argument is DATA, not shell syntax:
-        ``grep -E "15:56|15:57"`` contains no pipe, and ``grep -E "a;b"``
-        contains no command chain. Splitting on either corrupts the producer.
-
-        Both the chain split and the pipe split share this scanner so the two
-        cannot disagree about what counts as a separator — previously only the
-        pipe split was quote-aware, so ``grep -E "a;b" | head`` resolved its
-        producer to ``b"``.
-
-        Examples:
-            _split_unquoted('a | b | c', ('|',))            -> ['a ', ' b ', ' c']
-            _split_unquoted('grep -E "a|b"', ('|',))        -> ['grep -E "a|b"']
-            _split_unquoted('cd x\\ngrep y', ('\\n',))        -> ['cd x', 'grep y']
-        """
-        parts: list[str] = []
-        current: list[str] = []
-        in_single = False
-        in_double = False
-        index = 0
-        while index < len(text):
-            char = text[index]
-            if char == _ESCAPE_CHAR and not in_single:
-                # Consume the backslash AND whatever it escapes, so an escaped
-                # quote cannot flip the quote state.
-                current.append(char)
-                index += 1
-                if index < len(text):
-                    current.append(text[index])
-                    index += 1
-                continue
-            if char == "'" and not in_double:
-                in_single = not in_single
-            elif char == '"' and not in_single:
-                in_double = not in_double
-            elif not in_single and not in_double:
-                matched = next((s for s in separators if text.startswith(s, index)), None)
-                if matched is not None:
-                    parts.append("".join(current))
-                    current = []
-                    index += len(matched)
-                    continue
-            current.append(char)
-            index += 1
-        parts.append("".join(current))
-        return parts
-
     def _extract_source_segment(self, command: str) -> str:
         """Extract full segment before pipe to tail/head.
 
@@ -294,12 +237,12 @@ class PipeBlockerHandler(Handler):
             # Handle command chains (&&, ||, ;, newline) — take the last segment.
             # Quote-aware so a separator inside a quoted argument (grep -E "a;b")
             # is not mistaken for a chain.
-            before_pipe = self._split_unquoted(before_pipe, _CHAIN_SEPARATORS)[-1]
+            before_pipe = split_unquoted(before_pipe, _CHAIN_SEPARATORS)[-1]
 
             # Handle multiple actual pipes — take the last segment.
             # Quote-aware split prevents false splits on | inside grep patterns
             # like grep -E "15:56|15:57" where | is a regex alternation, not a pipe.
-            before_pipe = self._split_unquoted(before_pipe, _PIPE_SEPARATORS)[-1]
+            before_pipe = split_unquoted(before_pipe, _PIPE_SEPARATORS)[-1]
 
             return before_pipe.strip()
 
