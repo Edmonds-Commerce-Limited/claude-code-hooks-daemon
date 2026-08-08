@@ -1126,7 +1126,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - **Active**: 30 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
-- **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
+- **Last reconciled by**: the Plan 00200 / 00201 closures — counts re-derived
+  from the folders on disk (`30` active, `162` completed) at that point, not
+  carried forward. Previously attributed to Plan 00144 Task 2.2's sweep
+  remediation, which no longer produced the current numbers.
 
 ## Quick Links
 
