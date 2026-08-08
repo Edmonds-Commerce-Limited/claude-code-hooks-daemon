@@ -361,12 +361,24 @@ armed for the next script that captures stdout.
 
 ## Success Criteria
 
-- [ ] `run_lint.sh` reports a non-zero `total_files_checked` and the true violation count
-- [ ] A deliberately-introduced violation makes the gate fail
-- [ ] Unparseable tool output fails the gate rather than passing it
-- [ ] 0 ruff violations in the declared scope
-- [ ] Four false positives fixed, each with a regression test
-- [ ] Full QA green, daemon RUNNING
+- [x] ✅ `run_lint.sh` reports the true violation count. **Criterion reworded after measuring**:
+  it originally demanded a "non-zero `total_files_checked`", but that field counts files *with
+  violations*, not files *scanned* — so 0 is the correct and honest reading of a clean tree, and
+  the original wording would have made a passing gate look broken forever. What actually
+  distinguishes the repaired gate from the blind one is the criterion below.
+- [x] ✅ A deliberately-introduced violation makes the gate fail — **verified by doing it**, not
+  by inspection: a temporary `RUF012` (deliberately chosen because `ruff --fix` cannot silently
+  repair it) produced `total_files_checked: 1, total_violations: 1, passed: false`, exit 1. Probe
+  removed; gate back to exit 0 on a clean tree.
+- [x] ✅ Unparseable tool output fails the gate rather than passing it — the `JSONDecodeError`
+  swallow is gone from `run_lint.sh` and all four sibling scripts (Tasks 1.4/1.5), pinned by
+  `test_qa_lint_gate_integrity.py` (3 passing) against the real pre-fix file.
+- [x] ✅ 0 ruff violations in the declared scope (all 49 fixed by hand, no `noqa`).
+- [x] ✅ Handler false positives fixed, each with a regression test — **nine**, not the four
+  originally scoped: the six from Task 6.4 plus the three segmentation defects Task 3.6 found.
+  Two of the nine were false **negatives** (bypasses), which the original framing did not
+  anticipate.
+- [x] ✅ Full QA green (19/19, 11,122 tests, coverage 95.3%), daemon RUNNING.
 
 ## Risks & Mitigations
 
