@@ -1,6 +1,6 @@
 # Plan 00202: sensitive content git metadata surfaces
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-09
 **Owner**: joseph
 **Priority**: High
@@ -101,11 +101,11 @@ Two prior findings drive the design and must not be re-learned:
 
 ### Phase 3: Anti-regression
 
-- [ ] ⬜ **Task 3.1**: A test that enumerates all seven surfaces and asserts
+- [x] ✅ **Task 3.1**: A test that enumerates all seven surfaces and asserts
   each has a guard, so adding a surface without one fails
 - [x] ✅ **Task 3.2**: `get_claude_md()` states the Bash coverage
 - [x] ✅ **Task 3.3**: `get_acceptance_tests()` covers one metadata deny
-- [ ] ⬜ **Task 3.4**: QA green, daemon restarts RUNNING, live probe via the
+- [x] ✅ **Task 3.4**: QA green, daemon restarts RUNNING, live probe via the
   daemon socket
 
 ## Technical Decisions
@@ -132,12 +132,28 @@ haystacks after `fb91d81f`.
 
 ## Success Criteria
 
-- [ ] All five unguarded surfaces deny at write time on a term match
-- [ ] The history sweep reports 0 on the rewritten mirror, non-0 on the backup
-- [ ] No response on any surface contains a secret term — asserted against the
+- [x] All five unguarded surfaces deny at write time on a term match
+- [x] The history sweep reports 0 on the rewritten mirror, non-0 on the backup
+- [x] No response on any surface contains a secret term — asserted against the
   whole serialised response, not a single field
-- [ ] QA green; daemon restarts RUNNING; live socket probe confirms behaviour
+- [x] QA green; daemon restarts RUNNING; live socket probe confirms behaviour
+- [x] Every one of the seven surfaces has BOTH guards, each exercised rather
+  than declared, so an eighth surface cannot be added without one
+
+## Follow-up owned by the human, not this plan
+
+The gate is green because two grandfather entries hold the pre-existing
+contamination. Both are designed to expire, but one needs an action:
+
+1. After the force-push, `history_baseline` may be deleted from the config.
+   Strictly tidiness: a rewritten history renames every sha, so the key stops
+   resolving and then exempts nothing regardless.
+2. After the force-push, the three `history_grandfathered_refs` entries become
+   unnecessary — and the gate SAYS so (`stale-grandfather`) rather than
+   silently keeping them. Delete them when it does.
 
 ## Delivery & Milestones
 
 - Path surface closed ahead of this plan at `fb91d81f`
+- Phase 1 (write-time guard, five metadata surfaces) at `863d55a4`
+- Phase 2 (history sweep + self-expiring grandfathering) at `5041648c`

@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Security / Presentation Audit
 
-- [00202: Sensitive content git metadata surfaces](00202-sensitive-content-git-metadata-surfaces/PLAN.md) - In Progress (the 00201 guards cover file contents and — since `fb91d81f` — file paths; that is 2 of the 7 surfaces cleaning this repo's history actually had to touch. The other 5 are git metadata (commit …)
-
 ### Core / Hook Coverage
 
 - [00170: Universal Hook Coverage + Hook-Support Enforcement](00170-universal-hook-coverage-and-enforcement/PLAN.md) - In Progress (fundamental: intercepting hook events is the daemon's raison d'être, yet only **10 of the 30** documented Claude Code hook events are wired — 20 are silently unwired, so a client project cannot even …)
@@ -173,6 +171,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00202: Sensitive content git metadata surfaces](Completed/00202-sensitive-content-git-metadata-surfaces/PLAN.md) - Complete (file contents and file paths were 2 of the 7 surfaces that cleaning this repo's own history actually had to touch; the other 5 are git metadata — commit messages, author identity, tag names, tag messages, branch names — all entering via Bash, which `matches()` rejected outright. Every surface now carries BOTH a write-time guard and a batch guard, exercised in a 7×2 matrix rather than declared. Delivered `863d55a4`, `5041648c`.)
 
 - [00201: Sensitive Content Secret-Word Blocking](Completed/00201-sensitive-content-secret-word-blocking/PLAN.md) - Complete (guard against recurrence of the ~160-place employer/client identifier leak found by the presentation-quality audit; five leak vectors closed, not the four scoped, and the live dogfood confirms the term reaches no log or capture.)
 
@@ -1124,12 +1124,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 202 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191 and 00195 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run)
-- **Completed**: 162 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 31 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 163 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 30 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
-- **Last reconciled by**: the Plan 00202 opening — counts re-derived from the
-  folders on disk (`31` active, `162` completed), not carried forward. The
+- **Last reconciled by**: the Plan 00202 closure — counts re-derived from the
+  folders on disk (`30` active, `163` completed), not carried forward. The
   prior reconciliation was the Plan 00200 / 00201 closures at `30`/`162`;
   before that it was attributed to Plan 00144 Task 2.2's sweep remediation,
   which no longer produced the current numbers.
