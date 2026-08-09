@@ -141,6 +141,39 @@ class TestFindFirstMatchIndex:
         assert sr.find_first_match_index("has alpha", ("", "alpha")) == 2
 
 
+class TestPathTermMatchesItsSlugSpelling:
+    """A path-shaped secret term must also match its venv-slug spelling.
+
+    The venv fingerprinter renders a project path as a slug - leading ``/``
+    dropped, inner ``/`` replaced by ``_`` - so ``/home/someone`` appears on
+    disk as ``home_someone``. Plain substring matching on the path spelling
+    never sees that form, which is not hypothetical: a tracked plan document
+    carried the slug spelling of a listed path while the whole-tree scanner
+    reported the repository clean.
+    """
+
+    def test_slug_spelling_is_matched(self) -> None:
+        assert sr.find_first_match_index("venv-home_someone_project-py311", ("/home/someone",)) == 1
+
+    def test_path_spelling_still_matches(self) -> None:
+        assert sr.find_first_match_index("cd /home/someone/project", ("/home/someone",)) == 1
+
+    def test_reported_index_is_the_original_term_position(self) -> None:
+        """The deny message says 'entry N of M'; a variant must not shift N."""
+        terms = ("zulu", "/home/someone", "mike")
+        assert sr.find_first_match_index("home_someone_project", terms) == 2
+
+    def test_deeper_path_slug_is_matched(self) -> None:
+        assert sr.find_first_match_index("srv_apps_data_store", ("/srv/apps/data",)) == 1
+
+    def test_single_segment_path_gains_no_slug_variant(self) -> None:
+        """``/home`` -> ``home`` would match 'homepage'. Too broad to be safe."""
+        assert sr.find_first_match_index("homepage banner", ("/home",)) is None
+
+    def test_term_without_a_path_separator_is_unaffected(self) -> None:
+        assert sr.find_first_match_index("unrelated text", ("alpha",)) is None
+
+
 class TestRedactText:
     def test_no_terms_returns_text_unchanged(self) -> None:
         assert sr.redact_text("hello world", ()) == "hello world"

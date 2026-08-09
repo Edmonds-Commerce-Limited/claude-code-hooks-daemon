@@ -38,6 +38,14 @@ REDACTED_PLACEHOLDER: Final[str] = "[REDACTED]"
 
 _COMMENT_PREFIX: Final[str] = "#"
 
+# Venv-slug spelling of a path-shaped secret term (see ``_slug_variant``):
+# the leading separator is dropped and inner separators become underscores.
+_PATH_SEPARATOR: Final[str] = "/"
+_SLUG_SEPARATOR: Final[str] = "_"
+# A single-segment path would reduce to a bare word ('/home' -> 'home') and
+# match innocent text, so a slug variant needs at least two segments.
+_MIN_SLUG_SEGMENTS: Final[int] = 2
+
 # Path -> (mtime, term tuple). A missing file is cached as mtime -1.0 so a
 # repeated lookup for an absent file does not repeatedly hit the filesystem.
 _TERMS_CACHE: dict[Path, tuple[float, tuple[str, ...]]] = {}
@@ -170,26 +178,83 @@ def get_active_secret_terms() -> tuple[str, ...]:
     return get_cached_secret_terms(path)
 
 
+def _slug_variant(term: str) -> str | None:
+    """The venv-slug spelling of a path-shaped ``term``, or ``None``.
+
+    The venv fingerprinter renders a project root as a directory-name slug:
+    the leading ``/`` is dropped and inner ``/`` become ``_``, so a project at
+    ``/home/someone/project`` produces ``home_someone_project-py311-<hash>``.
+    A secret term written in path form therefore never substring-matches its
+    own on-disk slug, and that blind spot is real rather than theoretical - a
+    tracked document carried the slug spelling of a listed path while the
+    whole-tree scanner reported the repository clean.
+
+    Only paths with at least TWO non-empty segments get a variant. A single
+    segment would reduce ``/home`` to ``home``, which matches 'homepage' and
+    every other innocent word - a false positive that would train people to
+    ignore the guard.
+    """
+    if _PATH_SEPARATOR not in term:
+        return None
+    segments = [segment for segment in term.split(_PATH_SEPARATOR) if segment]
+    if len(segments) < _MIN_SLUG_SEGMENTS:
+        return None
+    return _SLUG_SEPARATOR.join(segments)
+
+
+def _term_variants(term: str) -> tuple[str, ...]:
+    """``term`` plus every alternative spelling it must also be caught by."""
+    slug = _slug_variant(term)
+    return (term,) if slug is None else (term, slug)
+
+
+def term_matches(text: str, term: str) -> bool:
+    """Is ``term`` (or any alternative spelling of it) present in ``text``?
+
+    THE single matching predicate for the secret word list. Both enforcement
+    surfaces — the ``sensitive_content`` handler at write time and the
+    whole-tree QA scanner — must call this rather than reimplement the test,
+    or they drift: the scanner previously hand-rolled a plain substring loop
+    and so kept reporting a repository clean while the handler's own rules
+    said otherwise.
+    """
+    if not term:
+        return False
+    lowered = text.lower()
+    return any(variant.lower() in lowered for variant in _term_variants(term))
+
+
 def find_first_match_index(text: str, terms: tuple[str, ...]) -> int | None:
     """1-based index of the first ``terms`` entry found in ``text``, or ``None``.
 
     Case-insensitive LITERAL substring containment — a term that is itself a
     regex metacharacter string (e.g. ``a.b*c``) matches only that exact
     substring, never as a pattern.
+
+    A path-shaped term also matches its venv-slug spelling (see
+    :func:`_slug_variant`). The returned index is always the position of the
+    ORIGINAL term, so the "entry N of M" deny message stays meaningful — a
+    variant never shifts N.
     """
     if not terms:
         return None
-    lowered = text.lower()
     for index, term in enumerate(terms, start=1):
-        if term and term.lower() in lowered:
+        if term_matches(text, term):
             return index
     return None
 
 
 def _redact_term(text: str, term: str) -> str:
-    """Replace every case-insensitive LITERAL occurrence of ``term`` in ``text``."""
-    pattern = re.compile(re.escape(term), re.IGNORECASE)
-    return pattern.sub(REDACTED_PLACEHOLDER, text)
+    """Replace every case-insensitive LITERAL occurrence of ``term`` in ``text``.
+
+    Alternative spellings are redacted too: detecting a leaked term but then
+    writing it into a log would move the leak rather than close it.
+    """
+    result = text
+    for variant in _term_variants(term):
+        pattern = re.compile(re.escape(variant), re.IGNORECASE)
+        result = pattern.sub(REDACTED_PLACEHOLDER, result)
+    return result
 
 
 def redact_text(text: str, terms: tuple[str, ...]) -> str:

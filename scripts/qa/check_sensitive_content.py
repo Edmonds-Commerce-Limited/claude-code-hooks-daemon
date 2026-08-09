@@ -33,6 +33,7 @@ import json
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -193,10 +194,37 @@ def _compile_public_patterns(
     return compiled
 
 
+def _never_matches(_text: str, _term: str) -> bool:
+    """Stand-in matcher used when the daemon package is not importable.
+
+    ``resolve_secret_terms`` already returns an empty tuple in that case, so
+    this is never consulted with a real term — it exists so the matcher is
+    always a callable and callers need no None-handling.
+    """
+    return False
+
+
+def resolve_term_matcher() -> Callable[[str, str], bool]:
+    """The shared secret-term predicate from ``utils/secret_redaction``.
+
+    Resolved ONCE and injected, rather than reimplemented here. The scanner
+    previously hand-rolled lowercase substring containment, which could not
+    see a path term's venv-slug spelling and so reported a clean tree while a
+    tracked file still carried one. Importing the real predicate is what
+    makes the two enforcement surfaces provably agree.
+    """
+    try:
+        from claude_code_hooks_daemon.utils.secret_redaction import term_matches
+    except ImportError:
+        return _never_matches
+    return term_matches
+
+
 def scan_file(
     path: Path,
     compiled_patterns: list[tuple[dict[str, str], re.Pattern[str]]],
     secret_terms: tuple[str, ...],
+    term_matcher: Callable[[str, str], bool],
 ) -> list[Violation]:
     """Every violation in one file — public patterns, then the secret list."""
     try:
@@ -205,7 +233,7 @@ def scan_file(
         return []
 
     violations: list[Violation] = []
-    lowered_terms = [term.lower() for term in secret_terms if term]
+    active_terms = [term for term in secret_terms if term]
 
     for number, line in enumerate(content.splitlines(), start=1):
         for entry, compiled in compiled_patterns:
@@ -226,22 +254,25 @@ def scan_file(
                     )
                 )
 
-        if lowered_terms:
-            lowered_line = line.lower()
-            for index, term in enumerate(lowered_terms, start=1):
-                if term in lowered_line:
-                    violations.append(
-                        Violation(
-                            file=str(path),
-                            line=number,
-                            rule=_SECRET_RULE,
-                            message=(
-                                f"Matches a configured blocked term (entry {index} of "
-                                f"{len(lowered_terms)} in the secret word list). The term "
-                                "is deliberately not shown."
-                            ),
-                        )
+        for index, term in enumerate(active_terms, start=1):
+            # Delegate to the shared predicate — never reimplement the match
+            # test here. This loop used to do plain lowercase substring
+            # containment, which cannot see a path term's venv-slug spelling
+            # ('/home/someone' on disk as 'home_someone'), so the scanner
+            # reported a clean tree while a tracked file still carried one.
+            if term_matcher(line, term):
+                violations.append(
+                    Violation(
+                        file=str(path),
+                        line=number,
+                        rule=_SECRET_RULE,
+                        message=(
+                            f"Matches a configured blocked term (entry {index} of "
+                            f"{len(active_terms)} in the secret word list). The term "
+                            "is deliberately not shown."
+                        ),
                     )
+                )
     return violations
 
 
@@ -283,9 +314,13 @@ def main() -> int:
     exclude_globs = load_exclude_paths(config_path)
     files = filter_excluded_files(files, exclude_globs, scan_root_for_terms)
 
+    # Resolved once, not per file: the predicate is shared with the live
+    # handler so both surfaces agree on what counts as a match.
+    term_matcher = resolve_term_matcher()
+
     violations: list[Violation] = []
     for file_path in files:
-        violations.extend(scan_file(file_path, compiled_patterns, secret_terms))
+        violations.extend(scan_file(file_path, compiled_patterns, secret_terms, term_matcher))
 
     output = {
         "tool": "sensitive_content",
