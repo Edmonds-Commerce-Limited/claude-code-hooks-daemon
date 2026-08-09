@@ -156,7 +156,15 @@ class TestInit:
 
 
 class TestMatchesIgnoresNonWriteEdit:
-    def test_bash_tool_never_matches(self) -> None:
+    def test_bash_command_that_writes_no_git_metadata_never_matches(self) -> None:
+        """THE load-bearing negative control for the whole Bash surface.
+
+        A term may legitimately appear in a command that writes nothing into
+        the repository — grepping for it, running the redaction tooling,
+        reading a file that contains it. Denying those would make the handler
+        unusable and get it switched off, which is a worse outcome than the
+        leak it prevents. Only commands that write git METADATA are candidates.
+        """
         handler = _handler_with_public_patterns(
             [{"name": "x", "pattern": "secretpath", "description": "d"}]
         )
@@ -385,6 +393,138 @@ class TestSecretListSelfExclusion:
 
         example = tmp_path / "block-words.secret.example"
         assert handler.matches(_write_input(str(example), "alpha-term\n")) is True
+
+
+def _bash_input(command: str) -> dict[str, Any]:
+    return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+
+class TestGitMetadataSurfaces:
+    """Five of the seven leak surfaces are git METADATA, and all enter via Bash.
+
+    Cleaning this repository's own history needed four distinct
+    ``git-filter-repo`` mechanisms, because ``--replace-text`` rewrites blob
+    contents and nothing else. Contents and paths are guarded. Commit
+    messages, author/committer identity, tag names, tag messages and branch
+    names are not — so one ``git commit -m "<term>"`` re-contaminates a
+    force-pushed-clean repository, and both guards then report all-clear.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'git commit -m "alpha-term is fixed"',
+            'git commit --message="alpha-term is fixed"',
+            'git tag -a v1.0.0 -m "ships alpha-term"',
+            "git tag alpha-term-release",
+            "git branch alpha-term-work",
+            "git checkout -b alpha-term-work",
+            "git switch -c alpha-term-work",
+            'git config user.name "alpha-term"',
+            "git config user.email alpha-term@example.com",
+            'git merge --no-ff -m "merge alpha-term" feature',
+        ],
+    )
+    def test_term_in_git_metadata_write_is_denied(self, tmp_path: Path, command: str) -> None:
+        secret_file = tmp_path / "words.secret"
+        secret_file.write_text("alpha-term\n")
+        handler = _handler_with_secret_file(secret_file)
+
+        assert handler.matches(_bash_input(command)) is True
+        assert handler.handle(_bash_input(command)).decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git log --oneline -20",
+            "git show HEAD",
+            "git status --porcelain",
+            "git diff HEAD~1",
+            'git commit -m "an ordinary message"',
+            "git tag -l",
+        ],
+    )
+    def test_clean_git_command_is_not_denied(self, tmp_path: Path, command: str) -> None:
+        secret_file = tmp_path / "words.secret"
+        secret_file.write_text("alpha-term\n")
+        handler = _handler_with_secret_file(secret_file)
+
+        assert handler.matches(_bash_input(command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -rn alpha-term /workspace/untracked",
+            "cat /workspace/untracked/alpha-term-notes.md",
+            "./untracked/rewrite/refresh.sh  # rewrites alpha-term out of history",
+            "git log --grep=alpha-term",
+            "git show alpha-term-tag",
+            "git branch --list 'alpha-term*'",
+            "git tag -l 'alpha-term*'",
+        ],
+    )
+    def test_term_in_a_command_that_writes_no_metadata_is_allowed(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        """The false positive that would get this handler switched off.
+
+        Reading, searching for, and REMOVING a term all legitimately put it on
+        a command line. ``git log --grep`` and ``git show`` name a ref without
+        creating one. Denying these would block the very work of cleaning a
+        repository — including this project's own rewrite tooling.
+        """
+        secret_file = tmp_path / "words.secret"
+        secret_file.write_text("alpha-term\n")
+        handler = _handler_with_secret_file(secret_file)
+
+        assert handler.matches(_bash_input(command)) is False
+
+    def test_public_pattern_in_git_metadata_write_is_denied(self) -> None:
+        handler = _handler_with_public_patterns(
+            [{"name": "vhosts-path", "pattern": "/var/www/vhosts", "description": "server path"}]
+        )
+        command = 'git commit -m "deploy to /var/www/vhosts/site"'
+
+        assert handler.matches(_bash_input(command)) is True
+        result = handler.handle(_bash_input(command))
+        assert result.decision == Decision.DENY
+        assert "vhosts-path" in (result.reason or "")
+
+    def test_deny_reason_never_echoes_the_term(self, tmp_path: Path) -> None:
+        """The command is echoed back — so the command is itself an output surface.
+
+        Exactly the defect the file-path work had to fix: the message
+        announcing the block was printing the thing it exists to suppress.
+        """
+        secret_file = tmp_path / "words.secret"
+        secret_file.write_text("alpha-term\n")
+        handler = _handler_with_secret_file(secret_file)
+
+        result = handler.handle(_bash_input('git commit -m "alpha-term is fixed"'))
+
+        # The WHOLE serialised result, not just `reason` — a term smuggled into
+        # any other field is just as published.
+        assert "alpha-term" not in result.model_dump_json()
+        assert "entry 1 of 1" in (result.reason or "")
+
+    def test_missing_command_field_is_not_denied(self, tmp_path: Path) -> None:
+        secret_file = tmp_path / "words.secret"
+        secret_file.write_text("alpha-term\n")
+        handler = _handler_with_secret_file(secret_file)
+
+        assert handler.matches({"tool_name": "Bash", "tool_input": {}}) is False
+
+    def test_non_git_command_naming_a_metadata_subcommand_is_allowed(self, tmp_path: Path) -> None:
+        """``commit``/``tag``/``branch`` are ordinary English words.
+
+        The gate is a git invocation, not the bare presence of a subcommand
+        name, or any sentence mentioning a branch would be denied.
+        """
+        secret_file = tmp_path / "words.secret"
+        secret_file.write_text("alpha-term\n")
+        handler = _handler_with_secret_file(secret_file)
+
+        assert handler.matches(_bash_input("echo 'commit the alpha-term branch tag'")) is False
 
 
 class TestGetClaudeMd:

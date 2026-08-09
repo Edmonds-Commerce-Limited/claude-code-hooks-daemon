@@ -36,6 +36,45 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 _FIELD_FILE_PATH: Final[str] = "file_path"
 _FIELD_CONTENT: Final[str] = "content"
 _FIELD_NEW_STRING: Final[str] = "new_string"
+_FIELD_COMMAND: Final[str] = "command"
+
+# Neutral label for the offending thing named in a deny reason: a file path for
+# Write/Edit, a command line for Bash. It was "File:" while only file writes
+# were guarded, which now reads as a lie half the time.
+_SUBJECT_LABEL: Final[str] = "Offending input"
+
+# Git METADATA write surfaces. Contents and paths are only two of the seven
+# places a term can enter a repository; the other five are metadata, and every
+# one of them arrives as a Bash `git` invocation:
+#
+#   commit   -> commit messages          (filter-repo: --replace-message)
+#   config   -> author/committer identity(filter-repo: --mailmap)
+#   tag      -> tag names AND messages   (filter-repo: manual re-tag)
+#   branch   -> branch names             (filter-repo: manual rename)
+#   checkout -> `-b` creates a branch
+#   switch   -> `-c` creates a branch
+#   merge    -> `-m` writes a merge commit message
+#
+# Gated on a `git` invocation, never on the bare subcommand word: "commit",
+# "tag" and "branch" are ordinary English, so matching them alone would deny
+# any sentence mentioning a branch.
+_GIT_EXECUTABLE: Final[str] = "git"
+_GIT_METADATA_WRITE_SUBCOMMANDS: Final[tuple[str, ...]] = (
+    "commit",
+    "config",
+    "tag",
+    "branch",
+    "checkout",
+    "switch",
+    "merge",
+)
+
+# Read-only git operations that TAKE a ref/pattern as an operand, so a term on
+# the command line means the caller is INSPECTING one, not creating one. These
+# must stay allowed: searching for a term and removing it are exactly the work
+# of cleaning a repository, and a guard that blocks its own remedy gets
+# switched off.
+_GIT_READ_ONLY_FLAGS: Final[tuple[str, ...]] = ("--grep", "--list", "-l", "--get")
 
 _PATTERN_KEY_NAME: Final[str] = "name"
 _PATTERN_KEY_PATTERN: Final[str] = "pattern"
@@ -138,18 +177,7 @@ class SensitiveContentHandler(Handler):
         return None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        tool_name = hook_input.get(HookInputField.TOOL_NAME)
-        if tool_name not in (ToolName.WRITE, ToolName.EDIT):
-            return False
-
-        tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
-        file_path = str(tool_input.get(_FIELD_FILE_PATH, ""))
-        if not file_path or self._is_excluded(file_path):
-            return False
-        if self._is_secret_list_itself(file_path):
-            return False
-
-        haystacks = self._haystacks(hook_input, file_path)
+        haystacks = self._haystacks_for(hook_input)
         if not haystacks:
             return False
 
@@ -158,6 +186,71 @@ class SensitiveContentHandler(Handler):
 
         terms = self._secret_terms()
         return any(sr.find_first_match_index(text, terms) is not None for text in haystacks)
+
+    def _haystacks_for(self, hook_input: dict[str, Any]) -> list[str]:
+        """Every piece of text this tool call would introduce, or ``[]``.
+
+        The one place tool dispatch happens, so ``matches()`` and ``handle()``
+        can never disagree about what was inspected — a divergence there would
+        deny with a reason derived from text the match was not based on.
+        """
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name == ToolName.BASH:
+            return self._git_metadata_haystacks(hook_input)
+        if tool_name not in (ToolName.WRITE, ToolName.EDIT):
+            return []
+
+        tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
+        file_path = str(tool_input.get(_FIELD_FILE_PATH, ""))
+        if not file_path or self._is_excluded(file_path):
+            return []
+        if self._is_secret_list_itself(file_path):
+            return []
+        return self._haystacks(hook_input, file_path)
+
+    def _git_metadata_haystacks(self, hook_input: dict[str, Any]) -> list[str]:
+        """The command, but ONLY when it writes git metadata.
+
+        Five of the seven surfaces that can carry a term into a repository are
+        git metadata, and none of them is a file write, so nothing else in this
+        handler can see them: one ``git commit -m "<term>"`` re-contaminates a
+        history that was just rewritten clean, and both this handler and the
+        whole-tree QA scanner report all-clear afterwards.
+
+        Deliberately NOT every Bash command. A term legitimately appears on the
+        command line when searching for it, reading a file containing it, or
+        running the tooling that REMOVES it. Denying those blocks the remedy,
+        and a guard that obstructs its own cleanup gets switched off — which
+        costs more than the leak it prevents.
+        """
+        tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
+        command = str(tool_input.get(_FIELD_COMMAND, ""))
+        if not command or not self._writes_git_metadata(command):
+            return []
+        return [command]
+
+    @staticmethod
+    def _writes_git_metadata(command: str) -> bool:
+        """True when ``command`` invokes git in a way that records metadata.
+
+        Token-based, not substring: ``git`` must appear as its own token
+        immediately followed by a metadata subcommand, so neither a sentence
+        about a branch nor a path like ``untracked/git-notes`` qualifies.
+        """
+        tokens = command.split()
+        for position, token in enumerate(tokens[:-1]):
+            if token != _GIT_EXECUTABLE and not token.endswith(f"/{_GIT_EXECUTABLE}"):
+                continue
+            subcommand = tokens[position + 1]
+            if subcommand not in _GIT_METADATA_WRITE_SUBCOMMANDS:
+                continue
+            # `git tag -l <pattern>` / `git branch --list <pattern>` /
+            # `git config --get <key>` take a ref pattern as an operand and
+            # create nothing — inspecting what needs cleaning, not adding to it.
+            if any(flag in tokens for flag in _GIT_READ_ONLY_FLAGS):
+                continue
+            return True
+        return False
 
     def _haystacks(self, hook_input: dict[str, Any], file_path: str) -> list[str]:
         """Every piece of text this write would introduce: its PATH and its body.
@@ -248,29 +341,41 @@ class SensitiveContentHandler(Handler):
             return False
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
-        file_path = str(tool_input.get(_FIELD_FILE_PATH, ""))
-        haystacks = self._haystacks(hook_input, file_path)
+        haystacks = self._haystacks_for(hook_input)
+        subject = self._subject(hook_input)
 
         for text in haystacks:
             public_match = self._find_public_pattern_match(text)
             if public_match is not None:
-                return self._deny_public_pattern(file_path, public_match)
+                return self._deny_public_pattern(subject, public_match)
 
         terms = self._secret_terms()
         for text in haystacks:
             index = sr.find_first_match_index(text, terms)
             if index is not None:
-                # The path is echoed back in the deny reason, and the path is
-                # now itself a thing that can MATCH. Printing it raw would put
-                # the term straight into the message the whole no-echo contract
-                # exists to keep it out of - moving the leak, not closing it.
-                return self._deny_secret_term(sr.redact_text(file_path, terms), index, len(terms))
+                # The subject is echoed back in the deny reason, and the
+                # subject is now itself a thing that can MATCH — a file path,
+                # or a whole git command line. Printing it raw would put the
+                # term straight into the message the no-echo contract exists to
+                # keep it out of: moving the leak, not closing it.
+                return self._deny_secret_term(sr.redact_text(subject, terms), index, len(terms))
 
         return HookResult(decision=Decision.ALLOW)
 
     @staticmethod
-    def _deny_public_pattern(file_path: str, match: dict[str, str]) -> HookResult:
+    def _subject(hook_input: dict[str, Any]) -> str:
+        """What the deny reason names as the offending thing.
+
+        A file path for ``Write``/``Edit``; the command line for ``Bash``,
+        where there is no file — the git metadata never lands in one.
+        """
+        tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
+        if hook_input.get(HookInputField.TOOL_NAME) == ToolName.BASH:
+            return str(tool_input.get(_FIELD_COMMAND, ""))
+        return str(tool_input.get(_FIELD_FILE_PATH, ""))
+
+    @staticmethod
+    def _deny_public_pattern(subject: str, match: dict[str, str]) -> HookResult:
         name = match.get(_PATTERN_KEY_NAME, "unnamed")
         description = match.get(_PATTERN_KEY_DESCRIPTION, "")
         matched_text = match.get("_matched", "")
@@ -278,7 +383,7 @@ class SensitiveContentHandler(Handler):
             decision=Decision.DENY,
             reason=(
                 "SENSITIVE CONTENT BLOCKED: content matches a configured public pattern\n\n"
-                f"File: {file_path}\n"
+                f"{_SUBJECT_LABEL}: {subject}\n"
                 f"Pattern: {name}" + (f" — {description}" if description else "") + "\n"
                 f"Matched: {matched_text}\n\n"
                 "Remove or replace the matched text before retrying."
@@ -286,13 +391,13 @@ class SensitiveContentHandler(Handler):
         )
 
     @staticmethod
-    def _deny_secret_term(file_path: str, index: int, total: int) -> HookResult:
+    def _deny_secret_term(subject: str, index: int, total: int) -> HookResult:
         return HookResult(
             decision=Decision.DENY,
             reason=(
                 "SENSITIVE CONTENT BLOCKED: content matches a configured blocked term "
                 f"(entry {index} of {total} in the secret word list).\n\n"
-                f"File: {file_path}\n\n"
+                f"{_SUBJECT_LABEL}: {subject}\n\n"
                 "The term is deliberately not shown. Check "
                 f"`{sr.DEFAULT_SECRET_WORD_LIST_PATH}` to see what is blocked, "
                 "then remove it from the content."
@@ -316,6 +421,21 @@ class SensitiveContentHandler(Handler):
             "the secret word list file (if you have access) to see what matched, or ask "
             "the user. Only the ADDED text is checked on `Edit` (`new_string`) — removing "
             "sensitive content is never blocked.\n\n"
+            "**Git metadata is checked too.** File contents and file PATHS are only "
+            "two of the seven places a term can enter a repository — the other five are "
+            "git metadata, and none of them is a file write. So a `Bash` command that "
+            "records metadata is also checked: `git commit` (messages), `git tag` "
+            "(names and messages), `git branch` / `checkout -b` / `switch -c` (branch "
+            "names), `git config user.name|user.email` (author identity), `git merge -m`. "
+            "A match denies the command.\n\n"
+            "**Reading is never blocked.** Only commands that WRITE metadata are "
+            "candidates, so `grep`, `cat`, `git log --grep=`, `git show`, "
+            "`git branch --list` and `git tag -l` stay allowed even when the term is "
+            "right there on the command line — searching for a term and removing it "
+            "are exactly the work of cleaning a repository.\n\n"
+            "If a compound command is denied because an unrelated part of it carries "
+            "a term (`grep <term> f && git commit -m 'clean'`), split it into two "
+            "calls rather than trying to disguise the term.\n\n"
             "Missing/empty/comments-only secret file = this source is silently inert."
         )
 
@@ -368,6 +488,43 @@ class SensitiveContentHandler(Handler):
                     "exactly how a redaction gets declared finished with identifiers "
                     "still in it."
                 ),
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="sensitive_content - blocks a secret-list term in a commit message",
+                command=(
+                    'Use the Bash tool to run `git commit -m "<term>"` where <term> '
+                    "comes from `.claude/block-words.secret`"
+                ),
+                description=(
+                    "Git METADATA is a leak surface no file write can reach. A term in "
+                    "a commit message is denied with an entry index only, never the term."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"entry \d+ of \d+", r"deliberately not shown"],
+                safety_notes=(
+                    "Deny path — no commit is made. Verify the deny reason contains "
+                    "neither the term nor the raw command line."
+                ),
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="sensitive_content - allows a read command naming a term",
+                command=(
+                    "Use the Bash tool to run `git log --grep=<term>` where <term> "
+                    "comes from `.claude/block-words.secret`"
+                ),
+                description=(
+                    "Searching for a term must stay allowed — a guard that blocks its "
+                    "own remedy gets switched off, which costs more than the leak."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Allow path — read-only git command, nothing is written",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,

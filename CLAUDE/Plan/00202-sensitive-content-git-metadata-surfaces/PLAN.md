@@ -74,15 +74,15 @@ Two prior findings drive the design and must not be re-learned:
 
 ### Phase 1: Write-time guard for git metadata
 
-- [ ] ⬜ **Task 1.1**: Enumerate the git metadata write commands as named
+- [x] ✅ **Task 1.1**: Enumerate the git metadata write commands as named
   constants — no magic strings, one tuple per surface
-- [ ] ⬜ **Task 1.2**: RED — tests per surface: term in commit message, tag
+- [x] ✅ **Task 1.2**: RED — tests per surface: term in commit message, tag
   name, tag message, branch name, `git config user.*`
-- [ ] ⬜ **Task 1.3**: RED — negative controls: a clean `git commit`, a
+- [x] ✅ **Task 1.3**: RED — negative controls: a clean `git commit`, a
   `git log`/`git show` **read** naming a term-free ref, and the escape a
   reviewer will ask about — a term appearing in a command that writes nothing
-- [ ] ⬜ **Task 1.4**: GREEN — extend `matches()`/`handle()` to `ToolName.BASH`
-- [ ] ⬜ **Task 1.5**: Deny reason redacts the command through `redact_text`;
+- [x] ✅ **Task 1.4**: GREEN — extend `matches()`/`handle()` to `ToolName.BASH`
+- [x] ✅ **Task 1.5**: Deny reason redacts the command through `redact_text`;
   assert the term is absent from the ENTIRE response, not one field
 
 ### Phase 2: Batch equivalent — history sweep
@@ -99,8 +99,8 @@ Two prior findings drive the design and must not be re-learned:
 
 - [ ] ⬜ **Task 3.1**: A test that enumerates all seven surfaces and asserts
   each has a guard, so adding a surface without one fails
-- [ ] ⬜ **Task 3.2**: `get_claude_md()` states the Bash coverage
-- [ ] ⬜ **Task 3.3**: `get_acceptance_tests()` covers one metadata deny
+- [x] ✅ **Task 3.2**: `get_claude_md()` states the Bash coverage
+- [x] ✅ **Task 3.3**: `get_acceptance_tests()` covers one metadata deny
 - [ ] ⬜ **Task 3.4**: QA green, daemon restarts RUNNING, live probe via the
   daemon socket
 
