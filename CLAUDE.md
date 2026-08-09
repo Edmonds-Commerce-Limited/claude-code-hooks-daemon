@@ -738,6 +738,12 @@ Writing content that matches a configured public pattern or a gitignored secret 
 
 **Secret word list** (`options.secret_word_list_path`, default `.claude/block-words.secret`, gitignored): a term never appears anywhere — not in the deny reason, not in any log, not in payload capture, not in a transcript archive. The deny reason names only an index (`entry N of M in the secret word list`), which is meaningless without the gitignored file. **Do NOT try to guess or work around the block** — open the secret word list file (if you have access) to see what matched, or ask the user. Only the ADDED text is checked on `Edit` (`new_string`) — removing sensitive content is never blocked.
 
+**Git metadata is checked too.** File contents and file PATHS are only two of the seven places a term can enter a repository — the other five are git metadata, and none of them is a file write. So a `Bash` command that records metadata is also checked: `git commit` (messages), `git tag` (names and messages), `git branch` / `checkout -b` / `switch -c` (branch names), `git config user.name|user.email` (author identity), `git merge -m`. A match denies the command.
+
+**Reading is never blocked.** Only commands that WRITE metadata are candidates, so `grep`, `cat`, `git log --grep=`, `git show`, `git branch --list` and `git tag -l` stay allowed even when the term is right there on the command line — searching for a term and removing it are exactly the work of cleaning a repository.
+
+If a compound command is denied because an unrelated part of it carries a term (`grep <term> f && git commit -m 'clean'`), split it into two calls rather than trying to disguise the term.
+
 Missing/empty/comments-only secret file = this source is silently inert.
 
 ## worktree_file_copy — do not copy files between worktrees and the main repo
