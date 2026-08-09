@@ -174,6 +174,39 @@ class TestPathTermMatchesItsSlugSpelling:
         assert sr.find_first_match_index("unrelated text", ("alpha",)) is None
 
 
+class TestHyphenAndUnderscoreAreInterchangeable:
+    """The same identifier is spelled both ways, so a term must catch both.
+
+    Prose and hostnames hyphenate (``some-host``); code identifiers, Python
+    modules and filenames underscore the same name (``some_host_baseline``).
+    This repository is its own evidence: a listed host appeared hyphenated in
+    documentation and underscored in a test fixture filename, and the history
+    rewrite needed a separate rule for each spelling. A guard that knows only
+    one of them cannot prevent the other from re-accumulating.
+    """
+
+    def test_hyphenated_term_matches_underscored_text(self) -> None:
+        assert sr.find_first_match_index("see some_host_baseline.json", ("some-host",)) == 1
+
+    def test_underscored_term_matches_hyphenated_text(self) -> None:
+        assert sr.find_first_match_index("deploy to some-host now", ("some_host",)) == 1
+
+    def test_original_spelling_still_matches(self) -> None:
+        assert sr.find_first_match_index("deploy to some-host now", ("some-host",)) == 1
+
+    def test_reported_index_is_the_original_term_position(self) -> None:
+        terms = ("zulu", "some-host", "mike")
+        assert sr.find_first_match_index("some_host_baseline", terms) == 2
+
+    def test_both_spellings_are_redacted(self) -> None:
+        result = sr.redact_text("some-host and some_host", ("some-host",))
+        assert "some-host" not in result
+        assert "some_host" not in result
+
+    def test_unrelated_separator_text_does_not_match(self) -> None:
+        assert sr.find_first_match_index("some.host", ("some-host",)) is None
+
+
 class TestRedactText:
     def test_no_terms_returns_text_unchanged(self) -> None:
         assert sr.redact_text("hello world", ()) == "hello world"

@@ -42,6 +42,9 @@ _COMMENT_PREFIX: Final[str] = "#"
 # the leading separator is dropped and inner separators become underscores.
 _PATH_SEPARATOR: Final[str] = "/"
 _SLUG_SEPARATOR: Final[str] = "_"
+# Prose and hostnames hyphenate a name; code identifiers, module names and
+# filenames underscore the SAME name. Both spellings must be caught.
+_HYPHEN: Final[str] = "-"
 # A single-segment path would reduce to a bare word ('/home' -> 'home') and
 # match innocent text, so a slug variant needs at least two segments.
 _MIN_SLUG_SEGMENTS: Final[int] = 2
@@ -202,10 +205,47 @@ def _slug_variant(term: str) -> str | None:
     return _SLUG_SEPARATOR.join(segments)
 
 
+def _separator_spellings(value: str) -> tuple[str, ...]:
+    """``value`` with ``-`` and ``_`` treated as interchangeable.
+
+    Swapping separators cannot broaden a match: the result is the same length
+    and the same shape, so this adds spellings without adding false
+    positives. ``some.host`` still does not match ``some-host``.
+    """
+    spellings = [value]
+    for candidate in (
+        value.replace(_HYPHEN, _SLUG_SEPARATOR),
+        value.replace(_SLUG_SEPARATOR, _HYPHEN),
+    ):
+        if candidate not in spellings:
+            spellings.append(candidate)
+    return tuple(spellings)
+
+
 def _term_variants(term: str) -> tuple[str, ...]:
-    """``term`` plus every alternative spelling it must also be caught by."""
+    """``term`` plus every alternative spelling it must also be caught by.
+
+    Two independent axes, both of which this repository's own history proved
+    necessary during its identifier rewrite:
+
+    * path -> venv slug (``/home/someone`` -> ``home_someone``)
+    * hyphen <-> underscore (``some-host`` -> ``some_host``)
+
+    They compose: a path term's slug is also offered in both separator
+    spellings. Order is stable and duplicates are dropped so the variant list
+    is deterministic.
+    """
+    bases = [term]
     slug = _slug_variant(term)
-    return (term,) if slug is None else (term, slug)
+    if slug is not None:
+        bases.append(slug)
+
+    variants: list[str] = []
+    for base in bases:
+        for spelling in _separator_spellings(base):
+            if spelling not in variants:
+                variants.append(spelling)
+    return tuple(variants)
 
 
 def term_matches(text: str, term: str) -> bool:
