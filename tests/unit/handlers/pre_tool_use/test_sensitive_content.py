@@ -54,6 +54,96 @@ def _handler_with_secret_file(secret_file: Path) -> SensitiveContentHandler:
     return handler
 
 
+class TestFilePathIsCheckedNotJustContent:
+    """An identifier in the FILE NAME leaks exactly as loudly as one in the body.
+
+    The history rewrite of this repository needed ``--path-rename`` for three
+    files whose NAMES carried an identifier - ``--replace-text`` never touches
+    a filename. The write-time guard had the same blind spot: a file could be
+    created with an identifier in its name and the content check would wave it
+    through.
+
+    The path is checked RELATIVE to the project root. Checking the absolute
+    path would be catastrophic: a project living under a listed directory
+    would have every single write denied.
+    """
+
+    def test_public_pattern_in_filename_matches(self) -> None:
+        handler = _handler_with_public_patterns(
+            [{"name": "vhosts-path", "pattern": "secretpath", "description": "d"}]
+        )
+        hook_input = _write_input("/workspace/untracked/report-secretpath-v1.md", "clean body\n")
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content."
+            "resolve_project_root",
+            return_value="/workspace",
+        ):
+            assert handler.matches(hook_input) is True
+
+    def test_public_pattern_in_directory_name_matches(self) -> None:
+        handler = _handler_with_public_patterns(
+            [{"name": "vhosts-path", "pattern": "secretpath", "description": "d"}]
+        )
+        hook_input = _write_input("/workspace/untracked/secretpath/notes.md", "clean body\n")
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content."
+            "resolve_project_root",
+            return_value="/workspace",
+        ):
+            assert handler.matches(hook_input) is True
+
+    def test_match_in_project_root_itself_is_ignored(self) -> None:
+        """The killer false positive: root contains the term, so EVERY write would deny."""
+        handler = _handler_with_public_patterns(
+            [{"name": "home-path", "pattern": "secretpath", "description": "d"}]
+        )
+        hook_input = _write_input("/home/secretpath/project/src/app.py", "clean body\n")
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content."
+            "resolve_project_root",
+            return_value="/home/secretpath/project",
+        ):
+            assert handler.matches(hook_input) is False
+
+    def test_secret_term_in_filename_matches(self, tmp_path: Path) -> None:
+        secret_file = tmp_path / "words.secret"
+        secret_file.write_text("zulu-host\n")
+        handler = _handler_with_secret_file(secret_file)
+        hook_input = _write_input("/workspace/untracked/zulu-host-report.md", "clean body\n")
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content."
+            "resolve_project_root",
+            return_value="/workspace",
+        ):
+            assert handler.matches(hook_input) is True
+
+    def test_secret_term_in_filename_deny_reason_never_names_it(self, tmp_path: Path) -> None:
+        secret_file = tmp_path / "words.secret"
+        secret_file.write_text("zulu-host\n")
+        handler = _handler_with_secret_file(secret_file)
+        hook_input = _write_input("/workspace/untracked/zulu-host-report.md", "clean body\n")
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content."
+            "resolve_project_root",
+            return_value="/workspace",
+        ):
+            result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert "zulu-host" not in (result.reason or "")
+
+    def test_clean_path_and_clean_content_does_not_match(self) -> None:
+        handler = _handler_with_public_patterns(
+            [{"name": "x", "pattern": "secretpath", "description": "d"}]
+        )
+        hook_input = _write_input("/workspace/untracked/clean-name.md", "clean body\n")
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content."
+            "resolve_project_root",
+            return_value="/workspace",
+        ):
+            assert handler.matches(hook_input) is False
+
+
 class TestInit:
     def test_identity(self) -> None:
         handler = SensitiveContentHandler()

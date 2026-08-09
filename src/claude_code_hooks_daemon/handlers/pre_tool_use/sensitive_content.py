@@ -149,15 +149,49 @@ class SensitiveContentHandler(Handler):
         if self._is_secret_list_itself(file_path):
             return False
 
-        content = self._get_content(hook_input)
-        if not content:
+        haystacks = self._haystacks(hook_input, file_path)
+        if not haystacks:
             return False
 
-        if self._find_public_pattern_match(content) is not None:
+        if any(self._find_public_pattern_match(text) is not None for text in haystacks):
             return True
 
         terms = self._secret_terms()
-        return sr.find_first_match_index(content, terms) is not None
+        return any(sr.find_first_match_index(text, terms) is not None for text in haystacks)
+
+    def _haystacks(self, hook_input: dict[str, Any], file_path: str) -> list[str]:
+        """Every piece of text this write would introduce: its PATH and its body.
+
+        The path matters independently of the body. This repository's own
+        history rewrite needed ``--path-rename`` for three files whose NAMES
+        carried an identifier — ``--replace-text`` never touches a filename,
+        and neither did this handler, so a file could be created with an
+        identifier in its name and sail through on a clean body.
+        """
+        return [
+            text
+            for text in (self._relative_path_text(file_path), self._get_content(hook_input))
+            if text
+        ]
+
+    @staticmethod
+    def _relative_path_text(file_path: str) -> str:
+        """``file_path`` relative to the project root, or ``""``.
+
+        Deliberately NOT the absolute path. A project whose own root sits
+        under a listed directory (a home directory on the secret list, say)
+        would otherwise have EVERY write denied — a false positive so total
+        it would force the handler to be switched off. Only the portion of
+        the path the author actually chose is checked.
+        """
+        project_root = resolve_project_root()
+        if project_root is None:
+            return ""
+        try:
+            return str(Path(file_path).resolve().relative_to(Path(project_root).resolve()))
+        except ValueError:
+            # Outside the project root: not ours to judge.
+            return ""
 
     def _secret_terms(self) -> tuple[str, ...]:
         """Terms from this handler's configured secret word list.
@@ -216,16 +250,22 @@ class SensitiveContentHandler(Handler):
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
         file_path = str(tool_input.get(_FIELD_FILE_PATH, ""))
-        content = self._get_content(hook_input)
+        haystacks = self._haystacks(hook_input, file_path)
 
-        public_match = self._find_public_pattern_match(content)
-        if public_match is not None:
-            return self._deny_public_pattern(file_path, public_match)
+        for text in haystacks:
+            public_match = self._find_public_pattern_match(text)
+            if public_match is not None:
+                return self._deny_public_pattern(file_path, public_match)
 
         terms = self._secret_terms()
-        index = sr.find_first_match_index(content, terms)
-        if index is not None:
-            return self._deny_secret_term(file_path, index, len(terms))
+        for text in haystacks:
+            index = sr.find_first_match_index(text, terms)
+            if index is not None:
+                # The path is echoed back in the deny reason, and the path is
+                # now itself a thing that can MATCH. Printing it raw would put
+                # the term straight into the message the whole no-echo contract
+                # exists to keep it out of - moving the leak, not closing it.
+                return self._deny_secret_term(sr.redact_text(file_path, terms), index, len(terms))
 
         return HookResult(decision=Decision.ALLOW)
 

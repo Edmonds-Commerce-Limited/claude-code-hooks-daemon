@@ -203,6 +203,109 @@ class TestSecretWordListScanning:
         assert str(secret_file) not in scanned_files
 
 
+class TestFileNamesAreScannedNotJustContent:
+    """A NAME leaks as loudly as a body.
+
+    ``git filter-repo --replace-text`` rewrites blob contents only; renaming a
+    file that carries an identifier in its NAME needs ``--path-rename``. A
+    content-only scanner has exactly that blind spot, so it can report a clean
+    tree while a tracked path still spells the term out.
+    """
+
+    def test_term_in_file_name_is_flagged(self, tmp_path: Path) -> None:
+        secret_file = tmp_path / ".claude" / "block-words.secret"
+        secret_file.parent.mkdir(parents=True)
+        secret_file.write_text("zzqx-nonsense-term\n")
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+        (tmp_path / "report-zzqx-nonsense-term-v1.md").write_text("wholly innocent body\n")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is False
+        violation = data["violations"][0]
+        assert violation["rule"] == "secret-word-list"
+        assert violation["line"] == 0
+
+    def test_term_in_directory_name_is_flagged(self, tmp_path: Path) -> None:
+        """The directory is part of the path, so ``path.name`` alone is not enough."""
+        secret_file = tmp_path / ".claude" / "block-words.secret"
+        secret_file.parent.mkdir(parents=True)
+        secret_file.write_text("zzqx-nonsense-term\n")
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+        nested = tmp_path / "zzqx-nonsense-term"
+        nested.mkdir()
+        (nested / "notes.md").write_text("wholly innocent body\n")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is False
+        assert data["violations"][0]["rule"] == "secret-word-list"
+
+    def test_file_name_violation_never_reveals_the_term(self, tmp_path: Path) -> None:
+        secret_file = tmp_path / ".claude" / "block-words.secret"
+        secret_file.parent.mkdir(parents=True)
+        secret_file.write_text("zzqx-nonsense-term\n")
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+        (tmp_path / "report-zzqx-nonsense-term-v1.md").write_text("wholly innocent body\n")
+
+        data = _run_checker(tmp_path, config)
+
+        # The FILE field necessarily carries the path — that is the whole point
+        # of reporting it — but the MESSAGE must still name only an index.
+        assert "zzqx-nonsense-term" not in data["violations"][0]["message"]
+        assert "entry 1 of 1" in data["violations"][0]["message"]
+
+    def test_public_pattern_in_file_name_is_flagged(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(
+            config, public_patterns=[{"name": "alpha", "pattern": "alpha", "description": ""}]
+        )
+        (tmp_path / "alpha-notes.md").write_text("wholly innocent body\n")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is False
+        violation = data["violations"][0]
+        assert violation["rule"] == "public-pattern:alpha"
+        assert violation["line"] == 0
+
+    def test_match_in_the_scan_root_itself_is_ignored(self, tmp_path: Path) -> None:
+        """THE negative control.
+
+        Names are matched RELATIVE to the scan root. Matching the absolute path
+        would flag every file in a checkout that merely happens to live beneath
+        a directory whose name contains a listed term — an unfixable false
+        positive that would force the whole guard to be disabled.
+        """
+        root = tmp_path / "zzqx-nonsense-term"
+        root.mkdir()
+        secret_file = root / ".claude" / "block-words.secret"
+        secret_file.parent.mkdir(parents=True)
+        secret_file.write_text("zzqx-nonsense-term\n")
+        config = root / "hooks-daemon.yaml"
+        _write_config(config)
+        (root / "notes.md").write_text("wholly innocent body\n")
+
+        data = _run_checker(root, config)
+
+        assert data["summary"]["passed"] is True
+
+    def test_clean_name_and_clean_body_still_passes(self, tmp_path: Path) -> None:
+        secret_file = tmp_path / ".claude" / "block-words.secret"
+        secret_file.parent.mkdir(parents=True)
+        secret_file.write_text("zzqx-nonsense-term\n")
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+        (tmp_path / "notes.md").write_text("wholly innocent body\n")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is True
+
+
 class TestExcludePaths:
     def test_excluded_path_is_not_scanned(self, tmp_path: Path) -> None:
         config = tmp_path / "hooks-daemon.yaml"

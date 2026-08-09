@@ -47,6 +47,9 @@ _DEFAULT_CONFIG: Final[Path] = _REPO_ROOT / ".claude" / "hooks-daemon.yaml"
 
 _PUBLIC_RULE_PREFIX: Final[str] = "public-pattern"
 _SECRET_RULE: Final[str] = "secret-word-list"
+# A filename violation belongs to no line of the file; 0 is never a real
+# 1-based line number, so it reads unambiguously as "the name, not the body".
+_FILENAME_LINE: Final[int] = 0
 
 _PATTERN_KEY_NAME: Final[str] = "name"
 _PATTERN_KEY_PATTERN: Final[str] = "pattern"
@@ -225,6 +228,7 @@ def scan_file(
     compiled_patterns: list[tuple[dict[str, str], re.Pattern[str]]],
     secret_terms: tuple[str, ...],
     term_matcher: Callable[[str, str], bool],
+    scan_root: Path,
 ) -> list[Violation]:
     """Every violation in one file — public patterns, then the secret list."""
     try:
@@ -234,6 +238,56 @@ def scan_file(
 
     violations: list[Violation] = []
     active_terms = [term for term in secret_terms if term]
+
+    # The NAME leaks as loudly as the body. --replace-text never touches a
+    # filename, which is why the history rewrite needed --path-rename for
+    # three files here; a content-only scanner has the identical blind spot.
+    #
+    # Checked relative to the SCAN ROOT, never the absolute path: otherwise a
+    # checkout that merely lives beneath a directory named after a listed term
+    # would flag every file in the tree — an unfixable false positive that
+    # would force the whole guard to be switched off.
+    #
+    # Lexical, with no ``resolve()`` on either side. Both file collections
+    # build their paths by joining onto this very root, so a file is always
+    # lexically below it and this cannot raise. Resolving would break that:
+    # a tracked SYMLINK would resolve to its target and escape the root, and
+    # the link's own tracked name — the name that actually ships — is exactly
+    # what must be checked. If this ever does raise, the caller passed a
+    # mismatched root and FAILING LOUDLY is correct; a fallback here would
+    # silently downgrade the scan to basenames and miss directory names.
+    relative_name = str(path.relative_to(scan_root))
+
+    for entry, compiled in compiled_patterns:
+        name_match = compiled.search(relative_name)
+        if name_match:
+            pattern_name = entry.get(_PATTERN_KEY_NAME, "unnamed")
+            violations.append(
+                Violation(
+                    file=str(path),
+                    line=_FILENAME_LINE,
+                    rule=f"{_PUBLIC_RULE_PREFIX}:{pattern_name}",
+                    message=(
+                        f"FILE NAME matches public pattern '{pattern_name}': "
+                        f"{name_match.group(0)}"
+                    ),
+                )
+            )
+
+    for index, term in enumerate(active_terms, start=1):
+        if term_matcher(relative_name, term):
+            violations.append(
+                Violation(
+                    file=str(path),
+                    line=_FILENAME_LINE,
+                    rule=_SECRET_RULE,
+                    message=(
+                        f"FILE NAME matches a configured blocked term (entry {index} of "
+                        f"{len(active_terms)} in the secret word list). The term is "
+                        "deliberately not shown."
+                    ),
+                )
+            )
 
     for number, line in enumerate(content.splitlines(), start=1):
         for entry, compiled in compiled_patterns:
@@ -320,7 +374,9 @@ def main() -> int:
 
     violations: list[Violation] = []
     for file_path in files:
-        violations.extend(scan_file(file_path, compiled_patterns, secret_terms, term_matcher))
+        violations.extend(
+            scan_file(file_path, compiled_patterns, secret_terms, term_matcher, scan_root_for_terms)
+        )
 
     output = {
         "tool": "sensitive_content",
