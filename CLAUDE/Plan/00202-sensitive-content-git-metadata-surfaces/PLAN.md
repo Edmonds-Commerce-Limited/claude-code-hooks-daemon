@@ -87,13 +87,17 @@ Two prior findings drive the design and must not be re-learned:
 
 ### Phase 2: Batch equivalent — history sweep
 
-- [ ] ⬜ **Task 2.1**: RED — fixture repo whose history carries a term in a
+- [x] ✅ **Task 2.1**: RED — fixture repo whose history carries a term in a
   commit message, a tag name, a tag message and an author id
-- [ ] ⬜ **Task 2.2**: GREEN — sweep those surfaces via plumbing, reporting
+- [x] ✅ **Task 2.2**: GREEN — sweep those surfaces via plumbing, reporting
   `rev`/`ref` + index, never the term
-- [ ] ⬜ **Task 2.3**: Wire into `llm_qa.py` / `run_all.sh` as a check
-- [ ] ⬜ **Task 2.4**: Confirm it reports 0 against the REWRITTEN mirror and
+- [x] ✅ **Task 2.3**: Wire into `llm_qa.py` / `run_all.sh` as a check
+- [x] ✅ **Task 2.4**: Confirm it reports 0 against the REWRITTEN mirror and
   non-0 against the pre-rewrite backup — the sweep's own negative control
+- [x] ✅ **Task 2.5**: Grandfather the known-contaminated history so the gate is
+  green (and therefore trusted) before the force-push, WITHOUT becoming an
+  amnesty: commit baseline self-invalidates on rewrite, ref allowlist reports
+  its own staleness
 
 ### Phase 3: Anti-regression
 

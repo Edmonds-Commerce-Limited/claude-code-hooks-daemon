@@ -144,6 +144,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="sensitive_content.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "git_history": ToolConfig(
+        command=_python("check_git_history.py", "--json"),
+        json_file="git_history.json",
+        jq_hint="jq '.violations[] | {surface, locator, rule, message}'",
+    ),
     "handler_reference": ToolConfig(
         command=_python("check_handler_reference.py", "--json"),
         json_file="handler_reference.json",
@@ -270,6 +275,14 @@ def _summarize_sensitive_content(data: QaReport) -> str:
     return f"{total} violations"
 
 
+def _summarize_git_history(data: QaReport) -> str:
+    summary = data.get("summary", {})
+    total = summary.get("total_violations", 0)
+    commits = summary.get("commits_scanned", 0)
+    refs = summary.get("refs_scanned", 0)
+    return f"{total} violations ({commits} commits, {refs} refs swept)"
+
+
 def _summarize_handler_reference(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
@@ -298,6 +311,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "repo_hygiene": _summarize_repo_hygiene,
     "doc_truth": _summarize_doc_truth,
     "sensitive_content": _summarize_sensitive_content,
+    "git_history": _summarize_git_history,
     "handler_reference": _summarize_handler_reference,
     "british_english": _summarize_british_english,
 }

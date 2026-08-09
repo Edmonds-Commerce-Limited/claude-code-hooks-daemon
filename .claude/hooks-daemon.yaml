@@ -134,6 +134,32 @@ handlers:
             pattern: '(?i)\b(fuck\w*|shit\w*|bullshit|bollocks|wank(?:er|ers|ing)?|bastard)\b'
             description: 'profanity in a tracked document — paraphrase it, keeping the engineering point'
         secret_word_list_path: .claude/block-words.secret
+        # --- consumed by scripts/qa/check_git_history.py, not by the handler ---
+        # The write-time handler blocks NEW contamination of git metadata
+        # (commit messages, identities, tag/branch names, tag messages). The
+        # history already committed here is a different problem: it can only be
+        # cleaned by a force-push, which only a human may run. Without these two
+        # keys the gate would be red the day it landed and stay red until then —
+        # and a permanently-red gate gets disabled, not fixed.
+        #
+        # history_baseline: commits reachable from this sha are exempt. It NEEDS
+        # no manual removal: the rewrite gives every commit a new sha, so this
+        # one stops resolving, and an unresolvable baseline exempts NOTHING
+        # (fail-safe). The gate therefore tightens to full history coverage by
+        # itself the moment the rewrite lands.
+        history_baseline: 863d55a4bb1b651cd3a682ec5ccde689931f6b8d
+        # Refs cannot be covered by a commit baseline — a ref has no ancestry,
+        # so exempting by the tagged commit would let a tag created TODAY on an
+        # ancient commit sail through. These three annotated tag messages are
+        # the known contamination (the same three releases whose GitHub release
+        # BODIES also need editing — GitHub, not git, so no rewrite reaches
+        # them). Unlike the baseline this list does not auto-expire, so the
+        # checker reports a `stale-grandfather` violation once an entry stops
+        # being needed.
+        history_grandfathered_refs:
+          - 'v3.16.0'
+          - 'v3.22.0'
+          - 'v3.25.0'
         exclude_paths:
           # A rules file must be able to contain its own rules. This config
           # DECLARES the patterns above, so it necessarily contains text

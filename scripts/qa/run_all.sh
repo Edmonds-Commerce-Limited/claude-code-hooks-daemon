@@ -201,7 +201,17 @@ else
 fi
 echo ""
 
-echo "17. Running Handler-Reference Check..."
+echo "17. Running Git-History Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_git_history.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Git-history check FAILED"
+else
+    echo "✅ Git-history check PASSED"
+fi
+echo ""
+
+echo "18. Running Handler-Reference Check..."
 echo "----------------------------------------"
 if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_handler_reference.py" --json; then
     OVERALL_EXIT_CODE=1
@@ -211,7 +221,7 @@ else
 fi
 echo ""
 
-echo "18. Running British-English Check..."
+echo "19. Running British-English Check..."
 echo "----------------------------------------"
 if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_british_english.py" --json; then
     OVERALL_EXIT_CODE=1
@@ -246,6 +256,7 @@ results = {
     "Repo Hygiene": "untracked/qa/repo_hygiene.json",
     "Doc Truth": "untracked/qa/doc_truth.json",
     "Sensitive Content": "untracked/qa/sensitive_content.json",
+    "Git History": "untracked/qa/git_history.json",
     "Handler Reference": "untracked/qa/handler_reference.json",
     "British English": "untracked/qa/british_english.json",
 }
