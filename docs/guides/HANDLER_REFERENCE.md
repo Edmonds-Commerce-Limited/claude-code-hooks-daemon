@@ -704,11 +704,19 @@ handlers:
 
 **Blocked categories:**
 
-- **SQL injection** -- building queries by string concatenation (use parameterised queries)
-- **Command injection** -- passing unvalidated input to a subprocess (use argument lists, never `shell=True`)
-- **Hardcoded credentials** -- API keys, passwords and tokens embedded in source
-- **Weak cryptography** -- MD5 or SHA1 used for password hashing (use bcrypt/argon2)
-- **Path traversal** -- unvalidated user input used to build a file path
+- **Code injection** -- `eval`, `exec`, `new Function`, `__import__`, `instance_eval`, `yaml.load`
+- **Command injection** -- `os.system`, `subprocess(..., shell=True)`, `shell_exec`, `proc_open`, `Runtime.exec`, `Process.Start`, `IO.popen`
+- **Unsafe deserialization** -- `pickle.load`, `Marshal.load`, `unserialize`, `ObjectInputStream`, `XMLDecoder`, `BinaryFormatter`
+- **XSS** -- `innerHTML`, `dangerouslySetInnerHTML`, `document.write`, `template.HTML`/`JS`/`URL`
+- **Hardcoded credentials** -- AWS access keys, GitHub tokens, Stripe keys, private key blocks
+
+**What it does NOT detect:** this is pattern matching on known-dangerous
+constructs, not analysis. **SQL injection, weak hashing and path traversal are
+not detected** in any language -- each is a property of how a value *flows*,
+which a regex cannot see (a concatenated query is only a vulnerability if the
+concatenated part is attacker-controlled). Do not read a passing write as
+"this code is secure". Coverage also varies by language: a construct blocked
+in one is not necessarily blocked in another. See Plan 00204.
 
 **Options:**
 
@@ -2060,37 +2068,37 @@ handlers:
 
 Priorities below are the **shipped defaults** from `constants/priority.py`. Several handlers share a priority; ties run in registration order.
 
-| Config Key                     | Event             | Priority | What It Blocks                                              |
-| ------------------------------ | ----------------- | -------- | ----------------------------------------------------------- |
-| `destructive_git`              | PreToolUse        | 10       | git reset --hard, clean -f, push --force, branch -D, etc.   |
-| `sed_blocker`                  | PreToolUse        | 10       | sed used to MODIFY files (read-only pipelines are allowed)  |
-| `curl_pipe_shell`              | PreToolUse        | 10       | curl/wget piped to bash/sh                                  |
-| `lock_file_edit_blocker`       | PreToolUse        | 10       | Direct editing of lock files                                |
-| `pip_break_system`             | PreToolUse        | 10       | pip --break-system-packages                                 |
-| `sudo_pip`                     | PreToolUse        | 10       | sudo pip install                                            |
-| `ask_user_question_blocker`    | PreToolUse        | 10       | AskUserQuestion without an `ASKING BECAUSE:` prefix         |
-| `daemon_location_guard`        | PreToolUse        | 11       | cd into .claude/hooks-daemon/                               |
-| `absolute_path`                | PreToolUse        | 12       | Relative paths in Read/Write/Edit                           |
-| `error_hiding_blocker`         | PreToolUse        | 13       | Code that silently swallows errors                          |
-| `security_antipattern`         | PreToolUse        | 14       | OWASP antipatterns (SQLi, hardcoded creds, weak crypto)     |
-| `worktree_file_copy`           | PreToolUse        | 15       | cp/mv/rsync between worktrees                               |
-| `pipe_blocker`                 | PreToolUse        | 15       | Expensive commands piped to tail/head                       |
-| `dangerous_permissions`        | PreToolUse        | 15       | chmod 777, chmod a+rwx                                      |
-| `tdd_enforcement`              | PreToolUse        | 15       | Production code without tests (11 languages)                |
-| `root_recursion_guard`         | PreToolUse        | 16       | Recursive scans rooted at /, /home, $HOME, ...              |
-| `git_stash`                    | PreToolUse        | 20       | git stash creation (deny by default; configurable)          |
-| `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs) |
-| `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                       |
-| `validate_plan_number`         | PreToolUse        | 30       | Invalid plan numbering                                      |
-| `markdown_organization`        | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes       |
-| `lsp_enforcement`              | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                   |
-| `gh_issue_comments`            | PreToolUse        | 40       | gh issue view without --comments                            |
-| `gh_pr_comments`               | PreToolUse        | 40       | gh pr view without --comments                               |
-| `plan_time_estimates`          | PreToolUse        | 40       | Time estimates in plan docs                                 |
-| `npm_command`                  | PreToolUse        | 50       | Non-llm: npm commands                                       |
-| `validate_instruction_content` | PreToolUse        | 50       | Ephemeral content in CLAUDE.md                              |
-| `auto_continue_stop`           | Stop              | 15       | Stops after confirmation questions                          |
-| `auto_approve_reads`           | PermissionRequest | 10       | (Approves) read-only tools in bypassPermissions mode        |
+| Config Key                     | Event             | Priority | What It Blocks                                                       |
+| ------------------------------ | ----------------- | -------- | -------------------------------------------------------------------- |
+| `destructive_git`              | PreToolUse        | 10       | git reset --hard, clean -f, push --force, branch -D, etc.            |
+| `sed_blocker`                  | PreToolUse        | 10       | sed used to MODIFY files (read-only pipelines are allowed)           |
+| `curl_pipe_shell`              | PreToolUse        | 10       | curl/wget piped to bash/sh                                           |
+| `lock_file_edit_blocker`       | PreToolUse        | 10       | Direct editing of lock files                                         |
+| `pip_break_system`             | PreToolUse        | 10       | pip --break-system-packages                                          |
+| `sudo_pip`                     | PreToolUse        | 10       | sudo pip install                                                     |
+| `ask_user_question_blocker`    | PreToolUse        | 10       | AskUserQuestion without an `ASKING BECAUSE:` prefix                  |
+| `daemon_location_guard`        | PreToolUse        | 11       | cd into .claude/hooks-daemon/                                        |
+| `absolute_path`                | PreToolUse        | 12       | Relative paths in Read/Write/Edit                                    |
+| `error_hiding_blocker`         | PreToolUse        | 13       | Code that silently swallows errors                                   |
+| `security_antipattern`         | PreToolUse        | 14       | Dangerous constructs (eval, shell exec, deserialization, XSS, creds) |
+| `worktree_file_copy`           | PreToolUse        | 15       | cp/mv/rsync between worktrees                                        |
+| `pipe_blocker`                 | PreToolUse        | 15       | Expensive commands piped to tail/head                                |
+| `dangerous_permissions`        | PreToolUse        | 15       | chmod 777, chmod a+rwx                                               |
+| `tdd_enforcement`              | PreToolUse        | 15       | Production code without tests (11 languages)                         |
+| `root_recursion_guard`         | PreToolUse        | 16       | Recursive scans rooted at /, /home, $HOME, ...                       |
+| `git_stash`                    | PreToolUse        | 20       | git stash creation (deny by default; configurable)                   |
+| `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)          |
+| `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                |
+| `validate_plan_number`         | PreToolUse        | 30       | Invalid plan numbering                                               |
+| `markdown_organization`        | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                |
+| `lsp_enforcement`              | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                            |
+| `gh_issue_comments`            | PreToolUse        | 40       | gh issue view without --comments                                     |
+| `gh_pr_comments`               | PreToolUse        | 40       | gh pr view without --comments                                        |
+| `plan_time_estimates`          | PreToolUse        | 40       | Time estimates in plan docs                                          |
+| `npm_command`                  | PreToolUse        | 50       | Non-llm: npm commands                                                |
+| `validate_instruction_content` | PreToolUse        | 50       | Ephemeral content in CLAUDE.md                                       |
+| `auto_continue_stop`           | Stop              | 15       | Stops after confirmation questions                                   |
+| `auto_approve_reads`           | PermissionRequest | 10       | (Approves) read-only tools in bypassPermissions mode                 |
 
 ### All Advisory Handlers
 
