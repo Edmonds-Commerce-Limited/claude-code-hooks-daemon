@@ -1,5 +1,7 @@
 """Comprehensive tests for SecurityAntipatternHandler."""
 
+from typing import ClassVar
+
 import pytest
 
 from claude_code_hooks_daemon.handlers.pre_tool_use.security_antipattern import (
@@ -729,3 +731,125 @@ class TestSecurityAntipatternExcludePaths:
         h = SecurityAntipatternHandler()
         h._project_exclude_paths = ["**/vendored/**"]
         assert h.matches(self._write("/proj/vendored/x.php", _EXCLUDE_PHP_PAYLOAD)) is False
+
+
+class TestGuidanceMatchesImplementedPatterns:
+    """The resident guidance must not promise detection that does not exist.
+
+    ``get_claude_md()`` is inlined into every client project's CLAUDE.md and
+    read in full every session, so an agent treats it as the authoritative
+    statement of what this handler covers. Claiming a category that no
+    strategy implements is worse than silence: it invites the agent to relax
+    its own vigilance about a class of bug nothing is actually watching for.
+
+    Shipped guidance asserted SQL injection, weak cryptography and path
+    traversal were blocked. Not one of the eleven language strategies had a
+    pattern for any of the three. Found by probing the live daemon with a
+    string-concatenated SQL query during the v3.52.0 release acceptance gate
+    and watching it sail through.
+
+    This is the DBF guard for that defect: every category the guidance names
+    must be evidenced by a real pattern, and a NEW category cannot be added
+    to the guidance without adding its evidence here.
+    """
+
+    # Category label (as written in the guidance) -> a substring that must
+    # appear in at least one registered pattern name. Adding a bullet to
+    # get_claude_md() without adding a row here fails the completeness test.
+    CATEGORY_EVIDENCE: ClassVar[dict[str, str]] = {
+        "Code injection": "code injection",
+        "Command injection": "command injection",
+        "Unsafe deserialization": "deserialization",
+        "XSS": "XSS",
+        "Hardcoded credentials": "Key",
+    }
+
+    _CATEGORY_HEADING = "**Blocked categories**:"
+    _BULLET = "- "
+
+    def _pattern_names(self) -> list[str]:
+        handler = SecurityAntipatternHandler()
+        names: list[str] = []
+        for strategy in handler._registry.all_strategies:
+            names.extend(pattern.name for pattern in strategy.patterns)
+        return names
+
+    def _guidance_categories(self) -> list[str]:
+        guidance = SecurityAntipatternHandler().get_claude_md()
+        assert guidance is not None
+        _, _, after = guidance.partition(self._CATEGORY_HEADING)
+        block, _, _ = after.partition("\n\n")
+        categories = []
+        for line in block.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith(self._BULLET):
+                continue
+            label = stripped[len(self._BULLET) :].split(":", 1)[0].strip()
+            categories.append(label)
+        return categories
+
+    def test_every_claimed_category_has_a_real_pattern(self):
+        names = self._pattern_names()
+        assert names, "registry produced no patterns — the probe itself is broken"
+        for label in self._guidance_categories():
+            evidence = self.CATEGORY_EVIDENCE.get(label)
+            assert evidence is not None, (
+                f"Guidance claims category {label!r} but no evidence row exists. "
+                "Add it to CATEGORY_EVIDENCE naming a substring that appears in a "
+                "real pattern name — or remove the claim from get_claude_md()."
+            )
+            assert any(evidence.lower() in name.lower() for name in names), (
+                f"Guidance claims {label!r} is blocked, but no registered pattern "
+                f"name contains {evidence!r}. The guidance is promising protection "
+                "that does not exist. Implement it, or stop claiming it."
+            )
+
+    def test_guidance_does_not_claim_the_three_unimplemented_categories(self):
+        """Regression pin for the exact wording that shipped.
+
+        Named explicitly rather than left to the generic check above, because
+        these three are the ones a reader is most likely to re-add from memory
+        of the OWASP top ten.
+
+        Scoped to the CLAIMS block on purpose: naming them in the explicit
+        "does NOT detect" disclaimer is the correct thing to do, and a check
+        that forbade the words outright would forbid saying so.
+        """
+        guidance = SecurityAntipatternHandler().get_claude_md()
+        assert guidance is not None
+        _, _, after = guidance.partition(self._CATEGORY_HEADING)
+        claims_block, _, _ = after.partition("\n\n")
+        lowered = claims_block.lower()
+        for absent in ("sql injection", "weak cryptography", "path traversal"):
+            assert absent not in lowered, (
+                f"Guidance claims {absent!r} is blocked. No strategy implements it. "
+                "If you have just added detection for it, add the category to "
+                "CATEGORY_EVIDENCE and delete this assertion's entry."
+            )
+
+    def test_guidance_states_what_it_cannot_detect(self):
+        """The disclaimer is load-bearing, not decoration.
+
+        An agent that reads "OWASP security antipatterns are blocked" and sees
+        no limits will reasonably infer broad coverage. Naming the absent
+        classes explicitly is what stops a passing write being read as
+        'this code is secure'.
+        """
+        guidance = SecurityAntipatternHandler().get_claude_md()
+        assert guidance is not None
+        lowered = guidance.lower()
+        assert "does not detect" in lowered or "not detect" in lowered
+        for named in ("sql injection", "path traversal"):
+            assert named in lowered, (
+                f"The limits disclaimer no longer names {named!r}. Removing it makes "
+                "the handler look broader than it is."
+            )
+
+    def test_evidence_rows_all_correspond_to_a_claimed_category(self):
+        """An evidence row for a category the guidance no longer names is dead weight."""
+        claimed = set(self._guidance_categories())
+        stale = set(self.CATEGORY_EVIDENCE) - claimed
+        assert not stale, (
+            f"CATEGORY_EVIDENCE rows with no matching guidance bullet: {sorted(stale)}. "
+            "Remove them, or restore the bullet they were written for."
+        )
