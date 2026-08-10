@@ -13,6 +13,18 @@ from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, SUDO_INVOCATION
+
+# `sudo` + any form of pip install.
+#
+# Two respellings defeated the original `\bsudo\s+(pip3?|...)` anchor, and both
+# are the FIRST thing a real user types:
+#   sudo -H pip install ...        - sudo takes its own options
+#   sudo /usr/bin/pip install ...  - the binary named by path
+# OPTIONAL_SUDO covers the former (and is shared with curl_pipe_shell, which
+# had already learned this lesson in isolation); OPTIONAL_PATH covers the
+# latter for both `pip` and the `python -m pip` spelling.
+_SUDO_PIP_PATTERN = SUDO_INVOCATION + OPTIONAL_PATH + r"(?:pip3?|python3?\s+-m\s+pip)\s+install\b"
 
 
 class SudoPipHandler(Handler):
@@ -63,11 +75,7 @@ class SudoPipHandler(Handler):
         if not command:
             return False
 
-        # Pattern: sudo + any form of pip install
-        # Matches: sudo pip/pip3/python -m pip/python3 -m pip + install
-        pattern = r"\bsudo\s+(pip3?|python3?\s+-m\s+pip)\s+install\b"
-
-        return bool(re.search(pattern, command, re.IGNORECASE))
+        return bool(re.search(_SUDO_PIP_PATTERN, command, re.IGNORECASE))
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block command and explain why sudo pip install is dangerous.

@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.utils import secret_redaction as sr
+from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
 from claude_code_hooks_daemon.utils.path_exclusion import (
     is_path_excluded,
     merge_exclude_patterns,
@@ -234,14 +235,24 @@ class SensitiveContentHandler(Handler):
         """True when ``command`` invokes git in a way that records metadata.
 
         Token-based, not substring: ``git`` must appear as its own token
-        immediately followed by a metadata subcommand, so neither a sentence
-        about a branch nor a path like ``untracked/git-notes`` qualifies.
+        followed by a metadata subcommand, so neither a sentence about a branch
+        nor a path like ``untracked/git-notes`` qualifies.
+
+        The subcommand is located via ``git_subcommand_index`` rather than by
+        reading the very next token, because git accepts GLOBAL OPTIONS first.
+        Reading ``tokens[position + 1]`` blindly meant ``git -C /path commit``
+        offered up ``-C`` as the subcommand, matched nothing, and let a blocked
+        term through into a commit message — the one leak surface that cannot
+        be undone without rewriting published history.
         """
         tokens = command.split()
         for position, token in enumerate(tokens[:-1]):
             if token != _GIT_EXECUTABLE and not token.endswith(f"/{_GIT_EXECUTABLE}"):
                 continue
-            subcommand = tokens[position + 1]
+            subcommand_index = git_subcommand_index(tokens, position)
+            if subcommand_index is None:
+                continue
+            subcommand = tokens[subcommand_index]
             if subcommand not in _GIT_METADATA_WRITE_SUBCOMMANDS:
                 continue
             # `git tag -l <pattern>` / `git branch --list <pattern>` /

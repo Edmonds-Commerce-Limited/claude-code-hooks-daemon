@@ -6,6 +6,16 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
+
+# Git accepts GLOBAL OPTIONS before the subcommand, so `git -C /path stash`
+# bypassed this handler entirely until every pattern below was widened.
+#
+# The ALLOW-list is widened for the opposite reason: it must keep pace with the
+# block pattern or it stops protecting the safe operations. If only the block
+# pattern tolerated global options, `git -C /path stash pop` would match "is a
+# stash command" while failing to match "is a recovery operation" — turning a
+# bypass into a false positive on the one form that RECOVERS work.
 
 # Escape hatch: MUST_STASH_BECAUSE="non-empty reason" before git stash
 # Requires a non-empty quoted reason to pass through.
@@ -43,12 +53,14 @@ class GitStashHandler(Handler):
         # Allow recovery/query operations unconditionally
         # pop, apply, list, show — these retrieve stashed work
         # Note: drop/clear are blocked by DestructiveGitHandler
-        if re.search(r"git\s+stash\s+(?:pop|apply|list|show)", command, re.IGNORECASE):
+        if re.search(GIT_INVOCATION + r"stash\s+(?:pop|apply|list|show)", command, re.IGNORECASE):
             return False
 
         # Check if this is a stash creation command
         is_stash = bool(
-            re.search(r"git\s+stash(?:\s+(?:push|save))?(?=\W|$)", command, re.IGNORECASE)
+            re.search(
+                GIT_INVOCATION + r"stash(?:\s+(?:push|save))?(?=\W|$)", command, re.IGNORECASE
+            )
         )
         if not is_stash:
             return False

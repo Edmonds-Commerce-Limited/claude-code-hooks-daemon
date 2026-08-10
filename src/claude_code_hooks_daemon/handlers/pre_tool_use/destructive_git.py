@@ -6,16 +6,14 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.command_evasion import (
+    GIT_INVOCATION,
+    SUBCOMMAND_SEPARATOR_CHARS,
+)
 
 # Generic reason used when a destructive pattern matches but warrants no
 # command-specific explanation (e.g. bare `git checkout .`).
 _GENERIC_DESTRUCTIVE_REASON = "This git command destroys uncommitted changes permanently"
-
-# Characters that separate shell sub-commands. A flag that appears AFTER one of
-# these in a compound command belongs to a DIFFERENT sub-command, so any pattern
-# that must stay within a single sub-command segment scopes its match by
-# forbidding these characters between the sub-command head and the flag.
-_SUBCOMMAND_SEPARATOR_CHARS = ";&|"
 
 # Git accepts GLOBAL OPTIONS between `git` and the subcommand -- `-C <path>`,
 # `-c <k>=<v>`, `--git-dir=<path>`, `--work-tree=<path>`, `--no-pager`, and more.
@@ -31,18 +29,12 @@ _SUBCOMMAND_SEPARATOR_CHARS = ";&|"
 # right after it. Aim it at a directory not ending in `.git` and the block
 # disappeared -- so the near-miss also hid how broad the hole was.
 #
-# An option token starts with `-` and may take a separate value token, which by
-# definition does NOT start with `-`. Neither may cross a sub-command separator,
-# so a later segment of a compound command can never be dragged into the prefix.
-# Deliberately permissive rather than an allowlist of known option names: this
-# handler must fail CLOSED, and an unrecognised option must never mean "allow".
-_GIT_GLOBAL_OPTION = (
-    rf"-[^\s{_SUBCOMMAND_SEPARATOR_CHARS}]+"
-    rf"(?:\s+[^-\s{_SUBCOMMAND_SEPARATOR_CHARS}][^\s{_SUBCOMMAND_SEPARATOR_CHARS}]*)?"
-)
-# `git` followed by any run of global options. Every destructive pattern starts
-# with this instead of a bare `\bgit\s+`.
-_GIT_INVOCATION = rf"\bgit\s+(?:{_GIT_GLOBAL_OPTION}\s+)*"
+# GIT_INVOCATION is SHARED (utils.command_evasion) rather than defined here:
+# git_stash and sensitive_content had the identical defect, and a fix that lives
+# in one handler cannot reach the others. See
+# tests/unit/handlers/pre_tool_use/test_blocking_handler_evasion.py.
+_SUBCOMMAND_SEPARATOR_CHARS = SUBCOMMAND_SEPARATOR_CHARS
+_GIT_INVOCATION = GIT_INVOCATION
 
 # Force-push detection, scoped to the `git push` sub-command segment.
 # `[^;&|]*?` consumes only characters within the push segment (never a command

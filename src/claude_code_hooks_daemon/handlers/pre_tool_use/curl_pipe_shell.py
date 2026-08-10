@@ -13,18 +13,28 @@ from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, OPTIONAL_SUDO
 
 # Interpreters that execute piped content as code. Piping network content to any of
 # these is a remote-code-execution risk and must be blocked.
 _PIPED_INTERPRETERS = ("bash", "sh", "zsh", "ksh", "dash", "python", "perl", "ruby")
 
-# Pattern: (curl|wget) ... | [sudo [flags]] <interpreter>
-# - `sudo(\s+-\S+)*\s+` allows arbitrary sudo flags between sudo and the interpreter
+# Pattern: (curl|wget) ... | [sudo [flags]] [path/]<interpreter>
+# - OPTIONAL_SUDO allows arbitrary sudo flags before the interpreter
 #   (e.g. "sudo -E bash", "sudo -E -H sh"), not just bare "sudo".
+# - OPTIONAL_PATH allows the interpreter to be named by path. Without it,
+#   `curl URL | /bin/bash` was ALLOWED while `curl URL | bash` was denied —
+#   and /bin/bash is how install docs commonly spell it, so the bypass was
+#   more likely to be typed by accident than on purpose.
 # - the interpreter alternation covers every shell/scripting interpreter in
 #   _PIPED_INTERPRETERS, not just bash/sh.
 _CURL_PIPE_SHELL_PATTERN = (
-    r"\b(curl|wget)\b.*\|\s*(sudo(\s+-\S+)*\s+)?(" + "|".join(_PIPED_INTERPRETERS) + r")\b"
+    r"\b(curl|wget)\b.*\|\s*"
+    + OPTIONAL_SUDO
+    + OPTIONAL_PATH
+    + r"("
+    + "|".join(_PIPED_INTERPRETERS)
+    + r")\b"
 )
 
 
