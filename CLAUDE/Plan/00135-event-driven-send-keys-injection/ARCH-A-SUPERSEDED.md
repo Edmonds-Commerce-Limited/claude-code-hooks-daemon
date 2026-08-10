@@ -3,8 +3,14 @@
 # ARCH-A (superseded) — archived from `feature/00135-tmux-send-keys-injection`
 
 **This document is history, not current truth.** It is the ARCH-A rewrite of
-Plan 00135 as it stood on 2026-06-23, recovered from the
-`feature/00135-tmux-send-keys-injection` branch before that branch was removed.
+Plan 00135 as it stood on 2026-06-23, copied from the
+`feature/00135-tmux-send-keys-injection` branch.
+
+It is a COPY, not a rescue: the same content is published on
+`origin/feature/00135-tmux-send-keys-injection`, byte-identical, and is not at
+risk. It is duplicated here only so the ARCH-A reasoning is discoverable from
+the plan folder on `main` instead of on a branch nobody opens. Deleting the
+stale LOCAL copy of that branch loses nothing.
 
 **ARCH-A was not built.** Plan 00135 continued on `main` and settled on
 **ARCH-B** (the PTY supervisor, CCY-first for dogfooding) — see `PLAN.md`
@@ -23,6 +29,7 @@ NOT archived here: it is an earlier revision of the document that `PLAN.md` on
 `main` descends from, so git already holds it.
 
 ---
+
 # Plan 00135: Event-Driven `send-keys` Injection (ARCH-A, buildable)
 
 **Status**: In Progress — building on `feature/00135-tmux-send-keys-injection` (NOT main)
