@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
 
 
 def get_bash_command(hook_input: dict[str, Any]) -> str | None:
@@ -18,7 +19,18 @@ def get_bash_command(hook_input: dict[str, Any]) -> str | None:
     if hook_input.get("tool_name") != "Bash":
         return None
     tool_input: dict[str, Any] = hook_input.get("tool_input", {})
-    return cast("str", tool_input.get("command", ""))
+    command = tool_input.get("command", "")
+    # A Bash call can carry command=None (or an empty string). Both must pass
+    # straight through: callers test falsiness, and normalising None would
+    # raise inside the regex. Only real text is normalised.
+    if not command or not isinstance(command, str):
+        return cast("str | None", command)
+    # Line continuations are normalised HERE, at the single point where commands
+    # enter the daemon, so no handler pattern has to know about them. A command
+    # split across lines with `\<newline>` reached guards in a form none of their
+    # patterns matched — `\s+` does not match a backslash — so `git \<newline>
+    # reset --hard` was allowed while the one-line form was denied.
+    return normalise_line_continuations(command)
 
 
 def get_file_path(hook_input: dict[str, Any]) -> str | None:

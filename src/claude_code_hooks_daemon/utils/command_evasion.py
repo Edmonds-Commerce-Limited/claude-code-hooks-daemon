@@ -28,8 +28,13 @@ whose group numbering belongs to the caller.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import Final
+
+# A backslash immediately before a newline: the shell's line continuation.
+# Compiled once — this runs on every Bash command the daemon sees.
+_LINE_CONTINUATION_PATTERN: Final[re.Pattern[str]] = re.compile(r"\\\r?\n")
 
 # Characters that separate shell sub-commands. A token appearing AFTER one of
 # these belongs to a DIFFERENT sub-command, so a fragment that must stay inside
@@ -93,6 +98,33 @@ GIT_GLOBAL_OPTIONS_TAKING_SEPARATE_VALUE: Final[frozenset[str]] = frozenset(
         "--super-prefix",
     }
 )
+
+
+def normalise_line_continuations(command: str) -> str:
+    r"""Replace shell line continuations with a plain space.
+
+    A backslash immediately before a newline is not part of the command — the
+    shell removes it and joins the lines. Every pattern in this daemon was
+    written against the joined form, so a command split across lines slipped
+    past guards that would have caught it written on one line::
+
+        git reset --hard HEAD        -> denied
+        git \<newline> reset --hard  -> ALLOWED
+
+    That predates the global-option bypass and is independent of it: ``\s+``
+    simply does not match a backslash. It is also the most innocent vector of
+    the set — nobody writes it to evade anything, they write it because the
+    command is long.
+
+    Normalising once, at the point commands enter the daemon, is why this is a
+    function and not nine more regexes: the shell already defines the sequence
+    as whitespace, so no pattern should have to know about it.
+
+    Note: a genuinely escaped backslash at end of line (``\\`` then newline) is
+    also collapsed. That is the fail-CLOSED direction — it can only cause a
+    guard to look at more text, never less.
+    """
+    return _LINE_CONTINUATION_PATTERN.sub(" ", command)
 
 
 def git_subcommand_index(tokens: Sequence[str], git_index: int) -> int | None:

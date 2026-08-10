@@ -12,6 +12,7 @@ from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.utils import get_bash_command
 
 # World-writable OCTAL modes: any mode whose "other" (last) digit has the write bit
 # (octal 2) set — digits 2, 3, 6, 7. Covers 666, 777, 757, 002, etc. An optional
@@ -77,13 +78,10 @@ class DangerousPermissionsHandler(Handler):
         Returns:
             True if command sets dangerous permissions
         """
-        # Only process Bash commands
-        if hook_input.get("tool_name") != "Bash":
-            return False
-
-        # Extract command
-        tool_input = hook_input.get("tool_input", {})
-        command = tool_input.get("command")
+        # Canonical accessor: non-Bash returns None, and shell line
+        # continuations are normalised so a command split across lines is
+        # matched in the same form as a one-line one.
+        command = get_bash_command(hook_input)
         if not command:
             return False
 

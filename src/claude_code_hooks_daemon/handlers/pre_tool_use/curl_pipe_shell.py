@@ -13,6 +13,7 @@ from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, OPTIONAL_SUDO
 
 # Interpreters that execute piped content as code. Piping network content to any of
@@ -86,13 +87,10 @@ class CurlPipeShellHandler(Handler):
         Returns:
             True if command pipes network content to shell
         """
-        # Only process Bash commands
-        if hook_input.get("tool_name") != "Bash":
-            return False
-
-        # Extract command
-        tool_input = hook_input.get("tool_input", {})
-        command = tool_input.get("command")
+        # Canonical accessor: non-Bash returns None, and shell line
+        # continuations are normalised so a command split across lines is
+        # matched in the same form as a one-line one.
+        command = get_bash_command(hook_input)
         if not command:
             return False
 

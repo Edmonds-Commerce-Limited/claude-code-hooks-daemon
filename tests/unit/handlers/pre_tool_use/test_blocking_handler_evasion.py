@@ -1,4 +1,4 @@
-"""No blocking handler may be talked out of blocking by respelling the command.
+r"""No blocking handler may be talked out of blocking by respelling the command.
 
 DBF. The ``destructive_git`` bypass was not really a ``destructive_git`` bug —
 it was a MISSING GUARD. Nothing anywhere asked "can this handler be evaded?", so
@@ -17,6 +17,14 @@ The three vectors, all confirmed against the live daemon:
 * ``git`` global options   — ``git -C /path <subcommand>``
 * ``sudo`` own options     — ``sudo -H pip install``
 * path-qualified binaries  — ``/usr/bin/sed``, ``| /bin/bash``
+* line continuations       — ``git \<newline> reset --hard``
+
+The last one is the most innocent and the oldest: it defeated the ORIGINAL bare
+patterns too, long before global options were considered, because ``\s+`` does
+not match a backslash. Nobody writes it to evade anything — they write it
+because the command is long. It is fixed by normalising at the boundary
+(``get_bash_command``), not by widening patterns, so these cases also guard
+against a handler regressing to reading ``tool_input`` directly.
 
 Handlers must fail CLOSED. A false positive here is acceptable and already
 documented as intended; a silent bypass is not.
@@ -56,6 +64,9 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             f"git -C {_SAFE_PATH} reset --hard origin/main",
             "git --no-pager reset --hard origin/main",
             f"git --git-dir={_SAFE_PATH}/.repo reset --hard HEAD",
+            # Line continuations: defeated the ORIGINAL bare pattern too.
+            "git \\\n  reset --hard HEAD",
+            f"git \\\n  -C {_SAFE_PATH} \\\n  reset --hard HEAD",
         ),
     ),
     "GitStashHandler": (
@@ -64,6 +75,7 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             f"git -C {_SAFE_PATH} stash",
             "git --no-pager stash",
             "git -c core.pager=cat stash push",
+            f"git \\\n  -C {_SAFE_PATH} \\\n  stash",
         ),
     ),
     "SensitiveContentHandler": (

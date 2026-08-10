@@ -26,7 +26,55 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     OPTIONAL_SUDO,
     SUBCOMMAND_SEPARATOR_CHARS,
     git_subcommand_index,
+    normalise_line_continuations,
 )
+
+
+class TestNormaliseLineContinuations:
+    r"""A shell line continuation is whitespace, and must be treated as such.
+
+    ``git \<newline> reset --hard`` bypassed destructive_git even BEFORE global
+    options were considered: ``\s+`` does not match the backslash, so the
+    subcommand never followed ``git``. This is not an adversarial trick — it is
+    how anyone writes a long command across lines, so a well-intentioned agent
+    reaches it by accident.
+
+    Normalising once here beats teaching every pattern about it: the shell
+    already defines the sequence as whitespace, so the patterns should never
+    have to see it.
+    """
+
+    def test_collapses_backslash_newline(self) -> None:
+        assert "git" in normalise_line_continuations("git \\\n  status")
+        assert "\\" not in normalise_line_continuations("git \\\n  status")
+
+    def test_collapses_windows_line_ending(self) -> None:
+        assert "\\" not in normalise_line_continuations("git \\\r\n  status")
+
+    def test_collapses_repeated_continuations(self) -> None:
+        result = normalise_line_continuations("git \\\n  -C /srv \\\n  status")
+
+        assert "\\" not in result
+
+    def test_leaves_ordinary_commands_untouched(self) -> None:
+        command = "git status --porcelain"
+
+        assert normalise_line_continuations(command) == command
+
+    def test_preserves_a_backslash_that_is_not_a_continuation(self) -> None:
+        """Only backslash-NEWLINE is a continuation; a lone backslash is data."""
+        command = r"grep 'a\bc' file.txt"
+
+        assert normalise_line_continuations(command) == command
+
+    def test_normalised_command_is_matchable(self) -> None:
+        """The point of the exercise: patterns match after normalisation."""
+        raw = "git \\\n  -C /srv/project \\\n  reset --hard HEAD"
+
+        normalised = normalise_line_continuations(raw)
+
+        assert re.search(GIT_INVOCATION + r"reset\b", normalised) is not None
+
 
 # A path with no "git" substring anywhere: a path ending in ".git" lets a
 # `\bgit` anchor match inside the PATH and mask a broken fragment.

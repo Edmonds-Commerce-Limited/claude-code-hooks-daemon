@@ -13,6 +13,7 @@ from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, SUDO_INVOCATION
 
 # `sudo` + any form of pip install.
@@ -65,13 +66,11 @@ class SudoPipHandler(Handler):
         Returns:
             True if command uses sudo pip install
         """
-        # Only process Bash commands
-        if hook_input.get("tool_name") != "Bash":
-            return False
-
-        # Extract command
-        tool_input = hook_input.get("tool_input", {})
-        command = tool_input.get("command")
+        # get_bash_command is the CANONICAL accessor: it returns None for
+        # non-Bash tools and normalises shell line continuations, so a command
+        # split across lines is matched in the same form as a one-line one.
+        # Reading tool_input directly skipped that and reopened the hole.
+        command = get_bash_command(hook_input)
         if not command:
             return False
 
