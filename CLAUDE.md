@@ -1332,20 +1332,6 @@ It also detects a **stale running supervisor** (Plan 00164): when a daemon upgra
 
 When you see this alert, fix the listed item(s) and commit the ccy files so the supervisor works for everyone.
 
-## git_upstream_checker — additive fetch + pull/cleanup advice on session start
-
-On each new session the daemon runs an **additive** `git fetch --all` (never `--prune` — it never removes anything automatically) and then:
-
-**If your branch is behind its upstream**, acts on the configured `mode`:
-
-- `warn` (default): strongly advises you to run `git pull`.
-- `agent-pull`: instructs you to run `git pull` as your first action.
-- `auto-pull`: the daemon runs `git pull --ff-only` for you on a clean, non-diverged tree; if it cannot fast-forward (dirty tree or diverged history) it degrades to a warning and you pull manually.
-
-**If local branches track a remote branch that was deleted**, it lists them (marked merged = safe vs not-merged = has unique commits) and asks you to clean up AFTER checking: `git branch -d <name>` for merged branches, ask the human for the rest, and optionally `git fetch --prune` the stale remote-tracking refs. The daemon never prunes or deletes a branch itself; never use `git branch -D`.
-
-It is silent when up to date with no gone branches, not in a git repo, on a detached HEAD, or without an upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
-
 ## hook_registration_checker — hooks configuration policy
 
 On every new session this handler audits hook configuration across `.claude/settings.json` and `.claude/settings.local.json`. When it reports issues, fix them — do not ignore the warning.
@@ -1395,6 +1381,22 @@ At session start, when the plan workflow is enabled but the daemon-owned `mkplan
 ```
 
 The deploy is idempotent (fills gaps only, never overwrites client-owned files). Silent when `mkplan.bash` is present or the workflow is disabled.
+
+## git_upstream_checker — additive fetch + pull/cleanup advice on session start
+
+On each new session the daemon runs an **additive** `git fetch --all` (never `--prune` — it never removes anything automatically) and then:
+
+**If your branch is behind its upstream**, acts on the configured `mode`:
+
+- `warn` (default): strongly advises you to run `git pull`.
+- `agent-pull`: instructs you to run `git pull` as your first action.
+- `auto-pull`: the daemon runs `git pull --ff-only` for you on a clean, non-diverged tree; if it cannot fast-forward (dirty tree or diverged history) it degrades to a warning and you pull manually.
+
+**If the upstream was REWRITTEN**, every mode above is overridden and NO pull is advised in any wording. The signal is a divergence whose two sides share no commit shas yet resolve to the SAME tree: identical content, so there is nothing to merge and each local commit is a pre-rewrite duplicate. Pulling would merge the entire pre-rewrite history back in and republish whatever the rewrite (a `filter-repo` secret-strip, say) was run to remove. The advisory instead asks a human to realign the branch onto its upstream and to re-fetch tags with `--force`, since a rewrite moves every tag to a new sha. Do NOT work around this by pulling — if you believe the divergence is genuine, check the trees yourself before merging.
+
+**If local branches track a remote branch that was deleted**, it lists them (marked merged = safe vs not-merged = has unique commits) and asks you to clean up AFTER checking: `git branch -d <name>` for merged branches, ask the human for the rest, and optionally `git fetch --prune` the stale remote-tracking refs. The daemon never prunes or deletes a branch itself; never use `git branch -D`.
+
+It is silent when up to date with no gone branches, not in a git repo, on a detached HEAD, or without an upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
 
 ## idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
 
