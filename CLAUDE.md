@@ -720,13 +720,15 @@ Writing code that contains security antipatterns is blocked across all supported
 
 **Blocked categories**:
 
-- SQL injection: building queries via string concatenation (use parameterised queries)
-- Command injection: passing unvalidated input to subprocess (use argument lists)
-- Hardcoded credentials: API keys, passwords, tokens embedded in source code
-- Weak cryptography: MD5 or SHA1 for password hashing (use bcrypt/argon2)
-- Path traversal: unvalidated user input used in file paths
+- Code injection: `eval`, `exec`, `new Function`, `__import__`, `instance_eval`, `yaml.load` — dynamic execution of a string
+- Command injection: `os.system`, `subprocess(..., shell=True)`, `shell_exec`, `proc_open`, `Runtime.exec`, `Process.Start`, `IO.popen`
+- Unsafe deserialization: `pickle.load`, `Marshal.load`, `unserialize`, `ObjectInputStream`, `XMLDecoder`, `BinaryFormatter`
+- XSS: `innerHTML`, `dangerouslySetInnerHTML`, `document.write`, `template.HTML`/`JS`/`URL`
+- Hardcoded credentials: AWS access keys, GitHub tokens, Stripe keys, private key blocks
 
-**Supported languages**: Python, JavaScript/TypeScript, Go, PHP, Ruby, Java, Kotlin, C#, Rust, Swift, Dart.
+**This is pattern matching on known-dangerous constructs, not analysis.** It does NOT detect SQL injection, weak hashing, or path traversal — those are properties of how a value FLOWS, which a regex cannot see. Do not read a passing write as 'this code is secure'.
+
+**Supported languages**: Python, JavaScript/TypeScript, Go, PHP, Ruby, Java, Kotlin, C#, Rust, Swift, Dart. Coverage varies by language — a construct blocked in one is not necessarily blocked in another.
 
 **Excluded paths**: vendor/, node_modules/, and test fixtures are skipped by default. Exempt more paths with glob patterns via `handlers.pre_tool_use.security_antipattern.options.exclude_paths` or the project-wide `daemon.exclude_paths`.
 
