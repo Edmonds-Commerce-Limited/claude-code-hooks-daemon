@@ -142,24 +142,35 @@ handlers:
         # keys the gate would be red the day it landed and stay red until then —
         # and a permanently-red gate gets disabled, not fixed.
         #
-        # history_baseline: commits reachable from this sha are exempt. It NEEDS
-        # no manual removal: the rewrite gives every commit a new sha, so this
-        # one stops resolving, and an unresolvable baseline exempts NOTHING
-        # (fail-safe). The gate therefore tightens to full history coverage by
-        # itself the moment the rewrite lands.
-        history_baseline: 863d55a4bb1b651cd3a682ec5ccde689931f6b8d
+        # history_baseline: commits reachable from this sha are exempt.
+        #
+        # The rewrite has now landed, and it did exactly what the previous note
+        # here predicted: every commit got a new sha, the old baseline stopped
+        # resolving, and the fail-safe (an unresolvable baseline exempts
+        # NOTHING) swept the full history for the first time. So this is no
+        # longer a placeholder awaiting a rewrite — it is the published tip as
+        # of the day the sweep first ran clean, and it means "everything
+        # already public predates this guard".
+        #
+        # It covers exactly one known finding, deliberately: a commit body on
+        # published main carries profanity ('profanity' public pattern). That
+        # is unreachable without a SECOND force-push of all 1562 commits and
+        # 121 tags, which is disproportionate to one word in one message body.
+        # New commits get no such tolerance — that is the point of a baseline.
+        history_baseline: ccfe3baa4d54dfbf930d2e5169bd335ef11c17b9
         # Refs cannot be covered by a commit baseline — a ref has no ancestry,
         # so exempting by the tagged commit would let a tag created TODAY on an
-        # ancient commit sail through. These three annotated tag messages are
-        # the known contamination (the same three releases whose GitHub release
-        # BODIES also need editing — GitHub, not git, so no rewrite reaches
-        # them). Unlike the baseline this list does not auto-expire, so the
-        # checker reports a `stale-grandfather` violation once an entry stops
-        # being needed.
-        history_grandfathered_refs:
-          - 'v3.16.0'
-          - 'v3.22.0'
-          - 'v3.25.0'
+        # ancient commit sail through. Unlike the baseline this list cannot
+        # auto-expire, so the checker reports a `stale-grandfather` violation
+        # once an entry stops being needed.
+        #
+        # It held v3.16.0 / v3.22.0 / v3.25.0, whose annotated tag MESSAGES
+        # carried the contamination. The rewrite cleaned those messages and the
+        # forced tag re-fetch brought the clean objects down, at which point the
+        # checker reported all three as `stale-grandfather` — the self-reporting
+        # worked, so the entries are gone. The list is now empty by design:
+        # nothing is exempt, and adding an entry should need a written reason.
+        history_grandfathered_refs: []
         exclude_paths:
           # A rules file must be able to contain its own rules. This config
           # DECLARES the patterns above, so it necessarily contains text

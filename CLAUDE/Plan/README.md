@@ -172,7 +172,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
-- [00202: Sensitive content git metadata surfaces](Completed/00202-sensitive-content-git-metadata-surfaces/PLAN.md) - Complete (file contents and file paths were 2 of the 7 surfaces that cleaning this repo's own history actually had to touch; the other 5 are git metadata — commit messages, author identity, tag names, tag messages, branch names — all entering via Bash, which `matches()` rejected outright. Every surface now carries BOTH a write-time guard and a batch guard, exercised in a 7×2 matrix rather than declared. Delivered `863d55a4`, `5041648c`.)
+- [00202: Sensitive content git metadata surfaces](Completed/00202-sensitive-content-git-metadata-surfaces/PLAN.md) - Complete (contents and paths were 2 of the 7 surfaces cleaning this repo's history had to touch; the other 5 are git metadata — commit messages, author identity, tag/branch names, tag messages — all entering via Bash, which `matches()` rejected outright. Each surface now carries both a write-time and a batch guard, exercised in a 7×2 matrix.)
 
 - [00201: Sensitive Content Secret-Word Blocking](Completed/00201-sensitive-content-secret-word-blocking/PLAN.md) - Complete (guard against recurrence of the ~160-place employer/client identifier leak found by the presentation-quality audit; five leak vectors closed, not the four scoped, and the live dogfood confirms the term reaches no log or capture.)
 

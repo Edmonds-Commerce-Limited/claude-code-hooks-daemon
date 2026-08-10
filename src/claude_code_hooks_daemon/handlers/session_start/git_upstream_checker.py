@@ -127,7 +127,16 @@ class GitUpstreamCheckerHandler(Handler):
         return HookResult(decision=Decision.ALLOW, context=context)
 
     def _behind_context(self, root: Path, status: git_sync.UpstreamStatus) -> list[str]:
-        """Dispatch the behind-upstream advisory according to the configured mode."""
+        """Dispatch the behind-upstream advisory according to the configured mode.
+
+        A rewritten upstream pre-empts every mode. Ahead/behind counts cannot
+        tell that state apart from ordinary divergence, but the right advice is
+        opposite, and this handler is usually the only thing that speaks up on a
+        fresh session — so getting it wrong here is the most consequential
+        sentence it can emit.
+        """
+        if status.ahead > 0 and git_sync.upstream_was_rewritten(root):
+            return self._rewrite_context(status)
         mode = self._resolve_mode()
         if mode == _MODE_AUTO_PULL:
             return self._auto_pull(root, status)
@@ -150,6 +159,40 @@ class GitUpstreamCheckerHandler(Handler):
                 f"   Local history has also moved on ({status.ahead} commit(s) ahead) — "
                 "the branches have diverged."
             )
+        return lines
+
+    def _rewrite_context(self, status: git_sync.UpstreamStatus) -> list[str]:
+        """Advice for a divergence whose two sides hold IDENTICAL content.
+
+        Deliberately says nothing about pulling, in any wording. An agent that
+        reads "pull" in any form here will reach for it, and after a rewrite
+        that single command re-merges every pre-rewrite commit and republishes
+        whatever the rewrite was run to remove.
+        """
+        lines = self._behind_lines(status)
+        lines.extend(
+            [
+                "",
+                f"   ⚠️  DO NOT MERGE. {status.upstream} appears to have been "
+                "REWRITTEN: your local commits have patch-IDENTICAL twins "
+                "upstream under different shas. The content is already there, "
+                "so there is nothing to merge.",
+                f"   Merging would drag {status.ahead} pre-rewrite commit(s) back "
+                "in and republish whatever the rewrite removed. (A rewrite keeps "
+                "untouched early history, so a shared merge base proves nothing "
+                "here.)",
+                "",
+                "   Realign instead. This discards local commits, so a human "
+                "should run it deliberately:",
+                "",
+                "     git fetch origin",
+                f"     git reset --hard {status.upstream}",
+                "     git fetch --tags --force",
+                "",
+                "   It changes no files: the trees already match. The tag fetch "
+                "matters too — a rewrite moves every tag to a new sha.",
+            ]
+        )
         return lines
 
     def _warn_context(self, status: git_sync.UpstreamStatus) -> list[str]:
@@ -271,6 +314,16 @@ class GitUpstreamCheckerHandler(Handler):
             "- `auto-pull`: the daemon runs `git pull --ff-only` for you on a clean, "
             "non-diverged tree; if it cannot fast-forward (dirty tree or diverged history) "
             "it degrades to a warning and you pull manually.\n\n"
+            "**If the upstream was REWRITTEN**, every mode above is overridden and NO pull "
+            "is advised in any wording. The signal is a divergence whose two sides share no "
+            "commit shas yet resolve to the SAME tree: identical content, so there is nothing "
+            "to merge and each local commit is a pre-rewrite duplicate. Pulling would merge "
+            "the entire pre-rewrite history back in and republish whatever the rewrite (a "
+            "`filter-repo` secret-strip, say) was run to remove. The advisory instead asks a "
+            "human to realign the branch onto its upstream and to re-fetch tags with "
+            "`--force`, since a rewrite moves every tag to a new sha. Do NOT work around "
+            "this by pulling — if you believe the divergence is genuine, check the trees "
+            "yourself before merging.\n\n"
             "**If local branches track a remote branch that was deleted**, it lists them "
             "(marked merged = safe vs not-merged = has unique commits) and asks you to clean "
             "up AFTER checking: `git branch -d <name>` for merged branches, ask the human for "

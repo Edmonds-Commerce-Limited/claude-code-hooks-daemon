@@ -261,7 +261,28 @@ except Exception:
     fi
 fi
 
-[ -d "$DAEMON_DIR/.git" ] || _fail "Daemon directory is not a git repository: $DAEMON_DIR"
+# The daemon dir must be the TOPLEVEL of its OWN git repository.
+#
+# Safety-critical, because Step 6 force-resets this directory. "Is it a repo?"
+# is the wrong question: for a PLAIN directory inside the user's own project,
+# git walks UP and answers about the PARENT. A half-finished install leaves
+# .claude/hooks-daemon/ as exactly such an ordinary directory — so a naive repo
+# test would aim a hard reset at the user's own repository and discard their
+# uncommitted work.
+#
+# `rev-parse --show-prefix` prints the queried directory's path RELATIVE to its
+# repo toplevel, so it is empty exactly AT the toplevel. That accepts clones,
+# worktrees and submodules — a worktree stores .git as a FILE, which the old
+# `[ -d "$DAEMON_DIR/.git" ]` test wrongly rejected, and which is why
+# scripts/dummy-client-repo.sh could not exercise this script at all.
+#
+# Deliberately NOT a `--show-toplevel` string comparison: that mis-fires
+# whenever symlinks make two spellings of the same path differ.
+# Pinned by tests/integration/test_upgrade_sh_daemon_dir_detection.py.
+DAEMON_DIR_PREFIX="$(git -C "$DAEMON_DIR" rev-parse --show-prefix 2>/dev/null)" \
+    || _fail "Daemon directory is not a git repository: $DAEMON_DIR"
+[ -z "$DAEMON_DIR_PREFIX" ] || _fail \
+    "Daemon directory is not the root of its own git repository: $DAEMON_DIR (it sits ${DAEMON_DIR_PREFIX%/} inside a repository rooted above it, so upgrading here would modify THAT repository). Reinstall the daemon into $DAEMON_DIR."
 _ok "Daemon directory: $DAEMON_DIR"
 
 # Step 3b: Capture FROM_VERSION before checkout overwrites pyproject.toml.
@@ -353,24 +374,43 @@ git -C "$DAEMON_DIR" rev-parse "$TARGET_VERSION" &>/dev/null || \
     _fail "Version $TARGET_VERSION not found"
 _ok "Target version: $TARGET_VERSION"
 
-# Plan 00109 Phase 2.3: clean up stray untracked uv.lock before checkout.
-# Migrated from the old skill upgrade.sh (Plan 00104 Issue #3 fix). The
-# upstream copy is git-aware: only removes uv.lock when it is UNTRACKED in
-# $DAEMON_DIR. In self-install mode uv.lock is tracked and must be left
-# alone (the new tag's checkout will overwrite it cleanly). In a client
-# install a prior `uv sync` may have left an untracked uv.lock that
-# would otherwise block `git checkout` with
-# "untracked working tree files would be overwritten by checkout".
-if [ -f "$DAEMON_DIR/uv.lock" ]; then
-    if ! git -C "$DAEMON_DIR" ls-files --error-unmatch uv.lock > /dev/null 2> /dev/null; then
-        rm -f "$DAEMON_DIR/uv.lock"
-        _ok "Removed untracked uv.lock from $DAEMON_DIR (would block checkout)"
-    fi
-fi
-
-# Step 6: Checkout target version FIRST (before looking for Layer 2)
+# Step 6: Land the daemon dir on the target version FIRST (before Layer 2).
+#
+# The two modes get DIFFERENT commands because $DAEMON_DIR means two very
+# different things (see Step 3).
+#
+# CLIENT INSTALL -- $DAEMON_DIR is <project>/.claude/hooks-daemon, an upstream
+# dependency this project's own guidance declares off-limits ("Do NOT edit
+# anything inside .claude/hooks-daemon/; changes will be overwritten on the
+# next upgrade"). Local drift there is never precious. A plain
+# `git checkout <tag>` disagrees and treats it as precious: it ABORTS when a
+# tracked file was modified locally, and again when an untracked file would be
+# overwritten by the tag. Either abort strands the client on an old daemon with
+# no self-service recovery. `reset --hard` writes the tag's tree
+# unconditionally and has neither failure mode.
+#
+# This supersedes a hand-rolled deletion of a stray untracked uv.lock that used
+# to sit here (Plan 00109 Phase 2.3, itself migrated from Plan 00104 Issue #3).
+# That was one filename, fixed by name, because that one file had been observed
+# blocking checkout -- every other stray file with the same shape still
+# stranded the client. The forced reset covers all of them, so the special case
+# is now dead code rather than a safety net.
+#
+# SELF-INSTALL -- $DAEMON_DIR is the project root ITSELF: the developer's own
+# repository, with their own branches and uncommitted work. Forcing there would
+# silently destroy it. This path deliberately keeps the checkout that REFUSES
+# on a dirty tree; an aborted upgrade is the correct outcome for a developer
+# who has work in flight.
+#
+# Pinned by tests/integration/test_upgrade_sh_forced_checkout.py, which
+# extracts the client invocation from this file and runs it against dirty
+# fixtures -- reverting to a plain checkout fails those tests.
 _info "Checking out $TARGET_VERSION..."
-git -C "$DAEMON_DIR" checkout "$TARGET_VERSION" --quiet
+if [ "$SELF_INSTALL" = "true" ]; then
+    git -C "$DAEMON_DIR" checkout "$TARGET_VERSION" --quiet
+else
+    git -C "$DAEMON_DIR" reset --hard --quiet "$TARGET_VERSION"
+fi
 _ok "Checked out $TARGET_VERSION"
 
 # Step 7: Clean up nested install artifacts

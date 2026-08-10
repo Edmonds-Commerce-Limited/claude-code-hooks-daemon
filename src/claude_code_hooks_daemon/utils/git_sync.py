@@ -54,6 +54,12 @@ _WOULD_PRUNE_MARKER = "[would prune]"
 # for-each-ref field separator (a char that never appears in a git ref name).
 _REF_FIELD_SEP = "\x1f"
 
+# Peeling suffix that resolves any commit-ish to the TREE object it points at.
+# Comparing trees (not commits) is what tells a history rewrite apart from
+# ordinary divergence — see ``upstream_tree_matches``.
+_TREE_PEEL_SUFFIX = "^{tree}"
+_HEAD_REF = "HEAD"
+
 
 @dataclass(frozen=True)
 class UpstreamStatus:
@@ -147,6 +153,118 @@ def upstream_ref(cwd: Path) -> str | None:
         return None
     ref = result.stdout.strip()
     return ref or None
+
+
+def _tree_of(cwd: Path, rev: str) -> str | None:
+    """Resolve ``rev`` to its tree object sha, or ``None`` when unresolvable."""
+    result = _run_git(cwd, "rev-parse", f"{rev}{_TREE_PEEL_SUFFIX}", timeout=Timeout.GIT_CONTEXT)
+    if result is None or result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def upstream_tree_matches(cwd: Path) -> bool:
+    """True when ``HEAD`` and its upstream resolve to the SAME tree object.
+
+    Read this together with :func:`upstream_status`. Ahead/behind counts cannot
+    tell an ordinary divergence apart from an upstream HISTORY REWRITE — both
+    report "N ahead, M behind" — yet the correct response is opposite. Merging
+    is right for the first and destructive for the second: a rewrite replays
+    the same content under new shas, so every local commit is a pre-rewrite
+    duplicate and a merge drags all of them back in, re-publishing exactly what
+    the rewrite existed to destroy.
+
+    The tree is the discriminator. A rewrite changes commit metadata and leaves
+    content untouched, so the trees match while the commit shas differ. Real
+    divergence changes content, so the trees differ too.
+
+    Conservative by design: anything unresolvable (no upstream, not a repo, git
+    unavailable) returns ``False``, so a caller falls back to the ordinary
+    divergence advice rather than suppressing it on a guess.
+    """
+    upstream = upstream_ref(cwd)
+    if upstream is None:
+        return False
+    head_tree = _tree_of(cwd, _HEAD_REF)
+    upstream_tree = _tree_of(cwd, upstream)
+    if head_tree is None or upstream_tree is None:
+        return False
+    return head_tree == upstream_tree
+
+
+def _cherry_counts(cwd: Path) -> tuple[int, int] | None:
+    """Return ``(duplicated, unique)`` counts for local commits versus upstream.
+
+    ``--cherry-pick`` compares by PATCH ID, so a commit replayed under a new sha
+    with the same change counts as duplicated. That is exactly what a history
+    rewrite produces, and it is why this beats comparing shas.
+
+    ``None`` when the counts cannot be established (no upstream, not a repo, git
+    unavailable, or the probe timed out on a very large history).
+    """
+    upstream = upstream_ref(cwd)
+    if upstream is None:
+        return None
+    ahead = _run_git(cwd, "rev-list", "--count", f"{upstream}..HEAD", timeout=Timeout.GIT_CONTEXT)
+    # Patch-id computation over every diverged commit — a fetch-scale budget,
+    # not a context-scale one. Only ever reached on an already-diverged branch.
+    unique = _run_git(
+        cwd,
+        "rev-list",
+        "--count",
+        "--left-only",
+        "--cherry-pick",
+        f"HEAD...{upstream}",
+        timeout=Timeout.GIT_FETCH_SESSION,
+    )
+    if ahead is None or unique is None:
+        return None
+    if ahead.returncode != 0 or unique.returncode != 0:
+        return None
+    # Validated rather than caught: `--count` always prints a bare integer, so
+    # anything else means git did not answer the question we asked. Checking up
+    # front keeps that an explicit branch instead of a swallowed exception.
+    ahead_text = ahead.stdout.strip()
+    unique_text = unique.stdout.strip()
+    if not ahead_text.isdigit() or not unique_text.isdigit():
+        return None
+    unique_count = int(unique_text)
+    return int(ahead_text) - unique_count, unique_count
+
+
+def upstream_was_rewritten(cwd: Path) -> bool:
+    """True when the upstream looks REWRITTEN rather than merely diverged.
+
+    Read with :func:`upstream_status`. Ahead/behind counts cannot separate the
+    two, yet the right response is opposite: merging is correct for ordinary
+    divergence and destructive after a rewrite, where every local commit is a
+    pre-rewrite duplicate and a merge drags the whole contaminated history back
+    in — republishing exactly what the rewrite existed to destroy.
+
+    Two signals, cheapest first:
+
+    1. Identical trees (:func:`upstream_tree_matches`) — a pure rewrite with no
+       local work on top. O(1), exact.
+    2. Most local commits have a patch-identical twin upstream. This is the
+       realistic case: a rewrite plus a handful of genuinely new local commits,
+       which signal 1 misses entirely because any local commit changes the tree.
+
+    Note what is NOT used: a missing merge base. ``filter-repo`` only rewrites
+    commits from the first modified one onward, so untouched early history keeps
+    its shas and a common ancestor usually still exists.
+
+    Conservative: anything unresolvable returns ``False``, so the caller falls
+    back to ordinary divergence advice rather than suppressing it on a guess.
+    """
+    if upstream_tree_matches(cwd):
+        return True
+    counts = _cherry_counts(cwd)
+    if counts is None:
+        return False
+    duplicated, unique = counts
+    # Strictly greater: a tie is not evidence, and "no duplicates at all" is
+    # the ordinary-divergence signature.
+    return duplicated > 0 and duplicated > unique
 
 
 def upstream_status(cwd: Path) -> UpstreamStatus | None:
