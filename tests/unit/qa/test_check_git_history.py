@@ -297,6 +297,32 @@ class TestIdentityAndRefSurfaces:
 
         assert "ref-name" in {v["surface"] for v in data["violations"]}
 
+    def test_term_in_remote_tracking_branch_name_is_flagged(self, tmp_path: Path) -> None:
+        """A remote branch NAME is the most published surface of all.
+
+        The commit sweep uses ``git log --all``, which already reaches
+        ``refs/remotes``, so remote COMMITS were never blind. Ref NAMES were:
+        the sweep enumerated ``refs/heads`` and ``refs/tags`` only. That
+        asymmetry meant a term could sit in a branch name on the origin —
+        readable by anyone with access to the repository — while this gate
+        reported the history clean. Found while hand-checking the remote
+        before a release, which is exactly the manual step a gate exists to
+        make unnecessary.
+        """
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        _secret_list(repo)
+        _git(repo, "update-ref", f"refs/remotes/origin/{_TERM}-work", "HEAD")
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+
+        data = _run_checker(repo, config)
+
+        offenders = {v["locator"] for v in data["violations"] if v["surface"] == "ref-name"}
+        assert any(
+            "origin/" in name for name in offenders
+        ), f"Remote-tracking ref name was not scanned. ref-name findings: {offenders}"
+
 
 class TestPublicPatterns:
     def test_public_pattern_in_commit_message_names_the_match(self, tmp_path: Path) -> None:

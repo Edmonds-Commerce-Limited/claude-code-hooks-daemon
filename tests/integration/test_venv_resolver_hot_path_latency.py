@@ -44,15 +44,31 @@ INIT_SH = REPO_ROOT / "init.sh"
 FINGERPRINT_HELPER = REPO_ROOT / "scripts" / "install" / "python_fingerprint.sh"
 
 ITERATIONS = 25
-# The original 5ms budget was tight even on bare metal: the cache-hit
-# path forks a subshell to read ``stat -c %Y`` (≈2-4ms on its own under
-# Linux fork+exec), so on throttled hosts (power-saver, podman/docker
-# under battery, shared CI runners) the median pushes 10-12ms even
-# though the cache IS hitting. 15ms is comfortably below the no-cache
-# path (which lands around 100ms because paths.py spawns a fresh python
-# interpreter to compute the fingerprint), so a real cache regression
-# still trips the gate while honest perf variance does not.
-LATENCY_BUDGET_MS = 15.0
+
+# This gate asserts a RATIO, not a wall-clock budget, and that is a
+# deliberate correction rather than a loosening.
+#
+# Two fixed budgets were tried and both were wrong in the same way. 5ms was
+# tight even on bare metal; 15ms then failed at a 15.31ms median on a loaded
+# host whose samples ran 7.38-20.68ms — i.e. the budget had been placed
+# INSIDE the cache-hit distribution's own spread, making the gate a coin
+# flip. Every such number is a guess about the host, and the gate does not
+# care about the host: it exists to catch the hot-path cache not hitting.
+#
+# The cache turns a ≈100ms python3-spawn into a ≈10ms file read, so the two
+# populations differ by an order of magnitude and the FIRST iteration is
+# always the uncached one (it is the sample that writes the cache). Dividing
+# by it is self-calibrating: a slow host inflates both terms and the ratio
+# holds, while a broken cache makes every sample slow and collapses the
+# ratio to ≈1. Observed on the failing run: 260.03ms first sample against a
+# 15.31ms steady-state median — 17x, with the cache working correctly.
+#
+# 3x is a conservative floor. The narrowest realistic working case (a fast
+# uncached spawn at ≈80ms against a slow cache hit at ≈20ms) still clears
+# 4x, and the broken case sits at ≈1x, so the separation is wide in both
+# directions. ``test_gate_fires_when_the_cache_cannot_hit`` proves the
+# lower half of that claim by measurement rather than by assertion.
+MIN_CACHE_SPEEDUP_RATIO = 3.0
 
 
 def _extract_init_sh_resolver(tmp_path: Path) -> Path:
@@ -124,14 +140,26 @@ def _build_fingerprint_keyed_fixture(tmp_path: Path) -> Path:
     return daemon_dir
 
 
-def _measure_resolver_latency(daemon_dir: Path, helper: Path) -> list[float]:
+HOT_PATH_CACHE_NAME = ".python-cmd-cache"
+
+
+def _measure_resolver_latency(
+    daemon_dir: Path, helper: Path, *, defeat_cache: bool = False
+) -> list[float]:
     """Time ``_resolve_python_cmd`` ITERATIONS times in one bash session.
 
     Returns a list of per-iteration durations in milliseconds.
+
+    ``defeat_cache`` deletes the hot-path cache before every timed call, which
+    simulates the regression this module gates against. It exists so the gate
+    can be shown to FAIL on a broken cache rather than merely asserted to.
     """
+    cache_file = daemon_dir / "untracked" / HOT_PATH_CACHE_NAME
+    invalidate = f'rm -f "{cache_file}"' if defeat_cache else ""
     script = f"""
         source "{helper}"
         for _ in $(seq 1 {ITERATIONS}); do
+            {invalidate}
             t0=$EPOCHREALTIME
             _resolve_python_cmd > /dev/null 2>&1
             t1=$EPOCHREALTIME
@@ -154,6 +182,18 @@ def _measure_resolver_latency(daemon_dir: Path, helper: Path) -> list[float]:
     return [float(line) for line in result.stdout.strip().splitlines() if line.strip()]
 
 
+def _cache_speedup(latencies: list[float]) -> float:
+    """How many times faster the steady state is than the uncached first call.
+
+    ``latencies[0]`` is by construction the cache MISS — it is the call that
+    computes the fingerprint and writes the cache — and the rest are hits.
+    Expressing the gate as their ratio removes the host from the assertion
+    entirely: a throttled machine slows both terms together.
+    """
+    steady_state = statistics.median(latencies[1:])
+    return latencies[0] / steady_state
+
+
 def test_resolver_harness_produces_measurements(tmp_path: Path) -> None:
     """Smoke: the benchmark harness runs and emits ITERATIONS samples.
 
@@ -174,33 +214,63 @@ def test_resolver_harness_produces_measurements(tmp_path: Path) -> None:
 
 
 def test_resolver_median_latency_under_budget(tmp_path: Path) -> None:
-    """Steady-state hot-path: median resolve must be ``<LATENCY_BUDGET_MS``.
+    """Steady-state hot-path: the cache must make repeat resolves much cheaper.
 
-    Runs ``_resolve_python_cmd`` ITERATIONS times against a fingerprint-
-    keyed venv (the realistic post-bootstrap state) and asserts the
-    median measured wall time is below ``LATENCY_BUDGET_MS``.
+    Runs ``_resolve_python_cmd`` ITERATIONS times against a fingerprint-keyed
+    venv (the realistic post-bootstrap state) and asserts the steady-state
+    median is at least :data:`MIN_CACHE_SPEEDUP_RATIO` times faster than the
+    uncached first call.
 
     This is a **cache-regression gate**, not a hard perf guarantee. The
     Phase 8 Task 8.1 hot-path cache in ``_rv_resolve_python_impl``
     (scripts/lib/resolve_venv.sh) stores ``<untracked_mtime> <python_path>``
     at ``$daemon_dir/untracked/.python-cmd-cache`` and is invalidated when
     untracked/'s directory mtime changes. The first iteration takes the
-    slow path (python3 spawn for fingerprint MD5 — ≈100ms) and writes the
-    cache; subsequent iterations must hit the cache. If the cache breaks
-    the median jumps an order of magnitude (≈100ms vs ≈10ms), well above
-    the budget — exactly the regression class this gate catches.
+    slow path (python3 spawn for fingerprint MD5); subsequent iterations must
+    hit the cache. If the cache breaks, every call pays that spawn and the
+    first call stops standing out — which is exactly what this ratio measures.
     """
     daemon_dir = _build_fingerprint_keyed_fixture(tmp_path)
     helper = _extract_init_sh_resolver(tmp_path)
 
     latencies = _measure_resolver_latency(daemon_dir, helper)
-    median_ms = statistics.median(latencies)
+    speedup = _cache_speedup(latencies)
 
-    assert median_ms < LATENCY_BUDGET_MS, (
-        f"Median resolve latency {median_ms:.2f}ms exceeds the {LATENCY_BUDGET_MS}ms budget.\n"
+    assert speedup >= MIN_CACHE_SPEEDUP_RATIO, (
+        f"Cached resolve is only {speedup:.1f}x faster than the uncached "
+        f"first call, below the {MIN_CACHE_SPEEDUP_RATIO}x floor.\n"
+        f"Uncached first sample: {latencies[0]:.2f}ms\n"
+        f"Steady-state median:   {statistics.median(latencies[1:]):.2f}ms\n"
         f"All samples: {[f'{t:.2f}' for t in latencies]}\n"
-        "Either the Phase 8 Task 8.1 hot-path cache regressed (cache no "
-        "longer hits — expect ≈100ms per sample after the first), or the "
-        "host is so slow that even cache hits exceed the budget. Bump "
-        "LATENCY_BUDGET_MS only if you have verified the cache IS hitting."
+        "The Phase 8 Task 8.1 hot-path cache is no longer hitting: every "
+        "call is paying the python3 fingerprint spawn, so the first call "
+        "is no longer distinguishable from the rest. This ratio is "
+        "host-independent — do NOT 'fix' it by lowering the floor."
+    )
+
+
+def test_gate_fires_when_the_cache_cannot_hit(tmp_path: Path) -> None:
+    """The gate above must FAIL when the cache is defeated.
+
+    A gate nobody has watched fail is not known to work — the two previous
+    wall-clock budgets were only ever observed rejecting HEALTHY runs. Here
+    the cache file is deleted before every timed call, so every call takes
+    the python3-spawn path and the first call loses its distinction. The
+    measured speedup must land below the floor the real gate enforces.
+    """
+    daemon_dir = _build_fingerprint_keyed_fixture(tmp_path)
+    helper = _extract_init_sh_resolver(tmp_path)
+
+    latencies = _measure_resolver_latency(daemon_dir, helper, defeat_cache=True)
+    speedup = _cache_speedup(latencies)
+
+    assert speedup < MIN_CACHE_SPEEDUP_RATIO, (
+        f"With the cache deleted before every call the speedup was still "
+        f"{speedup:.1f}x, at or above the {MIN_CACHE_SPEEDUP_RATIO}x floor — "
+        "so the gate would NOT have caught a broken cache.\n"
+        f"All samples: {[f'{t:.2f}' for t in latencies]}\n"
+        f"Cache file: {daemon_dir / 'untracked' / HOT_PATH_CACHE_NAME}\n"
+        "Either the resolver no longer caches at that path (update "
+        "HOT_PATH_CACHE_NAME), or it gained a second cache layer that "
+        "survives the file being removed."
     )

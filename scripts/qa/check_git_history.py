@@ -387,7 +387,13 @@ def _commit_records(repo: Path, exempt: set[str]) -> list[tuple[str, str, str]]:
 
 
 def _ref_records(repo: Path) -> list[tuple[str, str]]:
-    """``(ref_name, annotation)`` for every local branch and tag.
+    """``(ref_name, annotation)`` for every branch, tag and remote-tracking ref.
+
+    ``refs/remotes`` is included because a remote branch NAME is the most
+    published surface there is — readable by anyone with access to the origin.
+    The commit sweep already reaches it via ``git log --all``; enumerating only
+    ``refs/heads``/``refs/tags`` here left the name half of that surface blind,
+    so a term in a pushed branch name passed while the gate reported clean.
 
     Refs are NEVER grandfathered by the commit baseline. A ref has no ancestry
     of its own, so a tag created today on a decade-old commit would otherwise
@@ -412,6 +418,7 @@ def _ref_records(repo: Path) -> list[tuple[str, str]]:
         + _RECORD_SEPARATOR,
         "refs/heads",
         "refs/tags",
+        "refs/remotes",
     )
     if raw is None:
         return []
