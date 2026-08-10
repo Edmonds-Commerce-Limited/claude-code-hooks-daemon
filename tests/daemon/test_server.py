@@ -20,6 +20,28 @@ from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.server import HooksDaemon
 
+# Concurrency-timing parameters for test_daemon_handles_concurrent_requests.
+#
+# The delay is the SIGNAL that separates concurrent from serial dispatch, and it
+# must stay large relative to the fixed per-run overhead (socket setup, daemon
+# startup, and under `pytest --cov` the tracing cost). At 100ms it did not:
+# overhead alone was enough to push a correctly-concurrent run past the bound.
+_CONCURRENCY_REQUEST_COUNT = 3
+_CONCURRENCY_DELAY_MS = 300
+
+# What each dispatch model predicts: one delay if concurrent, N delays if serial.
+_CONCURRENCY_CONCURRENT_FLOOR_SECONDS = _CONCURRENCY_DELAY_MS / 1000
+_CONCURRENCY_SERIAL_FLOOR_SECONDS = (_CONCURRENCY_REQUEST_COUNT * _CONCURRENCY_DELAY_MS) / 1000
+
+# The bound sits between the two floors, derived rather than hardcoded so it
+# tracks any change to the delay. Placed nearer the serial floor because
+# overhead can only ever push a run UPWARD: it must not lift a concurrent run
+# over the bound, while a serial run overshoots by a full 0.1s even before
+# overhead is counted.
+_CONCURRENCY_UPPER_BOUND_SECONDS = (
+    _CONCURRENCY_CONCURRENT_FLOOR_SECONDS + _CONCURRENCY_SERIAL_FLOOR_SECONDS
+) / 2 + 0.2
+
 
 class SimpleTestHandler(Handler):
     """Simple test handler for testing daemon dispatch."""
@@ -296,10 +318,22 @@ class TestHooksDaemon:
 
     @pytest.mark.anyio
     async def test_daemon_handles_concurrent_requests(self, daemon_config: DaemonConfig) -> None:
-        """Test that daemon handles multiple concurrent requests correctly."""
-        # Use slow handler to verify concurrent execution
+        """Test that daemon handles multiple concurrent requests correctly.
+
+        Timing discriminates concurrent from serial dispatch, so the SIGNAL
+        (the delay) must stay large relative to fixed overhead. At 100ms it did
+        not: the concurrent floor was 0.3s, the serial floor 0.9s, and the
+        threshold sat at 0.25s -- only 0.15s above the floor it was measuring.
+        Under coverage instrumentation the tracing overhead alone pushed a
+        correctly-CONCURRENT run to 0.31s and failed the assertion.
+
+        Raising the delay rather than the threshold is what keeps the test
+        meaningful. A bigger threshold buys headroom by weakening the claim; a
+        bigger delay buys it by making the thing being measured dominate the
+        noise. Serialised dispatch still fails, and by a wide margin.
+        """
         controller = FrontController(event_name="PreToolUse")
-        controller.register(SlowTestHandler(delay_ms=100))
+        controller.register(SlowTestHandler(delay_ms=_CONCURRENCY_DELAY_MS))
 
         daemon = HooksDaemon(config=daemon_config, controller=controller)
         server_task = asyncio.create_task(daemon.start())
@@ -333,9 +367,15 @@ class TestHooksDaemon:
         assert len(responses) == 3
         assert all(r["request_id"] in ["req-1", "req-2", "req-3"] for r in responses)
 
-        # Should take ~100ms (concurrent) not ~300ms (sequential)
-        # Allow some margin for processing overhead
-        assert elapsed_time < 0.25
+        # Concurrent floor is one delay; serial floor is three. The bound sits
+        # between them with room for fixed overhead, so only genuine
+        # serialisation can cross it.
+        assert elapsed_time < _CONCURRENCY_UPPER_BOUND_SECONDS, (
+            f"{_CONCURRENCY_REQUEST_COUNT} concurrent requests took "
+            f"{elapsed_time:.2f}s. Concurrent dispatch should finish near "
+            f"{_CONCURRENCY_DELAY_MS / 1000:.1f}s; serial dispatch would take "
+            f"{_CONCURRENCY_SERIAL_FLOOR_SECONDS:.1f}s."
+        )
 
         # Cleanup
         await daemon.shutdown()
