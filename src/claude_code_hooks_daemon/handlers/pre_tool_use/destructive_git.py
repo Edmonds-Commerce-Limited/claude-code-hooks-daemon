@@ -17,6 +17,33 @@ _GENERIC_DESTRUCTIVE_REASON = "This git command destroys uncommitted changes per
 # forbidding these characters between the sub-command head and the flag.
 _SUBCOMMAND_SEPARATOR_CHARS = ";&|"
 
+# Git accepts GLOBAL OPTIONS between `git` and the subcommand -- `-C <path>`,
+# `-c <k>=<v>`, `--git-dir=<path>`, `--work-tree=<path>`, `--no-pager`, and more.
+# Every pattern below must tolerate them. Anchoring on a bare `\bgit\s+<sub>`
+# made ONE inserted token silently disable the whole handler:
+#
+#     git reset --hard origin/main            -> denied
+#     git -C /path reset --hard origin/main   -> ALLOWED
+#
+# The same insertion bypassed clean -f, push --force, stash drop and the rest.
+# `--git-dir=/repo/.git reset --hard` looked covered, but only by accident: the
+# path ends in `.git`, so `\bgit` matched INSIDE THE PATH and `\s+reset` matched
+# right after it. Aim it at a directory not ending in `.git` and the block
+# disappeared -- so the near-miss also hid how broad the hole was.
+#
+# An option token starts with `-` and may take a separate value token, which by
+# definition does NOT start with `-`. Neither may cross a sub-command separator,
+# so a later segment of a compound command can never be dragged into the prefix.
+# Deliberately permissive rather than an allowlist of known option names: this
+# handler must fail CLOSED, and an unrecognised option must never mean "allow".
+_GIT_GLOBAL_OPTION = (
+    rf"-[^\s{_SUBCOMMAND_SEPARATOR_CHARS}]+"
+    rf"(?:\s+[^-\s{_SUBCOMMAND_SEPARATOR_CHARS}][^\s{_SUBCOMMAND_SEPARATOR_CHARS}]*)?"
+)
+# `git` followed by any run of global options. Every destructive pattern starts
+# with this instead of a bare `\bgit\s+`.
+_GIT_INVOCATION = rf"\bgit\s+(?:{_GIT_GLOBAL_OPTION}\s+)*"
+
 # Force-push detection, scoped to the `git push` sub-command segment.
 # `[^;&|]*?` consumes only characters within the push segment (never a command
 # separator), so a non-push `--force` later in a compound command — e.g.
@@ -24,7 +51,8 @@ _SUBCOMMAND_SEPARATOR_CHARS = ";&|"
 # Within the segment, the long (`--force`, `--force-with-lease`) and short (`-f`)
 # force flags all qualify as a destructive force push.
 _GIT_PUSH_FORCE_PATTERN = (
-    rf"\bgit\s+push\b[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?" r"(?:--force(?:-with-lease)?|-f)\b"
+    rf"{_GIT_INVOCATION}push\b[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?"
+    r"(?:--force(?:-with-lease)?|-f)\b"
 )
 
 # SINGLE SOURCE OF TRUTH: ordered (pattern, reason) pairs consumed by BOTH matches()
@@ -33,22 +61,22 @@ _GIT_PUSH_FORCE_PATTERN = (
 # list prevents the pattern source from drifting between the two methods.
 _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
     (
-        r"\bgit\s+reset\s+.*--hard\b",
+        rf"{_GIT_INVOCATION}reset\s+.*--hard\b",
         "git reset --hard destroys all uncommitted changes permanently",
     ),
     (
-        r"\bgit\s+clean\s+.*-[a-z]*f",
+        rf"{_GIT_INVOCATION}clean\s+.*-[a-z]*f",
         "git clean -f permanently deletes untracked files",
     ),
     # Bare `git checkout .` discards working-tree changes; generic reason suffices.
     (
-        r"\bgit\s+checkout\s+\.\s*(?:$|;|&&|\|)",
+        rf"{_GIT_INVOCATION}checkout\s+\.\s*(?:$|;|&&|\|)",
         _GENERIC_DESTRUCTIVE_REASON,
     ),
     # Match all variants of checkout with -- and a file:
     # git checkout -- file / git checkout HEAD -- file / git checkout main -- file
     (
-        r"\bgit\s+checkout\s+.*--\s+\S",
+        rf"{_GIT_INVOCATION}checkout\s+.*--\s+\S",
         "git checkout [REF] -- file discards all local changes to that file permanently",
     ),
     # git restore with file paths discards working-tree changes.
@@ -56,15 +84,15 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
     #   git restore --staged file.txt   (long flag)
     #   git restore -S file.txt          (short flag, equivalent to --staged)
     (
-        r"\bgit\s+restore\s+(?!--staged\b)(?!-S\b).*\S",
+        rf"{_GIT_INVOCATION}restore\s+(?!--staged\b)(?!-S\b).*\S",
         "git restore discards all local changes to files permanently",
     ),
     (
-        r"\bgit\s+stash\s+drop\b",
+        rf"{_GIT_INVOCATION}stash\s+drop\b",
         "git stash drop permanently destroys stashed changes",
     ),
     (
-        r"\bgit\s+stash\s+clear\b",
+        rf"{_GIT_INVOCATION}stash\s+clear\b",
         "git stash clear permanently destroys all stashed changes",
     ),
     (
@@ -74,11 +102,11 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
     # Force branch deletion bypasses merge check. (?-i:) matches only uppercase -D
     # (lowercase -d is safe, it checks merge status).
     (
-        r"\bgit\s+branch\s+.*(?-i:-D)\b",
+        rf"{_GIT_INVOCATION}branch\s+.*(?-i:-D)\b",
         "git branch -D force-deletes a branch without checking if it has been merged",
     ),
     (
-        r"\bgit\s+commit\s+.*--amend\b",
+        rf"{_GIT_INVOCATION}commit\s+.*--amend\b",
         "git commit --amend rewrites the previous commit, creating messy history "
         "and potential data loss — create a new commit instead",
     ),
