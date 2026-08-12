@@ -95,6 +95,13 @@ class Priority:
     # line. Sits right after it so the arrow renders in the same trailing area.
     UPGRADE_NOTIFIER = 32
 
+    # Plan 00208: comment_changelog is "the valuable half" (history-shaped
+    # narrative in a comment); comment_size is the secondary, symptom-level
+    # size cap. Both content-quality, both sit in the same band as
+    # qa_suppression/markdown_organization.
+    COMMENT_CHANGELOG = 31
+    COMMENT_SIZE = 33
+
     MARKDOWN_ORGANIZATION = 35
 
     # LSP enforcement (Priority: 38)

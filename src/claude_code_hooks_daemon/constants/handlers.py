@@ -287,6 +287,16 @@ class HandlerID:
         config_key="daemon_stats",
         display_name="status-daemon-stats",
     )
+    COMMENT_CHANGELOG = HandlerIDMeta(
+        class_name="CommentChangelogHandler",
+        config_key="comment_changelog",
+        display_name="block-comment-changelog",
+    )
+    COMMENT_SIZE = HandlerIDMeta(
+        class_name="CommentSizeHandler",
+        config_key="comment_size",
+        display_name="block-comment-size",
+    )
     MARKDOWN_ORGANIZATION = HandlerIDMeta(
         class_name="MarkdownOrganizationHandler",
         config_key="markdown_organization",
@@ -659,6 +669,8 @@ HandlerKey = Literal[
     "validate_plan_number",
     "plan_number_helper",
     "daemon_stats",
+    "comment_changelog",
+    "comment_size",
     "markdown_organization",
     "validate_instruction_content",
     # Lint on edit
