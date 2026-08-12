@@ -118,7 +118,9 @@ class TestCompileHintPattern:
 
 class TestParseHintEntry:
     def test_valid_entry(self) -> None:
-        hint = _parse_hint_entry({"id": "x", "pattern": "foo", "hint": "do it", "ttl_seconds": 5}, 0)
+        hint = _parse_hint_entry(
+            {"id": "x", "pattern": "foo", "hint": "do it", "ttl_seconds": 5}, 0
+        )
         assert hint == CommandHint(id="x", pattern="foo", hint="do it", ttl_seconds=5)
 
     def test_missing_id_skipped(self) -> None:
@@ -222,7 +224,9 @@ class TestMatchesDefaultHint:
             "env \\\nagent-browser --close",
         ],
     )
-    def test_matches_agent_browser_spellings(self, handler: CommandHintsHandler, command: str) -> None:
+    def test_matches_agent_browser_spellings(
+        self, handler: CommandHintsHandler, command: str
+    ) -> None:
         assert handler.matches(_bash(command)) is True
 
     @pytest.mark.parametrize(

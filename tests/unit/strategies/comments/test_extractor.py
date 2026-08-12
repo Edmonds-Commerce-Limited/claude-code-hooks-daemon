@@ -215,8 +215,5 @@ class TestMultipleSpansInOneFile:
         # The shebang is itself a comment-only line contiguous with the
         # header lines below it, so all three merge into one run.
         assert len(spans) == 2
-        assert (
-            spans[0].text
-            == "#!/bin/bash\n# Header comment line one\n# Header comment line two"
-        )
+        assert spans[0].text == "#!/bin/bash\n# Header comment line one\n# Header comment line two"
         assert spans[1].text == "# trailing note"

@@ -171,7 +171,11 @@ def _segment_commands(command: str) -> list[str]:
     hand-rolled split, so a separator inside a quoted argument (a grep
     pattern, a commit message) is never mistaken for a real boundary.
     """
-    return [segment.strip() for segment in split_unquoted(command, _SEGMENT_SEPARATORS) if segment.strip()]
+    return [
+        segment.strip()
+        for segment in split_unquoted(command, _SEGMENT_SEPARATORS)
+        if segment.strip()
+    ]
 
 
 def _compile_hint_pattern(pattern: str) -> re.Pattern[str]:
@@ -215,9 +219,7 @@ def _parse_hint_entry(entry: Any, index: int) -> CommandHint | None:
     pattern = str(entry.get(_KEY_PATTERN, "") or "").strip()
     hint_text = str(entry.get(_KEY_HINT, "") or "").strip()
     if not hint_id or not pattern or not hint_text:
-        logger.warning(
-            "command_hints: hints[%d] missing required id/pattern/hint; skipped", index
-        )
+        logger.warning("command_hints: hints[%d] missing required id/pattern/hint; skipped", index)
         return None
 
     ttl_seconds = entry.get(_KEY_TTL_SECONDS, _DEFAULT_TTL_SECONDS)
@@ -282,7 +284,12 @@ class CommandHintsHandler(Handler):
             handler_id=HandlerID.COMMAND_HINTS,
             priority=Priority.COMMAND_HINTS,
             terminal=False,
-            tags=[HandlerTag.WORKFLOW, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL, HandlerTag.BASH],
+            tags=[
+                HandlerTag.WORKFLOW,
+                HandlerTag.ADVISORY,
+                HandlerTag.NON_TERMINAL,
+                HandlerTag.BASH,
+            ],
         )
         # Config options — injected by the registry via setattr; typed and
         # defaulted here so mypy sees real attributes, not dynamic ones.
@@ -373,7 +380,9 @@ class CommandHintsHandler(Handler):
 
         elapsed = now - state.last_fired_monotonic
         ttl_ready = elapsed >= hint.ttl_seconds
-        count_ready = hint.min_calls_between <= 0 or state.calls_since_fire >= hint.min_calls_between
+        count_ready = (
+            hint.min_calls_between <= 0 or state.calls_since_fire >= hint.min_calls_between
+        )
 
         if ttl_ready and count_ready:
             self._record_fire(key, now)
@@ -439,7 +448,7 @@ class CommandHintsHandler(Handler):
             ),
             AcceptanceTest(
                 title="unrelated command mentioning agent-browser does not trigger a hint",
-                command='grep agent-browser /dev/null',
+                command="grep agent-browser /dev/null",
                 description=(
                     "The word `agent-browser` appearing as an ARGUMENT to an unrelated "
                     "command (not the command itself) must NOT surface the hint — "
