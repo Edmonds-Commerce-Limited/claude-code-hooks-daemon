@@ -18,8 +18,10 @@ structural, and it is ours:
 `claude-supervise.py` lands in `.claude/ccy/`, which a client legitimately owns
 and lints (it also holds their `Dockerfile`, `ccy.env` and project handlers).
 The vendor path clients exclude by convention is `.claude/hooks-daemon/`. So
-every client repo lints ~3,100 lines of upstream code, and must independently
-rediscover why and write its own exclusion.
+every client repo has ~3,100 lines of upstream code inside its Python tooling's
+scope, and must independently rediscover why and write its own exclusion. It is
+not alone: FOUR daemon-owned assets deploy outside the vendor directory, and
+until this plan none of them declared that it was daemon-owned.
 
 The trap closes on three sides, which is what makes it worth fixing rather than
 documenting:
@@ -59,10 +61,16 @@ source into every Python tool's discovery.
 
 ## Goals
 
-- Make the ownership boundary match the directory layout, so daemon-owned code
-  sits where clients already know not to touch it.
+- Make the ownership boundary **legible** — in the artifact and in the client
+  docs — rather than moving the code. The original wording of this goal was
+  "make the boundary match the directory layout"; Decision 1 rejects moving the
+  file, because the vendor directory is git-ignored and a link or shim into it
+  dangles for every teammate who clones, bricking the ccy launcher and
+  disabling Plan 00164 stale detection.
 - Ensure a client repo running default `ruff check .` gets no findings from
-  daemon-owned files.
+  daemon-owned files, and keep it that way with a guard covering EVERY such
+  asset. (Measured: this was already true under ruff's real defaults — the
+  reported findings need `BLE`/`DTZ` selected — but nothing asserted it.)
 - Fix it once upstream rather than having every client rediscover and re-encode
   the same exclusion.
 
