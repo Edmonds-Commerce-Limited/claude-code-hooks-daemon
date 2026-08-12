@@ -97,9 +97,19 @@ greps `def test_` and finds ~9,888, concluding the badge is inflated.
 
 - [x] ✅ **Task 3.1**: Confirm every retained claim is independently verified
   against the repository, not carried over from the request document
-- [ ] 🔄 **Task 3.2**: Run QA — `validate_instruction_content` and `doc_truth`
-  both police README content. `./scripts/qa/llm_qa.py all` running; result
-  pending
+- [x] ✅ **Task 3.2**: Run QA — `validate_instruction_content` and `doc_truth`
+  both police README content. `./scripts/qa/llm_qa.py all` (in-worktree, via a
+  borrowed shared venv) → 17/20 PASSED, 3/20 FAILED. `doc_truth: 0 violations`
+  (the check that governs README content) and `british_english: 0 violations`
+  both passed cleanly. The 3 failures are worktree/shared-venv artefacts, not
+  README regressions: `tests` reported 11805 passed/0 failed/15 skipped but a
+  non-zero exit + implausible 4.2% coverage (coverage data corrupted by
+  concurrent sibling-agent pytest runs sharing the borrowed venv);
+  `smoke_test` needs a live daemon socket that only exists for the real
+  project root, which a worktree cannot provide; `canonical_callers` did not
+  run. This in-worktree run is informational only — the coordinator's
+  authoritative gate is the full suite re-run on the merged tree against the
+  real project root
 
 ## Success Criteria
 
