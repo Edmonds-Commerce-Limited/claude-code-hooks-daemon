@@ -90,11 +90,17 @@ Safety handlers protect against destructive or dangerous operations. Most are bl
 - `git branch -D` -- force-deletes a branch without checking it is merged (lowercase `-d` is allowed)
 - `git commit --amend` -- rewrites the previous commit; create a new commit instead
 
-**Deleting a branch has a sanctioned path (v3.52.0).** `git branch -D` stays
-blocked, but `hooks-daemon delete-branch <name>...` performs strictly more
-verification than that flag and needs no human. It refuses by default and
-deletes only what it can prove is recoverable, across four tiers evaluated
-cheapest-first:
+**To delete a branch, always try `git branch -d` first (v3.52.0).** It is
+allowed, battle-tested, and refuses unless the branch is genuinely merged.
+`hooks-daemon delete-branch <name>...` is the fallback for the case where `-d`
+has actually refused — not a general replacement for it.
+
+That case is specific: `-d` requires the branch's commits to be ancestors of
+the target, and both a **history rewrite** and a **squash merge** sever
+ancestry while leaving the content upstream. After either, `-d` refuses every
+affected branch even though nothing would be lost. `delete-branch` fills that
+gap, refusing by default and deleting only what it can prove is recoverable,
+across four tiers evaluated cheapest-first:
 
 | Tier                | Proof                                                                                 |
 | ------------------- | ------------------------------------------------------------------------------------- |
@@ -106,17 +112,30 @@ cheapest-first:
 Blocking preconditions -- the current branch, a branch checked out in any
 worktree, a protected branch name -- refuse absolutely and `--allow-unproven`
 cannot override them. Deletion is all-or-nothing across the batch and writes a
-recovery bundle first unless `--no-bundle` is passed; `--allow-unproven` also
-requires `--reason`. The proof is blob identity, never path presence: a path
-existing upstream says nothing about the content at that path.
+recovery bundle first unless `--no-bundle` is passed. The proof is blob
+identity, never path presence: a path existing upstream says nothing about the
+content at that path.
 
-This matters most after a history rewrite, which stops every branch's commits
-being ancestors of `main` -- `git branch -d` then refuses branches it would
-previously have deleted, and `patch-equivalent` is the only tier that can still
-prove them safe.
+**Abandoning unproven work is human-gated.** When no tier holds, the branch is
+the only copy of real work, so deleting it is a judgement call rather than a
+provable fact. `--allow-unproven --reason "..."` is necessary but NOT
+sufficient: the command additionally requires a human to type `abandon` at an
+interactive terminal. The flags declare *intent*; the prompt asks for
+*consent*, and the party requesting a deletion cannot grant its own consent.
+An agent's shell has no TTY, so the command refuses there with a message
+telling it to hand the decision back — the only unattended route to abandoning
+work is for a human to run it themselves. Provably-safe tiers never prompt, so
+the safe path stays fully automatic.
+
+For a `merged` branch the command delegates to `git branch -d` rather than
+forcing, so git independently re-runs its own ancestry check. A bug in the
+classifier therefore cannot cause a silent loss on that tier -- git refuses and
+the command fails loudly. The force flag is used only on the tiers where git
+would always refuse regardless.
 
 ```bash
-hooks-daemon delete-branch --dry-run <name>   # classify, delete nothing
+git branch -d <name>                          # ALWAYS TRY THIS FIRST
+hooks-daemon delete-branch --dry-run <name>   # only if -d refused
 hooks-daemon delete-branch <name>             # deletes only if provably safe
 ```
 

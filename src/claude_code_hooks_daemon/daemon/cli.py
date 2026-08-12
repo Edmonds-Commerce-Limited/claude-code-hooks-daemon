@@ -96,6 +96,9 @@ from claude_code_hooks_daemon.utils.settings_repair import repair_settings_regis
 from .init_config import generate_config
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from claude_code_hooks_daemon.daemon.branch_safety import BranchClassification
     from claude_code_hooks_daemon.daemon.controller import DaemonController
     from claude_code_hooks_daemon.daemon.project_handler_health import (
         ProjectHandlerHealthState,
@@ -2664,6 +2667,71 @@ def cmd_harvest_background(args: argparse.Namespace) -> int:
 # rest. The point is to make the risk legible, not to dump a whole tree.
 _UNPROVEN_PATH_PREVIEW = 10
 
+# The word a human must type to consent to abandoning unmerged work. A single
+# keystroke is too easy to fat-finger for a decision this size.
+_ABANDON_CONFIRMATION_WORD = "abandon"
+
+
+def _stdin_is_a_terminal() -> bool:
+    """True when a human could actually answer a prompt on this stdin.
+
+    An agent's Bash tool runs non-interactively, so this is False there — which
+    is the entire mechanism by which abandonment stays human-gated.
+    """
+    stdin = sys.stdin
+    if stdin is None:
+        return False
+    try:
+        return stdin.isatty()
+    except ValueError:
+        # A closed stdin cannot be asked anything. That is an ANSWER (there is
+        # no terminal), not a swallowed failure — the caller refuses on False.
+        return False
+
+
+def _confirm_abandonment_on_tty(
+    classifications: "Sequence[BranchClassification]", reason: str
+) -> bool:
+    """Ask the human at the terminal to consent to abandoning unmerged work.
+
+    Only ever reached when stdin is a real TTY. A declared ``--reason`` asserts
+    *intent*; this asks for *consent*, and consent cannot be self-granted by
+    the same party that wants the deletion.
+    """
+    from claude_code_hooks_daemon.daemon.branch_safety import TIER_UNPROVEN
+
+    print("\nHUMAN CONFIRMATION REQUIRED", file=sys.stderr)
+    print(
+        "These branches hold file content that exists nowhere else in the "
+        "repository. Deleting them abandons that work:",
+        file=sys.stderr,
+    )
+    for c in classifications:
+        if c.tier != TIER_UNPROVEN:
+            continue
+        print(
+            f"  {c.name} — {len(c.content_unique_paths)} file(s) whose content "
+            f"is found only on this branch",
+            file=sys.stderr,
+        )
+    if reason:
+        print(f"Declared reason: {reason}", file=sys.stderr)
+
+    # The prompt goes to STDERR, not via input()'s own prompt argument, which
+    # writes to stdout — that would inject prose into `--format json` output and
+    # break a caller piping this to a JSON parser. Piping stdout does not stop
+    # stdin being a terminal, so that combination is reachable, not theoretical.
+    print(f"Type '{_ABANDON_CONFIRMATION_WORD}' to proceed: ", file=sys.stderr, end="")
+    sys.stderr.flush()
+    try:
+        answer = input()
+    except EOFError:
+        # Ctrl-D is a person declining to answer. Treat it as a refusal rather
+        # than letting a traceback stand in for the decision.
+        print("\nNo answer given — treating as declined.", file=sys.stderr)
+        return False
+    return answer.strip().lower() == _ABANDON_CONFIRMATION_WORD
+
 
 def cmd_delete_branch(args: argparse.Namespace) -> int:
     """Delete local branches only when their safety can be proven (Plan 00206).
@@ -2685,6 +2753,12 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     repo = get_project_path(getattr(args, "project_root", None))
     bundle_path = None if args.no_bundle else Path(args.bundle)
 
+    # Pass a confirmer ONLY when a human can actually answer it. Passing one
+    # that always declines would report "a human declined" when in truth none
+    # was ever asked — so a missing terminal is signalled by its absence, and
+    # the engine says so precisely.
+    confirm = _confirm_abandonment_on_tty if _stdin_is_a_terminal() else None
+
     try:
         report = delete_branches(
             repo,
@@ -2694,6 +2768,7 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
             reason=args.reason,
             bundle_path=bundle_path,
             dry_run=args.dry_run,
+            confirm=confirm,
         )
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -2744,8 +2819,10 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
             print(f"  - {blocker}", file=sys.stderr)
         print(
             "\nA branch whose content cannot be proven recoverable is not "
-            "deleted by default. Re-run with --allow-unproven and --reason "
-            "once you have read the unique paths above.",
+            "deleted by default. Read the unique paths above, then re-run with "
+            "--allow-unproven and --reason. Those flags declare intent; "
+            "abandoning unmerged work also needs a human to consent at an "
+            "interactive terminal, so an agent cannot complete this alone.",
             file=sys.stderr,
         )
         return 1
@@ -4349,7 +4426,8 @@ def main() -> int:
     # delete-branch command (Plan 00206)
     parser_delete_branch = subparsers.add_parser(
         "delete-branch",
-        help="Delete local branches only when their safety can be proven",
+        help="Delete local branches only when their safety can be proven "
+        "(try 'git branch -d' first — this is the fallback for when it refuses)",
     )
     parser_delete_branch.add_argument(
         "branches",
@@ -4372,7 +4450,8 @@ def main() -> int:
         "--allow-unproven",
         dest="allow_unproven",
         action="store_true",
-        help="Permit branches whose safety cannot be proven (requires --reason)",
+        help="Permit branches whose safety cannot be proven. Requires --reason, "
+        "and additionally a human confirmation at an interactive terminal",
     )
     parser_delete_branch.add_argument(
         "--reason",

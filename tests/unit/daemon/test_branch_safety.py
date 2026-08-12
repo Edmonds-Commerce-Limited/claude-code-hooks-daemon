@@ -23,6 +23,7 @@ pins the difference.
 from __future__ import annotations
 
 import subprocess  # nosec B404 - trusted system tool (git) for repo fixtures
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -36,10 +37,23 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     TIER_MERGED,
     TIER_PATCH_EQUIVALENT,
     TIER_UNPROVEN,
+    BranchClassification,
     classify_branch,
+    delete_argv_for_tier,
     delete_branches,
     write_recovery_bundle,
 )
+
+
+def _approve(_classifications: Sequence[BranchClassification], _reason: str) -> bool:
+    """Stand-in for a human who consented at the terminal."""
+    return True
+
+
+def _decline(_classifications: Sequence[BranchClassification], _reason: str) -> bool:
+    """Stand-in for a human who was asked and said no."""
+    return False
+
 
 _ENV = {
     "GIT_AUTHOR_NAME": "Test Author",
@@ -262,7 +276,7 @@ class TestDeletion:
     def test_allow_unproven_requires_a_reason(self, repo: Path) -> None:
         _unproven_branch(repo, "risky")
         with pytest.raises(ValueError, match="reason"):
-            delete_branches(repo, ["risky"], allow_unproven=True)
+            delete_branches(repo, ["risky"], allow_unproven=True, confirm=_approve)
 
     def test_allow_unproven_with_a_reason_deletes(self, repo: Path) -> None:
         _unproven_branch(repo, "risky")
@@ -272,9 +286,72 @@ class TestDeletion:
             allow_unproven=True,
             reason="content is deliberately being destroyed",
             bundle_path=repo.parent / "r.bundle",
+            confirm=_approve,
         )
         assert report.deleted == ("risky",)
         assert "risky" not in _local_branches(repo)
+
+
+class TestAbandonmentIsHumanGated:
+    """Discarding unmerged work is a human's call, never an agent's.
+
+    Every other tier is a *proof* — checkable mechanically. ``unproven`` is the
+    one path where real work is knowingly destroyed, so it must not be reachable
+    by an agent that simply passes another flag. A declared reason is an
+    assertion of intent, not a gate; only a human is a gate.
+    """
+
+    def test_unproven_deletion_without_a_confirmer_is_refused(self, repo: Path) -> None:
+        _unproven_branch(repo, "risky")
+        report = delete_branches(repo, ["risky"], allow_unproven=True, reason="I would like to")
+        assert report.refused is True
+        assert report.deleted == ()
+        assert "risky" in _local_branches(repo)
+
+    def test_a_declined_confirmation_deletes_nothing(self, repo: Path) -> None:
+        _unproven_branch(repo, "risky")
+        report = delete_branches(
+            repo,
+            ["risky"],
+            allow_unproven=True,
+            reason="asked but refused",
+            confirm=_decline,
+        )
+        assert report.refused is True
+        assert report.deleted == ()
+        assert "risky" in _local_branches(repo)
+
+    def test_the_confirmer_receives_the_branches_and_the_reason(self, repo: Path) -> None:
+        """A human cannot consent to something they were not shown."""
+        _unproven_branch(repo, "risky")
+        shown: list[BranchClassification] = []
+        stated: list[str] = []
+
+        def _spy(classifications: Sequence[BranchClassification], reason: str) -> bool:
+            shown.extend(classifications)
+            stated.append(reason)
+            return True
+
+        delete_branches(
+            repo,
+            ["risky"],
+            allow_unproven=True,
+            reason="the stated rationale",
+            bundle_path=None,
+            confirm=_spy,
+        )
+        assert stated == ["the stated rationale"]
+        assert [c.name for c in shown] == ["risky"]
+
+    def test_provably_safe_branches_never_ask_for_confirmation(self, repo: Path) -> None:
+        """The gate exists for abandonment, not for proven-safe cleanup."""
+        _merged_branch(repo, "done")
+
+        def _explode(_classifications: Sequence[BranchClassification], _reason: str) -> bool:
+            raise AssertionError("a proven-safe deletion must not prompt a human")
+
+        report = delete_branches(repo, ["done"], bundle_path=None, confirm=_explode)
+        assert report.deleted == ("done",)
 
     def test_dry_run_classifies_but_deletes_nothing(self, repo: Path) -> None:
         _merged_branch(repo, "done")
@@ -303,6 +380,28 @@ class TestDeletion:
         report = delete_branches(repo, ["done"], bundle_path=None)
         assert report.bundle is None
         assert report.deleted == ("done",)
+
+
+class TestPrefersGitsOwnCheck:
+    """Plain ``-d`` is battle-tested; our proof is not. Use ours only when
+    git's cannot do the job at all."""
+
+    def test_merged_tier_uses_the_safe_delete_not_force(self) -> None:
+        assert delete_argv_for_tier(TIER_MERGED) == ("branch", "--delete")
+
+    @pytest.mark.parametrize("tier", [TIER_PATCH_EQUIVALENT, TIER_CONTENT_PRESERVED, TIER_UNPROVEN])
+    def test_tiers_git_cannot_verify_must_force(self, tier: str) -> None:
+        """A rewrite or squash merge severs ancestry, so git always calls these
+        unmerged and the safe delete cannot succeed."""
+        assert delete_argv_for_tier(tier) == ("branch", "--delete", "--force")
+
+    def test_a_merged_deletion_really_goes_through_gits_own_check(self, repo: Path) -> None:
+        """End-to-end: if our ancestry proof were wrong, git would refuse and
+        this would raise rather than silently destroying the branch."""
+        _merged_branch(repo, "done")
+        report = delete_branches(repo, ["done"], bundle_path=None)
+        assert report.deleted == ("done",)
+        assert "done" not in _local_branches(repo)
 
 
 class TestRecoveryBundle:

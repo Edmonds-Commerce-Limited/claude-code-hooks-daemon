@@ -33,6 +33,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from tests.acceptance.conftest import assert_clone_is_pinned, create_daemon_clone
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_VERSION_SH = REPO_ROOT / "scripts" / "install_version.sh"
@@ -70,31 +71,6 @@ _REQUIRED_METADATA_FIELDS = (
 
 def _make_test_hostname() -> str:
     return f"{_TEST_HOSTNAME_PREFIX}{os.getpid()}"
-
-
-def _create_daemon_clone(daemon_dir: Path) -> None:
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "protocol.file.allow=always",
-            "clone",
-            "--no-hardlinks",
-            "--local",
-            "--quiet",
-            str(REPO_ROOT),
-            str(daemon_dir),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(daemon_dir), "config", "protocol.file.allow", "always"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
 
 
 def _stop_test_daemon(venv_python: Path, project_root: Path, env: dict[str, str]) -> None:
@@ -164,7 +140,9 @@ def test_skill_upgrade_shim_end_to_end_emits_metadata(tmp_path: Path) -> None:
     )
 
     daemon_dir = project_root / ".claude" / "hooks-daemon"
-    _create_daemon_clone(daemon_dir)
+    # Pinned to its newest tag BEFORE installing, so the baseline is stamped
+    # with the version this test then upgrades to. See conftest's docstring.
+    target_tag = create_daemon_clone(daemon_dir)
 
     venv_python: Path | None = None
     env = os.environ.copy()
@@ -219,16 +197,10 @@ def test_skill_upgrade_shim_end_to_end_emits_metadata(tmp_path: Path) -> None:
         env["HOOKS_DAEMON_UPGRADE_REF"] = "main"
         env["HOOKS_DAEMON_PYTHON"] = str(venv_python)
 
-        # Resolve target tag from the clone — Layer 1 will checkout it
-        # idempotently (already on it after install).
-        tag_proc = subprocess.run(
-            ["git", "-C", str(daemon_dir), "describe", "--tags", "--abbrev=0"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        target_tag = tag_proc.stdout.strip()
-        assert target_tag, f"Could not resolve a tag in {daemon_dir}"
+        # The upgrade below must be IDEMPOTENT — that is the premise the
+        # metadata assertion rests on. Re-check it now, so a drift fails here
+        # by name rather than as an opaque uv error inside a subprocess.
+        assert_clone_is_pinned(daemon_dir, target_tag)
 
         # Invoke the SHIM (not Layer 1 directly). The shim should:
         #   1. Detect PROJECT_ROOT by walking up for .claude/hooks-daemon.yaml.

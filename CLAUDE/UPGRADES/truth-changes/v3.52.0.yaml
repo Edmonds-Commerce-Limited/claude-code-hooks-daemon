@@ -113,8 +113,9 @@ truth_changes:
       ask a human to run it manually, so an agent that needs a stale branch
       gone is simply stuck until a person intervenes.
     now: >
-      There is a sanctioned, deterministic route that needs no human:
-      "hooks-daemon delete-branch <name>...". The force flag remains blocked
+      There is a sanctioned, deterministic route that needs no human WHENEVER
+      THE DELETION CAN BE PROVEN SAFE: "hooks-daemon delete-branch <name>...".
+      The force flag remains blocked
       and this is NOT an escape hatch -- the command performs strictly MORE
       verification than the flag it replaces. It refuses by default and deletes
       only what it can positively prove is recoverable, using four tiers
@@ -124,9 +125,16 @@ truth_changes:
       reachable from the protected ref), and unproven (refused). Blocking
       preconditions -- the current branch, a branch checked out in any
       worktree, a protected branch name -- refuse absolutely and cannot be
-      overridden. Deletion is all-or-nothing across the batch, writes a
-      recovery bundle first unless --no-bundle is passed, and --allow-unproven
-      additionally requires --reason. This matters most right after the history
+      overridden. Deletion is all-or-nothing across the batch and writes a
+      recovery bundle first unless --no-bundle is passed. Read the scope of
+      "needs no human" precisely: it covers the three PROVABLE tiers, and
+      abandoning "unproven" work is deliberately human-gated. There, the branch
+      holds the only copy of real work, so "--allow-unproven --reason" is
+      necessary but NOT sufficient -- a human must also type "abandon" at an
+      interactive terminal. The flags declare intent; the prompt asks for
+      consent, and the party requesting a deletion cannot grant its own. An
+      agent's shell has no TTY, so it is refused there and told to hand the
+      decision back. This matters most right after the history
       rewrite in this same release: a rewrite stops every branch's commits
       being ancestors of main, so "git branch -d" now refuses branches it would
       previously have deleted, and patch-equivalence is the only tier that can

@@ -79,13 +79,27 @@ identifiers that should never have been committed. What this means for you:
   (every file version is byte-identical to a blob still reachable from `main`),
   and `unproven`. Blocking preconditions — the current branch, a branch checked
   out in any worktree, a protected name — refuse absolutely and cannot be
-  overridden. Deletion is all-or-nothing, writes a recovery bundle first unless
-  `--no-bundle` is passed, and `--allow-unproven` additionally demands
-  `--reason`. The proof is deliberately **blob identity, never path presence**:
+  overridden. Deletion is all-or-nothing and writes a recovery bundle first
+  unless `--no-bundle` is passed. **Abandoning unproven work is human-gated**:
+  when no tier holds, the branch is the only copy of real work, so
+  `--allow-unproven --reason` is necessary but not sufficient — a human must
+  also type `abandon` at an interactive terminal. The flags declare intent; the
+  prompt asks for consent, which the party requesting the deletion cannot grant
+  itself. An agent's shell has no TTY, so it is refused there and told to hand
+  the decision back. Provably-safe tiers never prompt.
+  The proof is deliberately **blob identity, never path presence**:
   a path existing upstream says nothing about the content at that path, so a
   path-level tier could approve a lossy deletion. Path-uniqueness is still
   reported, but only as context — on this repo's own stale branches it flagged
   21 "new" paths of which 20 were byte-identical to blobs already in `main`.
+  **`git branch -d` remains the first thing to reach for**; this command is the
+  fallback for when it has refused, and the `merged` tier *delegates* to
+  `git branch -d` rather than forcing, so git re-runs its own ancestry check
+  independently and a classifier bug cannot cause a silent loss there. The
+  force flag is used only on tiers where git would refuse regardless. A squash
+  merge is one such case: squashing N commits into one changes every patch-id,
+  so `-d` and `patch-equivalent` both fail while `content-preserved` proves the
+  branch safe and deletes it with no flags.
 - **`sensitive_content` (PreToolUse, blocking)** — denies a `Write`/`Edit` whose
   added content matches either of two independently configurable sources:
   `options.public_patterns` (named regexes, safe to name — the deny reason shows
@@ -154,6 +168,23 @@ identifiers that should never have been committed. What this means for you:
 
 ### Fixed
 
+- **Three upgrade acceptance gates were unsatisfiable during any release.**
+  They cloned this repo at HEAD and upgraded to `git describe --tags`, asserting
+  — as their docstrings state — that the upgrade is idempotent. That premise
+  holds only *between* releases: once the version is bumped and before the tag
+  exists, HEAD carries the new version while the newest tag is still the
+  previous one, so the "upgrade" became a **downgrade**, the version-specific
+  upgrader rebuilt the virtualenv, and the run died with an opaque
+  `No interpreter found at path ...` from uv. Because the release bumps the
+  version long before it tags, and the blocking QA gate runs in between, these
+  gates were red at exactly the moment the release depended on them — the worst
+  possible time to be arguing with a failing test. The clone is now pinned to
+  its tag *before* the baseline install, so the documented premise holds in both
+  conditions with no synthesised state, and `assert_clone_is_pinned` re-checks
+  it so any future drift fails by name at the fixture instead of three
+  subprocesses deep. The clone helper, previously copy-pasted into all three
+  files, now lives once in `tests/acceptance/conftest.py` — the duplication is
+  what let one wrong assumption sit unexamined in three places.
 - **`security_antipattern` claimed three protections it does not have.** Its
   guidance — inlined into every client project's resident `CLAUDE.md` — listed
   SQL injection, weak cryptography and path traversal as blocked categories.

@@ -43,9 +43,14 @@ the two makes an alarming path count look like data loss when it is not.
 from __future__ import annotations
 
 import subprocess  # nosec B404 - trusted system tool (git), list form, no shell
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Human gate for an ``unproven`` deletion: given the classifications and the
+# stated reason, return whether a person consented. Injected rather than called
+# directly so the policy is testable without a terminal.
+ConfirmCallback = Callable[[Sequence["BranchClassification"], str], bool]
 
 # Proof tiers, strongest first.
 TIER_MERGED = "merged"
@@ -72,6 +77,26 @@ _CHERRY_UNIQUE_MARKER = "+"
 # ``git ls-tree`` emits "<mode> <type> <sha>\t<path>" — three metadata fields
 # before the tab.
 _LS_TREE_META_FIELDS = 3
+
+
+def delete_argv_for_tier(tier: str | None) -> tuple[str, ...]:
+    """Git flags used to delete a branch proven at ``tier``.
+
+    A ``merged`` branch is removed with the SAFE lowercase delete, never the
+    force flag. Git then re-runs its own merged-ancestry check independently of
+    ours, so a bug in ``classify_branch`` cannot cause a silent loss — git
+    simply refuses and the command fails loudly. Prefer the battle-tested check
+    wherever it is capable of doing the job.
+
+    The remaining tiers describe branches git will always call unmerged
+    (a rewrite or a squash merge severs ancestry), so there the force flag is
+    unavoidable — and it is exactly there that our extra proof has to earn its
+    keep, because nothing else is checking.
+    """
+    if tier == TIER_MERGED:
+        return ("branch", "--delete")
+    return ("branch", "--delete", "--force")
+
 
 _REFUSAL_DETAIL = {
     REFUSAL_CURRENT_BRANCH: "is the currently checked-out branch",
@@ -201,7 +226,7 @@ def _reachable_object_shas(repo: Path, ref: str) -> set[str]:
     result = _git(repo, "rev-list", "--objects", ref, check=False)
     shas: set[str] = set()
     for line in result.stdout.splitlines():
-        sha, _, _path = line.partition(" ")
+        sha = line.partition(" ")[0]
         if sha:
             shas.add(sha)
     return shas
@@ -324,6 +349,7 @@ def delete_branches(
     reason: str | None = None,
     bundle_path: Path | None = None,
     dry_run: bool = False,
+    confirm: ConfirmCallback | None = None,
 ) -> DeletionReport:
     """Classify every branch, then delete all of them or none.
 
@@ -335,6 +361,13 @@ def delete_branches(
             precondition — those refuse regardless.
         reason: mandatory when ``allow_unproven`` is set, so an unproven
             deletion always carries its rationale.
+        confirm: HUMAN gate, required before any ``unproven`` branch is deleted.
+            Receives the classifications and the stated reason, and returns
+            whether to proceed. Absent or returning False, the deletion is
+            refused. Every other tier is a proof that can be checked
+            mechanically; ``unproven`` is the one path that knowingly destroys
+            unmerged work, so it must not be reachable by an agent passing
+            another flag. A declared reason asserts intent — it does not gate.
 
     Raises:
         ValueError: if ``allow_unproven`` is set without a reason.
@@ -361,12 +394,34 @@ def delete_branches(
     if dry_run:
         return DeletionReport(classifications=classifications)
 
+    # Abandonment is a human's call. Reaching here with an ``unproven`` branch
+    # means an agent asserted intent, and asserting intent is not consenting.
+    abandoning = [c for c in classifications if c.tier == TIER_UNPROVEN]
+    if abandoning:
+        if confirm is None:
+            return DeletionReport(
+                classifications=classifications,
+                refused=True,
+                blockers=(
+                    f"deleting unmerged work on {len(abandoning)} branch(es) needs a "
+                    "human, and no confirmation channel was available — ask the user "
+                    "to run this command themselves in a terminal",
+                ),
+            )
+        if not confirm(classifications, reason or ""):
+            return DeletionReport(
+                classifications=classifications,
+                refused=True,
+                blockers=("a human was asked and declined the deletion",),
+            )
+
     bundle: Path | None = None
     if bundle_path is not None:
         bundle = write_recovery_bundle(repo, [c.name for c in classifications], bundle_path)
 
     for classification in classifications:
-        _git(repo, "branch", "--delete", "--force", classification.name)
+        # Defer to git's own check whenever it is capable of making it.
+        _git(repo, *delete_argv_for_tier(classification.tier), classification.name)
 
     return DeletionReport(
         classifications=classifications,

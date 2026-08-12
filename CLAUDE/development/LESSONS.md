@@ -29,6 +29,31 @@ make the fixture run it, and ask "what bug could ship while this gate passes?"
 If the answer is "the bug we just fixed, in a different integration shape," the
 gate is theatre — strengthen the fixture.
 
+## A fixture must ESTABLISH the premise its test documents
+
+An acceptance test whose docstring says "idempotent upgrade" is only testing
+that if the fixture actually makes it idempotent. The three upgrade gates
+resolved their target with `git describe --tags --abbrev=0` on a clone of
+**HEAD** — true idempotency between releases, but during a release HEAD carries
+the new version while the newest tag is still the previous one. The "upgrade"
+silently became a **downgrade**, the version-specific upgrader rebuilt the venv,
+and the run died with `No interpreter found at path ...` from uv — an error with
+no visible connection to the premise that had quietly stopped holding.
+
+**Why it bit at the worst moment:** the release bumps the version (Step 3) long
+before it creates the tag (Step 14), and the BLOCKING QA gate runs in between.
+So these gates were structurally unsatisfiable during every version-bumping
+release — red exactly when the release most needs them green, which is precisely
+the pressure under which someone talks themselves into shipping past a red test.
+
+**Apply:** when a test's correctness rests on a premise, make the fixture
+establish it *and then assert it*. `tests/acceptance/conftest.py` pins the clone
+to its tag before the baseline install and re-checks with
+`assert_clone_is_pinned`, so a future drift fails by name at the fixture instead
+of as an unrelated-looking error three subprocesses deep. Also worth noticing:
+the helper was copy-pasted into three files, and the duplication is what let the
+same wrong assumption sit in all three unexamined.
+
 ## A QA gate only ever checks what you point it at — so test its BOUNDARY
 
 A gate reporting green means "clean **within its scope**", never "clean". Scope

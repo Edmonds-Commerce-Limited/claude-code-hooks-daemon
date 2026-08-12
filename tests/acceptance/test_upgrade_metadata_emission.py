@@ -41,6 +41,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from tests.acceptance.conftest import assert_clone_is_pinned, create_daemon_clone
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_VERSION_SH = REPO_ROOT / "scripts" / "install_version.sh"
@@ -70,38 +71,6 @@ _CLOSE_SENTINEL = "UPGRADE_METADATA>>>"
 
 def _make_test_hostname() -> str:
     return f"{_TEST_HOSTNAME_PREFIX}{os.getpid()}-{int(time.time())}"
-
-
-def _create_daemon_clone(daemon_dir: Path) -> None:
-    """Clone the repo at HEAD into ``daemon_dir`` (with tags).
-
-    Layer 1 ``scripts/upgrade.sh`` requires ``$DAEMON_DIR/.git`` to be a
-    real directory (not a worktree pointer). A local ``--no-hardlinks``
-    clone keeps the fixture isolated and brings tags along so the test
-    can pass a real tag as TARGET_VERSION.
-    """
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "protocol.file.allow=always",
-            "clone",
-            "--no-hardlinks",
-            "--local",
-            "--quiet",
-            str(REPO_ROOT),
-            str(daemon_dir),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(daemon_dir), "config", "protocol.file.allow", "always"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
 
 
 def _remove_daemon_clone(clone_path: Path) -> None:
@@ -176,7 +145,9 @@ def test_layer1_upgrade_sh_emits_metadata_block(tmp_path: Path) -> None:
     )
 
     daemon_dir = project_root / ".claude" / "hooks-daemon"
-    _create_daemon_clone(daemon_dir)
+    # Pinned to its newest tag BEFORE installing, so the baseline is stamped
+    # with the version this test then upgrades to. See conftest's docstring.
+    target_tag = create_daemon_clone(daemon_dir)
     venv_python: Path | None = None
     env = os.environ.copy()
 
@@ -211,17 +182,10 @@ def test_layer1_upgrade_sh_emits_metadata_block(tmp_path: Path) -> None:
         venv_python = venv_candidates[0] / "bin" / "python"
         assert venv_python.is_file(), f"venv Python must exist: {venv_python}"
 
-        # Resolve the most recent tag in the clone. The clone brought
-        # tags along via `clone --local`; Layer 1 will checkout this
-        # tag (idempotent — daemon dir is already on it).
-        tag_proc = subprocess.run(
-            ["git", "-C", str(daemon_dir), "describe", "--tags", "--abbrev=0"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        target_tag = tag_proc.stdout.strip()
-        assert target_tag, f"Could not resolve a tag in {daemon_dir}"
+        # The upgrade below must be IDEMPOTENT — that is the premise the
+        # metadata assertion rests on. Re-check it now, so a drift fails here
+        # by name rather than as an opaque uv error inside a subprocess.
+        assert_clone_is_pinned(daemon_dir, target_tag)
 
         # Step B: invoke Layer 1 upgrade.sh.
         #
@@ -362,7 +326,9 @@ def test_layer1_upgrade_sh_prints_truth_changes_summary(tmp_path: Path) -> None:
     )
 
     daemon_dir = project_root / ".claude" / "hooks-daemon"
-    _create_daemon_clone(daemon_dir)
+    # Pinned to its newest tag BEFORE installing, so the baseline is stamped
+    # with the version this test then upgrades to. See conftest's docstring.
+    target_tag = create_daemon_clone(daemon_dir)
     venv_python: Path | None = None
     env = os.environ.copy()
 

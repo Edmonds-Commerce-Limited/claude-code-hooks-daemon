@@ -101,20 +101,32 @@ tool must reason about content, not just commits.
   with `--no-bundle` for the deliberate-destruction case
 - [x] ✅ **Task 2.3**: `--allow-unproven` gate, refused unless a reason string
   is supplied, so an unproven deletion is always recorded with its rationale
+- [x] ✅ **Task 2.4**: Abandonment is human-gated — the engine requires a
+  `confirm` callback before deleting any `unproven` branch, and the CLI supplies
+  one only when `stdin` is a real terminal
+  - [x] ✅ the flags declare intent; the terminal prompt asks for consent, which
+    the party requesting the deletion cannot grant itself
+  - [x] ✅ no TTY ⇒ `confirm=None` ⇒ refused as "no confirmation channel", never
+    misreported as "a human declined"
+  - [x] ✅ consent is the word `abandon`, not `y` — one keystroke is too easy to
+    fat-finger for discarding the only copy of work
+  - [x] ✅ the prompt lists only the `unproven` branches; listing safe ones would
+    train a human to skim
 
 ### Phase 3: Close the loop
 
 - [x] ✅ **Task 3.1**: `destructive_git.get_claude_md()` names the new command
   as the sanctioned remedy, so the block message is no longer a dead end
-- [ ] 🔄 **Task 3.2**: `docs/guides/HANDLER_REFERENCE.md` updated to match
+- [x] ✅ **Task 3.2**: `docs/guides/HANDLER_REFERENCE.md` updated to match
 - [x] ✅ **Task 3.3**: Dogfood — all seven stale branches classified `unproven`,
   reviewed, and deleted with `--allow-unproven --reason ... --no-bundle`
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Full QA
-- [ ] ⬜ **Task 4.2**: Daemon restart, verify RUNNING
-- [ ] ⬜ **Task 4.3**: Client-mode verification via `scripts/dummy-client-repo.sh`
+- [x] ✅ **Task 4.1**: Full QA — 20/20, 11,499 passed / 0 failed / 5 skipped,
+  coverage 95.2%
+- [x] ✅ **Task 4.2**: Daemon restart, verify RUNNING (no import errors in logs)
+- [ ] 🔄 **Task 4.3**: Client-mode verification via `scripts/dummy-client-repo.sh`
 
 ## Dependencies
 
@@ -155,6 +167,32 @@ irreversible one is typed deliberately.
 
 **Date**: 2026-08-12
 
+### Decision 3: Intent is not consent — abandonment needs a human
+
+**Context**: `--allow-unproven --reason "..."` originally sufficed to delete a
+branch holding the only copy of real work. But every other tier is a *proof*,
+and a proof can be acted on unattended precisely because it is checkable.
+`unproven` is the case where evidence ran out and judgement takes over.
+
+**Options Considered**:
+
+1. Flags alone — self-consistent, but it makes the guard's only bypass "declare
+   loudly that you meant it", which is exactly the lesson Decision 1 refused to
+   teach.
+2. Refuse `unproven` outright — safest, but wrong: a genuinely abandoned branch
+   must be deletable, and a tool with no route for it is a tool people work
+   around.
+3. Require a human at an interactive terminal, in addition to the flags.
+
+**Decision**: Option 3. The flags declare *intent*; the prompt asks for
+*consent*, and the party that wants a deletion cannot grant its own permission
+for it. An agent's shell has no TTY, so this is structural rather than
+policy-based — there is nothing to remember or comply with. The three provable
+tiers are untouched and never prompt, so automation loses nothing it could
+justify.
+
+**Date**: 2026-08-12
+
 ## Success Criteria
 
 - [ ] A merged branch deletes with no flags
@@ -165,6 +203,9 @@ irreversible one is typed deliberately.
 - [ ] A recovery bundle exists after a default-mode deletion, and restores the
   branch
 - [ ] `destructive_git`'s block message names the new command
+- [ ] An `unproven` deletion is refused with every flag declared when there is
+  no terminal, and the safe tiers still delete unprompted — measured through the
+  real CLI, not only unit tests
 - [ ] Full QA passes; daemon restarts RUNNING
 
 ## Risks & Mitigations
