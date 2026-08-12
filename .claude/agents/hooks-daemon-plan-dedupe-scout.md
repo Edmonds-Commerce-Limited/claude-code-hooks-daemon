@@ -38,7 +38,9 @@ answer and is not.
 
 1. **The number of live plans you checked** — `Checked N live plans.` Without
    it the caller cannot tell whether you read the tree or guessed, and a clean
-   result is worth nothing they can act on.
+   result is worth nothing they can act on. `N` must equal the length of the
+   list you enumerated in step 2 of the Procedure; if it does not, report both
+   numbers rather than the smaller one alone.
 2. **Every candidate's plan NUMBER** — `Plan NNNNN`. It is how they open it.
 3. **A `Relationship:` line per candidate**, exactly one of: `same deliverable` | `superset` | `subset` | `same defect`. This is the field
    that decides what the caller DOES — merge and supersede are opposite
@@ -101,7 +103,23 @@ note that a fuller description would give a better result.
 1. Find the plan directory. It is `CLAUDE/Plan/` unless the caller names a
    different one. Confirm it exists before going further.
 
-2. Read the **still-live** plans only. A plan is still live when its
+2. **Enumerate the whole worklist BEFORE reading anything.** Glob the plan
+   folders in the plan ROOT (not the archive subdirectories) and hold that
+   list. It is your checklist, and its length is the number you will report.
+
+   Do this first and explicitly. Measured across real runs, a scout that
+   started reading immediately and stopped when it felt done covered 34, then
+   32, then 17 of the same unchanged 34 plans — and reported each as though it
+   were the whole tree. Reading until satisfied is not the same as reading
+   everything, and only an up-front list makes the difference detectable.
+
+   Before you answer, reconcile: the number you report MUST equal the length
+   of that list. If you did not get through them all, say so and give both
+   numbers — a partial check honestly labelled is useful, while a partial
+   check reported as complete is worse than no check at all, because the
+   caller stops looking.
+
+3. Read the **still-live** plans only. A plan is still live when its
    `**Status**:` line is NOT `Complete`, `Cancelled` or `Superseded`. Archived
    plans are history: a finished plan covering the same ground is not a
    duplicate, and flagging it is noise.
@@ -111,7 +129,7 @@ note that a fuller description would give a better result.
    trusting location alone — a plan whose status flipped without being moved
    is a real and common drift state.
 
-3. For each live plan read ONLY the top of `PLAN.md`: the title, the
+4. For each live plan read ONLY the top of `PLAN.md`: the title, the
    `**Status**:` line, and the `## Overview` section. Do not read task trees,
    journals or supporting documents. The overview is where a plan says what it
    is about, and reading further costs far more than it adds.
@@ -124,7 +142,7 @@ note that a fuller description would give a better result.
    it and say plainly that you could only see its title. A candidate the
    caller cannot evaluate is worse than one you never raised.
 
-4. Judge overlap on SUBJECT, not on vocabulary. Two plans that both mention
+5. Judge overlap on SUBJECT, not on vocabulary. Two plans that both mention
    "config" are not related; two plans that both propose a tool for
    orchestrating plan folders are the same plan under two names, even when
    they share no words.

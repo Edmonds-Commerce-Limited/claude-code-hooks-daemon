@@ -138,14 +138,23 @@ encodes a procedure, not user content, so fixes must reach the field. Gated on
   to the three fields a caller cannot recover for themselves. Restating it as
   "mandatory" further down did nothing — three dispatches dropped the
   checked-count, which predated that wording, so position beat emphasis
-- [ ] ⬜ **Task 4.6**: Investigate COVERAGE variance. With the count now
-  reported it is visible, and it moves: 34, then 32, then 17 live plans across
-  runs against an unchanged tree of 34. A half-read "no duplicates" is
-  indistinguishable from a thorough one without the count, which is the
-  argument for having required it — but 50% coverage is worse than
-  "non-deterministic" was meant to license. Likely remedy: have the procedure
-  enumerate the plan folders FIRST and check the total it reports against that
-  list, rather than reading until it feels done
+- [x] ✅ **Task 4.6**: Investigate COVERAGE variance. Requiring the count made
+  it visible and it moves: 34, 32, 17 across runs against an unchanged tree of
+  34 (ground truth verified on disk). Procedure now enumerates the folders
+  FIRST as an explicit worklist and reconciles its reported total against
+  that, with an instruction to report BOTH numbers on a partial pass — a
+  partial check labelled honestly is useful; one reported as complete is worse
+  than none, because the caller stops looking
+- [ ] ⬜ **Task 4.7**: Decide the division of labour, because prompt-tuning has
+  hit a wall here. Findings are correct in 6/6 real dispatches; the reporting
+  contract is not reliably honoured, and the feedback loop is one ~100k-token
+  sample per change against a demonstrably high-variance system — so a single
+  run cannot separate "my change regressed it" from noise, and further tuning
+  would be guessing with extra steps. The architectural alternative is to stop
+  asking a language model for a number the filesystem already knows: the
+  daemon's `plan-qa` machinery enumerates live plans deterministically, so
+  COVERAGE could be reported by tooling and the agent left to do only the
+  judgement it is actually good at
 
 ## Success Criteria
 
@@ -162,8 +171,10 @@ encodes a procedure, not user content, so fixes must reach the field. Gated on
   happens to exist in the source tree — verified under real dispatch
 - [x] Its report states how many plans it checked, so a clean result is
   verifiable rather than merely reassuring
-- [ ] The number it reports matches the number of live plans on disk
-  (Task 4.6) — currently varies 17–34 against a tree of 34
+- [ ] The number it reports matches the number of live plans on disk. Ground
+  truth is 34; observed 34, 32, 17, and absent. The reporting contract is the
+  unreliable part, not the judgement — see Task 4.7 for why the remedy is
+  probably architectural rather than another prompt revision
 
 ## Dependencies
 

@@ -711,6 +711,39 @@ class TestDedupeAgentDeployment:
             "ignored three times from further down the document."
         )
 
+    @staticmethod
+    def _agent_prose() -> str:
+        """The agent body with whitespace collapsed, lowercased.
+
+        The deployed markdown is reflowed by the daemon's own formatter, so a
+        multi-word phrase can land across a line break and a naive substring
+        assertion fails on the wrapping rather than on the content. Normalise
+        instead of shortening the prose to fit the test.
+        """
+        body = dedupe_agent_template_path().read_text(encoding="utf-8")
+        return " ".join(body.split()).lower()
+
+    def test_bundled_agent_enumerates_before_reading(self) -> None:
+        """Plan 00216 Task 4.6. Requiring the checked-count made coverage
+        variance visible: 34, then 32, then 17 of the SAME unchanged 34 live
+        plans, each reported as though it were the whole tree.
+
+        Reading until satisfied is not reading everything, and without an
+        up-front worklist the difference is undetectable from the outside.
+        The procedure must build the list first and reconcile against it.
+        """
+        prose = self._agent_prose()
+        assert "before reading anything" in prose
+        assert "reconcile" in prose
+
+    def test_bundled_agent_requires_an_honest_partial_count(self) -> None:
+        """A partial check reported as complete is worse than no check.
+
+        The caller stops looking — which is the whole failure this agent
+        exists to prevent, reintroduced by the agent itself.
+        """
+        assert "give both numbers" in self._agent_prose()
+
     def test_bundled_agent_names_the_three_unrecoverable_fields(self) -> None:
         """Each is something the caller cannot reconstruct from prose."""
         body = dedupe_agent_template_path().read_text()
