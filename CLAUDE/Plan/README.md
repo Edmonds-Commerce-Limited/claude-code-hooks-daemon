@@ -86,7 +86,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
   - Includes a "Why this might not be worth doing" section arguing the case against its own Phases 3-4; evidence with `file:line` in `COUPLING-ANALYSIS.md`
 
-- [00211: plan-size guidance missing extract remedy](00211-plan-size-guidance-missing-extract-remedy/PLAN.md) - Not Started (field report: `plan-doc-size` offers exactly two remedies — relocate to JOURNAL/, split — but the most common cause of an oversized plan is durable CURRENT detail that is neither history nor task tree. Adds EXTRACT as a third, first-listed remedy; teaches `plan-shrink-without-journal` to recognise it; ships the internally-documented supporting-docs concept to client-facing docs; adds a DRY single-source-of-truth constant and a DBF doc-parity regression guard.)
+- [00211: plan-size guidance missing extract remedy](00211-plan-size-guidance-missing-extract-remedy/PLAN.md) - In Progress (adds EXTRACT as a third, first-listed remedy for oversized plans; see PLAN.md for the field report and full rationale.)
 
 ### Self-Driving / Automation
 
