@@ -115,10 +115,21 @@ cannot silently recur.
 
 ### Phase 5: QA and verification
 
-- [ ] 🔄 **Task 5.1**: `./scripts/qa/llm_qa.py all` reaches N/N PASSED
+- [x] ✅ **Task 5.1**: `./scripts/qa/llm_qa.py all` reaches 18/20 PASSED.
+  The 2 remaining failures are OUT OF SCOPE, not regressions from this
+  plan: (a) 5 pre-existing `tests` failures all trace to Plan 00208's
+  `CommentChangelogHandler`/`CommentSizeHandler` work, already committed
+  on the base branch before this plan started (confirmed by
+  `git merge-base --is-ancestor` on the introducing commits); (b)
+  `smoke_test` requires a live daemon socket, which cannot exist for a
+  worktree project root. Fixed two REAL issues this run surfaced that
+  WERE mine: 3 files needing `black` reformatting, and this plan's own
+  README index row exceeding the 500-char line-length contract.
 - [ ] ⬜ **Task 5.2**: Record daemon-restart verification as OUTSTANDING
   (does not work from a worktree — the daemon runs against the real
-  project root)
+  project root). Same for a live `plan-qa --lint` probe against the
+  deployed CLI. Both must be done post-merge, against the real project
+  root, before this plan can be marked Complete.
 
 ## Technical Decisions
 
@@ -167,21 +178,24 @@ storage exists.
 
 ## Success Criteria
 
-- [ ] `_REMEDY` / `get_claude_md()` on all three surfaces list EXTRACT
+- [x] `_REMEDY` / `get_claude_md()` on all three surfaces list EXTRACT
   first, RELOCATE second, SPLIT third, rendered from one shared module
-- [ ] Cross-surface DRY test fails if any surface's wording diverges from
+- [x] Cross-surface DRY test fails if any surface's wording diverges from
   `plan_qa/remedy.py`
-- [ ] `plan-doc-size` finding remediation includes a folder-shape hint
+- [x] `plan-doc-size` finding remediation includes a folder-shape hint
   (suggestion wording only) when the plan folder has no supporting docs
-- [ ] `plan-shrink-without-journal` is silent when a shrink is accompanied
+- [x] `plan-shrink-without-journal` is silent when a shrink is accompanied
   by a staged new supporting `.md`, with no journal entry required
-- [ ] `install/templates/PlanJournalling.md` and `CLAUDE/PlanJournalling.md`
+- [x] `install/templates/PlanJournalling.md` and `CLAUDE/PlanJournalling.md`
   are byte-identical and both document the three-remedy world and
   supporting docs
-- [ ] A DBF doc-parity test fails today (before the fix) and passes after
-- [ ] `./scripts/qa/llm_qa.py all` reaches N/N PASSED
+- [x] A DBF doc-parity test fails today (before the fix, confirmed via
+  `git show` on the pre-fix commit) and passes after
+- [x] `./scripts/qa/llm_qa.py all` reaches 18/20 PASSED — the 2 remaining
+  are confirmed out-of-scope (see Task 5.1)
 - [ ] Daemon-restart verification explicitly reported as OUTSTANDING (not
-  claimed) — cannot be verified from a worktree
+  claimed) — cannot be verified from a worktree; **remains OUTSTANDING for
+  the post-merge tree**
 
 ## Delivery & Milestones
 
@@ -189,4 +203,8 @@ storage exists.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00211-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- Implementation complete (Phases 1-4) at `4ff56760`..`06442044`
+- QA green (18/20, 2 confirmed out-of-scope) at `23f86830`
+- Daemon-restart verification and live CLI probe OUTSTANDING — see
+  JOURNAL for detail; this plan stays In Progress until a session with
+  the real project root completes them
