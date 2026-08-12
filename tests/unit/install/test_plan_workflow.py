@@ -687,6 +687,26 @@ class TestDedupeAgentDeployment:
         assert "already shipped" in body
         assert "no additional work" in body
 
+    def test_bundled_agent_states_the_output_format_is_mandatory(self) -> None:
+        """Real-dispatch finding (Plan 00216 Task 4.4).
+
+        Once the agent was genuinely dispatchable it found the right plan and
+        named its number — but flattened the report into one sentence, dropping
+        the Overlap and Relationship lines. A format shown only as an example
+        reads as illustrative, and a small model compresses it away.
+
+        Relationship matters most of what was dropped: "merge" and "supersede"
+        are opposite actions, and it is the only field that says which applies.
+
+        This pins the INSTRUCTION, which is all a unit test can reach. Whether
+        a given model then obeys it is only observable by dispatching the
+        agent, which is why Task 4.4 exists as a manual step rather than a
+        test.
+        """
+        body = dedupe_agent_template_path().read_text().lower()
+        assert "mandatory" in body
+        assert "every line is required" in body
+
     def test_bundled_agent_requires_a_plan_number_per_candidate(self) -> None:
         """The failing run named no plan number at all, which is the one datum
         the caller cannot look up for themselves from a prose summary."""

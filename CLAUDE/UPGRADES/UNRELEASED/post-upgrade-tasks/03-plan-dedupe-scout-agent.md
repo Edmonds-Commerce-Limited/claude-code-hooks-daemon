@@ -59,12 +59,18 @@ ls .claude/agents/hooks-daemon-plan-dedupe-scout.md
 If the plan workflow is disabled, nothing is deployed and there is nothing to
 do.
 
-**Start a new Claude Code session before trying to use it.** Claude Code
-enumerates `.claude/agents/` when a session starts, so an agent deployed by an
-upgrade *during* a live session is not dispatchable in that session — you get
-`Agent type 'hooks-daemon-plan-dedupe-scout' not found` listing every other
-agent. Nothing is broken; the file is on disk and the next session picks it up.
-Verified during development, so expect it rather than diagnosing it.
+**A newly deployed agent is not dispatchable immediately.** For a while after
+the upgrade you may get `Agent type 'hooks-daemon-plan-dedupe-scout' not found`, listing every other agent — which reads exactly like a broken deploy.
+Nothing is broken: the file is on disk, and Claude Code picks it up when it
+next re-scans `.claude/agents/`.
+
+Observed during development: the agent appeared later in the SAME session,
+with no restart, so a restart is not required — it is simply the quickest way
+to force the re-scan if you do not want to wait. Check `ls .claude/agents/hooks-daemon-plan-dedupe-scout.md` first; if the file is there,
+the deploy worked and only the pick-up is outstanding.
+
+The same delay applies to CHANGES to the file, which matters if you fork it:
+editing your copy may not take effect until the next re-scan either.
 
 ## What to do
 

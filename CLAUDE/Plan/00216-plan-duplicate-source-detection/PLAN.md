@@ -124,11 +124,20 @@ encodes a procedure, not user content, so fixes must reach the field. Gated on
   daemon-owned copy refreshed
 - [x] ✅ **Task 4.3**: Dogfood it against this tree — one true negative and one
   true positive on un-built work, both correct
-- [ ] ⬜ **Task 4.4**: Re-dogfood under REAL dispatch once a new session has
-  enumerated the agent. Tasks 4.3's runs inlined the definition into a
-  general-purpose agent, whose own system prompt competes with it; under real
-  dispatch the definition IS the system prompt, so the pathological case below
-  is not yet fairly tested
+- [x] ✅ **Task 4.4**: Re-dogfooded under REAL dispatch. The pathological case
+  is FIXED — it now names Plan 00216 by number instead of answering "already
+  shipped, no additional work required". The true-positive control still names
+  Plan 00205. The inline harness was indeed the confound
+- [ ] ⬜ **Task 4.5**: Verify the OUTPUT FORMAT contract under real dispatch.
+  Task 4.4 exposed what the harness had masked: the finding is correct and the
+  plan number is named, but the report is flattened into one sentence and the
+  `Overlap:`/`Relationship:` lines are dropped. `Relationship` is the field
+  that matters most — "merge" and "supersede" are opposite actions and it is
+  the only thing that says which applies. The definition now states the format
+  is mandatory; **that strengthening is unverified** — a probe two minutes
+  after redeploying still showed the old behaviour, which is consistent with
+  the re-scan delay below rather than with the instruction being insufficient.
+  Retest before drawing a conclusion; do not iterate on the prompt blind
 
 ## Success Criteria
 
@@ -141,9 +150,11 @@ encodes a procedure, not user content, so fixes must reach the field. Gated on
 - [x] It is suggested at creation time and blocks nothing
 - [x] It deploys to a real client install, verified in client mode
 - [x] Full QA passes
-- [ ] It does not answer "is this already implemented?" when the proposed work
-  happens to exist in the source tree — hardened in the prompt, not yet
-  verified under real dispatch (Task 4.4)
+- [x] It does not answer "is this already implemented?" when the proposed work
+  happens to exist in the source tree — verified under real dispatch
+- [ ] Its report carries the `Overlap:` and `Relationship:` lines, not just a
+  correct sentence. `Relationship` distinguishes merge from supersede, which
+  are opposite actions (Task 4.5)
 
 ## Dependencies
 

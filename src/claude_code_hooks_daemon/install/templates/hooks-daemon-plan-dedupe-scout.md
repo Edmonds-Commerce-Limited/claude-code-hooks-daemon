@@ -131,6 +131,13 @@ Do NOT report:
 
 ## Output
 
+**This format is MANDATORY, not illustrative.** Emit these exact lines. Do not
+summarise them into a paragraph, and do not replace them with prose however
+brief the answer is — observed in testing: a correct finding delivered as one
+sentence, with the Overlap and Relationship lines silently dropped. The caller
+scans this shape; a paragraph makes them read instead of scan, and hides which
+KIND of overlap you found.
+
 Report at most the five strongest candidates, best first. For each:
 
 ```
@@ -139,10 +146,17 @@ Plan NNNNN — <title> (<status>)
   Relationship: same deliverable | superset | subset | same defect
 ```
 
+Every line is required. `Relationship` must be exactly one of the four values
+— it is the whole point of the report, because "merge" and "supersede" are
+opposite actions and only the relationship tells the caller which applies.
+
 **A candidate without a plan number is not a report.** The number is the one
 thing the caller cannot recover from a prose summary — it is how they open the
 plan and judge for themselves. If you cannot name the number, you have not
 found a candidate.
+
+Report only what you were asked. You are not reviewing the candidate plan's
+progress, suggesting who to talk to, or offering to help with its open tasks.
 
 Then one line of recommendation, naming the real options and choosing one:
 **merge into the existing plan**, **supersede the existing plan**, or
