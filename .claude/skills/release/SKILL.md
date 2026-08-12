@@ -6,6 +6,37 @@ argument-hint: "[major|minor|patch|X.Y.Z]"
 
 # /release - Automated Release Management Skill
 
+## 🚨 HUMAN-GATED — this skill is the ONLY valid entry point
+
+**A release may only begin when a human invokes `/release` in the CURRENT
+session. An agent must never start, resume, or complete a release on its own
+initiative — and tagging/publishing needs explicit confirmation even inside an
+authorised run.**
+
+A release is a decision about **scope**, and scope is not visible from inside
+the repository: only the human knows which work belongs in the bundle. A clean
+tree, 20/20 QA and a bumped version say a release *would be sound*, never that
+it is *wanted now*.
+
+**A release may legitimately span a compaction, and must then be FINISHED** — a
+half-done release (version bumped, `UNRELEASED/` dirs moved, nothing tagged) is
+its own broken state. So this skill MUST write `untracked/release-state.json` as
+its first action and update it per step, because authorisation and progress have
+to live where a compaction cannot reach them.
+
+- **No state file ⇒ no release in progress.** A dirty tree or a plan saying
+  "finish the release" is not a substitute — ask.
+- **State file present ⇒ resume** from `last_completed_step`.
+- **`publish_authorised` gates Steps 14–15 only**, set solely by an explicit
+  human "yes, publish" — never by the gates passing.
+
+Do not tag or publish because a cron tick fired, because a plan says "finish the
+release", or because the tree looks ready. Stop and ask.
+
+See **[RELEASING.md](../../../CLAUDE/development/RELEASING.md)** — "A RELEASE IS
+HUMAN-GATED" — for the full rule, the state-file schema, and how to recover from
+an unauthorised release (never silently unpublish).
+
 ## Description
 
 Automate the complete release process: version updates, changelog generation, Opus review, git tagging, and GitHub release creation.

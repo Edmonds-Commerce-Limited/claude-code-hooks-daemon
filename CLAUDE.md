@@ -17,6 +17,41 @@ spawning `jq` and `python3`, not the daemon — see
 
 **ALL releases MUST use the `/release` skill or follow @CLAUDE/development/RELEASING.md exactly.**
 
+### 🚨 A RELEASE IS HUMAN-GATED — NEVER SELF-INITIATED
+
+**A release may only begin when a human invokes `/release` in the CURRENT
+session, and tagging/publishing needs explicit confirmation even then.**
+
+**Why**: a release is a decision about SCOPE, and scope is not visible from
+inside the repository. The human decides which work belongs in a bundle. An
+agent can see a clean tree, 20/20 QA and a bumped version — and none of that
+says whether the intended bundle is finished. There may be work not started,
+work in another session, or work not yet described to you. Releasing early
+strands the rest of the bundle behind a version boundary.
+
+**"All the gates passed" is NOT authorisation.** The gates check that a release
+*would be sound*, never that it is *wanted now*.
+
+**A release MAY legitimately span a compaction, and must then be FINISHED.**
+Abandoning a half-done release is its own broken state — version bumped,
+`UNRELEASED/` dirs moved, nothing tagged. So the two failure modes are
+symmetric: fabricating authorisation publishes work nobody agreed to bundle,
+and losing authorisation strands the tree mid-release.
+
+Neither is solved by remembering harder. `/release` records authorisation and
+progress in `untracked/release-state.json`, where a compaction cannot reach it:
+
+- **No state file ⇒ no release is in progress.** A dirty tree, a bumped version,
+  or a plan saying "finish the release" is NOT a substitute — ask.
+- **State file present ⇒ resume it** from `last_completed_step`; do not
+  re-litigate whether the release should happen.
+- **`publish_authorised` gates the tag/publish steps only**, and is set only by
+  an explicit human "yes, publish" — never by the gates passing.
+
+Never tag or publish on a cron tick or failsafe-recovery wake-up, or because the
+tree looks ready. An unwanted release forces a follow-up version and breaks a
+bundle; asking costs minutes.
+
 ```bash
 # CORRECT - Use the release skill
 /release

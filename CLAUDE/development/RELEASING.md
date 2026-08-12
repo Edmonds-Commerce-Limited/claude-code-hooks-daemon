@@ -2,6 +2,110 @@
 
 **ALWAYS use `/release` skill. NEVER manually tag, edit CHANGELOG.md, or edit RELEASES/\*.md.**
 
+## 🚨 A RELEASE IS HUMAN-GATED (ABSOLUTE, READ BEFORE ANYTHING ELSE)
+
+**A release may ONLY begin when a human invokes `/release` in the CURRENT session.
+An agent must never start, resume, or complete a release on its own initiative.**
+
+### Why — this is not ceremony
+
+**A release is a decision about SCOPE, and scope is not visible from inside the
+repository.** The human decides which work belongs in a bundle. An agent can see
+that the tree is clean, that QA is 20/20, and that a version is bumped — and from
+that it can see nothing at all about whether the intended bundle is complete.
+There may be work not started, work in another session, work not yet described to
+you. Cutting a release early does not just publish sooner: it strands the rest of
+the bundle behind a version boundary and forces an unplanned follow-up release.
+
+"The gates all passed" is therefore NOT authorisation. The gates check that a
+release *would be sound*, never that it is *wanted now*.
+
+### The rule
+
+| Situation                                                                  | Allowed to tag/publish?       |
+| -------------------------------------------------------------------------- | ----------------------------- |
+| Human invoked `/release` in this session and confirmed the publish step    | YES                           |
+| Release state file records an explicit publish authorisation (see below)   | YES — resume and finish       |
+| Release state file exists but records no publish authorisation             | Finish the prep, then **ASK** |
+| A cron tick, failsafe-recovery wake-up, or `/loop` iteration fires         | **NO**                        |
+| All blocking gates just went green and no state file authorises publishing | **NO — stop and ask**         |
+| The working tree looks "ready" and a version bump is already committed     | **NO**                        |
+| A plan or TODO says "finish the release"                                   | **NO**                        |
+
+### A release MAY span a compaction — and then it MUST be finished
+
+Releases are long. A compaction part-way through one is normal, not an anomaly,
+and **abandoning a half-finished release is its own broken state**: the version
+is bumped, `UNRELEASED/` task and manifest directories have been moved, the
+changelog and release notes are written, and nothing is tagged. Leaving that
+sitting in the tree is worse than either finishing or reverting it.
+
+So the two failure modes are symmetric, and both are real:
+
+- **Fabricating authorisation** — an agent decides a release is wanted because
+  the tree looks ready. This publishes work the human never agreed to bundle.
+- **Losing authorisation** — an agent drops a genuinely authorised release
+  because a compaction ate the instruction. This strands the tree mid-release.
+
+**Neither is solved by remembering harder.** Authorisation and progress must be
+recorded WHERE A COMPACTION CANNOT REACH — on disk, not in context.
+
+### The release state file
+
+`/release` MUST write `untracked/release-state.json` as its first action, and
+update it as each numbered step completes:
+
+```json
+{
+  "version": "3.52.0",
+  "authorised_by_human_at": "<ISO timestamp of the /release invocation>",
+  "publish_authorised": false,
+  "last_completed_step": 8,
+  "notes": "human confirmed scope: plans 00197-00202 + 00206"
+}
+```
+
+Rules for reading it:
+
+- **No state file ⇒ no release is in progress.** A dirty tree, a bumped
+  version, or a plan saying "finish the release" is NOT a substitute. Ask.
+- **State file present ⇒ a release IS authorised.** Resume from
+  `last_completed_step`; do not restart it and do not re-litigate whether it
+  should happen.
+- **`publish_authorised` gates Steps 14–15 only.** Prep steps are reversible and
+  may proceed on the file's authority alone. Tag and publish are outward-facing
+  and effectively irreversible — once pushed, other installations upgrade onto
+  them. Set this flag only from an explicit human "yes, publish", never from
+  the fact that the gates passed.
+- **Delete the file** once Step 15 verification succeeds, so a later session
+  cannot mistake a finished release for an in-flight one.
+
+The scope question — "is the bundle complete?" — is the one thing an agent
+cannot answer from the repository, which is why `notes` records the human's
+answer rather than the agent's inference.
+
+**Steps 14 and 15 (tag, GitHub release) are the hard gate.** Preparing a release
+— version bump, changelog, release notes, running QA — is reversible and may
+proceed under `/release`. Tagging and publishing are outward-facing and
+effectively irreversible: once pushed, other installations upgrade onto them.
+Ask before those steps, every time, even inside an authorised `/release` run.
+
+**If in doubt, stop and ask.** An unwanted release costs a forced follow-up
+version and a broken bundle. A delayed release costs minutes.
+
+### Recovering from an unauthorised release
+
+Do NOT silently unpublish — that is a second unilateral outward-facing act. Tell
+the human what was published and let them choose between leaving it (the next
+bundle simply becomes the following version) and withdrawing it:
+
+```bash
+# ONLY on explicit human instruction:
+git tag -d vX.Y.Z
+git push origin :refs/tags/vX.Y.Z
+gh release delete vX.Y.Z --yes
+```
+
 ## Prerequisites
 
 - Clean git state, all QA passing
