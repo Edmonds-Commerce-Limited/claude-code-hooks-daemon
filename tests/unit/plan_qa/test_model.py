@@ -388,6 +388,18 @@ class TestPlanTreeScan:
         tree = PlanTree.scan(plan_root)
         assert tree.stray_files == ()
 
+    def test_planlib_is_a_built_in_expected_root_file(self, plan_root: Path) -> None:
+        """Plan 00213 Phase 2: `_planlib.inc.bash` is a DAEMON-DEPLOYED asset,
+
+        like `mkplan.bash`, so it belongs in the built-in accepted set and
+        must not require every project to hand-configure `extra_root_files`
+        for it (the gap the docstrings at config/models.py and this module
+        anticipated before the daemon actually shipped the file).
+        """
+        (plan_root / "_planlib.inc.bash").write_text("# shellcheck shell=bash\n")
+        tree = PlanTree.scan(plan_root)
+        assert tree.stray_files == ()
+
     def test_extra_root_files_are_not_stray(self, plan_root: Path) -> None:
         # Plan 00153: an additive allowlist entry suppresses that exact file.
         (plan_root / "_planlib.bash").write_text("# sourced helper\n")

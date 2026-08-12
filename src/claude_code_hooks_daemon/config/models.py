@@ -7,7 +7,7 @@ validation, serialisation, and sensible defaults.
 import logging
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Final, Literal, Self
 
 import yaml
 from pydantic import (
@@ -539,9 +539,14 @@ class PlanWorkflowQaConfig(BaseModel):
         collision_allowlist: Historic duplicate plan numbers to tolerate
         extra_root_files: Extra non-plan filenames permitted at the plan root,
             layered ADDITIVELY on top of the built-in accepted set
-            ({README.md, CLAUDE.md, mkplan.bash, _TEMPLATE_.md}); default empty
-            = today's behaviour. Use for a legitimately-placed shared file such
-            as a sourced ``_planlib.bash`` shell library.
+            ({README.md, CLAUDE.md, mkplan.bash, _TEMPLATE_.md,
+            _JOURNAL_TEMPLATE_.md, _planlib.inc.bash}); default empty = today's
+            behaviour. Use for a project's OWN legitimately-placed shared file
+            (e.g. a bespoke sourced helper script) that the daemon does not
+            already know about. `_planlib.inc.bash` -- the motivating example
+            for this option before the daemon shipped it -- is now built in
+            (Plan 00213 Phase 2) precisely so a client project no longer has
+            to configure this for it.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -600,6 +605,111 @@ class PlanWorkflowQaConfig(BaseModel):
     )
 
 
+_DOT_GIT: Final = ".git"
+
+
+class PlanWorkflowScriptsConfig(BaseModel):
+    """Configuration for the `planlib` operator-script safety library (Plan 00213 Phase 2).
+
+    Nested under ``plan_workflow.scripts``. `_planlib.inc.bash` is a sourced
+    bash library of safety-critical primitives for plan-folder orchestrator
+    scripts (deploy/verify/triage scripts an operator runs from their own
+    terminal): script-relative boundary-bounded repo-root resolution, a
+    tee'd run log with a deterministic drain, ssh-agent key loading, and the
+    state-change gate. Deploying it is a SEPARATE decision from writing
+    orchestrator scripts against it — this config only controls whether the
+    daemon deploys the library at all (via the same idempotent seam that
+    deploys `mkplan.bash`, see `install/plan_workflow.py`).
+
+    Ships OFF by default, and ``root_marker`` has NO default: a wrong default
+    silently resolves to *some* directory, and a deployed orchestrator then
+    operates on the wrong repository without complaint — the exact incident
+    class the library exists to prevent (see the library's own
+    `_plan_find_repo_root`/`plan_init`). Requiring it at config-validation
+    time surfaces a missing value at daemon-restart, not at first live run.
+
+    Attributes:
+        enabled: Master switch. Deploys `_planlib.inc.bash` into the plan
+            directory when true (requires `plan_workflow.enabled` too, since
+            the library is deployed alongside `mkplan.bash`).
+        root_marker: Filename marking this project's repository root for the
+            library's boundary-bounded upward walk. REQUIRED when `enabled`
+            — deliberately no default. Must not be `.git`: `.git` is the
+            walk's BOUNDARY (nested-checkout protection), and using it as the
+            marker too means the boundary check can never fire.
+        delegate: Optional project-relative command runner a leg delegates
+            to (e.g. a wrapper script that resolves credentials/targeting).
+            Empty = legs call commands directly.
+        check_flag: The dry-run flag threaded into delegated commands by the
+            orchestrator's own `--check` flag.
+        force_color_var: Optional env var forced to `1` when the console is a
+            TTY, so a colour-suppressing tool still colours the console while
+            the run log (which strips ANSI) stays clean. Empty disables this.
+        scrubber: Optional project-relative secret scrubber invoked on the
+            finished run log as `<scrubber> <file>`. Required in practice
+            when `track_run_logs` is true.
+        track_run_logs: When true, a run without a working scrubber
+            quarantines its log to `.unscrubbed` (gitignored) rather than
+            leaving an uncommitted-but-unmarked log lying around.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        default=False,
+        description="Deploy the planlib operator-script safety library",
+    )
+    root_marker: str = Field(
+        default="",
+        description="Filename marking the repo root boundary; REQUIRED when enabled, no default",
+    )
+    delegate: str = Field(
+        default="",
+        description="Project-relative command runner a leg delegates to (optional)",
+    )
+    check_flag: str = Field(
+        default="--check",
+        description="Dry-run flag threaded into delegated commands by --check",
+    )
+    force_color_var: str = Field(
+        default="",
+        description="Env var forced to 1 when the console is a TTY (optional)",
+    )
+    scrubber: str = Field(
+        default="",
+        description="Project-relative secret scrubber for run logs (optional)",
+    )
+    track_run_logs: bool = Field(
+        default=False,
+        description="Require a working scrubber; quarantine unscrubbed logs to .unscrubbed",
+    )
+
+    @model_validator(mode="after")
+    def _validate_root_marker(self) -> "PlanWorkflowScriptsConfig":
+        """FAIL FAST on the two ways `root_marker` can silently misresolve.
+
+        Both checks only apply when ``enabled`` — a disabled config never
+        deploys anything, so an unset/invalid marker is harmless until the
+        library would actually be deployed.
+        """
+        if not self.enabled:
+            return self
+        if not self.root_marker:
+            raise ValueError(
+                "plan_workflow.scripts.root_marker is required when "
+                "plan_workflow.scripts.enabled is true — there is deliberately "
+                "no default (a wrong default silently resolves to the wrong "
+                "repository; see _plan_find_repo_root in _planlib.inc.bash)"
+            )
+        if self.root_marker == _DOT_GIT:
+            raise ValueError(
+                "plan_workflow.scripts.root_marker must not be '.git' — .git is "
+                "the walk's BOUNDARY (nested-checkout protection); using it as "
+                "the marker too means the boundary check can never fire"
+            )
+        return self
+
+
 class PlanWorkflowConfig(BaseModel):
     """Configuration for plan workflow system.
 
@@ -612,6 +722,7 @@ class PlanWorkflowConfig(BaseModel):
         workflow_docs: Path to workflow documentation file
         enforce_claude_code_sync: Whether to enforce plansDirectory sync
         qa: Plan QA subsystem policy (Plan 00144)
+        scripts: `planlib` operator-script safety library policy (Plan 00213)
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -639,6 +750,10 @@ class PlanWorkflowConfig(BaseModel):
     qa: PlanWorkflowQaConfig = Field(
         default_factory=PlanWorkflowQaConfig,
         description="Plan QA subsystem policy (Plan 00144)",
+    )
+    scripts: PlanWorkflowScriptsConfig = Field(
+        default_factory=PlanWorkflowScriptsConfig,
+        description="`planlib` operator-script safety library policy (Plan 00213)",
     )
 
 

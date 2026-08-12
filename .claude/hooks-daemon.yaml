@@ -692,6 +692,20 @@ plan_workflow:
   directory: "CLAUDE/Plan"
   workflow_docs: "CLAUDE/PlanWorkflow.md"
   enforce_claude_code_sync: false
+  # planlib operator-script safety library (Plan 00213 Phase 2). Dogfoods the
+  # DEPLOYMENT mechanism only (mirrors the ccy.deploy_supervisor precedent
+  # below): this repo is a pure software project with no plan-folder
+  # deploy/verify/triage orchestrator scripts to run the library's
+  # operational primitives against, so there is nothing genuine to point
+  # plan_gate_change/plan_load_ssh_keys/the run-log tee at here. Enabling
+  # this still exercises the real, config-gated deploy path end to end
+  # (idempotent redeploy through deploy_plan_workflow_if_enabled, the same
+  # seam mkplan.bash uses) rather than leaving it entirely unexercised.
+  scripts:
+    enabled: true
+    # pyproject.toml is unique to this repo's root and is never .git (which
+    # is the walk's BOUNDARY, not a valid marker -- see PLAN.md Decision 1).
+    root_marker: "pyproject.toml"
   # Plan QA subsystem (Plan 00144): one policy for the edit-time lint, the
   # git-commit gate, the SessionStart sweep, and the `plan-qa` CLI.
   qa:

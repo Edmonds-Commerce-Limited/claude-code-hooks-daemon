@@ -76,24 +76,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Enforces status-header integrity, index-at-birth, terminal-state atomicity (`git mv` + README row + stats in one commit), number-collision defence, and required archive dirs (`Completed/`/`Cancelled/`, configurable)
   - Config under `plan_workflow.qa`; grandfathering for legacy plans; spec provenance: `untracked/hooks-daemon-plan-verify-qa.md` (31-sin audit catalogue)
 
-- [00199: planlib — plan-orchestrator tooling in the daemon](00199-hooks-daemon-plan-lib/PLAN.md) - Not Started (implements the upstream proposal at `untracked/hooks-daemon-plan-lib-v2.md`, which supersedes the v1 document and renumbers its sections from §3.5 onward.)
-
-  - Ships proposal artefacts **1 + 3**: `_planlib.inc.bash`, a sourced bash library of safety-critical primitives (script-relative boundary-bounded root resolution; a run log with a *waitable* drain so …
-
-  - **Defers artefact 2** (`plan_script_qa`): this repo has zero orchestrator scripts, so it would ship as a gate with an empty enforcement surface, an unseedable allowlist, and 16 rules validated only …
-
-  - Two grounding finds: the codebase **already anticipated this file** — `config/models.py:544` and `plan_qa/model.py:431` both name `_planlib.bash` as the motivating example for `extra_root_files` …
-
-  - Dissent recorded: when artefact 2 is built its rules belong in the **existing** `plan_qa` catalogue, not a second parallel engine as the proposal's §6.1 specifies — that section was written against a …
-
-  - v2 also supplies two verification techniques the plan adopts: `bash -n` **exits 0 while printing diagnostics**, so a syntax gate must assert stderr is empty (otherwise it is itself "a control that …
-
-  - Verified the blast radius rather than assuming it: security/type_check/dependencies/format are all **honest** (their tools write JSON to a file via `-o`/`--json-output`, so `2>&1` cannot corrupt …
-
-  - Second class: four handler false positives hit during ordinary work — `EnforceLlmQaHandler` blocking `cat` of `run_all.sh` (matches the filename, not the invocation); `destructive_git` reporting \`git …
-
-  - Includes a "Why this might not be worth doing" section arguing the case against its own Phases 3-4; evidence with `file:line` in `COUPLING-ANALYSIS.md`
-
 ### Self-Driving / Automation
 
 - [00166: Supervisor Multi-Terminal Session Isolation](00166-supervisor-multi-terminal-session-isolation/PLAN.md) - In Progress (root cause confirmed by code review + live `/proc` topology: the PTY supervisor reads the ONE shared per-repo `context-sidecar/` dir and matches compaction signals / sidecars by freshness / …)
@@ -1130,6 +1112,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Cancelled Plans
 
+- [00199: planlib — plan-orchestrator tooling in the daemon](Cancelled/00199-hooks-daemon-plan-lib/PLAN.md) - Superseded
+
+  - Superseded by [00213](00213-planlib-plan-folder-orchestrator-tooling/PLAN.md), which targets the SAME upstream proposal and is the plan being executed. Both were authored independently five days apart and neither referenced the other; 00213 additionally tracks the proposal under version control (`PROPOSAL.md`) rather than pointing at `untracked/`. 00199 was never started, so no work is lost.
+
+  - Preserved for `PROPOSAL-ASSESSMENT.md`, whose integration analysis 00213's owner reviewed and adopted wholesale: mode `0644` not `0755` (the library is sourced, not executed), adding it to `_EXPECTED_ROOT_FILES` so the sweep does not flag it, daemon-owned overwrite-on-upgrade, no default for `root_marker`, neutral config examples, the `bash -n` empty-stderr assertion, and deferring `plan_script_qa`.
+
 - [00091: Hook Executable Permissions](Cancelled/00091-hook-executable-permissions/PLAN.md) - Cancelled
 
   - Superseded by [00102](00102-hook-exec-bit-defense/PLAN.md).
@@ -1153,10 +1141,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 217 (count = `hooksdaemon.latestPlanNumber` git counter)
 - **Completed**: 167 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
-- **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102). A fifth — 00199, superseded by 00213 — is committed on the in-flight planlib branch and lands with that merge; these figures describe `main` as it stands, not the pending merge.
-- **Folder-to-number reconciliation**: 40 + 167 + 4 = **211 folders**, spanning
+- **Cancelled/Abandoned**: 5 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00199 superseded by 00213)
+- **Folder-to-number reconciliation**: 39 + 167 + 5 = **211 folders**, spanning
   **208 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1166,10 +1154,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work). 208 + 9 = 217. ✅
-- **Last reconciled by**: the Plan 00217 creation — recounted from disk
-  (`active`/`Completed`/`Cancelled` folder counts read directly), not
-  incremented from the previous figures. Before that, the Plan 00211 + 00212
-  merges, where every figure was re-derived because both sides of the merge
+- **Last reconciled by**: the Plan 00213 merge — recounted from the merged
+  tree on disk rather than by taking either side of the conflict, because
+  neither was right: `main` still had 00199 in the active count, and the
+  incoming block was internally inconsistent (it stated `Cancelled: 5` while
+  its own reconciliation summed `4`, and `Active: 37` while summing `38`).
+  Before that, the Plan 00217 creation, and the Plan 00211 + 00212 merges —
+  where every figure was likewise re-derived because both sides of that merge
   were wrong in the same way: each itemised 00038 as a deleted draft when its
   folder is present, and neither accounted for the six other absent numbers or
   the legacy 3-digit folders. Before that, the Plan 00208 / 00209 creations

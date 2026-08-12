@@ -23,6 +23,15 @@ MKPLAN_SCRIPT_NAME: Final[str] = "mkplan.bash"
 # Owner rwx, group/other rx — least-privilege executable (matches deploy_skills).
 _MKPLAN_MODE: Final[int] = 0o755
 
+# planlib operator-script safety library (Plan 00213 Phase 2): a SOURCED bash
+# library, never executed directly, so it gets a SEPARATE, less-privileged
+# mode constant rather than reusing _MKPLAN_MODE — an execute bit on a file
+# nobody should run invites exactly that.
+PLANLIB_SCRIPT_NAME: Final[str] = "_planlib.inc.bash"
+# Owner+group+other read/write, no execute — matches CLAUDE.md's "regular
+# files: chmod 644" guidance.
+_PLANLIB_MODE: Final[int] = 0o644
+
 # Tracked, client-owned plan template consumed by mkplan.bash (Plan 00144
 # Phase 5). Seeded from the bundled default when absent; NEVER overwritten.
 PLAN_TEMPLATE_NAME: Final[str] = "_TEMPLATE_.md"
@@ -49,6 +58,16 @@ def mkplan_template_path() -> Path:
     installer copies it into each project's plan directory on install/upgrade.
     """
     return Path(__file__).resolve().parent / _TEMPLATES_DIR_NAME / MKPLAN_SCRIPT_NAME
+
+
+def planlib_template_path() -> Path:
+    """Absolute path to the canonical bundled ``_planlib.inc.bash`` library.
+
+    Single source of truth for the planlib operator-script safety library
+    (Plan 00213 Phase 2); the installer copies it into each project's plan
+    directory when ``plan_workflow.scripts.enabled`` is true.
+    """
+    return Path(__file__).resolve().parent / _TEMPLATES_DIR_NAME / PLANLIB_SCRIPT_NAME
 
 
 def plan_template_default_path() -> Path:
@@ -144,6 +163,7 @@ class BootstrapResult:
     skipped_readme: bool = False
     skipped_claude_md: bool = False
     deployed_mkplan: bool = False
+    deployed_planlib: bool = False
     created_template: bool = False
     template_default_changed: bool = False
     created_journal_template: bool = False
@@ -154,6 +174,7 @@ class BootstrapResult:
 def bootstrap_plan_workflow(
     project_root: Path,
     plan_dir_name: str = _DEFAULT_PLAN_DIR_NAME,
+    deploy_scripts_library: bool = False,
 ) -> BootstrapResult:
     """Bootstrap the plan directory structure for a project.
 
@@ -164,10 +185,13 @@ def bootstrap_plan_workflow(
     - ``CLAUDE.md`` (lifecycle instructions) — skipped if it already exists
     - ``mkplan.bash`` (the next-plan scaffolding script) — daemon-owned tooling,
       overwritten on every run so audit fixes reach existing installs
+    - ``_planlib.inc.bash`` (Plan 00213 Phase 2) — ONLY when
+      ``deploy_scripts_library`` is true, since it is a separate opt-in on top
+      of the plan workflow itself (``plan_workflow.scripts.enabled``)
 
     Client content (README/CLAUDE.md) is never overwritten; the daemon-owned
-    ``mkplan.bash`` is overwritten on every run, matching how skill scripts and
-    hook wrappers are re-deployed.
+    ``mkplan.bash`` and ``_planlib.inc.bash`` are overwritten on every run,
+    matching how skill scripts and hook wrappers are re-deployed.
 
     Deployment on install/upgrade is gated by config and driven through
     :func:`deploy_plan_workflow_if_enabled` (the single decision site wired into
@@ -180,6 +204,11 @@ def bootstrap_plan_workflow(
             ``CLAUDE/Plan`` but MUST be passed the configured
             ``track_plans_in_project`` value so the bootstrap honours a project
             that tracks plans elsewhere (single source of truth).
+        deploy_scripts_library: Whether to also deploy ``_planlib.inc.bash``
+            (Plan 00213 Phase 2). Callers MUST pass the configured
+            ``plan_workflow.scripts.enabled`` value — defaults to False so a
+            direct caller (e.g. a test, or a caller unaware of the option)
+            never deploys it by accident.
 
     Returns:
         BootstrapResult with success status and messages
@@ -219,6 +248,12 @@ def bootstrap_plan_workflow(
 
     # Deploy mkplan.bash (daemon-owned: overwrite on every run + exec bit)
     _deploy_mkplan(plan_dir, result)
+
+    # Deploy _planlib.inc.bash (Plan 00213 Phase 2) -- opt-in on top of the
+    # plan workflow itself, so only when the caller (deploy_plan_workflow_if_
+    # enabled, reading plan_workflow.scripts.enabled) asks for it.
+    if deploy_scripts_library:
+        _deploy_planlib(plan_dir, result)
 
     # Seed the client-owned plan template + refresh the daemon-owned snapshot
     _deploy_plan_template(plan_dir, result)
@@ -292,6 +327,28 @@ def _deploy_mkplan(plan_dir: Path, result: BootstrapResult) -> None:
     logger.info("Deployed %s to %s (mode %o)", MKPLAN_SCRIPT_NAME, target, _MKPLAN_MODE)
 
 
+def _deploy_planlib(plan_dir: Path, result: BootstrapResult) -> None:
+    """Copy the canonical `_planlib.inc.bash` into ``plan_dir`` (Plan 00213 Phase 2).
+
+    Daemon-owned tooling, like `mkplan.bash`: overwritten on every run so
+    fixes reach the field, never left for a project to fork silently. Unlike
+    `mkplan.bash` it is SOURCED, not executed, so it gets `_PLANLIB_MODE`
+    (0o644) rather than the executable `_MKPLAN_MODE` -- a deliberately
+    separate constant, not a reuse, because the two files encode different
+    intentions (run me vs. source me).
+    """
+    template = planlib_template_path()
+    if not template.is_file():
+        raise FileNotFoundError(f"Bundled planlib library not found: {template}")
+
+    target = plan_dir / PLANLIB_SCRIPT_NAME
+    target.write_text(template.read_text())
+    target.chmod(_PLANLIB_MODE)
+    result.deployed_planlib = True
+    result.messages.append(f"Deployed {PLANLIB_SCRIPT_NAME} (chmod {_PLANLIB_MODE:o})")
+    logger.info("Deployed %s to %s (mode %o)", PLANLIB_SCRIPT_NAME, target, _PLANLIB_MODE)
+
+
 def _deploy_plan_template(plan_dir: Path, result: BootstrapResult) -> None:
     """Seed ``_TEMPLATE_.md`` and manage the default-template snapshot.
 
@@ -355,6 +412,10 @@ def deploy_plan_workflow_if_enabled(
     workflow is "on": when ``config.plan_workflow.enabled`` is true, the scaffold
     and the daemon-owned ``mkplan.bash`` are (re)deployed into
     ``config.plan_workflow.directory``; when false, this is a no-op.
+    ``_planlib.inc.bash`` (Plan 00213 Phase 2) is a further, INDEPENDENT opt-in
+    gated on ``config.plan_workflow.scripts.enabled`` -- a project can run the
+    plan workflow without the library, but never the library without the
+    workflow (the library deploys INTO the plan directory).
 
     This is the single deployment decision site, called identically by
     ``install_version.sh`` and BOTH ``upgrade_version.sh`` paths (full + the
@@ -372,8 +433,8 @@ def deploy_plan_workflow_if_enabled(
             an accidental deploy.
 
     Returns:
-        BootstrapResult — ``deployed_mkplan`` is False with an explanatory
-        message when the workflow is disabled in config.
+        BootstrapResult — ``deployed_mkplan``/``deployed_planlib`` are False
+        with an explanatory message when the workflow is disabled in config.
     """
     config = Config.load_or_default(config_path)
     plan_cfg = config.plan_workflow
@@ -384,4 +445,8 @@ def deploy_plan_workflow_if_enabled(
         logger.info("Plan workflow disabled in config; skipping mkplan deployment")
         return result
 
-    return bootstrap_plan_workflow(project_root, plan_cfg.directory)
+    return bootstrap_plan_workflow(
+        project_root,
+        plan_cfg.directory,
+        deploy_scripts_library=plan_cfg.scripts.enabled,
+    )

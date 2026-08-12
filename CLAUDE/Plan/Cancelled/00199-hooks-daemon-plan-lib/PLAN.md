@@ -1,16 +1,41 @@
 # Plan 00199: planlib — plan-orchestrator tooling in the daemon
 
-**Status**: Not Started
+**Status**: Superseded
 **Created**: 2026-08-07
 **Owner**: joseph
 **Priority**: Medium
 **Recommended Executor**: Opus
 **Execution Strategy**: Sub-Agent Teams
 
+## Superseded by Plan 00213
+
+**Do not execute this plan.** It is superseded by
+[Plan 00213: planlib plan folder orchestrator tooling](../00213-planlib-plan-folder-orchestrator-tooling/PLAN.md),
+which covers the same upstream proposal, is In Progress, and tracks the
+proposal documents inside its own folder (`PROPOSAL.md` +
+`PROPOSAL-v1-SUPERSEDED.md`) rather than pointing at `untracked/`.
+
+Both plans were authored independently against the same proposal — 00199 on
+2026-08-07, 00213 on 2026-08-12 — and neither referenced the other. 00213 wins
+on every axis that matters: it is the one being executed, it holds the sources
+under version control, and it carries an explicit ADAPT decision.
+
+**What survives is [PROPOSAL-ASSESSMENT.md](PROPOSAL-ASSESSMENT.md)**, which is
+the reason this folder is archived rather than deleted. Its integration
+analysis was reviewed by 00213's owner and adopted wholesale: mode `0644` not
+`0755` (the library is sourced, not executed), adding the library to
+`_EXPECTED_ROOT_FILES` so the sweep does not flag it, daemon-owned overwrite-on-
+upgrade ownership, no default for `root_marker`, neutral config examples in
+place of the proposal's Ansible-flavoured ones, the `bash -n` stderr assertion,
+and deferring `plan_script_qa`. The rule triage and the objections in §7 stand
+as written.
+
+Everything below is the superseded plan, kept for provenance.
+
 ## Source
 
-Specification: `untracked/hooks-daemon-plan-lib-v2.md` (1,327 lines) — read it
-before executing any phase. It supersedes v1; every `§` below refers to **v2**
+Specification: `untracked/hooks-daemon-plan-lib-v2.md` (1,327 lines) — now also
+tracked as `PROPOSAL.md` inside Plan 00213. Every `§` below refers to **v2**
 (numbering differs from §3.5 onward). Assessment, v2 deltas and objections:
 [PROPOSAL-ASSESSMENT.md](PROPOSAL-ASSESSMENT.md).
 
@@ -330,3 +355,5 @@ independently supports deferring artefact 2.
 
 - Plan authored against the proposal; artefacts 1 + 3 accepted, artefact 2
   deferred with triggers
+- Superseded by Plan 00213 before any implementation began. No code was written
+  under this plan; its integration analysis was adopted by 00213 instead

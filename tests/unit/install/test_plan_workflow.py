@@ -13,6 +13,7 @@ from claude_code_hooks_daemon.install.plan_workflow import (
     MKPLAN_SCRIPT_NAME,
     PLAN_JOURNALLING_DOC_NAME,
     PLAN_TEMPLATE_NAME,
+    PLANLIB_SCRIPT_NAME,
     TEMPLATE_SNAPSHOT_NAME,
     bootstrap_plan_workflow,
     deploy_plan_workflow_if_enabled,
@@ -20,6 +21,7 @@ from claude_code_hooks_daemon.install.plan_workflow import (
     mkplan_template_path,
     plan_journalling_doc_path,
     plan_template_default_path,
+    planlib_template_path,
 )
 
 
@@ -198,6 +200,149 @@ class TestMkplanDeployment:
         bootstrap_plan_workflow(tmp_path)
         deployed = tmp_path / "CLAUDE" / "Plan" / MKPLAN_SCRIPT_NAME
         assert deployed.read_text() == mkplan_template_path().read_text()
+
+
+class TestPlanlibDeployment:
+    """Tests for deploying `_planlib.inc.bash` (Plan 00213 Phase 2).
+
+    Unlike `mkplan.bash` (unconditionally deployed whenever the plan workflow
+    is on), the library is a SEPARATE opt-in: it is only deployed when
+    `plan_workflow.scripts.enabled` is true, which the config model already
+    requires a `root_marker` for. `bootstrap_plan_workflow` therefore takes an
+    explicit `deploy_scripts_library` flag rather than re-reading config
+    itself, matching this module's existing pattern of separating the
+    unconditional bootstrap from the config-driven decision in
+    `deploy_plan_workflow_if_enabled`.
+    """
+
+    def test_bundled_template_exists_and_is_sourceable(self) -> None:
+        """The canonical library is bundled inside the package."""
+        template = planlib_template_path()
+        assert template.is_file()
+        assert template.name == PLANLIB_SCRIPT_NAME
+        body = template.read_text()
+        assert "PLANLIB_SOURCED" in body
+        assert "plan_init()" in body
+
+    def test_not_deployed_by_default(self, tmp_path: Path) -> None:
+        """bootstrap_plan_workflow does NOT deploy the library unless asked."""
+        bootstrap_plan_workflow(tmp_path)
+        assert not (tmp_path / "CLAUDE" / "Plan" / PLANLIB_SCRIPT_NAME).exists()
+
+    def test_deploys_when_requested(self, tmp_path: Path) -> None:
+        """Passing deploy_scripts_library=True deploys the library."""
+        result = bootstrap_plan_workflow(tmp_path, deploy_scripts_library=True)
+        deployed = tmp_path / "CLAUDE" / "Plan" / PLANLIB_SCRIPT_NAME
+        assert deployed.is_file()
+        assert deployed.read_text() == planlib_template_path().read_text()
+        assert result.deployed_planlib is True
+
+    def test_deployed_library_is_not_executable(self, tmp_path: Path) -> None:
+        """0644, NOT 0755: the library is SOURCED, never executed directly.
+
+        Regression guard for reusing _MKPLAN_MODE (0o755) by mistake, which
+        would ship a misleading execute bit on a file nobody should run.
+        """
+        bootstrap_plan_workflow(tmp_path, deploy_scripts_library=True)
+        deployed = tmp_path / "CLAUDE" / "Plan" / PLANLIB_SCRIPT_NAME
+        mode = stat.S_IMODE(deployed.stat().st_mode)
+        assert mode == 0o644
+        assert not (mode & stat.S_IXUSR), "the sourced library must not be executable"
+
+    def test_overwritten_on_upgrade(self, tmp_path: Path) -> None:
+        """Daemon-owned, like mkplan.bash: a stale copy is overwritten."""
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        stale = plan_dir / PLANLIB_SCRIPT_NAME
+        stale.write_text("# stale forked copy\n")
+
+        bootstrap_plan_workflow(tmp_path, deploy_scripts_library=True)
+
+        assert stale.read_text() == planlib_template_path().read_text()
+
+    def test_idempotent_redeploy(self, tmp_path: Path) -> None:
+        """Running twice keeps the library in place and identical."""
+        bootstrap_plan_workflow(tmp_path, deploy_scripts_library=True)
+        bootstrap_plan_workflow(tmp_path, deploy_scripts_library=True)
+        deployed = tmp_path / "CLAUDE" / "Plan" / PLANLIB_SCRIPT_NAME
+        assert deployed.read_text() == planlib_template_path().read_text()
+
+    def test_missing_bundled_template_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FAIL FAST: a missing bundled source must not silently skip."""
+        monkeypatch.setattr(
+            _plan_workflow_module,
+            "planlib_template_path",
+            lambda: tmp_path / "does-not-exist.bash",
+        )
+        with pytest.raises(FileNotFoundError, match="planlib"):
+            bootstrap_plan_workflow(tmp_path, deploy_scripts_library=True)
+
+
+class TestDeployPlanlibIfEnabled:
+    """Tests for planlib deployment through the config-SSoT gated entrypoint.
+
+    The library deploys only when BOTH `plan_workflow.enabled` (the parent
+    gate that scaffolds the plan directory at all) AND
+    `plan_workflow.scripts.enabled` (this feature's own opt-in) are true --
+    same two-level gating shape the sibling scripts.* option family uses
+    nowhere else yet, but consistent with "an asset lives under a directory
+    that must itself exist first".
+    """
+
+    def _write_config(self, project_root: Path, body: str) -> Path:
+        config_dir = project_root / ".claude"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_path = config_dir / "hooks-daemon.yaml"
+        config_path.write_text(body)
+        return config_path
+
+    def test_enabled_config_deploys_planlib(self, tmp_path: Path) -> None:
+        config_path = self._write_config(
+            tmp_path,
+            "plan_workflow:\n"
+            "  enabled: true\n"
+            "  scripts:\n"
+            "    enabled: true\n"
+            "    root_marker: pyproject.toml\n",
+        )
+
+        result = deploy_plan_workflow_if_enabled(tmp_path, config_path)
+
+        assert result.deployed_planlib is True
+        deployed = tmp_path / "CLAUDE" / "Plan" / PLANLIB_SCRIPT_NAME
+        assert deployed.read_text() == planlib_template_path().read_text()
+
+    def test_scripts_disabled_skips_planlib_but_still_deploys_mkplan(
+        self, tmp_path: Path
+    ) -> None:
+        """plan_workflow.enabled alone must NOT deploy the library."""
+        config_path = self._write_config(tmp_path, "plan_workflow:\n  enabled: true\n")
+
+        result = deploy_plan_workflow_if_enabled(tmp_path, config_path)
+
+        assert result.deployed_mkplan is True
+        assert result.deployed_planlib is False
+        assert not (tmp_path / "CLAUDE" / "Plan" / PLANLIB_SCRIPT_NAME).exists()
+
+    def test_plan_workflow_disabled_skips_planlib_even_if_scripts_enabled(
+        self, tmp_path: Path
+    ) -> None:
+        """The parent gate wins: no plan directory, no library either."""
+        config_path = self._write_config(
+            tmp_path,
+            "plan_workflow:\n"
+            "  enabled: false\n"
+            "  scripts:\n"
+            "    enabled: true\n"
+            "    root_marker: pyproject.toml\n",
+        )
+
+        result = deploy_plan_workflow_if_enabled(tmp_path, config_path)
+
+        assert result.deployed_planlib is False
+        assert not (tmp_path / "CLAUDE" / "Plan").exists()
 
 
 class TestPlanTemplateDeployment:

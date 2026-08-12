@@ -123,6 +123,63 @@ config_changes:
         or rebase-only merging. Disable entirely with
         handlers.pre_tool_use.ancestry_preserving_merge.enabled: false.
         See docs/guides/HANDLER_REFERENCE.md#ancestry_preserving_merge.
+    - key: plan_workflow.scripts
+      recommended: false
+      dormant: true
+      description: >-
+        NEW nested config seam (Plan 00213 Phase 2), adopting the
+        externally-proposed planlib bash library. When
+        plan_workflow.scripts.enabled is true (and plan_workflow.enabled
+        is also true), the daemon deploys _planlib.inc.bash -- a sourced
+        library of safety-critical primitives for plan-folder orchestrator
+        scripts an OPERATOR runs from their own terminal (deploy/verify/
+        triage scripts filed inside a plan folder): script-relative
+        boundary-bounded repo-root resolution (fixes the
+        git rev-parse --show-toplevel cwd bug -- a script run by path from
+        a different checkout silently wrote its report into the WRONG
+        repository and still exited zero), a tee'd run log with a
+        deterministic drain (a process-substitution >(tee ...) cannot be
+        waited on, so the final buffered chunk -- the lines written as the
+        run died -- is lost), ssh-agent key loading, and the state-change
+        gate (gates on whether a run CHANGES state, never on target name).
+        Deployed through the SAME idempotent seam that deploys mkplan.bash;
+        daemon-owned, overwritten on every (re)deploy. The library is
+        SOURCED, never executed, so it ships 0644, not the executable 0755
+        mkplan.bash gets. Independently re-verified before landing:
+        bash -n with asserted-empty stderr, shellcheck -x -S style clean,
+        24/24 functions cross-referenced with zero dangling/unused
+        references, plus a 47-case pytest behavioural suite exercising the
+        library as real bash via subprocess (root resolution incl. the
+        nested-checkout boundary refusal, the change gate, leg
+        mode-mismatch guards, the BASH_SUBSHELL misuse guard, ordering
+        enforcement, no-TTY paths). This daemon's own repo has no
+        plan-folder orchestrator scripts to run the library against -- it
+        is a pure software project, not an infrastructure/ops repo -- so
+        only the deployment mechanism itself is dogfooded here (mirroring
+        the existing ccy.deploy_supervisor precedent), not the library's
+        runtime primitives. root_marker has NO default and enabling
+        without one is a config-validation error: a wrong default
+        silently resolves to the wrong repository, which is exactly the
+        incident class the library exists to prevent. plan_script_qa -- a
+        companion QA handler enforcing that orchestrators are built on
+        this library -- was proposed alongside it but deliberately NOT
+        built: this repo has zero orchestrator scripts to gate, so its 16
+        rules would be validated only against unit tests written from the
+        same specification that produced them, with no independent signal.
+      migration_note: >-
+        Ships disabled, with no default root_marker (a project must
+        supply one to enable). Not recommended for every project -- this
+        is for a project whose CLAUDE/Plan/ folders contain operator-run
+        deploy/verify/triage scripts against live infrastructure
+        (Ansible, Kubernetes, bespoke ops tooling); a pure
+        software-development project has nothing to point it at. Enable
+        with plan_workflow.scripts.enabled: true and
+        plan_workflow.scripts.root_marker: "<file marking your repo
+        root>" (never .git -- that is the walk's BOUNDARY, not the
+        marker). Optional: delegate (a project command runner legs call
+        through), check_flag, force_color_var, scrubber,
+        track_run_logs. See
+        CLAUDE/Plan/00213-planlib-plan-folder-orchestrator-tooling/PLAN.md.
   renamed: []
   removed: []
   changed: []

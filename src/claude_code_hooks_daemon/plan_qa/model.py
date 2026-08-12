@@ -310,6 +310,12 @@ _EXPECTED_ROOT_FILES: Final[frozenset[str]] = frozenset(
         "mkplan.bash",
         "_TEMPLATE_.md",
         "_JOURNAL_TEMPLATE_.md",  # Plan 00163: per-plan journalling scaffold template.
+        # Plan 00213 Phase 2: sourced planlib operator-script safety library,
+        # daemon-deployed like mkplan.bash when plan_workflow.scripts.enabled
+        # is true. Built in (not left to `extra_root_files`) because it is a
+        # DAEMON-owned asset -- a client should not have to hand-configure an
+        # allowlist entry for a file the daemon itself decided to ship.
+        "_planlib.inc.bash",
     }
 )
 
@@ -428,9 +434,12 @@ class PlanTree:
 
         ``extra_root_files`` (Plan 00153) is an ADDITIVE allowlist layered on top
         of the built-in :data:`_EXPECTED_ROOT_FILES`: a client can permit a
-        legitimately-placed non-plan file (e.g. a sourced ``_planlib.bash``) at
-        the plan root so it is not reported as stray. Default empty = today's
-        behaviour.
+        legitimately-placed non-plan file of their OWN (a bespoke sourced
+        helper script, say) at the plan root so it is not reported as stray.
+        Default empty = today's behaviour. ``_planlib.inc.bash`` -- the
+        motivating example for this option before the daemon shipped it -- is
+        now itself a member of :data:`_EXPECTED_ROOT_FILES` (Plan 00213 Phase
+        2), so a project no longer needs this allowlist for it specifically.
 
         Raises:
             FileNotFoundError: when ``root`` is not a directory (FAIL FAST —

@@ -1407,12 +1407,14 @@ whether the bulk is detail wanting a name. See
 PLAN-vs-supporting-doc-vs-JOURNAL contract.
 
 `extra_root_files` is an ADDITIVE allowlist layered on top of the built-in
-accepted set (`README.md`, `CLAUDE.md`, `mkplan.bash`, `_TEMPLATE_.md`): list any
-legitimately-placed non-plan file at the plan root here so the
-`structure-archive-dirs` check does not report it as a stray file. Typical use is
-a sourced shell library such as `_planlib.bash` shared by plan orchestrator
-scripts. Matching is by exact filename; the default empty list is byte-identical
-to prior behaviour.
+accepted set (`README.md`, `CLAUDE.md`, `mkplan.bash`, `_TEMPLATE_.md`,
+`_JOURNAL_TEMPLATE_.md`, `_planlib.inc.bash`): list any legitimately-placed
+non-plan file of your OWN at the plan root here so the `structure-archive-dirs`
+check does not report it as a stray file (a bespoke sourced helper script,
+say). Matching is by exact filename; the default empty list is byte-identical
+to prior behaviour. `_planlib.inc.bash` -- see below -- is now itself a
+built-in member of the accepted set, so a project no longer needs this
+allowlist just to deploy it.
 
 The `journal` sub-block governs per-plan journalling (Plan 00163): each plan
 folder may carry a `JOURNAL/` of append-only `NNNNN-Journal-YY-MM-DD.md`
@@ -1453,6 +1455,47 @@ and `freshness_days` to nag a quiet `JOURNAL/` sooner than the 30-day plan
 staleness window. See
 [CLAUDE/PlanJournalling.md](../../CLAUDE/PlanJournalling.md) for the entry
 grammar, append-only discipline, and the POLICY-vs-CONVENTION split.
+
+**`plan_workflow.scripts`** (Plan 00213 Phase 2, adopted from an externally
+proposed `planlib` library) is a SEPARATE, sibling config block under
+`plan_workflow` -- not part of `plan_workflow.qa`. When
+`plan_workflow.scripts.enabled` is true (and the parent `plan_workflow.enabled`
+is also true), the daemon deploys `_planlib.inc.bash` -- a sourced bash
+library of safety-critical primitives for plan-folder ORCHESTRATOR scripts an
+operator runs from their own terminal (deploy/verify/triage scripts filed
+inside a plan folder): script-relative boundary-bounded repo-root resolution,
+a tee'd run log with a deterministic drain, ssh-agent key loading, and a
+state-change gate. It ships through the SAME idempotent seam as `mkplan.bash`
+(daemon-owned, overwritten on every redeploy), but at file mode `0644` --
+never `0755` -- because it is SOURCED, not executed.
+
+```yaml
+plan_workflow:
+  enabled: true
+  scripts:
+    enabled: false          # ships OFF; deploys _planlib.inc.bash when true
+    root_marker: ""         # REQUIRED when enabled -- NO default (see below)
+    delegate: ""            # optional: project-relative command runner
+    check_flag: "--check"   # dry-run flag threaded into delegated commands
+    force_color_var: ""     # optional: env var forced to 1 on a real TTY
+    scrubber: ""            # optional: project-relative secret scrubber
+    track_run_logs: false   # require scrubber; quarantine unscrubbed logs
+```
+
+`root_marker` names the file that marks your project's repository root for
+the library's upward filesystem walk (e.g. `pyproject.toml`, `go.mod`,
+`ansible.cfg`). There is deliberately **no default**: a wrong default
+silently resolves to *some* directory and a deployed script then operates on
+the wrong repository without complaint -- the exact incident class the
+library exists to prevent. Setting `enabled: true` without `root_marker` (or
+setting `root_marker: ".git"`, which is the walk's BOUNDARY rather than a
+valid marker) FAILS config validation at daemon start, not at first live
+script run.
+
+This is not a universally-recommended feature -- it is for a project whose
+`CLAUDE/Plan/` folders contain operator-run deploy/verify/triage scripts
+against live infrastructure (Ansible, Kubernetes, bespoke ops tooling). A
+pure software-development project has nothing to point it at.
 
 The handler itself is enabled/prioritised in the usual place:
 
