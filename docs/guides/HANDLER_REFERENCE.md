@@ -1344,10 +1344,15 @@ in progress) and a same-size edit such as ticking a checkbox only advises, so
 an already-oversized plan can always be updated and refactored down. Beyond
 that, plans in `legacy_plan_allowlist` only ever advise, and a file declaring
 `<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->` is downgraded to advice. The
-remediation always names two remedies -- relocate narrative into `JOURNAL/`, or
-split an over-scoped plan -- and never suggests deleting content. See
+remediation always names three remedies, listed in this order -- extract
+durable-but-current detail into a named supporting document in the plan
+folder (the most common correct answer), relocate dated narrative into
+`JOURNAL/`, or split an over-scoped plan -- and never suggests deleting
+content. When the plan folder has no supporting documents at all, the
+remediation also appends a folder-shape HINT (never an assertion) to check
+whether the bulk is detail wanting a name. See
 [CLAUDE/PlanJournalling.md](../../CLAUDE/PlanJournalling.md) for the full
-PLAN-vs-JOURNAL contract.
+PLAN-vs-supporting-doc-vs-JOURNAL contract.
 
 `extra_root_files` is an ADDITIVE allowlist layered on top of the built-in
 accepted set (`README.md`, `CLAUDE.md`, `mkplan.bash`, `_TEMPLATE_.md`): list any

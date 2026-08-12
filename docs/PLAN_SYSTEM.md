@@ -189,11 +189,16 @@ first) — configurable via `plan_workflow.qa.plan_doc_size`:
 | Warning  | > 25,000 | > 500 | Escalated wording |
 | Block    | > 35,000 | > 900 | Edit denied       |
 
-**When a plan gets too big there are exactly two remedies, and neither is
+**When a plan gets too big there are three remedies, and none is
 deletion:**
 
-1. **Relocate** the narrative into the plan's `JOURNAL/` day-file.
-2. **Split** the plan if the task tree itself is the bulk — an over-scoped
+1. **Extract** durable-but-current detail (research, findings, decisions and
+   their reasoning, evidence tables) into a named supporting document in the
+   plan folder — see "Documentation Co-location" above. This is the most
+   common correct answer: `PLAN.md` is a task list, so almost anything
+   making it big is detail that wants a name.
+2. **Relocate** dated narrative into the plan's `JOURNAL/` day-file.
+3. **Split** the plan if the task tree itself is the bulk — an over-scoped
    plan is not fixed by better journalling.
 
 **Only an edit that GROWS the file can be blocked.** Shrinking it is silent
