@@ -1,0 +1,36 @@
+version: "3.53.0"
+date: "UNRELEASED"
+breaking: false
+config_changes:
+  added:
+    - key: handlers.post_tool_use.command_hints
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PostToolUse advisory handler (Plan 00212). ONE handler driven by
+        a config object mapping Bash command patterns to reminder text --
+        not a handler per hinted command. Ships default-ON with a single
+        built-in hint: running agent-browser reminds the agent to close the
+        browser session when finished. A pattern only fires at the START of
+        a shell segment (reusing utils/shell_segmentation.py and
+        utils/command_evasion.py rather than a hand-rolled check), so it
+        never fires on the configured word appearing as an unrelated
+        argument (grep agent-browser notes.md) or inside a commit message,
+        and it recognises path-qualified / env-prefixed invocation
+        respellings. Each hint is rate-limited via a ttl_seconds cooldown
+        tracked per (session_id, hint_id) in a bounded in-memory map, with
+        an optional min_calls_between secondary count-based gate. Never
+        blocks (terminal: false).
+      migration_note: >-
+        On by default with its one built-in hint active; no action needed
+        to adopt. Configure handlers.post_tool_use.command_hints.options:
+        options.mode is additive (default -- your options.hints list is
+        appended to the built-in set, and an entry whose id matches a
+        built-in one overrides it) or replace (discards the built-in set
+        entirely, using only your list). Disable entirely with
+        handlers.post_tool_use.command_hints.enabled: false. See
+        docs/guides/HANDLER_REFERENCE.md#command_hints for the full hint
+        schema.
+  renamed: []
+  removed: []
+  changed: []

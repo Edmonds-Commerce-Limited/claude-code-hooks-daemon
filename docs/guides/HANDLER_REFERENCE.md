@@ -1685,6 +1685,45 @@ handlers:
 
 ---
 
+#### command_hints
+
+| Property       | Value           |
+| -------------- | --------------- |
+| **Config key** | `command_hints` |
+| **Priority**   | 29              |
+| **Type**       | Advisory        |
+| **Event**      | PostToolUse     |
+
+**Description:** Generic, config-driven advisory: when a Bash command matches a configured hint's `pattern` — a literal command name matched at the start of a shell segment, recognising path-qualified (`/usr/local/bin/agent-browser`) and `env`-prefixed spellings — a reminder is injected as advisory context. ONE handler, not a handler per hinted command. Ships with a single default hint: running `agent-browser` reminds the agent to close the browser session when finished. Never blocks (`terminal: false`).
+
+The pattern never fires on the configured word appearing as an unrelated argument (`grep agent-browser notes.md`) or inside a commit message — only at the START of a shell segment (after stripping an optional `env `/path prefix), using `utils/shell_segmentation.py` and `utils/command_evasion.py` rather than a hand-rolled match.
+
+Each hint is rate-limited independently via `ttl_seconds`, tracked per `(session_id, hint_id)` in a bounded, in-memory map (state resets on daemon restart — a hint may fire once more than strictly necessary after one). An optional `min_calls_between` adds a secondary count-based gate: even once the TTL has elapsed, at least that many further matching calls must also occur before the hint fires again.
+
+**Config paradigm** (mirrors `idle_housekeeping_advisor`'s `custom_guidance_mode`): `options.mode` is `additive` (default) — the project's `options.hints` list is appended to the built-in set, and a project entry whose `id` matches a built-in one OVERRIDES it — or `replace`, which discards the built-in set entirely and uses only the project's list (possibly zero hints, if none are supplied).
+
+**Hint fields:** `id` (stable identifier, also used for override matching), `pattern` (literal command name), `hint` (the reminder text), `ttl_seconds`, and optional `min_calls_between` (default `0`, disabled).
+
+**Config example:**
+
+```yaml
+handlers:
+  post_tool_use:
+    command_hints:
+      enabled: true
+      priority: 29
+      options:
+        mode: additive          # additive (default) | replace
+        hints:
+          - id: agent-browser-close-session   # overrides the built-in hint of the same id
+            pattern: "agent-browser"
+            hint: "Custom reminder text"
+            ttl_seconds: 1800
+            min_calls_between: 0
+```
+
+---
+
 #### validate_eslint_on_write
 
 | Property       | Value                      |
@@ -2301,6 +2340,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `web_search_year`            | PreToolUse       | 55       | Warns about outdated search years      |
 | `british_english`            | PreToolUse       | 60       | Warns about American spellings         |
 | `validate_eslint_on_write`   | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes      |
+| `command_hints`              | PostToolUse      | 29       | Config-driven reminder after a command |
 | `bash_error_detector`        | PostToolUse      | 50       | Detects errors in bash output          |
 | `yolo_container_detection`   | SessionStart     | 40       | Detects container environments         |
 | `optimal_config_checker`     | SessionStart     | 52       | Audits Claude Code settings            |
