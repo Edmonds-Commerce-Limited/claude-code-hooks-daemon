@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-08-12 (v3.52.0) by `generate-docs`. Regenerate: `/workspace/bin/hooks-daemon generate-docs`
+> Generated on 2026-08-12 (v3.52.0) by `generate-docs`. Regenerate: `/workspace/.claude/worktrees/agent-a30acd31fd67cc845-c1114a12/bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (41 handlers)
+### PreToolUse (42 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -20,6 +20,7 @@
 | 16 | curl_pipe_shell | TERMINAL | Block curl/wget piped to shell commands |
 | 17 | pipe_blocker | BLOCKING | Block expensive commands piped to tail/head to prevent information loss |
 | 18 | dangerous_permissions | TERMINAL | Block chmod 777 and dangerous permission commands |
+| 19 | ancestry_preserving_merge | BLOCKING | Block (or, in warn mode, advise against) ancestry-severing merges |
 | 19 | git_stash | BLOCKING | Block or warn about git stash based on mode configuration |
 | 20 | lock_file_edit_blocker | TERMINAL | Block direct editing of package manager lock files |
 | 21 | pip_break_system | TERMINAL | Block pip install --break-system-packages commands |
@@ -50,7 +51,7 @@
 | 57 | daemon_docs_guard | ADVISORY | Warn when reading from the hooks-daemon internal CLAUDE/ docs directory |
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
 
-### PostToolUse (7 handlers)
+### PostToolUse (8 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -60,6 +61,7 @@
 | 26 | markdown_table_formatter | NON-TERMINAL | Auto-format markdown tables after Write/Edit of .md files |
 | 27 | git_hooks_executable_fixer | NON-TERMINAL | Detect git's "not set as executable" hint and fix the hooks automatically |
 | 28 | background_process_tracker | ADVISORY | Track backgrounded Bash processes and advise on watchdog/harvest (never kills) |
+| 29 | command_hints | ADVISORY | Inject a rate-limited advisory HINT when a configured command is detected |
 | 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
 
 ### SessionStart (12 handlers)
