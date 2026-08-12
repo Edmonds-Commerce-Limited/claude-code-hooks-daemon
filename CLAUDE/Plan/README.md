@@ -84,6 +84,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
   - Includes a "Why this might not be worth doing" section arguing the case against its own Phases 3-4; evidence with `file:line` in `COUPLING-ANALYSIS.md`
 
+- [00211: plan-size guidance missing extract remedy](00211-plan-size-guidance-missing-extract-remedy/PLAN.md) - In Progress (adds EXTRACT as a third, first-listed remedy for oversized plans; see PLAN.md for the field report and full rationale.)
+
 ### Self-Driving / Automation
 
 - [00166: Supervisor Multi-Terminal Session Isolation](00166-supervisor-multi-terminal-session-isolation/PLAN.md) - In Progress (root cause confirmed by code review + live `/proc` topology: the PTY supervisor reads the ONE shared per-repo `context-sidecar/` dir and matches compaction signals / sidecars by freshness / …)
@@ -1137,13 +1139,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 210 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191, 00195 and 00210 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run, and 00210 by a sub-agent that scaffolded it, then found Plan 00208 already covered the same work and withdrew its duplicate in favour of it)
+- **Total Plans Created**: 212 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191, 00195 and 00210 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run, and 00210 by a sub-agent that scaffolded it, then found Plan 00208 already covered the same work and withdrew its duplicate in favour of it)
 - **Completed**: 165 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 35 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
-- **Last reconciled by**: the Plan 00208 completion — counts re-derived from
-  the folders on disk (`35` active, `165` completed), not carried forward.
+- **Last reconciled by**: the Plan 00211 merge — counts re-derived from the
+  folders on disk (`36` active, `165` completed, `4` cancelled = 205, with the
+  7 counter-allocated-but-absent numbers itemised above reconciling to 212),
+  not carried forward from either side of the merge.
   The prior reconciliation was the Plan 00208 / 00209 creations after the
   v3.52.0 release at `36`/`164`; before that the Plan 00206 completion at
   `34`/`164`.

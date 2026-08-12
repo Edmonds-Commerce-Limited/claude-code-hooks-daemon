@@ -133,19 +133,29 @@ class TestMessageNamesTheBreachedAxis:
         assert "tokens" in message
 
 
-class TestRemediationNamesBothRemedies:
-    """Decision 4: naming only ``relocate`` leaves DELETION as the only lever.
+class TestRemediationNamesAllThreeRemedies:
+    """Plan 00211: naming only ``relocate``/``split`` leaves no slot for
+    durable-but-current detail, so the remediation must also offer EXTRACT.
 
-    Most oversized plans in the corpus are over-scoped rather than
-    journal-polluted, so the message must offer splitting too.
+    Most oversized plans in the corpus carry detail that is neither history
+    (relocate) nor an over-scoped task tree (split), so the message must
+    offer extraction too — and list it first, since it is the most common
+    correct answer.
     """
 
     @pytest.mark.parametrize("size", [20_000, 28_000, 40_000])
-    def test_message_offers_relocate_and_split(self, size):
+    def test_message_offers_extract_relocate_and_split(self, size):
         finding = _run(_context(_body_of_bytes(size)))[0]
         text = f"{finding.message} {finding.remediation}"
+        assert "EXTRACT" in text
         assert "JOURNAL/" in text
         assert "split" in text.lower()
+
+    @pytest.mark.parametrize("size", [20_000, 28_000, 40_000])
+    def test_extract_is_listed_before_relocate_and_split(self, size):
+        finding = _run(_context(_body_of_bytes(size)))[0]
+        text = finding.remediation
+        assert text.index("EXTRACT") < text.index("RELOCATE") < text.index("SPLIT")
 
     @pytest.mark.parametrize("size", [20_000, 28_000, 40_000])
     def test_message_never_recommends_deleting(self, size):
@@ -153,6 +163,66 @@ class TestRemediationNamesBothRemedies:
         text = f"{finding.message} {finding.remediation}".lower()
         assert "delete" not in text
         assert "trim" not in text
+
+
+class TestFolderShapeHint:
+    """Plan 00211: a suggestion, never a diagnosis (see the docstring on
+    ``_folder_has_supporting_docs`` for the 00001 counter-example this
+    honours: 19 supporting docs and still oversized because the task tree
+    genuinely was the bulk).
+    """
+
+    def _context_with_real_folder(self, tmp_path: Path, *, with_supporting_doc: bool):
+        plan_folder = tmp_path / "CLAUDE" / "Plan" / "00190-thing"
+        plan_folder.mkdir(parents=True)
+        if with_supporting_doc:
+            (plan_folder / "RESEARCH.md").write_text("findings\n")
+        return CheckContext(
+            project_root=tmp_path,
+            plan_dir_rel="CLAUDE/Plan",
+            file_path=plan_folder / "PLAN.md",
+            file_content=_body_of_bytes(20_000),
+        )
+
+    def test_no_supporting_docs_appends_hint(self, tmp_path: Path):
+        context = self._context_with_real_folder(tmp_path, with_supporting_doc=False)
+        finding = _run(context)[0]
+        assert "no supporting documents" in finding.remediation.lower()
+        assert "suggestion" in finding.remediation.lower()
+
+    def test_hint_is_never_phrased_as_a_diagnosis(self, tmp_path: Path):
+        context = self._context_with_real_folder(tmp_path, with_supporting_doc=False)
+        finding = _run(context)[0]
+        lowered = finding.remediation.lower()
+        # Never assert the folder shape IS the cause — only suggest it.
+        assert "is the cause" not in lowered
+        assert "must be" not in lowered
+
+    def test_supporting_doc_present_suppresses_hint(self, tmp_path: Path):
+        context = self._context_with_real_folder(tmp_path, with_supporting_doc=True)
+        finding = _run(context)[0]
+        assert "no supporting documents" not in finding.remediation.lower()
+
+    def test_journal_dayfile_alone_does_not_count_as_a_supporting_doc(self, tmp_path: Path):
+        plan_folder = tmp_path / "CLAUDE" / "Plan" / "00190-thing"
+        journal_dir = plan_folder / "JOURNAL"
+        journal_dir.mkdir(parents=True)
+        (journal_dir / "00190-Journal-26-08-12.md").write_text("# Journal\n")
+        context = CheckContext(
+            project_root=tmp_path,
+            plan_dir_rel="CLAUDE/Plan",
+            file_path=plan_folder / "PLAN.md",
+            file_content=_body_of_bytes(20_000),
+        )
+        finding = _run(context)[0]
+        assert "no supporting documents" in finding.remediation.lower()
+
+    def test_nonexistent_folder_defaults_to_hint_present(self):
+        """The fake ``/repo`` paths used elsewhere in this file have no real
+        backing folder — the hint must still fire safely (no crash) rather
+        than assume supporting docs exist."""
+        finding = _run(_context(_body_of_bytes(20_000)))[0]
+        assert "no supporting documents" in finding.remediation.lower()
 
 
 class TestShrinkingIsNeverPenalised:

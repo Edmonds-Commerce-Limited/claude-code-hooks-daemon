@@ -205,3 +205,47 @@ def has_staged_journal_entry(context: CheckContext, folder: str) -> bool:
             if staged_text is not None and staged_text != head_text:
                 return True
     return False
+
+
+_MARKDOWN_SUFFIX: Final[str] = ".md"
+
+
+def has_staged_supporting_doc(context: CheckContext, folder: str) -> bool:
+    """Whether a brand-new supporting document is staged directly in ``folder``.
+
+    Extraction — moving durable, current detail (research, decisions,
+    evidence tables) out of an oversized ``PLAN.md`` into a NAMED file in the
+    same plan folder — is exactly as legitimate a relocation as a
+    ``JOURNAL/`` entry (Plan 00211): a field report's restructure commit
+    shrank PLAN.md by 9,525 bytes while staging three brand-new supporting
+    ``.md`` files, and the check's only reason for not flagging it was that
+    a journal entry happened to also be staged.
+
+    Scoped to a NEW (Added) ``.md`` file DIRECTLY in ``folder`` — matching
+    is by "no further ``/`` after the prefix", which naturally excludes
+    ``JOURNAL/*`` (nested under the journal directory) and any other nested
+    subdirectory (e.g. ``assets/``) without a separate check. ``PLAN.md``
+    itself never counts — editing it is not evidence that something was
+    relocated OUT of it. Only ``Added`` status counts (not ``Modified``):
+    the report's own trigger case was extraction creating brand-new files,
+    and a modify-only edit to a pre-existing supporting doc is unrelated
+    editing churn, not evidence of THIS shrink being a relocation.
+    """
+    gitfacts = context.gitfacts
+    if gitfacts is None:
+        return False
+    prefix = folder.rstrip("/") + "/"
+    for change in gitfacts.staged_changes():
+        if change.status != _COMMIT_ADD_STATUS:
+            continue
+        if not change.path.startswith(prefix):
+            continue
+        remainder = change.path[len(prefix) :]
+        if "/" in remainder:
+            continue
+        if remainder == PLAN_DOC_FILENAME:
+            continue
+        if not remainder.endswith(_MARKDOWN_SUFFIX):
+            continue
+        return True
+    return False
