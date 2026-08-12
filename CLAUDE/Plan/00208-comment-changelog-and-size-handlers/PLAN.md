@@ -92,6 +92,8 @@ daemon's own source, the design is wrong. That must be *measured*, not assumed.
   and a representative sample of this repo's own rationale comments
 - [ ] ⬜ **Task 1.3**: Implement via Strategy Pattern over comment syntax
   (`#`, `//`, `/* */`, `<!-- -->`, `--`, `;`) — no if/elif on language
+  - [x] ✅ Shared `strategies/comments/` groundwork: `CommentSyntax` data
+    (`syntax.py`) + `CommentStrategy` Protocol (`protocol.py`) — see JOURNAL
 - [ ] ⬜ **Task 1.4**: Lower-precision signals (`Fixed:`/`Added:` runs, "used
   to", "no longer") ADVISE rather than block
 - [ ] ⬜ **Task 1.5**: `get_claude_md()` naming the destination for the text —
