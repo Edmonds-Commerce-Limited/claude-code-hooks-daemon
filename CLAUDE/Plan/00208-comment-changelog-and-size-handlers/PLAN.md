@@ -99,9 +99,10 @@ daemon's own source, the design is wrong. That must be *measured*, not assumed.
     block/doc delimited spans, Python docstring line-start guard
   - [x] ✅ `common.py` (shared skip-directories) + 12 per-language strategy
     files (11 canonical + Shell): Python, Shell, Ruby, JS/TS, Go, PHP,
-    Java, Kotlin, C#, Rust, Swift, Dart — 110 tests passing, mypy --strict
-    clean. `strategies/comments/` groundwork is COMPLETE; next is the
-    registry + the two handlers themselves
+    Java, Kotlin, C#, Rust, Swift, Dart
+  - [x] ✅ `registry.py` (extension -> strategy lookup, `create_default()`).
+    `strategies/comments/` groundwork is COMPLETE: 121 tests, 100% coverage,
+    mypy --strict clean. Next: the two handlers themselves
 - [ ] ⬜ **Task 1.4**: Lower-precision signals (`Fixed:`/`Added:` runs, "used
   to", "no longer") ADVISE rather than block
 - [ ] ⬜ **Task 1.5**: `get_claude_md()` naming the destination for the text —
