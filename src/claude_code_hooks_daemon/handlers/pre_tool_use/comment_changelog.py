@@ -56,30 +56,57 @@ _FIELD_NEW_STRING: Final[str] = "new_string"
 # bare two-part decimal (e.g. Python's "3.11") is common in ordinary prose
 # and is NOT treated as a version — only a full three-part release number or
 # an explicitly 'v'-prefixed token counts, matching the field report's own
-# shape (3.27.0, 3.26.2, ...).
-_SEMVER_TOKEN: Final[str] = r"v?\d+\.\d+\.\d+|v\d+\.\d+"
+# shape (3.27.0, 3.26.2, ...). Plan/Task numbering in THIS project's own
+# style ("Task 3.5.2", "Phase 3.5.2") is ALSO three-part and dotted, so
+# tokens immediately preceded by those words are excluded — measured via
+# Plan 00208's own whole-repo self-scan (see JOURNAL), which found this
+# collision firing on legitimate rationale comments across the codebase.
+_SEMVER_TOKEN: Final[str] = r"(?<!Task )(?<!Phase )(?:v?\d+\.\d+\.\d+|v\d+\.\d+)"
 _SEMVER_TOKEN_RE: Final[re.Pattern[str]] = re.compile(_SEMVER_TOKEN, re.IGNORECASE)
 
+# ── High-precision signals (BLOCK) ───────────────────────────────────────
+# Only these two. The proposal originally specified five signals as each
+# "close to unambiguous on its own" — a version arrow, a changelog verb
+# naming a version, and 2+ distinct versioned entries were ALSO planned as
+# blocking. Plan 00208's whole-repo self-scan measured all five against
+# this codebase's own ~1,080 source/test files and found the other three
+# fire on legitimate code: version-processing utilities (upgrade
+# compatibility checkers, version-range parsers) legitimately cite
+# multiple version numbers in their own docstrings; "removed in vX.Y"
+# describing an EXTERNAL tool's own deprecation is legitimate rationale,
+# not a changelog entry about this project. Only `Prior <version>:` /
+# `Previously <version>:` and a dated entry showed ZERO false positives —
+# every real hit was either this project's own field-report-style test
+# fixture, or the genuine field-report shape itself. The other three
+# signals are demoted to advisory (below) rather than dropped.
 _PRIOR_PATTERN: Final[re.Pattern[str]] = re.compile(
     rf"\b(?:Prior|Previously)\s+(?:{_SEMVER_TOKEN})\s*:", re.IGNORECASE
 )
+_DATED_ENTRY_PATTERN: Final[re.Pattern[str]] = re.compile(r"\b\d{4}-\d{2}-\d{2}\s*:")
+
+# ── Lower-precision signals (ADVISE only) ────────────────────────────────
 _VERSION_ARROW_PATTERN: Final[re.Pattern[str]] = re.compile(
     rf"(?:{_SEMVER_TOKEN})\s*(?:->|→)\s*(?:{_SEMVER_TOKEN})", re.IGNORECASE
 )
-_DATED_ENTRY_PATTERN: Final[re.Pattern[str]] = re.compile(r"\b\d{4}-\d{2}-\d{2}\s*:")
 _CHANGELOG_VERBS: Final[str] = (
     r"Bumped|Removed|Added|Fixed|Changed|Deprecated|Renamed|Patched|Released"
 )
 _CHANGELOG_VERB_VERSION_PATTERN: Final[re.Pattern[str]] = re.compile(
     rf"\b(?:{_CHANGELOG_VERBS})\b[^\n.]{{0,40}}\bin\b\s+(?:{_SEMVER_TOKEN})", re.IGNORECASE
 )
-
 _BULLET_RUN_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"\b(?:Fixed|Added|Changed):", re.IGNORECASE
 )
 _MIN_BULLET_RUN_COUNT: Final[int] = 2
+# "used to" is ambiguous in English: "we used to retry synchronously"
+# (retrospective) vs "a flag used to validate X" (utility sense — "used
+# [in order] to"). The self-scan found the utility sense overwhelmingly
+# more common in real code comments/docstrings, so this phrase is only
+# treated as retrospective when a pronoun subject immediately precedes it.
+# "no longer" / "we switched from" showed no comparable ambiguity.
 _RETROSPECTIVE_PHRASE_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"\b(?:used to|no longer|we switched from)\b", re.IGNORECASE
+    r"\b(?:we|it|this|they|I)\s+used\s+to\b|\bno longer\b|\bwe switched from\b",
+    re.IGNORECASE,
 )
 
 _MAX_SPANS_SHOWN: Final[int] = 5
@@ -92,29 +119,29 @@ def _distinct_dated_or_versioned_entries(text: str) -> set[str]:
     return entries
 
 
-def _block_reasons(text: str, max_history_entries: int) -> list[str]:
-    """High-precision signals: each is close to unambiguous on its own."""
+def _block_reasons(text: str) -> list[str]:
+    """High-precision signals: each measured with zero false positives (see module docstring)."""
     reasons: list[str] = []
     if _PRIOR_PATTERN.search(text):
         reasons.append("'Prior <version>:' / 'Previously <version>:' phrasing")
+    if _DATED_ENTRY_PATTERN.search(text):
+        reasons.append("a dated entry (e.g. '2026-08-12: ...')")
+    return reasons
+
+
+def _advisory_reasons(text: str, max_history_entries: int) -> list[str]:
+    """Lower-precision signals: suggestive, not conclusive -- advise only."""
+    reasons: list[str] = []
     if _VERSION_ARROW_PATTERN.search(text):
         reasons.append("a version-transition arrow (e.g. '1.2 -> 1.3')")
     if _CHANGELOG_VERB_VERSION_PATTERN.search(text):
         reasons.append("a changelog verb naming a version (e.g. 'Removed in v2.1.224')")
-    if _DATED_ENTRY_PATTERN.search(text):
-        reasons.append("a dated entry (e.g. '2026-08-12: ...')")
     entries = _distinct_dated_or_versioned_entries(text)
     if len(entries) > max_history_entries:
         reasons.append(
             f"{len(entries)} distinct dated/versioned entries in one comment "
-            f"(limit: {max_history_entries})"
+            f"(advisory threshold: {max_history_entries})"
         )
-    return reasons
-
-
-def _advisory_reasons(text: str) -> list[str]:
-    """Lower-precision signals: suggestive, not conclusive -- advise only."""
-    reasons: list[str] = []
     if len(_BULLET_RUN_PATTERN.findall(text)) >= _MIN_BULLET_RUN_COUNT:
         reasons.append("multiple 'Fixed:'/'Added:'/'Changed:' bullet-style entries")
     if _RETROSPECTIVE_PHRASE_PATTERN.search(text):
@@ -184,8 +211,8 @@ class CommentChangelogHandler(Handler):
         """Return (span, block_reasons, advisory_reasons) for every flagged span."""
         violations: list[tuple[CommentSpan, list[str], list[str]]] = []
         for span in extract_comment_spans(content, strategy.syntax):
-            block = _block_reasons(span.text, self._max_history_entries)
-            advisory = _advisory_reasons(span.text)
+            block = _block_reasons(span.text)
+            advisory = _advisory_reasons(span.text, self._max_history_entries)
             if block or advisory:
                 violations.append((span, block, advisory))
         return violations
@@ -280,15 +307,23 @@ class CommentChangelogHandler(Handler):
             "Writing HISTORICAL NARRATIVE into a code comment is blocked. A comment "
             "describes CURRENT STATE; changelog narrative belongs in git (the commit "
             "message), the project's changelog file, or a plan's `JOURNAL/` day-file.\n\n"
-            "**Blocked (high-precision) signals**, any one of which denies the write:\n"
+            "**Blocked (high-precision) signals**, either of which denies the write:\n"
             "- `Prior <version>:` / `Previously <version>:` phrasing\n"
-            "- two or more distinct versioned/dated entries in one comment "
-            "(configurable via `max_history_entries`, default 1)\n"
-            "- a version-transition arrow (`1.2 -> 1.3`, `v1.2 → v1.3`)\n"
-            "- a dated entry (`2026-08-12: ...`)\n"
-            "- a changelog verb naming a version (`Removed in v2.1.224`)\n\n"
-            "**NOT blocked — advisory only**: `Fixed:`/`Added:`/`Changed:` bullet "
-            "runs, retrospective phrasing (`used to`, `no longer`, `we switched from`).\n\n"
+            "- a dated entry (`2026-08-12: ...`)\n\n"
+            "Both were measured with ZERO false positives across this project's own "
+            "~1,080 source/test files (Plan 00208's whole-repo self-scan) — every real "
+            "hit was either the field-report shape itself or this handler's own test "
+            "fixtures.\n\n"
+            "**NOT blocked — advisory only**: a version-transition arrow "
+            "(`1.2 -> 1.3`), a changelog verb naming a version (`Removed in v2.1.224`), "
+            "two or more distinct versioned/dated entries in one comment (configurable "
+            "via `max_history_entries`, default 1), `Fixed:`/`Added:`/`Changed:` bullet "
+            "runs, retrospective phrasing (`used to`, `no longer`, `we switched from`). "
+            "These four started as blocking signals but the same self-scan found each "
+            "firing on legitimate code — version-processing utilities (upgrade "
+            "compatibility checkers) legitimately cite multiple versions in their own "
+            'docstrings, and "removed in vX.Y" describing an EXTERNAL tool\'s own '
+            "deprecation is rationale, not a changelog entry about this project.\n\n"
             "**History as RATIONALE is legitimate and is NOT flagged.** A comment may "
             "recount the past when the past is the reason the code looks the way it is "
             "now, and re-litigating it would reintroduce a fixed bug — e.g. `# Plan "

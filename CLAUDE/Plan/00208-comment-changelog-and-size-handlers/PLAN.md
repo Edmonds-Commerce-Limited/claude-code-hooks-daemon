@@ -81,12 +81,19 @@ daemon's own source, the design is wrong. That must be *measured*, not assumed.
 
 ### Phase 1: `comment_changelog` (TDD) — the valuable half
 
-- [x] ✅ **Task 1.1**: Failing tests for the high-precision block signals
-  - [x] ✅ `Prior <semver>:` / `Previously <semver>:`
-  - [x] ✅ two or more distinct semver tokens in one comment
-  - [x] ✅ a version transition arrow (`2.20 -> 2.22`, `v1.2 → v1.3`)
-  - [x] ✅ a dated entry inside a comment
-  - [x] ✅ a past-tense changelog verb naming a version (`Removed in v2.1.224`)
+- [x] ✅ **Task 1.1**: Failing tests for the high-precision block signals.
+  **REVISED after the whole-repo self-scan (see JOURNAL 12:20)**: only
+  `Prior <semver>:`/`Previously <semver>:` and a dated entry measured with
+  zero false positives and stayed BLOCKING. Two or more distinct semver
+  tokens, a version-transition arrow, and a changelog verb naming a
+  version all measured real false positives on this repo's own
+  version-processing docstrings and rationale comments — demoted to
+  advisory (still surfaced as context, never block)
+  - [x] ✅ `Prior <semver>:` / `Previously <semver>:` — BLOCKING
+  - [x] ✅ two or more distinct semver tokens in one comment — ADVISORY
+  - [x] ✅ a version transition arrow (`2.20 -> 2.22`, `v1.2 → v1.3`) — ADVISORY
+  - [x] ✅ a dated entry inside a comment — BLOCKING
+  - [x] ✅ a past-tense changelog verb naming a version (`Removed in v2.1.224`) — ADVISORY
 - [x] ✅ **Task 1.2**: Failing tests for what must stay ALLOWED — pin the
   proposal's `# History (Plan 00047 — do NOT re-add DISABLE_MOUSE…)` example
   and this repo's own rationale-comment style (plan-number-keyed, not
@@ -165,22 +172,28 @@ rather than its proxy.
 
 ## Success Criteria
 
-- [ ] The 5,645-char six-release banner comment is DENIED
-- [ ] The `DISABLE_MOUSE` rationale comment is ALLOWED
-- [ ] Running the matcher across this repo's `src/` produces ZERO hits on
-  legitimate rationale comments — measured, not assumed
-- [ ] Tiering verified: an over-limit comment can still be edited downward
-- [ ] The deny message names where the text should go instead
+- [x] ✅ The field-report shape (six `Prior <version>:` entries) is DENIED
+  (verified via unit test with the real phrasing; live pending)
+- [x] ✅ The `DISABLE_MOUSE` rationale comment is ALLOWED (pinned test)
+- [x] ✅ Running the matcher across this repo's `src/`+`scripts/`+`tests/`
+  (~1,080 files) produced ZERO BLOCK hits on legitimate rationale
+  comments — measured via a scratch scanner, NOT assumed. This measurement
+  actively CHANGED the design: 3 of the originally-planned 5 blocking
+  signals were demoted to advisory after finding real false positives
+  (see JOURNAL 12:20 for the full account)
+- [x] ✅ Tiering verified: an over-limit comment can still be edited downward
+  (comment_size shrink/same-size/grow tests)
+- [x] ✅ The deny message names where the text should go instead
 - [ ] Full QA passes; daemon restarts RUNNING; live socket probe confirms both
   directions
 
 ## Risks & Mitigations
 
-| Risk                                                          | Impact | Probability | Mitigation                                                                                     |
-| ------------------------------------------------------------- | ------ | ----------- | ---------------------------------------------------------------------------------------------- |
-| Blocks legitimate rationale comments, including this repo's   | High   | Medium      | Task 3.4 measures the whole repo; allowed cases are pinned as tests BEFORE implementation      |
-| Freezes a legacy over-commented file so it cannot be improved | Medium | Low         | Tiering: only a growing edit blocks, so refactoring downward is always possible                |
-| Semver detection fires on genuine version constants in code   | Medium | Medium      | Only match inside COMMENT spans, never code; require a changelog-shaped phrase, not a bare tag |
+| Risk                                                          | Impact | Probability | Mitigation                                                                                         | Outcome                                                                                                                                                             |
+| ------------------------------------------------------------- | ------ | ----------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Blocks legitimate rationale comments, including this repo's   | High   | Medium      | Whole-repo self-scan measures before shipping; allowed cases pinned as tests BEFORE implementation | Materialised for 3/5 signals — fixed by demoting them to advisory, not by weakening the scan                                                                        |
+| Freezes a legacy over-commented file so it cannot be improved | Medium | Low         | Tiering: only a growing edit blocks, so refactoring downward is always possible                    | Verified by test (shrink/same-size never block)                                                                                                                     |
+| Semver detection fires on genuine version constants in code   | Medium | Medium      | Only match inside COMMENT spans, never code; require a changelog-shaped phrase, not a bare tag     | Materialised anyway (version-processing docstrings, Task/Phase numbering collision) — fixed via signal demotion + a Task/Phase exclusion on the semver token itself |
 
 ## Delivery & Milestones
 

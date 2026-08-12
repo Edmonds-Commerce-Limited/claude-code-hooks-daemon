@@ -1,4 +1,16 @@
-"""Tests for CommentChangelogHandler - blocks changelog narrative in comments."""
+"""Tests for CommentChangelogHandler - blocks changelog narrative in comments.
+
+NOTE for future editors: this file's fixtures deliberately contain
+changelog-shaped example text (the exact thing the handler under test
+detects). Once ``comment_changelog`` is registered in the live daemon
+config, a future full-file ``Write`` of THIS file (not a normal ``Edit``,
+which only scans ``new_string``) could in principle be denied by the very
+handler it tests -- the same self-reference issue ``qa_suppression``'s own
+test file works around via runtime string concatenation. This file has not
+needed that treatment yet (no fixture has tripped it while editing this
+file with ``Edit``); if a future edit does, follow qa_suppression's
+pattern rather than disabling the handler.
+"""
 
 from typing import Any
 
@@ -103,6 +115,13 @@ class TestMatchesGating:
 
 
 class TestHighPrecisionBlockSignals:
+    """Only these two survived Plan 00208's whole-repo self-scan with zero
+    measured false positives (see JOURNAL). The other three signals the
+    proposal originally specified as blocking (arrow, verb+version, 2+
+    distinct entries) are demoted to advisory below -- the scan found them
+    firing on legitimate version-processing code and rationale comments
+    across this project's own ~1,080 files."""
+
     def test_prior_semver_colon(self) -> None:
         handler = CommentChangelogHandler()
         content = "x = 1  # Prior 3.26.2: whitelisted the supervisor\n"
@@ -118,37 +137,9 @@ class TestHighPrecisionBlockSignals:
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
 
-    def test_two_or_more_distinct_semver_tokens(self) -> None:
-        handler = CommentChangelogHandler()
-        content = "x = 1  # bumped from 1.2.3 to 1.2.4 for the fix\n"
-        hook_input = _make_write_input("/workspace/src/mod.py", content)
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-
-    def test_version_transition_arrow(self) -> None:
-        handler = CommentChangelogHandler()
-        content = f"x = 1  # migrated 1.2.0 {_ARROW} 1.3.0 for the new API\n"
-        hook_input = _make_write_input("/workspace/src/mod.py", content)
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-
-    def test_version_transition_arrow_unicode(self) -> None:
-        handler = CommentChangelogHandler()
-        content = "x = 1  # migrated v1.2 → v1.3 for the new API\n"
-        hook_input = _make_write_input("/workspace/src/mod.py", content)
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-
     def test_dated_entry(self) -> None:
         handler = CommentChangelogHandler()
         content = "x = 1  # 2026-08-12: switched to pasta for consistency\n"
-        hook_input = _make_write_input("/workspace/src/mod.py", content)
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-
-    def test_changelog_verb_naming_version(self) -> None:
-        handler = CommentChangelogHandler()
-        content = "x = 1  # Removed in v2.1.224 after the audit\n"
         hook_input = _make_write_input("/workspace/src/mod.py", content)
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
@@ -161,6 +152,78 @@ class TestHighPrecisionBlockSignals:
         reason = result.reason or ""
         assert "git" in reason.lower()
         assert "journal" in reason.lower() or "changelog" in reason.lower()
+
+    def test_task_number_is_not_mistaken_for_semver(self) -> None:
+        """'Task 3.5.2' collides with the 3-part semver shape - must be excluded."""
+        handler = CommentChangelogHandler()
+        content = (
+            "# Plan 00100 Phase 3.5: inline-safe bootstrap precondition.\n"
+            "# Before attempting it, consults `can_inline_bootstrap` (Task 3.5.2);\n"
+            "# any failure routes to the fallback (Task 3.5.3).\n"
+        )
+        hook_input = _make_write_input("/workspace/src/mod.py", content)
+        assert handler.matches(hook_input) is False
+
+
+class TestDemotedSignalsAreNowAdvisoryOnly:
+    """These three were originally specified as high-precision/blocking;
+    measurement against this repo's own source found each firing on
+    legitimate code (see module docstring + JOURNAL 00208)."""
+
+    def test_two_or_more_distinct_semver_tokens_advises_not_blocks(self) -> None:
+        handler = CommentChangelogHandler()
+        content = "x = 1  # bumped from 1.2.3 to 1.2.4 for the fix\n"
+        hook_input = _make_write_input("/workspace/src/mod.py", content)
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert result.context
+
+    def test_version_transition_arrow_advises_not_blocks(self) -> None:
+        handler = CommentChangelogHandler()
+        content = f"x = 1  # migrated 1.2.0 {_ARROW} 1.3.0 for the new API\n"
+        hook_input = _make_write_input("/workspace/src/mod.py", content)
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert result.context
+
+    def test_version_transition_arrow_unicode_advises_not_blocks(self) -> None:
+        handler = CommentChangelogHandler()
+        content = "x = 1  # migrated v1.2 → v1.3 for the new API\n"
+        hook_input = _make_write_input("/workspace/src/mod.py", content)
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert result.context
+
+    def test_arrow_describing_a_value_transformation_is_a_real_repo_example(self) -> None:
+        """Measured false positive this demotion fixes: version_check.py's own
+        `# refs/tags/v2.7.0 -> v2.7.0` describes a string transform, not history."""
+        handler = CommentChangelogHandler()
+        content = f'tag = parts[1].split("/")[-1]  # refs/tags/v2.7.0 {_ARROW} v2.7.0\n'
+        hook_input = _make_write_input("/workspace/src/mod.py", content)
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+
+    def test_changelog_verb_naming_version_advises_not_blocks(self) -> None:
+        handler = CommentChangelogHandler()
+        content = "x = 1  # Removed in v2.1.224 after the audit\n"
+        hook_input = _make_write_input("/workspace/src/mod.py", content)
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert result.context
+
+    def test_verb_version_rationale_with_wide_gap_is_a_real_repo_example(self) -> None:
+        """Measured false positive: project_loader.py's own rationale comment
+        ('was added to the Handler base in v3.24.0 (Plan 00133) ...')."""
+        handler = CommentChangelogHandler()
+        content = (
+            "# NOTE: get_default_enabled() was added to the Handler base in "
+            "v3.24.0 (Plan 00133) as a concrete method, deliberately not "
+            "abstract, so it does not appear above.\n"
+        )
+        hook_input = _make_write_input("/workspace/src/mod.py", content)
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
 
 
 class TestMustNotFlag:
@@ -218,6 +281,31 @@ class TestMustNotFlag:
         hook_input = _make_write_input("/workspace/src/mod.py", content)
         assert handler.matches(hook_input) is False
 
+    def test_version_processing_docstring_with_two_example_versions_is_allowed(self) -> None:
+        """Measured false positive this scope decision avoids: a version-range
+        parser's own docstring citing two EXAMPLE versions is not a changelog."""
+        handler = CommentChangelogHandler()
+        content = (
+            '"""Get breaking changes within a version range.\n'
+            "\n"
+            "Args:\n"
+            '    from_version: Starting version (e.g., "2.12.0")\n'
+            '    to_version: Ending version (e.g., "2.13.0")\n'
+            '"""\n'
+        )
+        hook_input = _make_write_input("/workspace/src/mod.py", content)
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+
+    def test_utility_sense_used_to_is_allowed(self) -> None:
+        """'X used to Y' (utility sense, 'used [in order] to') is NOT the
+        retrospective 'we used to Y' sense -- must not be flagged even as
+        advisory, or the noise rate on ordinary docstrings is unusable."""
+        handler = CommentChangelogHandler()
+        content = "# Flag used to validate the input before parsing.\n"
+        hook_input = _make_write_input("/workspace/src/mod.py", content)
+        assert handler.matches(hook_input) is False
+
 
 class TestLowerPrecisionAdvisorySignals:
     def test_multiple_fixed_added_bullets_advise_not_block(self) -> None:
@@ -258,13 +346,16 @@ class TestWarnMode:
 
 
 class TestMaxHistoryEntriesConfig:
-    def test_custom_max_history_entries_raises_the_bar(self) -> None:
+    """max_history_entries now gates the ADVISORY entries-count signal
+    (demoted from blocking - see TestDemotedSignalsAreNowAdvisoryOnly)."""
+
+    def test_custom_max_history_entries_raises_the_advisory_bar(self) -> None:
         handler = CommentChangelogHandler()
         handler._max_history_entries = 3
         content = "x = 1  # bumped from 1.2.3 to 1.2.4 for the fix\n"
         hook_input = _make_write_input("/workspace/src/mod.py", content)
         # Only 2 distinct semver tokens, below the raised threshold of 3, and
-        # no other high-precision signal present.
+        # no other signal (block or advisory) present in this text.
         assert handler.matches(hook_input) is False
 
 
