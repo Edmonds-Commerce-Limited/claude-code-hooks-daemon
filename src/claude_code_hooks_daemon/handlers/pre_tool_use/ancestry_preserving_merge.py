@@ -172,8 +172,7 @@ class AncestryPreservingMergeHandler(Handler):
                 decision=Decision.ALLOW,
                 context=[
                     _WARN_GUIDANCE_HEADER,
-                    f"{label} severs ancestry -- git branch -d will refuse this "
-                    "branch forever",
+                    f"{label} severs ancestry -- git branch -d will refuse this " "branch forever",
                     "Consider git merge --no-ff / gh pr merge --merge instead",
                 ],
                 guidance=self._warn_guidance(label),

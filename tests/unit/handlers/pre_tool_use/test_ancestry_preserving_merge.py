@@ -67,9 +67,7 @@ class TestMatchesGitMergeSquash:
         assert handler.matches(_bash('echo "git merge --squash feature-branch"')) is True
 
     def test_in_command_chain(self, handler: AncestryPreservingMergeHandler) -> None:
-        assert (
-            handler.matches(_bash("git fetch && git merge --squash feature-branch")) is True
-        )
+        assert handler.matches(_bash("git fetch && git merge --squash feature-branch")) is True
 
 
 class TestMatchesGitMergeSquashEvasion:
@@ -88,17 +86,11 @@ class TestMatchesGitMergeSquashEvasion:
     def test_trailing_backslash_line_continuation(
         self, handler: AncestryPreservingMergeHandler
     ) -> None:
-        assert (
-            handler.matches(_bash("git \\\n  merge --squash feature-branch")) is True
-        )
+        assert handler.matches(_bash("git \\\n  merge --squash feature-branch")) is True
 
-    def test_dash_c_plus_line_continuation(
-        self, handler: AncestryPreservingMergeHandler
-    ) -> None:
+    def test_dash_c_plus_line_continuation(self, handler: AncestryPreservingMergeHandler) -> None:
         assert (
-            handler.matches(
-                _bash("git \\\n  -C /workspace \\\n  merge --squash feature-branch")
-            )
+            handler.matches(_bash("git \\\n  -C /workspace \\\n  merge --squash feature-branch"))
             is True
         )
 
@@ -164,15 +156,11 @@ class TestFalsePositivesStayAllowed:
         # REBASE MERGE integration button that severs it, not this command.
         assert handler.matches(_bash("git rebase main")) is False
 
-    def test_word_squash_in_commit_message(
-        self, handler: AncestryPreservingMergeHandler
-    ) -> None:
+    def test_word_squash_in_commit_message(self, handler: AncestryPreservingMergeHandler) -> None:
         hook_input = _bash('git commit -m "squash these debug prints later"')
         assert handler.matches(hook_input) is False
 
-    def test_word_rebase_in_commit_message(
-        self, handler: AncestryPreservingMergeHandler
-    ) -> None:
+    def test_word_rebase_in_commit_message(self, handler: AncestryPreservingMergeHandler) -> None:
         hook_input = _bash('git commit -m "rebase workflow notes"')
         assert handler.matches(hook_input) is False
 
@@ -254,16 +242,12 @@ class TestHandleBlockMode:
         assert "ancestor" in result.reason.lower()
         assert "branch -d" in result.reason
 
-    def test_reason_names_no_ff_alternative(
-        self, handler: AncestryPreservingMergeHandler
-    ) -> None:
+    def test_reason_names_no_ff_alternative(self, handler: AncestryPreservingMergeHandler) -> None:
         result = handler.handle(_bash("git merge --squash feature-branch"))
         assert result.reason is not None
         assert "--no-ff" in result.reason
 
-    def test_reason_documents_escape_hatch(
-        self, handler: AncestryPreservingMergeHandler
-    ) -> None:
+    def test_reason_documents_escape_hatch(self, handler: AncestryPreservingMergeHandler) -> None:
         result = handler.handle(_bash("git merge --squash feature-branch"))
         assert result.reason is not None
         assert "MUST_SQUASH_BECAUSE" in result.reason
