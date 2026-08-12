@@ -1,6 +1,6 @@
 # Plan 00223: standing subagent authorisation system prompt overrides
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -59,6 +59,11 @@ Measured against this repository and the published docs, not assumed:
 | UserPromptSubmit `additionalContext`  | mid, but repeated + freshest | **none, already exists** |
 | daemon's `CLAUDE.md` block            | LOWEST of all                | none                     |
 
+Phase 1 measured the two middle rows and found they are NOT adjacent — they do
+not even share a transport. The full SessionStart payload fired **once** in a
+session with 18 compactions; UserPromptSubmit fired **198** times. See
+[PHASE-1-MEASUREMENT.md](PHASE-1-MEASUREMENT.md).
+
 The `CLAUDE.md` block was the user's second suggestion and is the weakest
 option: published guidance puts the system prompt highest in the hierarchy and
 `CLAUDE.md` lowest, so directives there lose by structural position rather
@@ -92,10 +97,17 @@ rows cost no new machinery at all.
 **Context**: four candidate levers, three of them requiring new machinery.
 
 **Decision**: put the authorisations in config, deliver them through the
-existing SessionStart/UserPromptSubmit `additionalContext` path, and document
-the setting in the CLAUDE.md block WITHOUT relying on it to carry the
-instruction. Recommended rather than settled — Phase 1 measures before
-committing.
+existing **UserPromptSubmit** `additionalContext` path, and document the
+setting in the CLAUDE.md block WITHOUT relying on it to carry the instruction.
+
+**Settled by Phase 1.** The delivery hook was left open as
+"SessionStart/UserPromptSubmit" pending measurement; it is now UserPromptSubmit
+only, and no SessionStart companion should be built. The restriction lives in
+the system prompt, which is re-sent on every request; only UserPromptSubmit
+matches that cadence. SessionStart delivers once and is then gated off for the
+rest of the session by `is_resume_session` (a transcript-size heuristic that
+is True for every post-compaction session). Full evidence:
+[PHASE-1-MEASUREMENT.md](PHASE-1-MEASUREMENT.md).
 
 **Why not lead with the supervisor**: it is the highest-leverage option and it
 is also owned by two in-progress plans, one of which exists because injection
@@ -115,32 +127,40 @@ instructions — that is both a worse prompt and a mechanism nobody should ship.
 
 ### Phase 1: Measure which injection point actually lands
 
-- [ ] ⬜ **Task 1.1**: Establish the baseline — confirm the restriction's
-  wording in the current session's prompt and capture how it presents
-- [ ] ⬜ **Task 1.2**: Trial SessionStart `additionalContext` and observe
-  whether free delegation follows without a per-task grant
-- [ ] ⬜ **Task 1.3**: Trial UserPromptSubmit (repeated, freshest position) and
-  compare. Measure BOTH before choosing — Plan 00216 measured a prompt
-  contract three ways and position beat emphasis every time
-- [ ] ⬜ **Task 1.4**: Record which landed, in a supporting doc, with the
-  actual observed behaviour rather than an assumption
+- [x] ✅ **Task 1.1**: Establish the baseline — captured verbatim. Two
+  corrections: it is `AgentTool` (one word), and there are TWO restrictions,
+  the second covering workflows/deep-research, which this plan had not recorded
+- [x] ✅ **Task 1.2**: SessionStart measured — different transport
+  (`hook_system_message`, not `hook_additional_context`); full payload
+  delivered ONCE in 18 compactions, then permanently gated off
+- [x] ✅ **Task 1.3**: UserPromptSubmit measured — 198 deliveries, one per
+  prompt, immune to compaction loss. Plan 00216's lesson holds: the winner is
+  decided by cadence/position, not by wording
+- [x] ✅ **Task 1.4**: Recorded in [PHASE-1-MEASUREMENT.md](PHASE-1-MEASUREMENT.md),
+  including an explicit statement of what this phase did NOT measure
 
 ### Phase 2: The config surface
 
 - [ ] ⬜ **Task 2.1**: Schema + defaults for the overrides block, default-on
 - [ ] ⬜ **Task 2.2**: A first-class entry for sub-agent authorisation, with
-  the text phrased per Decision 2
+  the text phrased per Decision 2. Phase 1 found the system prompt carries TWO
+  separate restrictions (AgentTool; workflows/deep-research) — they must be
+  independently authorisable, since authorising delegation says nothing about
+  authorising workflows
 - [ ] ⬜ **Task 2.3**: `config-changes/` manifest entry so existing installs are
   told the option exists (it would otherwise ship dormant)
 
 ### Phase 3: Delivery
 
-- [ ] ⬜ **Task 3.1**: Handler emitting the enabled authorisations via the
-  winning event from Phase 1
+- [ ] ⬜ **Task 3.1**: UserPromptSubmit handler emitting the enabled
+  authorisations (event settled by Phase 1 — no SessionStart companion)
 - [ ] ⬜ **Task 3.2**: `get_claude_md()` documenting the setting and pointing at
   the config, without duplicating the authorisation text itself
-- [ ] ⬜ **Task 3.3**: Rate-limiting if UserPromptSubmit wins, so it does not
-  re-inject on every turn
+- [ ] ⬜ **Task 3.3**: Rate-limiting — now load-bearing rather than optional,
+  and it must be a DECAY not a fixed cooldown. The whole value of this channel
+  is that it keeps pace with a system prompt re-sent every request, so a
+  cooldown long enough to span a compaction would reintroduce the SessionStart
+  failure the plan exists to avoid
 
 ### Phase 4: Verify
 
