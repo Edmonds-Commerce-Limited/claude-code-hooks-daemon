@@ -178,7 +178,9 @@ def daemon_process(daemon_env: dict[str, Any]):
 
 
 def send_hook_event(
-    socket_path: str | Path, hook_input: dict[str, Any], timeout: float = 5.0
+    socket_path: str | Path,
+    hook_input: dict[str, Any],
+    timeout: float = Timeout.SOCKET_DISPATCH_ROUNDTRIP,
 ) -> dict:
     """Send a hook event to the daemon via Unix socket.
 
@@ -381,9 +383,18 @@ class TestDaemonSmoke:
         assert isinstance(response, dict), "Response should be a dictionary"
         # Daemon should not crash - response may be empty or contain error
 
-    @pytest.mark.skip(reason="Restart command times out in test environment - works in real usage")
     def test_daemon_restart_works(self, daemon_env: dict[str, Any]) -> None:
-        """Daemon can be restarted successfully."""
+        """Daemon can be restarted successfully.
+
+        Previously skipped as "restart command times out in test environment -
+        works in real usage". It did time out, but not because of the
+        environment: the subprocess was given ``DAEMON_SHUTDOWN`` (10s) for an
+        operation that is a shutdown FOLLOWED BY a startup, and startup alone
+        budgets 30s. No environment could satisfy that, so the skip was hiding
+        a wrong constant rather than an environmental quirk. It now uses
+        ``DAEMON_RESTART``, which is the sum of the two phases it actually
+        performs.
+        """
         project_root = daemon_env["project_root"]
         test_env = os.environ.copy()
 
@@ -408,7 +419,7 @@ class TestDaemonSmoke:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=Timeout.DAEMON_SHUTDOWN,
+            timeout=Timeout.DAEMON_RESTART,
         )
 
         time.sleep(1)

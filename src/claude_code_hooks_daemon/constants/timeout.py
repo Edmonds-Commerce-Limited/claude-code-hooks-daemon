@@ -25,10 +25,19 @@ class Timeout:
     BASH_SHORT = 30_000  # 30 seconds (for quick operations)
     BASH_LONG = 300_000  # 5 minutes (for slower operations)
 
+    # Unit conversion. Named so that a constant declared in one unit can be
+    # re-expressed in another without a bare 1000 tripping the magic-value gate.
+    MILLISECONDS_PER_SECOND = 1_000
+
     # Daemon timeouts (seconds, for daemon configuration)
     DAEMON_IDLE = 600  # 10 minutes (daemon idle before shutdown)
     DAEMON_STARTUP = 30  # 30 seconds (wait for daemon to start)
     DAEMON_SHUTDOWN = 10  # 10 seconds (wait for daemon to shutdown)
+    # A restart is a shutdown FOLLOWED BY a startup, so its budget is the sum.
+    # Giving it DAEMON_SHUTDOWN alone asserts that stop-and-start fits inside
+    # the stop budget -- structurally impossible whenever startup is the slower
+    # half, which it is here by 3x.
+    DAEMON_RESTART = DAEMON_SHUTDOWN + DAEMON_STARTUP
 
     # Request timeouts (seconds)
     REQUEST_DEFAULT = 30  # 30 seconds (client request timeout)
@@ -41,6 +50,14 @@ class Timeout:
     # Network/IO timeouts (seconds)
     SOCKET_CONNECT = 5  # 5 seconds (Unix socket connection)
     FILE_LOCK = 10  # 10 seconds (file lock acquisition)
+    # A full send-hook-and-await-response round-trip over the socket. This is
+    # NOT the same budget as SOCKET_CONNECT and must never borrow it: connecting
+    # to a local AF_UNIX socket is sub-millisecond, whereas the response is only
+    # written after the whole handler chain has run -- an operation the daemon
+    # itself bounds at HOOK_TOTAL. A test that puts a connect-sized budget on a
+    # dispatch recv is silently asserting a latency budget it never meant to
+    # assert, and fails under CPU contention rather than on any defect.
+    SOCKET_DISPATCH_ROUNDTRIP = HOOK_TOTAL / MILLISECONDS_PER_SECOND
 
     # Retry timeouts (milliseconds)
     RETRY_DELAY_SHORT = 100  # 100ms (initial retry delay)
