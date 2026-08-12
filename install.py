@@ -349,6 +349,22 @@ _DAEMON_FORWARDER_HOOKS: dict[str, str] = {
 # Forwarders that carry an explicit per-invocation timeout in settings.json.
 _HOOKS_WITH_TIMEOUT: frozenset[str] = frozenset({"pre-tool-use", "post-tool-use"})
 
+# Ownership banner stamped into every script this installer generates into the
+# CLIENT's .claude/ (Plan 00217). These files are daemon-owned but deliberately
+# NOT git-ignored — they only work when committed — so they land inside the
+# project's own quality gates with nothing on them saying whose they are.
+#
+# The text is duplicated rather than imported from
+# claude_code_hooks_daemon.install.client_owned_assets: install.py runs
+# standalone, before the package is importable. The coupling is enforced
+# through the artifact instead — tests/unit/install/test_client_owned_assets.py
+# reads the GENERATED files and asserts they carry OWNERSHIP_MARKER, so drift
+# between the two fails the suite.
+_OWNERSHIP_BANNER = """# DAEMON-OWNED FILE - do not edit. Deployed into your project by the
+# claude-code-hooks-daemon installer and refreshed on every upgrade, so local
+# changes are discarded. See CLAUDE/LLM-INSTALL.md, "Which Files Under
+# .claude/ Are Yours?", for the full list and the linter exclusions."""
+
 
 def create_forwarder_script(hooks_dir: Path, hook_name: str, event_name: str) -> Path:
     """Create a forwarder script that routes to daemon via Unix socket.
@@ -371,6 +387,8 @@ def create_forwarder_script(hooks_dir: Path, hook_name: str, event_name: str) ->
     # which fires-and-forgets the JSON to stdout.
     if event_name in _STOP_EVENT_NAMES:
         hook_content = f"""#!/bin/bash
+#
+{_OWNERSHIP_BANNER}
 #
 # Claude Code Hooks - {event_name} Forwarder
 #
@@ -402,6 +420,8 @@ exit $?  # propagate 0 (allow) or 2 (block / hard re-entry)
     elif event_name == _WORKTREE_CREATE_EVENT_NAME:
         hook_content = f"""#!/bin/bash
 #
+{_OWNERSHIP_BANNER}
+#
 # Claude Code Hooks - {event_name} Forwarder
 #
 # Forwards {event_name} hook calls to daemon via Unix socket.
@@ -429,6 +449,8 @@ send_request_stdin "{event_name}" "worktree"
 """
     else:
         hook_content = f"""#!/bin/bash
+#
+{_OWNERSHIP_BANNER}
 #
 # Claude Code Hooks - {event_name} Forwarder
 #
@@ -479,8 +501,10 @@ def create_status_line_script(hooks_dir: Path) -> Path:
     """
     hook_file = hooks_dir / "status-line"
 
-    hook_content = """#!/bin/bash
-#
+    # Banner prepended rather than interpolated: the body below is a PLAIN
+    # string because it contains bash ``${...}`` expansions that an f-string
+    # would try to evaluate as Python.
+    hook_content = f"#!/bin/bash\n#\n{_OWNERSHIP_BANNER}\n" + """#
 # Claude Code Hooks - Status Line
 #
 # Forwards Status event to daemon via Unix socket and outputs plain text.

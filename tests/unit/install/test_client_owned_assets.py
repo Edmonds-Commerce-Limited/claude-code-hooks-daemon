@@ -30,6 +30,7 @@ import pytest
 from claude_code_hooks_daemon.install.client_owned_assets import (
     CLIENT_BOUNDARY_DOC,
     CLIENT_OWNED_ASSETS,
+    OWNERSHIP_MARKER,
     VENDOR_DIR,
     AssetLanguage,
     ClientOwnedAsset,
@@ -154,6 +155,41 @@ class TestBoundaryIsDocumentedWhereAClientReadsIt:
             f"daemon-owned path that is deployed but undocumented is exactly the "
             f"Plan 00217 defect: the client cannot tell whose file it is, and "
             f"cannot exclude what they have not been told about."
+        )
+
+
+class TestEveryDeployedAssetDeclaresItsOwnership:
+    """The file itself must answer "is this mine?" — not only the central table.
+
+    A client meets these files one at a time, usually because a tool pointed at
+    one. The Plan 00217 reporter opened 3,100 lines of PTY-supervisor source
+    whose first 59 lines discuss pseudo-terminals and thread safety, and nothing
+    in it said "this is not yours and your edit will be discarded". A table in a
+    document they were not reading at the time cannot answer that; a banner in
+    the file can, and it travels with the file on every deploy.
+    """
+
+    def test_marker_is_specific_enough_to_assert_on(self) -> None:
+        """A marker that could occur by accident would make the check meaningless."""
+        assert len(OWNERSHIP_MARKER) > len("DO NOT EDIT"), (
+            "OWNERSHIP_MARKER is too generic to distinguish a daemon-owned "
+            "banner from incidental prose."
+        )
+
+    def test_every_deployed_asset_carries_the_marker(self) -> None:
+        """Shell and Python both comment with '#', so one banner serves all five."""
+        missing = [
+            str(path.relative_to(_REPO_ROOT))
+            for _asset, path in resolve_sources(_REPO_ROOT)
+            if OWNERSHIP_MARKER not in path.read_text(encoding="utf-8", errors="replace")
+        ]
+        assert not missing, (
+            f"These daemon-owned files are deployed into client-owned "
+            f"directories without declaring it: {missing}. Add the ownership "
+            f"banner containing {OWNERSHIP_MARKER!r}. For the hook forwarders "
+            f"the banner belongs in install.py's generator, then regenerate "
+            f"this repo's own .claude/hooks/ so the dogfooding comparison "
+            f"still matches."
         )
 
 

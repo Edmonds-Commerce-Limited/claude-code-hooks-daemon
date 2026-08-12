@@ -56,6 +56,12 @@ VENDOR_DIR: Final[str] = ".claude/hooks-daemon/"
 #: asserts every ``deployed_to`` below appears in it.
 CLIENT_BOUNDARY_DOC: Final[str] = "CLAUDE/LLM-INSTALL.md"
 
+#: Substring every deployed asset must carry, so the file itself answers "is
+#: this mine?" at the moment someone opens it. Shell and Python both comment
+#: with ``#``, so one banner serves every asset below. Asserted by
+#: ``tests/unit/install/test_client_owned_assets.py``.
+OWNERSHIP_MARKER: Final[str] = "DAEMON-OWNED FILE - do not edit"
+
 
 class AssetLanguage(Enum):
     """Language of a deployed asset — selects which default linter applies.

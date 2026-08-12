@@ -95,9 +95,14 @@ source into every Python tool's discovery.
   - [x] ✅ Single manifest of daemon-owned assets deployed into client-owned
     paths (`install/client_owned_assets.py`), pinned to real files and to the
     client-facing document by `tests/unit/install/test_client_owned_assets.py`
-  - [ ] ⬜ Ownership banner in the deployed supervisor source
-  - [ ] ⬜ Guard: every manifest asset stays clean under its language's DEFAULT
-    rule set (`CLAUDE.md` Core Standard 15 — the check that was absent)
+  - [x] ✅ Ownership banner in EVERY deployed asset, not just the supervisor —
+    none of the five carried one. For the 31 hook forwarders + status-line the
+    banner lives in `install.py`'s generator and this repo's own `.claude/hooks/`
+    was regenerated through that same code path
+  - [x] ✅ Guard: `tests/integration/test_client_owned_asset_lint.py` — every
+    manifest asset stays clean under its language's DEFAULT rule set
+    (`ruff --isolated`, `shellcheck --norc`), the check that was absent
+    (`CLAUDE.md` Core Standard 15)
 - [ ] ⬜ **Task 2.2**: Verify against the client-shaped fixture
   (`scripts/dummy-client-repo.sh create`), not self-install
 - [ ] ⬜ **Task 2.3**: Confirm the upgrade path preserves the fix (the v3.24.0

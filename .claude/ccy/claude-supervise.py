@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+#
+# DAEMON-OWNED FILE - do not edit. Deployed into your project by the
+# claude-code-hooks-daemon installer and refreshed on every upgrade, so local
+# changes are discarded. See CLAUDE/LLM-INSTALL.md, "Which Files Under
+# .claude/ Are Yours?", for the full list and the linter exclusions.
+#
 """claude-supervise: a standalone, stdlib-only PTY supervisor for wrapping `claude`.
 
 This file is intentionally standalone: it imports nothing from
