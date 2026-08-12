@@ -82,6 +82,11 @@ class Priority:
     # Background-process tracker (Priority: 28 - PostToolUse advisory)
     BACKGROUND_PROCESS_TRACKER = 28
 
+    # Command hints (Priority: 29 - PostToolUse advisory reminders after
+    # specific commands; sits between background_process_tracker and
+    # recovery_cron_advisor)
+    COMMAND_HINTS = 29
+
     # PostToolUse advisory handlers (Priority: 30)
     RECOVERY_CRON_ADVISOR = 30
 

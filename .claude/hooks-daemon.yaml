@@ -431,6 +431,18 @@ handlers:
       enabled: true
       priority: 28
 
+    command_hints:  # Generic config-driven advisory reminder after a configured command (Plan 00212)
+      enabled: true
+      priority: 29
+      # options:
+      #   mode: additive          # additive (default) | replace
+      #   hints:
+      #     - id: agent-browser-close-session   # overrides the built-in hint of the same id
+      #       pattern: "agent-browser"
+      #       hint: "Custom reminder text"
+      #       ttl_seconds: 1800
+      #       min_calls_between: 0  # optional secondary count-based gate
+
     recovery_cron_advisor:  # Advises on failsafe recovery cron lifecycle (creation, progress, completion)
       enabled: true         # Dogfooding: enabled in this repo; opt-in (false) elsewhere
       priority: 30

@@ -406,6 +406,11 @@ class HandlerID:
         config_key="global_npm_advisor",
         display_name="advise-global-npm",
     )
+    COMMAND_HINTS = HandlerIDMeta(
+        class_name="CommandHintsHandler",
+        config_key="command_hints",
+        display_name="command-hints",
+    )
 
     # Advisory handlers (Priority: 55-60)
     POST_CLEAR_AUTO_EXECUTE = HandlerIDMeta(
