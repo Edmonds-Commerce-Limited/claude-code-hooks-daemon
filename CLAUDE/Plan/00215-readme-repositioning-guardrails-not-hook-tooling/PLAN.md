@@ -45,8 +45,10 @@ greps `def test_` and finds ~9,888, concluding the badge is inflated.
 - **Do NOT invent an origin story.** Item 5 of the request asks for one factual
   sentence about the incident that started the project, and explicitly gates it:
   *"Needs the real detail — do not draft this without it. Invented specifics
-  would be worse than nothing."* This task stays open pending the real detail
-  from the maintainer.
+  would be worse than nothing."* RESOLVED: the maintainer supplied the real
+  detail — an agent ran `git branch -D` once and days of work went with it —
+  and that sentence is now in `README.md` at the end of "What this solves".
+  The gate held: nothing was drafted until the fact arrived.
 - Do NOT touch the generated handler counts (`92 production handlers across 15 event types`) — the release process owns those.
 - Do NOT rewrite `## Project-Level Handlers`, `## Writing Custom Handlers`,
   `## Configuration`, `## Git Integration` or `## Troubleshooting`; the review

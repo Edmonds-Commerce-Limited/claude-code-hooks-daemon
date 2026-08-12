@@ -51,8 +51,38 @@ second without touching your session.
 or deny — not a prompt, and not a judgement the model makes about its own
 behaviour. It cannot be reasoned with, and it decides the thousandth call
 exactly as it decided the first. For the failure that actually matters — the
-destructive command issued confidently and in good faith — that is the
-property you want.
+one taken deliberately, for a reason that seemed good at the time — that is
+the property you want.
+
+---
+
+## Where this came from
+
+Approving every tool call one at a time gets old fast. The obvious escape is
+YOLO mode — `--dangerously-skip-permissions` — and the name is accurate. Running
+the agent in a container helps, because you control what it can reach, but it
+does not close the gap: the agent still needs the repository and it still needs
+git, and that is exactly where the damage happens.
+
+Then, after days of work in YOLO mode, an agent decided it did not need a branch
+any more and deleted it. `git branch -D` does not ask, and the branch was not
+backed up anywhere else. Days of work were simply gone. Nothing about that was
+malicious or even careless by the agent's own lights — it had finished with the
+branch, and tidying up was the reasonable next step. That is the shape of the
+problem: the destructive command issued confidently, in good faith, by something
+that cannot know what it is about to cost you.
+
+The speed is worth having, so the answer was never to give it up. Claude Code's
+hooks are the right mechanism — but writing them was the problem. Each hook is a
+separate program, and testing a one-character fix meant restarting Claude Code
+from scratch: abandoning work in progress, stopping the container, starting
+again. Iteration was expensive enough that hooks stayed hobbled — you wrote two
+or three, and lived with them.
+
+This daemon is what came out of that. Every handler lives in one long-running
+process behind a Unix socket, so changing one costs a sub-second daemon restart
+instead of a session. Python for the type system and the tooling, and because a
+long-lived daemon is something it is genuinely good at.
 
 ---
 
