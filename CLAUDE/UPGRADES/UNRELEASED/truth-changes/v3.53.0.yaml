@@ -54,3 +54,34 @@ truth_changes:
       folder (excluding JOURNAL/) as evidence of relocation, exactly as it
       accepts a journal entry. If you have been journalling solely to keep
       this check quiet while extracting, you no longer need to.
+  - was: >
+      The daemon's own files live in .claude/hooks-daemon/. That directory is
+      git-ignored by the installer, so excluding it -- which most projects get
+      for free, since ruff and similar tools respect .gitignore -- keeps
+      upstream code out of your quality gates. Everything else under .claude/
+      is yours.
+    now: >
+      Four more paths are daemon-owned and are deliberately NOT git-ignored,
+      because they only work when committed: .claude/init.sh, .claude/hooks/*
+      (the forwarder scripts), .claude/skills/hooks-daemon/scripts/*.sh, and --
+      where they apply -- CLAUDE/Plan/mkplan.bash and
+      .claude/ccy/claude-supervise.py. All are rewritten on every install and
+      upgrade, so a local edit is discarded, and all of them sit inside your
+      linters' default scope. Correct any doc of yours that says the daemon is
+      confined to .claude/hooks-daemon/, or that treats everything else under
+      .claude/ as project-owned. The enumerated list, why each file cannot live
+      in the vendor directory, and copy-pasteable ruff / shellcheck exclusions
+      are now in CLAUDE/LLM-INSTALL.md under "Which Files Under .claude/ Are
+      Yours?", generated from a manifest the daemon's test suite keeps in step
+      with the code that performs each deploy. Every one of those files also
+      now opens with a DAEMON-OWNED banner, so the file itself answers the
+      question at the moment you open it. The contract is explicit: upstream
+      guarantees each asset is clean under its language's DEFAULT rule set
+      (ruff --isolated, shellcheck with no rc) and a CI check enforces it, so a
+      finding under default rules is an upstream bug worth reporting; upstream
+      cannot guarantee cleanliness under rules you choose, which is what the
+      documented exclusions are for. This was reported from the field: a client
+      repo linted 3,100 lines of the deployed PTY supervisor and hit three
+      findings it could not fix (upgrades overwrite the file), could not
+      silence (the qa_suppression handler denies an agent writing an inline
+      directive), and had no reason to exclude.

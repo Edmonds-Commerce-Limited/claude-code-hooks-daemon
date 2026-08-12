@@ -121,8 +121,13 @@ source into every Python tool's discovery.
   will read it — `CLAUDE/LLM-INSTALL.md` now carries "Which Files Under
   `.claude/` Are Yours?": the enumerated path list, why each file cannot live in
   the vendor dir, and the copy-pasteable ruff/shellcheck exclusions
-- [ ] ⬜ **Task 3.2**: Stage a `truth-changes` entry if the fix changes where the
-  supervisor lives, since client docs and exclusions may assert the old path
+- [x] ✅ **Task 3.2**: The supervisor does NOT move, but a documented truth still
+  changed and client docs are likely to assert it — "the daemon lives in
+  `.claude/hooks-daemon/`; everything else under `.claude/` is yours". Appended
+  a third entry to `CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.53.0.yaml`
+  naming all four additional daemon-owned paths and the default-clean contract.
+  Also added post-upgrade task `02-review-daemon-owned-file-banners.md`, since
+  the upgrade rewrites ~39 committed files with a comment-only diff
 
 ## Dependencies
 

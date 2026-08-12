@@ -88,6 +88,7 @@ This file's lower half should list the tasks currently in this directory, so an 
 | File                                               | Type             | Severity    | Applies to                    | One-line summary                                                                                                                            |
 | -------------------------------------------------- | ---------------- | ----------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `01-migrate-allowed-markdown-paths-to-additive.md` | config-migration | recommended | sets `allowed_markdown_paths` | Migrate the markdown_organization full override to the additive `extra_allowed_markdown_paths` so upstream defaults are kept automatically. |
+| `02-review-daemon-owned-file-banners.md`           | notification     | optional    | all                           | Expect a comment-only diff across ~39 committed daemon-owned files: each now declares its ownership and points at the new boundary docs.    |
 
 <!-- END TASK INDEX -->
 
