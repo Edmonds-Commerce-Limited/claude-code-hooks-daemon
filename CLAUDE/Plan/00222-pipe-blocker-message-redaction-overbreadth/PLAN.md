@@ -63,19 +63,42 @@ Measured against the live handler:
 
 ## Technical Decisions
 
-### Decision 1: quote class decides inertness, not flag presence
+### Decision 1: SUBSTITUTION presence decides inertness, not quote class
 
 **Context**: the redaction treats any `-m` value as prose.
 
-**Decision**: only a SINGLE-quoted value (and the quoted-heredoc form, which is
-also literal) may be blanked. A double-quoted or bare value can substitute, so
-it must be left visible to the scanner — where Plan 00221's substitution
-attribution already resolves the inner producer correctly.
+**Rejected first attempt — "blank only single-quoted values".** Writing the
+tests before the fix killed this immediately. Plan 00200 has two deliberate
+tests asserting that a DOUBLE-quoted message containing literal `| tail -20`
+prose is not blocked, and they are right: without a `$(` or a backtick, the
+shell executes nothing and the pipe really is text. A quote-class rule would
+have re-broken the exact false positive Plan 00200 was written to fix.
 
-**Consequence accepted**: a double-quoted commit message containing literal
-`| tail` prose will now be scanned. That is the correct trade: such a message
-is *already* dangerous for the reason `git_message_backtick` documents, and the
-project's own guidance tells authors to use single quotes or `-F`.
+**Decision**: a message value is inert unless it contains a COMMAND
+SUBSTITUTION — `$(`, `` ` ``, or `<(`. Single-quoted values never do (the
+shell suppresses substitution inside them), so they stay inert unconditionally.
+A double-quoted value carrying a substitution is left visible to the scanner,
+where Plan 00221's substitution attribution already resolves the inner producer
+correctly.
+
+**Why this is the right line**: it is the same fact `git_message_backtick`
+encodes — the danger is substitution, not quoting.
+
+### Decision 1a: the heredoc idiom is inert because its DELIMITER is quoted
+
+**Context**: I predicted the repo's own `"$(cat <<'EOF' … EOF)"` message idiom
+would survive Decision 1 because its inner producer resolves to the
+whitelisted `cat`. **That prediction was wrong**, and the tests caught it —
+two of them, before any of this shipped.
+
+Newlines are chain separators, so scanning that value resolves the "command"
+before a pipe in the heredoc BODY to a line of English prose, not to `cat`.
+That is exactly the Plan 00200 false positive, reintroduced.
+
+**Decision**: recognise the quoted-heredoc value explicitly and treat it as
+inert. What makes it safe is not the producer but the QUOTED delimiter — bash
+performs no expansion at all inside `<<'EOF'`, so the body is literal text and
+only `cat` runs. An unquoted `<<EOF` does expand and is deliberately excluded.
 
 ### Decision 2: scope the flag to commands that take a message
 
@@ -89,30 +112,32 @@ name its real producer again.
 
 ### Phase 1: Pin the current behaviour
 
-- [ ] 🔄 **Task 1.1**: Failing test for the double-quoted substitution bypass
-- [ ] ⬜ **Task 1.2**: Failing test for `python -m <module>` producer naming
-- [ ] ⬜ **Task 1.3**: Passing tests locking the behaviour that must NOT change —
-  single-quoted prose stays inert, and the Plan 00209 heredoc case
+- [x] ✅ **Task 1.1**: Failing test for the double-quoted substitution bypass
+- [x] ✅ **Task 1.2**: Failing test for `python -m <module>` producer naming
+- [x] ✅ **Task 1.3**: Passing tests locking the behaviour that must NOT change —
+  single-quoted prose stays inert, and the Plan 00200 heredoc case
 
 ### Phase 2: Fix
 
-- [ ] ⬜ **Task 2.1**: Restrict blanking to non-substituting quote classes
-- [ ] ⬜ **Task 2.2**: Scope message-flag interpretation to message-taking commands
+- [x] ✅ **Task 2.1**: Blank only values that cannot execute
+- [x] ✅ **Task 2.2**: Scope message-flag interpretation to message-taking commands
 
 ### Phase 3: DBF — why did nothing catch this?
 
-- [ ] ⬜ **Task 3.1**: `git_message_backtick` already encodes "double quotes
-  execute". Establish whether that fact can be shared rather than restated, so a
-  third handler cannot disagree with it again
-- [ ] ⬜ **Task 3.2**: Add the bypass shape to the handler's
-  `get_acceptance_tests()` so it is exercised against the live daemon
+- [x] ✅ **Task 3.1**: The fact now lives once, in
+  `utils.shell_segmentation.value_can_substitute`. `pipe_blocker` consumes it
+  and `git_message_backtick` points at it, so a third handler asks rather than
+  re-derives. That module already existed for the identical failure — two
+  handlers growing their own scanner and each getting half the rule right
+- [x] ✅ **Task 3.2**: Two acceptance tests added — the substituting message and
+  the `python -m` naming — so both are exercised against the live daemon
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Full QA suite passes
-- [ ] ⬜ **Task 4.2**: Probe the live daemon through the production forwarder
-- [ ] ⬜ **Task 4.3**: `get_claude_md()` states the quote-class rule, since the
-  guidance currently implies any `-m` prose is safe
+- [ ] 🔄 **Task 4.1**: Full QA suite passes
+- [x] ✅ **Task 4.2**: Probed the live daemon through the production forwarder:
+  5/5, covering both defects and all three must-not-change controls
+- [x] ✅ **Task 4.3**: `get_claude_md()` now states where the exemption ends
 
 ## Success Criteria
 

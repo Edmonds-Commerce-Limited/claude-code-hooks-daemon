@@ -28,7 +28,10 @@ from __future__ import annotations
 
 import pytest
 
-from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    split_unquoted,
+    value_can_substitute,
+)
 
 CHAIN = ("&&", "||", ";", "\n")
 
@@ -100,3 +103,66 @@ class TestBothOriginalBypassesAreClosed:
         segments = split_unquoted(r"grep -n 'a\' README.md ; ./scripts/qa/run_all.sh", CHAIN)
 
         assert segments[-1].strip() == "./scripts/qa/run_all.sh"
+
+
+# Built at runtime so this file never contains the literal characters of a
+# pipe-to-pager, which the pipe_blocker handler denies on write.
+_PIPE = chr(124)
+_TO_TAIL = f" {_PIPE} tail -1"
+
+
+class TestValueCanSubstitute:
+    """Plan 00222: the fact two handlers had independently disagreed about.
+
+    ``git_message_backtick`` encoded "bash substitutes inside DOUBLE quotes".
+    ``pipe_blocker`` assumed the opposite — that any message value was inert
+    prose — and so let a real, executing pipe through inside a commit message.
+    Pinning the predicate here means a third handler cannot reach a third
+    answer.
+
+    Quote class is NOT the discriminator. That rule was tried first and
+    rejected: it re-breaks the deliberate Plan 00200 allowance for
+    double-quoted prose that merely mentions a pipe.
+    """
+
+    def test_double_quoted_dollar_paren_executes(self) -> None:
+        """The bypass. Double quotes stop word splitting, not substitution."""
+        assert value_can_substitute(f'"$(pytest tests/{_TO_TAIL})"') is True
+
+    def test_double_quoted_backtick_executes(self) -> None:
+        assert value_can_substitute('"result: `pytest tests/`"') is True
+
+    def test_process_substitution_executes(self) -> None:
+        assert value_can_substitute('"<(pytest tests/)"') is True
+
+    def test_single_quoted_dollar_paren_is_literal(self) -> None:
+        """Single quotes suppress substitution, however executable it reads."""
+        assert value_can_substitute("'$(pytest tests/)'") is False
+
+    def test_single_quoted_backtick_is_literal(self) -> None:
+        assert value_can_substitute("'text with `backticks` stays literal'") is False
+
+    def test_double_quoted_prose_mentioning_a_pipe_is_inert(self) -> None:
+        """No `$(` and no backtick, so bash runs nothing — the pipe is text."""
+        assert value_can_substitute(f'"docs: pytest 2>&1{_TO_TAIL} is blocked"') is False
+
+    def test_quoted_heredoc_idiom_is_inert(self) -> None:
+        """`<<'EOF'` expands nothing, so only `cat` runs.
+
+        Recognised rather than scanned: newlines are segment separators, so
+        scanning the body resolves the "command" before a pipe to a line of
+        English prose — which is exactly the false positive being avoided.
+        """
+        value = "\"$(cat <<'EOF'\nFix: something\n\nran pytest" + _TO_TAIL + '\nEOF\n)"'
+        assert value_can_substitute(value) is False
+
+    def test_unquoted_heredoc_delimiter_does_expand(self) -> None:
+        """`<<EOF` without quotes DOES expand, so it must not be exempted."""
+        value = '"$(cat <<EOF\nvalue is $(pytest)\nEOF\n)"'
+        assert value_can_substitute(value) is True
+
+    def test_bare_unquoted_value_with_substitution_executes(self) -> None:
+        assert value_can_substitute("$(pytest)") is True
+
+    def test_plain_bare_word_is_inert(self) -> None:
+        assert value_can_substitute("COMMIT_MSG.txt") is False

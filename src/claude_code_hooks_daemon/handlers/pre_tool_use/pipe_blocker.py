@@ -26,7 +26,10 @@ from claude_code_hooks_daemon.core import (
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.strategies.pipe_blocker.common import UNIVERSAL_WHITELIST_PATTERNS
 from claude_code_hooks_daemon.strategies.pipe_blocker.registry import PipeBlockerStrategyRegistry
-from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    split_unquoted,
+    value_can_substitute,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +231,33 @@ _MESSAGE_BODY_PATTERN = re.compile(
     re.DOTALL,
 )
 
+# Commands whose -m/--message/-F/--file argument is human-authored PROSE
+# rather than an operand (Plan 00222). Scoping is required because the same
+# spelling means something else elsewhere: `python -m <module>` names a MODULE,
+# and blanking it reported the producer of `python -m pytest ... | tail` as the
+# redaction placeholder, handing the caller a remediation they cannot run.
+_MESSAGE_TAKING_COMMANDS: tuple[str, ...] = ("git", "hg", "svn", "jj")
+
+# Path separator, for reducing `/usr/bin/git` to `git` before that comparison.
+_PATH_SEPARATOR = "/"
+
+
+def _segment_binary(command: str, index: int) -> str:
+    """Basename of the command word that owns the flag at ``index``.
+
+    Bounded by chain separators so a `git commit` earlier in the line cannot
+    lend its message-taking status to a later `python -m` in the same command.
+    """
+    start = _TOP_LEVEL_CONTENT_START
+    for separator in _CHAIN_SEPARATORS:
+        found = command.rfind(separator, _TOP_LEVEL_CONTENT_START, index)
+        if found != -1:
+            start = max(start, found + len(separator))
+    words = command[start:index].split()
+    if not words:
+        return ""
+    return words[0].rpartition(_PATH_SEPARATOR)[2]
+
 
 class PipeBlockerHandler(Handler):
     """Block expensive commands piped to tail/head to prevent information loss.
@@ -304,11 +334,29 @@ class PipeBlockerHandler(Handler):
         very handler — must never be mistaken for a real pipe operator.
         Everything else in the command (including a REAL pipe elsewhere) is
         left untouched.
+
+        Two conditions gate the blanking, both added by Plan 00222 after the
+        original unconditional form was found to hide a real pipe and to
+        mislabel an unrelated flag:
+
+        * the owning command must actually TAKE a message, so `python -m
+          <module>` keeps naming its real producer, and
+        * the value must not be able to execute, since bash substitutes inside
+          double quotes and blanking such a value conceals a live pipe.
+
+        A value that fails either test is returned untouched and scanned
+        normally, where Plan 00221's substitution attribution resolves the
+        producer INSIDE the substitution rather than the outer command.
         """
-        return _MESSAGE_BODY_PATTERN.sub(
-            lambda m: f"{m.group('flag')}{m.group('sep')}{_MESSAGE_BODY_PLACEHOLDER}",
-            command,
-        )
+
+        def _blank_if_inert(match: re.Match[str]) -> str:
+            if _segment_binary(command, match.start()) not in _MESSAGE_TAKING_COMMANDS:
+                return match.group(0)
+            if value_can_substitute(match.group("value")):
+                return match.group(0)
+            return f"{match.group('flag')}{match.group('sep')}{_MESSAGE_BODY_PLACEHOLDER}"
+
+        return _MESSAGE_BODY_PATTERN.sub(_blank_if_inert, command)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if command pipes a non-whitelisted operation to tail/head.
@@ -909,6 +957,18 @@ class PipeBlockerHandler(Handler):
             "than read whole.\n\n"
             "**Add to whitelist** (if safe to pipe): set `extra_whitelist` in "
             "`.claude/hooks-daemon.yaml` under `pipe_blocker`.\n\n"
+            "**A git message VALUE is exempt only while the shell cannot run "
+            "it.** Prose in `git commit -m`/`git tag -m` is not scanned, so a "
+            "literal `| tail` inside a message never counts as a pipe — but "
+            "that exemption ends at a command substitution. Bash expands "
+            "`$( )` and backticks inside DOUBLE quotes, so "
+            '`git commit -m "$(pytest | tail -1)"` genuinely runs pytest and '
+            "truncates it, and is blocked on the `pytest`. Single quotes "
+            "substitute nothing and are exempt unconditionally, as is the "
+            "`\"$(cat <<'EOF' ... EOF)\"` idiom, whose QUOTED delimiter makes "
+            "the body literal. The exemption is also scoped to commands that "
+            "actually take a message: `python -m pytest ... | tail` names "
+            "`pytest` as its producer, because `-m` there means module.\n\n"
             "**A heredoc body describing a pipe pattern can false-trigger this "
             "handler** (the literal characters `| tail`/`| head` are matched even "
             "inside prose). When the matched text reads as ENGLISH rather than as "
@@ -1020,6 +1080,46 @@ class PipeBlockerHandler(Handler):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes="--dry-run --allow-empty: no commit is created, no side effects",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="commit message running a substitution IS a real pipe",
+                command='[[ "git commit -m \\"$(pytest tests/ | tail -1)\\"" == 0 ]]',
+                description=(
+                    "Plan 00222: the -m exemption above ends at a command "
+                    "substitution. Bash expands $( ) inside DOUBLE quotes, so this "
+                    "genuinely runs pytest and truncates it — the message flag is "
+                    "not a shield. Blanking the whole value hid this. The block "
+                    "must name pytest, not the redaction placeholder."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"Pipe to tail/head",
+                    r"pytest",
+                ],
+                safety_notes="No-op: [[ ... ]] evaluates to false (exit 1), no commit, no pytest",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="python -m names the module as the producer, not a placeholder",
+                command='[[ "python -m pytest tests/ | tail -5" == 0 ]]',
+                description=(
+                    "Plan 00222: -m means MODULE to python, not message. The block "
+                    "was always correct, but the value was blanked, so the reason "
+                    "named a redaction placeholder and the remediation it printed "
+                    "was not runnable — on one of the most common invocations in "
+                    "this repository."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"Pipe to tail/head",
+                    r"pytest",
+                ],
+                safety_notes="No-op: [[ ... ]] evaluates to false (exit 1), pytest never runs",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

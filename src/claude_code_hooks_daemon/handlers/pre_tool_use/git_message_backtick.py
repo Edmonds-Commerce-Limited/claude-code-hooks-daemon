@@ -5,6 +5,18 @@ in ``git commit -m "..."`` is therefore EXECUTED, and its stdout replaces the
 text in the message. Inside SINGLE quotes nothing is substituted, so the same
 backticks are literal and safe.
 
+That fact is shared, not local to this handler: ``pipe_blocker`` independently
+assumed the OPPOSITE -- that any message value is inert prose -- and so let a
+real pipe through inside ``git commit -m "$(pytest ... | tail -1)"`` (Plan
+00222). It now lives once, in
+``utils.shell_segmentation.value_can_substitute``. A handler that needs to
+know whether an argument can execute must ask there rather than re-deriving
+it, which is how two handlers came to disagree about the shell.
+
+This handler keeps its own narrower scan because it answers a different
+question: not "can this execute?" but "is a BACKTICK the thing executing?",
+since the remedy it offers is about corruption of the message text.
+
 This is not theoretical (Plan 00219). Commit cc7dddc0 in this repository has
 a body reading "pipe_blocker now allows , so the force-delete form" where a
 backticked command used to be: bash ran it, it wrote to stderr and nothing to
