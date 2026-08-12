@@ -179,9 +179,30 @@ ensure_normal_mode_only "$DAEMON_DIR"
 # Validate project structure
 validate_project_structure "$PROJECT_ROOT" "true"
 
-# Validate daemon is a git repo
-if [ ! -d "$DAEMON_DIR/.git" ]; then
-    fail_fast "Daemon directory is not a git repository: $DAEMON_DIR"
+# Validate the daemon dir is the ROOT of its own git repository.
+#
+# `[ -d "$DAEMON_DIR/.git" ]` was safe but too narrow, and Layer 1
+# (scripts/upgrade.sh) already replaced it for exactly this reason — the fix
+# landed in one script and not its sibling. A git WORKTREE or SUBMODULE stores
+# .git as a FILE and is a perfectly valid repository, so the directory test
+# false-rejects both. That is not theoretical: it is why
+# scripts/dummy-client-repo.sh, this project's own client-mode harness, could
+# not exercise this script at all — leaving the Layer 2 upgrade path untested
+# in client mode, which is precisely where field bugs come from.
+#
+# `rev-parse --show-prefix` prints the queried directory's path RELATIVE to its
+# repo toplevel, so it is empty exactly AT the toplevel. It accepts clones,
+# worktrees and submodules, and still rejects the dangerous shape: a plain
+# .claude/hooks-daemon/ inside the user's own repo, where git walks UP and
+# answers about the PARENT.
+#
+# Deliberately NOT a `--show-toplevel` string comparison: that mis-fires
+# whenever symlinks make two spellings of the same path differ.
+# Pinned by tests/integration/test_upgrade_sh_daemon_dir_detection.py.
+DAEMON_DIR_PREFIX="$(git -C "$DAEMON_DIR" rev-parse --show-prefix 2>/dev/null)" \
+    || fail_fast "Daemon directory is not a git repository: $DAEMON_DIR"
+if [ -n "$DAEMON_DIR_PREFIX" ]; then
+    fail_fast "Daemon directory is not the root of its own git repository: $DAEMON_DIR (it sits ${DAEMON_DIR_PREFIX%/} inside a repository rooted above it, so upgrading here would modify THAT repository). Reinstall the daemon into $DAEMON_DIR."
 fi
 
 # ============================================================

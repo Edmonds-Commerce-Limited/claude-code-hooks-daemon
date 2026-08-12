@@ -24,8 +24,15 @@ submodules, rejects a nested plain directory, and needs no path comparison —
 which matters, because comparing ``--show-toplevel`` against ``$DAEMON_DIR``
 would produce false aborts whenever symlinks make the two spellings differ.
 
+Both upgrade layers are covered here. Layer 1 (``scripts/upgrade.sh``) was
+fixed first; Layer 2 (``scripts/upgrade_version.sh``) — the orchestrator
+``BUG_REPORTING.md`` and every upgrade guide tell clients to run directly —
+kept the narrow test afterwards. Same defect, diagnosed once, corrected in one
+script and left in its sibling. Asserting both here is what stops them drifting
+apart again.
+
 Behavioural test — builds real git repositories and runs the real invocation
-extracted from ``scripts/upgrade.sh``.
+extracted from each script.
 """
 
 from __future__ import annotations
@@ -39,6 +46,13 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LAYER1_UPGRADE_SH = REPO_ROOT / "scripts" / "upgrade.sh"
+# Layer 2, the version orchestrator clients are told to run directly by
+# BUG_REPORTING.md and every upgrade guide. It carried the narrow
+# `[ -d "$DAEMON_DIR/.git" ]` test for as long as Layer 1 did, and kept it
+# after Layer 1 was fixed — the same defect, diagnosed once, corrected in one
+# script and left in its sibling. Both are asserted here so they cannot drift
+# apart again.
+LAYER2_UPGRADE_SH = REPO_ROOT / "scripts" / "upgrade_version.sh"
 GIT = shutil.which("git") or "/usr/bin/git"
 _TIMEOUT_SECONDS = 60
 
@@ -69,17 +83,23 @@ def _require_ok(result: subprocess.CompletedProcess[str], what: str) -> None:
         raise AssertionError(f"fixture setup failed ({what}): {result.stderr.strip()}")
 
 
-def _probe_args() -> list[str]:
-    """Extract the real repo-root probe from scripts/upgrade.sh."""
-    script = LAYER1_UPGRADE_SH.read_text(encoding="utf-8")
+def _probe_args_for(script_path: Path) -> list[str]:
+    """Extract the real repo-root probe from an upgrade script."""
+    script = script_path.read_text(encoding="utf-8")
     match = _REPO_ROOT_PROBE.search(script)
     assert match is not None, (
-        'scripts/upgrade.sh no longer probes the daemon dir with `git -C "$DAEMON_DIR" '
-        "rev-parse --show-prefix`. Step 6 force-resets that directory, so the check "
-        "that it is the repo TOPLEVEL is what stands between a client upgrade and a "
-        "hard reset of the user's own project. Do not delete this test."
+        f"{script_path.name} no longer probes the daemon dir with "
+        '`git -C "$DAEMON_DIR" rev-parse --show-prefix`. Step 6 force-resets that '
+        "directory, so the check that it is the repo TOPLEVEL is what stands between "
+        "a client upgrade and a hard reset of the user's own project. Do not delete "
+        "this test."
     )
     return match.group("args").split()
+
+
+def _probe_args() -> list[str]:
+    """Extract the real repo-root probe from scripts/upgrade.sh."""
+    return _probe_args_for(LAYER1_UPGRADE_SH)
 
 
 def _is_repo_root(daemon_dir: Path) -> bool:
@@ -159,6 +179,92 @@ class TestDaemonDirMustBeItsOwnRepoRoot:
         assert (worktree / ".git").is_file(), "fixture did not produce a .git FILE"
 
         assert _is_repo_root(worktree) is True
+
+
+class TestLayer2UsesTheSameProbe:
+    """Layer 2 must accept every shape Layer 1 accepts.
+
+    `upgrade_version.sh` is not an internal helper — `BUG_REPORTING.md` and
+    every upgrade guide tell clients to invoke it directly. It kept the narrow
+    `[ -d "$DAEMON_DIR/.git" ]` test after Layer 1 replaced it, so a daemon
+    installed as a worktree or submodule was rejected by the Layer 2 upgrade
+    path while Layer 1 accepted it.
+
+    The narrow test was SAFE, not dangerous — a `.git` DIRECTORY does mean the
+    dir is a clone root, so it never false-ACCEPTED the hazardous nested-plain-
+    dir shape. What it did was false-REJECT valid repositories, which is why
+    `scripts/dummy-client-repo.sh` could not exercise this script and the
+    Layer 2 upgrade path went untested in client mode.
+    """
+
+    def _layer2_is_repo_root(self, daemon_dir: Path) -> bool:
+        result = _git(*_probe_args_for(LAYER2_UPGRADE_SH), cwd=daemon_dir)
+        if result.returncode != 0:
+            return False
+        return result.stdout.strip() == ""
+
+    def test_layer2_accepts_a_worktree(self, shapes: dict[str, Path]) -> None:
+        """The shape dummy-client-repo.sh builds, and the reason for this fix."""
+        worktree = shapes["worktree"]
+        assert (worktree / ".git").is_file(), "fixture did not produce a .git FILE"
+
+        assert self._layer2_is_repo_root(worktree) is True
+
+    def test_layer2_accepts_a_normal_clone(self, shapes: dict[str, Path]) -> None:
+        """Control: the fix must not trade one shape for another."""
+        assert self._layer2_is_repo_root(shapes["clone"]) is True
+
+    def test_layer2_still_rejects_plain_dir_inside_the_users_own_repo(
+        self, shapes: dict[str, Path]
+    ) -> None:
+        """Widening must not cost the safety property the narrow test had."""
+        assert self._layer2_is_repo_root(shapes["nested"]) is False
+
+    def test_layer2_still_rejects_a_directory_in_no_repo(self, shapes: dict[str, Path]) -> None:
+        assert self._layer2_is_repo_root(shapes["orphan"]) is False
+
+    def test_layer2_no_longer_uses_the_narrow_git_directory_test(self) -> None:
+        """Guard against a revert to `[ -d "$DAEMON_DIR/.git" ]`.
+
+        Without this, someone "simplifying" the check back would silently
+        reintroduce the false-reject and re-break the client-mode harness.
+        """
+        # Comment lines are skipped deliberately. The replacement's own comment
+        # NAMES the old test in order to explain why it was replaced, and a
+        # detector that matched that would fire on the very documentation of the
+        # fix — the same prose-vs-code false positive this repo just fixed in
+        # pipe_blocker. Match executable lines only.
+        code_lines = [
+            line
+            for line in LAYER2_UPGRADE_SH.read_text(encoding="utf-8").splitlines()
+            if not line.lstrip().startswith("#")
+        ]
+
+        narrow_test = [
+            line for line in code_lines if re.search(r'\[\s*!?\s*-d\s+"\$DAEMON_DIR/\.git"', line)
+        ]
+
+        assert not narrow_test, (
+            "scripts/upgrade_version.sh is back to testing for a .git DIRECTORY: "
+            f"{narrow_test}. That false-rejects worktrees and submodules, which "
+            "store .git as a FILE, and re-breaks scripts/dummy-client-repo.sh. Use "
+            '`git -C "$DAEMON_DIR" rev-parse --show-prefix` as Layer 1 does.'
+        )
+
+    def test_the_narrow_test_detector_can_actually_see_it(self) -> None:
+        """Positive control for the assertion above.
+
+        Skipping comments is what makes that check usable, but it is also how
+        it could go blind — one over-broad skip rule and it would report clean
+        forever. Plant the pattern as executable text and require a hit.
+        """
+        planted = 'if [ ! -d "$DAEMON_DIR/.git" ]; then'
+
+        assert re.search(r'\[\s*!?\s*-d\s+"\$DAEMON_DIR/\.git"', planted), (
+            "the detector no longer recognises the narrow test even when it is "
+            "present as code — the guard above is blind and would pass regardless."
+        )
+        assert not planted.lstrip().startswith("#"), "planted control must be code, not a comment"
 
 
 class TestProbeIsPathComparisonFree:
