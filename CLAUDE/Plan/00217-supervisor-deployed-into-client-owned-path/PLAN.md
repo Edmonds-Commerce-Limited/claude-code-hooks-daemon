@@ -103,10 +103,17 @@ source into every Python tool's discovery.
     manifest asset stays clean under its language's DEFAULT rule set
     (`ruff --isolated`, `shellcheck --norc`), the check that was absent
     (`CLAUDE.md` Core Standard 15)
-- [ ] ⬜ **Task 2.2**: Verify against the client-shaped fixture
-  (`scripts/dummy-client-repo.sh create`), not self-install
-- [ ] ⬜ **Task 2.3**: Confirm the upgrade path preserves the fix (the v3.24.0
-  class of bug: an asset install deploys and upgrade never refreshes)
+- [x] ✅ **Task 2.2**: Verified against the client-shaped fixture, with BOTH a
+  realistic client invocation (own `ruff.toml` selecting BLE+DTZ — reproduces
+  the reported 3 findings, and only from the supervisor) and the isolated one
+  (clean). Pasting the shipped exclusion verbatim returns it to clean; 39/39
+  deployed files carry the ownership banner (`EVIDENCE.md` E8)
+- [x] ✅ **Task 2.3**: Upgrade path confirmed — all four assets are redeployed
+  by `upgrade_version.sh`, and the banner lives inside the copied bytes so the
+  v3.24.0 class structurally cannot apply (`EVIDENCE.md` E9). Also surfaced a
+  fixture gap: `dummy-client-repo` cannot run `upgrade_version.sh` at all,
+  because its daemon dir is a git worktree and the script requires a `.git`
+  directory
 
 ### Phase 3: Close the documentation gap
 
@@ -148,10 +155,16 @@ source into every Python tool's discovery.
    on-disk fingerprint that a symlink makes incapable of diverging.
 3. **(c) document the exclusion** — ADOPTED, but not as the sentence the report
    describes. See below.
-4. **(d) `qa_suppression` default `exclude_paths`** — REJECTED as a category
-   error (E3). That option controls whether the daemon's PreToolUse handler
-   scans a `Write`/`Edit` payload; it has no bearing on a client's `ruff`. It
-   would only unlock writing the suppression that (a) shows we cannot accept.
+4. **(d) `qa_suppression` default `exclude_paths`** — REJECTED as unnecessary,
+   not as confused. The report proposes it as an ENABLER for (c), not a rival
+   fix: it would let a client write option (c)'s suppressions *inline*, which
+   the handler currently denies. That reading of the handler is correct. Two
+   measurements settle it anyway (E3): the handler allows a client agent to
+   write the per-file-ignores stanza into `ruff.toml`/`pyproject.toml` today —
+   only the inline directive in the `.py` is blocked — so the documented route
+   needs no exemption; and an inline directive would be discarded by the next
+   upgrade regardless, which is the report's own blocker (1). (d) would unlock
+   an action whose result does not survive.
 5. **(e) drop the `.py` extension at the deploy site** (our own proposal, not in
    the report) — REJECTED (E5). Architecturally the cleanest: an extensionless
    executable leaves every Python tool's discovery at once. But `_arm_ccy_supervisor()`
@@ -177,9 +190,10 @@ artifacts, and treat the finding as a **class** rather than an instance:
 
 **Where we disagree with the report**: its ranking is inverted. Its first
 choice is the most expensive and breaks our own gate; its second regresses two
-shipped safety features; its fourth cannot affect the reported symptom at all;
-its last — dismissed as "weakest" — is the only one that is both safe and
-fleet-wide, provided it ships as an artifact rather than a paragraph.
+shipped safety features; its last — dismissed as "weakest" — is the only one
+that is both safe and fleet-wide, provided it ships as an artifact rather than
+a paragraph. Its fourth is fairly reasoned but is made moot by the route we
+chose, which the handler already permits.
 
 **What upstream cannot promise**: cleanliness under rules a client *chooses*.
 Under ruff's actual defaults the file is already clean (E1) — the reported

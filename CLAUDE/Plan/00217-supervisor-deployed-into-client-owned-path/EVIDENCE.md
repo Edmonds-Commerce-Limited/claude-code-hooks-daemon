@@ -63,15 +63,37 @@ ruff check --isolated --select BLE,DTZ --statistics .
 136 findings across the tree. The report ranks option (a) "lowest total cost";
 measured here it is the highest.
 
-## E3 — option (d) (`qa_suppression` `exclude_paths`) cannot affect a client's ruff
+## E3 — option (d) is unnecessary, not confused
 
-`src/claude_code_hooks_daemon/handlers/pre_tool_use/qa_suppression.py`:
+The report does **not** claim `qa_suppression`'s `exclude_paths` fixes a
+client's `ruff check`. It offers it as an ENABLER for option (3): shipping
+`.claude/ccy/claude-supervise*` in that default "would at least let a client
+apply option 3's suppressions inline". That is a correct reading of the
+handler.
+
+Two facts nonetheless make it moot.
+
+**First, the scoping fact.** In
+`src/claude_code_hooks_daemon/handlers/pre_tool_use/qa_suppression.py`,
 `_is_excluded()` is consulted inside `matches()` (line 132) to decide whether
-the **handler** inspects a `Write`/`Edit` payload. It is a scan-scope control
-for the daemon's own PreToolUse gate. Nothing in that path emits, reads, or
-influences a `ruff`/`flake8`/`pylint` configuration. Shipping
-`.claude/ccy/claude-supervise*` in its defaults would only permit an agent to
-hand-write a suppression that E2 shows we cannot accept anyway.
+the **handler** inspects a `Write`/`Edit` payload. Nothing in that path emits,
+reads or influences a ruff/flake8/pylint configuration. Worth stating, but it
+contradicts nobody.
+
+**Second, the documented route is already permitted.** Driving the real handler
+with three payloads:
+
+```
+allowed   client ruff.toml (documented route)          (/proj/ruff.toml)
+allowed   client pyproject.toml (documented route)     (/proj/pyproject.toml)
+BLOCKED   inline directive in the .py (report blocker 2) (/proj/.claude/ccy/claude-supervise.py)
+```
+
+The strategy registry has no `.toml` strategy, so `matches()` returns False and
+a client agent can write the `per-file-ignores` stanza today. Only the *inline*
+directive is denied. So the fix we chose needs no `exclude_paths` change, and
+(d) would unlock an action whose result the next upgrade discards anyway — the
+report's own blocker (1).
 
 ## E4 — option (b) (symlink or shim into `.claude/hooks-daemon/`)
 
@@ -143,6 +165,96 @@ ruff check --isolated over claude-supervise.py          → clean
 So the whole deployed surface is currently clean under default tooling — and
 nothing anywhere asserts that it stays that way. That absent assertion is the
 guard this plan adds (`CLAUDE.md` Core Standard 15).
+
+## E8 — before/after in a real client fixture, both invocations
+
+Fixture rebuilt from this branch by `scripts/dummy-client-repo.sh create`
+(production installer), then made a ccy project (`mkdir .claude/ccy`) and the
+supervisor deployed through the **production** `deploy_ccy_supervisor_if_enabled`
+— the same function `install_version.sh` and `upgrade_version.sh` call:
+
+```
+-> Deployed claude-supervise.py to .../.claude/ccy/claude-supervise.py (chmod 755)
+-> Armed supervisor: created .../.claude/ccy/ccy.env
+deployed=True armed=True
+```
+
+The client's config has no `ccy:` block, so `deploy_supervisor` is `None` —
+the default path, not a special case.
+
+**A) Realistic client invocation** — the fixture's own `ruff.toml` selecting
+`E, F, BLE, DTZ, B, SIM`, run as a client would (`ruff check .`, no
+`--isolated`, config discovered from the project root):
+
+```
+.claude/ccy/claude-supervise.py:1913:14: DTZ005 ...
+.claude/ccy/claude-supervise.py:1913:54: DTZ006 ...
+.claude/ccy/claude-supervise.py:2413:16: BLE001 ...
+Found 3 errors.
+```
+
+The reported symptom, reproduced in a genuine client layout. Note what is
+ABSENT: nothing from `.claude/hooks-daemon/` (git-ignored, so ruff skips it)
+and nothing from `.claude/hooks/` (shell, not Python). The supervisor is the
+only daemon-owned file in a client's Python scope, which is exactly why it was
+the one that got reported. Line numbers moved 1907→1913 / 2407→2413 because of
+the six-line ownership banner.
+
+**B) Isolated invocation** — `ruff check --isolated .`: **All checks passed**,
+confirming E1 in a client layout too.
+
+**C) The shipped remedy, applied verbatim.** Pasting the stanza from
+`CLAUDE/LLM-INSTALL.md` into the fixture's `ruff.toml`:
+
+```toml
+[lint.per-file-ignores]
+".claude/ccy/claude-supervise.py" = ["BLE001", "DTZ005", "DTZ006"]
+```
+
+re-running the SAME client invocation as (A): **All checks passed**, exit 0.
+The client keeps their strict rules everywhere else and loses nothing.
+
+**D) Ownership banner coverage in the deployed tree**:
+
+```
+files carrying "DAEMON-OWNED FILE":  39
+deployed asset files in total:       39
+```
+
+(`.claude/init.sh`, 31 hook forwarders + status-line, 6 skill scripts, the
+supervisor.) `shellcheck -x --source-path=SCRIPTDIR` over the deployed shell
+assets: exit 0.
+
+## E9 — upgrade path (Task 2.3), and a fixture limitation
+
+Every asset in the manifest is redeployed by `scripts/upgrade_version.sh`, not
+only at install:
+
+| Asset                                | Upgrade call site                                            |
+| ------------------------------------ | ------------------------------------------------------------ |
+| `.claude/init.sh`, `.claude/hooks/*` | `deploy_all_hooks` — line 247 (fast path), line 726 (Step 8) |
+| skill scripts                        | `deploy_skills` — lines 264, 799                             |
+| `mkplan.bash`                        | `deploy_plan_workflow_if_enabled` — lines 283, 853           |
+| `claude-supervise.py`                | `deploy_ccy_supervisor_if_enabled` — lines 301, 880          |
+
+`scripts/install/hooks_deploy.sh` **copies** the daemon clone's own
+`.claude/hooks/*` and `init.sh` (lines 152, 210) rather than regenerating them,
+so the bytes a client receives are literally the files this repo tracks — which
+is what the lint guard checks.
+
+The v3.24.0 failure class (an asset that installs once and is never refreshed)
+**cannot** apply to this fix: the banner lives INSIDE the copied bytes. There is
+no separate refresh step to forget — if the deploy runs at all, the banner
+arrives with it.
+
+**Fixture limitation, reported not worked around**: `upgrade_version.sh` cannot
+be exercised against `untracked/dummy-client-repo`. Its safety check is
+`[ ! -d "$DAEMON_DIR/.git" ]` (line 183), and the fixture's daemon dir is a git
+WORKTREE whose `.git` is a *file*. A real client's `git clone` gives a
+directory, so the check is right for production and wrong for the fixture —
+`scripts/dummy-client-repo.sh` currently supports install-mode verification
+only. Hence the upgrade evidence above is code-level plus a direct call to the
+production deploy function, not an end-to-end upgrade run.
 
 ## E7 — the boundary is genuinely unmarked
 
