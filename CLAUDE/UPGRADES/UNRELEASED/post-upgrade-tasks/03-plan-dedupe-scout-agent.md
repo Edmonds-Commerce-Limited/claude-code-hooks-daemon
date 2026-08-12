@@ -97,3 +97,22 @@ positives: a wrong candidate makes you read an unrelated plan and teaches you
 to ignore the agent, after which the next real duplicate goes through anyway.
 If it is quiet when you expected a hit, give it a fuller description of the
 intended work — a bare kebab-case folder name is thin evidence to judge on.
+
+**Its COVERAGE varies, and a quiet answer does not prove it read everything.**
+Measured across six real dispatches against an unchanged tree of 34 live
+plans, the number it reported checking was 34, then 32, then 17, and on two
+runs it gave no number at all. The judgement was correct in all six — every
+duplicate it was shown, it found, including one whose wording shared almost no
+vocabulary with the matching plan. It is the self-reporting that is unreliable,
+not the reading it does.
+
+Read a clean result as "nothing obvious turned up", never as "the tree has
+been checked". If the answer matters — you are about to invest real effort in
+a plan, or the area is one you know is crowded — ask it again with a
+differently-worded description, or spend a minute in the plan index yourself.
+Two cheap looks from different angles beat one confident-sounding sentence.
+
+This is a deliberate position, not an outstanding bug: the agent exists
+because duplicate plans are a SEMANTIC problem that no deterministic rule
+could see (measured first — see the Why section). Buying reliable coverage
+would mean giving up the judgement that makes it useful at all.

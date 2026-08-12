@@ -345,3 +345,101 @@ def test_real_repository_is_clean() -> None:
     assert exit_code == 0, "Tracked detritus found in this repository:\n" + "\n".join(
         f"  [{v['rule']}] {v['path']}: {v['message']}" for v in report["violations"]
     )
+
+
+# ---------------------------------------------------------------------------
+# ignored-plan-document: the silent loss (found while closing Plan 00216)
+#
+# CLAUDE/Plan/ is tracked source by policy, but .gitignore patterns without a
+# leading slash match at EVERY depth. Root-level scratch names had therefore
+# been swallowing plan documents: two PLAN.md supporting docs and three
+# benchmark captures cited by a RESEARCH.md. Nothing noticed, because the
+# failure leaves `git status` clean and the author's own copy on disk with
+# working links.
+# ---------------------------------------------------------------------------
+
+
+def _write_ignored(repo: Path, rel: str, pattern: str) -> None:
+    """Add ``pattern`` to .gitignore and drop an untracked file at ``rel``."""
+    gitignore = repo / ".gitignore"
+    existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+    gitignore.write_text(f"{existing}{pattern}\n", encoding="utf-8")
+    target = repo / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("evidence\n", encoding="utf-8")
+
+
+def test_flags_plan_document_swallowed_by_an_unanchored_pattern(tmp_path: Path) -> None:
+    """The exact shape that lost two real plan documents."""
+    repo = _make_repo(tmp_path, {"README.md": "# fixture\n"})
+    _write_ignored(repo, "CLAUDE/Plan/00001-thing/PHASE-1-MEASUREMENT.md", "PHASE-*.md")
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1
+    assert "ignored-plan-document" in _rules(report)
+    assert "CLAUDE/Plan/00001-thing/PHASE-1-MEASUREMENT.md" in _paths(report)
+
+
+def test_flags_plan_evidence_swallowed_by_a_generic_suffix_pattern(tmp_path: Path) -> None:
+    """`*.log` had taken three benchmark captures from a plan's assets/."""
+    repo = _make_repo(tmp_path, {"README.md": "# fixture\n"})
+    _write_ignored(repo, "CLAUDE/Plan/Completed/00002-x/assets/results/restart_1.log", "*.log")
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1
+    assert "CLAUDE/Plan/Completed/00002-x/assets/results/restart_1.log" in _paths(report)
+
+
+def test_anchoring_the_pattern_clears_the_violation(tmp_path: Path) -> None:
+    """The remediation the rule recommends must actually work.
+
+    A leading slash confines the pattern to the repository root, which is what
+    those scratch names were always for.
+    """
+    repo = _make_repo(tmp_path, {"README.md": "# fixture\n"})
+    _write_ignored(repo, "CLAUDE/Plan/00001-thing/PHASE-1-MEASUREMENT.md", "/PHASE-*.md")
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, report
+    assert "ignored-plan-document" not in _rules(report)
+
+
+def test_untracked_but_not_ignored_plan_document_is_not_flagged(tmp_path: Path) -> None:
+    """Unstaged work is normal mid-edit and stays visible in `git status`.
+
+    Only an IGNORED document is invisible, which is the whole distinction the
+    rule turns on — flagging every unstaged plan file would make it noise and
+    it would be disabled within a day.
+    """
+    repo = _make_repo(tmp_path, {"README.md": "# fixture\n"})
+    draft = repo / "CLAUDE" / "Plan" / "00001-thing" / "PLAN.md"
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text("# draft\n", encoding="utf-8")
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, report
+
+
+def test_tracked_plan_document_is_not_flagged_even_if_a_pattern_matches(tmp_path: Path) -> None:
+    """Tracking wins. A file already in the index cannot be silently lost."""
+    repo = _make_repo(
+        tmp_path, {"README.md": "# fixture\n", "CLAUDE/Plan/00001-x/PHASE-1.md": "kept\n"}
+    )
+    (repo / ".gitignore").write_text("PHASE-*.md\n", encoding="utf-8")
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, report
+
+
+def test_repo_without_a_plan_directory_is_clean(tmp_path: Path) -> None:
+    """The rule must be inert in a project that does not use the plan workflow."""
+    repo = _make_repo(tmp_path, {"README.md": "# fixture\n"})
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, report

@@ -57,6 +57,13 @@ coverage.info
 
 # Django stuff:
 *.log
+# ...but a plan's captured evidence is tracked source, not a stray runtime log.
+# `*.log` had silently swallowed three benchmark captures in Plan 00154's
+# assets/results/, alongside nine tracked siblings, while RESEARCH.md cited the
+# directory and CLAUDE.md quotes the numbers those captures back. Scoped rather
+# than un-ignoring CLAUDE/Plan/ wholesale, so check_repo_hygiene's
+# ignored-plan-document rule keeps its teeth for the next over-broad pattern.
+!CLAUDE/Plan/**/*.log
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -164,12 +171,24 @@ Thumbs.db
 # one file that would let anyone verify either claim. CI now lives in
 # .github/workflows/qa.yml and is tracked.
 
-# Temporary/generated docs (keep only final summaries)
-COVERAGE_REPORT.md
-PHASE-*.md
-STATUS.md
-WORK_COMPLETED.md
-verify-*.sh
+# Temporary/generated docs at the REPOSITORY ROOT (keep only final summaries).
+#
+# The leading slash is load-bearing. A gitignore pattern without one matches at
+# ANY depth, so these root-level scratch names were silently swallowing tracked
+# plan documents: `CLAUDE/Plan/.../PHASE-1-MEASUREMENT.md` and
+# `CLAUDE/Plan/Completed/00025-.../STATUS.md` were both ignored, never
+# committed, and linked to from their own PLAN.md — so the links resolved for
+# the author and for nobody else.
+#
+# That is the worst shape of failure this file can produce: `git status` stays
+# clean, no check fires, and the loss is invisible until someone else follows
+# the link. CLAUDE/Plan/ is tracked source by policy (see CLAUDE/Plan/CLAUDE.md),
+# so nothing under it may be caught by a convenience pattern meant for the root.
+/COVERAGE_REPORT.md
+/PHASE-*.md
+/STATUS.md
+/WORK_COMPLETED.md
+/verify-*.sh
 
 # Development artifacts and QA outputs
 untracked/

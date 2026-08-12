@@ -1,6 +1,6 @@
 # Plan 00216: plan duplicate detection
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -117,17 +117,21 @@ encodes a procedure, not user content, so fixes must reach the field. Gated on
 ### Phase 4: Verify
 
 - [x] ✅ **Task 4.1**: Full QA suite passes
+
 - [x] ✅ **Task 4.2**: Client-mode verification — this changes deployed assets,
   which self-install mode does not represent. Proven in a real client install:
   correct path and mode, byte-identical, frontmatter intact, a client agent
   literally named `plan-dedupe-scout` left untouched beside it, and a tampered
   daemon-owned copy refreshed
+
 - [x] ✅ **Task 4.3**: Dogfood it against this tree — one true negative and one
   true positive on un-built work, both correct
+
 - [x] ✅ **Task 4.4**: Re-dogfooded under REAL dispatch. The pathological case
   is FIXED — it now names Plan 00216 by number instead of answering "already
   shipped, no additional work required". The true-positive control still names
   Plan 00205. The inline harness was indeed the confound
+
 - [x] ✅ **Task 4.5**: Verify the OUTPUT FORMAT contract under real dispatch.
   Task 4.4 exposed what the harness had masked: the finding is correct and the
   plan number is named, but the report is flattened into one sentence and the
@@ -138,6 +142,7 @@ encodes a procedure, not user content, so fixes must reach the field. Gated on
   to the three fields a caller cannot recover for themselves. Restating it as
   "mandatory" further down did nothing — three dispatches dropped the
   checked-count, which predated that wording, so position beat emphasis
+
 - [x] ✅ **Task 4.6**: Investigate COVERAGE variance. Requiring the count made
   it visible and it moves: 34, 32, 17 across runs against an unchanged tree of
   34 (ground truth verified on disk). Procedure now enumerates the folders
@@ -145,16 +150,24 @@ encodes a procedure, not user content, so fixes must reach the field. Gated on
   that, with an instruction to report BOTH numbers on a partial pass — a
   partial check labelled honestly is useful; one reported as complete is worse
   than none, because the caller stops looking
-- [ ] ⬜ **Task 4.7**: Decide the division of labour, because prompt-tuning has
-  hit a wall here. Findings are correct in 6/6 real dispatches; the reporting
-  contract is not reliably honoured, and the feedback loop is one ~100k-token
-  sample per change against a demonstrably high-variance system — so a single
-  run cannot separate "my change regressed it" from noise, and further tuning
-  would be guessing with extra steps. The architectural alternative is to stop
-  asking a language model for a number the filesystem already knows: the
-  daemon's `plan-qa` machinery enumerates live plans deterministically, so
-  COVERAGE could be reported by tooling and the agent left to do only the
-  judgement it is actually good at
+
+- [x] ✅ **Task 4.7**: Resolved by re-reading this plan's own Decision 1, which
+  had already accepted that the check "is advisory by construction" and cannot
+  be QA-gated. Chasing a reliable coverage guarantee was drift on my part —
+  buying it would mean giving up the semantic judgement that is the entire
+  reason a deterministic rule was rejected in Phase 1.
+
+  What "advisory" does NOT license is misleading output: "may miss a
+  duplicate" is accepted imprecision in JUDGEMENT, while "a clean result that
+  looks complete after reading half the tree" is a trust defect. Closed by
+  aligning the documentation with the measured behaviour rather than by adding
+  machinery — the post-upgrade task now states the observed coverage spread
+  and tells readers to treat a quiet answer as "nothing obvious turned up",
+  never as "the tree has been checked".
+
+  Checked first whether the daemon could supply the number deterministically:
+  `plan-qa --sweep --json` emits findings only, no live-plan count, so that
+  route was new machinery rather than a free win.
 
 ## Success Criteria
 
@@ -162,19 +175,31 @@ encodes a procedure, not user content, so fixes must reach the field. Gated on
   almost no vocabulary with it — verified against Plan 00205 (the original
   criterion named 00199/00213, which have since both been archived; the scout
   reads only live plans by design, so that pair is no longer a valid probe)
+
 - [x] It reports nothing, and says how many plans it checked, when the proposal
   is genuinely novel
+
 - [x] It is suggested at creation time and blocks nothing
+
 - [x] It deploys to a real client install, verified in client mode
+
 - [x] Full QA passes
+
 - [x] It does not answer "is this already implemented?" when the proposed work
   happens to exist in the source tree — verified under real dispatch
-- [x] Its report states how many plans it checked, so a clean result is
-  verifiable rather than merely reassuring
-- [ ] The number it reports matches the number of live plans on disk. Ground
-  truth is 34; observed 34, 32, 17, and absent. The reporting contract is the
-  unreliable part, not the judgement — see Task 4.7 for why the remedy is
-  probably architectural rather than another prompt revision
+
+- [x] Its documented behaviour matches its measured behaviour. **Dropped as a
+  criterion: "its report states how many plans it checked".** I ticked that
+  once and it was an overclaim — across six real dispatches against an
+  unchanged tree of 34 live plans, the reported count was 34, 32, 17, and on
+  two runs absent. The judgement was right all six times; the self-reporting
+  is what varies.
+
+  Not pursued further, because Decision 1 already accepted this tool as
+  advisory by construction, and reliable coverage would cost the semantic
+  judgement that is its whole reason to exist. Closed instead by making the
+  documentation honest about the spread, so a quiet answer reads as "nothing
+  obvious turned up" rather than "the tree has been checked" (Task 4.7).
 
 ## Dependencies
 
@@ -189,3 +214,9 @@ encodes a procedure, not user content, so fixes must reach the field. Gated on
 
 - Gap identified while reconciling the 00199/00213 duplication
 - Phase 1 measurement killed the originally-proposed deterministic remedy
+- Agent built, namespaced and covered by the Plan 00217 asset guard
+- Verified in a real client install alongside a deliberately-colliding client
+  agent, which was left untouched
+- Six real dispatches: judgement correct in all six, self-reported coverage
+  measured as unreliable, and the documentation aligned to that rather than
+  the tool being tuned toward a guarantee this plan had already declined

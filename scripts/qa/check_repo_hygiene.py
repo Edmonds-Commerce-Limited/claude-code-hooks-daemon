@@ -92,13 +92,20 @@ RULE_TRACKED_ARTIFACT: Final[str] = "tracked-build-artifact"
 RULE_ROOT_TEST_SCRIPT: Final[str] = "root-test-script"
 RULE_FROZEN_SUMMARY: Final[str] = "frozen-session-summary"
 RULE_SRC_TEST_STUB: Final[str] = "src-test-stub"
+RULE_IGNORED_PLAN_DOC: Final[str] = "ignored-plan-document"
 
 _ALL_RULES: Final[tuple[str, ...]] = (
     RULE_TRACKED_ARTIFACT,
     RULE_ROOT_TEST_SCRIPT,
     RULE_FROZEN_SUMMARY,
     RULE_SRC_TEST_STUB,
+    RULE_IGNORED_PLAN_DOC,
 )
+
+# Directory whose contents are tracked source BY POLICY (CLAUDE/Plan/CLAUDE.md:
+# "never let a plan folder linger untracked"). Nothing under it may be caught
+# by a convenience ignore pattern.
+_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 
 _MARKDOWN_SUFFIXES: Final[tuple[str, ...]] = (".md", ".markdown")
 
@@ -219,6 +226,16 @@ _REMEDIATION_SRC_TEST_STUB: Final[str] = (
     "exclusion. Never commit a bypass."
 )
 
+_REMEDIATION_IGNORED_PLAN_DOC: Final[str] = (
+    "Narrow the .gitignore pattern that matches it — anchor a root-level "
+    "scratch name with a leading slash (/STATUS.md), since an unanchored "
+    "pattern matches at EVERY depth. Then `git add` the document. Do not "
+    "rename the plan document to dodge the pattern: the next one will hit it "
+    "too. This is a silent loss — git status stays clean, so the document is "
+    "missing for everyone except its author, who still sees it on disk and "
+    "whose PLAN.md link still resolves locally."
+)
+
 
 @dataclass(frozen=True)
 class Violation:
@@ -283,6 +300,56 @@ def tracked_files(root: Path) -> tuple[str, ...]:
             f"could not read the git index at {root}: {result.stderr.strip() or 'git failed'}"
         )
     return tuple(path for path in result.stdout.split(_NUL) if path)
+
+
+def ignored_plan_documents(root: Path) -> tuple[str, ...]:
+    """Files under the plan directory that git is IGNORING, repo-relative.
+
+    The failure this exists for is silent by construction. An unanchored
+    ``.gitignore`` entry matches at every depth, so a root-level scratch name
+    like ``PHASE-*.md`` or ``STATUS.md`` also swallows a plan's supporting
+    documents. ``git status`` then stays clean, no other check looks, and the
+    document is missing for everyone except its author — whose copy is still
+    on disk and whose ``PLAN.md`` link still resolves locally. Two real plan
+    documents were lost this way before anything noticed.
+
+    Raises:
+        RuntimeError: when git cannot be read. FAIL FAST — reporting "clean"
+            because the check could not run is the blind guard again.
+    """
+    plan_dir = root / _PLAN_DIR
+    if not plan_dir.is_dir():
+        return ()
+
+    # `ls-files --others --ignored` is exactly the silent-loss set: files that
+    # are NOT in the index AND are ignored. A tracked file is safe even if a
+    # pattern also matches it, and an untracked-but-not-ignored file is just
+    # unstaged work — normal mid-edit, and visible in `git status`.
+    # SECURITY: list-form argv, no shell (B603); git is a trusted tool (B607).
+    result = subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary
+        [
+            _GIT_BINARY,
+            "-C",
+            str(root),
+            "ls-files",
+            "-z",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--",
+            _PLAN_DIR,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=_GIT_TIMEOUT_SECONDS,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"could not list ignored files at {root}: {result.stderr.strip() or 'git failed'}"
+        )
+
+    return tuple(sorted(path for path in result.stdout.split(_NUL) if path))
 
 
 def _is_build_artifact(rel_path: str) -> str | None:
@@ -428,6 +495,16 @@ def scan(root: Path) -> Report:
                     remediation=_REMEDIATION_FROZEN_SUMMARY,
                 )
             )
+
+    for rel_path in ignored_plan_documents(root):
+        report.violations.append(
+            Violation(
+                rule=RULE_IGNORED_PLAN_DOC,
+                path=rel_path,
+                message="plan document silently ignored by .gitignore",
+                remediation=_REMEDIATION_IGNORED_PLAN_DOC,
+            )
+        )
     return report
 
 

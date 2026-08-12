@@ -1,0 +1,7 @@
+Sent SIGTERM to daemon (PID: 75179)
+Daemon stopped
+Sent SIGTERM to daemon (PID: 75179)
+Daemon stopped
+Daemon started successfully (PID: 75197)
+Socket: /workspace/untracked/daemon-9b2a67613048.sock
+Logs: in-memory (query with 'logs' command)
