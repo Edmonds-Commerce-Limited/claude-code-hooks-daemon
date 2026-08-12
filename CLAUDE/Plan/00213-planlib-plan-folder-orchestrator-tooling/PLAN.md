@@ -59,6 +59,15 @@ durable detail belongs in named files, not inflating PLAN.md):
 - `PROPOSAL.md` — the current proposal (v2), self-contained and verified.
 - `PROPOSAL-v1-SUPERSEDED.md` — the earlier draft, kept because the daemon's
   own convention is to preserve superseded versions rather than delete them.
+- `../Cancelled/00199-hooks-daemon-plan-lib/PROPOSAL-ASSESSMENT.md` — an
+  independent integration analysis of this same proposal from a duplicate
+  plan (Plan 00199, filed 5 days before this one against the same source
+  document, unaware of each other). Plan 00199 was superseded by this plan
+  once the duplication was found; its assessment reached the same ADAPT
+  conclusion independently and is relied on directly in Phase 2 rather than
+  re-derived (deploy-mode 0644 vs 0755, `_EXPECTED_ROOT_FILES` inclusion, no
+  default `root_marker`, neutral config examples, the `bash -n` stderr
+  assertion, and `plan_script_qa` deferral all trace back to it).
 
 ## Tasks
 
@@ -74,14 +83,41 @@ durable detail belongs in named files, not inflating PLAN.md):
 
 ### Phase 2: Adoption (only if Task 1.3 accepts)
 
-- [ ] ⬜ **Task 2.1**: Define the configuration seam in `.claude/hooks-daemon.yaml`
-  and its schema validation
-- [ ] ⬜ **Task 2.2**: Wire deployment through the existing idempotent
-  plan-workflow asset deploy path
-- [ ] ⬜ **Task 2.3**: Bring shell QA coverage up to the standard the rest of the
-  shell surface is held to (`shell_audit`, `shellcheck`)
-- [ ] ⬜ **Task 2.4**: Stage `config-changes` and `truth-changes` manifests so the
-  feature does not ship dormant and undocumented
+- [x] ✅ **Task 2.1**: Define the configuration seam in `.claude/hooks-daemon.yaml`
+  and its schema validation. Landed as `PlanWorkflowScriptsConfig` nested at
+  `plan_workflow.scripts` (`src/claude_code_hooks_daemon/config/models.py`): `enabled` (default `false`),
+  `root_marker` (no default — a `model_validator` FAILS FAST if `enabled` is
+  true and `root_marker` is empty or `.git`), `delegate`, `check_flag`,
+  `force_color_var`, `scrubber`, `track_run_logs`.
+- [x] ✅ **Task 2.2**: Wire deployment through the existing idempotent
+  plan-workflow asset deploy path. `_planlib.inc.bash` (byte-identical to the
+  independently re-verified extraction) lives at
+  `install/templates/_planlib.inc.bash` and deploys through
+  `deploy_plan_workflow_if_enabled` → `bootstrap_plan_workflow` (a new
+  `deploy_scripts_library` parameter, gated on `plan_workflow.scripts.enabled`
+  AND the parent `plan_workflow.enabled`) — the SAME seam `mkplan.bash` uses,
+  not a parallel path. Daemon-owned (overwritten every deploy), but mode
+  `0o644` via its own `_PLANLIB_MODE` constant — deliberately NOT
+  `_MKPLAN_MODE` (`0o755`), since the library is sourced, never executed.
+  `_planlib.inc.bash` also joined `plan_qa`'s built-in `_EXPECTED_ROOT_FILES`
+  so the SessionStart sweep never flags it as a stray root file.
+- [x] ✅ **Task 2.3**: Bring shell QA coverage up to the standard the rest of the
+  shell surface is held to (`shell_audit`, `shellcheck`). Verified at landing:
+  `bash -n` (stderr asserted empty), `shellcheck -x -S style` (stricter than
+  the project's own `-S warning` gate) both clean; the project's own
+  `scripts/qa/run_shell_check.sh` passes with the file included (55 scripts,
+  0 issues). A 47-case pytest suite
+  (`tests/unit/install/test_planlib_library.py`) exercises the library as
+  real bash via subprocess — see Technical Decisions for what it covers and
+  what it deliberately does not.
+- [x] ✅ **Task 2.4**: Stage `config-changes` so the feature does not ship
+  dormant and undocumented. Appended (not rewrote) an entry to
+  `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.53.0.yaml` for
+  `plan_workflow.scripts` (`recommended: false`, `dormant: true` — this is
+  not a universally-beneficial feature). A `truth-changes` entry was assessed
+  and judged NOT applicable: truth-changes reconciles an EXISTING documented
+  workflow that changed, and this is a wholly new opt-in with no prior
+  documented truth to reconcile.
 
 ## Dependencies
 
@@ -159,15 +195,37 @@ section already reserves for a human.
 
 ## Success Criteria
 
-- [ ] An explicit, recorded decision exists on whether `planlib` is adopted
-- [ ] No proposal document remains in `untracked/`
-- [ ] If adopted: QA passes, the daemon restarts cleanly, and the feature ships
-  with upgrade manifests rather than silently
+- [x] ✅ An explicit, recorded decision exists on whether `planlib` is adopted
+  (ADAPT — Decision 1)
+- [x] ✅ No proposal document remains in `untracked/` (filed into this plan
+  folder at plan creation)
+- [x] ✅ Targeted tests pass and QA-equivalent checks pass in the worktree:
+  `pytest` for the new config/install/plan_qa/library-behaviour tests (all
+  green, 100% coverage on `install/plan_workflow.py`), `mypy`/`ruff`/`black`
+  clean on every touched Python file, `shellcheck -x -S style` +
+  `bash -n` (stderr-asserted-empty) clean on `_planlib.inc.bash`, and the
+  project's own `scripts/qa/run_shell_check.sh` passing with the file
+  included.
+- [ ] ⬜ **OUTSTANDING (cannot verify from this worktree)**: full
+  `./scripts/qa/run_all.sh`, a daemon restart + `status` showing `RUNNING`,
+  and client-mode verification (`scripts/dummy-client-repo.sh`) against the
+  merged tree — this worktree agent cannot restart the shared daemon; the
+  merging session must run these before treating Phase 2 as done.
+- [x] ✅ The feature ships with an upgrade manifest rather than silently
+  (`config-changes/v3.53.0.yaml` entry, Task 2.4)
 
 ## Delivery & Milestones
 
 <!-- Curated milestones + delivery commit hashes only (git is the SSoT for
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00213-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
+
+- Proposal filed out of `untracked/` and into tracked source at plan creation
+
+- Phase 2 landed in worktree `agent-a5ec3d0f3519739e1-e3a4a2e0`: config seam
+  (Task 2.1), deploy path + `_planlib.inc.bash` (Task 2.2), 47-case
+  behavioural test suite + shell QA verification (Task 2.3), config-changes
+  manifest (Task 2.4), and dogfooding the deploy mechanism in this repo's own
+  config — see the plan's `JOURNAL/` for the commit list.
 
 - Proposal filed out of `untracked/` and into tracked source at plan creation
