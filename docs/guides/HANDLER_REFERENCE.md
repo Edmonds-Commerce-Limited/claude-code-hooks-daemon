@@ -1339,11 +1339,13 @@ handlers:
 
 **Description:** Lints every Write/Edit of a `PLAN.md` under the plan directory in real time, running the plan QA edit-stage checks against the content the file *would* have after the tool call (for Edit, the old/new replacement is applied to the current file first). Single-file invariants only -- cross-file checks belong to `plan_qa_commit_gate` and `plan_qa_sweep`.
 
-**Fires when:** a Write or Edit targets a file named `PLAN.md` inside the configured plan directory (`plan_workflow.directory`, default `CLAUDE/Plan`).
+**Fires when:** a Write or Edit targets a file named `PLAN.md` inside the configured plan directory (`plan_workflow.directory`, default `CLAUDE/Plan`), a journal day-file under a plan's `JOURNAL/`, or the plan-index `README.md` at the plan directory root.
 
 **Enforcement mode:** honours `plan_workflow.qa.edit_mode` (`block` | `warn` | `off`, default `block`). In `block`, block-level findings on new material deny the tool call with the exact remediation; `warn` downgrades everything to advisory context; `off` disables the handler. Plans listed in `legacy_plan_allowlist` only ever advise.
 
 **Block-level checks (new material):** a parseable `**Status**:` line must exist (`status-line-present`); the token must be one of Not Started, In Progress, Complete, Blocked, Cancelled, Superseded, Dormant (`status-enum-and-date`); the header must not contradict an all-ticked body (`header-body-coherence`); tasks must use the template grammar `- [ ] ⬜ **Task N.N**:` rather than ad-hoc markers (`task-grammar`). Advisory-level checks cover missing Created/Owner/Priority headers, a terminal status set while the folder is still in the plan root, edits to archived plans, and backticked `src/...` paths that no longer exist.
+
+**The plan index (`README.md`) is linted against ONE rule:** `index-row-length` -- every line must stay under 500 characters, because an index row is a pointer (a link, a status and one clause), not a summary duplicated from the linked `PLAN.md`. Only an edit that makes the index worse blocks (a new over-long line, or a longer worst offender), so an index that already has one stays editable, including by the edit that fixes it. No plan-document rule applies to the index -- it has no `**Status**:` line and needs none. The limit is not configurable: it is shared with the batch guard `tests/integration/test_plan_index_navigability.py`, which asserts a fixed ceiling, and two guards over one rule must read one number.
 
 **Policy configuration:** all three plan QA surfaces (this handler, `plan_qa_commit_gate`, `plan_qa_sweep`) plus the `plan-qa` CLI share ONE policy block under the top-level `plan_workflow.qa` key -- not per-handler `options`:
 
@@ -1526,7 +1528,7 @@ handlers:
 
 **Enforcement mode:** honours `plan_workflow.qa.commit_gate_mode` (`block` | `warn` | `off`, default `warn`). In `warn` (the rollout default) findings render as advisory context -- read them and amend the commit content before it lands; `block` denies the commit with a diffable TODO list of what the commit must also contain; `off` disables the gate.
 
-**Invariants checked:** creating a plan folder ⇒ the same commit stages its README index row (`index-at-birth`) with a number from the git counter / `mkplan.bash` (`counter-sanity`, `no-new-collisions`); flipping a plan to Complete/Cancelled/Superseded ⇒ the same commit contains the `git mv` into the archive dir plus the README row and statistics update (`terminal-state-atomic`); every folder has a README row in the section matching its location and every row link resolves (`row-folder-bijection`, `stats-recount`); a commit claiming `Plan NNNNN` that stages src/test/config changes should also touch that plan's PLAN.md (`same-commit-plan-doc`), and plans are referenced as `Plan NNNNN:` (`plan-ref-format`).
+**Invariants checked:** creating a plan folder ⇒ the same commit stages its README index row (`index-at-birth`) with a number from the git counter / `mkplan.bash` (`counter-sanity`, `no-new-collisions`); flipping a plan to Complete/Cancelled/Superseded ⇒ the same commit contains the `git mv` into the archive dir plus the README row and statistics update (`terminal-state-atomic`); every folder has a README row in the section matching its location and every row link resolves (`row-folder-bijection`, `stats-recount`); every line of the README index stays under 500 characters (`index-row-length`); a commit claiming `Plan NNNNN` that stages src/test/config changes should also touch that plan's PLAN.md (`same-commit-plan-doc`), and plans are referenced as `Plan NNNNN:` (`plan-ref-format`).
 
 **Policy configuration:** shares the top-level `plan_workflow.qa` block documented under [`plan_qa_edit`](#plan_qa_edit).
 
@@ -1972,7 +1974,7 @@ handlers:
 | **Type**       | Advisory        |
 | **Event**      | SessionStart    |
 
-**Description:** At the start of each new session, sweeps the whole plan directory with the plan QA check catalogue (index/folder bijection, number collisions, statistics recount, archive structure, status-vs-location coherence, staleness and dormancy) and injects ONE compact drift report as advisory context. Silent when the tree is clean; skipped on session resume.
+**Description:** At the start of each new session, sweeps the whole plan directory with the plan QA check catalogue (index/folder bijection, number collisions, statistics recount, index row length, archive structure, status-vs-location coherence, staleness and dormancy) and injects ONE compact drift report as advisory context. Silent when the tree is clean; skipped on session resume.
 
 **Fires when:** a new (non-resumed) session starts with `plan_workflow.qa.enabled` true and `sweep_mode: advise`. A configured plan directory that does not exist is itself reported as a structural finding.
 

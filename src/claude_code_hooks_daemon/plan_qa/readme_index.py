@@ -88,10 +88,20 @@ class ReadmeRow:
 
 @dataclass(frozen=True)
 class ReadmeIndex:
-    """Parsed view of a plan-index README."""
+    """Parsed view of a plan-index README.
+
+    ``lines`` retains the SOURCE lines alongside the parsed structure. Some
+    index invariants are properties of the text rather than of the parse —
+    ``index-row-length`` (Plan 00218) bounds what a reader has to scroll
+    through, which includes prose paragraphs and statistics bullets that parse
+    to no row at all. Keeping the lines here means the COMMIT and SWEEP
+    surfaces measure the exact text this object was parsed from, rather than
+    re-reading the file and risking a different answer.
+    """
 
     rows: tuple[ReadmeRow, ...]
     stats: dict[str, int]
+    lines: tuple[str, ...] = ()
 
     @classmethod
     def parse(cls, text: str) -> "ReadmeIndex":
@@ -116,7 +126,7 @@ class ReadmeIndex:
             if row is not None:
                 rows.append(row)
 
-        return cls(rows=tuple(rows), stats=stats)
+        return cls(rows=tuple(rows), stats=stats, lines=tuple(text.split("\n")))
 
     def rows_for(self, number: int) -> tuple[ReadmeRow, ...]:
         """Every row that references plan ``number``."""

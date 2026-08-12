@@ -135,6 +135,21 @@ class TestMatches:
         target = tmp_path / _PLAN_DIR_REL / "00163-x" / "JOURNAL" / "00163-Journal-26-07-14.md"
         assert _handler(policy=policy).matches(_write_input(target, "x")) is False
 
+    def test_matches_the_plan_index_readme(self, tmp_path: Path) -> None:
+        # Plan 00218: the index has a shape rule (index-row-length) and so needs
+        # the fast loop too. It is the ONLY README the handler admits.
+        target = tmp_path / _PLAN_DIR_REL / "README.md"
+        assert _handler().matches(_write_input(target, "x")) is True
+
+    def test_ignores_readme_inside_a_plan_folder(self, tmp_path: Path) -> None:
+        """A README in a plan folder is a supporting doc, not the index."""
+        target = tmp_path / _PLAN_DIR_REL / "00042-widget" / "README.md"
+        assert _handler().matches(_write_input(target, "x")) is False
+
+    def test_ignores_readme_outside_the_plan_dir(self, tmp_path: Path) -> None:
+        target = tmp_path / "docs" / "README.md"
+        assert _handler().matches(_write_input(target, "x")) is False
+
 
 class TestHandleJournal:
     """Plan 00163: journal day-file edit linting through the handler."""
@@ -259,6 +274,48 @@ class TestHandleWrite:
             result = _handler().handle(_write_input(target, content))
         assert result.decision == Decision.ALLOW
         assert "terminal-placement-hint" in "\n".join(result.context)
+
+
+class TestHandlePlanIndex:
+    """Plan 00218: the index row-length rule, end to end through the handler."""
+
+    @staticmethod
+    def _index(row_length: int) -> str:
+        return "# Plans Index\n\n## Active Plans\n\n- " + "x" * row_length + "\n"
+
+    def test_long_row_written_into_the_index_is_denied(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.plan_qa.types import DEFAULT_INDEX_ROW_MAX_CHARS
+
+        target = tmp_path / _PLAN_DIR_REL / "README.md"
+        with _patched_root(tmp_path):
+            result = _handler().handle(
+                _write_input(target, self._index(DEFAULT_INDEX_ROW_MAX_CHARS + 1))
+            )
+        assert result.decision == Decision.DENY
+        assert "index-row-length" in (result.reason or "")
+
+    def test_index_within_the_limit_allows_silently(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.plan_qa.types import DEFAULT_INDEX_ROW_MAX_CHARS
+
+        target = tmp_path / _PLAN_DIR_REL / "README.md"
+        with _patched_root(tmp_path):
+            result = _handler().handle(
+                _write_input(target, self._index(DEFAULT_INDEX_ROW_MAX_CHARS - 10))
+            )
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_plan_document_rules_do_not_fire_on_the_index(self, tmp_path: Path) -> None:
+        """Widening the handler gate must not let PLAN.md rules onto a README.
+
+        The index has no ``**Status**:`` line and never will; if
+        ``status-line-present`` reached it, every index edit would be denied.
+        """
+        target = tmp_path / _PLAN_DIR_REL / "README.md"
+        with _patched_root(tmp_path):
+            result = _handler().handle(_write_input(target, "# Plans Index\n\nno status here\n"))
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
 
 
 class TestHandleEdit:
