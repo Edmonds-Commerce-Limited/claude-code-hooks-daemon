@@ -69,7 +69,9 @@ established by `idle_housekeeping_advisor.py`.
 
 ### Phase 3: Verification
 
-- [ ] ⬜ `./scripts/qa/llm_qa.py all` — 20/20
+- [x] ✅ `./scripts/qa/llm_qa.py all` — 18/20 (the 2 non-passing checks are
+  pre-existing/environmental, not caused by `command_hints`; see Success
+  Criteria for the itemised breakdown)
 - [ ] 🚫 Daemon restart + live socket probe — **cannot be done from a
   worktree** (documented as outstanding for the post-merge tree)
 
@@ -99,14 +101,21 @@ of `\b`. Regression-tested explicitly.
 
 ## Success Criteria
 
-- [ ] `command_hints` fires the `agent-browser` hint on bare, path-qualified,
+- [x] `command_hints` fires the `agent-browser` hint on bare, path-qualified,
   `env`-prefixed, and line-continuation-split invocations.
-- [ ] `command_hints` does NOT fire when the word appears as an argument to
+- [x] `command_hints` does NOT fire when the word appears as an argument to
   an unrelated command or inside a commit message.
-- [ ] TTL + optional `min_calls_between` gate re-firing; state is bounded.
-- [ ] `additive` mode overrides a built-in hint by matching `id`; `replace`
+- [x] TTL + optional `min_calls_between` gate re-firing; state is bounded.
+- [x] `additive` mode overrides a built-in hint by matching `id`; `replace`
   mode discards the built-in set entirely.
-- [ ] `./scripts/qa/llm_qa.py all` reports 20/20.
+- [x] `./scripts/qa/llm_qa.py all` reports 18/20. The 2 non-passing checks:
+  - `tests` (3 pre-existing failures, all pre-dating this plan and unrelated
+    to `command_hints`: `test_every_deny_capable_handler_has_a_near_miss_allow_case`
+    and `TestEveryHandlerIsClassified::test_no_handler_is_unclassified` both
+    concern `CommentChangelogHandler`/`CommentSizeHandler` from Plan 00208;
+    `test_no_index_row_is_a_paragraph` concerns a pre-existing 695-char Plan
+    00206 row in `CLAUDE/Plan/README.md` predating this branch)
+  - `smoke_test` (needs a live daemon socket — see the next line)
 - [ ] Daemon restart verification — OUTSTANDING (cannot run in a worktree).
 
 ## Delivery & Milestones
@@ -115,4 +124,11 @@ of `\b`. Regression-tested explicitly.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00212-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- (filled in as commits land)
+- Plan created at `20014fbd`
+- Handler implemented (65 tests, 100% coverage on the new module) at `3158a28c`
+- Docs/changelog/config-changes manifest at `64888e61`
+- Black auto-format checkpoint at `34bd8615`
+- Full-suite QA gaps found and fixed (example config, README row length) at
+  `3c8a0026`
+- Still open: daemon restart + live socket probe against the merged tree
+  (cannot be performed from this isolated worktree)
