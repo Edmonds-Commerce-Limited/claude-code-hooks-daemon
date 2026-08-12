@@ -861,6 +861,10 @@ pytest tests/ 2>&1 | /…/scripts/echd-capture 20
 
 **Allowed** (whitelisted): `grep`, `rg`, `awk`, `sed`, `jq`, `ls`, `cat`, `git log`, `git tag`, `git branch`, and other cheap filtering commands.
 
+**EVERY pipe in the command is judged, on its own producer.** A cheap pipe does not buy cover for an expensive one, so `git log | head -2 && pytest | head -1` is blocked on the `pytest` half. The `tail -f` / `head -c` exemptions are also per-pipe — an unrelated `&& tail -f x` elsewhere in the command exempts nothing.
+
+**A pipe inside `$( )` or backticks belongs to the command INSIDE it.** `echo $(pytest tests/ | head -1)` is blocked on `pytest`, not allowed because `echo` is cheap — the output being thrown away is pytest's. Nesting and `<( )` behave the same. Whitelisted inner producers are still fine: `echo $(git log --format=%H | head -1)` is allowed. Single-quoted text substitutes nothing, so it is never treated as a pipe.
+
 **Only PIPES are restricted — reading a file directly is not.** `tail -n 40 <file>`, `head -n 40 <file>` and `grep pattern <file>` take the path as an ARGUMENT, so no pipe exists and this handler never sees them. That is the supported way to sample a large append-only file such as a plan's `JOURNAL/` day-file — which you should tail or grep rather than read whole.
 
 **Add to whitelist** (if safe to pipe): set `extra_whitelist` in `.claude/hooks-daemon.yaml` under `pipe_blocker`.
