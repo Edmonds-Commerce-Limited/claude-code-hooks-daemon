@@ -50,8 +50,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00216: plan duplicate source detection](00216-plan-duplicate-source-detection/PLAN.md) - Not Started (DBF follow-up to the 00199/00213 duplication: `plan_qa` enforces number collisions and index bijection but is blind to two plans covering the same source document, so a duplicate is only caught if a human happens to notice.)
 
-- [00218: plan index row length fast loop](00218-plan-index-row-length-fast-loop/PLAN.md) - In Progress (inverse DBF: the 500-char index row cap existed ONLY in a pytest integration test, so the sole feedback path was a full-suite run. Adds `index-row-length` to the `plan_qa` catalogue on all three surfaces, reading the same constant the test reads.)
-
 - Root cause: agents conflate `PLAN.md` with `JOURNAL/` and append narrative progress into the plan. Measured churn proves it — `del/add` ratio 0.00–0.18 across large plans (00104: 885 lines added, **zero** deleted), so plans grow monotonically (57 KB locally, 100 KB+ reported in client projects)
 
 - Enforces the two contracts: **JOURNAL = append-only**; **PLAN.md = lean, surgical, always-correct**, mutated via commit-if-dirty → edit → commit so history lives in git, not in the file body
@@ -167,6 +165,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00218: plan index row length fast loop](Completed/00218-plan-index-row-length-fast-loop/PLAN.md) - Complete (inverse DBF — the batch guard existed and the fast one did not: the 500-char index row cap lived only in a pytest test, so the feedback loop was a full-suite run. Now an `index-row-length` check on all three `plan_qa` surfaces, reading the same single constant the test reads.)
 
 - [00217: supervisor deployed into client owned path](Completed/00217-supervisor-deployed-into-client-owned-path/PLAN.md) - Complete (the report's premise was wrong: `ruff --isolated` passes the supervisor clean; its findings need `BLE`/`DTZ` selected. So the fix is the ownership boundary, not the rules — a DAEMON-OWNED banner on each deployed asset, a manifest, client docs, and a guard keeping them default-clean.)
 
@@ -1144,11 +1144,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 219 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 172 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 173 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 35 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 36 + 172 + 5 = **213 folders**, spanning
+- **Folder-to-number reconciliation**: 35 + 173 + 5 = **213 folders**, spanning
   **210 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1158,11 +1158,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work). 210 + 9 = 219. ✅
-- **Last reconciled by**: the Plan 00218 merge — recounted from disk, taking
-  neither side of the conflict, because neither was right: `main` still listed
-  00218 as an absent allocation living on an in-flight worktree branch (the
-  merge is exactly what resolves that), while the incoming block was computed
-  at its own branch point and so predated the 00217 closure entirely. Before
+- **Last reconciled by**: the Plan 00218 merge and closure — recounted from
+  disk twice, once on merge and again after the `git mv` into `Completed/`,
+  since the folder totals are unchanged by an archive move but the Active and
+  Completed splits are not. On merge, neither side of the conflict was right:
+  `main` still listed 00218 as an absent allocation living on an in-flight
+  worktree branch (the merge is exactly what resolves that), while the
+  incoming block was computed at its own branch point and so predated the
+  00217 closure entirely. Before
   that, the Plan 00217 closure, and the Plan 00207 + 00214 + 00215 closures — recounted
   from disk after the three `git mv`s. Immediately before, the Plan 00213
   merge, where the figures were taken from the merged tree rather than from

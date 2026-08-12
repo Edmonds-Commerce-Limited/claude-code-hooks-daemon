@@ -143,6 +143,33 @@ priority) and the report's own framing of these three as "minor noise" /
   transformations it applied (list renumbering, pipe alignment) so an `Edit`
   retry after a stale-string failure is targeted rather than a blind re-read
 
+### Phase 4: Phase 1 regression — length is not evidence of prose
+
+Found by dogfooding during the Plan 00218 merge, not by a test: an ordinary
+82-character `git merge-tree` invocation crossed Phase 1's `>80 chars ⇒ prose`
+trigger and was denied with the prose reason, which withholds the matched text
+and the remediation and ends "no action needed beyond retrying" — false for a
+real command. See `JOURNAL/00209-Journal-26-08-12.md` for the full analysis.
+
+- [x] ✅ **Task 4.1**: RED — inverse-direction tests. Phase 1 only ever asserted
+  that long prose IS prose; nothing asked whether a long string could be a real
+  command, which in this repo is routine (32-char worktree branch names,
+  absolute paths). Includes a positive control asserting the fixture actually
+  exceeds the old bound, so it cannot pass vacuously
+- [x] ✅ **Task 4.2**: GREEN — replace the length trigger with function-word
+  density. Prose runs 30-50% closed-class words, a command runs 0%. A token
+  OPENING with a quote vetoes the ratio, since that is where English
+  legitimately lives inside a command (`echo "this is a test"` scores 60%)
+- [x] ✅ **Task 4.3**: Correct the Phase 1 test that pinned the false premise.
+  Its example is genuinely prose so its assertion stood, but it claimed length
+  as the reason — the reason is what a future reader generalises from
+- [x] ✅ **Task 4.4**: Update `get_claude_md()`, which shipped the same false
+  rule to every project, and state explicitly that a long command is still a
+  command
+- [x] ✅ **Task 4.5**: Verify against the LIVE daemon through the production
+  forwarder — real command gets remediation, field-report prose still gets the
+  short reason, short unknown commands unchanged
+
 ## Dependencies
 
 - Related: Plan 00206 — its retention finding (a capped log cannot back a

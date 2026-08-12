@@ -59,9 +59,41 @@ _MESSAGE_BODY_PLACEHOLDER = "<REDACTED>"
 # itself is NOT changed (Non-Goals) — only whether the verbose template is
 # safe to build from what was matched.
 #
-# A real "text before a pipe" shell segment is rarely long; prose commonly
-# is. This is a structural heuristic, not shell parsing.
-_MAX_SOURCE_SEGMENT_CHARS_FOR_TEMPLATE = 80
+# Prose is identified by ENGLISH, never by length. Segment length was the
+# original second trigger (>80 chars ⇒ prose) and it was wrong in principle,
+# not merely mistuned: in this repository an 80-character command is the
+# ordinary case, since worktree branch names are 32 characters and absolute
+# paths are long by construction. It fired on
+# `git merge-tree --write-tree --name-only main agent-<32-chars> 2>&1` (82
+# chars) and told the agent "no action needed beyond retrying" — false for a
+# real command, which re-blocks identically. Raising the bound would only
+# move the boundary; the defect was treating length as sufficient evidence.
+# Context economy, the length trigger's other justification, is already
+# handled independently by _MAX_ECHOED_COMMAND_CHARS below.
+#
+# What actually separates the two is function-word density: English prose
+# runs 30-50% closed-class words, a command runs 0%.
+_PROSE_FUNCTION_WORD_RATIO = 0.20
+
+# Below this many tokens a ratio is noise, not evidence: "cat a" is 50%
+# function words on a sample of two, and is a real command.
+_MIN_TOKENS_FOR_FUNCTION_WORD_RATIO = 6
+
+# Shell QUOTING marks the one place English legitimately lives inside a real
+# command — `docker run --name "the box that is in the room"` is 45% function
+# words and entirely executable.
+#
+# Two shapes, because testing only the first was itself a false-positive bug
+# caught while probing this fix: an opened quote can begin a token
+# (`--name "the`) OR follow an option assignment mid-token
+# (`note="this`). Matching only the former classified
+# `kubectl annotate pod x note="this is the thing that was broken"` as prose
+# — a narrower instance of the exact defect being fixed.
+#
+# Deliberately NOT plain containment: an apostrophe inside an English word
+# ("doesn't") would then read as quoting and exempt genuine prose.
+_QUOTE_CHARACTERS = ('"', "'")
+_QUOTED_ASSIGNMENT_MARKERS = ('="', "='")
 
 # Closed-class English function words (articles, pronouns, conjunctions,
 # prepositions, common auxiliary verbs, wh-words) — never a valid Unix
@@ -496,30 +528,56 @@ class PipeBlockerHandler(Handler):
         return command[:_MAX_ECHOED_COMMAND_CHARS] + _TRUNCATION_SUFFIX
 
     @staticmethod
+    def _is_shell_quoted(word: str) -> bool:
+        """Does this token open a shell-quoted run?
+
+        Either it begins with a quote (`"the`) or it assigns a quoted value
+        (`note="this`). The second shape is not decoration: matching only
+        the first classified a real `kubectl annotate ... note="..."` command
+        as prose.
+        """
+        return word.startswith(_QUOTE_CHARACTERS) or any(
+            marker in word for marker in _QUOTED_ASSIGNMENT_MARKERS
+        )
+
+    @staticmethod
     def _looks_like_prose(source_segment: str) -> bool:
         """Sanity-check before templating (Task 1.2): does the matched text
         look like a real shell command, or like prose that happens to
         contain the literal characters of a pipe-to-pager?
 
-        Two independent, purely structural/lexical triggers — no shell
-        parsing (Non-Goals: detection itself is unchanged):
+        Purely lexical — no shell parsing (Non-Goals: detection itself is
+        unchanged). The evidence is English, never length:
 
-        - the segment is implausibly long for "text before a pipe" in a
-          real command (a heredoc/prose sentence commonly is; a shell
-          command piped to tail/head rarely is)
         - its first token is a closed-class English function word — never a
           valid Unix command name (this is the exact field-report failure:
           "the" extracted as a binary name from a sentence)
+        - failing that, closed-class words make up a large enough SHARE of
+          the segment to be English rather than argv. Prose runs 30-50%;
+          a command runs 0%.
+
+        A token opening with a quote vetoes the ratio test: that is where
+        English legitimately appears inside a real command, and
+        `echo "this is a test"` would otherwise score 60%.
         """
         if not source_segment:
             return False
-        if len(source_segment) > _MAX_SOURCE_SEGMENT_CHARS_FOR_TEMPLATE:
-            return True
         words = source_segment.split()
         if not words:
             return False
         first_token = words[0].strip(_LEADING_TRAILING_PUNCTUATION).lower()
-        return first_token in _COMMON_ENGLISH_FUNCTION_WORDS
+        if first_token in _COMMON_ENGLISH_FUNCTION_WORDS:
+            return True
+        if any(PipeBlockerHandler._is_shell_quoted(word) for word in words):
+            return False
+        if len(words) < _MIN_TOKENS_FOR_FUNCTION_WORD_RATIO:
+            return False
+        function_words = sum(
+            1
+            for word in words
+            if word.strip(_LEADING_TRAILING_PUNCTUATION).lower() in _COMMON_ENGLISH_FUNCTION_WORDS
+        )
+        return function_words / len(words) >= _PROSE_FUNCTION_WORD_RATIO
 
     def _prose_reason(self) -> str:
         """Short, accurate block reason for matched text that looks like
@@ -676,12 +734,19 @@ class PipeBlockerHandler(Handler):
             "`.claude/hooks-daemon.yaml` under `pipe_blocker`.\n\n"
             "**A heredoc body describing a pipe pattern can false-trigger this "
             "handler** (the literal characters `| tail`/`| head` are matched even "
-            "inside prose). When the matched text does not look like a real "
-            "command — implausibly long, or starting with a common English word "
-            'like "the" — the block reason is short and does NOT echo your text '
-            "back or suggest a fabricated `extra_whitelist` entry. If this "
-            "happens, just retry (nothing to fix); to avoid it entirely, write "
-            "prose content with the `Write` tool instead of a `cat <<EOF` heredoc."
+            "inside prose). When the matched text reads as ENGLISH rather than as "
+            'a command — it starts with a function word like "the", or such words '
+            "make up a large share of it — the block reason is short and does NOT "
+            "echo your text back or suggest a fabricated `extra_whitelist` entry. "
+            "If this happens, just retry (nothing to fix); to avoid it entirely, "
+            "write prose content with the `Write` tool instead of a `cat <<EOF` "
+            "heredoc.\n\n"
+            "**Length is NOT part of that judgement.** A long command is still a "
+            "command: a 100-character invocation with a worktree branch name and "
+            "absolute paths gets the normal block reason, naming what matched and "
+            "how to whitelist it. If you ever see the short prose reason for text "
+            "that really was a command, that is a bug worth reporting — retrying "
+            "it unchanged will block again."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

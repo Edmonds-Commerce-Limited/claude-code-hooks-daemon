@@ -1,6 +1,6 @@
 # Plan 00218: plan index row length fast loop
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -92,9 +92,12 @@ collapses the feedback loop from a full-suite run to the moment of the write.
 - [x] ✅ **Task 4.1**: Confirm the new rule flags 0 lines on the current index.
 - [x] ✅ **Task 4.2**: Confirm `test_no_index_row_is_a_paragraph` still passes.
 - [x] ✅ **Task 4.3**: Run `./scripts/qa/llm_qa.py all`.
-- [ ] ⬜ **Task 4.4**: Daemon restart verification — deferred to the coordinator
+- [x] ✅ **Task 4.4**: Daemon restart verification — deferred to the coordinator
   after merge. A worktree has no daemon of its own, and restarting the dogfood
-  daemon from here would disturb the live session that owns it.
+  daemon from here would disturb the live session that owns it. Discharged on
+  merge: daemon restarted RUNNING with no load errors, and `plan-qa --sweep`
+  exercised the new check against the real index, reporting 0 row-length
+  findings alongside the two pre-existing staleness advisories.
 
 ## Technical Decisions
 
@@ -146,7 +149,7 @@ acquired a long row stays editable, including by the edit that fixes it.
 - [x] `test_no_index_row_is_a_paragraph` passes unchanged in behaviour
 - [x] The rule flags 0 lines on the current index (matching the test)
 - [x] QA green apart from the two worktree-shaped checks (see JOURNAL)
-- [ ] Daemon restart verified after merge (coordinator-owned)
+- [x] Daemon restart verified after merge (coordinator-owned)
 
 ## Delivery & Milestones
 
