@@ -674,6 +674,46 @@ class PayloadCaptureConfig(BaseModel):
     )
 
 
+class VerdictLogConfig(BaseModel):
+    """Configuration for the daemon's verdict log (Plan 00209).
+
+    Field report background: the daemon makes hundreds of handler decisions
+    per session and persisted none of them, so "which handlers earn their
+    keep?" and "what is the real false-positive rate per handler?" were
+    answerable only by anecdote. When enabled, every matched handler's
+    decision is appended to ``verdicts.jsonl`` — ``{ts, session, event,
+    tool, handler, verdict, rule, mode, overridden}`` — with no per-handler
+    opt-in required (the write happens once in the daemon controller).
+
+    Default-on (Task 2.6): the log records handler/rule/verdict metadata
+    only — never tool payloads or file contents — so there is no privacy
+    reason to ship it dormant, unlike ``payload_capture`` which DOES record
+    raw payloads and is therefore default-off.
+
+    Retention (Task 2.4): ``verdicts.jsonl`` is a bounded ROLLING SAMPLE,
+    capped the same way as every other daemon JSONL log (Plan 00181's
+    ``cap_log_file``) — NOT a durable lifetime counter. See
+    ``daemon/verdict_log.py`` for the full rationale; the `hooks-daemon
+    verdicts` report is explicit that its statistics describe the retained
+    window, not lifetime totals.
+
+    Attributes:
+        enabled: Master toggle. Default True (metadata-only, no payloads).
+        max_bytes: Retention cap in bytes before the oldest half is trimmed.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    enabled: bool = Field(
+        default=True,
+        description="Record every handler decision to verdicts.jsonl (metadata only, no payloads)",
+    )
+    max_bytes: Annotated[int, Field(gt=0)] = Field(
+        default=10 * 1024 * 1024,
+        description="Retention cap in bytes for verdicts.jsonl (rolling sample, oldest half trimmed on breach)",
+    )
+
+
 class DaemonConfig(BaseModel):
     """Configuration for the daemon server.
 
@@ -725,6 +765,10 @@ class DaemonConfig(BaseModel):
     payload_capture: PayloadCaptureConfig = Field(
         default_factory=PayloadCaptureConfig,
         description="Dogfooding: daemon-side raw hook-payload capture configuration",
+    )
+    verdict_log: VerdictLogConfig = Field(
+        default_factory=VerdictLogConfig,
+        description="Verdict log configuration (Plan 00209): per-decision audit trail",
     )
     languages: list[str] | None = Field(
         default=None,
