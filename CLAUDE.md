@@ -865,6 +865,8 @@ pytest tests/ 2>&1 | /…/scripts/echd-capture 20
 
 **Add to whitelist** (if safe to pipe): set `extra_whitelist` in `.claude/hooks-daemon.yaml` under `pipe_blocker`.
 
+**A heredoc body describing a pipe pattern can false-trigger this handler** (the literal characters `| tail`/`| head` are matched even inside prose). When the matched text does not look like a real command — implausibly long, or starting with a common English word like "the" — the block reason is short and does NOT echo your text back or suggest a fabricated `extra_whitelist` entry. If this happens, just retry (nothing to fix); to avoid it entirely, write prose content with the `Write` tool instead of a `cat <<EOF` heredoc.
+
 ## dangerous_permissions — chmod 777 is blocked
 
 `chmod 777` and other world-writable permission commands are blocked. Overly permissive file permissions are a security vulnerability.
