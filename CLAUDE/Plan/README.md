@@ -48,6 +48,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00162: Wire hello_world Handler Flag](00162-wire-hello-world-handler-flag/PLAN.md) - In Progress (fix the dead `daemon.enable_hello_world_handlers` flag so it actually gates the TEST handlers; default off removes the `✅ hook active` injection + the idle-tick doubled-stop root-caused in Plan 00161)
 
+- [00212: generic command hint handler](00212-generic-command-hint-handler/PLAN.md) - In Progress (a single config-driven PostToolUse advisory handler — `command_hints` — that injects a rate-limited reminder when a configured command is detected in a Bash call, rather than one handler per hinted command; ships with an `agent-browser` close-session reminder as its only default hint.)
+
 ### Plan Workflow / QA
 
 - Root cause: agents conflate `PLAN.md` with `JOURNAL/` and append narrative progress into the plan. Measured churn proves it — `del/add` ratio 0.00–0.18 across large plans (00104: 885 lines added, **zero** deleted), so plans grow monotonically (57 KB locally, 100 KB+ reported in client projects)
@@ -1137,15 +1139,16 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 210 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191, 00195 and 00210 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run, and 00210 by a sub-agent that scaffolded it, then found Plan 00208 already covered the same work and withdrew its duplicate in favour of it)
+- **Total Plans Created**: 212 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191, 00195 and 00210 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run, and 00210 by a sub-agent that scaffolded it, then found Plan 00208 already covered the same work and withdrew its duplicate in favour of it; 00211 was allocated by the counter but is not present on this worktree branch at time of writing, most likely a concurrent agent's plan in a sibling worktree not yet merged)
 - **Completed**: 164 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
-- **Last reconciled by**: the Plan 00208 / 00209 creations after the v3.52.0
-  release — counts re-derived from the folders on disk (`36` active, `164`
-  completed), not carried forward. The prior reconciliation was the Plan 00206
-  completion at `34`/`164`; before that the Plan 00207 creation at `35`/`163`.
+- **Last reconciled by**: the Plan 00212 creation — counts re-derived from the
+  folders on disk (`37` active, `164` completed) on this worktree branch, not
+  carried forward. The prior reconciliation was the Plan 00208 / 00209
+  creations after the v3.52.0 release at `36`/`164`; before that the Plan
+  00206 completion at `34`/`164`.
 
 ## Quick Links
 
