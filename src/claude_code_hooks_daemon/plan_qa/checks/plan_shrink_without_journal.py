@@ -72,9 +72,7 @@ def _run(context: CheckContext) -> list[Finding]:
         lost_bytes = len(head_text) - len(staged_text)
         if lost_bytes < _SIGNIFICANT_SHRINK_BYTES:
             continue
-        if has_staged_journal_entry(context, folder) or has_staged_supporting_doc(
-            context, folder
-        ):
+        if has_staged_journal_entry(context, folder) or has_staged_supporting_doc(context, folder):
             continue
 
         findings.append(

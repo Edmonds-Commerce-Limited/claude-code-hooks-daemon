@@ -137,11 +137,7 @@ def _folder_has_supporting_docs(plan_folder: Path, journal_dir_name: str) -> boo
     for entry in plan_folder.iterdir():
         if entry.name == journal_dir_name:
             continue
-        if (
-            entry.is_file()
-            and entry.suffix == _MARKDOWN_SUFFIX
-            and entry.name != PLAN_DOC_FILENAME
-        ):
+        if entry.is_file() and entry.suffix == _MARKDOWN_SUFFIX and entry.name != PLAN_DOC_FILENAME:
             return True
     return False
 
