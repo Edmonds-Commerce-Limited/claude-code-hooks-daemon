@@ -102,6 +102,80 @@ class TestDetection:
         assert "00200" in text
 
 
+class TestExtractionIntoSupportingDoc:
+    """Plan 00211: extraction into a named supporting document is exactly as
+    legitimate a relocation as a journal entry — the field report's
+    restructure commit shrank PLAN.md by 9,525 bytes while staging three
+    brand-new supporting `.md` files, and the check's ONLY reason for not
+    flagging it was that a journal entry happened to also be staged. The
+    check must not read a pure extraction (no journal entry at all) as
+    deletion.
+    """
+
+    def test_large_shrink_with_new_supporting_doc_is_silent(self, repo: Path) -> None:
+        (repo / "CLAUDE/Plan/00200-widget/PLAN.md").write_text(_SMALL_PLAN)
+        (repo / "CLAUDE/Plan/00200-widget/RESEARCH.md").write_text(
+            "# Research\n\nextracted findings\n"
+        )
+        _git(repo, "add", "-A")
+        assert CHECK.run(_context(repo)) == []
+
+    def test_shrink_with_neither_journal_entry_nor_supporting_doc_still_flags(
+        self, repo: Path
+    ) -> None:
+        _shrink(repo, with_journal_entry=False)
+        assert len(CHECK.run(_context(repo))) == 1
+
+    def test_supporting_doc_nested_in_a_subdirectory_does_not_count(self, repo: Path) -> None:
+        """Only DIRECT children of the plan folder are supporting docs —
+        matches the report's "in the same plan folder (excluding JOURNAL/)"
+        wording; a nested assets/ subfolder is not the plan folder itself."""
+        (repo / "CLAUDE/Plan/00200-widget/PLAN.md").write_text(_SMALL_PLAN)
+        assets_dir = repo / "CLAUDE/Plan/00200-widget/assets"
+        assets_dir.mkdir()
+        (assets_dir / "diagram.md").write_text("# Diagram notes\n")
+        _git(repo, "add", "-A")
+        assert len(CHECK.run(_context(repo))) == 1
+
+    def test_modified_existing_supporting_doc_does_not_count(self, repo: Path) -> None:
+        """Only a NEW (Added) supporting doc counts — modifying PLAN.md
+        alongside an unrelated pre-existing supporting doc edit is not
+        evidence of relocation."""
+        (repo / "CLAUDE/Plan/00200-widget/EXISTING.md").write_text("old content\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "seed existing supporting doc")
+        (repo / "CLAUDE/Plan/00200-widget/PLAN.md").write_text(_SMALL_PLAN)
+        (repo / "CLAUDE/Plan/00200-widget/EXISTING.md").write_text("old content, tweaked\n")
+        _git(repo, "add", "-A")
+        assert len(CHECK.run(_context(repo))) == 1
+
+    def test_new_plan_md_itself_does_not_count_as_a_supporting_doc(self, repo: Path) -> None:
+        """PLAN.md is never its own evidence of relocation, even though it
+        is technically staged as part of the shrink."""
+        (repo / "CLAUDE/Plan/00200-widget/PLAN.md").write_text(_SMALL_PLAN)
+        _git(repo, "add", "-A")
+        assert len(CHECK.run(_context(repo))) == 1
+
+    def test_non_markdown_artifact_does_not_count_as_a_supporting_doc(self, repo: Path) -> None:
+        """A staged image/log artifact is not a NAMED supporting document —
+        only ``.md`` files count."""
+        (repo / "CLAUDE/Plan/00200-widget/PLAN.md").write_text(_SMALL_PLAN)
+        (repo / "CLAUDE/Plan/00200-widget/diagram.png").write_bytes(b"\x89PNG\r\n")
+        _git(repo, "add", "-A")
+        assert len(CHECK.run(_context(repo))) == 1
+
+    def test_supporting_doc_in_a_different_plan_folder_does_not_count(self, repo: Path) -> None:
+        """A new supporting doc staged for an UNRELATED plan in the same
+        commit must not satisfy this plan's relocation check."""
+        _shrink(repo, with_journal_entry=False)
+        other_folder = repo / "CLAUDE/Plan/00201-other"
+        other_folder.mkdir(parents=True)
+        (other_folder / "RESEARCH.md").write_text("unrelated findings\n")
+        _git(repo, "add", "-A")
+        findings = [f for f in CHECK.run(_context(repo)) if "00200" in (f.path or "")]
+        assert len(findings) == 1
+
+
 class TestNoFalsePositives:
     def test_growing_plan_is_silent(self, repo: Path) -> None:
         (repo / "CLAUDE/Plan/00200-widget/PLAN.md").write_text(_plan(20_000))
