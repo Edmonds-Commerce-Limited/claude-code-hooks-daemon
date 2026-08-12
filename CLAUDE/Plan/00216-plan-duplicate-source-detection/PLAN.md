@@ -1,104 +1,138 @@
-# Plan 00216: plan duplicate source detection
+# Plan 00216: plan duplicate detection
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
 **Recommended Executor**: Sonnet
-**Execution Strategy**: Sub-Agent Orchestration
+**Execution Strategy**: Single-Threaded
 
 ## Overview
 
-Nothing in the plan system warns an author that an existing plan already covers
-the same source material. `plan_qa` enforces number collisions, index/folder
+Nothing in the plan system warns an author that an existing plan already
+covers the same ground. `plan_qa` enforces number collisions, index/folder
 bijection, statistics recount and status coherence — all *structural* — and is
 blind to two plans being about the same thing.
 
 The cost is not hypothetical. Plan 00213 was filed for a `planlib` proposal
-that Plan 00199 had already covered five days earlier. The duplicate was found
-only because a human-driven session happened to notice and say so. By then an
-evaluation agent had spent a large amount of context independently
-re-deriving an assessment that 00199's `PROPOSAL-ASSESSMENT.md` already held,
-and had independently arrived at the same scoping conclusion 00199 had already
-recorded.
+that Plan 00199 had already covered five days earlier. A human noticed; no
+tooling did. By then an evaluation agent had spent a large amount of context
+re-deriving an assessment that 00199 already held.
 
-This is the DBF case (Core Standard 15) in its clearest form: the duplicate
-plan is the symptom, and the bug worth fixing is the guard that could not see
-it. Filing more carefully is not a fix — the next author has the same blind
-spot, and the plan tree is now large enough (206 folders) that reading it
-before filing is not a realistic precaution.
+This is the DBF case (Core Standard 15): the duplicate plan is the symptom,
+and the bug is the guard that could not see it. Filing more carefully is not a
+fix — the next author has the same blind spot, and at 215 folders, reading the
+tree before filing is not a realistic precaution.
 
-## Context & Background
-
-The detection surface already exists. `plan_qa` parses every `PLAN.md` at
-sweep time (SessionStart) and at commit time, so a rule has the whole tree in
-hand without new machinery. The signal is cheap: a plan that is *about* an
-external document almost always names it — a proposal filename, a report
-filename, a GitHub issue number, or a supporting document it carries in its
-own folder.
-
-Credit: the gap was identified by a peer session while closing 00199, and
-recorded in that plan's closing journal
-(`CLAUDE/Plan/Cancelled/00199-hooks-daemon-plan-lib/`).
+**Phase 1 measured the originally-proposed remedy and killed it.** See
+[PHASE-1-MEASUREMENT.md](PHASE-1-MEASUREMENT.md). A deterministic
+citation-matching rule cannot see what made 00199 and 00213 duplicates,
+because that was semantic, not literal. The remedy for a semantic duplicate is
+a semantic reader.
 
 ## Goals
 
-- Warn at plan-creation time when a new plan cites a source document that an
-  existing non-terminal plan already cites.
-- Make the warning name the existing plan and the shared citation, so the
-  author can merge, supersede, or consciously proceed.
-- Keep it advisory. A false positive must never block plan creation.
+- Ship a **specialist dedupe sub-agent** that reads the titles and overviews of
+  still-live plans and reports candidates that already cover the proposed work
+- **Suggest** its use at plan-creation time — from `mkplan.bash` output and the
+  plan-workflow handler guidance — without mandating or blocking
+- Deploy it to client projects through the existing plan-workflow asset path,
+  so it arrives with the rest of the plan tooling rather than needing setup
 
 ## Non-Goals
 
-- Semantic similarity or embedding comparison. The signal here is a shared
-  literal citation, which is cheap, explainable, and has an obvious remedy.
-  A fuzzy "these plans feel related" warning would be ignored within a week.
-- Blocking. Two plans legitimately citing one document is normal — a proposal
-  can spawn a research plan and an implementation plan on purpose.
-- Retrospectively de-duplicating the existing tree. If the sweep surfaces
-  historic pairs, that is a finding to triage, not a precondition.
+- No deterministic citation-matching check. Phase 1 measured it: the reliable
+  GitHub-issue spelling finds zero pairs here and would have missed the
+  motivating case; the loose spelling is 34/35 false positives; the
+  supporting-document signal is dominated by project-wide filenames.
+- No blocking. Two plans legitimately covering adjacent ground is normal, and a
+  non-deterministic reader must never be able to stop work.
+- No retrospective de-duplication of the existing tree.
+
+## Technical Decisions
+
+### Decision 1: semantic reader, not a citation rule
+
+**Context**: the plan was filed assuming a shared literal citation would
+identify duplicates.
+
+**Options considered**:
+
+1. Match GitHub issue citations — precise, but **zero** pairs in this tree and
+   it does not fire on the motivating case, which cites no issue.
+2. Match supporting-document filenames — fires, but every live hit is noise
+   (`HOOKS-DAEMON.md`, `RELEASING.md`, the `YY-MM-DD.md` template placeholder)
+   or a *correct* prior-art citation.
+3. A specialist sub-agent reading titles and overviews.
+
+**Decision**: option 3. Measured evidence in
+[PHASE-1-MEASUREMENT.md](PHASE-1-MEASUREMENT.md). The duplication was
+semantic — both plans were about "planlib tooling in the daemon" — and no
+literal signal separates that from two unrelated plans that each happen to
+carry a `PROPOSAL.md`.
+
+**Consequence accepted**: the check is non-deterministic and therefore cannot
+be QA-gated the way `plan_qa` rules are. It is advisory by construction.
+
+### Decision 2: a deployed agent definition, daemon-owned
+
+**Context**: the daemon deploys skills to `.claude/skills/` and plan tooling to
+the plan directory, but has never deployed an agent definition.
+
+**Decision**: deploy `.claude/agents/` as a new asset surface, daemon-owned
+(refreshed on every deploy) like `mkplan.bash` and the skills — the file
+encodes a procedure, not user content, so fixes must reach the field. Gated on
+`plan_workflow.enabled`, so a project without the plan workflow gets nothing.
 
 ## Tasks
 
 ### Phase 1: Establish the signal against real data
 
-- [ ] ⬜ **Task 1.1**: Enumerate what existing plans actually cite — supporting
-  `.md` filenames in their own folder, backticked paths to other plans, GitHub
-  issue numbers, report filenames
-- [ ] ⬜ **Task 1.2**: Run the candidate rule over the whole current tree and
-  count how many pairs it flags, inspecting each by hand
-- [ ] ⬜ **Task 1.3**: Confirm it would have flagged the 00199/00213 pair, and
-  record the measured false-positive rate
+- [x] ✅ **Task 1.1**: Enumerate what plans actually cite
+- [x] ✅ **Task 1.2**: Run the candidate rules over the whole tree and inspect
+  every hit by hand
+- [x] ✅ **Task 1.3**: Confirm against the 00199/00213 pair and record the
+  measured false-positive rate — recorded in `PHASE-1-MEASUREMENT.md`
 
-### Phase 2: Implement as an advisory check
+### Phase 2: The specialist agent
 
-- [ ] ⬜ **Task 2.1**: TDD a `plan_qa` check that reports two NON-TERMINAL plans
-  sharing a citation (terminal-status plans are excluded — a superseded plan
-  citing the same document is the correct end state, not a finding)
-- [ ] ⬜ **Task 2.2**: Wire into the sweep and the CLI, advisory severity only
-- [ ] ⬜ **Task 2.3**: Make the finding name both plan numbers and the shared
-  citation, with a remedy naming the three real options: merge, supersede one,
-  or proceed deliberately
+- [x] ✅ **Task 2.1**: Write the agent definition — Haiku, read-only tools,
+  focused on reporting candidates with reasons rather than a verdict
+- [x] ✅ **Task 2.2**: TDD the deployment into `.claude/agents/`, gated on
+  `plan_workflow.enabled`
+- [x] ✅ **Task 2.3**: Namespace the agent `hooks-daemon-` and carry an
+  ownership banner — `.claude/agents/` is a FLAT client-owned namespace where a
+  collision silently drops one definition rather than erroring
+- [x] ✅ **Task 2.4**: Register it in `CLIENT_OWNED_ASSETS` so the Plan 00217
+  default-clean guard covers it — this is the first MARKDOWN asset, so the
+  guard gained a markdown check in the same change (a language the guard
+  cannot lint passes by omission)
 
-### Phase 3: Close the creation-time gap
+### Phase 3: Suggest it where plans are created
 
-- [ ] ⬜ **Task 3.1**: Decide whether `mkplan.bash` should surface the same
-  check at creation, when the cost of merging is lowest — the session sweep
-  only fires on the NEXT session, by which point work may have started
-- [ ] ⬜ **Task 3.2**: Triage whatever historic pairs the first full sweep finds
+- [x] ✅ **Task 3.1**: `mkplan.bash` suggests the check in its next-steps output
+- [x] ✅ **Task 3.2**: Plan-workflow handler guidance names it
+- [x] ✅ **Task 3.3**: Asset checker notices when it is missing
+
+### Phase 4: Verify
+
+- [ ] 🔄 **Task 4.1**: Full QA suite passes
+- [ ] ⬜ **Task 4.2**: Client-mode verification — this changes deployed assets,
+  which self-install mode does not represent
+- [ ] ⬜ **Task 4.3**: Dogfood it against this tree and confirm it finds the
+  00199/00213 duplication from 00213's description alone
+
+## Success Criteria
+
+- [ ] The agent, given Plan 00213's description, names Plan 00199
+- [ ] It is suggested at creation time and blocks nothing
+- [ ] It deploys to a real client install, verified in client mode
+- [ ] Full QA passes
 
 ## Dependencies
 
 - Related: Plan 00213 / Plan 00199 — the duplication that motivated this.
-- Related: Plan 00214, whose measure-before-blocking method Phase 1 follows.
-
-## Success Criteria
-
-- [ ] The check would have caught the 00199/00213 duplication at filing time
-- [ ] Measured false-positive rate is recorded, and the check is advisory
-- [ ] A finding names both plans and the shared citation, not just a count
-- [ ] Historic pairs surfaced by the first sweep are triaged
+- Related: Plan 00214, whose measure-before-blocking method Phase 1 followed.
 
 ## Delivery & Milestones
 
@@ -107,3 +141,4 @@ recorded in that plan's closing journal
      JOURNAL/00216-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Gap identified while reconciling the 00199/00213 duplication
+- Phase 1 measurement killed the originally-proposed deterministic remedy

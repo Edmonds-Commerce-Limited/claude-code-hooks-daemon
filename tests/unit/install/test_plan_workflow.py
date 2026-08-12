@@ -8,7 +8,9 @@ import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.install import plan_workflow as _plan_workflow_module
+from claude_code_hooks_daemon.install.client_owned_assets import OWNERSHIP_MARKER
 from claude_code_hooks_daemon.install.plan_workflow import (
+    DEDUPE_AGENT_NAME,
     JOURNAL_TEMPLATE_NAME,
     MKPLAN_SCRIPT_NAME,
     PLAN_JOURNALLING_DOC_NAME,
@@ -16,6 +18,7 @@ from claude_code_hooks_daemon.install.plan_workflow import (
     PLANLIB_SCRIPT_NAME,
     TEMPLATE_SNAPSHOT_NAME,
     bootstrap_plan_workflow,
+    dedupe_agent_template_path,
     deploy_plan_workflow_if_enabled,
     journal_template_path,
     mkplan_template_path,
@@ -560,6 +563,144 @@ class TestMkplanScaffoldsJournal:
         target = self._run_mkplan(plan_dir, "unjournalled-plan")
 
         assert not (target / "JOURNAL").exists(), "no JOURNAL/ without the template marker"
+
+
+class TestDedupeAgentDeployment:
+    """Plan 00216: the dedupe scout deploys to `.claude/agents/`.
+
+    A NEW asset surface — the daemon deploys skills and plan tooling, but had
+    never deployed an agent definition. It is DAEMON-owned (refreshed on every
+    deploy, like `mkplan.bash` and the skills) because the file encodes a
+    procedure rather than user content, so fixes have to reach the field.
+
+    Phase 1 measured the deterministic alternative and rejected it: duplicate
+    plans do not reliably share a citation, filename or issue number. They
+    share subject matter, which needs a reader.
+    """
+
+    def test_bundled_agent_definition_exists(self) -> None:
+        template = dedupe_agent_template_path()
+        assert template.is_file()
+
+    def test_agent_name_is_namespaced_to_the_daemon(self) -> None:
+        """`.claude/agents/` is a FLAT namespace the CLIENT owns and fills with
+        its own agents. A collision there does not error — one definition wins
+        and the other is silently never dispatched, the same silent-disablement
+        class the project-handler load checker exists to catch.
+
+        The prefix also makes daemon-deployed agents obvious in a directory
+        listing, so a client can tell at a glance which files are not theirs.
+        """
+        assert DEDUPE_AGENT_NAME.startswith("hooks-daemon-")
+
+    def test_frontmatter_name_matches_the_deployed_filename(self) -> None:
+        """Claude Code dispatches by the frontmatter `name`, while humans find
+        the file by its filename. If they drift, the agent a client reads is
+        not the agent they can call."""
+        text = dedupe_agent_template_path().read_text()
+        frontmatter = text.split("---", 2)[1]
+        assert f"name: {DEDUPE_AGENT_NAME}\n" in frontmatter
+        assert dedupe_agent_template_path().stem == DEDUPE_AGENT_NAME
+
+    def test_bundled_agent_carries_the_daemon_ownership_banner(self) -> None:
+        """Same marker every other deployed asset uses, so one grep finds them
+        all and the central manifest test enforces it automatically."""
+        assert OWNERSHIP_MARKER in dedupe_agent_template_path().read_text()
+
+    def test_banner_tells_the_client_how_to_customise_instead_of_editing(self) -> None:
+        """'Do not edit' with no alternative gets edited anyway. The banner has
+        to name the supported route — copy it under your own name."""
+        body = dedupe_agent_template_path().read_text().lower()
+        assert "copy it" in body
+
+    def test_bundled_agent_declares_required_frontmatter(self) -> None:
+        """Without name/description/model the definition is not loadable as an
+        agent, and a silently unloadable agent is worse than none — the caller
+        is told to use something that does not answer."""
+        text = dedupe_agent_template_path().read_text()
+        assert text.startswith("---\n")
+        frontmatter = text.split("---", 2)[1]
+        assert f"name: {DEDUPE_AGENT_NAME}" in frontmatter
+        assert "description:" in frontmatter
+        assert "model: haiku" in frontmatter
+
+    def test_bundled_agent_is_read_only(self) -> None:
+        """A dedupe scout that could Write or Edit could act on its own
+        non-deterministic judgement. It reports; the caller decides."""
+        frontmatter = dedupe_agent_template_path().read_text().split("---", 2)[1]
+        tools_line = next(line for line in frontmatter.splitlines() if line.startswith("tools:"))
+        for forbidden in ("Write", "Edit", "Bash", "Task"):
+            assert forbidden not in tools_line, f"{forbidden} must not be granted"
+
+    def test_bundled_agent_handles_plans_without_an_overview(self) -> None:
+        """The scout reads title + status + Overview. Measured against this
+        repo's own tree, 5 of 36 live plans have NO `## Overview` — for those
+        it would otherwise be judging on a folder name and not saying so.
+
+        A name says what a plan is CALLED, not what it covers, so silently
+        scoring one is how a confident wrong answer gets produced. The prompt
+        must name the fallback and require disclosure.
+        """
+        body = dedupe_agent_template_path().read_text()
+        assert "## Goals" in body, "no fallback for a plan lacking an Overview"
+        assert "no overview" in body.lower(), "coverage gap is never disclosed to the caller"
+
+    def test_bundled_agent_prefers_false_negatives(self) -> None:
+        """Calibration is the difference between a used tool and an ignored
+        one: a wrong candidate costs the caller a wasted read and teaches them
+        to skip the check, after which real duplicates pass anyway."""
+        body = dedupe_agent_template_path().read_text().lower()
+        assert "false positive" in body
+        assert "leave it out" in body
+
+    def test_deploys_agent_definition(self, tmp_path: Path) -> None:
+        result = bootstrap_plan_workflow(tmp_path)
+        deployed = tmp_path / ".claude" / "agents" / f"{DEDUPE_AGENT_NAME}.md"
+        assert deployed.is_file()
+        assert deployed.read_text() == dedupe_agent_template_path().read_text()
+        assert result.deployed_dedupe_agent is True
+
+    def test_agent_is_daemon_owned_and_overwritten(self, tmp_path: Path) -> None:
+        """Unlike the client-owned template/journal assets, a stale copy is
+        replaced — otherwise a prompt fix never reaches an existing install."""
+        agents_dir = tmp_path / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / f"{DEDUPE_AGENT_NAME}.md").write_text("# stale\n")
+        bootstrap_plan_workflow(tmp_path)
+        deployed = agents_dir / f"{DEDUPE_AGENT_NAME}.md"
+        assert deployed.read_text() == dedupe_agent_template_path().read_text()
+
+    def test_does_not_disturb_other_agents(self, tmp_path: Path) -> None:
+        """`.claude/agents/` is the user's namespace; we add one file to it."""
+        agents_dir = tmp_path / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "my-own-agent.md").write_text("# mine\n")
+        bootstrap_plan_workflow(tmp_path)
+        assert (agents_dir / "my-own-agent.md").read_text() == "# mine\n"
+
+    def test_agent_deploys_relative_to_project_root_not_plan_dir(self, tmp_path: Path) -> None:
+        """Claude Code resolves agents at `<project>/.claude/agents/`, so a
+        project tracking plans elsewhere must still get a usable agent."""
+        bootstrap_plan_workflow(tmp_path, plan_dir_name="docs/plans")
+        assert (tmp_path / ".claude" / "agents" / f"{DEDUPE_AGENT_NAME}.md").is_file()
+
+    def test_mkplan_suggests_the_dedupe_check_in_its_next_steps(self, tmp_path: Path) -> None:
+        """A deployed agent nobody is told about is a deployed agent nobody
+        uses. mkplan's output is the backstop suggestion — the folder exists by
+        then, but nothing is invested, so merging still costs one `git rm -r`.
+        """
+        bootstrap_plan_workflow(tmp_path)
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, timeout=Timeout.GIT_CONTEXT)
+        completed = subprocess.run(
+            [str(tmp_path / "CLAUDE" / "Plan" / MKPLAN_SCRIPT_NAME), "some-new-thing"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=Timeout.REQUEST_DEFAULT,
+        )
+        output = completed.stdout + completed.stderr
+        assert DEDUPE_AGENT_NAME in output
 
 
 class TestJournalAssetDeployment:

@@ -382,6 +382,12 @@ mkplan: created plan $padded
   counter $COUNTER_KEY -> $new_counter
 
 Next steps (not done automatically):
+  - Check nothing already covers this, BEFORE you invest in filling it in.
+    Dispatch the hooks-daemon-plan-dedupe-scout agent with what this plan is
+    about; it
+    reads the still-live plans and names any that already cover it. Nothing
+    is invested yet, so merging or superseding now costs one 'git rm -r'.
+    Suggested, not required - it never blocks, and it can be wrong.
   - Fill in PLAN.md (overview, goals, tasks).
   - Add a row to $plan_rel/README.md under "Active Plans" (if the project keeps one).
 DONE

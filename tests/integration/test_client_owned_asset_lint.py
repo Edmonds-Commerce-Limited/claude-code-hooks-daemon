@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.install.client_owned_assets import (
     ClientOwnedAsset,
     resolve_sources,
 )
+from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 
@@ -70,6 +71,19 @@ _RUFF_DEFAULT_ARGS: Final[tuple[str, ...]] = ("check", "--isolated", "--output-f
 # the invocation, not the script. Its own SC1091 message recommends `-x`, and
 # `CLAUDE/LLM-INSTALL.md` gives clients the same one-line setting.
 _SHELLCHECK_DEFAULT_ARGS: Final[tuple[str, ...]] = ("--norc", "-x", "--source-path=SCRIPTDIR")
+
+# Markdown assets are checked with the daemon's OWN formatter
+# (``format_markdown_text``), not with a bare ``mdformat --check``.
+#
+# This is not a convenience: bare mdformat does not understand YAML
+# frontmatter and rewrites a leading ``---`` block into a thematic break plus
+# a setext heading — which destroys an agent definition, since Claude Code
+# resolves the agent by that frontmatter. Verified the hard way while writing
+# this guard: the naive check "fixed" the asset by breaking it.
+#
+# The daemon's formatter strips and re-attaches frontmatter byte-for-byte, so
+# checking against it asks the only question that matters — is this file
+# stable under what the daemon will actually do to it in a client project?
 
 
 def _assets_for(language: AssetLanguage) -> list[tuple[ClientOwnedAsset, Path]]:
@@ -166,3 +180,61 @@ class TestShellAssetsAreCleanUnderShellcheckDefaults:
         assert result.returncode == _CLEAN_EXIT_CODE, _remediation(
             paths, result.stdout + result.stderr
         )
+
+
+class TestMarkdownAssetsAreCleanUnderMdformatDefaults:
+    """``mdformat --check`` — the same formatter the daemon's own
+    ``markdown_table_formatter`` handler applies to client markdown.
+
+    A deployed markdown asset that is not mdformat-canonical would be
+    reformatted the first time a client's tooling (or this daemon's own
+    handler) touched it, producing a spurious diff in a file the client is
+    told not to edit — and on the next upgrade that diff is silently
+    discarded. Checking it here keeps the deployed copy stable in place.
+
+    Added WITH the MARKDOWN language, never after it: the manifest documents
+    that a language the guard cannot lint passes by omission.
+    """
+
+    def test_manifest_has_markdown_assets(self) -> None:
+        """Control: an empty set would make the check below pass vacuously."""
+        assert _assets_for(AssetLanguage.MARKDOWN), (
+            "No MARKDOWN assets resolved from the manifest, yet the daemon "
+            "deploys the plan-dedupe scout agent definition."
+        )
+
+    def test_markdown_assets_are_stable_under_the_daemons_own_formatter(self) -> None:
+        """A deployed markdown asset must be a FIXED POINT of the formatter the
+        daemon applies to client markdown, or the first Write/Edit anywhere near
+        it rewrites a file the client was told not to edit — and the next
+        upgrade silently discards that rewrite."""
+        unstable = [
+            str(path)
+            for _asset, path in _assets_for(AssetLanguage.MARKDOWN)
+            if format_markdown_text(path.read_text(encoding="utf-8"))
+            != path.read_text(encoding="utf-8")
+        ]
+        assert not unstable, _remediation(
+            [Path(p) for p in unstable],
+            "Not stable under format_markdown_text(). Run the daemon's own "
+            "formatter over them: `hooks-daemon format-markdown <path>`. Do NOT "
+            "run bare `mdformat` — it does not understand YAML frontmatter and "
+            "will rewrite the agent's `---` block into a thematic break, which "
+            "destroys the definition.",
+        )
+
+    def test_frontmatter_survives_the_daemons_formatter(self) -> None:
+        """The reason the check above uses the daemon's formatter at all.
+
+        Bare mdformat mangles a leading `---` block; Claude Code resolves an
+        agent by exactly that block. This pins the mitigation the formatter
+        already implements, so removing it fails here rather than in the field.
+        """
+        for _asset, path in _assets_for(AssetLanguage.MARKDOWN):
+            text = path.read_text(encoding="utf-8")
+            if not text.startswith("---\n"):
+                continue
+            assert format_markdown_text(text).startswith("---\n"), (
+                f"{path} loses its YAML frontmatter when formatted; an agent "
+                f"definition without frontmatter is undispatchable."
+            )

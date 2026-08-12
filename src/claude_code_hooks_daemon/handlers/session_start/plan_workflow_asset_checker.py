@@ -22,6 +22,8 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.install.plan_workflow import (
+    AGENTS_DIR_PARTS,
+    DEDUPE_AGENT_NAME,
     JOURNAL_TEMPLATE_NAME,
     MKPLAN_SCRIPT_NAME,
     PLAN_JOURNALLING_DOC_NAME,
@@ -94,6 +96,15 @@ class PlanWorkflowAssetCheckerHandler(Handler):
         if not journalling_doc.exists():
             missing.append(
                 f"{plan_dir.parent.name}/{PLAN_JOURNALLING_DOC_NAME} " "(journalling reference doc)"
+            )
+        # Plan 00216: both mkplan.bash and plan_number_helper guidance tell
+        # agents to dispatch this scout before filing, so an absent definition
+        # points them at an agent that does not exist.
+        dedupe_agent = project_root.joinpath(*AGENTS_DIR_PARTS) / f"{DEDUPE_AGENT_NAME}.md"
+        if not dedupe_agent.exists():
+            missing.append(
+                f"{'/'.join(AGENTS_DIR_PARTS)}/{DEDUPE_AGENT_NAME}.md "
+                "(plan duplicate-check agent — daemon-owned)"
             )
 
         context = [

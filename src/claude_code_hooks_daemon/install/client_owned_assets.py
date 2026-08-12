@@ -73,6 +73,11 @@ class AssetLanguage(Enum):
 
     SHELL = "shell"
     PYTHON = "python"
+    # Markdown arrived with the first deployed AGENT DEFINITION (Plan 00216).
+    # Added together with its check in the lint guard, never ahead of it: an
+    # entry whose language the guard cannot lint passes by omission, which is
+    # the exact failure this manifest exists to prevent.
+    MARKDOWN = "markdown"
 
 
 @dataclass(frozen=True)
@@ -137,6 +142,19 @@ CLIENT_OWNED_ASSETS: Final[tuple[ClientOwnedAsset, ...]] = (
         why=(
             "Scaffolds plans inside the project's plan directory and is invoked "
             "from it by CLAUDE.md guidance and the plan_number_helper handler."
+        ),
+    ),
+    ClientOwnedAsset(
+        source="src/claude_code_hooks_daemon/install/templates/hooks-daemon-plan-dedupe-scout.md",
+        deployed_to=".claude/agents/hooks-daemon-plan-dedupe-scout.md",
+        language=AssetLanguage.MARKDOWN,
+        deployed_by="plan_workflow",
+        why=(
+            "Claude Code discovers sub-agents only under .claude/agents/, a flat "
+            "directory the client owns and fills with its own agents; a definition "
+            "inside the vendor clone would never be dispatchable. The name is "
+            "prefixed so it cannot collide with a client's own agent, since a "
+            "collision there silently drops one definition rather than erroring."
         ),
     ),
     ClientOwnedAsset(

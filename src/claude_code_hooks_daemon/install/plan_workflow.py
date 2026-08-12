@@ -50,6 +50,37 @@ _TEMPLATE_DIFF_MAX_LINES: Final[int] = 40
 JOURNAL_TEMPLATE_NAME: Final[str] = "_JOURNAL_TEMPLATE_.md"
 PLAN_JOURNALLING_DOC_NAME: Final[str] = "PlanJournalling.md"
 
+# Plan-dedupe scout agent (Plan 00216). A specialist sub-agent that reads the
+# titles and overviews of still-live plans and reports ones already covering
+# proposed work.
+#
+# Why an agent rather than a `plan_qa` rule: Plan 00216 Phase 1 measured the
+# deterministic alternative against this repository's own 215 plans and it
+# does not exist. The reliable GitHub-issue spelling finds ZERO shared pairs
+# and would have missed the duplication that motivated the work; the loose
+# `#N` spelling is 34/35 false positives ("resolver #1", "Bug #3", "the #1
+# correctness risk"); the supporting-document signal is dominated by
+# project-wide filenames and by CORRECT prior-art citations. Duplicates share
+# SUBJECT, not citations, which needs a reader.
+#
+# DAEMON-owned, so it is refreshed on every deploy like `mkplan.bash` and the
+# skills: the file encodes a procedure, not client content, and a prompt fix
+# that never reaches an existing install is worthless.
+# NAMESPACED deliberately. `.claude/agents/` is a FLAT namespace that the
+# CLIENT owns and populates with its own agents. A bare `plan-dedupe-scout`
+# could collide with one of theirs, and a collision in a flat namespace does
+# not error — one definition wins and the other is silently never dispatched,
+# which is the same class of silent-disablement failure the project-handler
+# load checker exists to catch. The `hooks-daemon-` prefix makes collision
+# impossible and makes daemon-deployed agents obvious in a directory listing.
+DEDUPE_AGENT_NAME: Final[str] = "hooks-daemon-plan-dedupe-scout"
+# Claude Code resolves agent definitions at `<project>/.claude/agents/`, which
+# is why this deploys relative to the PROJECT ROOT and not to the plan
+# directory — a project tracking plans elsewhere must still get a usable agent.
+AGENTS_DIR_PARTS: Final[tuple[str, str]] = (".claude", "agents")
+# Owner rw, group/other r — a definition that is read, never executed.
+_DEDUPE_AGENT_MODE: Final[int] = 0o644
+
 
 def mkplan_template_path() -> Path:
     """Absolute path to the canonical bundled ``mkplan.bash`` template.
@@ -83,6 +114,11 @@ def journal_template_path() -> Path:
 def plan_journalling_doc_path() -> Path:
     """Absolute path to the bundled ``PlanJournalling.md`` reference (Plan 00163)."""
     return Path(__file__).resolve().parent / _TEMPLATES_DIR_NAME / PLAN_JOURNALLING_DOC_NAME
+
+
+def dedupe_agent_template_path() -> Path:
+    """Absolute path to the bundled plan-dedupe scout agent (Plan 00216)."""
+    return Path(__file__).resolve().parent / _TEMPLATES_DIR_NAME / f"{DEDUPE_AGENT_NAME}.md"
 
 
 _README_TEMPLATE: Final[str] = """\
@@ -168,6 +204,7 @@ class BootstrapResult:
     template_default_changed: bool = False
     created_journal_template: bool = False
     created_journalling_doc: bool = False
+    deployed_dedupe_agent: bool = False
     messages: list[str] = field(default_factory=list)
 
 
@@ -261,7 +298,34 @@ def bootstrap_plan_workflow(
     # Seed the client-owned journal assets (enabled-by-default rollout)
     _deploy_journal_assets(plan_dir, result)
 
+    # Deploy the plan-dedupe scout agent (Plan 00216). Relative to the PROJECT
+    # ROOT, not the plan dir — Claude Code resolves agents at .claude/agents/.
+    _deploy_dedupe_agent(project_root, result)
+
     return result
+
+
+def _deploy_dedupe_agent(project_root: Path, result: BootstrapResult) -> None:
+    """Copy the plan-dedupe scout into ``<project>/.claude/agents/``.
+
+    Daemon-owned: overwritten on every run so a prompt fix reaches existing
+    installs, exactly like ``mkplan.bash`` and the deployed skills. Only this
+    one file is touched — ``.claude/agents/`` is the user's namespace and any
+    other agent definition in it is left alone.
+    """
+    template = dedupe_agent_template_path()
+    if not template.is_file():
+        raise FileNotFoundError(f"Bundled dedupe agent definition not found: {template}")
+
+    agents_dir = project_root.joinpath(*AGENTS_DIR_PARTS)
+    agents_dir.mkdir(parents=True, exist_ok=True)
+
+    target = agents_dir / f"{DEDUPE_AGENT_NAME}.md"
+    target.write_text(template.read_text())
+    target.chmod(_DEDUPE_AGENT_MODE)
+    result.deployed_dedupe_agent = True
+    result.messages.append(f"Deployed {DEDUPE_AGENT_NAME} agent (plan duplicate check)")
+    logger.info("Deployed %s to %s", DEDUPE_AGENT_NAME, target)
 
 
 def _deploy_journal_assets(plan_dir: Path, result: BootstrapResult) -> None:

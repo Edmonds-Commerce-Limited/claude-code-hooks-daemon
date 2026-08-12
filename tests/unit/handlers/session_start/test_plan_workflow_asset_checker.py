@@ -9,6 +9,7 @@ from unittest.mock import patch
 from claude_code_hooks_daemon.handlers.session_start.plan_workflow_asset_checker import (
     PlanWorkflowAssetCheckerHandler,
 )
+from claude_code_hooks_daemon.install.plan_workflow import DEDUPE_AGENT_NAME
 
 
 def _session_start_input(transcript_path: str | None = None) -> dict[str, Any]:
@@ -91,6 +92,52 @@ class TestHandle:
         text = "\n".join(result.context)
         assert "_JOURNAL_TEMPLATE_.md" in text
         assert "PlanJournalling.md" in text
+
+    def test_names_missing_dedupe_agent_too(self, tmp_path: Path) -> None:
+        """Plan 00216: the dedupe scout is advertised by mkplan.bash and by
+        plan_number_helper guidance, so an absent one points agents at an
+        agent that does not exist — the same silent-breakage shape the rest of
+        this handler exists to catch."""
+        (tmp_path / "CLAUDE" / "Plan").mkdir(parents=True)
+        handler = _make_handler()
+        with patch(
+            "claude_code_hooks_daemon.handlers.session_start."
+            "plan_workflow_asset_checker.ProjectContext.project_root",
+            return_value=tmp_path,
+        ):
+            result = handler.handle(_session_start_input())
+        assert DEDUPE_AGENT_NAME in "\n".join(result.context)
+
+    def test_reports_the_namespaced_name_not_a_bare_one(self, tmp_path: Path) -> None:
+        """The advisory names a file the reader is about to look for, so it must
+        name the DEPLOYED one. `.claude/agents/` is flat and client-owned: an
+        advisory pointing at a bare `plan-dedupe-scout` sends them to a path
+        that does not exist, or worse, to one of their own agents."""
+        (tmp_path / "CLAUDE" / "Plan").mkdir(parents=True)
+        handler = _make_handler()
+        with patch(
+            "claude_code_hooks_daemon.handlers.session_start."
+            "plan_workflow_asset_checker.ProjectContext.project_root",
+            return_value=tmp_path,
+        ):
+            result = handler.handle(_session_start_input())
+        context = "\n".join(result.context)
+        assert DEDUPE_AGENT_NAME.startswith("hooks-daemon-")
+        assert "plan-dedupe-scout" not in context.replace(DEDUPE_AGENT_NAME, "")
+
+    def test_present_dedupe_agent_is_not_reported_missing(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE" / "Plan").mkdir(parents=True)
+        agents_dir = tmp_path / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / f"{DEDUPE_AGENT_NAME}.md").write_text("x")
+        handler = _make_handler()
+        with patch(
+            "claude_code_hooks_daemon.handlers.session_start."
+            "plan_workflow_asset_checker.ProjectContext.project_root",
+            return_value=tmp_path,
+        ):
+            result = handler.handle(_session_start_input())
+        assert DEDUPE_AGENT_NAME not in "\n".join(result.context)
 
     def test_silent_when_all_assets_present(self, tmp_path: Path) -> None:
         plan_dir = tmp_path / "CLAUDE" / "Plan"

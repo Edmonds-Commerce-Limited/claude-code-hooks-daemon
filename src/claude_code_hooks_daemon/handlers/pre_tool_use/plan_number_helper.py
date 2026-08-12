@@ -275,6 +275,16 @@ class PlanNumberHelperHandler(Handler):
     def get_claude_md(self) -> str | None:
         return (
             "## plan_number_helper — use `mkplan.bash` to create a plan\n\n"
+            "**Before creating one, check nothing already covers it.** Dispatch the "
+            "`hooks-daemon-plan-dedupe-scout` agent with a sentence describing the "
+            "intended work; it "
+            "reads the still-live plans and names any that already cover it, so you can "
+            "merge or supersede instead of filing alongside. This is a SUGGESTION — it "
+            "never blocks, it is a judgement call rather than a rule, and it can be "
+            "wrong. It is worth the few seconds because the alternative failure is "
+            "expensive and silent: a duplicate plan is usually discovered only after an "
+            "agent has spent a lot of context re-deriving conclusions that already "
+            "existed on disk.\n\n"
             "**To create a new plan, run the deployed scaffolding script:**\n\n"
             "```\n"
             'CLAUDE/Plan/mkplan.bash "descriptive-kebab-name"\n'
