@@ -91,12 +91,12 @@ source into every Python tool's discovery.
 
 ### Phase 2: Implement
 
-- [ ] ⬜ **Task 2.1**: Implement the chosen fix with TDD
+- [x] ✅ **Task 2.1**: Implement the chosen fix with TDD
   - [x] ✅ Single manifest of daemon-owned assets deployed into client-owned
     paths (`install/client_owned_assets.py`), pinned to real files and to the
     client-facing document by `tests/unit/install/test_client_owned_assets.py`
   - [x] ✅ Ownership banner in EVERY deployed asset, not just the supervisor —
-    none of the five carried one. For the 31 hook forwarders + status-line the
+    none of the four carried one. For the 31 hook forwarders + status-line the
     banner lives in `install.py`'s generator and this repo's own `.claude/hooks/`
     was regenerated through that same code path
   - [x] ✅ Guard: `tests/integration/test_client_owned_asset_lint.py` — every
