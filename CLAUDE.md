@@ -1076,6 +1076,8 @@ A `Write`/`Edit` whose content contains an over-limit comment is blocked or advi
 
 ## plan_number_helper — use `mkplan.bash` to create a plan
 
+**Before creating one, check nothing already covers it.** Dispatch the `plan-dedupe-scout` agent with a sentence describing the intended work; it reads the still-live plans and names any that already cover it, so you can merge or supersede instead of filing alongside. This is a SUGGESTION — it never blocks, it is a judgement call rather than a rule, and it can be wrong. It is worth the few seconds because the alternative failure is expensive and silent: a duplicate plan is usually discovered only after an agent has spent a lot of context re-deriving conclusions that already existed on disk.
+
 **To create a new plan, run the deployed scaffolding script:**
 
 ```
@@ -1535,18 +1537,6 @@ The CLI exits 1 while findings remain (CI-able). Single-file lint:
 Policy lives under `plan_workflow.qa` in `.claude/hooks-daemon.yaml`
 (archive dir names, staleness window, legacy/collision allowlists).
 
-## plan_workflow_asset_checker — plan tooling provisioning alert
-
-At session start, when the plan workflow is enabled but the daemon-owned `mkplan.bash` is missing from the plan directory, this advisory fires (it never blocks). A missing `mkplan.bash` means `CLAUDE.md` and `plan_number_helper` reference a scaffolder that does not exist and journalling is inert.
-
-**Fix**: (re)deploy the assets on demand —
-
-```
-/workspace/bin/hooks-daemon deploy-plan-workflow
-```
-
-The deploy is idempotent (fills gaps only, never overwrites client-owned files). Silent when `mkplan.bash` is present or the workflow is disabled.
-
 ## git_upstream_checker — additive fetch + pull/cleanup advice on session start
 
 On each new session the daemon runs an **additive** `git fetch --all` (never `--prune` — it never removes anything automatically) and then:
@@ -1562,6 +1552,18 @@ On each new session the daemon runs an **additive** `git fetch --all` (never `--
 **If local branches track a remote branch that was deleted**, it lists them (marked merged = safe vs not-merged = has unique commits) and asks you to clean up AFTER checking: `git branch -d <name>` for merged branches, ask the human for the rest, and optionally `git fetch --prune` the stale remote-tracking refs. The daemon never prunes or deletes a branch itself; never use `git branch -D`.
 
 It is silent when up to date with no gone branches, not in a git repo, on a detached HEAD, or without an upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
+
+## plan_workflow_asset_checker — plan tooling provisioning alert
+
+At session start, when the plan workflow is enabled but the daemon-owned `mkplan.bash` is missing from the plan directory, this advisory fires (it never blocks). A missing `mkplan.bash` means `CLAUDE.md` and `plan_number_helper` reference a scaffolder that does not exist and journalling is inert.
+
+**Fix**: (re)deploy the assets on demand —
+
+```
+/workspace/bin/hooks-daemon deploy-plan-workflow
+```
+
+The deploy is idempotent (fills gaps only, never overwrites client-owned files). Silent when `mkplan.bash` is present or the workflow is disabled.
 
 ## idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
 
