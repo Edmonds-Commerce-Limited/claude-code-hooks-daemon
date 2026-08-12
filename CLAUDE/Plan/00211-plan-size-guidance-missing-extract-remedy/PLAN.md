@@ -1,6 +1,6 @@
 # Plan 00211: plan size guidance missing extract remedy
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -65,57 +65,57 @@ cannot silently recur.
 
 ### Phase 1: Single source of truth for remedy wording
 
-- [ ] ⬜ **Task 1.1**: TDD `plan_qa/remedy.py` — `REMEDIES` tuple (EXTRACT
+- [x] ✅ **Task 1.1**: TDD `plan_qa/remedy.py` — `REMEDIES` tuple (EXTRACT
   first, then RELOCATE, then SPLIT), `remedy_sentence()` and
   `remedy_markdown_list()` renderers
-- [ ] ⬜ **Task 1.2**: Wire `plan_doc_size.py`'s `_REMEDY` from
+- [x] ✅ **Task 1.2**: Wire `plan_doc_size.py`'s `_REMEDY` from
   `remedy_sentence()`
-- [ ] ⬜ **Task 1.3**: Wire `plan_qa_edit.py`'s `get_claude_md()` bullet from
+- [x] ✅ **Task 1.3**: Wire `plan_qa_edit.py`'s `get_claude_md()` bullet from
   `remedy_sentence()`
-- [ ] ⬜ **Task 1.4**: Wire `plan_workflow.py`'s `get_claude_md()` remedy
+- [x] ✅ **Task 1.4**: Wire `plan_workflow.py`'s `get_claude_md()` remedy
   list from `remedy_markdown_list()`, and widen the contract table to
   three columns (`PLAN.md` / `SOME-DOC.md` / `JOURNAL/`)
-- [ ] ⬜ **Task 1.5**: Cross-surface DRY test — every surface's rendered
+- [x] ✅ **Task 1.5**: Cross-surface DRY test — every surface's rendered
   text contains the canonical rendering; fails on divergence
 
 ### Phase 2: Folder-shape hint
 
-- [ ] ⬜ **Task 2.1**: TDD `_folder_has_supporting_docs()` helper in
+- [x] ✅ **Task 2.1**: TDD `_folder_has_supporting_docs()` helper in
   `plan_doc_size.py` and the `_FOLDER_SHAPE_HINT` suggestion text
   (never an assertion — honours the report's 00001 counter-example)
-- [ ] ⬜ **Task 2.2**: Wire the hint into `_run()`, appended to
+- [x] ✅ **Task 2.2**: Wire the hint into `_run()`, appended to
   `remediation` whenever a Finding fires and the folder has no
   supporting docs
 
 ### Phase 3: Teach plan-shrink-without-journal about extraction
 
-- [ ] ⬜ **Task 3.1**: RED — failing test: a commit that shrinks PLAN.md by
+- [x] ✅ **Task 3.1**: RED — failing test: a commit that shrinks PLAN.md by
   \>2,000 bytes while staging a new supporting `.md` (no journal entry)
   must be SILENT, not flagged
-- [ ] ⬜ **Task 3.2**: GREEN — add `has_staged_supporting_doc()` to
+- [x] ✅ **Task 3.2**: GREEN — add `has_staged_supporting_doc()` to
   `plan_qa/checks/common.py`; `plan_shrink_without_journal.py` accepts
   it alongside `has_staged_journal_entry()`
-- [ ] ⬜ **Task 3.3**: Update the finding's remediation text to mention the
+- [x] ✅ **Task 3.3**: Update the finding's remediation text to mention the
   extraction alternative
 
 ### Phase 4: Ship the concept to clients + DBF guard
 
-- [ ] ⬜ **Task 4.1**: Port the supporting-docs structure into
+- [x] ✅ **Task 4.1**: Port the supporting-docs structure into
   `install/templates/PlanJournalling.md` (two-remedy -> three-remedy,
   layout section mentions supporting docs) and sync
   `CLAUDE/PlanJournalling.md` byte-identically (installer never
   overwrites the deployed copy, so both must be edited)
-- [ ] ⬜ **Task 4.2**: Doc-parity regression test — structural concepts
+- [x] ✅ **Task 4.2**: Doc-parity regression test — structural concepts
   (`supporting`, `assets/`) present in `CLAUDE/PlanWorkflow.md` must
   also be present in the deployed template and the injected
   `plan_workflow` CLAUDE.md guidance
-- [ ] ⬜ **Task 4.3**: Best-effort consistency pass over
+- [x] ✅ **Task 4.3**: Best-effort consistency pass over
   `docs/PLAN_SYSTEM.md` / `docs/guides/HANDLER_REFERENCE.md` remedy
   mentions
 
 ### Phase 5: QA and verification
 
-- [ ] ⬜ **Task 5.1**: `./scripts/qa/llm_qa.py all` reaches N/N PASSED
+- [ ] 🔄 **Task 5.1**: `./scripts/qa/llm_qa.py all` reaches N/N PASSED
 - [ ] ⬜ **Task 5.2**: Record daemon-restart verification as OUTSTANDING
   (does not work from a worktree — the daemon runs against the real
   project root)
