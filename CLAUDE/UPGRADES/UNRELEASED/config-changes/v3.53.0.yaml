@@ -95,6 +95,34 @@ config_changes:
         reflowed, say -- declare it in the content itself with a
         "MUST_EXCEED_COMMENT_SIZE_BECAUSE: <reason>" line rather than
         disabling the handler.
+    - key: handlers.pre_tool_use.ancestry_preserving_merge
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PreToolUse blocking handler (Plan 00207). Blocks merge
+        integrations that sever ancestry: git merge --squash,
+        gh pr merge --squash and gh pr merge --rebase. A squash merge
+        collapses every commit into one new commit on the target, and a
+        rebase merge replays them as new commits with new shas -- either
+        way the branch's original commits never become ancestors of the
+        target, so git branch -d (the safe, battle-tested delete) refuses
+        the branch FOREVER even though its content is fully upstream. Only
+        a --no-ff merge commit preserves ancestry. git merge,
+        git merge --no-ff, gh pr merge --merge and a LOCAL git rebase
+        <branch> stay allowed -- it is the rebase MERGE integration button
+        that severs ancestry, not local rebasing. Built on the shared
+        command_evasion GIT_INVOCATION grammar so git -C <path> merge
+        --squash and a line-continued command cannot bypass it. Does NOT
+        cover a squash/rebase merge performed through the GitHub web UI --
+        the daemon sees tool calls, not browser clicks.
+      migration_note: >-
+        Ships enabled (block mode) by default -- no action needed to
+        adopt. Mirrors git_stash: options.mode is block (default, hard
+        blocks) or warn (advisory only). A MUST_SQUASH_BECAUSE="reason"
+        prefix bypasses the block for platforms that mandate squash-only
+        or rebase-only merging. Disable entirely with
+        handlers.pre_tool_use.ancestry_preserving_merge.enabled: false.
+        See docs/guides/HANDLER_REFERENCE.md#ancestry_preserving_merge.
   renamed: []
   removed: []
   changed: []

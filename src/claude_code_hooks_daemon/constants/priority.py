@@ -69,6 +69,11 @@ class Priority:
     GIT_CONTEXT_INJECTOR = 20
     GIT_BRANCH = 20
     GIT_STASH = 20
+    # Plan 00207: sits beside GIT_STASH -- both are safety-band git-workflow
+    # opinions with a mode option and a MUST_..._BECAUSE escape hatch. Relative
+    # order does not change any verdict since the two match disjoint command
+    # sets (merge/gh-pr-merge vs stash).
+    ANCESTRY_PRESERVING_MERGE = 19
 
     # Lint on edit (Priority: 25 - code quality range)
     LINT_ON_EDIT = 25

@@ -561,6 +561,58 @@ handlers:
 
 ---
 
+#### ancestry_preserving_merge
+
+| Property       | Value                                         |
+| -------------- | --------------------------------------------- |
+| **Config key** | `ancestry_preserving_merge`                   |
+| **Priority**   | 19                                            |
+| **Type**       | Blocking (block mode) or Advisory (warn mode) |
+| **Event**      | PreToolUse                                    |
+
+**Description:** Blocks (or, in `warn` mode, advises against) merge integrations that sever ancestry: `git merge --squash`, `gh pr merge --squash`, and `gh pr merge --rebase`. A squash merge collapses every commit into one new commit on the target; a rebase merge replays them with new shas. Either way the branch's commits never become ancestors of the target, so `git branch -d` (the safe, battle-tested delete) refuses the branch forever, even though its content is fully upstream. Only a `--no-ff` merge commit preserves ancestry.
+
+**Options:**
+
+| Option | Values          | Default | Description                                                                       |
+| ------ | --------------- | ------- | --------------------------------------------------------------------------------- |
+| `mode` | `block`, `warn` | `block` | `block` hard-blocks the ancestry-severing command; `warn` allows with an advisory |
+
+- **`block`** (default) -- Blocks `git merge --squash`, `gh pr merge --squash`, `gh pr merge --rebase`. This is the shipped default; ancestry survives every merge so `git branch -d` stays usable.
+- **`warn`** -- Allows the command through with an advisory warning naming the ancestry-preserving alternative.
+
+**Escape hatch (block mode):** prefix the command with a non-empty `MUST_SQUASH_BECAUSE` reason and the handler stands aside (covers both the squash and rebase-merge spellings):
+
+```bash
+MUST_SQUASH_BECAUSE="platform mandates squash-only merging"; git merge --squash feature-branch
+```
+
+**Always allowed:** `git merge`, `git merge --no-ff`, `gh pr merge --merge` (all preserve ancestry), and a LOCAL `git rebase <branch>` on your own feature branch before merging -- it is the REBASE MERGE *integration button* that severs ancestry, not local rebasing.
+
+**Not covered:** a squash or rebase merge performed through the GitHub web UI. The daemon sees tool calls, not browser clicks.
+
+**Example trigger:**
+
+```bash
+git merge --squash feature-branch
+gh pr merge --squash 123
+gh pr merge --rebase 123
+```
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    ancestry_preserving_merge:
+      enabled: true
+      priority: 19
+      options:
+        mode: "block"  # default; use "warn" for advisory-only
+```
+
+---
+
 #### lock_file_edit_blocker
 
 | Property       | Value                    |
@@ -2313,6 +2365,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `tdd_enforcement`              | PreToolUse        | 15       | Production code without tests (11 languages)                         |
 | `root_recursion_guard`         | PreToolUse        | 16       | Recursive scans rooted at /, /home, $HOME, ...                       |
 | `git_stash`                    | PreToolUse        | 20       | git stash creation (deny by default; configurable)                   |
+| `ancestry_preserving_merge`    | PreToolUse        | 19       | git merge --squash, gh pr merge --squash/--rebase (severs ancestry)  |
 | `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)          |
 | `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                |
 | `validate_plan_number`         | PreToolUse        | 30       | Invalid plan numbering                                               |

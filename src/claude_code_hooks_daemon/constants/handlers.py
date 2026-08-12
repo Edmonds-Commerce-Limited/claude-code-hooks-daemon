@@ -261,6 +261,14 @@ class HandlerID:
         config_key="git_stash",
         display_name="block-git-stash",
     )
+    # Ancestry-preserving merge (Plan 00207): blocks git merge --squash,
+    # gh pr merge --squash and gh pr merge --rebase by default, since all
+    # three sever ancestry and leave git branch -d permanently unusable.
+    ANCESTRY_PRESERVING_MERGE = HandlerIDMeta(
+        class_name="AncestryPreservingMergeHandler",
+        config_key="ancestry_preserving_merge",
+        display_name="block-ancestry-severing-merge",
+    )
     ROOT_RECURSION_GUARD = HandlerIDMeta(
         class_name="RootRecursionGuardHandler",
         config_key="root_recursion_guard",

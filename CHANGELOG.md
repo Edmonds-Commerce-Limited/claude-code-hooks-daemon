@@ -48,6 +48,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (discards the built-in set entirely) paradigm already established by
   `idle_housekeeping_advisor`'s `custom_guidance_mode`. Never blocks.
 
+- **`ancestry_preserving_merge` — block merge integrations that sever
+  ancestry (Plan 00207).** A squash merge collapses every commit into one
+  new commit on the target, and a GitHub "rebase and merge" replays them as
+  new commits with new shas — either way the branch's original commits
+  never become ancestors of the target, so `git branch -d` (the safe,
+  battle-tested delete) refuses the branch FOREVER even though its content
+  is fully upstream. Only a `--no-ff` merge commit preserves ancestry.
+  Blocks `git merge --squash`, `gh pr merge --squash` and
+  `gh pr merge --rebase` by default; `git merge`, `git merge --no-ff`,
+  `gh pr merge --merge` and a LOCAL `git rebase <branch>` stay allowed —
+  it is the rebase *merge* integration button that severs ancestry, not
+  local rebasing. Built on the shared `command_evasion` `GIT_INVOCATION`
+  grammar so `git -C <path> merge --squash` and a line-continued command
+  cannot bypass it (the Plan 00202 evasion class). Mirrors `git_stash`:
+  `options.mode` (`block` default, `warn`) and a `MUST_SQUASH_BECAUSE`
+  escape hatch for platforms that mandate squash-only or rebase-only
+  merging. Does NOT cover a squash/rebase merge performed through the
+  GitHub web UI — the daemon sees tool calls, not browser clicks.
+
 ## [3.52.0] - 2026-08-12
 
 This is a **minor release** carrying two new handlers, a whole-tree QA backstop,
