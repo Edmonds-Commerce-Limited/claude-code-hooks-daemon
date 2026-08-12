@@ -21,7 +21,7 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.plan_qa.context import edit_context
-from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME
+from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME, README_FILENAME
 from claude_code_hooks_daemon.plan_qa.remedy import remedy_sentence
 from claude_code_hooks_daemon.plan_qa.report import format_advisory, format_block_reason
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
@@ -79,19 +79,42 @@ class PlanQaEditHandler(Handler):
         return self._is_lintable_plan_file(file_path, policy)
 
     def _is_lintable_plan_file(self, file_path: str, policy: Any) -> bool:
-        """True for a PLAN.md OR a journal day-file under a plan folder.
+        """True for a PLAN.md, the plan INDEX, or a journal day-file.
 
         Journal files are ``*.md`` directly inside a ``{journal_dir_name}/``
         directory (Plan 00163); the per-check target resolvers do the precise
         folder-structure validation, so this stays a cheap string gate.
+
+        The plan index (``{plan_dir}/README.md``, Plan 00218) is admitted
+        because it has a shape rule of its own — ``index-row-length`` — whose
+        only other enforcement is a full test-suite run. Widening the gate is
+        safe: every plan-DOCUMENT check scopes itself through ``edit_target()``,
+        which returns ``None`` for anything that is not a ``PLAN.md``, so none
+        of them can fire on a README.
         """
         path = Path(file_path)
         if path.name == PLAN_DOC_FILENAME:
+            return True
+        if self._is_plan_index(path):
             return True
         journal = getattr(policy, "journal", None)
         if journal is None or not journal.enabled or journal.mode == _JOURNAL_MODE_OFF:
             return False
         return path.suffix == _MARKDOWN_SUFFIX and path.parent.name == journal.dir_name
+
+    def _is_plan_index(self, path: Path) -> bool:
+        """True only for the README at the plan directory ROOT.
+
+        A README inside a plan folder is a supporting document, not the index,
+        so the parent directory must be the plan directory itself. ``matches()``
+        has already established that the path is under the plan directory.
+        """
+        if path.name != README_FILENAME:
+            return False
+        plan_dir_rel = self._track_plans_in_project
+        if plan_dir_rel is None:
+            return False
+        return path.parent.name == Path(plan_dir_rel).name
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
@@ -159,6 +182,16 @@ class PlanQaEditHandler(Handler):
             "against the plan QA edit-stage rules on the content the file WOULD\n"
             "have. Block-level violations (in `edit_mode: block`) deny the tool\n"
             "call with the exact remediation; fix the content and retry.\n"
+            "\n"
+            "The plan-index `README.md` is linted too, against ONE rule:\n"
+            "`index-row-length`. Keep every line under 500 characters — an index\n"
+            "row is a POINTER (a link, a status and one clause), not a summary,\n"
+            "because the rationale belongs in the linked `PLAN.md` and a second\n"
+            "copy in the index is the one that goes stale. Only an edit that\n"
+            "makes the index WORSE is blocked (more over-long lines, or a longer\n"
+            "worst offender), so an index that already has one stays editable —\n"
+            "including by the edit that fixes it. No other plan-document rule\n"
+            "applies to the index: it has no `**Status**:` line and needs none.\n"
             "\n"
             "**Rules that block new plan material**:\n"
             "\n"

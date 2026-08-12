@@ -4,6 +4,8 @@ Each check module exposes a ``CHECK: CheckSpec`` constant, or ``CHECKS`` (a
 COMMIT + SWEEP pair sharing one run function) for the cross-file tree checks
 — that dual registration is how the plan's ``full-tree-consistency`` is
 realised: the sweep evaluates the same invariants the commit gate enforces.
+``index_row_length`` extends the same idea to three surfaces, adding an EDIT
+registration so the rule also has a fast loop (Plan 00218).
 :func:`all_checks` assembles the registry consumed by
 :func:`plan_qa.runner.run_stage`; the catalogue is therefore greppable and
 documentation can be generated from it.
@@ -16,6 +18,7 @@ from claude_code_hooks_daemon.plan_qa.checks import (
     dormant_honesty,
     header_body_coherence,
     index_at_birth,
+    index_row_length,
     journal_append_only,
     journal_completion_entry,
     journal_dayfile_is_today,
@@ -66,6 +69,8 @@ def all_checks() -> tuple[CheckSpec, ...]:
         *stats_recount.CHECKS,
         *structure_archive_dirs.CHECKS,
         *location_status_coherence.CHECKS,
+        # Plan-index shape — EDIT + COMMIT + SWEEP (Plan 00218)
+        *index_row_length.CHECKS,
         # Stage 2 — commit-gate-only checks
         index_at_birth.CHECK,
         counter_sanity.CHECK,

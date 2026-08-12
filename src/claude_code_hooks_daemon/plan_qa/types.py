@@ -58,6 +58,18 @@ DEFAULT_PLAN_DOC_WARNING_LINES: Final[int] = 500
 DEFAULT_PLAN_DOC_BLOCK_BYTES: Final[int] = 35_000  # ~8,800 tokens
 DEFAULT_PLAN_DOC_BLOCK_LINES: Final[int] = 900
 
+# Plan-index row limit (Plan 00218). A ceiling, not a target: an index row is a
+# POINTER — a link, a status and one clause — because the rationale belongs in
+# the linked PLAN.md, and a second copy in the index is the one that goes stale.
+# A row a reader must scroll horizontally to finish is not an index row.
+#
+# Deliberately NOT config-driven, unlike the plan-doc tiers above. The batch
+# guard (tests/integration/test_plan_index_navigability.py) asserts a fixed
+# ceiling and imports this constant; a configurable value could be raised to 800
+# while that test still failed at 500, which is precisely the two-definitions
+# drift this constant exists to remove.
+DEFAULT_INDEX_ROW_MAX_CHARS: Final[int] = 500
+
 
 @dataclass(frozen=True)
 class PlanDocSizeLimits:

@@ -12,11 +12,18 @@ line: the one document meant to make the plan tree navigable had become the
 least navigable file in the repository. That is the exemption working exactly
 as designed and no guard noticing the consequence.
 
-This is the missing guard. It is deliberately NOT a plan-QA check: the index is
-correctly exempt from the per-plan tiers, and bolting a special case onto them
-would blur a rule that is currently crisp. It bounds the two properties that
-actually make an index usable — total size and per-row scannability — and
-nothing else.
+This is the batch guard. It bounds the two properties that actually make an
+index usable — total size and per-row scannability — and nothing else.
+
+The per-row ceiling now ALSO has a fast-loop guard: the plan_qa
+``index-row-length`` check (Plan 00218), which reads
+:data:`DEFAULT_INDEX_ROW_MAX_CHARS` — the same constant imported below — so the
+two can never disagree about the limit or about what counts as a violation.
+That is a SEPARATE check, not a special case bolted onto the per-plan size
+tiers: the index stays correctly exempt from those, and the rule that is
+currently crisp stays crisp. This file remains the batch equivalent, because a
+write-time guard never sees what is already on disk (``CLAUDE.md`` Core
+Standard 15) — a long row can arrive by merge, by script, or from a worktree.
 
 **A row is a pointer, not a summary.** The full rationale belongs in the linked
 ``PLAN.md``; keeping a copy in the index means maintaining the same paragraph in
@@ -27,6 +34,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from claude_code_hooks_daemon.plan_qa.types import DEFAULT_INDEX_ROW_MAX_CHARS
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INDEX = REPO_ROOT / "CLAUDE" / "Plan" / "README.md"
 
@@ -34,7 +43,13 @@ INDEX = REPO_ROOT / "CLAUDE" / "Plan" / "README.md"
 # headroom left, so ordinary growth never trips them and a return to
 # paragraph-per-row does.
 MAX_BYTES = 130_000
-MAX_LINE_CHARS = 500
+
+# IMPORTED, never redeclared (Plan 00218). The per-line ceiling is now also
+# enforced in the fast loop by the plan_qa ``index-row-length`` check, and two
+# guards over one rule must read one number — a local literal here is exactly
+# how the fast and batch guards would drift apart. The total-size ceiling above
+# has no fast-loop equivalent, so it stays local.
+MAX_LINE_CHARS = DEFAULT_INDEX_ROW_MAX_CHARS
 
 
 def _lines() -> list[str]:
