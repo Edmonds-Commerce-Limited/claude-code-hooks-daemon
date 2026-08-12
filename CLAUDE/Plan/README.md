@@ -52,7 +52,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00214: magic number scanner blindness](00214-magic-number-scanner-blindness/PLAN.md) - Not Started (DBF follow-up: Core Standard 9 bans magic strings **and numbers**, but `check_magic_values.py` implements only string-shaped rules, so `magic_values: 0 violations` has always meant "half the standard was checked". Surfaced by a hardcoded dispatch timeout that no rule could see.)
 
-- [00215: readme repositioning guardrails not hook tooling](00215-readme-repositioning-guardrails-not-hook-tooling/PLAN.md) - Not Started (cold-reader review found the README answers "why a daemon?" at length and never answers "why guardrails?", so a 90-second reader files the project under developer ergonomics; plus two factual errors — "just five hooks" against 31 forwarders, and a test badge a reader cannot reproduce.)
+- [00215: readme repositioning guardrails not hook tooling](00215-readme-repositioning-guardrails-not-hook-tooling/PLAN.md) - In Progress (cold-reader review found the README answers "why a daemon?" at length and never answers "why guardrails?", so a 90-second reader files the project under developer ergonomics; plus two factual errors — "just five hooks" against 31 forwarders, and a test badge a reader cannot reproduce.)
+
+- [00216: plan duplicate source detection](00216-plan-duplicate-source-detection/PLAN.md) - Not Started (DBF follow-up to the 00199/00213 duplication: `plan_qa` enforces number collisions and index bijection but is blind to two plans covering the same source document, so a duplicate is only caught if a human happens to notice.)
 
 - Root cause: agents conflate `PLAN.md` with `JOURNAL/` and append narrative progress into the plan. Measured churn proves it — `del/add` ratio 0.00–0.18 across large plans (00104: 885 lines added, **zero** deleted), so plans grow monotonically (57 KB locally, 100 KB+ reported in client projects)
 
@@ -1147,21 +1149,21 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 215 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 216 (count = `hooksdaemon.latestPlanNumber` git counter)
 - **Completed**: 167 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 38 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
-- **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102)
-- **Folder-to-number reconciliation**: 38 + 167 + 4 = **209 folders**, spanning
-  **206 distinct plan numbers** — three numbers carry two folders each, the
+- **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102). A fifth — 00199, superseded by 00213 — is committed on the in-flight planlib branch and lands with that merge; these figures describe `main` as it stands, not the pending merge.
+- **Folder-to-number reconciliation**: 39 + 167 + 4 = **210 folders**, spanning
+  **207 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **9** of the
-  215 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  216 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210 — abandoned drafts, numbers burned by transient
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
-  already covered the work). 206 + 9 = 215. ✅
+  already covered the work). 207 + 9 = 216. ✅
 - **Last reconciled by**: the Plan 00211 + 00212 merges — every figure above
   re-derived from the folders on disk, not carried forward from either side of
   the merge. Both sides were wrong in the same way: each itemised 00038 as a
