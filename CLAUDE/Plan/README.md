@@ -46,8 +46,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00162: Wire hello_world Handler Flag](00162-wire-hello-world-handler-flag/PLAN.md) - In Progress (fix the dead `daemon.enable_hello_world_handlers` flag so it actually gates the TEST handlers; default off removes the `✅ hook active` injection + the idle-tick doubled-stop root-caused in Plan 00161)
 
-- [00212: generic command hint handler](00212-generic-command-hint-handler/PLAN.md) - In Progress (a single config-driven PostToolUse advisory handler — `command_hints` — that injects a rate-limited reminder when a configured command is detected in a Bash call, rather than one handler per hinted command; ships with an `agent-browser` close-session reminder as its only default hint.)
-
 ### Plan Workflow / QA
 
 - [00213: planlib plan folder orchestrator tooling](00213-planlib-plan-folder-orchestrator-tooling/PLAN.md) - Not Started (an upstream proposal from a client project to promote its `planlib` bash library into the daemon; filed to get the ~62KB proposal out of `untracked/` and into tracked source. Deliberately not started — adopting a foreign library is a scope decision for a human, not something to begin because the document is well written.)
@@ -91,8 +89,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Second class: four handler false positives hit during ordinary work — `EnforceLlmQaHandler` blocking `cat` of `run_all.sh` (matches the filename, not the invocation); `destructive_git` reporting \`git …
 
   - Includes a "Why this might not be worth doing" section arguing the case against its own Phases 3-4; evidence with `file:line` in `COUPLING-ANALYSIS.md`
-
-- [00211: plan-size guidance missing extract remedy](00211-plan-size-guidance-missing-extract-remedy/PLAN.md) - In Progress (adds EXTRACT as a third, first-listed remedy for oversized plans; see PLAN.md for the field report and full rationale.)
 
 ### Self-Driving / Automation
 
@@ -191,6 +187,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00212: generic command hint handler](Completed/00212-generic-command-hint-handler/PLAN.md) - Complete (one config-driven PostToolUse handler mapping command patterns to hints, rather than a handler per command; TTL cooldown per (session, hint), extend-or-replace project config. Live-verified post-merge: fires on `agent-browser`, and three repeat probes were all suppressed.)
+
+- [00211: plan-size guidance missing extract remedy](Completed/00211-plan-size-guidance-missing-extract-remedy/PLAN.md) - Complete (adds EXTRACT — relocate durable detail into a named supporting doc — as a third, first-listed remedy for oversized plans, and teaches `plan-shrink-without-journal` that a staged new `.md` in the plan folder is relocation, not deletion. The concept existed in the daemon's own internal docs and had never shipped to clients.)
 
 - [00208: comment changelog and size handlers](Completed/00208-comment-changelog-and-size-handlers/PLAN.md) - Complete (blocks `Prior <version>:`/dated entries in comments; caps comment length with plan-doc-size-style tiering. A whole-repo self-scan demoted 3 of 5 planned blocking signals to advisory after measuring real false positives.)
 
@@ -1148,11 +1148,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 215 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 165 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 167 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 38 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102)
-- **Folder-to-number reconciliation**: 40 + 165 + 4 = **209 folders**, spanning
+- **Folder-to-number reconciliation**: 38 + 167 + 4 = **209 folders**, spanning
   **206 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

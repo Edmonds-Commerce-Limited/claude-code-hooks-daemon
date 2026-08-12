@@ -1,6 +1,6 @@
 # Plan 00212: generic command hint handler
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -72,8 +72,13 @@ established by `idle_housekeeping_advisor.py`.
 - [x] ✅ `./scripts/qa/llm_qa.py all` — 18/20 (the 2 non-passing checks are
   pre-existing/environmental, not caused by `command_hints`; see Success
   Criteria for the itemised breakdown)
-- [ ] 🚫 Daemon restart + live socket probe — **cannot be done from a
-  worktree** (documented as outstanding for the post-merge tree)
+- [x] ✅ Daemon restart + live socket probe — DONE post-merge against the real
+  project root. The worktree correctly reported this outstanding rather than
+  claiming it. Evidence: daemon restarted to `RUNNING` with no load errors; a
+  live `PostToolUse` probe of an `agent-browser` Bash call returned the
+  close-the-session hint; and three immediately-repeated identical probes were
+  all SUPPRESSED, confirming the TTL cooldown holds rather than merely being
+  configured. Full suite reaches **20/20** on the merged tree.
 
 ## Technical Decisions
 
@@ -116,7 +121,8 @@ of `\b`. Regression-tested explicitly.
     `test_no_index_row_is_a_paragraph` concerns a pre-existing 695-char Plan
     00206 row in `CLAUDE/Plan/README.md` predating this branch)
   - `smoke_test` (needs a live daemon socket — see the next line)
-- [ ] Daemon restart verification — OUTSTANDING (cannot run in a worktree).
+- [x] Daemon restart verification — done post-merge against the real project
+  root, including a live TTL-suppression probe (see Phase 3).
 
 ## Delivery & Milestones
 

@@ -1,6 +1,6 @@
 # Plan 00211: plan size guidance missing extract remedy
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -125,11 +125,16 @@ cannot silently recur.
   worktree project root. Fixed two REAL issues this run surfaced that
   WERE mine: 3 files needing `black` reformatting, and this plan's own
   README index row exceeding the 500-char line-length contract.
-- [ ] ⬜ **Task 5.2**: Record daemon-restart verification as OUTSTANDING
-  (does not work from a worktree — the daemon runs against the real
-  project root). Same for a live `plan-qa --lint` probe against the
-  deployed CLI. Both must be done post-merge, against the real project
-  root, before this plan can be marked Complete.
+- [x] ✅ **Task 5.2**: Daemon-restart verification — DONE post-merge against
+  the real project root, which is where it always had to happen. The
+  worktree correctly reported it OUTSTANDING rather than claiming it.
+  Evidence: daemon restarted to `RUNNING` with no load errors in the log;
+  a live `PreToolUse`/`Write` probe of an over-threshold `PLAN.md` returned
+  the three-remedy text with EXTRACT listed FIRST, followed by the
+  folder-shape hint and its "suggestion based on folder shape, not a
+  diagnosis" caveat; `plan-qa --sweep` reports no structural drift; and the
+  full suite reaches **20/20** on the merged tree, so the 2 checks the
+  worktree could not satisfy were indeed environmental.
 
 ## Technical Decisions
 
@@ -191,11 +196,12 @@ storage exists.
   supporting docs
 - [x] A DBF doc-parity test fails today (before the fix, confirmed via
   `git show` on the pre-fix commit) and passes after
-- [x] `./scripts/qa/llm_qa.py all` reaches 18/20 PASSED — the 2 remaining
-  are confirmed out-of-scope (see Task 5.1)
-- [ ] Daemon-restart verification explicitly reported as OUTSTANDING (not
-  claimed) — cannot be verified from a worktree; **remains OUTSTANDING for
-  the post-merge tree**
+- [x] `./scripts/qa/llm_qa.py all` reaches 18/20 PASSED in the worktree — the
+  2 remaining were confirmed out-of-scope (see Task 5.1) and both pass on the
+  merged tree, which reaches **20/20**
+- [x] Daemon-restart verification reported as OUTSTANDING rather than claimed
+  while in the worktree, then actually performed post-merge against the real
+  project root (see Task 5.2)
 
 ## Delivery & Milestones
 
