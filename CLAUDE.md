@@ -876,6 +876,29 @@ pytest tests/ 2>&1 | /…/scripts/echd-capture 20
 - Regular files: `chmod 644` (owner rw, group/other r)
 - Private files: `chmod 600` (owner rw only)
 
+## ancestry_preserving_merge — ancestry-severing merges are blocked by default
+
+`git merge --squash`, `gh pr merge --squash` and `gh pr merge --rebase` are blocked. A squash merge collapses every commit into one new commit on the target; a rebase merge replays them with new shas. Either way this branch's commits never become **ancestors** of the target, so `git branch -d` (the safe, battle-tested delete) refuses the branch FOREVER, even though its content is fully upstream. This is about the ancestry consequence, not a style opinion on squashing or rebasing.
+
+**Always allowed**: `git merge`, `git merge --no-ff`, `gh pr merge --merge`, and a LOCAL `git rebase <branch>` on your own feature branch before merging -- that preserves ancestry once merged with `--no-ff`. It is the REBASE MERGE *integration button* that severs ancestry, not local rebasing.
+
+**Use instead**:
+
+```
+git merge --no-ff <branch>      # merge commit, preserves ancestry
+gh pr merge --merge <number>    # GitHub equivalent of --no-ff
+```
+
+**Escape hatch** (when your platform genuinely mandates squash-only or rebase-only merging):
+
+```
+MUST_SQUASH_BECAUSE="explain why"; git merge --squash <branch>
+```
+
+**Not covered**: a squash or rebase merge performed through the GitHub web UI. The daemon sees tool calls, not browser clicks, so this handler has no visibility into a merge button pressed in a browser.
+
+Configure via `handlers.pre_tool_use.ancestry_preserving_merge.options.mode: warn` for advisory-only mode.
+
 ## git_stash — git stash is blocked by default
 
 `git stash`, `git stash push`, and `git stash save` are blocked. `git stash pop`, `git stash apply`, `git stash list`, and `git stash show` are always allowed.
