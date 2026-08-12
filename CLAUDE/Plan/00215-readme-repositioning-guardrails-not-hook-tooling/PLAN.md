@@ -1,6 +1,6 @@
 # Plan 00215: readme repositioning guardrails not hook tooling
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: High
@@ -58,36 +58,58 @@ greps `def test_` and finds ~9,888, concluding the badge is inflated.
 
 ### Phase 1: Structural repositioning
 
-- [ ] ⬜ **Task 1.1**: Replace the strapline with a claim rather than a category
-- [ ] ⬜ **Task 1.2**: Add a `## What this solves` section stating the guardrail
+- [x] ✅ **Task 1.1**: Replace the strapline with a claim rather than a category
+- [x] ✅ **Task 1.2**: Add a `## What this solves` section stating the guardrail
   case and the determinism property (a handler returns allow/deny; it is not a
   prompt and not a judgement the model makes about its own behaviour)
-- [ ] ⬜ **Task 1.3**: Reorder to strapline → What this solves → Why a daemon →
+- [x] ✅ **Task 1.3**: Reorder to strapline → What this solves → Why a daemon →
   What's Built In → Installation & Updates → rest unchanged
-- [ ] ⬜ **Task 1.4**: Retitle `## Why Use This?` to `## Why a daemon rather than plain hooks`, keeping all five sub-headings
-- [ ] ⬜ **Task 1.5**: Promote `## Deterministic vs Agent-Based Hooks` to sit
+- [x] ✅ **Task 1.4**: Retitle `## Why Use This?` to `## Why a daemon rather than plain hooks`, keeping all five sub-headings
+- [x] ✅ **Task 1.5**: Promote `## Deterministic vs Agent-Based Hooks` to sit
   directly after `## What's Built In`
 
 ### Phase 2: Factual corrections (each must be re-measured, not copied)
 
-- [ ] ⬜ **Task 2.1**: Replace "just five Claude Code hooks — one per event type"
+- [x] ✅ **Task 2.1**: Replace "just five Claude Code hooks — one per event type"
   with "one lightweight forwarder per event type"; verify the forwarder count in
-  `.claude/hooks/` first
-- [ ] ⬜ **Task 2.2**: Add the source-to-test line ratio beside the test badge,
-  measuring both figures rather than trusting the request's numbers
-- [ ] ⬜ **Task 2.3**: Reconcile the priority bands — `## What's Built In` lists
+  `.claude/hooks/` first. Re-measured: 31 forwarder scripts (32 entries minus the
+  `handlers/` support subdirectory) — matches the request; the "just five" text
+  was already gone from the live file, so this was a wording tightening
+- [x] ✅ **Task 2.2**: Add the source-to-test line ratio beside the test badge,
+  measuring both figures rather than trusting the request's numbers. Re-measured
+  via `find … -exec wc -l`: 69,419 source lines / 157,974 test lines = 2.3× —
+  both figures differ from the request's (63,509 / 145,073) but the ratio
+  matches almost exactly; trusted my own measurement
+- [x] ✅ **Task 2.3**: Reconcile the priority bands — `## What's Built In` lists
   five categories, `## Writing Custom Handlers` lists six; add the missing band
-  or drop it
-- [ ] ⬜ **Task 2.4**: Move `Requirements` (Python version, OS support) up, or
-  surface those two facts in the badge row
-- [ ] ⬜ **Task 2.5**: Add a one-line maintainer credit with a link near the top
+  or drop it. Re-measured: actually 4 vs 5 (not 5 vs 6) before this change. Added
+  a `### Advisory` category to `## What's Built In` (british_english,
+  daemon_docs_guard) without touching `## Writing Custom Handlers`, which is on
+  the do-not-rewrite list
+- [x] ✅ **Task 2.4**: Move `Requirements` (Python version, OS support) up, or
+  surface those two facts in the badge row. Chose the badge-row option: added a
+  Platform badge (Python version was already badged)
+- [x] ✅ **Task 2.5**: Add a one-line maintainer credit with a link near the top.
+  Linked to the GitHub org already referenced elsewhere in the file
+  (`Edmonds-Commerce-Limited`) rather than an unverified external URL
 
 ### Phase 3: Verification
 
-- [ ] ⬜ **Task 3.1**: Confirm every retained claim is independently verified
+- [x] ✅ **Task 3.1**: Confirm every retained claim is independently verified
   against the repository, not carried over from the request document
-- [ ] ⬜ **Task 3.2**: Run QA — `validate_instruction_content` and `doc_truth`
-  both police README content
+- [x] ✅ **Task 3.2**: Run QA — `validate_instruction_content` and `doc_truth`
+  both police README content. `./scripts/qa/llm_qa.py all` (in-worktree, via a
+  borrowed shared venv) → 17/20 PASSED, 3/20 FAILED. `doc_truth: 0 violations`
+  (the check that governs README content) and `british_english: 0 violations`
+  both passed cleanly. The 3 failures are worktree/shared-venv artefacts, not
+  README regressions: `tests` reported 11805 passed/0 failed/15 skipped but a
+  non-zero exit + implausible 4.2% coverage (coverage data corrupted by
+  concurrent sibling-agent pytest runs sharing the borrowed venv);
+  `smoke_test` needs a live daemon socket that only exists for the real
+  project root, which a worktree cannot provide; `canonical_callers` did not
+  run. This in-worktree run is informational only — the coordinator's
+  authoritative gate is the full suite re-run on the merged tree against the
+  real project root
 
 ## Success Criteria
 

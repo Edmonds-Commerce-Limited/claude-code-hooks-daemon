@@ -2,11 +2,16 @@
 
 ![Version](https://img.shields.io/badge/version-3.52.0-blue)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
+![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Tests](https://img.shields.io/badge/tests-11400%2B%20passing-success)
 ![Coverage](https://img.shields.io/badge/coverage-95%25%20required-success)
 
-**A better way to build and maintain Claude Code hooks.**
+*69,419 lines of source, 157,974 lines of tests — the test tree is 2.3× the size of the thing it tests.*
+
+Maintained by [Edmonds Commerce](https://github.com/Edmonds-Commerce-Limited).
+
+**Guardrails for coding agents — containment, policy enforcement and quality gates, evaluated on every tool call before it runs.**
 
 A long-running Python daemon that Claude Code's hook events are forwarded to
 over a Unix socket. Instead of one script per hook, you register one thin
@@ -22,43 +27,42 @@ languages, plan/journal workflow QA, status line), all opt-in via one YAML file.
 
 ---
 
-## Installation & Updates
+## What this solves
 
-> **For humans:** See [Installation](#installation) and [Updating](#updating) sections below for manual and AI-assisted instructions.
+A coding agent with shell access will eventually run the command nobody thought
+to forbid. Not maliciously, and usually mid-way through doing exactly what was
+asked: a `git reset --hard` to tidy the tree before committing, a `sed -i`
+across a directory of files that mangles most of them, an API key pasted into
+source because it was the shortest path to a green test.
 
-**LLM Quick Reference** — paste these into Claude Code to install or update:
+Claude Code exposes hooks — points where an external program inspects a tool
+call and allows, blocks or annotates it before it runs. That is the right
+mechanism, and it is underused, because each hook is a separate program spawned
+per event, and changing one usually means restarting your session. Most
+projects wire up two or three and stop.
 
-<details>
-<summary>Install (copy into Claude Code)</summary>
+This daemon makes handlers cheap enough to write dozens of. Lightweight
+forwarder scripts — one per event — pass events over a Unix socket to a
+long-lived Python process holding every handler in memory. Adding another
+handler costs almost nothing at runtime, and the daemon restarts in under a
+second without touching your session.
 
-```
-Use curl to fetch and save this file:
-curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md -o /tmp/LLM-INSTALL.md
-Then read /tmp/LLM-INSTALL.md and follow the instructions exactly.
-```
-
-</details>
-
-<details>
-<summary>Update (copy into Claude Code)</summary>
-
-```
-Use curl to fetch and save this file:
-curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md -o /tmp/LLM-UPDATE.md
-Then read /tmp/LLM-UPDATE.md and follow the instructions exactly.
-```
-
-</details>
+**The enforcement is deterministic.** A handler is a function returning allow
+or deny — not a prompt, and not a judgement the model makes about its own
+behaviour. It cannot be reasoned with, and it decides the thousandth call
+exactly as it decided the first. For the failure that actually matters — the
+destructive command issued confidently and in good faith — that is the
+property you want.
 
 ---
 
-## Why Use This?
+## Why a daemon rather than plain hooks
 
 Claude Code's native hook system is powerful but difficult to iterate on. Hooks are small programs registered in settings — to test a change you need to modify external files and often restart your session to pick up the changes.
 
 **The daemon changes this fundamentally.**
 
-When installed, your project has exactly one Claude Code hook per event type — a lightweight shell script that does nothing but forward the event to the daemon over a Unix socket. Registration is a fixed, one-time cost that never grows with the number of handlers. The daemon is a separate Python process that **you can restart independently of Claude Code**.
+When installed, your project registers one lightweight forwarder per event type — a thin shell script that does nothing but forward the event to the daemon over a Unix socket. Registration is a fixed, one-time cost that never grows with the number of handlers. The daemon is a separate Python process that **you can restart independently of Claude Code**.
 
 This means you can use Claude Code itself to write and modify hook handlers, restart the daemon with a single command, and immediately test your changes — all without leaving your current session. The tool you're using to edit code becomes the tool you use to improve the hooks that govern how you edit code.
 
@@ -112,10 +116,58 @@ The daemon ships with a large library of production handlers spanning every hook
 - **Web search year** (`web_search_year`) — Warns when a search query carries an outdated year
 - **Git context injector** (`git_context_injector`) — Injects current git status as context on each prompt
 
+### Advisory
+
+- **British English checker** (`british_english`) — Warns about American English spellings in content files; non-blocking
+- **Daemon docs guard** (`daemon_docs_guard`) — Warns when reading from the hooks-daemon's internal `CLAUDE/` docs directory
+
 ### Session Management
 
 - **YOLO container detection** (`yolo_container_detection`) — Identifies container environments from OS-level markers
 - **Version checker** (`version_check`) — Alerts when the daemon is out of date
+
+---
+
+## Deterministic vs Agent-Based Hooks
+
+The daemon is designed for **fast, deterministic validation**. For reasoning-heavy evaluation, use Claude Code's native agent-based hooks.
+
+| Use Daemon For                          | Use Agent Hooks For                       |
+| --------------------------------------- | ----------------------------------------- |
+| Pattern matching (regex, string checks) | Workflow compliance validation            |
+| Fast synchronous validation             | Context analysis (transcripts, git state) |
+| Reusable safety rules across sessions   | Multi-turn investigation                  |
+| Deterministic, stateless logic          | Reasoning and judgement calls             |
+
+---
+
+## Installation & Updates
+
+> **For humans:** See [Installation](#installation) and [Updating](#updating) sections below for manual and AI-assisted instructions.
+
+**LLM Quick Reference** — paste these into Claude Code to install or update:
+
+<details>
+<summary>Install (copy into Claude Code)</summary>
+
+```
+Use curl to fetch and save this file:
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md -o /tmp/LLM-INSTALL.md
+Then read /tmp/LLM-INSTALL.md and follow the instructions exactly.
+```
+
+</details>
+
+<details>
+<summary>Update (copy into Claude Code)</summary>
+
+```
+Use curl to fetch and save this file:
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md -o /tmp/LLM-UPDATE.md
+Then read /tmp/LLM-UPDATE.md and follow the instructions exactly.
+```
+
+</details>
 
 ---
 
@@ -334,19 +386,6 @@ handlers:
 ```
 
 **Available tags:** `safety`, `tdd`, `qa-suppression-prevention`, `workflow`, `advisory`, `git`, `npm`, `python`, `typescript`, `javascript`, `php`, `go`
-
----
-
-## Deterministic vs Agent-Based Hooks
-
-The daemon is designed for **fast, deterministic validation**. For reasoning-heavy evaluation, use Claude Code's native agent-based hooks.
-
-| Use Daemon For                          | Use Agent Hooks For                       |
-| --------------------------------------- | ----------------------------------------- |
-| Pattern matching (regex, string checks) | Workflow compliance validation            |
-| Fast synchronous validation             | Context analysis (transcripts, git state) |
-| Reusable safety rules across sessions   | Multi-turn investigation                  |
-| Deterministic, stateless logic          | Reasoning and judgment calls              |
 
 ---
 
