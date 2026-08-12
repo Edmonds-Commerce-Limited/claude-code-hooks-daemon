@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (39 handlers)
+### PreToolUse (41 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -27,6 +27,8 @@
 | 23 | ask_user_question_blocker | TERMINAL | Allow AskUserQuestion only when every question is prefix-justified |
 | 23 | daemon_restart_verifier | ADVISORY | Verify daemon can restart before allowing git commits |
 | 30 | qa_suppression | BLOCKING | Block QA suppression comments across all supported languages |
+| 31 | comment_changelog | BLOCKING | Block Write/Edit content that writes historical narrative into a comment |
+| 33 | comment_size | BLOCKING | Block/advise on over-long comments, tiered like plan-doc-size |
 | 33 | plan_number_helper | ADVISORY | Detect bash commands attempting to discover plan numbers and provide correct answer |
 | 35 | tdd_enforcement | BLOCKING | Enforce TDD by blocking production file creation without corresponding test file |
 | 36 | task_tdd_advisor | ADVISORY | Advise on TDD workflow when spawning Task agents for implementation work |
