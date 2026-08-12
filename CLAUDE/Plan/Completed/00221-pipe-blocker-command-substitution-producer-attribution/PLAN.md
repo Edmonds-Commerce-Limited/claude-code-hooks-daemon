@@ -1,6 +1,6 @@
 # Plan 00221: pipe blocker command substitution producer attribution
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: High
@@ -115,7 +115,7 @@ extraction being pointed at the wrong text.
 
 ### Phase 5: Verify
 
-- [ ] ⬜ **Task 5.1**: Full QA suite passes
+- [x] ✅ **Task 5.1**: Full QA suite passes
 - [x] ✅ **Task 5.2**: Daemon restarts RUNNING and the probe is re-run against
   the live daemon through the production forwarder
 - [x] ✅ **Task 5.3**: Whitelist `pgrep` — correcting the attribution exposed
@@ -134,7 +134,7 @@ extraction being pointed at the wrong text.
   half; an all-cheap multi-pipe command stays ALLOWED
 - [x] A genuine `| tail -f` / `| head -c` pipe remains exempt while an
   unrelated one elsewhere in the command exempts nothing
-- [ ] Full QA passes and the daemon restarts RUNNING
+- [x] Full QA passes and the daemon restarts RUNNING
 
 ## Delivery & Milestones
 
@@ -143,3 +143,7 @@ extraction being pointed at the wrong text.
      JOURNAL/00221-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Defect pinned by probe against the live daemon before any code change
+- Delivered in f167d9fa, alongside Plans 00219 and 00220: `CLAUDE/Plan/README.md`
+  and `.claude/HOOKS-DAEMON.md` are shared index/generated artifacts, so
+  splitting the plans across commits would have broken `row-folder-bijection`
+  or `terminal-state-atomic` in whichever landed first

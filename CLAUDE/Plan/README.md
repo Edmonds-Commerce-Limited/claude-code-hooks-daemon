@@ -116,8 +116,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Handler UX Adjustments
 
-- [00221: pipe blocker command substitution producer attribution](00221-pipe-blocker-command-substitution-producer-attribution/PLAN.md) - In Progress (a pipe inside `$( )` is attributed to the OUTER command, so `echo $(expensive | head -1)` launders any producer past the whitelist; fix reads the producer from the innermost substitution)
-
 - [00117: Enable ask_user_question_blocker (dogfood → default-on)](00117-ask-user-question-blocker-default-on/PLAN.md) - Dormant (remaining: flip shipped default + regression test; awaiting scheduling)
 
   - Dogfooding alert: agent stalled twice asking tautological questions ("Should I push?"); the prefix-positive `ask_user_question_blocker` (Plan 00108 / v3.14.0) was shipped `enabled: false` so it never fired
@@ -165,6 +163,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00221: pipe blocker producer attribution and per-pipe evaluation](Completed/00221-pipe-blocker-command-substitution-producer-attribution/PLAN.md) - Complete (three bypasses, one root cause: the handler judged the whole command rather than each pipe, so a whitelisted outer command, a cheap earlier pipe, or an unrelated tail -f each laundered an expensive producer)
 
 - [00220: stale exclusion audit in qa suppression files](Completed/00220-stale-exclusion-audit-in-qa-suppression-files/PLAN.md) - Complete (a suppression file was only ever read to REMOVE findings, so nothing asked whether each entry still earned its place. An exclusion matching nothing is now a violation — it means the entry drifted off its target or its code was fixed. Found 6 dead entries on first run.)
 
@@ -1148,11 +1148,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 221 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 175 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 35 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 176 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 34 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 35 + 175 + 5 = **215 folders**, spanning
+- **Folder-to-number reconciliation**: 34 + 176 + 5 = **215 folders**, spanning
   **212 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1162,9 +1162,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work). 212 + 9 = 221. ✅
-- **Last reconciled by**: the Plan 00221 opening — one new root folder and the
-  counter advanced by `mkplan.bash`, so Total and Active each rose by one
-  while Completed and Cancelled were untouched. Before that, the Plan 00219 +
+- **Last reconciled by**: the Plan 00221 closure — the `git mv` into
+  `Completed/` moves one folder between the Active and Completed splits and
+  leaves the folder total unchanged, which is why this line is recounted
+  twice per plan (once on opening, once on archiving). Before that, the Plan
+  00221 opening — one new root folder and the counter advanced by
+  `mkplan.bash`, so Total and Active each rose by one while Completed and
+  Cancelled were untouched. Before that, the Plan 00219 +
   00220 closures — recounted from
   disk after both `git mv`s, with the counter re-read (00220 was scaffolded by
   `mkplan.bash`, which advances it). Before that, the Plan 00218 merge and
