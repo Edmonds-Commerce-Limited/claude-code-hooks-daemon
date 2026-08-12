@@ -659,6 +659,69 @@ project/
 - Root `.gitignore` also updated automatically with `.claude/hooks-daemon/` entry
 - If auto-creation fails, manual instructions are displayed
 
+### Which Files Under `.claude/` Are Yours?
+
+**Most of `.claude/` is yours. A short, fixed list is not.** The daemon owns the
+files below: it rewrites them on every install and upgrade, so a local edit is
+discarded. They are the daemon's, not your project's — do not edit them, and do
+not treat their contents as your code.
+
+`.claude/hooks-daemon/` is the obvious one and needs no thought: the installer
+git-ignores it, and ruff, black and most modern tooling respect `.gitignore`, so
+it is already outside your quality gates without you doing anything.
+
+**The rest of the list is not git-ignored, and that is deliberate** — these
+files only work if they are committed, so your teammates receive them. The same
+fact puts daemon-owned source inside your linters' default scope.
+
+| Deployed path                              | What it is                                    | Why it cannot live in `.claude/hooks-daemon/`               |
+| ------------------------------------------ | --------------------------------------------- | ----------------------------------------------------------- |
+| `.claude/init.sh`                          | Daemon lifecycle / socket resolution          | Sourced by every hook forwarder; must sit beside them       |
+| `.claude/hooks/*`                          | Hook forwarder scripts                        | Claude Code executes them by the path in `settings.json`    |
+| `.claude/skills/hooks-daemon/scripts/*.sh` | Skill helper scripts                          | Claude Code only discovers skills under `.claude/skills/`   |
+| `CLAUDE/Plan/mkplan.bash`                  | Plan scaffolder (plan workflow only)          | Runs inside your plan directory and is documented that way  |
+| `.claude/ccy/claude-supervise.py`          | Standalone PTY supervisor (ccy projects only) | `exec`'d by the ccy launcher; committed so teammates get it |
+
+Every path in that table is asserted against
+`src/claude_code_hooks_daemon/install/client_owned_assets.py` — the daemon's
+single manifest of what it deploys into client-owned space — by a test that
+fails if the two disagree. A new deployed asset therefore cannot reach you
+undocumented.
+
+#### Excluding Them From Your Quality Gates
+
+Every file above is checked upstream against its language's **default** rule set
+(`ruff check --isolated` for Python, `shellcheck -x` for shell) and ships clean.
+If your project selects **stricter** rules than the defaults, they may report
+findings you cannot act on: you cannot fix them (the next upgrade overwrites the
+file) and you cannot suppress them inline (the daemon's own `qa_suppression`
+handler denies an agent writing a suppression directive). Exclude them instead.
+
+Ruff:
+
+```toml
+# ruff.toml / pyproject.toml — daemon-owned, refreshed on upgrade; do not lint
+[lint.per-file-ignores]
+".claude/ccy/claude-supervise.py" = ["BLE001", "DTZ005", "DTZ006"]
+```
+
+Or, to exclude the daemon-owned files wholesale rather than rule-by-rule:
+
+```toml
+[tool.ruff]
+extend-exclude = [".claude/ccy/claude-supervise.py", ".claude/init.sh", ".claude/hooks"]
+```
+
+Shell (`.shellcheckrc`), if you check `.claude/hooks/*` without `-x`:
+
+```
+# Follow the `source .claude/init.sh` the forwarders perform
+source-path=SCRIPTDIR
+```
+
+**Report anything the defaults catch.** A daemon-owned file that is dirty under
+default rules is an upstream bug — file it rather than excluding around it.
+
 ---
 
 ## Feedback & Issue Reporting

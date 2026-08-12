@@ -50,7 +50,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00216: plan duplicate source detection](00216-plan-duplicate-source-detection/PLAN.md) - Not Started (DBF follow-up to the 00199/00213 duplication: `plan_qa` enforces number collisions and index bijection but is blind to two plans covering the same source document, so a duplicate is only caught if a human happens to notice.)
 
-- [00217: supervisor deployed into client owned path](00217-supervisor-deployed-into-client-owned-path/PLAN.md) - Not Started (field report: `claude-supervise.py` deploys into client-owned `.claude/ccy/` rather than the `.claude/hooks-daemon/` vendor path clients exclude, so every client lints upstream code they cannot fix, silence, or keep. The three ruff findings are deliberate and correct; the deployment location is the bug.)
+- [00217: supervisor deployed into client owned path](00217-supervisor-deployed-into-client-owned-path/PLAN.md) - In Progress (daemon-owned assets deploy outside the vendor dir into client-lintable space and none declared it. The field report's premise proved wrong — `ruff --isolated` passes clean; its three findings need `BLE`/`DTZ` selected — so the fix is the ownership boundary, not the rules. Awaiting post-merge QA + daemon restart before closure.)
 
 - Root cause: agents conflate `PLAN.md` with `JOURNAL/` and append narrative progress into the plan. Measured churn proves it — `del/add` ratio 0.00–0.18 across large plans (00104: 885 lines added, **zero** deleted), so plans grow monotonically (57 KB locally, 100 KB+ reported in client projects)
 
