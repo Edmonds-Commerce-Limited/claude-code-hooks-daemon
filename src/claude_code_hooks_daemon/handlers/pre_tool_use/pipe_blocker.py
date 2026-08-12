@@ -118,7 +118,7 @@ _COMMON_ENGLISH_FUNCTION_WORDS: frozenset[str] = frozenset(
 # Leading/trailing punctuation stripped from a candidate first token before
 # comparing against the function-word set (heredoc prose often starts
 # mid-sentence, or the token was quoted).
-_TOKEN_PUNCTUATION_STRIP = ".,;:!?\"'()[]{}"
+_LEADING_TRAILING_PUNCTUATION = ".,;:!?\"'()[]{}"
 
 # Task 1.3: the echoed COMMAND line is capped at this many characters
 # regardless of path (blacklisted/unknown/prose) — the full text is rarely
@@ -515,7 +515,7 @@ class PipeBlockerHandler(Handler):
         words = source_segment.split()
         if not words:
             return False
-        first_token = words[0].strip(_TOKEN_PUNCTUATION_STRIP).lower()
+        first_token = words[0].strip(_LEADING_TRAILING_PUNCTUATION).lower()
         return first_token in _COMMON_ENGLISH_FUNCTION_WORDS
 
     def _prose_reason(self) -> str:
@@ -675,7 +675,7 @@ class PipeBlockerHandler(Handler):
             "handler** (the literal characters `| tail`/`| head` are matched even "
             "inside prose). When the matched text does not look like a real "
             "command — implausibly long, or starting with a common English word "
-            "like \"the\" — the block reason is short and does NOT echo your text "
+            'like "the" — the block reason is short and does NOT echo your text '
             "back or suggest a fabricated `extra_whitelist` entry. If this "
             "happens, just retry (nothing to fix); to avoid it entirely, write "
             "prose content with the `Write` tool instead of a `cat <<EOF` heredoc."

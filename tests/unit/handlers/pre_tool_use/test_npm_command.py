@@ -496,6 +496,21 @@ class TestNpmCommandHandler:
         assert "cache files" in result.reason
         assert "jq to query" in result.reason
 
+    def test_handle_pipe_block_caps_echoed_command_length(self, handler: NpmCommandHandler) -> None:
+        """Plan 00209 Task 1.4 (DBF audit): the piped-command branch echoes
+        the FULL raw command back into the deny reason with no length cap —
+        the same defect class fixed in pipe_blocker.py. A long command (a
+        heredoc or verbose one-liner containing 'npm run X ... |') must not
+        be echoed back in full."""
+        long_command = "npm run test " + ("x" * 1000) + " | grep failed"
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": long_command},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert len(result.reason) < 1000
+
     def test_handle_pipe_block_extracts_command_name(self, handler: NpmCommandHandler) -> None:
         """Pipe blocking extracts command name for suggestion."""
         hook_input: dict[str, Any] = {
