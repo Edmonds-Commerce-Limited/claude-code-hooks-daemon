@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.plan_qa.context import edit_context
 from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME
+from claude_code_hooks_daemon.plan_qa.remedy import remedy_sentence
 from claude_code_hooks_daemon.plan_qa.report import format_advisory, format_block_reason
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
 from claude_code_hooks_daemon.plan_qa.types import Finding, Level, Stage
@@ -173,14 +174,15 @@ class PlanQaEditHandler(Handler):
             "  ad-hoc markers like `[✓]`/`[⏳]` (`task-grammar`)\n"
             "- a `PLAN.md` must stay under the size tiers (`plan-doc-size`):\n"
             "  advisory above 18,000 bytes / 350 lines, escalated warning above\n"
-            "  25,000 / 500, and edits BLOCKED above 35,000 / 900. The two\n"
-            "  remedies are RELOCATE the narrative into this plan's `JOURNAL/`\n"
-            "  or SPLIT the plan — never delete content. Only an edit that\n"
+            "  25,000 / 500, and edits BLOCKED above 35,000 / 900. "
+            f"{remedy_sentence()} Only an edit that\n"
             "  GROWS the file can be blocked (shrinking is silent, same-size\n"
             "  only advises), so an oversized plan can always be updated and\n"
             "  refactored down; declare a genuine exception in the file with\n"
-            "  `<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`. Journals and\n"
-            "  the plan-index README are exempt at any size.\n"
+            "  `<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`. Journals,\n"
+            "  supporting docs and the plan-index README are exempt at any\n"
+            "  size — if the advisory notes the folder has none, that is a\n"
+            "  hint the bulk may want a named supporting document, not proof.\n"
             "\n"
             "**Advisory rules**: missing Created/Owner/Priority headers on new\n"
             "plans; a terminal status set while the folder is still in the plan\n"
