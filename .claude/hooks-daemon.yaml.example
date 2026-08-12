@@ -128,6 +128,14 @@ handlers:
       #     - JavaScript/TypeScript
       #     - PHP
 
+    comment_changelog:     # Blocks changelog narrative accumulating in a code comment
+      enabled: false       # Enable for strict code quality control
+      priority: 31
+
+    comment_size:          # Caps over-long comments (only growing an over-limit one is blocked)
+      enabled: false       # Enable for strict code quality control
+      priority: 33
+
     tdd_enforcement:       # Enforces test-first development
       enabled: false       # Enable for strict TDD workflow
       priority: 32
@@ -264,6 +272,17 @@ handlers:
     background_process_tracker:  # Tracks backgrounded processes; advises harvest-background + watchdog cron (never kills)
       enabled: true              # On by default (opt-out); advisory-only and rate-limited. Set false to disable.
       priority: 28
+
+    command_hints:  # Config-driven advisory reminder after a configured command (e.g. agent-browser -> close session)
+      enabled: true  # On by default (opt-out); advisory-only, never blocks. Set false to disable.
+      priority: 29
+      # options:
+      #   mode: additive          # additive (default) | replace
+      #   hints:
+      #     - id: agent-browser-close-session   # overrides the built-in hint of the same id
+      #       pattern: "agent-browser"
+      #       hint: "Custom reminder text"
+      #       ttl_seconds: 1800
 
     recovery_cron_advisor:  # Advises on failsafe recovery cron lifecycle (creation, progress, completion)
       enabled: true         # On by default (opt-out); advisory-only, fires only on CLAUDE/Plan/*/PLAN.md writes. Set false to disable.

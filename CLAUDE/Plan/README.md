@@ -1139,7 +1139,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 212 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191, 00195 and 00210 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run, and 00210 by a sub-agent that scaffolded it, then found Plan 00208 already covered the same work and withdrew its duplicate in favour of it; 00211 was allocated by the counter but is not present on this worktree branch at time of writing, most likely a concurrent agent's plan in a sibling worktree not yet merged)
+- **Total Plans Created**: 212 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191, 00195, 00210 and 00211 were allocated by the counter but their folders are not present on this branch — see this section's git history for the per-number rationale)
 - **Completed**: 164 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 - **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
