@@ -918,6 +918,22 @@ MUST_STASH_BECAUSE="explain why"; git stash
 
 Configure via `handlers.pre_tool_use.git_stash.options.mode: warn` for advisory-only mode.
 
+## git_message_backtick — backticks in a double-quoted git message
+
+Bash runs command substitution inside DOUBLE quotes, so backticks in `git commit -m "..."` (and `git tag -m "..."`) are EXECUTED and the span is replaced by the command's stdout. The commit still succeeds, so the text is lost silently — this is not hypothetical, a commit in this repo lost a phrase exactly this way.
+
+**Blocked**: an unescaped backtick inside a double-quoted `-m`/`--message` value on `git commit` or `git tag`.
+
+**Always allowed** — none of these substitute:
+
+- Single quotes: `git commit -m 'text with `backticks` stays literal'`
+- A message file: `git commit -F <file>`
+- A backslash-escaped `` \` `` inside double quotes
+
+**Prefer single quotes or `-F` for any message containing markdown.** If a message needs BOTH backticks and interpolation, put it in a file and use `-F` — do not try to escape your way through it.
+
+Note this handler covers the CORRUPTION case only. A *dangerous* command inside backticks is already denied by the full-command-string matching in `destructive_git` and friends, which run at a lower priority and give the better reason.
+
 ## lock_file_edit_blocker — never directly edit lock files
 
 Direct `Write` or `Edit` to package manager lock files is blocked. Lock files are generated artifacts; manual edits create checksum mismatches and broken dependency graphs.
