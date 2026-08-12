@@ -21,6 +21,22 @@ from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 # matches() and handle().
 _NPM_RUN_SCRIPT_PATTERN = r"\bnpm\s+run\s+([A-Za-z0-9:_-]+)"
 
+# Plan 00209 Task 1.4 (DBF audit): pipe_blocker's remediation-output defect
+# (echoing unbounded matched text into a deny reason) is not unique to that
+# handler. The piped-command branch below echoes the FULL raw command —
+# which can be an arbitrarily long heredoc/one-liner that merely happens to
+# contain both "npm run X" and a literal "|" — so it gets the same cap.
+_MAX_ECHOED_COMMAND_CHARS = 300
+_TRUNCATION_SUFFIX = "… [truncated]"
+
+
+def _truncate_command(command: str) -> str:
+    """Cap echoed command text (Task 1.3/1.4): the full text is rarely what
+    makes a block actionable, and re-quoting a long command wastes context."""
+    if len(command) <= _MAX_ECHOED_COMMAND_CHARS:
+        return command
+    return command[:_MAX_ECHOED_COMMAND_CHARS] + _TRUNCATION_SUFFIX
+
 
 class NpmCommandHandler(Handler):
     """Enforce llm: prefixed npm commands and block direct npx tool usage."""
@@ -114,7 +130,7 @@ class NpmCommandHandler(Handler):
                     f"  • Full data in JSON cache files\n"
                     f"  • Use jq to query cache files directly\n\n"
                     f"BLOCKED COMMAND:\n"
-                    f"  {command}\n\n"
+                    f"  {_truncate_command(command)}\n\n"
                     f"INSTEAD:\n"
                     f"  1. Run: npm run llm:{cmd_name.replace('llm:', '')}\n"
                     f"  2. Query cache with jq: jq '.results[] | select(.success == false)' ./var/qa/{{type}}-cache.json\n"

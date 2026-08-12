@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.config.models import (
     PlanWorkflowConfig,
     PluginConfig,
     PluginsConfig,
+    VerdictLogConfig,
 )
 from claude_code_hooks_daemon.constants import EventID
 
@@ -488,6 +489,42 @@ class TestPluginsConfig:
         assert config.plugins[0].event_type == EventID.PRE_TOOL_USE.config_key
         assert config.plugins[1].handlers == ["Handler1"]
         assert config.plugins[1].event_type == EventID.SESSION_START.config_key
+
+
+class TestVerdictLogConfig:
+    """Tests for VerdictLogConfig model (Plan 00209 verdict log)."""
+
+    def test_default_enabled_is_true(self) -> None:
+        """Default-on: only handler/rule/verdict metadata is recorded, never
+        tool payloads or file contents, so there is no privacy reason to
+        ship it dormant (Plan 00209 Task 2.6)."""
+        config = VerdictLogConfig()
+        assert config.enabled is True
+
+    def test_default_max_bytes(self) -> None:
+        """Default retention budget is a positive number of bytes."""
+        config = VerdictLogConfig()
+        assert config.max_bytes > 0
+
+    def test_can_disable(self) -> None:
+        config = VerdictLogConfig(enabled=False)
+        assert config.enabled is False
+
+    def test_can_set_max_bytes(self) -> None:
+        config = VerdictLogConfig(max_bytes=1024)
+        assert config.max_bytes == 1024
+
+    def test_max_bytes_must_be_positive(self) -> None:
+        with pytest.raises(ValidationError):
+            VerdictLogConfig(max_bytes=0)
+        with pytest.raises(ValidationError):
+            VerdictLogConfig(max_bytes=-1)
+
+    def test_daemon_config_carries_verdict_log_defaults(self) -> None:
+        """VerdictLogConfig is reachable via DaemonConfig.verdict_log."""
+        config = DaemonConfig()
+        assert isinstance(config.verdict_log, VerdictLogConfig)
+        assert config.verdict_log.enabled is True
 
 
 class TestDaemonConfig:

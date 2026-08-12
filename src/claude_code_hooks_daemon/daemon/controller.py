@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from claude_code_hooks_daemon.config.models import VerdictLogConfig
 from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
@@ -27,6 +28,7 @@ from claude_code_hooks_daemon.core.pseudo_event import (
     merge_pseudo_results,
 )
 from claude_code_hooks_daemon.core.router import EventRouter
+from claude_code_hooks_daemon.daemon.verdict_log import append_verdicts
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 
 if TYPE_CHECKING:
@@ -125,6 +127,7 @@ class DaemonController:
         "_registry",
         "_router",
         "_stats",
+        "_verdict_log_config",
     )
 
     def __init__(self, config: "DaemonConfig | None" = None) -> None:
@@ -141,6 +144,14 @@ class DaemonController:
         self._degraded = False
         self._config_errors: list[str] = []
         self._mode_manager = self._init_mode_manager(config)
+        # Verdict log config (Plan 00209): narrow config-slice passed via
+        # initialise() — the same DI idiom already used for plan_workflow /
+        # pseudo_events_config, since the `config` constructor parameter
+        # above is not populated by the real daemon startup path
+        # (_build_initialised_controller constructs DaemonController() with
+        # no config and threads individual slices into initialise() instead).
+        # Defaults enabled=True (metadata-only, no privacy reason to be dormant).
+        self._verdict_log_config: VerdictLogConfig = VerdictLogConfig()
         self._pseudo_dispatcher: PseudoEventDispatcher | None = None
 
     def initialise(
@@ -153,6 +164,7 @@ class DaemonController:
         project_exclude_paths: list[str] | None = None,
         pseudo_events_config: dict[str, dict[str, Any]] | None = None,
         plan_workflow: "PlanWorkflowConfig | None" = None,
+        verdict_log: "VerdictLogConfig | None" = None,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -168,6 +180,9 @@ class DaemonController:
             project_exclude_paths: Project-level path-exclusion globs from daemon.exclude_paths
             pseudo_events_config: Optional pseudo-event configuration from hooks-daemon.yaml
             plan_workflow: Optional PlanWorkflowConfig for plan-related handlers
+            verdict_log: Optional VerdictLogConfig (Plan 00209) for the
+                per-decision audit log. None uses VerdictLogConfig()'s
+                defaults (enabled).
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -184,6 +199,12 @@ class DaemonController:
             )
 
         logger.info("Initialising DaemonController")
+
+        # Verdict log config (Plan 00209): a narrow config slice, same idiom
+        # as plan_workflow/pseudo_events_config above. None (the default when
+        # the caller passes nothing, e.g. every existing unit test) falls
+        # back to VerdictLogConfig()'s own defaults (enabled).
+        self._verdict_log_config = verdict_log or VerdictLogConfig()
 
         # Initialize ProjectContext singleton (single source of truth for project-level constants)
         # May already be initialized from CLI config validation
@@ -695,6 +716,13 @@ class DaemonController:
                     reason=result.result.reason,
                 )
 
+            # Persist the verdict log (Plan 00209): every matched handler's
+            # OWN decision (result.decisions, from HandlerChain.execute —
+            # NOT the blunt "attribute the final chain decision to every
+            # matched handler" the loop above does for HandlerHistory), so
+            # the daemon's effectiveness stops being anecdote.
+            self._record_verdicts(event, result, hook_input_dict)
+
             # Dispatch pseudo-events (if configured)
             if self._pseudo_dispatcher is not None:
                 session_id = event.hook_input.session_id or "default"
@@ -726,6 +754,40 @@ class DaemonController:
                 result=error_result,
                 execution_time_ms=processing_time,
             )
+
+    def _record_verdicts(
+        self,
+        event: HookEvent,
+        result: ChainExecutionResult,
+        hook_input_dict: dict[str, Any],
+    ) -> None:
+        """Append this dispatch's verdict lines to verdicts.jsonl (Plan 00209).
+
+        Fail-open by design, mirroring notification_logger and
+        payload_capture: a logging failure must never break hook dispatch,
+        which carries safety-critical handlers. RuntimeError (ProjectContext
+        not initialised — the default-config / standalone entry-point branch
+        exercised by many unit tests) and OSError (unwritable dir) are
+        logged at warning level, never silently swallowed.
+        """
+        if not self._verdict_log_config.enabled:
+            return
+        try:
+            log_dir = ProjectContext.daemon_untracked_dir() / "logs" / "hooks"
+            append_verdicts(
+                enabled=True,
+                decisions=result.decisions,
+                hook_input=hook_input_dict,
+                event=event.event_type.value,
+                tool_name=event.hook_input.tool_name or "",
+                session_id=event.hook_input.session_id or "default",
+                log_dir=log_dir,
+                max_bytes=self._verdict_log_config.max_bytes,
+            )
+        except RuntimeError as e:
+            logger.warning("Skipping verdict log (no project context): %s", e)
+        except OSError as e:
+            logger.warning("Failed to write verdict log: %s", e)
 
     def process_request(self, request_data: dict[str, Any]) -> dict[str, Any]:
         """Process a raw request from the socket server.

@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import VerdictLogConfig
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
 from claude_code_hooks_daemon.core.event import EventType, HookEvent
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -919,3 +920,121 @@ class TestIntegration:
         assert health["status"] == "healthy"
         assert health["initialised"] is True
         assert health["stats"]["requests_processed"] >= 1
+
+
+class TestControllerVerdictLog:
+    """Tests for verdict log wiring in process_event (Plan 00209).
+
+    The verdict log is a core dispatch-level capability, not a per-handler
+    opt-in — process_event() is the single choke point (mirrors the
+    pre-existing data_layer.history.record() loop it sits alongside), reading
+    VerdictLogConfig via initialise()'s narrow config-slice parameter (the
+    same DI idiom already used for plan_workflow/pseudo_events_config, since
+    the DaemonController(config=...) constructor parameter is not populated
+    by the real daemon startup path).
+    """
+
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+
+    @pytest.fixture
+    def workspace_root(self, tmp_path: Path) -> Path:
+        workspace = tmp_path / "test-workspace"
+        claude_dir = workspace / ".claude"
+        claude_dir.mkdir(parents=True)
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "handlers:\n"
+            "  pre_tool_use: {}\n"
+        )
+        return workspace
+
+    def _initialised_controller(
+        self, workspace_root: Path, verdict_log: VerdictLogConfig | None = None
+    ) -> DaemonController:
+        controller = DaemonController()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root, verdict_log=verdict_log)
+        return controller
+
+    def _bash_event(self, command: str = "git push --force origin main") -> "HookEvent":
+        from claude_code_hooks_daemon.core.event import HookInput
+
+        return HookEvent(
+            event=EventType.PRE_TOOL_USE,
+            hook_input=HookInput(
+                tool_name="Bash",
+                tool_input={"command": command},
+                transcript_path="/tmp/transcript.jsonl",
+                session_id="verdict-test-session",
+            ),
+        )
+
+    def _verdict_log_path(self, workspace_root: Path) -> Path:
+        return (
+            workspace_root
+            / ".claude"
+            / "hooks-daemon"
+            / "untracked"
+            / "logs"
+            / "hooks"
+            / "verdicts.jsonl"
+        )
+
+    def test_default_enabled_writes_verdicts_jsonl(self, workspace_root: Path) -> None:
+        """Default (no verdict_log passed) is enabled — metadata-only, no
+        privacy reason to ship dormant (Task 2.6)."""
+        controller = self._initialised_controller(workspace_root)
+
+        controller.process_event(self._bash_event())
+
+        assert self._verdict_log_path(workspace_root).exists()
+
+    def test_disabled_writes_nothing(self, workspace_root: Path) -> None:
+        controller = self._initialised_controller(
+            workspace_root, verdict_log=VerdictLogConfig(enabled=False)
+        )
+
+        controller.process_event(self._bash_event())
+
+        assert not self._verdict_log_path(workspace_root).exists()
+
+    def test_recorded_line_carries_session_and_event(self, workspace_root: Path) -> None:
+        import json
+
+        controller = self._initialised_controller(workspace_root)
+
+        controller.process_event(self._bash_event())
+
+        lines = self._verdict_log_path(workspace_root).read_text(encoding="utf-8").splitlines()
+        assert lines
+        record = json.loads(lines[0])
+        assert record["session"] == "verdict-test-session"
+        assert record["event"] == "PreToolUse"
+        assert record["tool"] == "Bash"
+
+    def test_escape_hatch_is_recorded_even_with_no_matched_handler(
+        self, workspace_root: Path
+    ) -> None:
+        """An escape-hatch marker on an otherwise-unremarkable command still
+        yields a synthetic override line end to end through process_event."""
+        import json
+
+        controller = self._initialised_controller(workspace_root)
+
+        controller.process_event(
+            self._bash_event(command='MUST_STASH_BECAUSE="urgent fix"; git stash')
+        )
+
+        lines = self._verdict_log_path(workspace_root).read_text(encoding="utf-8").splitlines()
+        records = [json.loads(line) for line in lines]
+        assert any(r["overridden"] for r in records)

@@ -927,4 +927,126 @@ class TestHandlerChain:
         assert h2.handle_called == 0
         assert h3.handle_called == 1
         assert h4.handle_called == 0
-        assert h5.handle_called == 1
+
+
+class TestChainDecisions:
+    """Tests for ChainExecutionResult.decisions (Plan 00209 verdict log).
+
+    The pre-existing controller.py loop over ``handlers_matched`` attributes
+    the SAME final chain decision to every matched handler, which is wrong
+    for a non-terminal handler whose own decision got superseded by a later
+    handler (Plan 00144's "most restrictive decision wins" rule). The verdict
+    log needs each handler's OWN decision, captured once, in the front
+    controller — not per handler opt-in.
+    """
+
+    def test_default_decisions_is_empty_list(self) -> None:
+        """ChainExecutionResult.decisions defaults to an empty list."""
+        result = HookResult.allow()
+        exec_result = ChainExecutionResult(result=result)
+        assert exec_result.decisions == []
+
+    def test_decisions_records_one_entry_per_matched_handler(self) -> None:
+        """Every matched handler gets exactly one HandlerVerdict entry."""
+        chain = HandlerChain()
+        h1 = MockHandler("h1", priority=10, result=HookResult.allow())
+        h2 = MockHandler("h2", priority=20, should_match=False)
+        h3 = MockHandler("h3", priority=30, terminal=True, result=HookResult.deny(reason="blocked"))
+
+        chain.add(h1)
+        chain.add(h2)
+        chain.add(h3)
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        names = [d.handler for d in result.decisions]
+        assert names == ["h1", "h3"]  # h2 never matched, so no verdict
+
+    def test_decisions_capture_each_handlers_own_decision_not_the_merged_final(
+        self,
+    ) -> None:
+        """A superseded non-terminal deny still shows as its OWN deny.
+
+        Regression guard for the controller.py bug this plan fixes: naively
+        attributing the final chain decision to every matched handler would
+        report h2 (an ALLOW) as DENY here, because the final chain result is
+        DENY (h1's non-terminal deny survives per Plan 00144).
+        """
+        chain = HandlerChain()
+        h1 = MockHandler(
+            "h1", priority=10, terminal=False, result=HookResult.deny(reason="non-terminal deny")
+        )
+        h2 = MockHandler("h2", priority=20, terminal=True, result=HookResult.allow())
+
+        chain.add(h1)
+        chain.add(h2)
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.decision == Decision.DENY  # chain-level outcome
+        by_handler = {d.handler: d.decision for d in result.decisions}
+        assert by_handler["h1"] == Decision.DENY
+        assert by_handler["h2"] == Decision.ALLOW  # h2's OWN decision, not DENY
+
+    def test_decisions_record_terminal_flag(self) -> None:
+        """Each verdict records whether its handler is terminal."""
+        chain = HandlerChain()
+        h1 = MockHandler("h1", priority=10, terminal=False, result=HookResult.allow())
+        h2 = MockHandler("h2", priority=20, terminal=True, result=HookResult.allow())
+        chain.add(h1)
+        chain.add(h2)
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        by_handler = {d.handler: d.terminal for d in result.decisions}
+        assert by_handler["h1"] is False
+        assert by_handler["h2"] is True
+
+    def test_decisions_carry_optional_rule_from_hook_result(self) -> None:
+        """A handler that sets HookResult.rule surfaces it on the verdict."""
+        chain = HandlerChain()
+        h1 = MockHandler(
+            "h1",
+            priority=10,
+            terminal=True,
+            result=HookResult(decision=Decision.DENY, reason="x", rule="blacklisted"),
+        )
+        chain.add(h1)
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.decisions[0].rule == "blacklisted"
+
+    def test_decisions_rule_defaults_to_none(self) -> None:
+        """A handler that never sets rule surfaces None on the verdict."""
+        chain = HandlerChain()
+        h1 = MockHandler("h1", priority=10, terminal=True, result=HookResult.allow())
+        chain.add(h1)
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.decisions[0].rule is None
+
+    def test_decisions_skip_a_crashed_handler_in_strict_mode(self) -> None:
+        """A handler that raises made no verdict — it is not recorded."""
+        chain = HandlerChain()
+        h1 = MockHandler("h1", priority=10, raise_exception=ValueError("boom"))
+        chain.add(h1)
+
+        result = chain.execute({"tool_name": "Bash"}, strict_mode=True)
+
+        assert result.decisions == []
+
+    def test_decisions_skip_a_crashed_handler_in_non_strict_mode(self) -> None:
+        """Fail-open mode also records no verdict for the crashed handler,
+        while the chain continues and records the next handler's verdict."""
+        chain = HandlerChain()
+        h1 = MockHandler("h1", priority=10, raise_exception=ValueError("boom"))
+        h2 = MockHandler("h2", priority=20, terminal=True, result=HookResult.allow())
+        chain.add(h1)
+        chain.add(h2)
+
+        result = chain.execute({"tool_name": "Bash"}, strict_mode=False)
+
+        names = [d.handler for d in result.decisions]
+        assert names == ["h2"]

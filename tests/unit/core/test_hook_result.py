@@ -965,3 +965,34 @@ class TestHookResultToResponseDict:
         }
         assert output["timing_ms"] == 12.35
         assert output["handlers_matched"] == []
+
+
+class TestHookResultRule:
+    """Tests for the optional ``rule`` field (Plan 00209 verdict log).
+
+    A handler MAY set ``rule`` to a short, stable, machine-readable string
+    naming which internal check/pattern produced the decision (e.g.
+    pipe_blocker distinguishing "blacklisted" from "unknown"). It is purely
+    optional metadata for the verdict log — most handlers never set it and
+    that is fine; the field defaults to ``None`` so the log schema stays
+    stable even for handlers that never opt in.
+    """
+
+    def test_rule_defaults_to_none(self):
+        """rule is None unless a handler explicitly sets it."""
+        result = HookResult.allow()
+        assert result.rule is None
+
+    def test_rule_can_be_set_on_construction(self):
+        """rule can be passed through the constructor like any other field."""
+        result = HookResult(decision=Decision.DENY, reason="blocked", rule="blacklisted")
+        assert result.rule == "blacklisted"
+
+    def test_rule_is_not_serialised_into_claude_code_json(self):
+        """rule is internal verdict-log metadata, not part of the Claude Code
+        hook response contract — to_json output must not carry it."""
+        result = HookResult(decision=Decision.DENY, reason="blocked", rule="blacklisted")
+        output = result.to_json("PreToolUse")
+        assert "rule" not in output
+        hook_specific = output.get("hookSpecificOutput", {})
+        assert "rule" not in hook_specific

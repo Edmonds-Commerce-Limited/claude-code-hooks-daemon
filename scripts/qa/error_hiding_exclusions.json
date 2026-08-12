@@ -751,6 +751,18 @@
       "function": "_compile_public_patterns",
       "rule": "silent-continue",
       "reason": "Plan 00200 Task 5.4: re.error compiling one client-configured public_pattern while building a list of several -- skips the invalid entry and continues with the rest. Same shape as handlers/pre_tool_use/sensitive_content.py::_compiled_public_pattern above."
+    },
+    {
+      "file": "daemon/controller.py",
+      "function": "_record_verdicts",
+      "rule": "log-and-continue",
+      "reason": "Plan 00209 verdict log: log-and-continue on RuntimeError (ProjectContext not initialised -- the default-config/standalone entry-point branch exercised by many unit tests) and OSError (untracked dir unwritable). The verdict log is a metadata-only audit trail; a failed write must never break hook dispatch, which carries safety-critical handlers. Both errors are logged at warning level, never silently swallowed. Same sanctioned fail-open contract as daemon/server.py::_capture_payload_best_effort and handlers/notification/notification_logger.py::handle."
+    },
+    {
+      "file": "daemon/verdict_report.py",
+      "function": "read_verdict_records",
+      "rule": "silent-continue",
+      "reason": "Plan 00209 verdict log reporting: except json.JSONDecodeError: continue is the standard JSONL pattern -- identical shape to transcript_reader.read_incremental, background_harvester.read_tracked_pgids, and hedging_language_detector._parse_transcript. One corrupted append (e.g. a crash mid-write) must not hide every other decision recorded around it."
     }
   ]
 }

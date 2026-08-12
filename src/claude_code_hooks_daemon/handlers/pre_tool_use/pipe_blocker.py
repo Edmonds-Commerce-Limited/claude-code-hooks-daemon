@@ -47,6 +47,86 @@ _ECHD_CAPTURE_REL_PARTS = ("scripts", _ECHD_CAPTURE_NAME)
 # false match.
 _MESSAGE_BODY_PLACEHOLDER = "<REDACTED>"
 
+# Sanity-check thresholds before templating a remediation block (Plan 00209
+# §1 / Task 1.2). Field report: a heredoc journal entry whose PROSE described
+# an earlier pipe block tripped detection (correct — the literal characters
+# of a pipe-to-pager were present). The defect was what happened NEXT: the
+# matched "command" was run through the extra_whitelist/echd-capture
+# templates, which extracted "the" (the first word of a SENTENCE) as a binary
+# name and offered `extra_whitelist: - "^the\\b"` plus a full remediation
+# block — a correct safety decision presented as broken, and several hundred
+# lines of the agent's own prose echoed back into a denial reason. Detection
+# itself is NOT changed (Non-Goals) — only whether the verbose template is
+# safe to build from what was matched.
+#
+# A real "text before a pipe" shell segment is rarely long; prose commonly
+# is. This is a structural heuristic, not shell parsing.
+_MAX_SOURCE_SEGMENT_CHARS_FOR_TEMPLATE = 80
+
+# Closed-class English function words (articles, pronouns, conjunctions,
+# prepositions, common auxiliary verbs, wh-words) — never a valid Unix
+# command name, so a first token drawn from this set is always prose. This
+# is what actually happened in the field report: the sentence "the guardrail
+# blocks piping straight to a pager... | tail" had "the" as its first word.
+_COMMON_ENGLISH_FUNCTION_WORDS: frozenset[str] = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "this",
+        "that",
+        "these",
+        "those",
+        "it",
+        "its",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "and",
+        "or",
+        "but",
+        "so",
+        "because",
+        "if",
+        "when",
+        "while",
+        "as",
+        "which",
+        "who",
+        "whom",
+        "what",
+        "why",
+        "how",
+        "where",
+        "of",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "with",
+        "from",
+        "by",
+        "about",
+    }
+)
+
+# Leading/trailing punctuation stripped from a candidate first token before
+# comparing against the function-word set (heredoc prose often starts
+# mid-sentence, or the token was quoted).
+_LEADING_TRAILING_PUNCTUATION = ".,;:!?\"'()[]{}"
+
+# Task 1.3: the echoed COMMAND line is capped at this many characters
+# regardless of path (blacklisted/unknown/prose) — the full text is rarely
+# what makes a block actionable, and re-quoting a long command wastes
+# context. Applied uniformly, not just to the prose fallback.
+_MAX_ECHOED_COMMAND_CHARS = 500
+_TRUNCATION_SUFFIX = "… [truncated]"
+
 # Shell separators that end one command and begin the next. A NEWLINE is one of
 # them: omitting it meant a multi-line command never split, so the producer for
 # "cd /workspace\ngrep foo | head" resolved to the whole two-line string and no
@@ -402,12 +482,73 @@ class PipeBlockerHandler(Handler):
         except Exception:
             return 0
 
+    @staticmethod
+    def _truncate_command(command: str) -> str:
+        """Cap the echoed COMMAND text (Task 1.3): the full text is rarely
+        what makes a block actionable, and re-quoting a long command wastes
+        context. Applied unconditionally, regardless of which message path
+        is used below."""
+        if len(command) <= _MAX_ECHOED_COMMAND_CHARS:
+            return command
+        return command[:_MAX_ECHOED_COMMAND_CHARS] + _TRUNCATION_SUFFIX
+
+    @staticmethod
+    def _looks_like_prose(source_segment: str) -> bool:
+        """Sanity-check before templating (Task 1.2): does the matched text
+        look like a real shell command, or like prose that happens to
+        contain the literal characters of a pipe-to-pager?
+
+        Two independent, purely structural/lexical triggers — no shell
+        parsing (Non-Goals: detection itself is unchanged):
+
+        - the segment is implausibly long for "text before a pipe" in a
+          real command (a heredoc/prose sentence commonly is; a shell
+          command piped to tail/head rarely is)
+        - its first token is a closed-class English function word — never a
+          valid Unix command name (this is the exact field-report failure:
+          "the" extracted as a binary name from a sentence)
+        """
+        if not source_segment:
+            return False
+        if len(source_segment) > _MAX_SOURCE_SEGMENT_CHARS_FOR_TEMPLATE:
+            return True
+        words = source_segment.split()
+        if not words:
+            return False
+        first_token = words[0].strip(_LEADING_TRAILING_PUNCTUATION).lower()
+        return first_token in _COMMON_ENGLISH_FUNCTION_WORDS
+
+    def _prose_reason(self) -> str:
+        """Short, accurate block reason for matched text that looks like
+        prose, not a shell command (Task 1.1/1.2). Deliberately carries NO
+        remediation template and does NOT echo the matched text back — the
+        field-report defect was exactly a correct safety decision presented
+        as broken by re-quoting a large amount of the agent's own prose
+        wrapped in fabricated shell scaffolding.
+        """
+        return (
+            "🚫 BLOCKED: pipe-like pattern (`| tail` / `| head`) detected, but the "
+            "matched text does not look like a real shell command\n\n"
+            "WHY BLOCKED:\n"
+            "  • This handler errs on the side of caution and cannot reliably tell "
+            "heredoc/prose content apart from executable shell text\n"
+            "  • The matched text is not shown here — it did not look like a "
+            "command, so re-quoting it would not help\n\n"
+            "IF THIS WAS A REAL COMMAND: rephrase so the piped segment starts "
+            "with a recognisable program name (e.g. `grep ... | tail`)\n\n"
+            "IF THIS WAS PROSE (e.g. a heredoc describing a pipe pattern): no "
+            "action needed beyond retrying — the false trigger is now handled; "
+            "for a permanent fix use the `Write` tool instead of a `cat <<EOF` "
+            "heredoc for prose content\n\n"
+            f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
+        )
+
     def _blacklisted_reason(self, source_segment: str, command: str) -> str:
         """Return verbose block message for known-expensive commands (blacklisted)."""
         source_name = source_segment.split()[0] if source_segment else "command"
         return (
             f"🚫 BLOCKED: Pipe to tail/head detected\n\n"
-            f"COMMAND: {command}\n\n"
+            f"COMMAND: {self._truncate_command(command)}\n\n"
             f"WHY BLOCKED:\n"
             f"  • Piping {source_name} to tail/head causes information loss\n"
             f"  • If needed data isn't in those N truncated lines, the ENTIRE\n"
@@ -422,7 +563,7 @@ class PipeBlockerHandler(Handler):
         source_name = source_segment.split()[0] if source_segment else "command"
         return (
             f"BLOCKED: Pipe to tail/head — {source_name} is expensive\n\n"
-            f"COMMAND: {command}\n\n"
+            f"COMMAND: {self._truncate_command(command)}\n\n"
             f"{self._echd_capture_terse(source_segment)}\n"
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
@@ -432,7 +573,7 @@ class PipeBlockerHandler(Handler):
         source_name = source_segment.split()[0] if source_segment else "command"
         return (
             f"🚫 BLOCKED: Pipe to tail/head detected\n\n"
-            f"COMMAND: {command}\n\n"
+            f"COMMAND: {self._truncate_command(command)}\n\n"
             f"WHY BLOCKED:\n"
             f"  • This command is unrecognized by the pipe blocker\n"
             f"  • If it is cheap/safe to pipe, add it to {_CONFIG_HINT_EXTRA_WHITELIST} in "
@@ -453,7 +594,7 @@ class PipeBlockerHandler(Handler):
         source_name = source_segment.split()[0] if source_segment else "command"
         return (
             f"BLOCKED: Pipe to tail/head — {source_name} unrecognized\n\n"
-            f"COMMAND: {command}\n\n"
+            f"COMMAND: {self._truncate_command(command)}\n\n"
             f"Add to whitelist in .claude/hooks-daemon.yaml:\n"
             f"  {_CONFIG_YAML_KEY}:\n"
             f"    {_CONFIG_HINT_EXTRA_WHITELIST}:\n"
@@ -470,6 +611,15 @@ class PipeBlockerHandler(Handler):
         # for the real one that triggered the block. The displayed COMMAND
         # below still shows the full, un-redacted original.
         source_segment = self._extract_source_segment(self._strip_message_bodies(command))
+
+        # Task 1.2: sanity-check BEFORE templating. Matched text that looks
+        # like prose, not a shell command, gets a short accurate reason and
+        # skips the extra_whitelist/echd-capture template entirely — that
+        # template is what turned a defensible block into an embarrassing
+        # one (Plan 00209 §1).
+        if self._looks_like_prose(source_segment):
+            return HookResult(decision=Decision.DENY, reason=self._prose_reason())
+
         block_count = self._get_block_count()
 
         # Differentiate: known expensive vs unrecognized, verbose vs terse
@@ -520,7 +670,15 @@ class PipeBlockerHandler(Handler):
             "as a plan's `JOURNAL/` day-file — which you should tail or grep rather "
             "than read whole.\n\n"
             "**Add to whitelist** (if safe to pipe): set `extra_whitelist` in "
-            "`.claude/hooks-daemon.yaml` under `pipe_blocker`."
+            "`.claude/hooks-daemon.yaml` under `pipe_blocker`.\n\n"
+            "**A heredoc body describing a pipe pattern can false-trigger this "
+            "handler** (the literal characters `| tail`/`| head` are matched even "
+            "inside prose). When the matched text does not look like a real "
+            "command — implausibly long, or starting with a common English word "
+            'like "the" — the block reason is short and does NOT echo your text '
+            "back or suggest a fabricated `extra_whitelist` entry. If this "
+            "happens, just retry (nothing to fix); to avoid it entirely, write "
+            "prose content with the `Write` tool instead of a `cat <<EOF` heredoc."
         )
 
     def get_acceptance_tests(self) -> list[Any]:
@@ -617,6 +775,34 @@ class PipeBlockerHandler(Handler):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes="--dry-run --allow-empty: no commit is created, no side effects",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="heredoc prose describing a pipe pattern gets a short reason, no fabricated remediation",
+                command=(
+                    "false && cat >> /tmp/never-created-$$.md <<'EOF'\n"
+                    "the guardrail described above blocks piping straight to a pager e.g. output | tail -20\n"
+                    "EOF"
+                ),
+                description=(
+                    "Plan 00209 §1: a heredoc body whose PROSE contains the literal "
+                    "characters of a pipe-to-pager still gets blocked (detection is "
+                    "unchanged — correct, cautious behaviour), but must NOT be run "
+                    "through the extra_whitelist/echd-capture template (the field-report "
+                    "defect: 'the' extracted as a binary name from a sentence) and must "
+                    "NOT echo the prose back. 'false &&' short-circuits so the heredoc "
+                    "write never executes even if the hook fails to block."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"does not look like a real shell command",
+                ],
+                safety_notes=(
+                    "Safe no-op: 'false' exits 1, && short-circuits, the heredoc write "
+                    "never executes."
+                ),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

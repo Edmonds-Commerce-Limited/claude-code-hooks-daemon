@@ -124,6 +124,12 @@ class HookResult(BaseModel):
     # decision), so the handler carries the absolute path here and to_json emits
     # {"worktreePath": ...} which the forwarder prints raw.
     worktree_path: str | None = Field(default=None)
+    # Optional sub-classification of WHICH internal check/pattern produced this
+    # decision (Plan 00209 verdict log). Purely internal metadata consumed by
+    # the verdict-log writer — never part of the Claude Code hook response, so
+    # to_json() never emits it. Most handlers never set it; that is fine, the
+    # verdict log records it as null in that case.
+    rule: str | None = Field(default=None)
 
     @field_validator("decision", mode="before")
     @classmethod

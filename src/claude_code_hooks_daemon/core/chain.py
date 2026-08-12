@@ -29,6 +29,34 @@ def _is_restrictive(decision: Decision | str | None) -> bool:
     return decision in _RESTRICTIVE_DECISIONS
 
 
+@dataclass(frozen=True, slots=True)
+class HandlerVerdict:
+    """One matched handler's OWN decision from a single chain execution.
+
+    Plan 00209 (verdict log): the chain-level ``ChainExecutionResult.result``
+    is the MERGED outcome (most-restrictive-decision-wins, Plan 00144), which
+    is the wrong thing to attribute to every matched handler — a non-terminal
+    handler whose deny is superseded by nothing still made a real decision,
+    and a handler whose result got overridden by an earlier restrictive
+    decision still deserves its own accurate record. This is captured once,
+    here, in the chain loop — not by each handler opting in.
+
+    Attributes:
+        handler: Name of the handler that produced this verdict.
+        decision: The handler's OWN decision (never the chain's merged one).
+        terminal: Whether this handler is registered as terminal.
+        rule: Optional handler-set sub-classification (``HookResult.rule``),
+            e.g. pipe_blocker's "blacklisted" vs "unknown". None when the
+            handler did not set one — most handlers never do, and that is
+            fine; the verdict log records it as null in that case.
+    """
+
+    handler: str
+    decision: Decision
+    terminal: bool
+    rule: str | None = None
+
+
 @dataclass(slots=True)
 class ChainExecutionResult:
     """Result of handler chain execution.
@@ -39,6 +67,9 @@ class ChainExecutionResult:
         handlers_matched: List of handler names that matched
         execution_time_ms: Total execution time in milliseconds
         terminated_by: Handler name that terminated the chain (if any)
+        decisions: Per-handler verdicts (Plan 00209) — one entry per matched
+            handler that actually returned a decision (a handler that raised
+            an exception made no verdict and is not recorded here).
     """
 
     result: HookResult
@@ -49,6 +80,7 @@ class ChainExecutionResult:
     # Handler that OWNS the restrictive decision (deny/ask), when any — the
     # correct attribution target for the "To disable:" footer (Plan 00144).
     decided_by: str | None = None
+    decisions: list[HandlerVerdict] = field(default_factory=list)
 
 
 class HandlerChain:
@@ -179,6 +211,7 @@ class HandlerChain:
         final_result: HookResult | None = None
         terminated_by: str | None = None
         decided_by: str | None = None
+        decisions: list[HandlerVerdict] = []
 
         for handler in self.handlers:
             try:
@@ -195,6 +228,18 @@ class HandlerChain:
                     )
                     handlers_executed.append(handler.name)
                     result.add_handler(handler.name)
+
+                    # Record THIS handler's own verdict now, before any later
+                    # handler's laxer/stricter result can change what the
+                    # eventual merged chain decision looks like (Plan 00209).
+                    decisions.append(
+                        HandlerVerdict(
+                            handler=handler.name,
+                            decision=result.decision,
+                            terminal=handler.terminal,
+                            rule=result.rule,
+                        )
+                    )
 
                     # First restrictive decision wins attribution: this is the
                     # handler the "To disable:" footer must name.
@@ -292,6 +337,7 @@ class HandlerChain:
             execution_time_ms=execution_time_ms,
             terminated_by=terminated_by,
             decided_by=decided_by,
+            decisions=decisions,
         )
 
     def execute_legacy(self, hook_input: dict[str, Any]) -> HookResult:
