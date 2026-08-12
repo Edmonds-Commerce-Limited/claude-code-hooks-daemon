@@ -31,6 +31,70 @@ config_changes:
         handlers.post_tool_use.command_hints.enabled: false. See
         docs/guides/HANDLER_REFERENCE.md#command_hints for the full hint
         schema.
+    - key: handlers.pre_tool_use.comment_changelog
+      recommended: true
+      dormant: true
+      description: >-
+        NEW PreToolUse blocking handler (Plan 00208). Denies a Write/Edit
+        whose COMMENT SPANS contain historical narrative -- a changelog
+        belongs in git, in CHANGELOG.md, or in a plan's JOURNAL/, not in a
+        code comment, which should describe CURRENT STATE. Two
+        high-precision signals block: "Prior <version>:" /
+        "Previously <version>:" phrasing, and a date-prefixed entry. Both
+        were measured at ZERO false positives across this project's own
+        ~1,080 source and test files before being made blocking. Four
+        weaker signals were DEMOTED to advisory after that same self-scan
+        caught each firing on legitimate code -- a version-transition
+        arrow, a changelog verb naming a version, two or more distinct
+        versioned/dated entries in one comment (options.max_history_entries,
+        default 1), and retrospective phrasing -- because version-processing
+        utilities legitimately cite several versions in their own
+        docstrings. History as RATIONALE is deliberately NOT flagged: the
+        separating test is that an entry keyed by a RELEASE NUMBER is a
+        changelog, while an entry keyed by a FAILURE MODE (a plan number, a
+        bug description) is the reason the code looks the way it does. Only
+        comment spans are scanned, never code; .md files are skipped
+        entirely; and on Edit only the ADDED text is checked, so REMOVING
+        changelog content is never blocked. Deliberately has NO
+        MUST_..._BECAUSE escape hatch -- changelog content should be MOVED,
+        never exempted in place.
+      migration_note: >-
+        Ships disabled. Enable with
+        handlers.pre_tool_use.comment_changelog.enabled: true. Tune with
+        options.max_history_entries (advisory threshold) and options.mode
+        (block | warn). Vendor, build and fixture directories are excluded
+        by default; add more via options.exclude_paths or the project-wide
+        daemon.exclude_paths. Expect the first enablement to surface
+        existing comments -- a write-time guard does not see what is
+        already on disk, so an oversized backlog is normal and is cleared
+        by editing, not by disabling.
+    - key: handlers.pre_tool_use.comment_size
+      recommended: true
+      dormant: true
+      description: >-
+        NEW PreToolUse blocking handler (Plan 00208). Caps over-long
+        comments using the SAME grow/shrink/same-size tiering as
+        plan-doc-size, with two independent limits, either of which trips
+        it: a single comment line longer than options.max_comment_line_chars
+        (default 400), or a contiguous comment block longer than
+        options.max_comment_block_lines (default 40). The tiering is what
+        makes it safe to adopt on a legacy codebase: SHRINKING an
+        over-limit comment is silent and always allowed, a SAME-SIZE edit
+        only advises, and only an edit that GROWS an already-over-limit
+        comment is denied. So an over-commented file is never trapped --
+        it stays editable and can always be refactored down. Docstrings
+        and JSDoc are treated as API documentation rather than comments
+        and are exempt entirely (they remain subject to
+        comment_changelog).
+      migration_note: >-
+        Ships disabled. Enable with
+        handlers.pre_tool_use.comment_size.enabled: true. Tune
+        options.max_comment_line_chars, options.max_comment_block_lines and
+        options.mode (block | warn). For a genuinely unavoidable long
+        comment -- verbatim upstream licence text that must not be
+        reflowed, say -- declare it in the content itself with a
+        "MUST_EXCEED_COMMENT_SIZE_BECAUSE: <reason>" line rather than
+        disabling the handler.
   renamed: []
   removed: []
   changed: []

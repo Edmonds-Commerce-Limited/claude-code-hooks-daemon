@@ -1,0 +1,56 @@
+version: "3.53.0"
+truth_changes:
+  - was: >
+      When a PLAN.md grows past the size tiers there are exactly TWO remedies,
+      and neither is deletion: RELOCATE the narrative into the plan's JOURNAL/
+      day-file, or SPLIT the plan if the task tree itself is the bulk. If
+      neither fits your content, the remaining option is to compress the prose
+      until the file drops under the threshold.
+    now: >
+      There are THREE remedies, and the one that is correct most often was the
+      one never named: EXTRACT durable detail -- research output, findings,
+      decisions and their reasoning, drafts, evidence tables -- into a NAMED
+      SUPPORTING DOCUMENT in the plan folder (RESEARCH-*.md, DECISIONS.md, a
+      brief) and link to it from the task that needs it. PLAN.md is a task list
+      plus instructions; almost anything making it big is detail that wants a
+      name of its own. The justification is the same read-contract argument
+      that already justifies JOURNAL/: a supporting doc is unbounded because it
+      is only opened when its link is followed, so it costs nothing to the
+      sessions that do not need it. This is the progressive-disclosure
+      principle the markdown_organization handler already applies to
+      .claude/rules/*.md -- the plan system simply was not applying its own
+      rule. Concretely, three things changed: (1) the plan-doc-size remedy text
+      now lists EXTRACT first, ahead of RELOCATE and SPLIT; (2) when the check
+      fires on a plan folder containing no supporting documents, it appends a
+      folder-shape hint saying so, since a PLAN.md over the threshold with no
+      supporting docs is usually a plan being used as a notepad -- offered
+      explicitly as a suggestion from folder shape and NOT as a diagnosis,
+      because a plan can legitimately be large when its task tree genuinely is
+      the bulk; and (3) the supporting-docs structure, which the daemon's own
+      internal PlanWorkflow.md has always used, is now shipped to client
+      projects instead of staying upstream.
+      Correct your own docs if they assert the two-remedy version. The
+      practical consequence of the old wording was measured in a client
+      project: an agent hit the advisory repeatedly, found neither sanctioned
+      remedy fitted content that was durable and CURRENT rather than
+      historical, and so compressed prose five times -- deleting a decision
+      table outright purely to clear a threshold. Applying the third remedy
+      instead took that PLAN.md from 19,045 to 9,520 bytes with all 31 tasks
+      intact, and the extracted material ended up FULLER than what had been
+      compressed away, because it finally had a legitimate home.
+  - was: >
+      The plan-shrink-without-journal commit check distinguishes a relocation
+      from a deletion by a single reliable signal: a relocation stages a
+      JOURNAL/ entry and a deletion does not. So a commit that shrinks a
+      PLAN.md by 2,000+ bytes without staging a journal entry has deleted
+      narrative.
+    now: >
+      That premise is true for HISTORICAL narrative and false for DURABLE
+      narrative. Extracting content into a supporting document is a
+      textbook relocation that stages no journal entry at all, so the check
+      previously reported the most correct possible action as a deletion --
+      actively punishing the behaviour the guidance is now promoting. The
+      check now also accepts a newly ADDED .md file staged in the same plan
+      folder (excluding JOURNAL/) as evidence of relocation, exactly as it
+      accepts a journal entry. If you have been journalling solely to keep
+      this check quiet while extracting, you no longer need to.
