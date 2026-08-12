@@ -219,6 +219,12 @@ handlers:
       options:
         mode: deny             # Block git stash entirely (use git commit or worktree instead)
 
+    ancestry_preserving_merge: # Blocks git merge --squash / gh pr merge --squash|--rebase (Plan 00207)
+      enabled: true
+      priority: 19
+      options:
+        mode: block             # Block ancestry-severing merges (use --no-ff / gh pr merge --merge)
+
     lock_file_edit_blocker: # Prevents editing package lock files
       enabled: true
       priority: 20

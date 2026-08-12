@@ -1,6 +1,7 @@
 """PreToolUse handlers for claude-code-hooks-daemon."""
 
 from .absolute_path import AbsolutePathHandler
+from .ancestry_preserving_merge import AncestryPreservingMergeHandler
 from .british_english import BritishEnglishHandler
 from .comment_changelog import CommentChangelogHandler
 from .comment_size import CommentSizeHandler
@@ -28,6 +29,7 @@ from .worktree_file_copy import WorktreeFileCopyHandler
 
 __all__ = [
     "AbsolutePathHandler",
+    "AncestryPreservingMergeHandler",
     "BritishEnglishHandler",
     "CommentChangelogHandler",
     "CommentSizeHandler",

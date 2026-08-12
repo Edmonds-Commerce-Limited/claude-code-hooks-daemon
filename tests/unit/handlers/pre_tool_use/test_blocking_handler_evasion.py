@@ -133,6 +133,16 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
         "gh pr view 123",
         ("/usr/bin/gh pr view 123", "command gh pr view 123"),
     ),
+    "AncestryPreservingMergeHandler": (
+        "git merge --squash feature-branch",
+        (
+            f"git -C {_SAFE_PATH} merge --squash feature-branch",
+            "git --no-pager merge --squash feature-branch",
+            # Line continuations: same shell idiom that defeated destructive_git.
+            "git \\\n  merge --squash feature-branch",
+            f"git \\\n  -C {_SAFE_PATH} \\\n  merge --squash feature-branch",
+        ),
+    ),
 }
 
 # class name -> safe commands that must NOT match after the widening.
@@ -188,6 +198,14 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
     "PipBreakSystemHandler": ("pip install requests", "pip install --user requests"),
     "GhIssueCommentsHandler": ("gh issue view 123 --comments",),
     "GhPrCommentsHandler": ("gh pr view 123 --comments",),
+    "AncestryPreservingMergeHandler": (
+        "git merge feature-branch",
+        "git merge --no-ff feature-branch",
+        "gh pr merge --merge 123",
+        "git rebase main",
+        'git commit -m "squash these debug prints later"',
+        f"git -C {_SAFE_PATH} log --oneline -n 5",
+    ),
 }
 
 # Handlers that do NOT anchor on a command name, so no respelling applies.
