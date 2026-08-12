@@ -1,6 +1,6 @@
 # Plan 00209: field feedback daemon self observability
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: High
@@ -75,37 +75,63 @@ codebase of a different kind (code, not docs).
 
 ### Phase 1: `pipe_blocker` remediation output (TDD) — §1
 
-- [ ] ⬜ **Task 1.1**: Failing test — a heredoc body of prose produces a block
+- [x] ✅ **Task 1.1**: Failing test — a heredoc body of prose produces a block
   reason with NO remediation template and NO echoed prose
-- [ ] ⬜ **Task 1.2**: Sanity-check before templating: if the matched "command"
+- [x] ✅ **Task 1.2**: Sanity-check before templating: if the matched "command"
   has no recognisable binary as its first token, or exceeds a sane length, emit
   the reason alone
-- [ ] ⬜ **Task 1.3**: Cap the echoed command at N characters regardless. The
+- [x] ✅ **Task 1.3**: Cap the echoed command at N characters regardless. The
   full text is rarely what makes a block actionable
-- [ ] ⬜ **Task 1.4**: Audit every other handler that echoes matched input into
+- [x] ✅ **Task 1.4**: Audit every other handler that echoes matched input into
   a remediation template — this defect class is not unique to `pipe_blocker`
-  (DBF: fix the shared output path, not the one instance)
+  (DBF: fix the shared output path, not the one instance). An Explore agent
+  audited every `pre_tool_use` handler; found and fixed one real instance
+  (`npm_command.py`'s piped-command branch echoed the full raw command with
+  no cap). All others either lack the naive-extraction-into-config-template
+  step, or only echo already-bounded literal matches.
 
 ### Phase 2: Verdict log — §3, the valuable half
 
-- [ ] ⬜ **Task 2.1**: Design decision — where the write happens so EVERY
-  handler decision is captured without each handler opting in (front controller,
-  not per handler)
-- [ ] ⬜ **Task 2.2**: Append-only `verdicts.jsonl`, one line per decision:
-  `{ts, session, event, tool, handler, verdict, rule, mode}`
-- [ ] ⬜ **Task 2.3**: Record an `overridden` marker when a `MUST_…_BECAUSE`
-  escape hatch was used — an override is the strongest available signal that a
-  rule is mis-tuned
-- [ ] ⬜ **Task 2.4**: Retention. It must be bounded like the other JSONL logs,
-  but note the Plan 00206 lesson: a cap that discards the oldest half silently
-  corrupts any cumulative statistic derived from it. Decide explicitly whether
-  this log is a rolling sample or a durable counter, and say which in the docs
-- [ ] ⬜ **Task 2.5**: A `hooks-daemon verdicts` reporting command — per-handler
-  fire counts, verdict mix, override rate, never-fired handlers
-- [ ] ⬜ **Task 2.6**: Config gate + docs. Decide default-on vs default-off on
-  privacy grounds: the log records tool names and rule names, not payloads
+- [x] ✅ **Task 2.1**: Design decision — the write happens in
+  `DaemonController.process_event()` (`daemon/controller.py`), reading
+  `ChainExecutionResult.decisions` (new field on `core/chain.py`, populated
+  once per matched handler inside `HandlerChain.execute()`), so every handler
+  decision is captured without any handler opting in
+- [x] ✅ **Task 2.2**: Append-only `verdicts.jsonl` via `daemon/verdict_log.py`,
+  one line per decision: `{ts, session, event, tool, handler, verdict, rule, mode, overridden}`
+- [x] ✅ **Task 2.3**: Synthetic `overridden: true` record when a
+  `MUST_…_BECAUSE=`/`MUST_…_BECAUSE:` escape hatch marker is detected anywhere
+  in the event payload — detects the SHARED convention shape once, since the
+  bypassed handler's own `matches()` returns `False` and so contributes no
+  entry of its own for that event
+- [x] ✅ **Task 2.4**: Retention decision made EXPLICIT: `verdicts.jsonl` is a
+  bounded ROLLING SAMPLE via the same `cap_log_file` primitive as every other
+  daemon JSONL log (Plan 00181) — NOT a durable lifetime counter. Documented in
+  the module docstring, `VerdictLogConfig`, and `docs/guides/VERDICT_LOG.md`;
+  `hooks-daemon verdicts`' own output states this explicitly on every run so
+  the numbers can never be read as lifetime totals (the Plan 00206 lesson)
+- [x] ✅ **Task 2.5**: `hooks-daemon verdicts` CLI command
+  (`daemon/verdict_report.py` + `cli.py`) — per-handler fire counts, per-handler
+  verdict mix, overall verdict mix, override count/rate, and never-fired
+  handlers (queried from a running daemon over the socket; reports
+  "unavailable" rather than a misleading empty list when no daemon is running)
+- [x] ✅ **Task 2.6**: Config gate (`daemon.verdict_log.enabled`, default
+  `true`) + docs (`docs/guides/VERDICT_LOG.md`, linked from `CLAUDE.md`).
+  Default-on because only handler/rule/verdict metadata is recorded, never
+  tool payloads or file contents — no privacy reason to ship it dormant.
+  Along the way, found and fixed a real wiring bug: `DaemonController`'s
+  `config` constructor parameter is never populated by the real daemon
+  startup path (`_build_initialised_controller` always constructs
+  `DaemonController()` with no config), which would have made
+  `verdict_log.enabled: false` permanently inert. Threaded `verdict_log` as
+  its own narrow config-slice parameter through `initialise()`, the same DI
+  idiom already used for `plan_workflow`/`pseudo_events_config`.
 
-### Phase 3: Advisory noise — §2, §4, §5
+### Phase 3: Advisory noise — §2, §4, §5 (NOT STARTED — deliberately deferred)
+
+Deprioritised per this plan's own Decision 1 (the verdict log is the
+priority) and the report's own framing of these three as "minor noise" /
+"optional, offered as such". Left for a follow-up session rather than rushed:
 
 - [ ] ⬜ **Task 3.1**: §2 (optional, offered as such) — skip the output-keyword
   advisory when the trigger keyword also appears in the COMMAND string, e.g. a
@@ -137,14 +163,25 @@ other findings raise answerable with a query rather than a discussion.
 
 ## Success Criteria
 
-- [ ] A heredoc of prose produces a short, accurate block reason and no
+- [x] ✅ A heredoc of prose produces a short, accurate block reason and no
   fabricated shell scaffolding
-- [ ] `verdicts.jsonl` records every handler decision across a real session
-- [ ] `hooks-daemon verdicts` answers "which handlers have never fired" and
+- [x] ✅ `verdicts.jsonl` records every handler decision — proven end-to-end via
+  `TestControllerVerdictLog` (real `process_event()` → real
+  `HandlerChain.execute()` → real file on disk, reading the content back and
+  asserting on it). **Confirming this against a genuinely LIVE daemon session
+  is OUTSTANDING** — this work was executed in an isolated worktree that
+  cannot restart the project's real daemon; do this as part of the next
+  daemon restart in the main checkout
+- [x] ✅ `hooks-daemon verdicts` answers "which handlers have never fired" and
   "what is the override rate per handler" over that data
-- [ ] The retention decision for `verdicts.jsonl` is explicit and documented,
-  and does not silently corrupt cumulative statistics
-- [ ] Full QA passes; daemon restarts RUNNING
+- [x] ✅ The retention decision for `verdicts.jsonl` is explicit and documented,
+  and does not silently corrupt cumulative statistics (the report is explicit
+  that its numbers describe the retained window, not lifetime totals)
+- [ ] ⬜ Full QA passes; daemon restarts RUNNING — QA is 18/20 in-worktree (see
+  JOURNAL); the 2 gaps are a daemon restart / live-socket smoke test this
+  worktree cannot run, and a confirmed pre-existing test-order flake
+  unrelated to this plan's changes. **Daemon restart verification is
+  OUTSTANDING** for the same worktree-isolation reason
 
 ## Risks & Mitigations
 
@@ -160,4 +197,6 @@ other findings raise answerable with a query rather than a discussion.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00209-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not started. Field report filed as `FEEDBACK.md` in this folder.
+- Phases 1 and 2 delivered on branch `agent-ac1ec50c70f9ed8b8-2fdf9107`
+  (isolated worktree). See JOURNAL for the full commit list. Phase 3 not
+  started — see Tasks above.
