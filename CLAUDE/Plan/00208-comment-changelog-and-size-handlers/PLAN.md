@@ -97,6 +97,11 @@ daemon's own source, the design is wrong. That must be *measured*, not assumed.
   - [x] ✅ `extractor.py`: `CommentSpan` + `extract_comment_spans()` (100%
     coverage, 36 tests) — line-comment runs, trailing inline comments,
     block/doc delimited spans, Python docstring line-start guard
+  - [x] ✅ `common.py` (shared skip-directories) + 12 per-language strategy
+    files (11 canonical + Shell): Python, Shell, Ruby, JS/TS, Go, PHP,
+    Java, Kotlin, C#, Rust, Swift, Dart — 110 tests passing, mypy --strict
+    clean. `strategies/comments/` groundwork is COMPLETE; next is the
+    registry + the two handlers themselves
 - [ ] ⬜ **Task 1.4**: Lower-precision signals (`Fixed:`/`Added:` runs, "used
   to", "no longer") ADVISE rather than block
 - [ ] ⬜ **Task 1.5**: `get_claude_md()` naming the destination for the text —
