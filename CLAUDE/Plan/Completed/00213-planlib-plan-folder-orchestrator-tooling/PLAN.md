@@ -1,6 +1,6 @@
 # Plan 00213: planlib plan folder orchestrator tooling
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -197,8 +197,10 @@ section already reserves for a human.
 
 - [x] ✅ An explicit, recorded decision exists on whether `planlib` is adopted
   (ADAPT — Decision 1)
+
 - [x] ✅ No proposal document remains in `untracked/` (filed into this plan
   folder at plan creation)
+
 - [x] ✅ Targeted tests pass and QA-equivalent checks pass in the worktree:
   `pytest` for the new config/install/plan_qa/library-behaviour tests (all
   green, 100% coverage on `install/plan_workflow.py`), `mypy`/`ruff`/`black`
@@ -206,11 +208,30 @@ section already reserves for a human.
   `bash -n` (stderr-asserted-empty) clean on `_planlib.inc.bash`, and the
   project's own `scripts/qa/run_shell_check.sh` passing with the file
   included.
-- [ ] ⬜ **OUTSTANDING (cannot verify from this worktree)**: full
-  `./scripts/qa/run_all.sh`, a daemon restart + `status` showing `RUNNING`,
-  and client-mode verification (`scripts/dummy-client-repo.sh`) against the
-  merged tree — this worktree agent cannot restart the shared daemon; the
-  merging session must run these before treating Phase 2 as done.
+
+- [x] ✅ **DONE post-merge by the merging session**: full QA on the merged
+  tree → **20/20 PASSED**, 12,032 tests, 0 failed, `smoke_test` 3/3 (which a
+  worktree cannot provide at all). Daemon restarted → `RUNNING`, and the
+  sweep no longer flags `_planlib.inc.bash` at the plan root, confirming the
+  `_EXPECTED_ROOT_FILES` addition against the **live** daemon rather than the
+  source. Client-mode via `dummy-client-repo.sh`: the production installer
+  builds a working client with its daemon RUNNING, and the feature correctly
+  ships **dormant** — the only copy of the library in the client sits inside
+  the vendored `.claude/hooks-daemon/` checkout, nothing deployed into
+  client-owned space.
+
+  Config validation checked in BOTH directions, not just the failing one:
+  missing `root_marker` rejected, `.git`-as-marker rejected, valid marker
+  accepted, disabled-with-no-marker accepted. A guard that rejects everything
+  passes the two rejecting cases too, so the accepting cases are what
+  separate a working guard from a merely red one.
+
+  One finding worth recording: `black` wanted to reformat two of this plan's
+  own test files (`tests/config/test_models.py`,
+  `tests/unit/install/test_plan_workflow.py`). The in-worktree run reported
+  black clean because it resolved a different target version — so "formatter
+  clean in a worktree" does not transfer to the merged tree.
+
 - [x] ✅ The feature ships with an upgrade manifest rather than silently
   (`config-changes/v3.53.0.yaml` entry, Task 2.4)
 

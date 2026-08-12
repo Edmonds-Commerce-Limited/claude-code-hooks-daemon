@@ -46,8 +46,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Plan Workflow / QA
 
-- [00213: planlib plan folder orchestrator tooling](00213-planlib-plan-folder-orchestrator-tooling/PLAN.md) - In Progress (adopts a client project's `planlib` bash library. Phase 2 delivered: a `plan_workflow.scripts` config block shipping OFF, deploying `_planlib.inc.bash` through the same seam as `mkplan.bash`, with `root_marker` deliberately defaultless and `.git` rejected as a marker since `.git` is the walk's boundary. Supersedes Plan 00199, which targeted the same proposal.)
-
 - [00219: git commit message backtick substitution guard](00219-git-commit-message-backtick-substitution-guard/PLAN.md) - Not Started (backticks in a double-quoted `git commit -m` are command-substituted by bash: the span is executed and replaced by its stdout, silently deleting text from the message. Hit live; one commit body on `main` lost a phrase this way. The execution half is already covered by full-command-string matching — the corruption half is not.)
 
 - [00216: plan duplicate source detection](00216-plan-duplicate-source-detection/PLAN.md) - Not Started (DBF follow-up to the 00199/00213 duplication: `plan_qa` enforces number collisions and index bijection but is blind to two plans covering the same source document, so a duplicate is only caught if a human happens to notice.)
@@ -169,6 +167,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00213: planlib plan folder orchestrator tooling](Completed/00213-planlib-plan-folder-orchestrator-tooling/PLAN.md) - Complete (adopts a client project's `planlib` bash library behind a `plan_workflow.scripts` block shipping OFF, deployed through the same seam as `mkplan.bash`. `root_marker` is deliberately defaultless and `.git` is rejected as a marker, since `.git` is the walk's boundary. Supersedes Plan 00199.)
 
 - [00215: readme repositioning guardrails not hook tooling](Completed/00215-readme-repositioning-guardrails-not-hook-tooling/PLAN.md) - Complete (README now answers "why guardrails?" before "why a daemon?", and states the incident the project exists to prevent. Every number re-measured rather than carried over — three of the request's own figures were wrong. The origin story stayed BLANK until the maintainer supplied the facts, rather than being invented.)
 
@@ -1142,11 +1142,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 219 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 170 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 171 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 37 + 170 + 5 = **212 folders**, spanning
+- **Folder-to-number reconciliation**: 36 + 171 + 5 = **212 folders**, spanning
   **209 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1157,7 +1157,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work), and one live allocation whose folder is still on
   an in-flight worktree branch (00218). 209 + 10 = 219. ✅
-- **Last reconciled by**: the Plan 00219 creation — recounted from disk. Note
+- **Last reconciled by**: the Plan 00213 closure — recounted from disk. Note
   00218 is allocated but absent here: an agent scaffolded it on an isolated
   worktree branch, so the shared counter advanced while the folder did not
   land in this tree. That is expected during concurrent work and resolves on
