@@ -345,9 +345,45 @@ class CommentChangelogHandler(Handler):
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """Return acceptance tests aggregated from all registered strategies."""
+        """Return acceptance tests: per-language DENY cases plus a near-miss ALLOW case."""
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+        )
+
         tests: list[Any] = []
         for strategy in self._registry.all_strategies:
             if hasattr(strategy, "get_acceptance_tests"):
                 tests.extend(strategy.get_acceptance_tests())
+
+        # Near-miss ALLOW case: history as RATIONALE (keyed by a plan/failure
+        # mode, not a release number) must NOT be flagged, even though it
+        # also recounts the past -- this is the make-or-break distinction
+        # the whole handler exists to get right.
+        tests.append(
+            AcceptanceTest(
+                title="comment_changelog: plan-number-keyed rationale is allowed",
+                command=(
+                    "Use the Write tool to create "
+                    "/tmp/acceptance-test-comment-changelog-rationale/example.py "
+                    "whose content has a '#' comment reading "
+                    "'History (Plan 00047 -- do NOT re-add DISABLE_MOUSE without "
+                    "reading this): fullscreen draws on the terminal alt-screen...'"
+                ),
+                description=(
+                    "A rationale comment keyed by a plan/failure-mode reference "
+                    "(not a release number) must be ALLOWED even though it "
+                    "recounts history -- the make-or-break distinction"
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Uses /tmp path - safe. Verify the file is created, not blocked.",
+                test_type=TestType.ADVISORY,
+                setup_commands=["mkdir -p /tmp/acceptance-test-comment-changelog-rationale"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-comment-changelog-rationale"],
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            )
+        )
         return tests

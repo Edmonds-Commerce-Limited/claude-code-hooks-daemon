@@ -128,6 +128,21 @@ handlers:
       #     - JavaScript/TypeScript
       #     - PHP
 
+    comment_changelog:     # Blocks changelog narrative accumulating in a code comment
+      enabled: false       # Enable for strict comment hygiene
+      priority: 31
+      # options:
+      #   max_history_entries: 1   # more than this many dated/versioned entries advises
+      #   mode: block               # block | warn
+
+    comment_size:          # Caps over-long comments, tiered like plan-doc-size
+      enabled: false       # Enable for strict comment hygiene
+      priority: 33
+      # options:
+      #   max_comment_line_chars: 400
+      #   max_comment_block_lines: 40
+      #   mode: block               # block | warn
+
     tdd_enforcement:       # Enforces test-first development
       enabled: false       # Enable for strict TDD workflow
       priority: 32

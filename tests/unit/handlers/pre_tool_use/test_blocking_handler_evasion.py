@@ -198,6 +198,8 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "AgentIsolationAdvisorHandler": "matches on the Agent tool, not a command",
     "AskUserQuestionBlockerHandler": "matches on the AskUserQuestion tool",
     "BritishEnglishHandler": "matches written content",
+    "CommentChangelogHandler": "matches written content (comment spans)",
+    "CommentSizeHandler": "matches written content (comment spans)",
     "DaemonDocsGuardHandler": "matches a Read path",
     "ErrorHidingBlockerHandler": "matches written content",
     "HelloWorldPreToolUseHandler": "test handler, blocks nothing",

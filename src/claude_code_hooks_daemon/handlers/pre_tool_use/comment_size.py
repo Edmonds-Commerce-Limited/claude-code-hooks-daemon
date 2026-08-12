@@ -355,4 +355,25 @@ class CommentSizeHandler(Handler):
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
+            AcceptanceTest(
+                title="comment_size: a normal, reasonably-sized comment is allowed",
+                command=(
+                    "Use the Write tool to create "
+                    "/tmp/acceptance-test-comment-size-ok/example.py whose content has "
+                    "an ordinary short '#' comment (well under 400 chars, well under "
+                    "40 lines) explaining a single function"
+                ),
+                description=(
+                    "Near-miss ALLOW case: an ordinary explanatory comment is never "
+                    "blocked -- only comments that actually exceed the size limit are"
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Uses /tmp path - safe. Verify the file is created, not blocked.",
+                test_type=TestType.ADVISORY,
+                setup_commands=["mkdir -p /tmp/acceptance-test-comment-size-ok"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-comment-size-ok"],
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
         ]
