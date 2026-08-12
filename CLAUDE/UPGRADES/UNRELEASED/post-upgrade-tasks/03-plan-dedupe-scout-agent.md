@@ -59,6 +59,13 @@ ls .claude/agents/hooks-daemon-plan-dedupe-scout.md
 If the plan workflow is disabled, nothing is deployed and there is nothing to
 do.
 
+**Start a new Claude Code session before trying to use it.** Claude Code
+enumerates `.claude/agents/` when a session starts, so an agent deployed by an
+upgrade *during* a live session is not dispatchable in that session — you get
+`Agent type 'hooks-daemon-plan-dedupe-scout' not found` listing every other
+agent. Nothing is broken; the file is on disk and the next session picks it up.
+Verified during development, so expect it rather than diagnosing it.
+
 ## What to do
 
 1. **Commit the file.** `.claude/agents/` is a directory your project owns and

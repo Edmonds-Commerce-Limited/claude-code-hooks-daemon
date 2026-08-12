@@ -653,6 +653,46 @@ class TestDedupeAgentDeployment:
         assert "false positive" in body
         assert "leave it out" in body
 
+    def test_bundled_agent_is_fenced_to_plan_documents(self) -> None:
+        """Dogfooding find. Given a proposal phrased as the work itself, the
+        scout read the SOURCE TREE, found the feature implemented, and answered
+        "already shipped, no additional work required" — never naming a plan.
+
+        It answered the wrong question. "Is this already built?" and "does a
+        plan already cover this?" are different, and only the second is its
+        job: a proposal whose code happens to exist may still need a plan, and
+        a caller told "no work required" files nothing at all.
+
+        The procedure has to fence the EVIDENCE, not just describe the task.
+        """
+        body = dedupe_agent_template_path().read_text().lower()
+        assert "only evidence" in body or "your only evidence" in body
+        assert "source code" in body, (
+            "The prompt must name source code as out of bounds. Saying 'read "
+            "the plans' is not a fence — the agent read src/ anyway."
+        )
+        assert "already implemented" in body or "already built" in body, (
+            "The prompt must name the wrong question explicitly, so the agent "
+            "can recognise it is being drawn into answering it."
+        )
+
+    def test_bundled_agent_forbids_delivering_a_verdict(self) -> None:
+        """Same dogfooding run: the report was a VERDICT ("production-ready",
+        "no additional work is required"), not candidates plus evidence.
+
+        The definition already said "never a verdict" in its Purpose, and that
+        was not enough — an abstract rule at the top loses to concrete pressure
+        further down. The forbidden phrasings have to be named."""
+        body = dedupe_agent_template_path().read_text().lower()
+        assert "already shipped" in body
+        assert "no additional work" in body
+
+    def test_bundled_agent_requires_a_plan_number_per_candidate(self) -> None:
+        """The failing run named no plan number at all, which is the one datum
+        the caller cannot look up for themselves from a prose summary."""
+        body = dedupe_agent_template_path().read_text().lower()
+        assert "without a plan number" in body
+
     def test_deploys_agent_definition(self, tmp_path: Path) -> None:
         result = bootstrap_plan_workflow(tmp_path)
         deployed = tmp_path / ".claude" / "agents" / f"{DEDUPE_AGENT_NAME}.md"

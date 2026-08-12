@@ -116,18 +116,34 @@ encodes a procedure, not user content, so fixes must reach the field. Gated on
 
 ### Phase 4: Verify
 
-- [ ] 🔄 **Task 4.1**: Full QA suite passes
-- [ ] ⬜ **Task 4.2**: Client-mode verification — this changes deployed assets,
-  which self-install mode does not represent
-- [ ] ⬜ **Task 4.3**: Dogfood it against this tree and confirm it finds the
-  00199/00213 duplication from 00213's description alone
+- [x] ✅ **Task 4.1**: Full QA suite passes
+- [x] ✅ **Task 4.2**: Client-mode verification — this changes deployed assets,
+  which self-install mode does not represent. Proven in a real client install:
+  correct path and mode, byte-identical, frontmatter intact, a client agent
+  literally named `plan-dedupe-scout` left untouched beside it, and a tampered
+  daemon-owned copy refreshed
+- [x] ✅ **Task 4.3**: Dogfood it against this tree — one true negative and one
+  true positive on un-built work, both correct
+- [ ] ⬜ **Task 4.4**: Re-dogfood under REAL dispatch once a new session has
+  enumerated the agent. Tasks 4.3's runs inlined the definition into a
+  general-purpose agent, whose own system prompt competes with it; under real
+  dispatch the definition IS the system prompt, so the pathological case below
+  is not yet fairly tested
 
 ## Success Criteria
 
-- [ ] The agent, given Plan 00213's description, names Plan 00199
-- [ ] It is suggested at creation time and blocks nothing
-- [ ] It deploys to a real client install, verified in client mode
-- [ ] Full QA passes
+- [x] The agent names an existing live plan from a description that shares
+  almost no vocabulary with it — verified against Plan 00205 (the original
+  criterion named 00199/00213, which have since both been archived; the scout
+  reads only live plans by design, so that pair is no longer a valid probe)
+- [x] It reports nothing, and says how many plans it checked, when the proposal
+  is genuinely novel
+- [x] It is suggested at creation time and blocks nothing
+- [x] It deploys to a real client install, verified in client mode
+- [x] Full QA passes
+- [ ] It does not answer "is this already implemented?" when the proposed work
+  happens to exist in the source tree — hardened in the prompt, not yet
+  verified under real dispatch (Task 4.4)
 
 ## Dependencies
 
