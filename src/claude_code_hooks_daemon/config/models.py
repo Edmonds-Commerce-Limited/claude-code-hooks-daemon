@@ -539,9 +539,14 @@ class PlanWorkflowQaConfig(BaseModel):
         collision_allowlist: Historic duplicate plan numbers to tolerate
         extra_root_files: Extra non-plan filenames permitted at the plan root,
             layered ADDITIVELY on top of the built-in accepted set
-            ({README.md, CLAUDE.md, mkplan.bash, _TEMPLATE_.md}); default empty
-            = today's behaviour. Use for a legitimately-placed shared file such
-            as a sourced ``_planlib.bash`` shell library.
+            ({README.md, CLAUDE.md, mkplan.bash, _TEMPLATE_.md,
+            _JOURNAL_TEMPLATE_.md, _planlib.inc.bash}); default empty = today's
+            behaviour. Use for a project's OWN legitimately-placed shared file
+            (e.g. a bespoke sourced helper script) that the daemon does not
+            already know about. `_planlib.inc.bash` -- the motivating example
+            for this option before the daemon shipped it -- is now built in
+            (Plan 00213 Phase 2) precisely so a client project no longer has
+            to configure this for it.
     """
 
     model_config = ConfigDict(extra="forbid")
