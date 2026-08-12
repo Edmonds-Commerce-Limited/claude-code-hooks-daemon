@@ -22,6 +22,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00207: ban squash merge to preserve ancestry](00207-ban-squash-merge-preserve-ancestry/PLAN.md) - Not Started (measurement widened this from "ban squash" to "mandate ancestry-preserving merges": a rebase merge severs ancestry identically, and only a merge commit preserves it. Both stop the branch's commits ever being ancestors of the target, so the battle-tested `git branch -d` refuses permanently and deletion is forced onto the newer Plan 00206 tool; blocks both so `-d` stays usable.)
 
+- [00208: comment changelog and size handlers](00208-comment-changelog-and-size-handlers/PLAN.md) - Not Started (field report: an agent-authored comment reached 5,645 characters on one line, six releases deep, and broke the user-facing banner that reads it — no human wrote any of it, each agent appended following the shape of the last. Two handlers: block changelog-in-a-comment, cap comment size. The hard part is allowing history-as-*rationale*, which this repo's own source is full of.)
+
+- [00209: field feedback — daemon self-observability](00209-field-feedback-daemon-self-observability/PLAN.md) - Not Started (the daemon makes hundreds of decisions per session and persists none, so "which handlers earn their keep" and "what is the per-handler false-positive rate" are unanswerable. Adds a verdict log plus a reporting command; also fixes `pipe_blocker` quoting a heredoc of prose back as a shell command.)
+
 ### Status Line / Agent View
 
 - [00175: statusline refreshInterval first-class default + startup validation](00175-statusline-refresh-interval-first-class/PLAN.md) - In Progress (root-caused the Ctrl+Z notice lag to `statusLine.refreshInterval: 10` — Claude Code re-runs the status command only on events (Ctrl+Z is not one) plus this optional timer whose minimum is 1s, so an …)
@@ -1133,15 +1137,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 207 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191 and 00195 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run)
+- **Total Plans Created**: 209 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191 and 00195 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run)
 - **Completed**: 164 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 34 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
-- **Last reconciled by**: the Plan 00206 completion during the v3.52.0 release —
-  counts re-derived from the folders on disk (`34` active, `164` completed),
-  not carried forward. The prior reconciliation was the Plan 00207 creation at
-  `35`/`163`; before that the Plan 00206 creation at `34`/`163`.
+- **Last reconciled by**: the Plan 00208 / 00209 creations after the v3.52.0
+  release — counts re-derived from the folders on disk (`36` active, `164`
+  completed), not carried forward. The prior reconciliation was the Plan 00206
+  completion at `34`/`164`; before that the Plan 00207 creation at `35`/`163`.
 
 ## Quick Links
 
