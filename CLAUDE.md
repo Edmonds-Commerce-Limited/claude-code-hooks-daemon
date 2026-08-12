@@ -980,6 +980,52 @@ Writing QA suppression directives into source files is blocked across all suppor
 
 **Excluded paths**: per-language vendor/build/node_modules dirs are skipped by default. Exempt more paths with glob patterns via `handlers.pre_tool_use.qa_suppression.options.exclude_paths` or the project-wide `daemon.exclude_paths` — use these for fixtures that must contain suppression annotations.
 
+## comment_changelog — no changelog narrative in code comments
+
+Writing HISTORICAL NARRATIVE into a code comment is blocked. A comment describes CURRENT STATE; changelog narrative belongs in git (the commit message), the project's changelog file, or a plan's `JOURNAL/` day-file.
+
+**Blocked (high-precision) signals**, either of which denies the write:
+
+- `Prior <version>:` / `Previously <version>:` phrasing
+- a dated entry (`2026-08-12: ...`)
+
+Both were measured with ZERO false positives across this project's own ~1,080 source/test files (Plan 00208's whole-repo self-scan) — every real hit was either the field-report shape itself or this handler's own test fixtures.
+
+**NOT blocked — advisory only**: a version-transition arrow (`1.2 -> 1.3`), a changelog verb naming a version (`Removed in v2.1.224`), two or more distinct versioned/dated entries in one comment (configurable via `max_history_entries`, default 1), `Fixed:`/`Added:`/`Changed:` bullet runs, retrospective phrasing (`used to`, `no longer`, `we switched from`). These four started as blocking signals but the same self-scan found each firing on legitimate code — version-processing utilities (upgrade compatibility checkers) legitimately cite multiple versions in their own docstrings, and "removed in vX.Y" describing an EXTERNAL tool's own deprecation is rationale, not a changelog entry about this project.
+
+**History as RATIONALE is legitimate and is NOT flagged.** A comment may recount the past when the past is the reason the code looks the way it is now, and re-litigating it would reintroduce a fixed bug — e.g. `# Plan 00047: do NOT re-add DISABLE_MOUSE, see...`. The separating test: an entry keyed by a RELEASE NUMBER is a changelog; an entry keyed by a FAILURE MODE (a plan number, a bug description) is a rationale.
+
+**No escape hatch** — unlike `comment_size`, this handler has no `MUST_..._BECAUSE` override: changelog content should be MOVED to git/a changelog file/a plan JOURNAL/, never exempted in place.
+
+**Scope**: only comment spans are scanned (not code), via the same Strategy Pattern language registry as `qa_suppression`. `.md` files are skipped entirely — markdown prose is not a comment. Only the ADDED text is checked on `Edit` (`new_string`) — removing changelog content is never blocked.
+
+**Excluded paths**: vendor/build/fixture dirs are skipped by default. Exempt more paths via `handlers.pre_tool_use.comment_changelog.options.exclude_paths` or the project-wide `daemon.exclude_paths`.
+
+## comment_size — over-long comments are capped, tiered like plan-doc-size
+
+A `Write`/`Edit` whose content contains an over-limit comment is blocked or advised, using the SAME grow/shrink/same-size tiering as `plan-doc-size`: only an edit that GROWS an already-over-limit comment can be denied.
+
+**Two independent limits (either trips it)**:
+
+- a single comment line longer than `max_comment_line_chars` (default 400)
+- a contiguous comment block longer than `max_comment_block_lines` (default 40)
+
+**Tiering**:
+
+- **Shrinking is silent** — always allowed, no context, so an over-commented legacy file stays editable and can be refactored down.
+- **Same-size only advises** — never blocks, so a legitimately-unchanged oversized comment does not trap the file.
+- **Growing an already-over-limit comment is BLOCKED** unless the escape hatch is declared or `mode: warn` is configured.
+
+**Escape hatch** (in-content, matching the daemon's `MUST_..._BECAUSE` convention):
+
+```
+# MUST_EXCEED_COMMENT_SIZE_BECAUSE: verbatim upstream licence text, must not be reflowed
+```
+
+**Docstrings and JSDoc are API documentation, not comments** — exempt from this handler entirely (still subject to `comment_changelog`).
+
+**Excluded paths**: vendor/build/fixture dirs are skipped by default. Exempt more paths via `handlers.pre_tool_use.comment_size.options.exclude_paths` or the project-wide `daemon.exclude_paths`.
+
 ## plan_number_helper — use `mkplan.bash` to create a plan
 
 **To create a new plan, run the deployed scaffolding script:**
