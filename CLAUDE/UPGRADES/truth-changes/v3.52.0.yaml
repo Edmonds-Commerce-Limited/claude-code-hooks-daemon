@@ -1,7 +1,88 @@
-# NOTE: rename to v{X.Y.Z}.yaml at release time; the release skill moves it
-# into CLAUDE/UPGRADES/truth-changes/.
-version: "UNRELEASED"
+version: "3.52.0"
 truth_changes:
+  - was: >
+      The upstream history of this repository is append-only. Your clone's
+      commits, and the tags you already have, will always be ancestors of what
+      you fetch. A divergence between your clone and origin means someone
+      pushed work you have not merged, and the remedy is to pull.
+    now: >
+      The upstream history WAS REWRITTEN before this release (git filter-repo)
+      to remove sensitive identifiers from file contents, file paths, commit
+      messages, author identities, tag names and tag messages. Every commit
+      after the rewrite point has a NEW sha, and every tag now points at a new
+      object. Nothing about the code changed -- the trees are equivalent -- but
+      the object graph is not. Consequences, in order of how likely they are to
+      bite you. (1) INSTALLED DAEMONS ARE FINE and need no special action:
+      install.sh clones, and upgrade.sh fetches tags with --force and resets
+      onto the target tag, so it moves cleanly onto the new history; the
+      skill's upgrade.sh is fetched fresh from main HEAD on every run, so this
+      applies even if your installed copy predates the fix. (2) If you have a
+      personal CLONE or FORK of this repository, your local main and the new
+      origin/main share no commits. DO NOT PULL OR MERGE -- a merge would
+      reattach the entire pre-rewrite history and republish exactly what the
+      rewrite removed. Realign instead, deliberately, after checking you have
+      no unmerged work: fetch, then reset your branch onto origin/main, then
+      re-fetch tags with --force (a rewrite moves every tag, and git will NOT
+      move a tag you already hold without --force). (3) The daemon detects this
+      for you: session_start.git_upstream_checker recognises a rewrite (a
+      divergence whose two sides are patch-identical) and suppresses its normal
+      "run git pull" advice, telling you to realign instead. If you see that
+      advisory, believe it -- do not work around it by pulling.
+  - was: >
+      A blocking safety handler matches the command you typed. Spelling the
+      same command a different way -- naming the binary by path, putting git's
+      global options before the subcommand, adding sudo's own flags, or
+      splitting the command across lines with a backslash -- does not change
+      whether it is blocked.
+    now: >
+      That was never true. It is now true for the INVOCATION of a command --
+      how the binary is named and how options are arranged around it -- and it
+      remains NOT true for a synonym, where a different command performs the
+      same act. Ten invocation bypasses were found by probing the running
+      daemon and are now closed, so commands that previously RAN will now be
+      DENIED. Concretely: "git -C /path reset
+      --hard" (and --no-pager, -c, --git-dir=, --work-tree= before any
+      destructive subcommand), "git -C /path stash", "sudo -H pip install",
+      "sudo /usr/bin/pip install", "curl URL | /bin/bash", and any of the above
+      written across lines with a trailing backslash. The most serious was
+      sensitive_content: "git -C /path commit -m '<blocked term>'" wrote a
+      blocked term into a commit message unchecked -- a leak surface that
+      cannot be undone without another history rewrite. If you have scripts or
+      aliases that relied on any of these spellings reaching the shell, they
+      will now be blocked, and that is the guard working. Use the documented
+      escape hatches (MUST_STASH_BECAUSE, and the per-handler enabled: false
+      switches) rather than respelling the command to get around a block.
+      What is NOT covered, so that you do not over-trust the guard: a SYNONYM
+      that reaches the same destruction through a different command is still
+      allowed. Two are known and tracked in Plan 00205 -- "git update-ref -d
+      refs/heads/<name>" deletes a branch with no merge check exactly as "git
+      branch -D" does, and "git push origin +main:main" force-pushes exactly as
+      "git push --force" does, because the "+" refspec prefix carries the force
+      rather than a flag. Both predate this release and neither is a regression,
+      but do not read "respelling is blocked" as covering them.
+
+  - was: >
+      The "security_antipattern" handler blocks OWASP security antipatterns
+      including SQL injection, weak cryptography and path traversal. Its
+      resident CLAUDE.md guidance says so, so a write that passes it has been
+      checked for those classes.
+    now: >
+      It never blocked any of those three, in any of the eleven supported
+      languages, and the guidance that said otherwise has been corrected. The
+      handler matches dangerous CONSTRUCTS by regex -- eval/exec, os.system and
+      shell=True, pickle.load and unserialize, innerHTML, credential literals --
+      and those five categories do work. SQL injection, weak hashing and path
+      traversal are properties of how a value FLOWS: a concatenated query
+      matters only if the concatenated part is attacker-controlled, and md5 is
+      weak only when hashing a password. A regex sees the shape, not the
+      provenance, so these were never implementable at this layer and were
+      never implemented. If your project's own docs, onboarding notes or
+      security checklist assert that this handler covers SQL injection or path
+      traversal, correct them: a passing write has NOT been checked for those
+      classes and never was. Nothing about the handler's behaviour changed in
+      this release -- only the claim. Coverage also varies by language, which
+      the guidance now states: a construct blocked in one language is not
+      necessarily blocked in another. Implementation is tracked in Plan 00204.
   - was: >
       The "lint_on_edit" handler only runs a linter that is on your PATH. If it
       reports "lint tool not found (ruff) - install to enable lint checking",
@@ -25,3 +106,30 @@ truth_changes:
       A linter that cannot be found anywhere is still ADVISORY and never blocks:
       resolution deliberately happens before execution so that "tool absent"
       cannot be mistaken for "tool found problems".
+
+  - was: >
+      Deleting a local branch that git considers unmerged requires the force
+      flag, which destructive_git blocks unconditionally. The only route is to
+      ask a human to run it manually, so an agent that needs a stale branch
+      gone is simply stuck until a person intervenes.
+    now: >
+      There is a sanctioned, deterministic route that needs no human:
+      "hooks-daemon delete-branch <name>...". The force flag remains blocked
+      and this is NOT an escape hatch -- the command performs strictly MORE
+      verification than the flag it replaces. It refuses by default and deletes
+      only what it can positively prove is recoverable, using four tiers
+      evaluated cheapest-first: merged (tip is an ancestor of the protected
+      ref), patch-equivalent (every commit already upstream by patch-id),
+      content-preserved (every file version byte-identical to a blob still
+      reachable from the protected ref), and unproven (refused). Blocking
+      preconditions -- the current branch, a branch checked out in any
+      worktree, a protected branch name -- refuse absolutely and cannot be
+      overridden. Deletion is all-or-nothing across the batch, writes a
+      recovery bundle first unless --no-bundle is passed, and --allow-unproven
+      additionally requires --reason. This matters most right after the history
+      rewrite in this same release: a rewrite stops every branch's commits
+      being ancestors of main, so "git branch -d" now refuses branches it would
+      previously have deleted, and patch-equivalence is the only tier that can
+      still prove them safe. If your project's docs say branch deletion must be
+      escalated to a human, correct them -- escalate only when the command
+      refuses and you have read the files it names as holding unique content.

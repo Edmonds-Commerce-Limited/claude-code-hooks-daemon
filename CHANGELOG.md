@@ -7,6 +7,183 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.52.0] - 2026-08-12
+
+This is a **minor release** carrying two new handlers, a whole-tree QA backstop,
+and the closure of a bypass class that ran through five existing blocking
+handlers. It is also the release in which **this repository's published history
+was rewritten** — read the first section before upgrading.
+
+The theme is a principle now written into `CLAUDE.md` as Core Standard 15:
+**Defence Before Fix (DBF)**. When a defect is found, the defect is the
+*symptom*; the bug worth fixing is the guard that failed to see it. A defect
+fixed by hand recurs; a defect fixed by making the guard see it cannot. Its
+corollary drove most of this release: a guard that only fires at write time
+(a PreToolUse handler) does not cover what is already on disk, so **every
+write-time rule needs a batch equivalent** — otherwise everything predating the
+rule is permanently unexamined.
+
+### ⚠️ Published history was rewritten
+
+The `main` branch and every tag in this repository were rewritten to remove
+identifiers that should never have been committed. What this means for you:
+
+- **An installed daemon needs no action.** `scripts/upgrade.sh` already fetches
+  tags with `--force` (a rewrite moves every tag to a new sha, and a plain
+  `git fetch --tags` silently refuses to move an existing local tag). Upgrades
+  work normally.
+- **A clone or fork must NOT `git pull`.** The two histories share no commit
+  shas, so a merge would reinstate the entire pre-rewrite history and republish
+  exactly what the rewrite removed. Realign your branch onto its upstream
+  instead, and re-fetch tags with `git fetch --tags --force`.
+- **The daemon now detects this shape for you.** `git_upstream_checker` treats a
+  divergence whose two sides share no shas yet resolve to the *same tree* as a
+  rewrite, and suppresses every pull recommendation in favour of asking a human
+  to realign. Identical content means there is nothing to merge — only history
+  to republish.
+
+### Security
+
+- **The command-respelling bypass class is closed.** Five blocking handlers —
+  `destructive_git`, `git_stash`, `sudo_pip`, `curl_pipe_shell` and
+  `sensitive_content` — matched a command only in the spelling a well-behaved
+  agent happens to type. Ten distinct bypasses were found by probing the live
+  daemon and all are now denied: any git global option before the subcommand
+  (`git -C /path reset --hard`, `git -c x=y stash`, `git --git-dir=… commit`),
+  sudo's own options (`sudo -H pip install`), a path-qualified binary
+  (`sudo /usr/bin/pip install`, `curl URL | /bin/bash`), and any of these split
+  across lines with a trailing backslash.
+- **Shell line continuations are normalised once, at the boundary.** Rather than
+  teaching nine regexes about `\`+newline, `get_bash_command()` joins
+  continuations where a command enters the daemon, so *every* command guard —
+  including ones written later — sees the joined form. `None` and non-string
+  command payloads pass through untouched.
+- **`sensitive_content` read the wrong token as the git subcommand.** It
+  indexed `tokens[position + 1]`, so `git -C /path commit -m "<term>"` was
+  classified as a non-metadata command and allowed. The shared
+  `git_subcommand_index()` now walks past global options, accounting for those
+  that consume a separate value.
+
+### Added
+
+- **`hooks-daemon delete-branch` — a proven-safe branch deletion (Plan 00206).**
+  `destructive_git` blocks `git branch -D`, and `git branch -d` refuses every
+  branch after a history rewrite because their commits stop being ancestors of
+  `main`. A stale branch therefore had no route to deletion but escalation to a
+  human — which stalled this very release. The new command is not an escape
+  hatch: it performs strictly **more** verification than the flag it replaces,
+  refuses by default, and deletes only what it can prove is recoverable, via
+  four tiers evaluated cheapest-first — `merged` (tip is an ancestor),
+  `patch-equivalent` (every commit already upstream by patch-id — the shape a
+  rewrite produces, which git has no built-in check for), `content-preserved`
+  (every file version is byte-identical to a blob still reachable from `main`),
+  and `unproven`. Blocking preconditions — the current branch, a branch checked
+  out in any worktree, a protected name — refuse absolutely and cannot be
+  overridden. Deletion is all-or-nothing, writes a recovery bundle first unless
+  `--no-bundle` is passed, and `--allow-unproven` additionally demands
+  `--reason`. The proof is deliberately **blob identity, never path presence**:
+  a path existing upstream says nothing about the content at that path, so a
+  path-level tier could approve a lossy deletion. Path-uniqueness is still
+  reported, but only as context — on this repo's own stale branches it flagged
+  21 "new" paths of which 20 were byte-identical to blobs already in `main`.
+- **`sensitive_content` (PreToolUse, blocking)** — denies a `Write`/`Edit` whose
+  added content matches either of two independently configurable sources:
+  `options.public_patterns` (named regexes, safe to name — the deny reason shows
+  the pattern name and the matched text) and `options.secret_word_list_path`
+  (default `.claude/block-words.secret`, gitignored, one term per line, matched
+  literally and case-insensitively). **A secret-list match is never disclosed
+  anywhere** — not in the deny reason, not in any daemon log, not in payload
+  capture, not in a PreCompact transcript archive. The deny reason names only a
+  1-based index (`entry N of M in the secret word list`), which is meaningless
+  without the gitignored file. Both sources are inert by default, so the handler
+  ships dormant until a project populates one.
+- **Git metadata is checked too.** File contents and file *paths* are only two of
+  the seven places a term can enter a repository; the other five are git
+  metadata, and none of them is a file write. `git commit`, `git tag`,
+  `git branch`/`checkout -b`/`switch -c`, `git config user.name|user.email` and
+  `git merge -m` are now checked. Read-only commands (`grep`, `git log --grep=`,
+  `git branch --list`, `git tag -l`) stay allowed even with the term on the
+  command line — searching for a term and removing it are exactly the work of
+  cleaning a repository.
+- **A whole-tree QA backstop for the same two sources.**
+  `scripts/qa/check_sensitive_content.py` (wired into `run_all.sh` and
+  `llm_qa.py`) enforces them against every git-tracked file — the DBF corollary
+  in practice, covering content that never passed through a `Write`/`Edit` call
+  (`git mv`, external editors, other agents).
+- **`agent_isolation_advisor` (PreToolUse, advisory)** — when more than one agent
+  thread is live in a checkout, spawning another `Agent` without isolation is
+  flagged. Agents sharing one working tree share a single `.git/index`, so a
+  peer's bare `git commit` can silently absorb another agent's staged work. It
+  never blocks, and deliberately does not advise isolation for agents that need
+  the real project root (daemon restart verification and client-mode testing do
+  not work in a worktree).
+- **`journal-dayfile-is-today` (plan QA, edit-time)** — a `Write`/`Edit`
+  targeting a plan `JOURNAL/` day-file dated anything other than today is
+  blocked, and the message names the exact today-dated filename to write
+  instead. The previous rule tolerated a yesterday-dated file as a "legitimate
+  midnight rollover"; that tolerance was precisely the mis-filing this closes.
+  Configured independently via `plan_workflow.qa.journal.today_only_mode`
+  (`advise` | `block` | `off`; default `block`).
+- **A completeness-gated evasion guard.**
+  `tests/unit/handlers/pre_tool_use/test_blocking_handler_evasion.py` discovers
+  every PreToolUse handler by `pkgutil` and requires each to be classified —
+  hardened, not command-anchored, or command-anchored but not unit-testable — so
+  a new handler cannot silently escape triage. It also requires every hardened
+  handler to carry false-positive cover: that requirement caught a near-miss in
+  which a widened `sudo_pip` pattern would have blocked *every* ordinary
+  `pip install`.
+- **Continuous integration**, plus fixes for the two things that would have made
+  it lie, and a **handler-reference truth check** that fails when
+  `docs/guides/HANDLER_REFERENCE.md` drifts from the handler code.
+- **`*.secret` / `*.secrets` gitignore defaults**, with
+  `gitignore_safety_checker` warning when they are absent.
+
+### Changed
+
+- **Blocking decisions are read from the decision, not from substrings.** Code
+  that inferred "is this a blocking response" by string-matching a reason is now
+  keyed on the decision itself.
+- **Shell segmentation has one scanner.** Two implementations had diverged; the
+  pipe blocker now resolves the producer from the segment that actually feeds
+  the pipe, and an escaped quote no longer desynchronises the scan.
+- **`plan_number_helper` stops treating a plan count as discovery**, and
+  `lsp_enforcement` exempts a `grep` scoped to one named file.
+- **Documentation restructured** — the README states what the project *is* above
+  the fold, the plan index is navigable, and CONTRIBUTING's handler walkthrough
+  no longer teaches three things that are wrong.
+
+### Fixed
+
+- **`security_antipattern` claimed three protections it does not have.** Its
+  guidance — inlined into every client project's resident `CLAUDE.md` — listed
+  SQL injection, weak cryptography and path traversal as blocked categories.
+  No pattern for any of the three exists in any of the eleven language
+  strategies, and they were absent for a structural reason: every pattern the
+  handler owns matches a *construct* (`eval`, `shell_exec`, `pickle.load`,
+  `innerHTML`), while all three missing categories are properties of how a
+  value *flows*, which a regex cannot see. The guidance now names the five
+  categories that genuinely exist and states outright what it cannot detect,
+  so a passing write is not read as "this code is secure". A completeness gate
+  now requires every claimed category to be evidenced by a real registered
+  pattern. Implementation of the three is tracked in Plan 00204.
+- **`lint_on_edit` could not find a venv-installed linter**, so lint-on-edit was
+  silently inert wherever the linter was not also on `PATH`.
+- **`enforce_llm_qa` mis-segmented compound commands**, matching across segment
+  boundaries.
+- **Client upgrades survive a dirty daemon directory**, and a rewritten upstream
+  is reported rather than merged.
+- **The installer deployed a self-destroying symlink** (Plan 00198), verified
+  fixed in client mode.
+- **A status flip could lose content to a shared-index race** when agents shared
+  a checkout; `plan_qa_commit_gate` now resolves pathspec commits against the
+  working tree.
+- **The lint QA gate passed while blind** — it is no longer scoped narrower than
+  the defect it exists to prevent, and the error-hiding auditor now guards the
+  guards.
+- **A flaky concurrency assertion** in the daemon server tests, fixed by raising
+  the signal rather than loosening the bound.
+- **Upgrade scripts no longer splice shell values into generated Python.**
+
 ## [3.51.0] - 2026-08-02
 
 This is a **minor release** that finishes what v3.50.0 started. It is minor

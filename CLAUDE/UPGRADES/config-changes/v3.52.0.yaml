@@ -1,5 +1,5 @@
 version: "3.52.0"
-date: "UNRELEASED"
+date: "2026-08-12"
 breaking: false
 config_changes:
   added:
@@ -67,6 +67,41 @@ config_changes:
         must never be committed, printed, or pasted into a bug report --
         only its gitignored file path and a numeric line index are ever
         surfaced anywhere.
+    - key: handlers.pre_tool_use.agent_isolation_advisor
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PreToolUse advisory handler (Plan 00200). When more than one agent
+        thread is already live in this checkout, spawning another Agent without
+        isolation is flagged. It never blocks. Agents sharing one working tree
+        share a single .git/index, so a peer's bare "git commit" can silently
+        absorb another agent's staged work -- the advisory suggests
+        isolation: "worktree" on the Agent tool, with "git merge" or
+        "git cherry-pick" to bring the work back. It deliberately does NOT
+        advise isolation for agents that need the real project root (daemon
+        restart verification and client-mode testing do not work in a
+        worktree).
+      migration_note: >-
+        On by default and advisory only; no action needed. Disable with
+        handlers.pre_tool_use.agent_isolation_advisor.enabled: false.
   renamed: []
   removed: []
-  changed: []
+  changed:
+    - key: handlers.pre_tool_use.destructive_git
+      recommended: false
+      description: >-
+        No config change, but a BEHAVIOUR change worth knowing before you
+        upgrade: destructive_git, git_stash, sudo_pip, curl_pipe_shell and
+        sensitive_content were each bypassable by respelling the command, and
+        all ten known bypasses are now closed. Commands that previously ran
+        will now be denied -- "git -C /path reset --hard", "git -C /path
+        stash", "sudo -H pip install", "sudo /usr/bin/pip install",
+        "curl URL | /bin/bash", and any of these split across lines with a
+        trailing backslash. Shell line continuations are now normalised once at
+        the point commands enter the daemon, so every command guard sees the
+        joined form.
+      migration_note: >-
+        No configuration to change. If a script of yours relied on one of those
+        spellings, it will now be blocked; use the documented escape hatch for
+        that handler, or set its enabled: false, rather than respelling the
+        command.

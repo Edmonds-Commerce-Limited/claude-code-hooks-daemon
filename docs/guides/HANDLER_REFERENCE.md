@@ -90,6 +90,36 @@ Safety handlers protect against destructive or dangerous operations. Most are bl
 - `git branch -D` -- force-deletes a branch without checking it is merged (lowercase `-d` is allowed)
 - `git commit --amend` -- rewrites the previous commit; create a new commit instead
 
+**Deleting a branch has a sanctioned path (v3.52.0).** `git branch -D` stays
+blocked, but `hooks-daemon delete-branch <name>...` performs strictly more
+verification than that flag and needs no human. It refuses by default and
+deletes only what it can prove is recoverable, across four tiers evaluated
+cheapest-first:
+
+| Tier                | Proof                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| `merged`            | Tip is an ancestor of the protected ref (what `git branch -d` proves)                 |
+| `patch-equivalent`  | Every commit is already upstream by patch-id -- the shape a history rewrite produces  |
+| `content-preserved` | Every file version is byte-identical to a blob still reachable from the protected ref |
+| `unproven`          | Everything else -- refused, naming the files whose content exists nowhere else        |
+
+Blocking preconditions -- the current branch, a branch checked out in any
+worktree, a protected branch name -- refuse absolutely and `--allow-unproven`
+cannot override them. Deletion is all-or-nothing across the batch and writes a
+recovery bundle first unless `--no-bundle` is passed; `--allow-unproven` also
+requires `--reason`. The proof is blob identity, never path presence: a path
+existing upstream says nothing about the content at that path.
+
+This matters most after a history rewrite, which stops every branch's commits
+being ancestors of `main` -- `git branch -d` then refuses branches it would
+previously have deleted, and `patch-equivalent` is the only tier that can still
+prove them safe.
+
+```bash
+hooks-daemon delete-branch --dry-run <name>   # classify, delete nothing
+hooks-daemon delete-branch <name>             # deletes only if provably safe
+```
+
 **Example trigger:**
 
 ```bash

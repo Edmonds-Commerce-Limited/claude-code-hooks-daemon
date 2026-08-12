@@ -2660,6 +2660,107 @@ def cmd_harvest_background(args: argparse.Namespace) -> int:
     return 1 if report["has_breaches"] else 0
 
 
+# How many unique paths to print per unproven branch before summarising the
+# rest. The point is to make the risk legible, not to dump a whole tree.
+_UNPROVEN_PATH_PREVIEW = 10
+
+
+def cmd_delete_branch(args: argparse.Namespace) -> int:
+    """Delete local branches only when their safety can be proven (Plan 00206).
+
+    The sanctioned alternative to the force branch delete that
+    ``destructive_git`` blocks. It performs strictly MORE verification than that
+    flag: blocking preconditions first, then a tiered proof, then an
+    all-or-nothing deletion behind a recovery bundle.
+
+    Returns:
+        0 if the requested branches were deleted (or dry-run classified), 1 if
+        any branch was refused, 2 on a usage error.
+    """
+    from claude_code_hooks_daemon.daemon.branch_safety import (
+        TIER_UNPROVEN,
+        delete_branches,
+    )
+
+    repo = get_project_path(getattr(args, "project_root", None))
+    bundle_path = None if args.no_bundle else Path(args.bundle)
+
+    try:
+        report = delete_branches(
+            repo,
+            args.branches,
+            protected_ref=args.protected_ref,
+            allow_unproven=args.allow_unproven,
+            reason=args.reason,
+            bundle_path=bundle_path,
+            dry_run=args.dry_run,
+        )
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+
+    if args.format == "json":
+        print(
+            json.dumps(
+                {
+                    "refused": report.refused,
+                    "deleted": list(report.deleted),
+                    "bundle": str(report.bundle) if report.bundle else None,
+                    "blockers": list(report.blockers),
+                    "classifications": [
+                        {
+                            "name": c.name,
+                            "tier": c.tier,
+                            "refusal": c.refusal,
+                            "unique_commits": c.unique_commits,
+                            "unique_paths": list(c.unique_paths),
+                            "content_unique_paths": list(c.content_unique_paths),
+                            "detail": c.detail,
+                        }
+                        for c in report.classifications
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return 1 if report.refused else 0
+
+    for c in report.classifications:
+        verdict = c.refusal or c.tier
+        print(f"  {c.name}: {verdict} — {c.detail}")
+        if c.tier == TIER_UNPROVEN and c.content_unique_paths:
+            # Show the CONTENT-unique files: these are the only ones whose
+            # bytes disappear. A merely path-unique file is already safe.
+            shown = c.content_unique_paths[:_UNPROVEN_PATH_PREVIEW]
+            for path in shown:
+                print(f"      content found only here: {path}")
+            remaining = len(c.content_unique_paths) - len(shown)
+            if remaining > 0:
+                print(f"      ... and {remaining} more file(s) with unique content")
+
+    if report.refused:
+        print("\nREFUSED — nothing was deleted. Blockers:", file=sys.stderr)
+        for blocker in report.blockers:
+            print(f"  - {blocker}", file=sys.stderr)
+        print(
+            "\nA branch whose content cannot be proven recoverable is not "
+            "deleted by default. Re-run with --allow-unproven and --reason "
+            "once you have read the unique paths above.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if args.dry_run:
+        print("\nDry run — nothing was deleted.")
+        return 0
+
+    if report.bundle:
+        print(f"\nRecovery bundle: {report.bundle}")
+        print(f"  restore with: git fetch {report.bundle} <branch>:<branch>")
+    print(f"Deleted {len(report.deleted)} branch(es).")
+    return 0
+
+
 def cmd_release_notes(args: argparse.Namespace) -> int:
     """Show daemon release notes by version, range, latest, or list.
 
@@ -4244,6 +4345,60 @@ def main() -> int:
         help="Output format: text (default) or json",
     )
     parser_harvest.set_defaults(func=cmd_harvest_background)
+
+    # delete-branch command (Plan 00206)
+    parser_delete_branch = subparsers.add_parser(
+        "delete-branch",
+        help="Delete local branches only when their safety can be proven",
+    )
+    parser_delete_branch.add_argument(
+        "branches",
+        nargs="+",
+        metavar="BRANCH",
+        help="Local branch name(s) to delete",
+    )
+    parser_delete_branch.add_argument(
+        "--protected-ref",
+        dest="protected_ref",
+        default="main",
+        help="Ref every proof is measured against (default: main)",
+    )
+    parser_delete_branch.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Classify and report without deleting anything",
+    )
+    parser_delete_branch.add_argument(
+        "--allow-unproven",
+        dest="allow_unproven",
+        action="store_true",
+        help="Permit branches whose safety cannot be proven (requires --reason)",
+    )
+    parser_delete_branch.add_argument(
+        "--reason",
+        default=None,
+        help="Why the unique content on an unproven branch may be destroyed",
+    )
+    parser_delete_branch.add_argument(
+        "--bundle",
+        default="untracked/deleted-branches.bundle",
+        metavar="PATH",
+        help="Recovery bundle written before deletion "
+        "(default: untracked/deleted-branches.bundle)",
+    )
+    parser_delete_branch.add_argument(
+        "--no-bundle",
+        dest="no_bundle",
+        action="store_true",
+        help="Skip the recovery bundle — use when the content must NOT survive",
+    )
+    parser_delete_branch.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format: text (default) or json",
+    )
+    parser_delete_branch.set_defaults(func=cmd_delete_branch)
 
     # release-notes command
     parser_release_notes = subparsers.add_parser(
