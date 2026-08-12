@@ -31,6 +31,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus Shell — the field report's own language) via a shared
   `strategies/comments/` Strategy Pattern package.
 
+- **`command_hints` — generic, config-driven advisory reminders after a
+  configured command (Plan 00212).** ONE PostToolUse handler driven by a
+  config object mapping Bash command patterns to reminder text — not a
+  handler per hinted command. Ships with a single default hint: running
+  `agent-browser` reminds the agent to close the browser session when
+  finished. Command matching reuses `utils/shell_segmentation.py` and
+  `utils/command_evasion.py` rather than a hand-rolled check, so a
+  `pattern` only fires at the START of a shell segment — never on the
+  configured word appearing as an unrelated argument (`grep agent-browser notes.md`) or inside a commit message — and recognises path-qualified
+  and `env`-prefixed invocation respellings. Each hint is rate-limited via
+  a `ttl_seconds` cooldown tracked per `(session_id, hint_id)` in a
+  bounded, in-memory map, with an optional `min_calls_between` secondary
+  count-based gate. `options.mode` follows the same `additive` (default,
+  appends to and can override the built-in set by `id`) / `replace`
+  (discards the built-in set entirely) paradigm already established by
+  `idle_housekeeping_advisor`'s `custom_guidance_mode`. Never blocks.
+
 ## [3.52.0] - 2026-08-12
 
 This is a **minor release** carrying two new handlers, a whole-tree QA backstop,

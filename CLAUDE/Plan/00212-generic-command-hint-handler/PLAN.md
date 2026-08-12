@@ -50,20 +50,22 @@ established by `idle_housekeeping_advisor.py`.
 
 ### Phase 1: TDD Implementation
 
-- [ ] ⬜ Write failing unit tests: init, matching (segmentation + evasion,
+- [x] ✅ Write failing unit tests: init, matching (segmentation + evasion,
   both directions), TTL gating, config merge (additive/replace/override),
   malformed-entry handling, `get_claude_md()`, `get_acceptance_tests()`
-- [ ] ⬜ Implement `CommandHintsHandler` to pass tests
-- [ ] ⬜ Add `HandlerID.COMMAND_HINTS` / `Priority.COMMAND_HINTS` constants
-- [ ] ⬜ Verify 95%+ coverage on the new module
+- [x] ✅ Implement `CommandHintsHandler` to pass tests
+- [x] ✅ Add `HandlerID.COMMAND_HINTS` / `Priority.COMMAND_HINTS` constants
+- [x] ✅ Verify 95%+ coverage on the new module (100% reached)
 
 ### Phase 2: Integration & Registration
 
-- [ ] ⬜ Register in `.claude/hooks-daemon.yaml` (dogfood config)
-- [ ] ⬜ Add to `daemon/init_config.py` `generate_full()` template
-- [ ] ⬜ `docs/guides/HANDLER_REFERENCE.md` entry
-- [ ] ⬜ `CHANGELOG.md` `[Unreleased]` entry
-- [ ] ⬜ `config-changes` manifest (`recommended: true`)
+- [x] ✅ Register in `.claude/hooks-daemon.yaml` (dogfood config)
+- [x] ✅ Add to `daemon/init_config.py` `generate_full()` template (also
+  fixed a pre-existing gap: `comment_changelog`/`comment_size` were missing)
+- [x] ✅ `docs/guides/HANDLER_REFERENCE.md` entry
+- [x] ✅ `CHANGELOG.md` `[Unreleased]` entry
+- [x] ✅ `config-changes` manifest (`recommended: true`,
+  `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.53.0.yaml`)
 
 ### Phase 3: Verification
 
