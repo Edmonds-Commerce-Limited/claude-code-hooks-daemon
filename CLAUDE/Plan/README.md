@@ -20,8 +20,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00205: destructive git synonym respellings](00205-destructive-git-synonym-respellings/PLAN.md) - Not Started (tracked follow-up captured by the v3.52.0 release gate per RELEASING.md "never drop a finding": v3.52.0 closed ten *invocation* respellings but not *synonym* ones — `git update-ref -d refs/heads/X` is an unguarded `git branch -D`, and `git push origin +main:main` an unguarded `git push --force`.)
 
-- [00207: ban squash merge to preserve ancestry](00207-ban-squash-merge-preserve-ancestry/PLAN.md) - Not Started (measurement widened this from "ban squash" to "mandate ancestry-preserving merges": a rebase merge severs ancestry identically, and only a merge commit preserves it. Both stop the branch's commits ever being ancestors of the target, so the battle-tested `git branch -d` refuses permanently and deletion is forced onto the newer Plan 00206 tool; blocks both so `-d` stays usable.)
-
 - [00209: field feedback — daemon self-observability](00209-field-feedback-daemon-self-observability/PLAN.md) - Not Started (the daemon makes hundreds of decisions per session and persists none, so "which handlers earn their keep" and "what is the per-handler false-positive rate" are unanswerable. Adds a verdict log plus a reporting command; also fixes `pipe_blocker` quoting a heredoc of prose back as a shell command.)
 
 ### Status Line / Agent View
@@ -48,11 +46,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Plan Workflow / QA
 
-- [00213: planlib plan folder orchestrator tooling](00213-planlib-plan-folder-orchestrator-tooling/PLAN.md) - Not Started (an upstream proposal from a client project to promote its `planlib` bash library into the daemon; filed to get the ~62KB proposal out of `untracked/` and into tracked source. Deliberately not started — adopting a foreign library is a scope decision for a human, not something to begin because the document is well written.)
-
-- [00214: magic number scanner blindness](00214-magic-number-scanner-blindness/PLAN.md) - Not Started (DBF follow-up: Core Standard 9 bans magic strings **and numbers**, but `check_magic_values.py` implements only string-shaped rules, so `magic_values: 0 violations` has always meant "half the standard was checked". Surfaced by a hardcoded dispatch timeout that no rule could see.)
-
-- [00215: readme repositioning guardrails not hook tooling](00215-readme-repositioning-guardrails-not-hook-tooling/PLAN.md) - In Progress (cold-reader review found the README answers "why a daemon?" at length and never answers "why guardrails?", so a 90-second reader files the project under developer ergonomics; plus two factual errors — "just five hooks" against 31 forwarders, and a test badge a reader cannot reproduce.)
+- [00213: planlib plan folder orchestrator tooling](00213-planlib-plan-folder-orchestrator-tooling/PLAN.md) - In Progress (adopts a client project's `planlib` bash library. Phase 2 delivered: a `plan_workflow.scripts` config block shipping OFF, deploying `_planlib.inc.bash` through the same seam as `mkplan.bash`, with `root_marker` deliberately defaultless and `.git` rejected as a marker since `.git` is the walk's boundary. Supersedes Plan 00199, which targeted the same proposal.)
 
 - [00216: plan duplicate source detection](00216-plan-duplicate-source-detection/PLAN.md) - Not Started (DBF follow-up to the 00199/00213 duplication: `plan_qa` enforces number collisions and index bijection but is blind to two plans covering the same source document, so a duplicate is only caught if a human happens to notice.)
 
@@ -173,6 +167,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00215: readme repositioning guardrails not hook tooling](Completed/00215-readme-repositioning-guardrails-not-hook-tooling/PLAN.md) - Complete (README now answers "why guardrails?" before "why a daemon?", and states the incident the project exists to prevent. Every number was re-measured rather than carried over from the request — three of the request's own figures were wrong. The origin story was left BLANK until the maintainer supplied the facts, rather than inventing a plausible one; the line-count figures were later rounded because exact digits there go stale on every merge.)
+
+- [00214: magic number scanner blindness](Completed/00214-magic-number-scanner-blindness/PLAN.md) - Complete (DBF: Core Standard 9 bans magic strings **and numbers**, but `check_magic_values.py` implemented only string-shaped rules, so `magic_values: 0 violations` had always meant "half the standard was checked". Numeric rules added where a wrong value is mechanically checkable; identity/index numerics measured at 61% of all literals and deliberately left unenforced, with Core Standard 9 reworded to say so rather than overclaim.)
+
+- [00207: ban squash merge to preserve ancestry](Completed/00207-ban-squash-merge-preserve-ancestry/PLAN.md) - Complete (measurement widened this from "ban squash" to "mandate ancestry-preserving merges": a rebase merge severs ancestry identically, and only a merge commit preserves it. Both stop a branch's commits ever becoming ancestors of the target, so `git branch -d` refuses permanently. 10/10 spellings verified through the production forwarder post-merge.)
 
 - [00212: generic command hint handler](Completed/00212-generic-command-hint-handler/PLAN.md) - Complete (one config-driven PostToolUse handler mapping command patterns to hints, rather than a handler per command; TTL cooldown per (session, hint), extend-or-replace project config. Live-verified post-merge: fires on `agent-browser`, and three repeat probes were all suppressed.)
 
@@ -1140,11 +1140,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 217 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 167 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 170 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 39 + 167 + 5 = **211 folders**, spanning
+- **Folder-to-number reconciliation**: 36 + 170 + 5 = **211 folders**, spanning
   **208 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1154,11 +1154,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work). 208 + 9 = 217. ✅
-- **Last reconciled by**: the Plan 00213 merge — recounted from the merged
-  tree on disk rather than by taking either side of the conflict, because
-  neither was right: `main` still had 00199 in the active count, and the
-  incoming block was internally inconsistent (it stated `Cancelled: 5` while
-  its own reconciliation summed `4`, and `Active: 37` while summing `38`).
+- **Last reconciled by**: the Plan 00207 + 00214 + 00215 closures — recounted
+  from disk after the three `git mv`s. Immediately before, the Plan 00213
+  merge, where the figures were taken from the merged tree rather than from
+  either side of the conflict because neither was right: `main` still had
+  00199 in the active count, and the incoming block was internally
+  inconsistent (it stated `Cancelled: 5` while its own reconciliation summed
+  `4`, and `Active: 37` while summing `38`).
   Before that, the Plan 00217 creation, and the Plan 00211 + 00212 merges —
   where every figure was likewise re-derived because both sides of that merge
   were wrong in the same way: each itemised 00038 as a deleted draft when its

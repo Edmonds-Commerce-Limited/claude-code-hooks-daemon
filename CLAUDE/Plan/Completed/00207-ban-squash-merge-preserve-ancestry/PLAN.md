@@ -1,6 +1,6 @@
 # Plan 00207: ban squash merge preserve ancestry
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -133,14 +133,25 @@ Two corrections recorded because both were asserted before being checked:
   suite — deferred to the merged tree per host CPU contention across four
   parallel worktree agents this session; `smoke_test` cannot pass in a
   worktree regardless (needs a live project-root daemon socket).
-- [ ] ⬜ **Task 3.2**: Daemon restart, verify RUNNING, probe every spelling
-  against the live socket — **OUTSTANDING**: this worktree has no
-  project-root daemon to restart or probe. Verified the closest available
-  proxy instead: `HandlerRegistry.discover()` + `register_all()` against the
-  real dogfood config (with `ProjectContext` initialized) discovers 107
-  handlers, registers 93, finds `ancestry_preserving_merge` in the live
-  `PreToolUse` chain at priority 19, and dispatches deny/allow correctly for
-  the squash and `--no-ff` cases.
+
+- [x] ✅ **Task 3.2**: Daemon restart, verify RUNNING, probe every spelling
+  against the live socket — **DONE post-merge** at the real project root.
+  Daemon restarted RUNNING; 10/10 spellings behaved as specified through the
+  **production forwarder** (`.claude/hooks/pre-tool-use`), not a hand-rolled
+  socket client: the six denied forms (plain, whitespace-padded,
+  path-qualified `/usr/bin/git`, trailing-flag `gh pr merge 12 --squash`, and
+  both `gh pr merge` severing modes), the `MUST_SQUASH_BECAUSE=` escape
+  hatch, and the three allowed alternatives (`--no-ff`, `gh pr merge --merge`, local `git rebase`).
+
+  Worth recording because it nearly produced a false result: a first probe
+  harness that spoke to the socket directly returned `allow` for all six
+  deny cases. The handler was fine — the harness was wrong. It was caught
+  only because the live daemon had blocked those same commands through the
+  real hook path moments earlier, which contradicted the harness. A
+  verification tool that bypasses the production entry point can fail in
+  exactly the direction that reports a working guard as broken (or a broken
+  one as working).
+
 - [x] ✅ **Task 3.3**: Confirmed a `--no-ff` merged branch still deletes with
   plain `git branch -d`, which is the whole point of the plan — measured in
   a throwaway scratch repo (not assumed): `--no-ff` merge → `git branch -d`
@@ -186,9 +197,10 @@ rather than chosen.
 - [x] The deny message explains the ancestry consequence, not a style opinion
 - [x] After a `--no-ff` merge, `git branch -d` deletes the branch — measured,
   not assumed, since that outcome is the entire point of the plan
-- [ ] Full QA passes; daemon restarts RUNNING — targeted QA is clean (see
-  Task 3.1); the literal full suite + daemon restart are OUTSTANDING,
-  blocked on this being a worktree with no project-root daemon
+- [x] Full QA passes; daemon restarts RUNNING — discharged post-merge at the
+  real project root: `llm_qa.py all` → 20/20 PASSED (11,964 tests, 0 failed),
+  daemon restarted RUNNING, and `smoke_test` 3/3, which a worktree run can
+  never provide
 
 ## Risks & Mitigations
 

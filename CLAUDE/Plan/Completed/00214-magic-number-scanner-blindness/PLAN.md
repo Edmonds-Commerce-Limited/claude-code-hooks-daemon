@@ -1,6 +1,6 @@
 # Plan 00214: magic number scanner blindness
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -95,13 +95,15 @@ actual design problem.
 
 ### Phase 4: Real-project-root verification (outstanding)
 
-- [ ] ⬜ **Task 4.1**: This work was executed in an isolated git worktree,
+- [x] ✅ **Task 4.1**: This work was executed in an isolated git worktree,
   which cannot start the daemon or reach a live socket. The two fixed
   acceptance tests (`tests/acceptance/test_absolute_path_socket_deny.py`,
   `tests/acceptance/test_tool_use_error_recovery.py`) only SKIPPED here —
   they never actually exercised the `Timeout.SOCKET_DISPATCH_ROUNDTRIP`
-  replacement against a live daemon. After merge, in the real project root:
-  restart the daemon and run both files (they should PASS, not skip).
+  replacement against a live daemon. **DONE post-merge** at the real project
+  root: daemon restarted RUNNING, both files run → **8 passed, 0 skipped**.
+  The zero is the part that mattered — a skip here would have looked like a
+  pass in the summary line while proving nothing about the constant.
 
 ## Dependencies
 
@@ -116,8 +118,8 @@ actual design problem.
 - [x] The `timeout=` / `settimeout()` literal class is caught automatically
 - [x] The connect-only liveness probes are NOT flagged
 - [x] Core Standard 9 and the checker enforcing it make the same claim
-- [ ] Live-daemon verification of the two fixed acceptance tests (Task 4.1,
-  requires the real project root — see JOURNAL handoff)
+- [x] Live-daemon verification of the two fixed acceptance tests (Task 4.1) —
+  8 passed, 0 skipped at the real project root
 
 ## Delivery & Milestones
 

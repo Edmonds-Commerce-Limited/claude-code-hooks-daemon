@@ -1,6 +1,6 @@
 # Plan 00215: readme repositioning guardrails not hook tooling
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: High
@@ -115,12 +115,24 @@ greps `def test_` and finds ~9,888, concluding the badge is inflated.
 
 ## Success Criteria
 
-- [ ] A reader learns what the project is FOR before meeting an install command
-- [ ] No factual claim in the README contradicts another
-- [ ] Every number in the README was re-measured during this plan
-- [ ] The origin-story line is either supplied by the maintainer or absent — not
-  invented
-- [ ] QA passes and the daemon restarts cleanly
+- [x] A reader learns what the project is FOR before meeting an install command
+  — strapline, `## What this solves`, `## Where this came from` and the
+  deterministic-vs-agent argument all precede `## Installation & Updates`
+- [x] No factual claim in the README contradicts another
+- [x] Every number in the README was re-measured during this plan — and the
+  two line-count figures were then **rounded**, post-merge, because they had
+  already gone stale within the hour (69,419/157,974 → measured
+  70,601/159,656). Exact digits there rot on every merge, so precision was
+  the defect, not the cure; the `2.3×` ratio is the durable claim and is
+  unchanged. The test-count badge (`11400+`) stays a true floor at 11,964.
+- [x] The origin-story line is either supplied by the maintainer or absent —
+  not invented. The gate held: the executing agent left it unwritten and said
+  so rather than inventing a plausible incident, and it was written only once
+  the maintainer supplied the actual facts.
+- [x] QA passes and the daemon restarts cleanly — `llm_qa.py all` → 20/20
+  PASSED at the real project root (`doc_truth` and `british_english`, the two
+  checks that police README content, both ran after the edit), daemon
+  restarted RUNNING
 
 ## Delivery & Milestones
 
