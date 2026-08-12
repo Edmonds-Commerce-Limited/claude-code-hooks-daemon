@@ -1,6 +1,6 @@
 # Plan 00208: comment changelog and size handlers
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -148,9 +148,13 @@ in `.claude/hooks-daemon.yaml` (Phase 3 task).
   (Step 6/Step 7 of RELEASING.md), not this plan; both are `enabled: true`
   by default already so the manifest is a release-time promotion, not a
   functional gap
-- [ ] ⬜ **Task 3.3**: Full QA (`./scripts/qa/llm_qa.py all`), daemon restart
-  RUNNING, and a LIVE socket probe of both directions — the banner case blocked,
-  a rationale comment allowed
+- [x] ✅ **Task 3.3**: Full QA (`./scripts/qa/llm_qa.py all`) — **20/20 PASSED**
+  (11,705 passed, 0 failed, 5 pre-existing skipped, coverage 95.4%). Daemon
+  restart verified RUNNING (PID discovered both new handlers cleanly, zero
+  import errors). LIVE socket probes via `/workspace/.claude/hooks/pre-tool-use`
+  confirmed both directions: the field-report banner shape (six `Prior X.Y.Z:` entries) DENIED with the exact reason; the Plan-00047 rationale
+  example ALLOWED silently (`{}`). A third probe confirmed `comment_size`
+  denies a 452-char comment on a brand-new file
 - [x] ✅ **Task 3.4**: Run the matcher over this entire repository and report the
   hit list. Any hit on a legitimate rationale comment is a design defect, not a
   tuning problem. **Done BEFORE Task 3.3** (see JOURNAL 12:20) — this measurement
@@ -190,8 +194,8 @@ rather than its proxy.
 - [x] ✅ Tiering verified: an over-limit comment can still be edited downward
   (comment_size shrink/same-size/grow tests)
 - [x] ✅ The deny message names where the text should go instead
-- [ ] Full QA passes; daemon restarts RUNNING; live socket probe confirms both
-  directions
+- [x] ✅ Full QA passes (20/20); daemon restarts RUNNING; live socket probe
+  confirms both directions (plus a third probe for `comment_size`)
 
 ## Risks & Mitigations
 
@@ -207,6 +211,10 @@ rather than its proxy.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00208-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not started. Proposal filed as `PROPOSAL.md` in this folder. A first
-  implementation attempt was dispatched to a sub-agent and produced nothing
-  before terminating; re-dispatch from this plan.
+- Proposal filed as `PROPOSAL.md` in this folder. Delivered across commits
+  on `main` from `b0e1efc4` (HandlerID/Priority constants) through the
+  plan-closure commit — `git log --oneline --grep "Plan 00208"` lists the
+  full sequence: shared `strategies/comments/` package, both handlers
+  (TDD), the whole-repo self-scan that redesigned the blocking signal set,
+  config/docs/changelog wiring, and the 4 QA-surfaced registration-gap
+  fixes.

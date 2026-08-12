@@ -22,8 +22,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00207: ban squash merge to preserve ancestry](00207-ban-squash-merge-preserve-ancestry/PLAN.md) - Not Started (measurement widened this from "ban squash" to "mandate ancestry-preserving merges": a rebase merge severs ancestry identically, and only a merge commit preserves it. Both stop the branch's commits ever being ancestors of the target, so the battle-tested `git branch -d` refuses permanently and deletion is forced onto the newer Plan 00206 tool; blocks both so `-d` stays usable.)
 
-- [00208: comment changelog and size handlers](00208-comment-changelog-and-size-handlers/PLAN.md) - Not Started (field report: an agent-authored comment reached 5,645 characters on one line, six releases deep, and broke the user-facing banner that reads it — no human wrote any of it, each agent appended following the shape of the last. Two handlers: block changelog-in-a-comment, cap comment size. The hard part is allowing history-as-*rationale*, which this repo's own source is full of.)
-
 - [00209: field feedback — daemon self-observability](00209-field-feedback-daemon-self-observability/PLAN.md) - Not Started (the daemon makes hundreds of decisions per session and persists none, so "which handlers earn their keep" and "what is the per-handler false-positive rate" are unanswerable. Adds a verdict log plus a reporting command; also fixes `pipe_blocker` quoting a heredoc of prose back as a shell command.)
 
 ### Status Line / Agent View
@@ -183,6 +181,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00208: comment changelog and size handlers](Completed/00208-comment-changelog-and-size-handlers/PLAN.md) - Complete (blocks `Prior <version>:`/dated entries in comments; caps comment length with plan-doc-size-style tiering. A whole-repo self-scan demoted 3 of 5 planned blocking signals to advisory after measuring real false positives.)
 
 - [00206: safe branch delete deterministic proof](Completed/00206-safe-branch-delete-deterministic-proof/PLAN.md) - Complete (`hooks-daemon delete-branch`: four tiers proven cheapest-first on blob identity, never path presence, since a rewrite leaves no ancestor route for `git branch -d`. `unproven` abandonment is human-gated at an interactive terminal.)
 
@@ -1138,14 +1138,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 210 (count = `hooksdaemon.latestPlanNumber` git counter; 00145, 00191, 00195 and 00210 were allocated by the counter but their folders are not present on this branch — 00195 was consumed by a transient probe during the v3.51.0 acceptance run, and 00210 by a sub-agent that scaffolded it, then found Plan 00208 already covered the same work and withdrew its duplicate in favour of it)
-- **Completed**: 164 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 165 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 35 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
-- **Last reconciled by**: the Plan 00208 / 00209 creations after the v3.52.0
-  release — counts re-derived from the folders on disk (`36` active, `164`
-  completed), not carried forward. The prior reconciliation was the Plan 00206
-  completion at `34`/`164`; before that the Plan 00207 creation at `35`/`163`.
+- **Last reconciled by**: the Plan 00208 completion — counts re-derived from
+  the folders on disk (`35` active, `165` completed), not carried forward.
+  The prior reconciliation was the Plan 00208 / 00209 creations after the
+  v3.52.0 release at `36`/`164`; before that the Plan 00206 completion at
+  `34`/`164`.
 
 ## Quick Links
 
