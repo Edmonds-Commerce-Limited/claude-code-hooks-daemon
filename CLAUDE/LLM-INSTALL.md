@@ -682,10 +682,11 @@ fact puts daemon-owned source inside your linters' default scope.
 | `CLAUDE/Plan/mkplan.bash`                  | Plan scaffolder (plan workflow only)          | Runs inside your plan directory and is documented that way  |
 | `.claude/ccy/claude-supervise.py`          | Standalone PTY supervisor (ccy projects only) | `exec`'d by the ccy launcher; committed so teammates get it |
 
-The manifest above is generated from
-`src/claude_code_hooks_daemon/install/client_owned_assets.py`, which the daemon's
-own test suite keeps in step with the code that performs each deploy — so this
-table cannot silently go stale.
+Every path in that table is asserted against
+`src/claude_code_hooks_daemon/install/client_owned_assets.py` — the daemon's
+single manifest of what it deploys into client-owned space — by a test that
+fails if the two disagree. A new deployed asset therefore cannot reach you
+undocumented.
 
 #### Excluding Them From Your Quality Gates
 
