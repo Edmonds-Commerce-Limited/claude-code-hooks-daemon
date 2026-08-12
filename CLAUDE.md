@@ -651,6 +651,15 @@ The following git commands are permanently blocked and will always be denied:
 
 If the user needs to run one of these, ask them to do it manually. Do not attempt to work around the block.
 
+**Deleting a branch has a sanctioned path — use it instead of asking.** `git branch -D` stays blocked, but `hooks-daemon delete-branch <name>...` does strictly MORE checking than that flag and needs no human:
+
+```
+hooks-daemon delete-branch --dry-run <name>    # classify first, delete nothing
+hooks-daemon delete-branch <name>              # deletes only if provably safe
+```
+
+It refuses by default and deletes only what it can prove is recoverable — the branch is merged, or every commit is already upstream by patch-id, or every file version on it is byte-identical to one still reachable from `main`. A recovery bundle is written before deletion unless you pass `--no-bundle`. If it refuses, it names the files whose CONTENT exists nowhere else; read those before considering `--allow-unproven`, which also requires `--reason`. Note that `git branch -d` refuses every branch after a history rewrite (their commits stop being ancestors), which is exactly the gap this command fills.
+
 **Safe alternatives**: `git stash` (recoverable), `git diff` / `git status` (inspect first), `git commit` (save changes permanently first).
 
 ## sed_blocker — sed is forbidden for file modification
