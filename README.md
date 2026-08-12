@@ -49,10 +49,13 @@ second without touching your session.
 
 **The enforcement is deterministic.** A handler is a function returning allow
 or deny — not a prompt, and not a judgement the model makes about its own
-behaviour. It cannot be reasoned with, and it decides the thousandth call
-exactly as it decided the first. For the failure that actually matters — the
-one taken deliberately, for a reason that seemed good at the time — that is
-the property you want.
+behaviour. That distinction is the point. Instructions are a request: however
+firmly you word them, they amount to *please don't*, and a model is free to
+weigh them against everything else in its context. A handler is a *no*. It
+cannot be negotiated with, talked around, or outweighed by a good reason, and
+it decides the thousandth call exactly as it decided the first. For the failure
+that actually matters — the one taken deliberately, for a reason that seemed
+good at the time — that is the property you want.
 
 That is the whole argument in one line: **when you have an agent that can go
 off the rails, the thing enforcing the rails must not be another agent.**
