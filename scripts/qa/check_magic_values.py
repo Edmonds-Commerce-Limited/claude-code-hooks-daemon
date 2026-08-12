@@ -9,9 +9,20 @@ the constants module. Checks 8 categories:
 3. Magic tool names (tool_name == "Bash")
 4. Magic config keys (config["enabled"])
 5. Magic priorities (priority=10)
-6. Magic timeouts (timeout=30)
+6. Magic timeouts (timeout=30, or sock.settimeout(30) guarding a dispatch
+   round trip - see ``_contains_dispatch_call``. A settimeout() literal
+   guarding a connect-only liveness probe is correct-by-design (Plan 00127)
+   and is deliberately NOT flagged; see Plan 00214.)
 7. Magic decisions (decision="allow")
 8. Magic event types (event_type == "pre_tool_use")
+
+Plan 00214 measured the wider space of numeric literals across this
+repository (~7,100 across src/ and tests/) before adding rule #6's
+``settimeout()`` half: 61% are 0/1/-1/2 (indices, identities, sentinels) and
+the rest are overwhelmingly test-local fixture data or values already named
+by the assignment that defines them. A blanket "every numeric literal is
+magic" rule was rejected on that evidence - see
+``CLAUDE/Plan/00214-magic-number-scanner-blindness/PLAN.md``.
 
 Usage:
     python scripts/qa/check_magic_values.py
@@ -153,6 +164,13 @@ HANDLER_DISPLAY_NAMES: frozenset[str] = frozenset(
     }
 )
 
+# Method names whose presence in a function marks it as performing a full
+# request/response dispatch round trip over a socket, as opposed to a
+# connect-only liveness probe (Plan 00127). Used to decide whether a raw
+# numeric literal passed to that function's settimeout() call is genuinely
+# magic (Plan 00214) - see ``_contains_dispatch_call``.
+_DISPATCH_CALL_METHODS: frozenset[str] = frozenset({"sendall", "recv"})
+
 
 class MagicValueChecker(ast.NodeVisitor):
     """AST visitor that detects magic values in Python source."""
@@ -162,6 +180,10 @@ class MagicValueChecker(ast.NodeVisitor):
         self.violations: list[Violation] = []
         self._in_handler_init = False
         self._current_class_bases: list[str] = []
+        # Stack of "does the enclosing function contain a dispatch call"
+        # booleans, one entry per nested FunctionDef/AsyncFunctionDef scope.
+        # See _contains_dispatch_call and _check_settimeout_call.
+        self._dispatch_call_stack: list[bool] = []
 
     def _add(self, node: _PositionedNode, rule: str, message: str) -> None:
         self.violations.append(
@@ -182,14 +204,27 @@ class MagicValueChecker(ast.NodeVisitor):
         self._current_class_bases = old_bases
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        """Track if we're inside __init__ of a Handler subclass."""
+        """Track Handler.__init__ scope and dispatch-call scope."""
+        self._visit_function_scope(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        """Async twin of visit_FunctionDef - same scope tracking applies."""
+        self._visit_function_scope(node)
+
+    def _visit_function_scope(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        """Shared scope tracking for sync and async function definitions."""
         is_handler_init = node.name == "__init__" and "Handler" in " ".join(
             self._current_class_bases
         )
-        old = self._in_handler_init
+        old_in_init = self._in_handler_init
         self._in_handler_init = is_handler_init
+
+        self._dispatch_call_stack.append(_contains_dispatch_call(node))
+
         self.generic_visit(node)
-        self._in_handler_init = old
+
+        self._in_handler_init = old_in_init
+        self._dispatch_call_stack.pop()
 
     def visit_Call(self, node: ast.Call) -> None:
         """Detect magic values in function/constructor calls."""
@@ -202,7 +237,38 @@ class MagicValueChecker(ast.NodeVisitor):
         if func_name == "HookResult":
             self._check_hook_result_keywords(node)
 
+        # Check sock.settimeout(<literal>) calls guarding a dispatch round trip
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "settimeout":
+            self._check_settimeout_call(node)
+
         self.generic_visit(node)
+
+    def _check_settimeout_call(self, node: ast.Call) -> None:
+        """Check a settimeout() call for a raw numeric literal.
+
+        Only flagged when the enclosing function also performs a dispatch
+        round trip (see ``_DISPATCH_CALL_METHODS`` / ``_contains_dispatch_call``)
+        - a settimeout() literal guarding a connect-only liveness probe
+        (Plan 00127) is correct-by-design and must never be flagged.
+        """
+        if not node.args:
+            return
+        arg = node.args[0]
+        if not (
+            isinstance(arg, ast.Constant)
+            and isinstance(arg.value, (int, float))
+            and not isinstance(arg.value, bool)
+        ):
+            return
+        if not self._dispatch_call_stack or not self._dispatch_call_stack[-1]:
+            return
+        self._add(
+            arg,
+            "magic-timeout",
+            f"Magic timeout {arg.value} passed to settimeout() before a dispatch "
+            "round trip - use Timeout.SOCKET_DISPATCH_ROUNDTRIP or another named "
+            "Timeout.XXX constant",
+        )
 
     def _check_handler_init_keywords(self, node: ast.Call) -> None:
         """Check Handler.__init__ keyword args for magic values."""
@@ -433,6 +499,32 @@ def _is_super_init(node: ast.Call) -> bool:
         inner = node.func.value
         if isinstance(inner, ast.Call):
             return _get_name(inner.func) == "super"
+    return False
+
+
+def _contains_dispatch_call(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Return True if a function body calls a socket dispatch method.
+
+    Distinguishes a full request/response round trip (``sendall``/``recv``)
+    from a connect-only liveness probe (Plan 00127, correct-by-design). A
+    ``settimeout()`` literal guarding a dispatch round trip is genuinely
+    magic and should use ``Timeout.SOCKET_DISPATCH_ROUNDTRIP`` (or another
+    named ``Timeout.XXX`` constant) instead of silently reusing a
+    connect-sized budget - the defect this rule exists to catch (Plan 00214).
+
+    Walks the WHOLE subtree including any nested function, so a dispatch
+    call inside a nested helper would (rarely, and only in the direction of
+    a missed catch rather than a false positive) mark the outer scope as
+    dispatching too. No nested-function socket helper exists in this
+    codebase today, so this is a documented limitation, not an observed gap.
+    """
+    for child in ast.walk(node):
+        if (
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Attribute)
+            and child.func.attr in _DISPATCH_CALL_METHODS
+        ):
+            return True
     return False
 
 

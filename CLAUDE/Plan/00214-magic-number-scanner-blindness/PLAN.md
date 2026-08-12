@@ -1,6 +1,6 @@
 # Plan 00214: magic number scanner blindness
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -68,30 +68,40 @@ actual design problem.
 
 ### Phase 1: Measure the surface before designing the rule
 
-- [ ] ⬜ **Task 1.1**: Enumerate every numeric literal in `src/` and `tests/`,
+- [x] ✅ **Task 1.1**: Enumerate every numeric literal in `src/` and `tests/`,
   grouped by shape (bare int, float, keyword-argument value, comparison operand)
-- [ ] ⬜ **Task 1.2**: Classify a sample by hand into genuinely-magic vs
+- [x] ✅ **Task 1.2**: Classify a sample by hand into genuinely-magic vs
   legitimately-inline, deriving the exemption categories from evidence rather
   than from guesswork
-- [ ] ⬜ **Task 1.3**: Record the measured false-positive rate per candidate rule
+- [x] ✅ **Task 1.3**: Record the measured false-positive rate per candidate rule
 
 ### Phase 2: Implement the highest-precision rule first
 
-- [ ] ⬜ **Task 2.1**: TDD a numeric rule targeting the shape with the best
+- [x] ✅ **Task 2.1**: TDD a numeric rule targeting the shape with the best
   measured precision — a strong candidate is a literal passed to a `timeout=`
   keyword or to `settimeout()`, where a named `Timeout.` constant already exists
-- [ ] ⬜ **Task 2.2**: Wire it into `check_magic_values.py` and its JSON output
-- [ ] ⬜ **Task 2.3**: Fix the violations it surfaces (the two `10.0` dispatch
+- [x] ✅ **Task 2.2**: Wire it into `check_magic_values.py` and its JSON output
+- [x] ✅ **Task 2.3**: Fix the violations it surfaces (the two `10.0` dispatch
   sites in `tests/acceptance/` are known)
-- [ ] ⬜ **Task 2.4**: Demote any rule with a non-zero measured false-positive
+- [x] ✅ **Task 2.4**: Demote any rule with a non-zero measured false-positive
   rate to advisory rather than shipping it blocking
 
 ### Phase 3: Close the batch gap
 
-- [ ] ⬜ **Task 3.1**: Confirm the whole-repo QA check covers files that never
+- [x] ✅ **Task 3.1**: Confirm the whole-repo QA check covers files that never
   pass through a Write/Edit, so the rule is not write-time-only
-- [ ] ⬜ **Task 3.2**: Correct Core Standard 9's wording if any numeric category
+- [x] ✅ **Task 3.2**: Correct Core Standard 9's wording if any numeric category
   is deliberately left unenforced, so the standard and the guard agree
+
+### Phase 4: Real-project-root verification (outstanding)
+
+- [ ] ⬜ **Task 4.1**: This work was executed in an isolated git worktree,
+  which cannot start the daemon or reach a live socket. The two fixed
+  acceptance tests (`tests/acceptance/test_absolute_path_socket_deny.py`,
+  `tests/acceptance/test_tool_use_error_recovery.py`) only SKIPPED here —
+  they never actually exercised the `Timeout.SOCKET_DISPATCH_ROUNDTRIP`
+  replacement against a live daemon. After merge, in the real project root:
+  restart the daemon and run both files (they should PASS, not skip).
 
 ## Dependencies
 
@@ -101,11 +111,13 @@ actual design problem.
 
 ## Success Criteria
 
-- [ ] A numeric magic-value rule exists, is calibrated against measured data,
+- [x] A numeric magic-value rule exists, is calibrated against measured data,
   and runs in the QA suite
-- [ ] The `timeout=` / `settimeout()` literal class is caught automatically
-- [ ] The connect-only liveness probes are NOT flagged
-- [ ] Core Standard 9 and the checker enforcing it make the same claim
+- [x] The `timeout=` / `settimeout()` literal class is caught automatically
+- [x] The connect-only liveness probes are NOT flagged
+- [x] Core Standard 9 and the checker enforcing it make the same claim
+- [ ] Live-daemon verification of the two fixed acceptance tests (Task 4.1,
+  requires the real project root — see JOURNAL handoff)
 
 ## Delivery & Milestones
 
