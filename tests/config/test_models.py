@@ -1021,6 +1021,83 @@ class TestPlanWorkflowQaConfig:
             PlanWorkflowConfig.model_validate({"qa": {"staleness_days": 0}})
 
 
+class TestPlanWorkflowScriptsConfig:
+    """Tests for the nested plan_workflow.scripts sub-model (Plan 00213 Phase 2).
+
+    Configures the `planlib` operator-script safety library: a sourced bash
+    library of safety-critical primitives (script-relative root resolution,
+    a tee'd run log, ssh-agent loading, the change gate) for plan-folder
+    orchestrator scripts. Deployment is a SEPARATE decision (Task 2.2,
+    install/plan_workflow.py) — this model is config validation only.
+    """
+
+    def test_defaults(self) -> None:
+        """Ships OFF, with NO default root_marker (deliberate — see §3.1)."""
+        config = PlanWorkflowConfig()
+        assert config.scripts.enabled is False
+        assert config.scripts.root_marker == ""
+        assert config.scripts.delegate == ""
+        assert config.scripts.check_flag == "--check"
+        assert config.scripts.force_color_var == ""
+        assert config.scripts.scrubber == ""
+        assert config.scripts.track_run_logs is False
+
+    def test_custom_values(self) -> None:
+        """Sub-model accepts the documented YAML shape with neutral examples."""
+        config = PlanWorkflowConfig.model_validate(
+            {
+                "scripts": {
+                    "enabled": True,
+                    "root_marker": "pyproject.toml",
+                    "delegate": "scripts/run-deploy.bash",
+                    "check_flag": "--dry-run",
+                    "force_color_var": "FORCE_COLOR",
+                    "scrubber": "scripts/scrub-secrets.py",
+                    "track_run_logs": True,
+                }
+            }
+        )
+        assert config.scripts.enabled is True
+        assert config.scripts.root_marker == "pyproject.toml"
+        assert config.scripts.delegate == "scripts/run-deploy.bash"
+        assert config.scripts.check_flag == "--dry-run"
+        assert config.scripts.force_color_var == "FORCE_COLOR"
+        assert config.scripts.scrubber == "scripts/scrub-secrets.py"
+        assert config.scripts.track_run_logs is True
+
+    def test_extra_fields_forbidden(self) -> None:
+        """Sub-model rejects unknown keys (typo defence)."""
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            PlanWorkflowConfig.model_validate({"scripts": {"unknown_field": "value"}})
+
+    def test_enabled_requires_root_marker(self) -> None:
+        """FAIL FAST: enabling without a root_marker is refused, not silently inert.
+
+        There is deliberately no default (proposal §3.1 / PROPOSAL-ASSESSMENT.md
+        §7): a wrong default resolves to SOME directory and the deployed script
+        then silently operates on the wrong repository -- the exact incident
+        class the library exists to prevent. Requiring it at config-validation
+        time surfaces the mistake at daemon-restart, not at first live run.
+        """
+        with pytest.raises(ValidationError, match="root_marker"):
+            PlanWorkflowConfig.model_validate({"scripts": {"enabled": True}})
+
+    def test_disabled_does_not_require_root_marker(self) -> None:
+        """Disabled (the default) never demands a root_marker."""
+        config = PlanWorkflowConfig.model_validate({"scripts": {"enabled": False}})
+        assert config.scripts.root_marker == ""
+
+    def test_root_marker_rejects_dot_git(self) -> None:
+        """`.git` is the WALK BOUNDARY (proposal §3.3) -- using it as the marker
+        too means the boundary check can never fire, silently disabling the
+        nested-checkout protection the whole design exists to provide.
+        """
+        with pytest.raises(ValidationError, match=r"\.git"):
+            PlanWorkflowConfig.model_validate(
+                {"scripts": {"enabled": True, "root_marker": ".git"}}
+            )
+
+
 class TestMigratePlanHandlerOptions:
     """Tests for Config.migrate_plan_handler_options validator."""
 
