@@ -231,6 +231,112 @@ class TestMagicTimeout:
         assert "magic-timeout" not in _rules(violations)
 
 
+class TestMagicSettimeoutDispatch:
+    """Tests for the settimeout()-before-dispatch-round-trip rule.
+
+    Plan 00214: a raw numeric literal passed to ``sock.settimeout()`` is only
+    genuinely magic when the enclosing function also performs a full dispatch
+    round trip (``sendall`` + ``recv``). The identical shape guarding a
+    connect-only liveness probe (Plan 00127) is correct-by-design and must
+    NOT be flagged - flagging it is exactly the false positive that would get
+    this rule switched off.
+    """
+
+    def test_detects_settimeout_before_dispatch_round_trip(self) -> None:
+        """settimeout(10.0) followed by sendall()+recv() is genuinely magic."""
+        violations = _check("""
+            import socket
+
+            def _send_pre_tool_use(sock_path, payload):
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(10.0)
+                    sock.connect(str(sock_path))
+                    sock.sendall(payload)
+                    sock.shutdown(socket.SHUT_WR)
+                    chunks = []
+                    while True:
+                        chunk = sock.recv(65536)
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+        """)
+        assert "magic-timeout" in _rules(violations)
+
+    def test_allows_settimeout_before_connect_only_probe(self) -> None:
+        """settimeout(1.0) with only connect() (no sendall/recv) is exempt.
+
+        This is the Plan 00127 socket-liveness probe shape: correct-by-design,
+        never flagged.
+        """
+        violations = _check("""
+            import socket
+
+            def _socket_is_alive(sock_path):
+                try:
+                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                        sock.settimeout(1.0)
+                        sock.connect(str(sock_path))
+                    return True
+                except OSError:
+                    return False
+        """)
+        assert "magic-timeout" not in _rules(violations)
+
+    def test_allows_settimeout_with_named_constant(self) -> None:
+        """A named Timeout.XXX constant is never flagged, even before dispatch."""
+        violations = _check("""
+            import socket
+
+            def _send_pre_tool_use(sock_path, payload):
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(Timeout.SOCKET_DISPATCH_ROUNDTRIP)
+                    sock.connect(str(sock_path))
+                    sock.sendall(payload)
+                    sock.recv(65536)
+        """)
+        assert "magic-timeout" not in _rules(violations)
+
+    def test_allows_settimeout_with_variable(self) -> None:
+        """A parameter/variable value is never flagged (not a Constant node)."""
+        violations = _check("""
+            import socket
+
+            def send_hook_event(sock_path, payload, timeout=30.0):
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                sock.settimeout(timeout)
+                sock.connect(str(sock_path))
+                sock.sendall(payload)
+                sock.recv(4096)
+        """)
+        assert "magic-timeout" not in _rules(violations)
+
+    def test_two_helper_functions_classified_independently(self) -> None:
+        """A probe helper and a dispatch helper in the same file/class of
+        functions must be classified independently - the probe's literal
+        must stay unflagged even though a sibling function in the same file
+        does a real dispatch round trip.
+        """
+        violations = _check("""
+            import socket
+
+            def _socket_is_alive(sock_path):
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(1.0)
+                    sock.connect(str(sock_path))
+                return True
+
+            def _send_pre_tool_use(sock_path, payload):
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(10.0)
+                    sock.connect(str(sock_path))
+                    sock.sendall(payload)
+                    sock.recv(65536)
+        """)
+        timeout_violations = [v for v in violations if v.rule == "magic-timeout"]
+        assert len(timeout_violations) == 1
+        assert timeout_violations[0].message.startswith("Magic timeout 10.0")
+
+
 class TestMagicDecision:
     """Tests for magic-decision rule."""
 

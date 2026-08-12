@@ -30,6 +30,8 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOCKET_GLOB = "daemon-*.sock"
 
@@ -85,7 +87,7 @@ def _send_stop_event(sock_path: Path, transcript_path: Path, session_id: str) ->
     request = json.dumps(payload).encode("utf-8") + b"\n"
 
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-        sock.settimeout(10.0)
+        sock.settimeout(Timeout.SOCKET_DISPATCH_ROUNDTRIP)
         sock.connect(str(sock_path))
         sock.sendall(request)
         sock.shutdown(socket.SHUT_WR)
