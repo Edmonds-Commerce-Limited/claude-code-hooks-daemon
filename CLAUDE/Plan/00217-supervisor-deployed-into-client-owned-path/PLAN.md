@@ -92,8 +92,9 @@ source into every Python tool's discovery.
 ### Phase 2: Implement
 
 - [ ] ⬜ **Task 2.1**: Implement the chosen fix with TDD
-  - [ ] ⬜ Single manifest of daemon-owned assets deployed into client-owned
-    paths, derived from the deploying modules' own constants
+  - [x] ✅ Single manifest of daemon-owned assets deployed into client-owned
+    paths (`install/client_owned_assets.py`), pinned to real files and to the
+    client-facing document by `tests/unit/install/test_client_owned_assets.py`
   - [ ] ⬜ Ownership banner in the deployed supervisor source
   - [ ] ⬜ Guard: every manifest asset stays clean under its language's DEFAULT
     rule set (`CLAUDE.md` Core Standard 15 — the check that was absent)
@@ -104,8 +105,10 @@ source into every Python tool's discovery.
 
 ### Phase 3: Close the documentation gap
 
-- [ ] ⬜ **Task 3.1**: State the ownership boundary explicitly where a client
-  will read it — the enumerated path list plus the copy-pasteable exclusion
+- [x] ✅ **Task 3.1**: State the ownership boundary explicitly where a client
+  will read it — `CLAUDE/LLM-INSTALL.md` now carries "Which Files Under
+  `.claude/` Are Yours?": the enumerated path list, why each file cannot live in
+  the vendor dir, and the copy-pasteable ruff/shellcheck exclusions
 - [ ] ⬜ **Task 3.2**: Stage a `truth-changes` entry if the fix changes where the
   supervisor lives, since client docs and exclusions may assert the old path
 
