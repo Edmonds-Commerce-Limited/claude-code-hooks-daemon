@@ -166,7 +166,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
-- [00217: supervisor deployed into client owned path](Completed/00217-supervisor-deployed-into-client-owned-path/PLAN.md) - Complete (the field report's premise was wrong: `ruff --isolated` passes the supervisor clean, and its three findings need `BLE`/`DTZ` selected. So the fix is the ownership boundary, not the rules — a DAEMON-OWNED banner on every deployed asset, one manifest, client boundary docs, and a guard pinning each asset clean under default rules. Supervisor behaviour unchanged.)
+- [00217: supervisor deployed into client owned path](Completed/00217-supervisor-deployed-into-client-owned-path/PLAN.md) - Complete (the report's premise was wrong: `ruff --isolated` passes the supervisor clean; its findings need `BLE`/`DTZ` selected. So the fix is the ownership boundary, not the rules — a DAEMON-OWNED banner on each deployed asset, a manifest, client docs, and a guard keeping them default-clean.)
 
 - [00213: planlib plan folder orchestrator tooling](Completed/00213-planlib-plan-folder-orchestrator-tooling/PLAN.md) - Complete (adopts a client project's `planlib` bash library behind a `plan_workflow.scripts` block shipping OFF, deployed through the same seam as `mkplan.bash`. `root_marker` is deliberately defaultless and `.git` is rejected as a marker, since `.git` is the walk's boundary. Supersedes Plan 00199.)
 
