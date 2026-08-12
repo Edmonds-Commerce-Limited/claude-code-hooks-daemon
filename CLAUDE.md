@@ -1165,14 +1165,14 @@ call with the exact remediation; fix the content and retry.
   ad-hoc markers like `[✓]`/`[⏳]` (`task-grammar`)
 - a `PLAN.md` must stay under the size tiers (`plan-doc-size`):
   advisory above 18,000 bytes / 350 lines, escalated warning above
-  25,000 / 500, and edits BLOCKED above 35,000 / 900. The two
-  remedies are RELOCATE the narrative into this plan's `JOURNAL/`
-  or SPLIT the plan — never delete content. Only an edit that
+  25,000 / 500, and edits BLOCKED above 35,000 / 900. Three remedies, and NONE is deletion: (1) EXTRACT durable detail — research output, findings, decisions and their reasoning, drafts, evidence tables — into a named supporting document in this plan folder (e.g. `RESEARCH-*.md`, `DECISIONS.md`) and link to it from the task; (2) RELOCATE dated narrative — progress notes, incident write-ups, hand-off prose — into this plan's JOURNAL/ day-file, which is append-only and unbounded by design; or (3) SPLIT the plan if the task tree itself is the bulk, since an over-scoped plan is not fixed by better journalling. Keep PLAN.md lean, current and correct — history belongs in git and in JOURNAL/. Only an edit that
   GROWS the file can be blocked (shrinking is silent, same-size
   only advises), so an oversized plan can always be updated and
   refactored down; declare a genuine exception in the file with
-  `<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`. Journals and
-  the plan-index README are exempt at any size.
+  `<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`. Journals,
+  supporting docs and the plan-index README are exempt at any
+  size — if the advisory notes the folder has none, that is a
+  hint the bulk may want a named supporting document, not proof.
 
 **Advisory rules**: missing Created/Owner/Priority headers on new
 plans; a terminal status set while the folder is still in the plan
@@ -1232,25 +1232,26 @@ Agents in one working tree share a single `.git/index`, so a peer's bare `git co
 
 **Keep the shared tree** for agents that need the real project root — daemon restart verification and client-mode testing do not work in a worktree.
 
-## plan_workflow — PLAN.md and JOURNAL/ obey OPPOSITE contracts
+## plan_workflow — PLAN.md, supporting docs and JOURNAL/ obey DIFFERENT contracts
 
-Confusing these two is the single most common plan-hygiene failure: narrative gets appended to `PLAN.md` until it is tens of KB of stale log. Each file has a WRITE contract and a READ contract, and the read contract is what justifies the write contract.
+Confusing these is the single most common plan-hygiene failure: narrative AND durable detail both get crammed into `PLAN.md` until it is tens of KB of stale log. Each file has a WRITE contract and a READ contract, and the read contract is what justifies the write contract.
 
-|             | `PLAN.md`                                                                                | `JOURNAL/NNNNN-Journal-YY-MM-DD.md`                                                                  |
-| ----------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| **Write**   | Commit if dirty, EDIT IN PLACE, commit. Rewrite freely — git holds the history           | APPEND ONLY. Never edit or remove an earlier entry; corrections are new dated entries at the bottom  |
-| **Content** | LEAN, surgical, always correct — current truth only: goals, decisions, task tree, status | What actually happened: dated progress, findings, incidents, hand-offs                               |
-| **Read**    | Read IN FULL every session — it is your grounding                                        | NEVER read whole. `tail -n N` the newest day-file, grep it, or send a sub-agent for deep archaeology |
-| **Size**    | Bounded — see tiers below                                                                | UNBOUNDED by design. Length is never a problem; never tidy or trim a journal                         |
+|             | `PLAN.md`                                                                                | `SOME-DOC.md`                                                                                                                                   | `JOURNAL/NNNNN-Journal-YY-MM-DD.md`                                                                  |
+| ----------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **Write**   | Commit if dirty, EDIT IN PLACE, commit. Rewrite freely — git holds the history           | EDIT IN PLACE, freely — a named supporting document, not a log                                                                                  | APPEND ONLY. Never edit or remove an earlier entry; corrections are new dated entries at the bottom  |
+| **Content** | LEAN, surgical, always correct — current truth only: goals, decisions, task tree, status | Durable detail that is current but too big for the task list: research output, findings, decisions and their reasoning, drafts, evidence tables | What actually happened: dated progress, findings, incidents, hand-offs                               |
+| **Read**    | Read IN FULL every session — it is your grounding                                        | ON DEMAND, only when its link from `PLAN.md` is followed                                                                                        | NEVER read whole. `tail -n N` the newest day-file, grep it, or send a sub-agent for deep archaeology |
+| **Size**    | Bounded — see tiers below                                                                | UNBOUNDED — never opened by a session that doesn't follow its link, so it costs that session nothing                                            | UNBOUNDED by design. Length is never a problem; never tidy or trim a journal                         |
 
-**Why the asymmetry**: a plan is re-read in full at the start of every session that touches it, so every KB is a recurring context cost paid before any work starts. A journal is only ever sampled, so it is safe to grow forever.
+**Why the asymmetry**: a plan is re-read in full at the start of every session that touches it, so every KB is a recurring context cost paid before any work starts. A supporting doc and a journal are both only ever read ON DEMAND — one via its link, the other by tailing/grepping — so both are safe to grow forever. This is the same progressive-disclosure argument the `markdown_organization` handler already makes for `.claude/rules/*.md`.
 
 **Size tiers on `PLAN.md`** (bytes OR lines, whichever trips first): advisory above 18,000 bytes / 350 lines; escalated warning above 25,000 / 500; edits BLOCKED above 35,000 / 900.
 
-**When a plan gets too big there are exactly two remedies, and NEITHER is deletion**:
+**When a plan gets too big there are three remedies, and NONE is deletion**:
 
-1. **Relocate** the narrative into this plan's `JOURNAL/` day-file.
-2. **Split** the plan if the task tree itself is the bulk — an over-scoped plan is not fixed by better journalling.
+1. **EXTRACT** durable detail — research output, findings, decisions and their reasoning, drafts, evidence tables — into a named supporting document in this plan folder (e.g. `RESEARCH-*.md`, `DECISIONS.md`) and link to it from the task.
+2. **RELOCATE** dated narrative — progress notes, incident write-ups, hand-off prose — into this plan's JOURNAL/ day-file, which is append-only and unbounded by design.
+3. **SPLIT** the plan if the task tree itself is the bulk, since an over-scoped plan is not fixed by better journalling.
 
 **Only an edit that GROWS the file can be blocked.** Shrinking it is silent and a same-size edit (ticking a checkbox) only advises — so an oversized plan can always be updated and refactored down. If a plan genuinely warrants its size, record why in the file: `<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`.
 
@@ -1400,6 +1401,14 @@ After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-
 ## git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
 When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
+
+## command_hints — advisory reminders after specific commands
+
+PostToolUse advisory (never blocks). When a configured command is detected in a Bash call, a HINT is injected reminding you of a follow-up action. Shipped default: running `agent-browser` reminds you to close the browser session when finished.
+
+**Rate-limited per hint** — each hint has a `ttl_seconds` cooldown (tracked per session + hint id) so it does not repeat on every matching command; state resets on daemon restart, so a hint may fire once more after a restart.
+
+**Configure** via `handlers.post_tool_use.command_hints.options`: `mode: additive` (default) appends your `hints` list to the built-in set — a project entry whose `id` matches a built-in one overrides it; `mode: replace` discards the built-in set entirely and uses only your list. Each hint: `id`, `pattern` (a literal command name, matched at the start of a shell segment — path-qualified and `env`-prefixed spellings are recognised, but it never fires on the word appearing as an unrelated argument), `hint` (the reminder text), `ttl_seconds`, and optional `min_calls_between` (secondary count-based gate). Disable with `handlers.post_tool_use.command_hints.enabled: false`.
 
 ## project_handler_load_checker — project protection degraded alert
 
