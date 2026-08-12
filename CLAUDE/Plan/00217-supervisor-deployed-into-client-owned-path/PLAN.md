@@ -224,3 +224,19 @@ default-clean and we hand you the exclusion for anything stricter.
      JOURNAL/00217-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Field report received and filed as a tracked plan
+- Phase 1 decision recorded, with the two options that break our own gate — `72e328d2`
+- Manifest + client boundary document — `4f8ceb8a`
+- Ownership banner in every deployed asset + default-rules lint guard — `8b87277e`
+- Client-fixture before/after evidence; option (d) re-framed — `65503ff0`
+- Truth-change + post-upgrade task — `b8356836`
+
+**Remaining before this plan can close** (not doable from an isolated worktree,
+and deliberately left to the merge owner):
+
+1. Authoritative `./scripts/qa/llm_qa.py all` against the real project root.
+   From the worktree, `smoke_test` cannot pass (it needs a live daemon socket
+   for this project root) and every pytest route needs
+   `PYTHONPATH=<worktree>/src` plus a symlinked venv.
+2. Daemon restart verification (`./bin/hooks-daemon restart` → RUNNING).
+3. Then flip the status, `git mv` into `Completed/`, and update the README row
+   and statistics in that same commit.
