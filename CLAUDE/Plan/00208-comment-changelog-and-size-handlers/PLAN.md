@@ -94,6 +94,9 @@ daemon's own source, the design is wrong. That must be *measured*, not assumed.
   (`#`, `//`, `/* */`, `<!-- -->`, `--`, `;`) — no if/elif on language
   - [x] ✅ Shared `strategies/comments/` groundwork: `CommentSyntax` data
     (`syntax.py`) + `CommentStrategy` Protocol (`protocol.py`) — see JOURNAL
+  - [x] ✅ `extractor.py`: `CommentSpan` + `extract_comment_spans()` (100%
+    coverage, 36 tests) — line-comment runs, trailing inline comments,
+    block/doc delimited spans, Python docstring line-start guard
 - [ ] ⬜ **Task 1.4**: Lower-precision signals (`Fixed:`/`Added:` runs, "used
   to", "no longer") ADVISE rather than block
 - [ ] ⬜ **Task 1.5**: `get_claude_md()` naming the destination for the text —
