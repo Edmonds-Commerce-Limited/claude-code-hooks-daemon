@@ -81,17 +81,19 @@ daemon's own source, the design is wrong. That must be *measured*, not assumed.
 
 ### Phase 1: `comment_changelog` (TDD) — the valuable half
 
-- [ ] ⬜ **Task 1.1**: Failing tests for the high-precision block signals
-  - [ ] ⬜ `Prior <semver>:` / `Previously <semver>:`
-  - [ ] ⬜ two or more distinct semver tokens in one comment
-  - [ ] ⬜ a version transition arrow (`2.20 -> 2.22`, `v1.2 → v1.3`)
-  - [ ] ⬜ a dated entry inside a comment
-  - [ ] ⬜ a past-tense changelog verb naming a version (`Removed in v2.1.224`)
-- [ ] ⬜ **Task 1.2**: Failing tests for what must stay ALLOWED — pin the
+- [x] ✅ **Task 1.1**: Failing tests for the high-precision block signals
+  - [x] ✅ `Prior <semver>:` / `Previously <semver>:`
+  - [x] ✅ two or more distinct semver tokens in one comment
+  - [x] ✅ a version transition arrow (`2.20 -> 2.22`, `v1.2 → v1.3`)
+  - [x] ✅ a dated entry inside a comment
+  - [x] ✅ a past-tense changelog verb naming a version (`Removed in v2.1.224`)
+- [x] ✅ **Task 1.2**: Failing tests for what must stay ALLOWED — pin the
   proposal's `# History (Plan 00047 — do NOT re-add DISABLE_MOUSE…)` example
-  and a representative sample of this repo's own rationale comments
-- [ ] ⬜ **Task 1.3**: Implement via Strategy Pattern over comment syntax
-  (`#`, `//`, `/* */`, `<!-- -->`, `--`, `;`) — no if/elif on language
+  and this repo's own rationale-comment style (plan-number-keyed, not
+  release-number-keyed)
+- [x] ✅ **Task 1.3**: Implement via Strategy Pattern over comment syntax
+  (`#`, `//`, `/* */` — `<!-- -->`/`--`/`;` deliberately out of scope, see
+  Non-Goals) — no if/elif on language
   - [x] ✅ Shared `strategies/comments/` groundwork: `CommentSyntax` data
     (`syntax.py`) + `CommentStrategy` Protocol (`protocol.py`) — see JOURNAL
   - [x] ✅ `extractor.py`: `CommentSpan` + `extract_comment_spans()` (100%
@@ -101,11 +103,14 @@ daemon's own source, the design is wrong. That must be *measured*, not assumed.
     files (11 canonical + Shell): Python, Shell, Ruby, JS/TS, Go, PHP,
     Java, Kotlin, C#, Rust, Swift, Dart
   - [x] ✅ `registry.py` (extension -> strategy lookup, `create_default()`).
-    `strategies/comments/` groundwork is COMPLETE: 121 tests, 100% coverage,
-    mypy --strict clean. Next: the two handlers themselves
-- [ ] ⬜ **Task 1.4**: Lower-precision signals (`Fixed:`/`Added:` runs, "used
+    `strategies/comments/` groundwork: 121 tests, 100% coverage,
+    mypy --strict clean.
+  - [x] ✅ `handlers/pre_tool_use/comment_changelog.py`: `CommentChangelogHandler`
+    (41 tests, 99.47% file coverage, mypy --strict clean). Not yet
+    registered in `.claude/hooks-daemon.yaml` (Phase 3 task).
+- [x] ✅ **Task 1.4**: Lower-precision signals (`Fixed:`/`Added:` runs, "used
   to", "no longer") ADVISE rather than block
-- [ ] ⬜ **Task 1.5**: `get_claude_md()` naming the destination for the text —
+- [x] ✅ **Task 1.5**: `get_claude_md()` naming the destination for the text —
   git / changelog file / plan `JOURNAL/` — since "where does this go instead" is
   exactly what the agent does not know
 

@@ -1,0 +1,318 @@
+"""CommentChangelogHandler - blocks changelog narrative accumulating in a comment.
+
+A comment describes CURRENT STATE; a changelog belongs in git, a changelog
+file, or a plan's JOURNAL/. The failure mode this handler defends against is
+MONOTONIC: nobody deletes from a comment changelog, so it only ever grows
+(Plan 00208, field report: a bash version-marker trailing comment reached
+5,645 characters, six releases deep, and broke the banner that echoed it).
+
+History as RATIONALE is legitimate and must NOT be flagged -- a comment may
+recount the past when the past is the reason the code looks the way it does.
+The separating test: does the comment grow via APPEND (changelog), or get
+REPLACED when the situation changes (rationale)? Practical proxies: an entry
+keyed by a RELEASE NUMBER is a changelog; an entry keyed by a FAILURE MODE
+(a plan number, a bug description) is a rationale.
+
+Uses Strategy Pattern for comment SYNTAX only (CommentStrategyRegistry); the
+changelog-detection signals themselves are language-agnostic regexes run
+against extracted CommentSpan text, mirroring how qa_suppression's matching
+logic lives once in the handler while strategies carry only config.
+"""
+
+import re
+from typing import Any, Final
+
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core.utils import get_file_path
+from claude_code_hooks_daemon.strategies.comments.extractor import (
+    CommentSpan,
+    extract_comment_spans,
+)
+from claude_code_hooks_daemon.strategies.comments.protocol import CommentStrategy
+from claude_code_hooks_daemon.strategies.comments.registry import (
+    CommentStrategyRegistry,
+)
+from claude_code_hooks_daemon.utils.path_exclusion import (
+    is_path_excluded,
+    merge_exclude_patterns,
+    resolve_project_root,
+)
+
+_MODE_BLOCK: Final[str] = "block"
+_MODE_WARN: Final[str] = "warn"
+_DEFAULT_MAX_HISTORY_ENTRIES: Final[int] = 1
+
+_FIELD_CONTENT: Final[str] = "content"
+_FIELD_NEW_STRING: Final[str] = "new_string"
+
+# A "semver token" is deliberately narrower than "anything with a dot": a
+# bare two-part decimal (e.g. Python's "3.11") is common in ordinary prose
+# and is NOT treated as a version — only a full three-part release number or
+# an explicitly 'v'-prefixed token counts, matching the field report's own
+# shape (3.27.0, 3.26.2, ...).
+_SEMVER_TOKEN: Final[str] = r"v?\d+\.\d+\.\d+|v\d+\.\d+"
+_SEMVER_TOKEN_RE: Final[re.Pattern[str]] = re.compile(_SEMVER_TOKEN, re.IGNORECASE)
+
+_PRIOR_PATTERN: Final[re.Pattern[str]] = re.compile(
+    rf"\b(?:Prior|Previously)\s+(?:{_SEMVER_TOKEN})\s*:", re.IGNORECASE
+)
+_VERSION_ARROW_PATTERN: Final[re.Pattern[str]] = re.compile(
+    rf"(?:{_SEMVER_TOKEN})\s*(?:->|→)\s*(?:{_SEMVER_TOKEN})", re.IGNORECASE
+)
+_DATED_ENTRY_PATTERN: Final[re.Pattern[str]] = re.compile(r"\b\d{4}-\d{2}-\d{2}\s*:")
+_CHANGELOG_VERBS: Final[str] = (
+    r"Bumped|Removed|Added|Fixed|Changed|Deprecated|Renamed|Patched|Released"
+)
+_CHANGELOG_VERB_VERSION_PATTERN: Final[re.Pattern[str]] = re.compile(
+    rf"\b(?:{_CHANGELOG_VERBS})\b[^\n.]{{0,40}}\bin\b\s+(?:{_SEMVER_TOKEN})", re.IGNORECASE
+)
+
+_BULLET_RUN_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:Fixed|Added|Changed):", re.IGNORECASE
+)
+_MIN_BULLET_RUN_COUNT: Final[int] = 2
+_RETROSPECTIVE_PHRASE_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:used to|no longer|we switched from)\b", re.IGNORECASE
+)
+
+_MAX_SPANS_SHOWN: Final[int] = 5
+
+
+def _distinct_dated_or_versioned_entries(text: str) -> set[str]:
+    """Return the set of distinct semver/date tokens referenced in ``text``."""
+    entries: set[str] = {match.group(0).lower() for match in _SEMVER_TOKEN_RE.finditer(text)}
+    entries.update(match.group(0) for match in _DATED_ENTRY_PATTERN.finditer(text))
+    return entries
+
+
+def _block_reasons(text: str, max_history_entries: int) -> list[str]:
+    """High-precision signals: each is close to unambiguous on its own."""
+    reasons: list[str] = []
+    if _PRIOR_PATTERN.search(text):
+        reasons.append("'Prior <version>:' / 'Previously <version>:' phrasing")
+    if _VERSION_ARROW_PATTERN.search(text):
+        reasons.append("a version-transition arrow (e.g. '1.2 -> 1.3')")
+    if _CHANGELOG_VERB_VERSION_PATTERN.search(text):
+        reasons.append("a changelog verb naming a version (e.g. 'Removed in v2.1.224')")
+    if _DATED_ENTRY_PATTERN.search(text):
+        reasons.append("a dated entry (e.g. '2026-08-12: ...')")
+    entries = _distinct_dated_or_versioned_entries(text)
+    if len(entries) > max_history_entries:
+        reasons.append(
+            f"{len(entries)} distinct dated/versioned entries in one comment "
+            f"(limit: {max_history_entries})"
+        )
+    return reasons
+
+
+def _advisory_reasons(text: str) -> list[str]:
+    """Lower-precision signals: suggestive, not conclusive -- advise only."""
+    reasons: list[str] = []
+    if len(_BULLET_RUN_PATTERN.findall(text)) >= _MIN_BULLET_RUN_COUNT:
+        reasons.append("multiple 'Fixed:'/'Added:'/'Changed:' bullet-style entries")
+    if _RETROSPECTIVE_PHRASE_PATTERN.search(text):
+        reasons.append("retrospective phrasing ('used to', 'no longer', 'we switched from')")
+    return reasons
+
+
+class CommentChangelogHandler(Handler):
+    """Block Write/Edit content that writes historical narrative into a comment.
+
+    This is the valuable half of Plan 00208 -- size is a proxy, history is
+    the defect. Configuration options (set via config YAML):
+        max_history_entries: int - more than this many distinct dated/
+            versioned entries in one comment is a changelog regardless of
+            phrasing (default 1).
+        mode: "block" | "warn" - block denies; warn downgrades every
+            high-precision finding to advisory context (default "block").
+        languages: list[str] | None - restrict to specific languages.
+        exclude_paths: list[str] | None - additional glob excludes.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            handler_id=HandlerID.COMMENT_CHANGELOG,
+            priority=Priority.COMMENT_CHANGELOG,
+            tags=[
+                HandlerTag.MULTI_LANGUAGE,
+                HandlerTag.CONTENT_QUALITY,
+                HandlerTag.BLOCKING,
+                HandlerTag.TERMINAL,
+            ],
+        )
+        self._registry = CommentStrategyRegistry.create_default()
+        self._languages: list[str] | None = None
+        self._languages_applied: bool = False
+        self._max_history_entries: int = _DEFAULT_MAX_HISTORY_ENTRIES
+        self._mode: str = _MODE_BLOCK
+        self._exclude_paths: list[str] | None = None
+
+    def _apply_language_filter(self) -> None:
+        if self._languages_applied:
+            return
+        self._languages_applied = True
+        effective_languages = self._languages or getattr(self, "_project_languages", None)
+        if effective_languages:
+            self._registry.filter_by_languages(effective_languages)
+
+    def _get_content(self, hook_input: dict[str, Any]) -> str:
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
+        if tool_name == ToolName.EDIT:
+            return str(tool_input.get(_FIELD_NEW_STRING, ""))
+        return str(tool_input.get(_FIELD_CONTENT, ""))
+
+    def _is_excluded(self, file_path: str) -> bool:
+        patterns = merge_exclude_patterns(
+            getattr(self, "_project_exclude_paths", None),
+            self._exclude_paths,
+        )
+        return bool(patterns) and is_path_excluded(
+            file_path, patterns, project_root=resolve_project_root()
+        )
+
+    def _find_violations(
+        self, content: str, strategy: CommentStrategy
+    ) -> list[tuple[CommentSpan, list[str], list[str]]]:
+        """Return (span, block_reasons, advisory_reasons) for every flagged span."""
+        violations: list[tuple[CommentSpan, list[str], list[str]]] = []
+        for span in extract_comment_spans(content, strategy.syntax):
+            block = _block_reasons(span.text, self._max_history_entries)
+            advisory = _advisory_reasons(span.text)
+            if block or advisory:
+                violations.append((span, block, advisory))
+        return violations
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        """Check whether the content being written has a flagged comment span."""
+        self._apply_language_filter()
+
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name not in (ToolName.WRITE, ToolName.EDIT):
+            return False
+
+        file_path = get_file_path(hook_input)
+        if not file_path:
+            return False
+
+        strategy = self._registry.get_strategy(file_path)
+        if strategy is None:
+            return False
+
+        if any(skip_dir in file_path for skip_dir in strategy.skip_directories):
+            return False
+        if self._is_excluded(file_path):
+            return False
+
+        content = self._get_content(hook_input)
+        if not content:
+            return False
+
+        return bool(self._find_violations(content, strategy))
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        """Deny (or advise) when a comment span carries changelog narrative."""
+        file_path = get_file_path(hook_input)
+        if not file_path:
+            return HookResult(decision=Decision.ALLOW)
+
+        strategy = self._registry.get_strategy(file_path)
+        if strategy is None:
+            return HookResult(decision=Decision.ALLOW)
+
+        content = self._get_content(hook_input)
+        if not content:
+            return HookResult(decision=Decision.ALLOW)
+
+        violations = self._find_violations(content, strategy)
+        if not violations:
+            return HookResult(decision=Decision.ALLOW)
+
+        blocking = [(span, reasons) for span, reasons, _advisory in violations if reasons]
+        if blocking and self._mode == _MODE_BLOCK:
+            return HookResult(decision=Decision.DENY, reason=self._build_deny_reason(blocking))
+
+        return HookResult(decision=Decision.ALLOW, context=[self._build_advisory(violations)])
+
+    def _build_deny_reason(self, blocking: list[tuple[CommentSpan, list[str]]]) -> str:
+        lines: list[str] = []
+        for span, reasons in blocking[:_MAX_SPANS_SHOWN]:
+            preview = span.text if len(span.text) <= 120 else span.text[:117] + "..."
+            reasons_text = "; ".join(reasons)
+            lines.append(f"  - {reasons_text}\n    {preview!r}")
+        spans_text = "\n".join(lines)
+
+        return (
+            f"BLOCKED: changelog content in a code comment ({len(blocking)} comment(s)).\n\n"
+            f"{spans_text}\n\n"
+            "Comments describe CURRENT STATE only. Move the history:\n"
+            "  - what changed and when  -> git (it is already there — the commit message)\n"
+            "  - release notes for humans -> the project's changelog file\n"
+            "  - in-flight narrative      -> the plan's JOURNAL/ day-file\n\n"
+            "Keep in the comment only what is true of the code as it stands now.\n\n"
+            "If this is RATIONALE (why the code looks the way it does, anchored to a "
+            "failure mode) rather than a changelog, rephrase without dated/versioned "
+            "entries — key it to the failure mode, not the release number."
+        )
+
+    def _build_advisory(self, violations: list[tuple[CommentSpan, list[str], list[str]]]) -> str:
+        lines = ["ADVISORY: comment content resembles changelog narrative"]
+        for span, block, advisory in violations[:_MAX_SPANS_SHOWN]:
+            for reason in (*block, *advisory):
+                preview = span.text if len(span.text) <= 80 else span.text[:77] + "..."
+                lines.append(f"  - {reason}: {preview!r}")
+        lines.append(
+            "Comments describe current state only — consider moving history to git, "
+            "a changelog file, or the plan's JOURNAL/."
+        )
+        return "\n".join(lines)
+
+    def get_claude_md(self) -> str | None:
+        return (
+            "## comment_changelog — no changelog narrative in code comments\n\n"
+            "Writing HISTORICAL NARRATIVE into a code comment is blocked. A comment "
+            "describes CURRENT STATE; changelog narrative belongs in git (the commit "
+            "message), the project's changelog file, or a plan's `JOURNAL/` day-file.\n\n"
+            "**Blocked (high-precision) signals**, any one of which denies the write:\n"
+            "- `Prior <version>:` / `Previously <version>:` phrasing\n"
+            "- two or more distinct versioned/dated entries in one comment "
+            "(configurable via `max_history_entries`, default 1)\n"
+            "- a version-transition arrow (`1.2 -> 1.3`, `v1.2 → v1.3`)\n"
+            "- a dated entry (`2026-08-12: ...`)\n"
+            "- a changelog verb naming a version (`Removed in v2.1.224`)\n\n"
+            "**NOT blocked — advisory only**: `Fixed:`/`Added:`/`Changed:` bullet "
+            "runs, retrospective phrasing (`used to`, `no longer`, `we switched from`).\n\n"
+            "**History as RATIONALE is legitimate and is NOT flagged.** A comment may "
+            "recount the past when the past is the reason the code looks the way it is "
+            "now, and re-litigating it would reintroduce a fixed bug — e.g. `# Plan "
+            "00047: do NOT re-add DISABLE_MOUSE, see...`. The separating test: an entry "
+            "keyed by a RELEASE NUMBER is a changelog; an entry keyed by a FAILURE MODE "
+            "(a plan number, a bug description) is a rationale.\n\n"
+            "**No escape hatch** — unlike `comment_size`, this handler has no "
+            "`MUST_..._BECAUSE` override: changelog content should be MOVED to git/a "
+            "changelog file/a plan JOURNAL/, never exempted in place.\n\n"
+            "**Scope**: only comment spans are scanned (not code), via the same "
+            "Strategy Pattern language registry as `qa_suppression`. `.md` files are "
+            "skipped entirely — markdown prose is not a comment. Only the ADDED text "
+            "is checked on `Edit` (`new_string`) — removing changelog content is "
+            "never blocked.\n\n"
+            "**Excluded paths**: vendor/build/fixture dirs are skipped by default. "
+            "Exempt more paths via "
+            "`handlers.pre_tool_use.comment_changelog.options.exclude_paths` or the "
+            "project-wide `daemon.exclude_paths`."
+        )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests aggregated from all registered strategies."""
+        tests: list[Any] = []
+        for strategy in self._registry.all_strategies:
+            if hasattr(strategy, "get_acceptance_tests"):
+                tests.extend(strategy.get_acceptance_tests())
+        return tests
