@@ -2664,6 +2664,90 @@ def cmd_harvest_background(args: argparse.Namespace) -> int:
     return 1 if report["has_breaches"] else 0
 
 
+def _resolve_registered_handler_names(
+    args: argparse.Namespace, project_path: Path
+) -> list[str] | None:
+    """Best-effort: the full set of currently-registered handler names.
+
+    Only available when the daemon is actually running (queried the same way
+    ``cmd_handlers`` does, over the socket) — reconstructing it offline would
+    mean duplicating the whole config-load + controller-init path just for a
+    report command. Returns ``None`` (not an error) when the daemon is not
+    running, so ``aggregate_verdicts`` knows to report "unavailable" rather
+    than a misleading empty "never fired" list.
+    """
+    pid_path = _resolve_pid_path(args, project_path)
+    pid = read_pid_file(str(pid_path))
+    if pid is None:
+        return None
+
+    socket_path = _resolve_socket_path(args, project_path)
+    request = {"event": "_system", "hook_input": {"action": "handlers"}}
+    response = send_daemon_request(socket_path, request)
+    if response is None or "error" in response:
+        return None
+
+    handlers = response.get("result", {}).get("handlers", {})
+    names: list[str] = []
+    for handler_list in handlers.values():
+        for handler in handler_list:
+            name = handler.get("name")
+            if name:
+                names.append(name)
+    return names
+
+
+def cmd_verdicts(args: argparse.Namespace) -> int:
+    """Report on the handler verdict log (Plan 00209 Task 2.5).
+
+    Answers the field report's concrete questions from parsed
+    ``verdicts.jsonl`` records: per-handler fire counts, verdict mix,
+    override rate, and (when the daemon is running) which registered
+    handlers never fired at all.
+
+    ``verdicts.jsonl`` is a bounded ROLLING SAMPLE, not a durable lifetime
+    counter (Plan 00206 lesson) — every figure printed describes the
+    RETAINED WINDOW only; ``format_report`` states this explicitly so the
+    output can never be mistaken for lifetime totals.
+
+    Returns:
+        0 always — this is a report, not a pass/fail gate.
+    """
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+    from claude_code_hooks_daemon.daemon.verdict_log import VERDICT_LOG_FILENAME
+    from claude_code_hooks_daemon.daemon.verdict_report import (
+        aggregate_verdicts,
+        format_report,
+        read_verdict_records,
+    )
+
+    if getattr(args, "log_file", None):
+        log_path = Path(args.log_file)
+        project_path = get_project_path(getattr(args, "project_root", None))
+    else:
+        project_path = get_project_path(getattr(args, "project_root", None))
+        config_file = project_path / ".claude" / "hooks-daemon.yaml"
+        if not ProjectContext._initialized and config_file.exists():
+            ProjectContext.initialize(config_file)
+        if ProjectContext._initialized:
+            log_path = (
+                ProjectContext.daemon_untracked_dir() / "logs" / "hooks" / VERDICT_LOG_FILENAME
+            )
+        else:
+            log_path = project_path / "untracked" / "logs" / "hooks" / VERDICT_LOG_FILENAME
+
+    records = read_verdict_records(log_path)
+    all_handlers = _resolve_registered_handler_names(args, project_path)
+    aggregate = aggregate_verdicts(records, all_handlers=all_handlers)
+
+    if args.json:
+        print(json.dumps(aggregate, indent=2))
+    else:
+        print(format_report(aggregate))
+
+    return 0
+
+
 # How many unique paths to print per unproven branch before summarising the
 # rest. The point is to make the risk legible, not to dump a whole tree.
 _UNPROVEN_PATH_PREVIEW = 10
@@ -4423,6 +4507,26 @@ def main() -> int:
         help="Output format: text (default) or json",
     )
     parser_harvest.set_defaults(func=cmd_harvest_background)
+
+    # verdicts command (Plan 00209): report on the handler decision log
+    parser_verdicts = subparsers.add_parser(
+        "verdicts",
+        help="Report on the handler verdict log: fire counts, verdict mix, "
+        "override rate, never-fired handlers",
+    )
+    parser_verdicts.add_argument(
+        "--log-file",
+        dest="log_file",
+        metavar="PATH",
+        default=None,
+        help="Override the verdicts.jsonl path (default: daemon untracked dir)",
+    )
+    parser_verdicts.add_argument(
+        "--json",
+        action="store_true",
+        help="Output machine-readable JSON instead of a text report",
+    )
+    parser_verdicts.set_defaults(func=cmd_verdicts)
 
     # delete-branch command (Plan 00206)
     parser_delete_branch = subparsers.add_parser(
