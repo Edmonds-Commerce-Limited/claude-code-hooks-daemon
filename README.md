@@ -7,7 +7,7 @@
 ![Tests](https://img.shields.io/badge/tests-11400%2B%20passing-success)
 ![Coverage](https://img.shields.io/badge/coverage-95%25%20required-success)
 
-*69,419 lines of source, 157,974 lines of tests — the test tree is 2.3× the size of the thing it tests.*
+*~70,000 lines of source, ~160,000 lines of tests — the test tree is 2.3× the size of the thing it tests.*
 
 Maintained by [Edmonds Commerce](https://github.com/Edmonds-Commerce-Limited).
 

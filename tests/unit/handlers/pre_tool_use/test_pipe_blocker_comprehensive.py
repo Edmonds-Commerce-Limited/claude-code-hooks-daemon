@@ -387,13 +387,30 @@ class TestPipeBlockerBlocking:
         }
         assert handler.matches(hook_input) is True
 
-    def test_matches_git_log_piped_to_head(self, handler: PipeBlockerHandler) -> None:
-        """git log is NOT whitelisted (only git tag, status, diff are)."""
+    def test_does_not_match_git_log_piped_to_head(self, handler: PipeBlockerHandler) -> None:
+        """git log IS whitelisted — truncating it is the point of the pipe.
+
+        This assertion used to be inverted, with the docstring "git log is NOT
+        whitelisted (only git tag, status, diff are)" — a restatement of the
+        constant rather than a safety requirement. That made a real defect look
+        deliberate and tested: the handler's own CLAUDE.md guidance advertised
+        `git log` as whitelisted, so agents were denied for doing exactly what
+        resident context told them was allowed.
+
+        The merits, not the text, decide it: git log is no more expensive than
+        the already-whitelisted git diff, it writes continuously (so a closed
+        pipe raises SIGPIPE and it stops early), and truncation is the INTENT
+        here rather than the information loss this handler exists to prevent.
+
+        See test_pipe_blocker_guidance_truth.py for the guard that now keeps
+        the whitelist and the guidance from diverging again in either
+        direction.
+        """
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "git log --oneline | head -n 10"},
         }
-        assert handler.matches(hook_input) is True
+        assert handler.matches(hook_input) is False
 
     def test_matches_multiple_tail_head_in_pipeline(self, handler: PipeBlockerHandler) -> None:
         hook_input = {

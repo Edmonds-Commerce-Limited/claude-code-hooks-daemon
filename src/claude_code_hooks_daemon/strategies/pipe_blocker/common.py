@@ -26,6 +26,16 @@ UNIVERSAL_WHITELIST_PATTERNS: tuple[str, ...] = (
     r"^git\s+tag\b",
     r"^git\s+status\b",
     r"^git\s+diff\b",
+    # `git log` and `git branch` were advertised as whitelisted by the
+    # handler's own CLAUDE.md guidance while absent here, so an agent piping
+    # either was denied as "unrecognized" for doing what resident context
+    # said was allowed. They belong here on the merits, not merely to match
+    # the text: both are as cheap as the already-whitelisted `git diff`, both
+    # write continuously (so a closed pipe raises SIGPIPE and they stop), and
+    # for both, truncation is the POINT of the pipe rather than the
+    # information loss this handler exists to prevent.
+    r"^git\s+log\b",
+    r"^git\s+branch\b",
     r"^date\b",
     r"^hostname\b",
     r"^uname\b",

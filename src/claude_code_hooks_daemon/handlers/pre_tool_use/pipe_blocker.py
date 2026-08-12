@@ -181,7 +181,10 @@ class PipeBlockerHandler(Handler):
 
     Configuration options (set via YAML config):
         extra_whitelist: list[str] - Additional regex patterns to always allow.
-            Example: ["^git\\\\s+log\\\\b"]  — allows git log | tail
+            Example: ["^my_fast_report\\\\b"]  — allows my_fast_report | tail
+            (this example used ``^git\\\\s+log\\\\b`` while the guidance below
+            simultaneously advertised ``git log`` as already whitelisted —
+            pick an example that is genuinely NOT in the universal set)
         extra_blacklist: list[str] - Additional regex patterns to always block.
             Example: ["^my_test_runner\\\\b"]
         languages: list[str] — Restrict to specific language blacklists.
