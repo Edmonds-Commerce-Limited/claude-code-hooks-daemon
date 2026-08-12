@@ -56,6 +56,10 @@ _RECOMMENDED_HANDLERS: Final[list[str]] = [
     "critical_thinking_advisory",
     "task_tdd_advisor",
     "agent_isolation_advisor",
+    # Plan 00223: the MECHANISM ships on so the options are discoverable;
+    # every individual authorisation ships OFF, so this is inert until a
+    # project explicitly records one.
+    "standing_authorisations",
 ]
 
 _STRICT_ONLY_HANDLERS: Final[list[str]] = [

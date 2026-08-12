@@ -123,6 +123,34 @@ requested the behaviour, and names where it is configured so it can be
 audited and revoked. It must never instruct the agent to disregard its own
 instructions — that is both a worse prompt and a mechanism nobody should ship.
 
+### Decision 3: the MECHANISM ships on, each AUTHORISATION ships off
+
+**Context**: Goals asked for a "default-on mechanism ... shipped with a small
+default set". Phase 2 exposed a problem with reading that as "the sub-agent
+authorisation is active on a fresh install".
+
+Every other default-on handler in this codebase ADDS a restriction
+(`ancestry_preserving_merge`, `git_message_backtick`). This one REMOVES one,
+and that is different in kind. Worse, it makes the handler's own text false:
+Decision 2 requires the injection to say the project owner recorded this
+request, and on a fresh install nobody did. A daemon that ships the
+authorisation on is fabricating the very consent the design depends on.
+
+**Decision**: the handler ships `enabled: true`, and every built-in
+authorisation entry ships `enabled: false`. The default set exists so the
+options are discoverable and adopting one is a single flag, not so that
+anything is authorised by default. `config-changes/` with `recommended: true`
+is what carries it to existing installs — the same shape `comment_changelog`
+and `comment_size` used.
+
+This makes the injected text true by construction: it can only ever fire
+where a project explicitly opted in. It also converts the "becomes a general
+ignore-your-instructions surface" risk from a wording safeguard into a
+structural one.
+
+Enabled in THIS repo's config, because here the authorisation is real and
+on the record.
+
 ## Tasks
 
 ### Phase 1: Measure which injection point actually lands
@@ -141,33 +169,49 @@ instructions — that is both a worse prompt and a mechanism nobody should ship.
 
 ### Phase 2: The config surface
 
-- [ ] ⬜ **Task 2.1**: Schema + defaults for the overrides block, default-on
-- [ ] ⬜ **Task 2.2**: A first-class entry for sub-agent authorisation, with
-  the text phrased per Decision 2. Phase 1 found the system prompt carries TWO
-  separate restrictions (AgentTool; workflows/deep-research) — they must be
-  independently authorisable, since authorising delegation says nothing about
-  authorising workflows
-- [ ] ⬜ **Task 2.3**: `config-changes/` manifest entry so existing installs are
-  told the option exists (it would otherwise ship dormant)
+- [x] ✅ **Task 2.1**: Config surface shipped as a handler options block
+  (`handlers.user_prompt_submit.standing_authorisations.options.authorisations`),
+  not a new `daemon.` block — handler behaviour belongs in handler options, and
+  `command_hints` already established the `{id, enabled}` list shape
+- [x] ✅ **Task 2.2**: Two built-in ids ship — `subagent-delegation` and
+  `workflow-orchestration` — independently enablable, per Phase 1's finding
+  that the prompt carries two separate restrictions. Both DISABLED by default
+  (Decision 3)
+- [x] ✅ **Task 2.3**: `config-changes/v3.53.0.yaml` entry with
+  `recommended: true`, `dormant: true`, stating plainly that upgrading changes
+  nothing until a project opts in
 
 ### Phase 3: Delivery
 
-- [ ] ⬜ **Task 3.1**: UserPromptSubmit handler emitting the enabled
-  authorisations (event settled by Phase 1 — no SessionStart companion)
-- [ ] ⬜ **Task 3.2**: `get_claude_md()` documenting the setting and pointing at
-  the config, without duplicating the authorisation text itself
-- [ ] ⬜ **Task 3.3**: Rate-limiting — now load-bearing rather than optional,
-  and it must be a DECAY not a fixed cooldown. The whole value of this channel
-  is that it keeps pace with a system prompt re-sent every request, so a
-  cooldown long enough to span a compaction would reintroduce the SessionStart
-  failure the plan exists to avoid
+- [x] ✅ **Task 3.1**: `StandingAuthorisationsHandler` at priority 57 — last of
+  the UserPromptSubmit advisories deliberately, since the context block sits
+  AFTER the user's prompt so a higher number is the recency position. Verified
+  against the live daemon through the production forwarder
+- [x] ✅ **Task 3.2**: `get_claude_md()` documents the setting and points at the
+  config; a test asserts it does NOT restate the authorisation text, so there
+  is only ever one copy to go stale
+- [x] ✅ **Task 3.3**: Decay, not cooldown — full text for the first 3
+  deliveries per session, short form thereafter, per-session counts in a
+  FIFO-bounded map. A test asserts it still fires on all of 50 consecutive
+  prompts: a skipped prompt would be a window where the restriction is
+  unopposed, which is the SessionStart failure this plan exists to avoid.
+  Verified live: `authorisation_present=1` on every delivery, `full_form`
+  dropping to 0 from delivery 4
 
 ### Phase 4: Verify
 
 - [ ] ⬜ **Task 4.1**: Full QA suite passes
-- [ ] ⬜ **Task 4.2**: Client-mode verification — this adds deployed config
-- [ ] ⬜ **Task 4.3**: Dogfood: confirm a fresh session delegates without a
-  per-task grant, and that disabling the option restores the prior behaviour
+- [ ] ⬜ **Task 4.2**: Client-mode verification — required, because
+  `handler_profiles.py` changes what a NEW install generates, and self-install
+  mode cannot show that
+- [ ] ⬜ **Task 4.3**: Dogfood: confirm disabling the option restores the prior
+  behaviour exactly. Note the positive direction ("a fresh session delegates
+  without a per-task grant") is NOT honestly measurable — see Phase 1's
+  non-claim: it is N=1 on an agent that knows the experiment. Verify the
+  MECHANISM (delivered, correct text, correct cadence) and report the
+  behavioural question as open rather than dressing up a single run as proof
+- [ ] ⬜ **Task 4.4**: Docs — `HANDLER_REFERENCE.md` entry (done), and confirm
+  the generated `.claude/HOOKS-DAEMON.md` lists the handler
 
 ## Success Criteria
 

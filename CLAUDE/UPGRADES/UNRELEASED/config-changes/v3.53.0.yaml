@@ -211,6 +211,50 @@ config_changes:
         through), check_flag, force_color_var, scrubber,
         track_run_logs. See
         CLAUDE/Plan/00213-planlib-plan-folder-orchestrator-tooling/PLAN.md.
+    - key: handlers.user_prompt_submit.standing_authorisations
+      recommended: true
+      dormant: true
+      description: >-
+        NEW UserPromptSubmit advisory handler (Plan 00223). Gives a project a
+        DURABLE place to record a standing request it has genuinely made.
+        Several system-prompt instructions are conditional on the user having
+        asked ("do not call the Agent tool unless the user requested it"), and
+        those instructions are not wrong -- the gap is that a request made in
+        conversation is gone by the next session, while the restriction is
+        restated on every subsequent request. This handler replays recorded
+        authorisations so the condition stays satisfied. It is a filing
+        cabinet, not a countermand, and that is enforced by a test: no entry's
+        text may contain ignore/disregard/override/bypass, and every entry
+        must attribute the request to the project and name the config key
+        holding it, so it can be audited and revoked. Delivered on
+        UserPromptSubmit rather than SessionStart, and that choice is measured
+        rather than assumed -- against a real 37,475-record transcript
+        spanning 18 compactions, SessionStart proved to be a DIFFERENT
+        transport (hook_system_message, appearing zero times in
+        hook_additional_context) whose full payload was delivered exactly
+        ONCE, because the prevailing is_resume_session gate is a
+        transcript-size heuristic that is True for every post-compaction
+        session; UserPromptSubmit delivered 198 times, one per prompt. Since
+        the restriction lives in a system prompt re-sent on EVERY request,
+        only a per-prompt channel keeps pace -- anything delivered once loses
+        on arithmetic, not on wording. Two built-in ids ship
+        (subagent-delegation, workflow-orchestration) because the prompt
+        carries two SEPARATE restrictions and authorising delegation says
+        nothing about authorising workflow orchestration.
+      migration_note: >-
+        The HANDLER ships enabled but EVERY authorisation ships disabled, so
+        it is completely inert until you opt in -- nothing changes on upgrade.
+        That asymmetry is deliberate: every other default-on handler in this
+        daemon ADDS a restriction, whereas this one relaxes one, and shipping
+        that active would have the daemon fabricate the very consent its own
+        injected text claims. Enabling is therefore a deliberate act by
+        whoever owns the repository. To adopt, add under
+        handlers.user_prompt_submit.standing_authorisations.options:
+        authorisations: [{id: subagent-delegation, enabled: true}]. Remove the
+        entry to withdraw the authorisation. Note this only makes a RECORDED
+        request visible to the agent; it does not and cannot change what the
+        agent is permitted to do.
+
     - key: daemon.verdict_log
       recommended: true
       dormant: false

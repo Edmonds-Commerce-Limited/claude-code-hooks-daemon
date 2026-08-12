@@ -407,6 +407,22 @@ handlers:
       enabled: false             # Opt-in beta - leave off unless trying it. See docs/guides/CREATING_REPORTS.md
       priority: 56
 
+    standing_authorisations:  # Replay a standing request THIS project recorded (Plan 00223)
+      # The HANDLER ships on so the options are discoverable; every
+      # AUTHORISATION below ships off, so this is inert until you opt in.
+      # Deliberate: every other default-on handler ADDS a restriction, this
+      # one relaxes one, and the daemon must never assert consent nobody gave.
+      enabled: true
+      priority: 57
+      options:
+        authorisations:
+          # Set enabled: true to record the request. It is then replayed on
+          # each prompt, naming this file so it can be audited and withdrawn.
+          - id: subagent-delegation
+            enabled: false
+          - id: workflow-orchestration
+            enabled: false
+
   # Other hook events
   permission_request:
     auto_approve_reads:  # Auto-approves read-only file operations

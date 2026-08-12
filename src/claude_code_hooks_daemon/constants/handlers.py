@@ -444,6 +444,11 @@ class HandlerID:
         config_key="idle_housekeeping_advisory",
         display_name="idle-housekeeping-advisory",
     )
+    STANDING_AUTHORISATIONS = HandlerIDMeta(
+        class_name="StandingAuthorisationsHandler",
+        config_key="standing_authorisations",
+        display_name="standing-authorisations",
+    )
     BRITISH_ENGLISH = HandlerIDMeta(
         class_name="BritishEnglishHandler",
         config_key="british_english",

@@ -164,6 +164,10 @@ class Priority:
     # Advisory handlers (Priority: 55-60)
     CRITICAL_THINKING_ADVISORY = 55
     IDLE_HOUSEKEEPING_ADVISORY = 56
+    # Last of the UserPromptSubmit advisories deliberately (Plan 00223): the
+    # injected context block sits AFTER the user's prompt, so a higher number
+    # is the recency position within it.
+    STANDING_AUTHORISATIONS = 57
     NITPICK_DISMISSIVE = 10
     NITPICK_HEDGING = 20
     DAEMON_DOCS_GUARD = 57

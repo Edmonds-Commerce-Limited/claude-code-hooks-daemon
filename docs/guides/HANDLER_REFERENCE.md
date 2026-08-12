@@ -2271,6 +2271,53 @@ handlers:
 
 ---
 
+#### standing_authorisations
+
+| Property       | Value                     |
+| -------------- | ------------------------- |
+| **Config key** | `standing_authorisations` |
+| **Priority**   | 57                        |
+| **Type**       | Advisory                  |
+| **Event**      | UserPromptSubmit          |
+
+**Description:** Gives a project a durable place to record a standing request it has genuinely made. Several instructions an agent receives are conditional on the user having asked ("do not do X unless the user requested it"); those instructions are not wrong, but a request made in conversation is gone by the next session while the restriction is restated on every subsequent request. This handler replays recorded authorisations so the condition stays satisfied.
+
+It is a filing cabinet, not a countermand. A test asserts that no entry's text contains *ignore*, *disregard*, *override*, *overrule* or *bypass*, and that every entry attributes the request to the project and names the config key holding it — an authorisation that cannot be audited is not a request, and one that cannot be revoked is not one either.
+
+**Nothing is authorised by default.** The handler ships enabled so the options are discoverable; every built-in entry ships disabled. Every other default-on handler in this daemon *adds* a restriction — this one relaxes one, and shipping that active would have the daemon assert consent nobody gave.
+
+**Options:**
+
+| Option           | Type | Default | Description                                                                                                                                 |
+| ---------------- | ---- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `authorisations` | list | `[]`    | List of `{id, enabled}` entries. Built-in ids: `subagent-delegation`, `workflow-orchestration`. An unrecognised id is ignored, never fatal. |
+
+The two built-in ids are separate because the restrictions they answer are separate: authorising sub-agent delegation says nothing about authorising multi-agent workflow orchestration.
+
+**Delivery cadence (why UserPromptSubmit):** measured, not assumed. Against a real 37,475-record transcript spanning 18 compactions, `SessionStart` proved to be a different transport (`hook_system_message`, appearing zero times in `hook_additional_context`) whose full payload was delivered exactly **once** — the prevailing `is_resume_session` gate is a transcript-size heuristic that is true for every post-compaction session. `UserPromptSubmit` delivered **198** times, one per prompt. Since the instruction being answered lives in a system prompt re-sent on every request, only a per-prompt channel keeps pace with it.
+
+The text **decays but never skips**: the full wording is delivered for the first few prompts of a session, then a short form thereafter. A cooldown that skipped prompts would leave windows where the restriction is unopposed, which is the failure the measurement above rules out.
+
+**Config example:**
+
+```yaml
+handlers:
+  user_prompt_submit:
+    standing_authorisations:
+      enabled: true
+      priority: 57
+      options:
+        authorisations:
+          - id: subagent-delegation
+            enabled: true
+          - id: workflow-orchestration
+            enabled: false
+```
+
+Remove an entry (or set `enabled: false`) to withdraw that authorisation. Note this only makes a recorded request visible to the agent — it does not, and cannot, change what the agent is permitted to do.
+
+---
+
 ## Notification Handlers
 
 #### notification_logger

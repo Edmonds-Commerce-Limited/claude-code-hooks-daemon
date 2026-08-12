@@ -568,6 +568,22 @@ handlers:
         max_passes_per_session: 1
         reports_dir: "untracked/reports"
 
+    standing_authorisations:  # Plan 00223: replay authorisations THIS project recorded.
+      # Delivered on UserPromptSubmit because Phase 1 measured it as the only
+      # channel that keeps pace with a system prompt re-sent every request:
+      # SessionStart's full payload fired ONCE across 18 compactions.
+      # Every entry ships DISABLED upstream (Decision 3) — the daemon must
+      # never assert consent nobody gave. Enabled here because in this repo
+      # the authorisation is real and on the record.
+      enabled: true
+      priority: 57
+      options:
+        authorisations:
+          - id: subagent-delegation
+            enabled: true
+          - id: workflow-orchestration
+            enabled: false
+
     # auto_continue:  # Auto-continues on 'continue' keyword
     #   enabled: false # Optional - enable for auto-continue behavior
     #   priority: 20
