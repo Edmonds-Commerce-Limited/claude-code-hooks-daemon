@@ -2379,6 +2379,7 @@ def _build_initialised_controller(config: Config, project_path: Path) -> "Daemon
         project_exclude_paths=config.daemon.exclude_paths,
         pseudo_events_config=config.pseudo_events or None,
         plan_workflow=config.plan_workflow,
+        verdict_log=config.daemon.verdict_log,
     )
     return controller
 
