@@ -128,16 +128,24 @@ encodes a procedure, not user content, so fixes must reach the field. Gated on
   is FIXED — it now names Plan 00216 by number instead of answering "already
   shipped, no additional work required". The true-positive control still names
   Plan 00205. The inline harness was indeed the confound
-- [ ] ⬜ **Task 4.5**: Verify the OUTPUT FORMAT contract under real dispatch.
+- [x] ✅ **Task 4.5**: Verify the OUTPUT FORMAT contract under real dispatch.
   Task 4.4 exposed what the harness had masked: the finding is correct and the
   plan number is named, but the report is flattened into one sentence and the
   `Overlap:`/`Relationship:` lines are dropped. `Relationship` is the field
   that matters most — "merge" and "supersede" are opposite actions and it is
   the only thing that says which applies. The definition now states the format
-  is mandatory; **that strengthening is unverified** — a probe two minutes
-  after redeploying still showed the old behaviour, which is consistent with
-  the re-scan delay below rather than with the instruction being insufficient.
-  Retest before drawing a conclusion; do not iterate on the prompt blind
+  Fixed by hoisting the contract to the TOP of the definition and cutting it
+  to the three fields a caller cannot recover for themselves. Restating it as
+  "mandatory" further down did nothing — three dispatches dropped the
+  checked-count, which predated that wording, so position beat emphasis
+- [ ] ⬜ **Task 4.6**: Investigate COVERAGE variance. With the count now
+  reported it is visible, and it moves: 34, then 32, then 17 live plans across
+  runs against an unchanged tree of 34. A half-read "no duplicates" is
+  indistinguishable from a thorough one without the count, which is the
+  argument for having required it — but 50% coverage is worse than
+  "non-deterministic" was meant to license. Likely remedy: have the procedure
+  enumerate the plan folders FIRST and check the total it reports against that
+  list, rather than reading until it feels done
 
 ## Success Criteria
 
@@ -152,9 +160,10 @@ encodes a procedure, not user content, so fixes must reach the field. Gated on
 - [x] Full QA passes
 - [x] It does not answer "is this already implemented?" when the proposed work
   happens to exist in the source tree — verified under real dispatch
-- [ ] Its report carries the `Overlap:` and `Relationship:` lines, not just a
-  correct sentence. `Relationship` distinguishes merge from supersede, which
-  are opposite actions (Task 4.5)
+- [x] Its report states how many plans it checked, so a clean result is
+  verifiable rather than merely reassuring
+- [ ] The number it reports matches the number of live plans on disk
+  (Task 4.6) — currently varies 17–34 against a tree of 34
 
 ## Dependencies
 

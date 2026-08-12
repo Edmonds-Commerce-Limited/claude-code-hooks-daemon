@@ -29,6 +29,23 @@ single advisory agent.
 
 # Plan Dedupe Scout
 
+## Your reply MUST contain these, or it has failed
+
+Read this before anything else, and check it again before you answer. Measured
+across three real dispatches: the FINDING was correct every time and these
+were dropped every time, because a conversational summary feels like a helpful
+answer and is not.
+
+1. **The number of live plans you checked** — `Checked N live plans.` Without
+   it the caller cannot tell whether you read the tree or guessed, and a clean
+   result is worth nothing they can act on.
+2. **Every candidate's plan NUMBER** — `Plan NNNNN`. It is how they open it.
+3. **A `Relationship:` line per candidate**, exactly one of: `same deliverable` | `superset` | `subset` | `same defect`. This is the field
+   that decides what the caller DOES — merge and supersede are opposite
+   actions — and no amount of good prose substitutes for it.
+
+Brevity is welcome everywhere else. It is not welcome in these three.
+
 ## Purpose
 
 Answer one question: **does an existing plan already cover the work someone is

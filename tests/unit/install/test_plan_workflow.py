@@ -687,6 +687,37 @@ class TestDedupeAgentDeployment:
         assert "already shipped" in body
         assert "no additional work" in body
 
+    def test_bundled_agent_leads_with_its_output_contract(self) -> None:
+        """Plan 00216 Task 4.5. Three real dispatches, three format misses.
+
+        The finding was correct every time; the report was flattened to a
+        sentence every time, dropping the checked-count and the Relationship
+        line. The count requirement predates the "mandatory" wording, so this
+        is not a propagation artifact — a contract stated ~100 lines down
+        loses to the pull of answering conversationally.
+
+        So the contract is hoisted to the TOP and cut to the three fields the
+        caller cannot recover for themselves. Designing to what the model
+        reliably does beats demanding compliance a fourth time.
+
+        Pins the POSITION, not just the presence: a later edit that relegates
+        this section is the regression.
+        """
+        body = dedupe_agent_template_path().read_text()
+        heading = "## Your reply MUST contain these, or it has failed"
+        assert heading in body
+        assert body.index(heading) < body.index("## Purpose"), (
+            "The output contract must come before everything else. It was "
+            "ignored three times from further down the document."
+        )
+
+    def test_bundled_agent_names_the_three_unrecoverable_fields(self) -> None:
+        """Each is something the caller cannot reconstruct from prose."""
+        body = dedupe_agent_template_path().read_text()
+        assert "Checked N live plans." in body, "the verifiability signal"
+        assert "Plan NNNNN" in body, "how the caller opens the plan"
+        assert "Relationship:" in body, "merge vs supersede are opposite actions"
+
     def test_bundled_agent_states_the_output_format_is_mandatory(self) -> None:
         """Real-dispatch finding (Plan 00216 Task 4.4).
 
