@@ -93,9 +93,7 @@ def _extract_escape_hatch_text(hook_input: dict[str, Any]) -> str:
     tool_input = hook_input.get("tool_input")
     if not isinstance(tool_input, dict):
         return ""
-    parts = [
-        value for key in _TEXT_FIELDS if isinstance(value := tool_input.get(key), str)
-    ]
+    parts = [value for key in _TEXT_FIELDS if isinstance(value := tool_input.get(key), str)]
     return "\n".join(parts)
 
 

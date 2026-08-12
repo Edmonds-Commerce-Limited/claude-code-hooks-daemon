@@ -951,9 +951,7 @@ class TestChainDecisions:
         chain = HandlerChain()
         h1 = MockHandler("h1", priority=10, result=HookResult.allow())
         h2 = MockHandler("h2", priority=20, should_match=False)
-        h3 = MockHandler(
-            "h3", priority=30, terminal=True, result=HookResult.deny(reason="blocked")
-        )
+        h3 = MockHandler("h3", priority=30, terminal=True, result=HookResult.deny(reason="blocked"))
 
         chain.add(h1)
         chain.add(h2)

@@ -655,6 +655,7 @@ daemon:
 - **@CLAUDE/PlanWorkflow.md** - Planning workflow and standards
 - **CLAUDE/Plan/** - Implementation plans directory
 - **CLAUDE/development/LESSONS.md** - Durable engineering & process lessons
+- **docs/guides/VERDICT_LOG.md** - Handler decision audit log: schema, retention, `hooks-daemon verdicts` reporting
 - **examples/project-handlers/** - Example project handlers with tests
 - **RELEASES/** - Version release notes
 - **CONTRIBUTING.md** - Contribution guidelines

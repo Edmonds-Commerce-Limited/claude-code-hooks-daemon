@@ -104,9 +104,7 @@ def test_no_daemon_running_reports_never_fired_as_unavailable(tmp_path, capsys):
         [{"handler": "pipe_blocker", "verdict": "deny", "overridden": False}],
     )
 
-    rc = cli.cmd_verdicts(
-        _args(tmp_path, pid_file=str(tmp_path / "does-not-exist.pid"))
-    )
+    rc = cli.cmd_verdicts(_args(tmp_path, pid_file=str(tmp_path / "does-not-exist.pid")))
     out = capsys.readouterr().out
 
     assert rc == 0

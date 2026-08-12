@@ -167,7 +167,9 @@ class TestBuildVerdictLines:
         assert synthetic["verdict"] == "override"
 
     def test_escape_hatch_line_is_additional_to_real_decisions(self) -> None:
-        decisions = [HandlerVerdict(handler="absolute_path", decision=Decision.ALLOW, terminal=True)]
+        decisions = [
+            HandlerVerdict(handler="absolute_path", decision=Decision.ALLOW, terminal=True)
+        ]
         lines = build_verdict_lines(
             decisions=decisions,
             hook_input={
@@ -269,9 +271,7 @@ class TestAppendVerdicts:
         for _ in range(50):
             append_verdicts(
                 enabled=True,
-                decisions=[
-                    HandlerVerdict(handler="h1", decision=Decision.ALLOW, terminal=False)
-                ],
+                decisions=[HandlerVerdict(handler="h1", decision=Decision.ALLOW, terminal=False)],
                 hook_input={},
                 event="PreToolUse",
                 tool_name="Bash",
