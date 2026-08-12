@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00223: standing subagent authorisation and system prompt overrides](00223-standing-subagent-authorisation-system-prompt-overrides/PLAN.md) - Not Started (a project has nowhere durable to record authorisations it has genuinely granted, so a standing "use sub-agents freely" is re-asked every session; config declares, existing hook context delivers, and Phase 1 measures which injection point actually lands before any code is written.)
-
 ### Security / Presentation Audit
 
 ### Core / Hook Coverage
@@ -169,6 +167,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00216: plan duplicate source detection](Completed/00216-plan-duplicate-source-detection/PLAN.md) - Complete (a deterministic citation rule was measured out of existence in Phase 1, so this ships a namespaced read-only dedupe sub-agent instead; judgement verified correct across six real dispatches, self-reported coverage measured as unreliable and documented as such rather than tuned toward a guarantee the plan had declined)
 
 - [00222: pipe blocker message redaction overbreadth](Completed/00222-pipe-blocker-message-redaction-overbreadth/PLAN.md) - Complete (the `-m` value blanking fired on any command and on double-quoted values the shell *does* substitute, so an executing pipe hid inside a commit message; the "double quotes execute" fact now has one home)
+
+- [00223: standing subagent authorisation and system prompt overrides](Completed/00223-standing-subagent-authorisation-system-prompt-overrides/PLAN.md) - Complete (a project can now record a standing request in config and have it replayed each prompt; the mechanism ships on and every authorisation ships off, so the daemon never asserts consent nobody gave)
 
 - [00220: stale exclusion audit in qa suppression files](Completed/00220-stale-exclusion-audit-in-qa-suppression-files/PLAN.md) - Complete (a suppression file was only ever read to REMOVE findings, so nothing asked whether each entry still earned its place. An exclusion matching nothing is now a violation — it means the entry drifted off its target or its code was fixed. Found 6 dead entries on first run.)
 
@@ -1152,11 +1152,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 223 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 178 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 34 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 179 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 33 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 34 + 178 + 5 = **217 folders**, spanning
+- **Folder-to-number reconciliation**: 33 + 179 + 5 = **217 folders**, spanning
   **214 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1166,9 +1166,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work). 214 + 9 = 223. ✅
-- **Last reconciled by**: the Plan 00223 opening — one new root folder and the
-  counter advanced by `mkplan.bash`, so Total and Active each rose by one while
-  Completed and Cancelled were untouched. Before that, the Plan 00216 closure —
+- **Last reconciled by**: the Plan 00223 closure — the `git mv` into
+  `Completed/` moves one folder between the Active and Completed splits and
+  leaves the folder total unchanged. Before that, the Plan 00223 opening — one
+  new root folder and the counter advanced by `mkplan.bash`, so Total and
+  Active each rose by one while Completed and Cancelled were untouched. Before
+  that, the Plan 00216 closure —
   the `git mv` into `Completed/` moves one folder between the Active and
   Completed splits and leaves the folder total unchanged. Before that, the
   Plan 00222 closure —

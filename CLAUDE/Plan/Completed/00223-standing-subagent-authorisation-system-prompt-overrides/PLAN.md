@@ -1,6 +1,6 @@
 # Plan 00223: standing subagent authorisation system prompt overrides
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -200,28 +200,65 @@ on the record.
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Full QA suite passes
-- [ ] ⬜ **Task 4.2**: Client-mode verification — required, because
-  `handler_profiles.py` changes what a NEW install generates, and self-install
-  mode cannot show that
-- [ ] ⬜ **Task 4.3**: Dogfood: confirm disabling the option restores the prior
-  behaviour exactly. Note the positive direction ("a fresh session delegates
-  without a per-task grant") is NOT honestly measurable — see Phase 1's
-  non-claim: it is N=1 on an agent that knows the experiment. Verify the
-  MECHANISM (delivered, correct text, correct cadence) and report the
-  behavioural question as open rather than dressing up a single run as proof
-- [ ] ⬜ **Task 4.4**: Docs — `HANDLER_REFERENCE.md` entry (done), and confirm
-  the generated `.claude/HOOKS-DAEMON.md` lists the handler
+- [x] ✅ **Task 4.1**: QA 20/20, 12,253 tests, coverage 95.3%. The FIRST run
+  failed 17/20 and earned its keep — it caught the handler being in
+  `handler_profiles.py` but absent from the shipped
+  `hooks-daemon.yaml.example`, which would have shipped it missing from every
+  new install's config while self-install mode looked perfect
+- [x] ✅ **Task 4.2**: Client-mode verified against a fixture rebuilt from the
+  committed HEAD: handler source installed, generated config carries it with
+  both authorisations `enabled: false`, and a probe through the client's own
+  forwarder injects NO authorisation. Decision 3 proven where it matters —
+  a fresh install is inert. (Ordering note: the fixture builds from HEAD, so
+  verifying a NEW file is only meaningful after it is committed)
+- [x] ✅ **Task 4.3**: Both directions shown — client install (disabled) emits
+  nothing, dogfood install (enabled) emits the authorisation on every prompt.
+  The POSITIVE behavioural claim is deliberately NOT made: whether the
+  injection changes delegation behaviour is N=1 on an agent that knows the
+  experiment, and this plan already recorded why that is not evidence. The
+  MECHANISM is verified; the behavioural question stays open and honest
+- [x] ✅ **Task 4.4**: `HANDLER_REFERENCE.md` entry added (the canonical home
+  per `docs/CLAUDE.md`'s SSOT rule) and `.claude/HOOKS-DAEMON.md` regenerated,
+  listing the handler at priority 57
 
 ## Success Criteria
 
-- [ ] A fresh session in this project dispatches sub-agents without needing a
-  per-task grant, on the strength of the recorded standing request alone
-- [ ] Setting the option to false restores the previous behaviour exactly
-- [ ] The injected text reads as a recorded authorisation, never as an
-  instruction to disregard the system prompt
-- [ ] Existing installs learn the option exists, via `config-changes/`
-- [ ] Full QA passes and the daemon restarts RUNNING
+- [x] The recorded request is DELIVERED to a fresh session, on every prompt,
+  in the freshest position the daemon can reach — verified live in this repo
+  and through the production forwarder
+- [x] Setting the option to false restores the previous behaviour exactly —
+  verified in client mode, where a fresh install emits nothing at all
+- [x] The injected text reads as a recorded authorisation, never as an
+  instruction to disregard the system prompt — enforced by test, not by
+  intention
+- [x] Existing installs learn the option exists, via `config-changes/`
+- [x] Full QA passes (20/20) and the daemon restarts RUNNING
+
+**One criterion was REVISED, and that is the honest kind of change to declare
+loudly rather than bury.** As opened, the first read "a fresh session
+dispatches sub-agents without needing a per-task grant". That is a claim about
+BEHAVIOUR, and this plan cannot honestly make it: measuring it means one
+session, observed by the agent that knows what the experiment is. Plan 00216
+measured a prompt contract three ways in a single session and got 34 / 32 / 17
+/ absent / absent on an unchanged tree — a single sample on a high-variance
+system is not evidence, and ticking it here would repeat the exact overclaim
+that plan had to un-tick.
+
+So it was narrowed to what is demonstrable — DELIVERY — and the behavioural
+question is recorded as OPEN below. The bar was not quietly lowered; it was
+split into the part this plan proved and the part it did not.
+
+## Open Question (deliberately not answered here)
+
+**Does replaying a recorded authorisation actually change delegation
+behaviour?** Unanswered, and not answerable by the method available to this
+plan. Answering it honestly needs several fresh sessions, ideally not
+self-observed, comparing enabled against disabled — a different methodology
+from anything this plan ran. Recorded rather than dropped, per the
+never-drop-a-finding rule.
+
+What IS established: the mechanism delivers the right text, at the right
+cadence, in the right position, and is inert until a project opts in.
 
 ## Dependencies
 
