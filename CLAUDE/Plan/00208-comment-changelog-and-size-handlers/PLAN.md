@@ -116,12 +116,20 @@ daemon's own source, the design is wrong. That must be *measured*, not assumed.
 
 ### Phase 2: `comment_size`
 
-- [ ] ⬜ **Task 2.1**: Failing tests for line-length and block-length limits
-- [ ] ⬜ **Task 2.2**: Tiering — only an edit that GROWS an already-over-limit
-  comment blocks; shrinking silent; same-size advises
-- [ ] ⬜ **Task 2.3**: Docstrings/JSDoc are API documentation — exempt from
+- [x] ✅ **Task 2.1**: Failing tests for line-length and block-length limits
+- [x] ✅ **Task 2.2**: Tiering — only an edit that GROWS an already-over-limit
+  comment blocks; shrinking silent; same-size advises. Growth is measured
+  as aggregate non-doc comment character count in the touched region
+  (`old_string`/`new_string` for Edit; on-disk content vs new content for
+  Write), mirroring `plan-doc-size`'s whole-file byte-count philosophy
+  rather than per-span matching
+- [x] ✅ **Task 2.3**: Docstrings/JSDoc are API documentation — exempt from
   `comment_size`, still subject to `comment_changelog`
-- [ ] ⬜ **Task 2.4**: `MUST_EXCEED_COMMENT_SIZE_BECAUSE` escape hatch
+- [x] ✅ **Task 2.4**: `MUST_EXCEED_COMMENT_SIZE_BECAUSE` escape hatch
+
+`handlers/pre_tool_use/comment_size.py`: `CommentSizeHandler` — 35 tests,
+100% file coverage, mypy --strict / ruff / black clean. Not yet registered
+in `.claude/hooks-daemon.yaml` (Phase 3 task).
 
 ### Phase 3: Integrate & verify
 

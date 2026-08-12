@@ -3,6 +3,7 @@
 from .absolute_path import AbsolutePathHandler
 from .british_english import BritishEnglishHandler
 from .comment_changelog import CommentChangelogHandler
+from .comment_size import CommentSizeHandler
 from .daemon_location_guard import DaemonLocationGuardHandler
 from .destructive_git import DestructiveGitHandler
 from .error_hiding_blocker import ErrorHidingBlockerHandler
@@ -29,6 +30,7 @@ __all__ = [
     "AbsolutePathHandler",
     "BritishEnglishHandler",
     "CommentChangelogHandler",
+    "CommentSizeHandler",
     "DaemonLocationGuardHandler",
     "DestructiveGitHandler",
     "ErrorHidingBlockerHandler",
