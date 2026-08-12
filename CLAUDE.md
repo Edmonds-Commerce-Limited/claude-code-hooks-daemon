@@ -1571,6 +1571,14 @@ The deploy is idempotent (fills gaps only, never overwrites client-owned files).
 
 When the session is idle and caught up (repeated no-op failsafe-recovery ticks), this advisory suggests a bounded HOUSEKEEPING MODE: dispatch specialist housekeeping sub-agents that run read-only audits and write shareable **markdown report files** (default `untracked/reports/`). It is REPORT-ONLY — never auto-fix or auto-commit — and strictly lower priority than real work (a real user prompt aborts it). Off by default; enable via `handlers.user_prompt_submit.idle_housekeeping_advisory.enabled: true`. A project can point it at its own doc via the `custom_guidance_doc` option (`custom_guidance_mode: additive` appends it to the default, `replace` uses only the project doc). See docs/guides/CREATING_REPORTS.md.
 
+## standing_authorisations — a project can record a standing request
+
+Some instructions are conditional on the user having asked ("unless the user requested it"). A request made in conversation does not survive the session, so this project can record one in config instead, and the daemon replays it on each prompt.
+
+Configured in `.claude/hooks-daemon.yaml` under `handlers.user_prompt_submit.standing_authorisations.options.authorisations`, as a list of `{id, enabled}` entries. Built-in ids: `subagent-delegation`, `workflow-orchestration`.
+
+**Every entry ships disabled.** The handler is enabled so the options are discoverable, but nothing is authorised until the project turns it on — the daemon must never assert consent that was not given. Enabling one is a deliberate act by whoever owns the repository, and removing it withdraws the authorisation.
+
 ## auto_approve_reads — gated on bypassPermissions mode
 
 Read-only tool permission requests (`Read`, `Glob`, `Grep`) are auto-approved **only** when Claude Code reports `permission_mode == "bypassPermissions"` (YOLO mode).
