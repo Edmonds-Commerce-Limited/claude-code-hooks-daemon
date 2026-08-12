@@ -1,6 +1,6 @@
 # Plan 00208: comment changelog and size handlers
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
