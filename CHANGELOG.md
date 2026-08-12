@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`comment_changelog` and `comment_size` — no changelog narrative or
+  runaway length in code comments (Plan 00208).** A field report: a bash
+  version-marker trailing comment accumulated six releases of history and
+  reached 5,645 characters on one line, then broke the user-facing banner
+  that echoed it verbatim. Comments describe CURRENT STATE; history belongs
+  in git, a changelog file, or a plan's `JOURNAL/`. `comment_changelog`
+  blocks `Prior <version>:`/`Previously <version>:` phrasing and dated
+  entries — both measured with zero false positives across this project's
+  own ~1,080 source/test files. Three further signals from the original
+  design (a version-transition arrow, a changelog verb naming a version,
+  two-or-more distinct versioned entries) measured real false positives on
+  legitimate version-processing docstrings and rationale comments, so they
+  are advisory-only rather than blocking. History as RATIONALE (e.g. `# Plan 00047: do NOT re-add DISABLE_MOUSE, see...`) is explicitly not
+  flagged — the separating test is whether an entry is keyed by a RELEASE
+  NUMBER (changelog) or a FAILURE MODE (rationale). `comment_size` caps
+  comment length using the same grow/shrink/same-size tiering as
+  `plan-doc-size`: only an edit that GROWS an already-over-limit comment
+  can be denied, so a legacy over-commented file stays editable and can be
+  refactored down. Both cover 12 languages (the 11-language canonical set
+  plus Shell — the field report's own language) via a shared
+  `strategies/comments/` Strategy Pattern package.
+
 ## [3.52.0] - 2026-08-12
 
 This is a **minor release** carrying two new handlers, a whole-tree QA backstop,

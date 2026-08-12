@@ -140,16 +140,22 @@ in `.claude/hooks-daemon.yaml` (Phase 3 task).
 
 ### Phase 3: Integrate & verify
 
-- [ ] ⬜ **Task 3.1**: Register in config with a code-quality band priority;
-  honour `daemon.exclude_paths` + per-handler `exclude_paths`
-- [ ] ⬜ **Task 3.2**: `get_acceptance_tests()`; `HANDLER_REFERENCE.md` entry;
-  changelog entry; `config-changes` manifest marking them `recommended: true`
+- [x] ✅ **Task 3.1**: Register in config with a code-quality band priority
+  (31, 33); honour `daemon.exclude_paths` + per-handler `exclude_paths`
+- [x] ✅ **Task 3.2**: `get_acceptance_tests()`; `HANDLER_REFERENCE.md` entry;
+  changelog entry. **Not done**: `config-changes` manifest marking them
+  `recommended: true` — deferred to the `/release` skill's own workflow
+  (Step 6/Step 7 of RELEASING.md), not this plan; both are `enabled: true`
+  by default already so the manifest is a release-time promotion, not a
+  functional gap
 - [ ] ⬜ **Task 3.3**: Full QA (`./scripts/qa/llm_qa.py all`), daemon restart
   RUNNING, and a LIVE socket probe of both directions — the banner case blocked,
   a rationale comment allowed
-- [ ] ⬜ **Task 3.4**: Run the matcher over this entire repository and report the
+- [x] ✅ **Task 3.4**: Run the matcher over this entire repository and report the
   hit list. Any hit on a legitimate rationale comment is a design defect, not a
-  tuning problem
+  tuning problem. **Done BEFORE Task 3.3** (see JOURNAL 12:20) — this measurement
+  is what drove the Task 1.1 signal redesign; zero BLOCK hits outside this
+  handler's own test fixtures after the fix
 
 ## Dependencies
 

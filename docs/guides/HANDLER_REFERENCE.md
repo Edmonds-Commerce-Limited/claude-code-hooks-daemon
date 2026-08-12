@@ -740,6 +740,139 @@ handlers:
 
 ---
 
+#### comment_changelog
+
+| Property       | Value               |
+| -------------- | ------------------- |
+| **Config key** | `comment_changelog` |
+| **Priority**   | 31                  |
+| **Type**       | Blocking            |
+| **Event**      | PreToolUse          |
+
+**Description:** Blocks Write/Edit content that writes HISTORICAL NARRATIVE
+into a code comment. A comment describes CURRENT STATE; changelog narrative
+belongs in git (the commit message), the project's changelog file, or a
+plan's `JOURNAL/` day-file. The failure mode is monotonic — nobody deletes
+from a comment changelog, so it only ever grows (Plan 00208's field report: a
+bash version-marker trailing comment reached 5,645 characters, six releases
+deep, and broke the banner that echoed it).
+
+**Blocked (high-precision) signals**, either denies the write:
+
+- `Prior <version>:` / `Previously <version>:` phrasing
+- a dated entry (`2026-08-12: ...`)
+
+Both were measured with zero false positives across this project's own
+~1,080 source/test files. The proposal originally specified three further
+signals as blocking (a version-transition arrow, a changelog verb naming a
+version, and two-or-more distinct versioned entries); the same measurement
+found each firing on legitimate code — version-processing utilities citing
+multiple example versions in their own docstrings, and "removed in vX.Y"
+describing an *external* tool's deprecation. All three are **advisory
+only** now (still surfaced as context, never block), alongside `Fixed:`/
+`Added:`/`Changed:` bullet runs and retrospective phrasing (`used to`, `no longer`, `we switched from`).
+
+**History as RATIONALE is legitimate and is NOT flagged.** A comment may
+recount the past when the past is the reason the code looks the way it is
+now — e.g. `# Plan 00047: do NOT re-add DISABLE_MOUSE, see...`. The
+separating test: an entry keyed by a RELEASE NUMBER is a changelog; an entry
+keyed by a FAILURE MODE (a plan number, a bug description) is a rationale.
+
+**No escape hatch** — unlike `comment_size`, changelog content should be
+MOVED to git/a changelog file/a plan `JOURNAL/`, never exempted in place.
+
+**Options:**
+
+| Option                | Type        | Default        | Description                                                                                               |
+| --------------------- | ----------- | -------------- | --------------------------------------------------------------------------------------------------------- |
+| `max_history_entries` | `int`       | `1`            | More than this many distinct dated/versioned entries in one comment triggers the advisory entries signal. |
+| `mode`                | `str`       | `block`        | `block` denies a high-precision hit; `warn` downgrades every finding to advisory context.                 |
+| `languages`           | `list[str]` | all registered | Restrict enforcement to specific languages.                                                               |
+| `exclude_paths`       | `list[str]` | `[]`           | Gitignore-style globs exempting files from scanning. Unioned with `daemon.exclude_paths` and defaults.    |
+
+**Built-in exclusions:** `vendor/`, `node_modules/`, `tests/fixtures/`, `tests/assets/`, `migrations/`, `.venv/`/`venv/`, `build/`, `dist/`. `.md` files are skipped entirely — markdown prose is not a comment. Only the ADDED text is checked on `Edit` (`new_string`) — removing changelog content is never blocked.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    comment_changelog:
+      enabled: true
+      priority: 31
+      options:
+        max_history_entries: 1
+        mode: block
+```
+
+---
+
+#### comment_size
+
+| Property       | Value          |
+| -------------- | -------------- |
+| **Config key** | `comment_size` |
+| **Priority**   | 33             |
+| **Type**       | Blocking       |
+| **Event**      | PreToolUse     |
+
+**Description:** Caps over-long comments, tiered exactly like `plan-doc-size`
+(Plan 00190): only an edit that GROWS an already-over-limit comment can be
+denied. Shrinking is silent (always allowed); a same-size edit only advises.
+That keeps an over-commented legacy file editable so it can be refactored
+down, instead of freezing it. Comment length is mostly a symptom —
+`comment_changelog` is the actual defect this project cares about — but a
+single comment can still grow unboundedly even without changelog-shaped
+phrasing.
+
+**Two independent limits** (either trips it):
+
+- a single comment line longer than `max_comment_line_chars` (default 400)
+- a contiguous comment block longer than `max_comment_block_lines` (default 40)
+
+Growth is measured as the aggregate non-doc comment character count in the
+edit's touched region (`old_string`/`new_string` for `Edit`; on-disk content
+vs. new content for `Write` — `None` for a brand-new file, which always
+counts as growth since there is nothing to compare against).
+
+**Docstrings and JSDoc are API documentation, not comments** — exempt from
+this handler entirely (still subject to `comment_changelog`).
+
+**Escape hatch** (in-content, matching the daemon's `MUST_..._BECAUSE`
+convention):
+
+```bash
+# MUST_EXCEED_COMMENT_SIZE_BECAUSE: verbatim upstream licence text, must not be reflowed
+```
+
+**Options:**
+
+| Option                    | Type        | Default        | Description                                                                                            |
+| ------------------------- | ----------- | -------------- | ------------------------------------------------------------------------------------------------------ |
+| `max_comment_line_chars`  | `int`       | `400`          | Single comment line character limit.                                                                   |
+| `max_comment_block_lines` | `int`       | `40`           | Contiguous comment block line-count limit.                                                             |
+| `mode`                    | `str`       | `block`        | `block` denies a GROWING breach; `warn` downgrades every finding to advisory context.                  |
+| `languages`               | `list[str]` | all registered | Restrict enforcement to specific languages.                                                            |
+| `exclude_paths`           | `list[str]` | `[]`           | Gitignore-style globs exempting files from scanning. Unioned with `daemon.exclude_paths` and defaults. |
+
+**Built-in exclusions:** `vendor/`, `node_modules/`, `tests/fixtures/`, `tests/assets/`, `migrations/`, `.venv/`/`venv/`, `build/`, `dist/`.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    comment_size:
+      enabled: true
+      priority: 33
+      options:
+        max_comment_line_chars: 400
+        max_comment_block_lines: 40
+        mode: block
+```
+
+---
+
 #### security_antipattern
 
 | Property       | Value                  |
@@ -2139,6 +2272,8 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)          |
 | `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                |
 | `validate_plan_number`         | PreToolUse        | 30       | Invalid plan numbering                                               |
+| `comment_changelog`            | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries) |
+| `comment_size`                 | PreToolUse        | 33       | Over-long comments growing past the size limit                       |
 | `markdown_organization`        | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                |
 | `lsp_enforcement`              | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                            |
 | `gh_issue_comments`            | PreToolUse        | 40       | gh issue view without --comments                                     |

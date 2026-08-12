@@ -253,6 +253,21 @@ handlers:
       #     - JavaScript/TypeScript
       #     - PHP
 
+    comment_changelog:     # Blocks changelog narrative accumulating in a code comment (Plan 00208)
+      enabled: true
+      priority: 31
+      # options:
+      #   max_history_entries: 1   # more than this many distinct dated/versioned entries in one comment advises
+      #   mode: block               # block | warn
+
+    comment_size:          # Caps over-long comments, tiered like plan-doc-size (Plan 00208)
+      enabled: true
+      priority: 33
+      # options:
+      #   max_comment_line_chars: 400
+      #   max_comment_block_lines: 40
+      #   mode: block               # block | warn
+
     tdd_enforcement:       # Enforces test-first development
       enabled: true
       priority: 35
