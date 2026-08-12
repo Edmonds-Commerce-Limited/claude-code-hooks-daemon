@@ -1,6 +1,6 @@
 # Plan 00213: planlib plan folder orchestrator tooling
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -26,9 +26,11 @@ every defined one. The `§5` skeletons are explicitly marked as templates
 containing placeholders, not runnable code.
 
 This plan exists so the proposal is TRACKED rather than lingering in
-`untracked/`. It is deliberately **Not Started**: adopting a ~62KB bash library
-into the daemon is a scope decision for a human, not something to begin because
-the document happens to be well written.
+`untracked/`. Phase 1 (evaluation only) is complete — see Technical Decisions
+for the recorded ADAPT recommendation. Phase 2 (adoption) remains gated on a
+human scope decision: adopting a ~62KB bash library into the daemon is not
+something to begin because the document happens to be well written, or
+because an evaluation recommends it.
 
 ## Goals
 
@@ -62,13 +64,13 @@ durable detail belongs in named files, not inflating PLAN.md):
 
 ### Phase 1: Evaluation
 
-- [ ] ⬜ **Task 1.1**: Read `PROPOSAL.md` and independently re-run its stated
-  verification (`bash -n` with an empty-stderr assertion, `shellcheck -x -S style`, defined-vs-called function cross-reference)
-- [ ] ⬜ **Task 1.2**: Assess overlap with what the daemon already ships —
+- [x] ✅ **Task 1.1**: Read `PROPOSAL.md` and independently re-run its stated
+  verification (`bash -n` with an empty-stderr assertion, `shellcheck -x -S style`, defined-vs-called function cross-reference). Confirmed all three claims exactly as stated — see `EVALUATION.md` §1.
+- [x] ✅ **Task 1.2**: Assess overlap with what the daemon already ships —
   `mkplan.bash`, `deploy-plan-workflow`, the `plan_qa` check catalogue — and
-  identify what `planlib` adds beyond them
-- [ ] ⬜ **Task 1.3**: Record an accept / adapt / decline decision with rationale
-  under Technical Decisions
+  identify what `planlib` adds beyond them. Overlap is minimal; different lifecycle stage — see `EVALUATION.md` §2.
+- [x] ✅ **Task 1.3**: Record an accept / adapt / decline decision with rationale
+  under Technical Decisions. Recorded: ADAPT.
 
 ### Phase 2: Adoption (only if Task 1.3 accepts)
 
@@ -85,6 +87,75 @@ durable detail belongs in named files, not inflating PLAN.md):
 
 - Related: Plan 00211 (plan-size guidance / supporting-docs concept) — this plan
   folder is itself an application of that plan's EXTRACT remedy.
+
+## Technical Decisions
+
+### Decision 1: planlib — ADAPT, not full accept, not decline
+
+**Context**: Phase 1 independently re-ran the proposal's stated verification
+and assessed overlap with existing daemon tooling. Full detail (verification
+transcripts, per-artefact overlap table, architectural analysis) is in
+`EVALUATION.md`; this records the decision and the load-bearing reasons.
+
+**Verification (Task 1.1)**: all three of the proposal's stated claims about
+`_planlib.inc.bash` (§3) were independently reproduced and confirmed exactly
+as stated — `bash -n` with empty stdout/stderr, `shellcheck -x -S style`
+clean (stricter than the daemon's own shell QA gate requires), and a
+zero-dangling-reference cross-check across all 24 `plan_*`/`_plan_*`
+functions. A bonus dynamic smoke test (not claimed by the proposal, done for
+extra confidence) confirmed the pure/testable primitives behave as documented,
+including the specific incident-class fix in §1.1 (script-relative,
+boundary-bounded root resolution correctly refuses to walk past a nested
+repo). However, of the proposal's three named artefacts
+(`_planlib.inc.bash`, `plan_script_qa`, `test-planlib.bash`), **only the
+library is delivered as complete, runnable code** — the QA handler is a
+rules table plus two illustrative snippets, and the test suite is four
+stated principles with no runnable file. The proposal itself scopes its
+verification table to the library only, but a skim can read it as covering
+"the proposal."
+
+**Overlap (Task 1.2)**: minimal, and mostly additive rather than duplicative.
+`mkplan.bash`, `deploy-plan-workflow`, and all 30 `plan_qa` checks across its
+3 enforcement surfaces operate at plan **creation** and `PLAN.md` **hygiene**
+— none inspect executable content. `planlib` addresses a different lifecycle
+stage entirely: safe **execution** of operator-run scripts filed inside a
+plan folder. The one real new-capability claim (`plan_script_qa` linting
+script structural safety) holds up — the daemon has nothing like it today.
+The honest answer to "does most of this already exist here" is **no**.
+
+**Options considered**:
+
+1. **Decline** — reject the proposal outright. Rejected: the verified library
+   solves a real, previously-encountered incident class with primitives that
+   are easy to get subtly wrong if reinvented (named-pipe-vs-`>()` drain
+   determinism, the `BASH_SUBSHELL` leg guard, TTY-vs-stdin prompt-ordering).
+   Declining would discard genuinely solid, independently-verified work.
+2. **Full accept** — land all three artefacts as "Phase 2" per the plan's
+   original task list. Rejected: only 1 of 3 artefacts is actually finished
+   code. Treating the QA handler and test suite as a four-task polish step
+   understates the work — this project's TDD discipline has no RED phase to
+   start from for either, since neither exists yet as runnable code.
+3. **Adapt** (chosen) — accept the library alone, behind config, on the
+   existing `deploy_plan_workflow_if_enabled` seam (already reusable,
+   already idempotent, already the mechanism this plan's own Goals section
+   names); treat `plan_script_qa` + `test-planlib.bash` as a **separate**,
+   honestly-scoped follow-up plan rather than folding them into this one.
+
+**Decision**: ADAPT. If a human authorises Phase 2, re-scope it to land the
+library only, then open a new plan for the QA handler and test suite once a
+human has also weighed the open architectural question below — this decision
+does not resolve it, only surfaces it.
+
+**Open question for the human, not resolved here**: `planlib` is explicitly
+operator-invoked (§9 of the proposal) with zero runtime coupling to Claude
+Code hook events or anything the daemon governs — unlike `mkplan.bash`, which
+manipulates daemon-owned state (the plan counter, `PLAN.md` shape). Whether a
+general-purpose, plan-system-agnostic bash safety library belongs inside a
+**Claude Code hooks daemon**, versus being a separate vendored library the
+daemon merely helps distribute, is a scope call this plan's own Non-Goals
+section already reserves for a human.
+
+**Date**: 2026-08-12
 
 ## Success Criteria
 
