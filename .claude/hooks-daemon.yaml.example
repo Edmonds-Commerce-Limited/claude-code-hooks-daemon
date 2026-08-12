@@ -95,7 +95,7 @@ handlers:
 
     ancestry_preserving_merge: # BLOCKS git merge --squash / gh pr merge --squash|--rebase (severs ancestry).
       enabled: true             # Escape hatch: MUST_SQUASH_BECAUSE="reason"; git merge --squash <branch>
-      priority: 17
+      priority: 19
       # options:
       #   mode: block            # block (default) | warn (advisory only)
 

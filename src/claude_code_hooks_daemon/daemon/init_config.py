@@ -141,7 +141,7 @@ class ConfigTemplate:
             "    worktree_file_copy: {enabled: true, priority: 15}  # Prevent worktree file copies\n"
             "    dangerous_permissions: {enabled: true, priority: 15}  # Block chmod 777, chown root\n"
             "    git_stash: {enabled: true, priority: 20}         # Warn about git stash\n"
-            "    ancestry_preserving_merge: {enabled: true, priority: 17}  "
+            "    ancestry_preserving_merge: {enabled: true, priority: 19}  "
             "# Block squash/rebase merges that sever ancestry\n"
             "\n"
             "    # CODE QUALITY HANDLERS (Priority 25-35)\n"
