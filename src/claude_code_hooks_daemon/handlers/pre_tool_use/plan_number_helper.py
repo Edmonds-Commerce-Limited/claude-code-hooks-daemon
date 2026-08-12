@@ -35,6 +35,12 @@ if TYPE_CHECKING:
 # a negated class matches "\n" unless told otherwise.
 _COMMAND_SEPARATORS: Final[str] = r";&|\n\r"
 
+# A `-name` pattern carrying this many consecutive literal digits is naming ONE
+# specific plan (e.g. `00036-*`), not sweeping for whichever plans happen to
+# exist. A single digit is not enough: `0*` is the generic "any plan folder"
+# glob that the discovery idiom uses.
+_SPECIFIC_PLAN_NUMBER_DIGITS: Final[int] = 2
+
 
 class PlanNumberHelperHandler(Handler):
     """Detect bash commands attempting to discover plan numbers and provide correct answer."""
@@ -52,6 +58,57 @@ class PlanNumberHelperHandler(Handler):
         self._workspace_root: Path = ProjectContext.project_root()
         self._track_plans_in_project: str | None = None  # Path to plan folder or None
         self._plan_workflow_docs: str | None = None  # Path to workflow doc or None
+
+    @staticmethod
+    def _extracts_latest(command: str) -> bool:
+        """True when the command reduces its output to the single highest entry.
+
+        This is the signature of "what is the next plan number?" -- sorting the
+        folder list and taking the last one. It is what the git counter exists
+        to replace, so it stays blocked regardless of how thorough the scan
+        feeding it happens to be.
+        """
+        return bool(re.search(r"tail\s+(-n\s*)?-?\d+", command))
+
+    @staticmethod
+    def _covers_archive_subdirectories(command: str, plan_dir: str) -> bool:
+        """True when the command demonstrably reaches the plan dir's archives.
+
+        Two shapes qualify:
+
+        1. An explicit path into a NAMED subdirectory of the plan dir --
+           ``CLAUDE/Plan/Completed/...``. The check is for a letter rather than
+           the literal names ``Completed``/``Cancelled`` because the archive
+           directory names are configurable; a numbered plan folder always
+           starts with a digit, so "letter follows the plan dir" cleanly
+           separates a named subdirectory from a specific plan. The segment
+           must then END (at a slash, whitespace, or the end of the string) so
+           that a letter-led FILE in the plan root -- ``CLAUDE/Plan/README.md``
+           -- cannot masquerade as a subdirectory and exempt a compound command
+           whose other half really is a discovery scan.
+        2. A ``find`` rooted at the plan dir whose ``-name`` pattern is not a
+           generic plan-number sweep -- either it names ONE specific plan
+           (``00036-*``) or it is not about plan numbers at all (``PLAN.md``).
+           A bare ``find`` with no ``-name``, or one globbing ``0*`` /
+           ``[0-9]*``, stays ambiguous: an agent hunting the next number
+           plausibly runs exactly that and reads the tail of the output, so it
+           is left to the handler's normal detection.
+        """
+        if re.search(rf"{re.escape(plan_dir)}/[A-Za-z][\w-]*(/|\s|$)", command):
+            return True
+
+        if not re.search(rf"find\s+{re.escape(plan_dir)}/?(\s|$)", command):
+            return False
+
+        name_pattern = re.search(r"-name\s+['\"]?([^'\"\s]+)", command)
+        if name_pattern is None:
+            return False
+
+        target = name_pattern.group(1)
+        if re.search(rf"\d{{{_SPECIFIC_PLAN_NUMBER_DIGITS},}}", target):
+            return True
+        # No digit and no digit character-class => not a plan-number search.
+        return not re.search(r"\d|\[0-9\]", target)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match bash commands attempting to discover plan numbers.
@@ -84,6 +141,24 @@ class PlanNumberHelperHandler(Handler):
         # different, legitimate operation this handler must not misfire on,
         # regardless of which other discovery-shaped pattern it also matches.
         if plan_dir in command and re.search(r"\|\s*wc\b", command):
+            return False
+
+        # RECONCILIATION, not discovery. This handler's whole justification --
+        # stated verbatim in its own deny reason -- is that a folder scan
+        # "misses subdirectories like Completed/". A command that demonstrably
+        # DOES reach those subdirectories cannot be denied on that ground
+        # without telling the caller something untrue about their own command.
+        #
+        # The carve-out is deliberately narrow: it applies only while the
+        # command is NOT also extracting a single highest value. Auditing which
+        # numbers exist (statistics, collision hunting, absent-number
+        # reconciliation) is a different operation from asking "what is the next
+        # number", and only the latter is what the git counter replaces --
+        # folder scans still disagree across branches, so the discovery idiom
+        # stays blocked even when it happens to cover the archives.
+        if self._covers_archive_subdirectories(command, plan_dir) and not self._extracts_latest(
+            command
+        ):
             return False
 
         # Pattern detection: Commands trying to discover plan numbers

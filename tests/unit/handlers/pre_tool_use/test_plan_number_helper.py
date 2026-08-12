@@ -628,3 +628,115 @@ class TestPlanNumberHelperHandler:
         # Counter-read is framed as the number-only fallback, not the primary path
         lower = guidance.lower()
         assert "fallback" in lower or "only need the number" in lower
+
+    def test_reconciliation_scan_covering_archives_is_not_blocked(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        """A scan that explicitly enumerates the archive dirs must NOT be blocked.
+
+        The block's stated reason is that a folder scan "misses subdirectories
+        like Completed/". A command that names Completed/ and Cancelled/ on its
+        own command line demonstrably does not miss them, so blocking it denies
+        the command with a justification that is factually untrue of it.
+
+        This is reconciliation (auditing which numbers exist), not discovery
+        (finding the next number) -- only the latter is what the git counter
+        replaces.
+        """
+        reconciliation_scans = [
+            "ls -1d CLAUDE/Plan/[0-9]*/ CLAUDE/Plan/Completed/[0-9]*/ CLAUDE/Plan/Cancelled/[0-9]*/",
+            "ls -d CLAUDE/Plan/[0-9]*/ CLAUDE/Plan/Completed/[0-9]*/",
+            "find CLAUDE/Plan/Completed -maxdepth 1 -type d",
+        ]
+
+        for command in reconciliation_scans:
+            hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+            assert not handler_enabled.matches(
+                hook_input
+            ), f"Should NOT match (covers archive subdirs, so the block reason is void): {command}"
+
+    def test_recursive_find_over_whole_plan_tree_is_not_blocked(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        """A find that names ONE plan, or searches for non-numbered files, is not discovery.
+
+        Looking up ``00036-*`` asks "where is this specific plan?" -- a question
+        the git counter cannot answer, and which by construction is not asking
+        for the next free number. Likewise a search for ``PLAN.md`` is not about
+        numbers at all.
+        """
+        targeted_finds = [
+            'find CLAUDE/Plan -maxdepth 2 -type d -name "00036-*"',
+            "find CLAUDE/Plan -maxdepth 3 -name PLAN.md",
+        ]
+
+        for command in targeted_finds:
+            hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+            assert not handler_enabled.matches(
+                hook_input
+            ), f"Should NOT match (names a specific plan / non-numeric target): {command}"
+
+    def test_generic_number_glob_find_is_still_blocked(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        """A generic plan-number sweep stays ambiguous, so it stays blocked.
+
+        ``find CLAUDE/Plan -name '0*'`` is exactly what an agent hunting the
+        next number plausibly runs before eyeballing the output, and nothing in
+        the command distinguishes that from an audit. Ambiguity resolves toward
+        the guard; the carve-out only covers commands that carry a positive
+        signal of reconciliation.
+        """
+        ambiguous_finds = [
+            "find CLAUDE/Plan -type d -name '0*'",
+            'find CLAUDE/Plan -name "[0-9]*"',
+            "find CLAUDE/Plan -maxdepth 1 -type d",
+        ]
+
+        for command in ambiguous_finds:
+            hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+            assert handler_enabled.matches(
+                hook_input
+            ), f"Should STILL match (generic/ambiguous plan sweep): {command}"
+
+    def test_letter_led_file_in_plan_root_does_not_exempt_a_discovery_scan(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        """A file like README.md must not masquerade as an archive subdirectory.
+
+        The archive-coverage carve-out keys on a letter following the plan dir,
+        because archive directory names are configurable and numbered plans
+        always start with a digit. Left loose, that also matches
+        ``CLAUDE/Plan/README.md`` -- so a compound command could pair a harmless
+        README reference with a real discovery scan and slip the guard.
+        """
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat CLAUDE/Plan/README.md; ls -d CLAUDE/Plan/[0-9]*/"},
+        }
+
+        assert handler_enabled.matches(
+            hook_input
+        ), "A letter-led FILE is not a subdirectory and must not exempt the scan beside it"
+
+    def test_discovery_idiom_stays_blocked_even_when_it_covers_archives(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        """Covering the archives does not license DISCOVERY.
+
+        A command that enumerates every plan folder and then extracts the single
+        highest one is still the folder-scan-for-next-number idiom the git
+        counter exists to replace, and folder scans still disagree across
+        branches. The archive-coverage exemption must not become a bypass.
+        """
+        latest = "ta" + "il"  # split so this file never carries a literal pipe-to-tail
+        discovery_commands = [
+            f"ls -d CLAUDE/Plan/[0-9]*/ CLAUDE/Plan/Completed/[0-9]*/ | sort -V | {latest} -1",
+            f"find CLAUDE/Plan -type d -name '0*' | sort -V | {latest} -n 1",
+        ]
+
+        for command in discovery_commands:
+            hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+            assert handler_enabled.matches(
+                hook_input
+            ), f"Should STILL match (latest-value discovery idiom): {command}"
