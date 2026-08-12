@@ -8,9 +8,12 @@ and this check never touches it.
 
 That asymmetry is the whole design. The thresholds come from read cost
 (:class:`PlanDocSizeLimits`), the scope comes from the shared classifier
-(so journals and the plan index are exempt by construction), and the
-remediation names TWO remedies because most oversized plans are over-scoped
-rather than journal-polluted.
+(so journals, the plan index and supporting docs are exempt by
+construction), and the remediation names THREE remedies (Plan 00211) —
+EXTRACT durable-but-current detail into a named supporting document,
+RELOCATE dated narrative into JOURNAL/, or SPLIT an over-scoped plan —
+because most oversized plans carry detail that is neither history nor
+task tree, so neither of the first two remedies alone used to fit.
 
 Guards keep the block from ever trapping an agent — only an edit that makes
 the problem WORSE can be denied:
@@ -28,9 +31,12 @@ the problem WORSE can be denied:
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.checks.common import edit_target, level_for_plan
+from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME
+from claude_code_hooks_daemon.plan_qa.remedy import remedy_sentence
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
     CheckSpec,
@@ -56,18 +62,30 @@ _TIER_BLOCK: Final[str] = "block"
 
 _BYTES_PER_TOKEN: Final[float] = 3.97
 
-_REMEDY: Final[str] = (
-    "Two remedies, and NEITHER is deletion: (1) RELOCATE the narrative — dated "
-    "progress notes, incident write-ups, hand-off prose — into this plan's "
-    "JOURNAL/ day-file, which is append-only and unbounded by design; or "
-    "(2) SPLIT the plan if the task tree itself is the bulk, since an "
-    "over-scoped plan is not fixed by better journalling. Keep PLAN.md lean, "
-    "current and correct — history belongs in git and in JOURNAL/."
-)
+# Single source of truth for the remedy wording (Plan 00211) — see
+# plan_qa/remedy.py. Every surface (this Finding, plan_qa_edit's CLAUDE.md
+# bullet, plan_workflow's CLAUDE.md section) renders from the same module
+# instead of hand-copying the text, which is exactly how it drifted before.
+_REMEDY: Final[str] = remedy_sentence()
 
 _ESCAPE_HATCH_HINT: Final[str] = (
     " If this plan genuinely warrants its size, record why in the file: "
     "`<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: <reason> -->`."
+)
+
+_MARKDOWN_SUFFIX: Final[str] = ".md"
+
+# Suggestion, never an assertion (Plan 00211): one plan in the field report's
+# corpus had 19 supporting docs and was STILL oversized because its task
+# tree genuinely was the bulk. So this only ever hints at a possible cause
+# based on folder shape — it never claims the folder shape IS the cause.
+_FOLDER_SHAPE_HINT: Final[str] = (
+    " This plan folder has no supporting documents — a PLAN.md over the "
+    "threshold with none is usually a plan being used as a notepad; check "
+    "whether the bulk is findings or research that wants a named file "
+    "(remedy 1), rather than prose that wants compressing. This is a "
+    "suggestion based on folder shape, not a diagnosis — some plans are "
+    "large because the task tree itself genuinely is the bulk."
 )
 
 
@@ -104,6 +122,28 @@ def _has_justified_escape_hatch(content: str) -> bool:
     if reason.endswith(_HTML_COMMENT_CLOSE):
         reason = reason[: -len(_HTML_COMMENT_CLOSE)].strip()
     return bool(reason)
+
+
+def _folder_has_supporting_docs(plan_folder: Path, journal_dir_name: str) -> bool:
+    """Whether ``plan_folder`` contains a named supporting document.
+
+    A HINT for the advisory (Plan 00211), never a diagnosis — see
+    :data:`_FOLDER_SHAPE_HINT`. Missing/non-existent folders (e.g. a
+    synthetic test context with no real filesystem backing) count as "no
+    supporting docs", which is the harmless, conservative default.
+    """
+    if not plan_folder.is_dir():
+        return False
+    for entry in plan_folder.iterdir():
+        if entry.name == journal_dir_name:
+            continue
+        if (
+            entry.is_file()
+            and entry.suffix == _MARKDOWN_SUFFIX
+            and entry.name != PLAN_DOC_FILENAME
+        ):
+            return True
+    return False
 
 
 def _breached(tier: _Tier, byte_count: int, line_count: int) -> bool:
@@ -161,6 +201,7 @@ def _run(context: CheckContext) -> list[Finding]:
 
     content = context.file_content
     assert content is not None  # narrowed by edit_target succeeding
+    assert context.file_path is not None  # narrowed by edit_target succeeding
 
     # A shrinking edit is the remedy in progress — never penalise it, or an
     # oversized plan becomes impossible to refactor down.
@@ -193,6 +234,9 @@ def _run(context: CheckContext) -> list[Finding]:
         else:
             level = level_for_plan(context, target.plan_number)
             remediation = _REMEDY + _ESCAPE_HATCH_HINT
+
+    if not _folder_has_supporting_docs(context.file_path.parent, context.journal_dir_name):
+        remediation += _FOLDER_SHAPE_HINT
 
     return [
         Finding(
