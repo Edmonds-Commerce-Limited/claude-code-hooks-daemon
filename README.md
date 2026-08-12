@@ -11,7 +11,7 @@
 
 Maintained by [Edmonds Commerce](https://github.com/Edmonds-Commerce-Limited).
 
-**Guardrails for coding agents — containment, policy enforcement and quality gates, evaluated on every tool call before it runs.**
+**Deterministic guardrails for coding agents — containment, policy enforcement and quality gates, evaluated on every tool call before it runs.**
 
 A long-running Python daemon that Claude Code's hook events are forwarded to
 over a Unix socket. Instead of one script per hook, you register one thin
@@ -53,6 +53,9 @@ behaviour. It cannot be reasoned with, and it decides the thousandth call
 exactly as it decided the first. For the failure that actually matters — the
 one taken deliberately, for a reason that seemed good at the time — that is
 the property you want.
+
+That is the whole argument in one line: **when you have an agent that can go
+off the rails, the thing enforcing the rails must not be another agent.**
 
 ---
 
