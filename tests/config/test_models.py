@@ -1130,9 +1130,7 @@ class TestPlanWorkflowScriptsConfig:
         nested-checkout protection the whole design exists to provide.
         """
         with pytest.raises(ValidationError, match=r"\.git"):
-            PlanWorkflowConfig.model_validate(
-                {"scripts": {"enabled": True, "root_marker": ".git"}}
-            )
+            PlanWorkflowConfig.model_validate({"scripts": {"enabled": True, "root_marker": ".git"}})
 
 
 class TestMigratePlanHandlerOptions:

@@ -156,6 +156,72 @@ change, reviewed as such) or when a refactor moved a seam the test patched
 (e.g. a handler that doesn't support 5-digit plan numbers), the handler is
 wrong — fix it with TDD, do not relax the test.
 
+## A test that restates the implementation is not a requirement
+
+The rule above has a third case beyond its two stated exceptions, and it is
+dangerous because it looks exactly like the forbidden one: a test that never
+encoded a requirement at all, only a **restatement of the current constant**.
+Such a test cannot fail when the code is wrong — it changes meaning whenever
+the code does — and its real harm is that it makes a defect look deliberate and
+covered.
+
+**Why:** `pipe_blocker`'s `get_claude_md()` told every session that `git log`
+and `git branch` were whitelisted, while `UNIVERSAL_WHITELIST_PATTERNS` had
+never contained them, so agents were denied for doing what resident context
+said was allowed. The same file contradicted itself — the `extra_whitelist`
+docstring used `^git\s+log\b` as its example of a pattern you must ADD, three
+hundred lines above the guidance claiming it was already there. Guarding the
+divergence was a test whose entire docstring read *"git log is NOT whitelisted
+(only git tag, status, diff are)"*: no rationale, no requirement, just the
+constant spelled twice. It had shipped that way since the handler was written
+and survived a full redesign.
+
+**Apply:** when a test blocks a fix you believe is right, do not edit it on the
+strength of that belief — this reasoning will rationalise almost any test edit.
+Establish three things first, and abandon the change if any fails:
+
+1. **Read the docstring.** Does it state a *requirement* ("X must be blocked
+   because it is expensive") or *restate the implementation* ("X is not in the
+   list")? Only the second is suspect.
+2. **Check the history.** `git log -L` the assertion. A deliberate safety
+   decision leaves a rationale somewhere — a commit message, a plan, a comment.
+   Silence across its whole life is evidence it was never a decision.
+3. **Justify the new behaviour independently**, on the merits, without
+   reference to the text that disagreed with it. Here: `git log` is no more
+   expensive than the already-whitelisted `git diff`, it writes continuously so
+   a closed pipe raises `SIGPIPE`, and truncation is the *intent* of the pipe
+   rather than the information loss the handler exists to prevent.
+
+Then rewrite the test to assert the requirement with its reasoning, so the next
+reader inherits a decision instead of an echo. And fix the guard, not just the
+instance (Core Standard 15): the durable output here was a test deriving the
+guidance's claims at runtime and asserting the handler honours them, so the two
+cannot drift again in either direction.
+
+## Verify through the production entry point, not a hand-rolled client
+
+A verification harness that reimplements how production talks to a component
+can fail in the direction that reports a **working guard as broken** — or, far
+worse, a broken guard as working. Zero findings from a blind probe is
+indistinguishable from zero findings from a clean system.
+
+**Why:** closing Plan 00207 meant probing every ancestry-severing merge
+spelling against the live daemon. A hand-rolled `AF_UNIX` client that guessed
+the wire protocol returned `allow` for all six spellings that must be denied —
+a clean-looking "the handler is not firing". It was caught only because the
+live daemon had blocked those same commands minutes earlier through the real
+hook path, so two observations of one daemon contradicted each other. Re-run
+through the production forwarder (`.claude/hooks/pre-tool-use`, payload on
+stdin), all ten spellings behaved as specified.
+
+**Apply:** probe through the same entry point production uses. When a handler
+matches on the full command string, assemble blocked literals from fragments at
+runtime (`"--" + "squash"`) so the launching command does not trip the handler
+under test — that false trigger is correct behaviour, not something to disable.
+Always include a **positive control**: at least one case that must be denied.
+Without it, a harness that silently reports "allow" for everything looks
+identical to a passing run.
+
 ## Fix defects you find — don't just report them
 
 When you discover a bug, inconsistency, or defect while doing other work —

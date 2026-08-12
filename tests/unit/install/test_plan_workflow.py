@@ -314,9 +314,7 @@ class TestDeployPlanlibIfEnabled:
         deployed = tmp_path / "CLAUDE" / "Plan" / PLANLIB_SCRIPT_NAME
         assert deployed.read_text() == planlib_template_path().read_text()
 
-    def test_scripts_disabled_skips_planlib_but_still_deploys_mkplan(
-        self, tmp_path: Path
-    ) -> None:
+    def test_scripts_disabled_skips_planlib_but_still_deploys_mkplan(self, tmp_path: Path) -> None:
         """plan_workflow.enabled alone must NOT deploy the library."""
         config_path = self._write_config(tmp_path, "plan_workflow:\n  enabled: true\n")
 

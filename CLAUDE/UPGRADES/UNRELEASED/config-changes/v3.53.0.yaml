@@ -180,6 +180,42 @@ config_changes:
         through), check_flag, force_color_var, scrubber,
         track_run_logs. See
         CLAUDE/Plan/00213-planlib-plan-folder-orchestrator-tooling/PLAN.md.
+    - key: daemon.verdict_log
+      recommended: true
+      dormant: false
+      description: >-
+        NEW config block (Plan 00209 Phase 2), shipping default-ON. The
+        daemon makes hundreds of handler decisions per session and
+        previously persisted NONE of them, so "which handlers earn their
+        keep?" and "what is this handler's real false-positive rate?" were
+        answerable only by anecdote. When enabled, every matched handler's
+        decision is appended to verdicts.jsonl in the daemon's untracked
+        dir -- {ts, session, event, tool, handler, verdict, rule, mode,
+        overridden} -- written once in the daemon controller, so no
+        per-handler opt-in is needed. Read it with the new
+        `hooks-daemon verdicts` command (add --json for machine-readable
+        output). Default-ON deliberately, and the distinction from
+        payload_capture is the reason: this log records handler/rule/
+        verdict METADATA ONLY and never tool payloads or file contents, so
+        there is no privacy argument for shipping it dormant, whereas
+        payload_capture DOES record raw payloads and stays default-off.
+        The write is fail-open by design -- a logging failure must never
+        break hook dispatch, which carries safety-critical handlers -- and
+        catches only RuntimeError (no ProjectContext) and OSError
+        (unwritable dir), both logged at warning level rather than
+        swallowed.
+      migration_note: >-
+        On by default; no action needed to adopt. A new verdicts.jsonl
+        will begin appearing in your daemon untracked dir after upgrade --
+        this is expected, not a leak: it is metadata-only and is a BOUNDED
+        ROLLING SAMPLE, capped like every other daemon JSONL log (oldest
+        half trimmed at daemon.verdict_log.max_bytes), NOT a durable
+        lifetime counter. The `hooks-daemon verdicts` report is explicit
+        that its figures describe the retained window, so do not read them
+        as lifetime totals -- a handler that fired long ago and was since
+        trimmed will not appear. Tune retention with
+        daemon.verdict_log.max_bytes, or turn it off entirely with
+        daemon.verdict_log.enabled: false. See docs/guides/VERDICT_LOG.md.
   renamed: []
   removed: []
   changed: []

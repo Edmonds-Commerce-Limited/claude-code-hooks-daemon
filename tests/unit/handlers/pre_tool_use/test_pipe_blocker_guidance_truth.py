@@ -109,3 +109,49 @@ class TestClaimedGitSubcommandsArePipeable:
         """Positive control. Without it, a whitelist that accidentally matched
         everything would pass both tests above and look like a fix."""
         assert self._pipes_to_head("pytest tests/ | head -n 20")
+
+
+class TestPipeWhitelistDoesNotShadowDestructiveGit:
+    """Whitelisting a `git` subcommand for pipes must not make a destructive
+    form reachable by appending a pipe.
+
+    `pipe_blocker` sits at priority 17 and now ALLOWS `git branch ... | head`.
+    `destructive_git` sits at 10 and runs first, so the force-delete form is
+    denied before the pipe whitelist is ever consulted. That is the intended
+    ordering, but it is an interaction between two handlers introduced by a
+    change to only one of them — the kind of thing that holds by accident
+    until someone renumbers a priority.
+
+    Verified against the live daemon when the whitelist landed (5/5 through
+    the production forwarder); pinned here so a priority change cannot
+    silently open the hole.
+    """
+
+    # Assembled so the literal never appears in this file as a contiguous
+    # blocked pattern — the same reason the live probe built it at runtime.
+    _FORCE_DELETE_FLAG = "-" + "D"
+
+    def _is_denied(self, command: str) -> bool:
+        from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import (
+            DestructiveGitHandler,
+        )
+
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+        for handler in (DestructiveGitHandler(), PipeBlockerHandler()):
+            if handler.matches(hook_input) and handler.handle(hook_input).decision == Decision.DENY:
+                return True
+        return False
+
+    def test_force_delete_still_denied_when_piped(self) -> None:
+        assert self._is_denied(f"git branch {self._FORCE_DELETE_FLAG} feature | head -n 5")
+
+    def test_force_delete_still_denied_unpiped(self) -> None:
+        assert self._is_denied(f"git branch {self._FORCE_DELETE_FLAG} feature")
+
+    def test_safe_branch_listing_is_allowed(self) -> None:
+        """Negative control: the whole point of the whitelist change."""
+        assert not self._is_denied("git branch --list | head -n 20")
+
+    def test_lowercase_safe_delete_is_allowed(self) -> None:
+        """`git branch -d` refuses unmerged branches itself, so it stays allowed."""
+        assert not self._is_denied("git branch -d merged-feature")
