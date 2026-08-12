@@ -269,6 +269,14 @@ class HandlerID:
         config_key="ancestry_preserving_merge",
         display_name="block-ancestry-severing-merge",
     )
+    # Backtick substitution in a git message (Plan 00219): backticks inside a
+    # DOUBLE-quoted -m are executed by bash, not quoted, so the span is
+    # replaced by the command's stdout and the text is silently lost.
+    GIT_MESSAGE_BACKTICK = HandlerIDMeta(
+        class_name="GitMessageBacktickHandler",
+        config_key="git_message_backtick",
+        display_name="block-git-message-backtick",
+    )
     ROOT_RECURSION_GUARD = HandlerIDMeta(
         class_name="RootRecursionGuardHandler",
         config_key="root_recursion_guard",

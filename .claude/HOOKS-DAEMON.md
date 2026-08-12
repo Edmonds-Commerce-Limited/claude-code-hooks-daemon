@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-08-12 (v3.52.0) by `generate-docs`. Regenerate: `/workspace/.claude/worktrees/agent-a30acd31fd67cc845-c1114a12/bin/hooks-daemon generate-docs`
+> Generated on 2026-08-12 (v3.52.0) by `generate-docs`. Regenerate: `/workspace/bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (42 handlers)
+### PreToolUse (43 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -22,6 +22,7 @@
 | 18 | dangerous_permissions | TERMINAL | Block chmod 777 and dangerous permission commands |
 | 19 | ancestry_preserving_merge | BLOCKING | Block (or, in warn mode, advise against) ancestry-severing merges |
 | 19 | git_stash | BLOCKING | Block or warn about git stash based on mode configuration |
+| 20 | git_message_backtick | BLOCKING | Block a double-quoted git message whose backticks would be executed |
 | 20 | lock_file_edit_blocker | TERMINAL | Block direct editing of package manager lock files |
 | 21 | pip_break_system | TERMINAL | Block pip install --break-system-packages commands |
 | 22 | sudo_pip | TERMINAL | Block sudo pip install commands |

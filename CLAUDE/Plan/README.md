@@ -46,8 +46,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Plan Workflow / QA
 
-- [00219: git commit message backtick substitution guard](00219-git-commit-message-backtick-substitution-guard/PLAN.md) - Not Started (backticks in a double-quoted `git commit -m` are command-substituted by bash: the span is executed and replaced by its stdout, silently deleting text from the message. Hit live; one commit body on `main` lost a phrase this way. The execution half is already covered by full-command-string matching — the corruption half is not.)
-
 - [00216: plan duplicate source detection](00216-plan-duplicate-source-detection/PLAN.md) - Not Started (DBF follow-up to the 00199/00213 duplication: `plan_qa` enforces number collisions and index bijection but is blind to two plans covering the same source document, so a duplicate is only caught if a human happens to notice.)
 
 - Root cause: agents conflate `PLAN.md` with `JOURNAL/` and append narrative progress into the plan. Measured churn proves it — `del/add` ratio 0.00–0.18 across large plans (00104: 885 lines added, **zero** deleted), so plans grow monotonically (57 KB locally, 100 KB+ reported in client projects)
@@ -118,6 +116,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Handler UX Adjustments
 
+- [00221: pipe blocker command substitution producer attribution](00221-pipe-blocker-command-substitution-producer-attribution/PLAN.md) - In Progress (a pipe inside `$( )` is attributed to the OUTER command, so `echo $(expensive | head -1)` launders any producer past the whitelist; fix reads the producer from the innermost substitution)
+
 - [00117: Enable ask_user_question_blocker (dogfood → default-on)](00117-ask-user-question-blocker-default-on/PLAN.md) - Dormant (remaining: flip shipped default + regression test; awaiting scheduling)
 
   - Dogfooding alert: agent stalled twice asking tautological questions ("Should I push?"); the prefix-positive `ask_user_question_blocker` (Plan 00108 / v3.14.0) was shipped `enabled: false` so it never fired
@@ -165,6 +165,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00220: stale exclusion audit in qa suppression files](Completed/00220-stale-exclusion-audit-in-qa-suppression-files/PLAN.md) - Complete (a suppression file was only ever read to REMOVE findings, so nothing asked whether each entry still earned its place. An exclusion matching nothing is now a violation — it means the entry drifted off its target or its code was fixed. Found 6 dead entries on first run.)
+
+- [00219: git commit message backtick substitution guard](Completed/00219-git-commit-message-backtick-substitution-guard/PLAN.md) - Complete (backticks in a double-quoted `-m` are EXECUTED by bash, not quoted, and the commit still succeeds — so the text vanishes silently, as it did in cc7dddc0. Blocking, justified by measurement: the rule would have fired on none of the 120 backticked messages in this repo's history.)
 
 - [00218: plan index row length fast loop](Completed/00218-plan-index-row-length-fast-loop/PLAN.md) - Complete (inverse DBF — the batch guard existed and the fast one did not: the 500-char index row cap lived only in a pytest test, so the feedback loop was a full-suite run. Now an `index-row-length` check on all three `plan_qa` surfaces, reading the same single constant the test reads.)
 
@@ -1143,22 +1147,28 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 219 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 173 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Total Plans Created**: 221 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Completed**: 175 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 - **Active**: 35 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 35 + 173 + 5 = **213 folders**, spanning
-  **210 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 35 + 175 + 5 = **215 folders**, spanning
+  **212 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **9** of the
-  219 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  221 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210 — abandoned drafts, numbers burned by transient
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
-  already covered the work). 210 + 9 = 219. ✅
-- **Last reconciled by**: the Plan 00218 merge and closure — recounted from
+  already covered the work). 212 + 9 = 221. ✅
+- **Last reconciled by**: the Plan 00221 opening — one new root folder and the
+  counter advanced by `mkplan.bash`, so Total and Active each rose by one
+  while Completed and Cancelled were untouched. Before that, the Plan 00219 +
+  00220 closures — recounted from
+  disk after both `git mv`s, with the counter re-read (00220 was scaffolded by
+  `mkplan.bash`, which advances it). Before that, the Plan 00218 merge and
+  closure — recounted from
   disk twice, once on merge and again after the `git mv` into `Completed/`,
   since the folder totals are unchanged by an archive move but the Active and
   Completed splits are not. On merge, neither side of the conflict was right:

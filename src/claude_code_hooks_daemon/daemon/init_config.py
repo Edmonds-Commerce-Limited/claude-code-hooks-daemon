@@ -141,6 +141,8 @@ class ConfigTemplate:
             "    worktree_file_copy: {enabled: true, priority: 15}  # Prevent worktree file copies\n"
             "    dangerous_permissions: {enabled: true, priority: 15}  # Block chmod 777, chown root\n"
             "    git_stash: {enabled: true, priority: 20}         # Warn about git stash\n"
+            "    git_message_backtick: {enabled: true, priority: 20}  "
+            "# Block backticks in a double-quoted git -m (bash executes them)\n"
             "    ancestry_preserving_merge: {enabled: true, priority: 19}  "
             "# Block squash/rebase merges that sever ancestry\n"
             "\n"

@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "description": "Intentional error-handling patterns exempt from the error-hiding audit. Each entry uses 'function' (not 'lines') for drift-proof matching \u2014 line numbers shift on every edit, function names are stable. Each entry documents WHY the pattern is appropriate.",
+  "description": "Intentional error-handling patterns exempt from the error-hiding audit. Prefer 'function' over 'lines': line numbers shift whenever anything above them is edited, function names do not. 'lines' remains necessary for module-level sites and shell scripts, where there is no enclosing function to key on. Each entry documents WHY the pattern is appropriate. Entries are themselves audited: an exclusion matching NO finding is reported as a 'stale-exclusion' violation, because it means either the entry drifted off its target (realign it) or the code was fixed (delete it) \u2014 and a drifted entry silently exempts an innocent site while the real finding resurfaces elsewhere looking new.",
   "exclusions": [
     {
       "file": "config/models.py",
@@ -303,18 +303,6 @@
       "reason": "Version check helper: returns None when version info unavailable (subprocess failure, parse error). Callers handle None gracefully. Version checking is advisory \u2014 failure should not break session start."
     },
     {
-      "file": "handlers/session_start/yolo_container_detection.py",
-      "function": "_calculate_confidence_score",
-      "rule": "silent-pass",
-      "reason": "Optional container confidence indicator checks: nested try/except/pass for filesystem and OS queries (uid, socket existence). These are optional scoring signals \u2014 if unavailable, skip without logging (noisy). The outer function catches and logs broader failures."
-    },
-    {
-      "file": "handlers/session_start/yolo_container_detection.py",
-      "function": "_get_detected_indicators",
-      "rule": "silent-pass",
-      "reason": "Optional container confidence indicator checks: nested try/except/pass for filesystem and OS queries (uid, socket existence). These are optional scoring signals \u2014 if unavailable, skip without logging (noisy). The outer function catches and logs broader failures."
-    },
-    {
       "file": "handlers/status_line/daemon_stats.py",
       "function": "handle",
       "rule": "log-and-continue",
@@ -343,12 +331,6 @@
       "function": "_run_background_fetch",
       "rule": "log-and-continue",
       "reason": "Background git fetch is best-effort by design: it only refreshes remote-tracking refs so ahead/behind icons are honest. Offline hosts, missing remotes, and slow networks are expected conditions \u2014 a failed fetch must leave the status line exactly as it was (counts as stale as before), never crash or retry-storm. Already logged at debug level; the finally block still clears the in-flight marker."
-    },
-    {
-      "file": "handlers/status_line/model_context.py",
-      "function": "_read_effort_level",
-      "rule": "log-and-continue",
-      "reason": "Model context effort level reader: log-and-continue on settings file read failure (OSError, invalid JSON). Status line handlers are fail-open by design \u2014 settings stays empty and falls through to daemon default. Already logged at warning level."
     },
     {
       "file": "handlers/status_line/startup_cleanup.py",
@@ -405,12 +387,6 @@
       "reason": "_log_stop_event(): Non-critical JSONL append \u2014 logs at debug level and continues when ProjectContext is not initialised (unit tests) or the log file is unwritable. Stop event logging is purely diagnostic and must not affect the handler decision or raise to callers."
     },
     {
-      "file": "handlers/stop/hedging_language_detector.py",
-      "function": "_parse_transcript",
-      "rule": "silent-continue",
-      "reason": "JSONL transcript parsing loop: except (json.JSONDecodeError, ValueError): continue is the standard JSONL pattern. Malformed lines are skipped to process the rest of the transcript. Logging each malformed line would be excessively noisy."
-    },
-    {
       "file": "handlers/subagent_stop/subagent_completion_logger.py",
       "function": "handle",
       "rule": "log-and-continue",
@@ -439,18 +415,6 @@
       "function": "save_results",
       "rule": "return-none-on-error",
       "reason": "save_results(): Returns None when JSON result file cannot be written. Prints error to stdout. QA result saving is an auxiliary function \u2014 failure does not affect QA pass/fail determination."
-    },
-    {
-      "file": "utils/container_detection.py",
-      "function": "get_container_confidence_score",
-      "rule": "silent-pass",
-      "reason": "Optional container confidence indicator checks: nested try/except/pass for filesystem and OS queries (uid, socket existence, project root). These are optional scoring signals \u2014 if unavailable, skip without logging (noisy). The outer function catches and logs broader failures."
-    },
-    {
-      "file": "utils/container_detection.py",
-      "function": "get_detected_indicators",
-      "rule": "silent-pass",
-      "reason": "Optional container confidence indicator checks: nested try/except/pass for filesystem and OS queries (uid, socket existence, project root). These are optional scoring signals \u2014 if unavailable, skip without logging (noisy). The outer function catches and logs broader failures."
     },
     {
       "file": "utils/git_repo.py",

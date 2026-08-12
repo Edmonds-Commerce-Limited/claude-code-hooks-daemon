@@ -405,6 +405,86 @@ class TestRealRepoSelfScan:
         assert violations == [], f"Unaddressed error-hiding findings: {offenders}"
 
 
+class TestStaleExclusionsAreReported:
+    """An exclusion that suppresses nothing is a defect, not a no-op.
+
+    Line-keyed exclusions silently drift: editing anything ABOVE one shifts
+    the code without shifting the entry, so it then exempts an innocent line
+    while the real violation resurfaces elsewhere. That happened twice in one
+    session in upgrade_version.sh, and the only signal was two mysterious new
+    violations — the mis-targeting itself was invisible.
+
+    Line-keying cannot simply be abolished: every remaining `lines` entry is a
+    shell script or a module-level import, where there is no enclosing
+    function to key on. So the guard is applied to the exclusion rather than
+    to the keying style, and it covers the other rot too — an exclusion whose
+    underlying code was FIXED also stops matching, and should be deleted
+    rather than left as a standing licence.
+
+    This is the unused-`noqa` pattern (ruff's RUF100) applied to our own
+    suppression file.
+    """
+
+    def _entry(self, **overrides: Any) -> dict[str, Any]:
+        entry = {"file": "a/b.py", "rule": "silent-pass", "lines": [10]}
+        entry.update(overrides)
+        return entry
+
+    def test_exclusion_matching_nothing_is_reported_as_stale(self) -> None:
+        from audit_error_hiding import find_stale_exclusions
+
+        violations = [{"file": "src/a/b.py", "line": 10, "rule": "silent-pass", "function": None}]
+        drifted = self._entry(lines=[31])
+        stale = find_stale_exclusions(violations, [drifted])
+        assert len(stale) == 1
+        assert "a/b.py" in stale[0]["message"]
+
+    def test_exclusion_that_matches_is_not_reported(self) -> None:
+        from audit_error_hiding import find_stale_exclusions
+
+        violations = [{"file": "src/a/b.py", "line": 10, "rule": "silent-pass", "function": None}]
+        assert find_stale_exclusions(violations, [self._entry()]) == []
+
+    def test_function_keyed_exclusions_are_covered_too(self) -> None:
+        """A renamed function orphans its exclusion just as surely as an
+        edit orphans a line number."""
+        from audit_error_hiding import find_stale_exclusions
+
+        violations = [
+            {"file": "src/a/b.py", "line": 10, "rule": "silent-pass", "function": "renamed_now"}
+        ]
+        entry = self._entry(function="old_name")
+        entry.pop("lines")
+        assert len(find_stale_exclusions(violations, [entry])) == 1
+
+    def test_stale_finding_names_the_two_causes(self) -> None:
+        """The message must distinguish drift from fixed-code, since the
+        remedies are opposite: realign the entry, or delete it."""
+        from audit_error_hiding import find_stale_exclusions
+
+        stale = find_stale_exclusions([], [self._entry()])
+        assert stale
+        message = stale[0]["message"].lower()
+        assert "drift" in message or "moved" in message
+        assert "delete" in message or "remove" in message
+
+    def test_the_live_exclusions_file_has_no_stale_entries(self) -> None:
+        """The check applied to this repo's real exclusions.
+
+        Positive control for the whole class: the three synthetic tests above
+        would all pass against a `find_stale_exclusions` that worked only on
+        hand-built dicts. This one runs it against the real 127-entry file
+        and the real violation set.
+        """
+        from audit_error_hiding import find_stale_exclusions, load_exclusions
+
+        violations = collect_python_violations(REPO_ROOT) + collect_shell_violations(REPO_ROOT)
+        exclusions = load_exclusions(REPO_ROOT / "scripts" / "qa")
+        assert exclusions, "no exclusions loaded — the control proves nothing"
+        stale = find_stale_exclusions(violations, exclusions)
+        assert stale == [], f"Stale exclusions: {[s['message'] for s in stale]}"
+
+
 class TestAuditDirectoryUnaffectedByWidening:
     """audit_directory (the pre-existing Python-only scanner) keeps working
     unchanged — widening is additive, not a rewrite of the existing path."""

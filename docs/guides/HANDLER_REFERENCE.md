@@ -512,6 +512,51 @@ handlers:
 
 ---
 
+#### git_message_backtick
+
+| Property       | Value                  |
+| -------------- | ---------------------- |
+| **Config key** | `git_message_backtick` |
+| **Priority**   | 20                     |
+| **Type**       | Blocking               |
+| **Event**      | PreToolUse             |
+
+**Description:** Blocks an unescaped backtick inside a **double-quoted** `-m`/`--message` value on `git commit` or `git tag`. Bash performs command substitution inside double quotes, so the backticked span is **executed** and its stdout replaces the text. The commit still succeeds, which is what makes the loss silent — a commit in this repository lost a phrase from its body exactly this way, and the stray `fatal:` on the terminal read as git rejecting the commit rather than as bash running a command nobody asked for.
+
+`git tag` is covered because `git tag -a vX.Y.Z -m "..."` is the form the release process itself uses, so the corruption path is live on the release route.
+
+**Options:** none.
+
+**Always allowed** — none of these substitute:
+
+| Form                                       | Why it is safe                               |
+| ------------------------------------------ | -------------------------------------------- |
+| `git commit -m 'text with \`backticks\`'\` | Single quotes suppress substitution entirely |
+| `git commit -F <file>`                     | The message never passes through the shell   |
+| `git commit -m "see \\\`cmd\\\` output"\`  | A backslash-escaped backtick is literal      |
+
+**Not matched:** `$(...)`. It substitutes identically, but unlike a backtick it has a legitimate deliberate use in a message (`git commit -m "Release $(cat VERSION)"`). Backticks in a message are essentially always markdown that was meant to be single-quoted.
+
+**Scope:** this handler covers the *corruption* half only. A **dangerous** command inside the backticks is already denied by the full-command-string matching in [`destructive_git`](#destructive_git) and its siblings, which run at a lower priority and give the more useful reason.
+
+**Example trigger:**
+
+```bash
+git commit -m "pipe_blocker now allows `git branch`, so the form holds"
+```
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    git_message_backtick:
+      enabled: true
+      priority: 20
+```
+
+---
+
 #### git_stash
 
 | Property       | Value                                        |
@@ -2410,6 +2455,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `tdd_enforcement`              | PreToolUse        | 15       | Production code without tests (11 languages)                         |
 | `root_recursion_guard`         | PreToolUse        | 16       | Recursive scans rooted at /, /home, $HOME, ...                       |
 | `git_stash`                    | PreToolUse        | 20       | git stash creation (deny by default; configurable)                   |
+| `git_message_backtick`         | PreToolUse        | 20       | Backticks in a double-quoted git -m (bash executes them)             |
 | `ancestry_preserving_merge`    | PreToolUse        | 19       | git merge --squash, gh pr merge --squash/--rebase (severs ancestry)  |
 | `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)          |
 | `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                |

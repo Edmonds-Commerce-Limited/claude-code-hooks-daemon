@@ -521,28 +521,77 @@ def apply_exclusions(
     if not exclusions:
         return violations
 
-    filtered = []
-    for v in violations:
-        excluded = False
-        for excl in exclusions:
-            file_suffix = excl.get("file", "")
-            if not v["file"].endswith(file_suffix):
-                continue
-            excl_rule = excl.get("rule", "")
-            if excl_rule and v["rule"] != excl_rule:
-                continue
-            # Function-based match (preferred — immune to line drift)
-            if "function" in excl:
-                if v.get("function") == excl["function"]:
-                    excluded = True
-                    break
-            # Line-based match (legacy fallback)
-            elif v["line"] in excl.get("lines", []):
-                excluded = True
-                break
-        if not excluded:
-            filtered.append(v)
-    return filtered
+    return [v for v in violations if not any(_exclusion_matches(v, excl) for excl in exclusions)]
+
+
+def _exclusion_matches(violation: dict[str, Any], exclusion: dict[str, Any]) -> bool:
+    """Does this exclusion entry suppress this violation?
+
+    Sole definition of the matching rule. apply_exclusions() and
+    find_stale_exclusions() both call it, so "what an exclusion suppresses"
+    and "what counts as an exclusion suppressing nothing" can never drift
+    apart into two subtly different answers.
+    """
+    file_suffix = exclusion.get("file", "")
+    if not violation["file"].endswith(file_suffix):
+        return False
+    excl_rule = exclusion.get("rule", "")
+    if excl_rule and violation["rule"] != excl_rule:
+        return False
+    # Function-based match (preferred — immune to line drift)
+    if "function" in exclusion:
+        return bool(violation.get("function") == exclusion["function"])
+    # Line-based match (retained for module-level and shell-script sites,
+    # where there is no enclosing function to key on)
+    return violation["line"] in exclusion.get("lines", [])
+
+
+def find_stale_exclusions(
+    violations: list[dict[str, Any]], exclusions: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Exclusions that suppress nothing — reported so drift cannot stay silent.
+
+    An exclusion is a standing licence to ignore a specific finding. When it
+    stops matching, exactly two things can have happened, and they have
+    opposite remedies:
+
+    1. It DRIFTED. Line-keyed entries move out of alignment whenever code is
+       inserted above them; function-keyed entries orphan when the function is
+       renamed. The entry now exempts the wrong site while the real finding
+       resurfaces somewhere else, which reads as a brand-new violation with no
+       hint that a suppression caused it. Observed twice in one session in
+       upgrade_version.sh.
+    2. The underlying code was FIXED. The licence is spent and should be
+       withdrawn, or it will silently cover a future re-introduction.
+
+    Both are invisible without this check, because a suppression file is only
+    ever consulted to REMOVE findings — nothing previously asked whether each
+    entry still earned its place.
+
+    Takes the UNFILTERED violation list.
+    """
+    stale: list[dict[str, Any]] = []
+    for exclusion in exclusions:
+        if any(_exclusion_matches(v, exclusion) for v in violations):
+            continue
+        target = exclusion.get("function") or exclusion.get("lines", [])
+        stale.append(
+            {
+                "file": exclusion.get("file", "<unknown>"),
+                "line": 0,
+                "rule": "stale-exclusion",
+                "function": exclusion.get("function"),
+                "message": (
+                    f"Exclusion for {exclusion.get('file', '<unknown>')} "
+                    f"({exclusion.get('rule', 'any rule')} @ {target}) matches no "
+                    "finding. Either it has DRIFTED off its target (code moved "
+                    "above it), in which case realign it — or the code was fixed, "
+                    "in which case delete/remove the entry so it cannot silently "
+                    "cover a future re-introduction."
+                ),
+            }
+        )
+    return stale
 
 
 def write_json_output(violations: list[dict[str, Any]], output_path: Path) -> None:
@@ -579,7 +628,15 @@ def main() -> int:
     # Apply exclusions for intentional patterns (documented in error_hiding_exclusions.json)
     script_dir = Path(__file__).parent
     exclusions = load_exclusions(script_dir)
-    all_violations = apply_exclusions(all_violations, exclusions)
+
+    # Audit the exclusions themselves BEFORE applying them, against the
+    # unfiltered set. A suppression file is otherwise only ever consulted to
+    # REMOVE findings, so nothing asks whether each entry still earns its
+    # place -- and a drifted entry exempts an innocent site while the real
+    # finding resurfaces elsewhere looking like a brand-new violation.
+    stale = find_stale_exclusions(all_violations, exclusions)
+
+    all_violations = apply_exclusions(all_violations, exclusions) + stale
 
     if json_mode:
         output_path = workspace / "untracked" / "qa" / "error_hiding.json"

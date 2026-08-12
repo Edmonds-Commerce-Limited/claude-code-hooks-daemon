@@ -69,6 +69,17 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             f"git \\\n  -C {_SAFE_PATH} \\\n  reset --hard HEAD",
         ),
     ),
+    "GitMessageBacktickHandler": (
+        'git commit -m "now allows `git branch` here"',
+        (
+            f'git -C {_SAFE_PATH} commit -m "now allows `git branch` here"',
+            'git --no-pager commit -m "now allows `git branch` here"',
+            # `git tag -m` carries the identical hazard and is what
+            # RELEASING.md instructs for every release.
+            f'git -C {_SAFE_PATH} tag -a v1 -m "now allows `git branch` here"',
+            'git \\\n  commit -m "now allows `git branch` here"',
+        ),
+    ),
     "GitStashHandler": (
         "git stash",
         (
@@ -161,6 +172,19 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
         "git restore --staged src/app.py",
         "git stash list",
         "git push origin main",
+    ),
+    "GitMessageBacktickHandler": (
+        # Single quotes suppress substitution, so backticks are literal —
+        # and single-quoting is the remedy the handler itself recommends,
+        # which would be useless if it were also blocked.
+        "git commit -m 'now allows `git branch` here'",
+        # A backslash-escaped backtick is literal even inside double quotes.
+        'git commit -m "now allows \\`git branch\\` here"',
+        'git commit -m "an ordinary clean message"',
+        "git commit -F /tmp/message.txt",
+        # Not a commit/tag: git log -S with a backtick is a search, not a
+        # message, and searching is exactly how you FIND the corruption.
+        "git log --grep='`git branch`'",
     ),
     "GitStashHandler": (
         "git stash pop",

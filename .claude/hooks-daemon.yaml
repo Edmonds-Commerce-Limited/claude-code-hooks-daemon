@@ -219,6 +219,10 @@ handlers:
       options:
         mode: deny             # Block git stash entirely (use git commit or worktree instead)
 
+    git_message_backtick:  # Blocks backticks in a double-quoted git -m (Plan 00219)
+      enabled: true
+      priority: 20
+
     ancestry_preserving_merge: # Blocks git merge --squash / gh pr merge --squash|--rebase (Plan 00207)
       enabled: true
       priority: 19

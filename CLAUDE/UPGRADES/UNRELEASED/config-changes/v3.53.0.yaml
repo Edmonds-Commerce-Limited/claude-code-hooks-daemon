@@ -3,6 +3,37 @@ date: "UNRELEASED"
 breaking: false
 config_changes:
   added:
+    - key: handlers.pre_tool_use.git_message_backtick
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PreToolUse blocking handler (Plan 00219). Denies an unescaped
+        backtick inside a DOUBLE-quoted -m/--message value on git commit or
+        git tag. Bash performs command substitution inside double quotes, so
+        the backticked span is EXECUTED and its stdout replaces the text --
+        and because the commit still succeeds, the loss is silent. This is
+        not hypothetical: a commit in the daemon's own history lost a phrase
+        from its body exactly this way, and the stray fatal: on the terminal
+        read as git rejecting the commit rather than as bash running a
+        command nobody asked for. Single-quoted messages, backslash-escaped
+        backticks and the -F file form are never matched -- none of them
+        substitutes. $(...) is deliberately NOT matched: unlike a backtick it
+        has a legitimate deliberate use in a message. Ships default-ON, and
+        the blocking choice is measured rather than assumed -- of 1,736
+        commit messages in the daemon's own history, the 120 containing
+        backticks are all evidence of SAFE authoring (a double-quoted one
+        would have had the span consumed before git saw it), so the rule
+        would have fired on none of them.
+      migration_note: >-
+        On by default; no action needed to adopt. If a commit is denied, use
+        single quotes (git commit -m 'text with `backticks` stays literal')
+        or a message file (git commit -F <file>). Note the EXECUTION half of
+        this hazard -- a dangerous command inside the backticks -- was
+        already covered by full-command-string matching in destructive_git
+        and friends; this handler closes the silent-corruption half only.
+        Disable with handlers.pre_tool_use.git_message_backtick.enabled:
+        false.
+
     - key: handlers.post_tool_use.command_hints
       recommended: true
       dormant: false

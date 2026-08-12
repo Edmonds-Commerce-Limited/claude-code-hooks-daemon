@@ -75,6 +75,14 @@ class Priority:
     # sets (merge/gh-pr-merge vs stash).
     ANCESTRY_PRESERVING_MERGE = 19
 
+    # Plan 00219: deliberately BELOW destructive_git (10) and the other
+    # full-string matchers. When a backticked span holds a dangerous command,
+    # those deny first and their reason is the more useful one -- naming the
+    # destructive operation rather than the quoting. This handler exists for
+    # the remaining case: a BENIGN backticked span that would be silently
+    # eaten by command substitution, which nothing else watches.
+    GIT_MESSAGE_BACKTICK = 20
+
     # Lint on edit (Priority: 25 - code quality range)
     LINT_ON_EDIT = 25
 

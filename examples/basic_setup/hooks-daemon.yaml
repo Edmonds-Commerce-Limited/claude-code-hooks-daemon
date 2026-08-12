@@ -17,6 +17,12 @@ handlers:
       priority: 20
       escape_hatch: "I HAVE ABSOLUTELY CONFIRMED THAT STASH IS THE ONLY OPTION"
 
+    # Block backticks in a double-quoted git -m: bash substitutes them, so
+    # the span is executed and the text is silently lost from the message
+    git_message_backtick:
+      enabled: true
+      priority: 20
+
     # Enforce relative paths in tool calls
     absolute_path:
       enabled: true

@@ -1074,6 +1074,35 @@ class TestPipeBlockerWhitelistExpansion:
         }
         assert handler.matches(hook_input) is False
 
+    # --- pgrep ---
+
+    def test_no_match_pgrep_piped_to_head(self, handler: PipeBlockerHandler) -> None:
+        """pgrep is whitelisted on the same merits as ps.
+
+        Both are cheap process queries that write continuously, so a closed
+        pipe raises SIGPIPE and they stop; and for both, truncation is the
+        POINT of the pipe rather than the information loss this handler
+        exists to prevent.
+
+        It was previously absent, which went unnoticed only because
+        `ps ... $(pgrep ... | head -1)` misattributed the producer to the
+        whitelisted OUTER `ps` (Plan 00221). Correcting the attribution made
+        the omission visible.
+        """
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "pgrep -f claude | head -1"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_pgrep_inside_a_substitution(self, handler: PipeBlockerHandler) -> None:
+        """The idiom that surfaced the omission: take one pid from pgrep."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ps -o etime= -p $(pgrep -f claude | head -1)"},
+        }
+        assert handler.matches(hook_input) is False
+
     # --- df ---
 
     def test_no_match_df_piped_to_head(self, handler: PipeBlockerHandler) -> None:

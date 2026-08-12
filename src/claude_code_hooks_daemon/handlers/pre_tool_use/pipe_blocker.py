@@ -171,6 +171,36 @@ _CHAIN_SEPARATORS: tuple[str, ...] = ("&&", "||", ";", "\n")
 # split must run AFTER the chain split has narrowed to the final command.
 _PIPE_SEPARATORS: tuple[str, ...] = ("|",)
 
+# Command-substitution openers (Plan 00221). Each RUNS a command and
+# substitutes its output, so a pipe inside one is truncating the output of the
+# command INSIDE it, not of whatever appears to its left in the outer command.
+#
+# Reading the producer from the outer text was a laundering route, not a
+# cosmetic mis-label: `echo` is whitelisted because echoing is cheap, so
+# `echo $(pytest tests/ | head -1)` resolved its producer to `echo` and was
+# ALLOWED while the output actually being thrown away was pytest's. Any
+# expensive command could be wrapped that way, and nesting hid it further.
+#
+# All three openers are two characters wide, so content begins two past the
+# opener. `<(`/`>(` (process substitution) do not expand inside double quotes;
+# treating them as if they did can only narrow the region to an inner command,
+# which fails CLOSED, so the distinction is deliberately not tracked.
+_SUBSTITUTION_OPENERS: tuple[str, ...] = ("$(", "<(", ">(")
+_SUBSTITUTION_OPENER_WIDTH = 2
+_SUBSTITUTION_CLOSER = ")"
+
+# Backticks are the older substitution spelling. They do not nest — the same
+# character opens and closes — so a frame records which spelling opened it.
+_BACKTICK = "`"
+
+_SINGLE_QUOTE = "'"
+_DOUBLE_QUOTE = '"'
+_BACKSLASH = "\\"
+
+# Returned when the pipe is not inside any substitution: scan from the start
+# of the command, which is the pre-existing top-level behaviour.
+_TOP_LEVEL_CONTENT_START = 0
+
 # Matches a `-m`/`--message`/`-F`/`--file` flag immediately followed by its
 # VALUE, so the value's content can be excluded from pipe detection: these
 # flags carry human-authored prose (a commit/tag message, or a message-file
@@ -306,24 +336,58 @@ class PipeBlockerHandler(Handler):
         # command is untouched and still detected.
         scan_target = self._strip_message_bodies(command)
 
-        if not self._pipe_pattern.search(scan_target):
-            return False
+        # EVERY pipe is classified, not just the first one (Plan 00221).
+        return self._find_offending_producer(scan_target) is not None
 
-        # Allow tail -f (follow mode) and head -c (byte count)
-        if self._tail_follow_pattern.search(scan_target):
-            return False
-        if self._head_bytes_pattern.search(scan_target):
-            return False
+    def _find_offending_producer(self, command: str) -> str | None:
+        """Producer of the first pipe that is not allowed, or None if all are.
 
-        # Extract full source segment before pipe to tail/head
-        source_segment = self._extract_source_segment(scan_target)
+        Each `| tail` / `| head` occurrence is judged on its OWN producer and
+        its OWN consumer. Asking these questions of the command as a whole was
+        the shared root cause of three bypasses:
 
-        # Step 1: Whitelist check — if whitelisted, always allow
-        if self._matches_whitelist(source_segment):
-            return False
+        - only the FIRST pipe was ever classified, so a cheap first pipe
+          shadowed an expensive second one and prefixing any command with
+          `git log | head -1 &&` laundered it
+        - the `tail -f` / `head -c` exemptions were searched across the whole
+          string, so an unrelated `&& tail -f /dev/null` anywhere in the
+          command exempted a pipe that had nothing to do with following a file
+        - the producer was read from the outer text, so a pipe inside `$( )`
+          was attributed to the outer command (see
+          ``_substitution_content_start``)
 
-        # Steps 2 & 3: Blacklisted or unknown → block
-        return True
+        An empty producer (extraction failed) is deliberately NOT whitelisted,
+        preserving the pre-existing "unknown ⇒ block" tier.
+        """
+        for match in self._pipe_pattern.finditer(command):
+            consumer_segment = self._extract_consumer_segment(command, match.start())
+
+            # Following a stream (`tail -f`) and taking bytes (`head -c`) are
+            # not truncation of a finished output, so nothing is lost.
+            if self._tail_follow_pattern.search(consumer_segment):
+                continue
+            if self._head_bytes_pattern.search(consumer_segment):
+                continue
+
+            producer = self._extract_producer(command, match.start())
+            if self._matches_whitelist(producer):
+                continue
+            return producer
+        return None
+
+    @staticmethod
+    def _extract_consumer_segment(command: str, pipe_start: int) -> str:
+        """The consuming `tail`/`head` invocation belonging to THIS pipe.
+
+        Bounded by the next chain separator and by any following pipe, so the
+        flags of one consumer can never be read as another's.
+        """
+        from_pipe = command[pipe_start:]
+        segment = split_unquoted(from_pipe, _CHAIN_SEPARATORS)[0]
+        after_pipe = split_unquoted(segment, _PIPE_SEPARATORS)
+        # split on the leading "|" yields ["", "<consumer>"]; a command that
+        # somehow lacks the split falls back to the whole segment.
+        return after_pipe[1] if len(after_pipe) > 1 else segment
 
     def _extract_source_segment(self, command: str) -> str:
         """Extract full segment before pipe to tail/head.
@@ -343,11 +407,28 @@ class PipeBlockerHandler(Handler):
         """
         try:
             match = self._pipe_pattern.search(command)
-            if not match:
-                return ""
+        except Exception:  # nosec B110 - fail-safe: locating the pipe must never raise
+            return ""
+        if not match:
+            return ""
+        return self._extract_producer(command, match.start())
+
+    def _extract_producer(self, command: str, pipe_start: int) -> str:
+        """Producer feeding the pipe that begins at ``pipe_start``.
+
+        Split out from :meth:`_extract_source_segment` so each pipe in a
+        command can be judged on its own producer rather than only the first.
+        """
+        try:
+            # Narrow to the innermost command substitution containing the
+            # pipe (Plan 00221). Without this the text to the left starts
+            # with the OUTER command, so a whitelisted outer name shadowed
+            # the real producer. Returns 0 for a top-level pipe, leaving the
+            # original behaviour exactly as it was.
+            region_start = self._substitution_content_start(command, pipe_start)
 
             # Get everything before the pipe to tail/head
-            before_pipe = command[: match.start()]
+            before_pipe = command[region_start:pipe_start]
 
             # Handle command chains (&&, ||, ;, newline) — take the last segment.
             # Quote-aware so a separator inside a quoted argument (grep -E "a;b")
@@ -363,6 +444,79 @@ class PipeBlockerHandler(Handler):
 
         except Exception:  # nosec B110 - fail-safe: extraction error → empty string (unknown)
             return ""
+
+    @staticmethod
+    def _substitution_content_start(command: str, pipe_index: int) -> int:
+        """Where the INNERMOST command substitution containing ``pipe_index``
+        begins its content, or 0 when the pipe is not inside one.
+
+        Lexical, quote-aware, and deliberately not a shell parser — the same
+        posture as the existing segmentation. It tracks only what changes the
+        answer:
+
+        - single quotes suppress substitution entirely, so ``$(`` and a
+          backtick inside them are literal characters, not openers
+        - double quotes do NOT suppress ``$( )``, which is exactly why
+          ``FOO="$(pytest ... | head -1)"`` runs pytest
+        - a backslash-escaped character can neither open nor close anything
+        - backticks do not nest, so a frame records which spelling opened it
+          and only that spelling closes it
+
+        An unbalanced or exotic construct degrades to a shallower frame (or to
+        top level), which is the pre-existing behaviour rather than a crash.
+        """
+        # (content_start, opened_by_backtick) for each substitution still open.
+        open_frames: list[tuple[int, bool]] = []
+        in_single_quotes = False
+        in_double_quotes = False
+        index = 0
+
+        while index < pipe_index:
+            char = command[index]
+
+            if char == _BACKSLASH and not in_single_quotes:
+                index += 2
+                continue
+
+            if in_single_quotes:
+                if char == _SINGLE_QUOTE:
+                    in_single_quotes = False
+                index += 1
+                continue
+
+            if char == _SINGLE_QUOTE and not in_double_quotes:
+                in_single_quotes = True
+                index += 1
+                continue
+
+            if char == _DOUBLE_QUOTE:
+                in_double_quotes = not in_double_quotes
+                index += 1
+                continue
+
+            if command[index : index + _SUBSTITUTION_OPENER_WIDTH] in _SUBSTITUTION_OPENERS:
+                open_frames.append((index + _SUBSTITUTION_OPENER_WIDTH, False))
+                index += _SUBSTITUTION_OPENER_WIDTH
+                continue
+
+            if char == _BACKTICK:
+                if open_frames and open_frames[-1][1]:
+                    open_frames.pop()
+                else:
+                    open_frames.append((index + 1, True))
+                index += 1
+                continue
+
+            if char == _SUBSTITUTION_CLOSER and open_frames and not open_frames[-1][1]:
+                open_frames.pop()
+                index += 1
+                continue
+
+            index += 1
+
+        if not open_frames:
+            return _TOP_LEVEL_CONTENT_START
+        return open_frames[-1][0]
 
     def _matches_whitelist(self, source_segment: str) -> bool:
         """Check if source segment matches the whitelist (never block)."""
@@ -671,7 +825,18 @@ class PipeBlockerHandler(Handler):
         # inside a -m/-F value earlier in the string can never be mistaken
         # for the real one that triggered the block. The displayed COMMAND
         # below still shows the full, un-redacted original.
-        source_segment = self._extract_source_segment(self._strip_message_bodies(command))
+        scan_target = self._strip_message_bodies(command)
+
+        # Report the producer of the OFFENDING pipe, which is not necessarily
+        # the first one: naming a whitelisted `git log` as the reason a
+        # command was blocked would send the agent to whitelist something
+        # that is already whitelisted.
+        offending_producer = self._find_offending_producer(scan_target)
+        source_segment = (
+            offending_producer
+            if offending_producer is not None
+            else self._extract_source_segment(scan_target)
+        )
 
         # Task 1.2: sanity-check BEFORE templating. Matched text that looks
         # like prose, not a shell command, gets a short accurate reason and
@@ -724,6 +889,18 @@ class PipeBlockerHandler(Handler):
             "`pytest tests/ > /tmp/out.txt 2>&1` then read the file selectively.\n\n"
             "**Allowed** (whitelisted): `grep`, `rg`, `awk`, `sed`, `jq`, `ls`, `cat`, "
             "`git log`, `git tag`, `git branch`, and other cheap filtering commands.\n\n"
+            "**EVERY pipe in the command is judged, on its own producer.** A cheap "
+            "pipe does not buy cover for an expensive one, so "
+            "`git log | head -2 && pytest | head -1` is blocked on the `pytest` half. "
+            "The `tail -f` / `head -c` exemptions are also per-pipe — an unrelated "
+            "`&& tail -f x` elsewhere in the command exempts nothing.\n\n"
+            "**A pipe inside `$( )` or backticks belongs to the command INSIDE it.** "
+            "`echo $(pytest tests/ | head -1)` is blocked on `pytest`, not allowed "
+            "because `echo` is cheap — the output being thrown away is pytest's. "
+            "Nesting and `<( )` behave the same. Whitelisted inner producers are "
+            "still fine: `echo $(git log --format=%H | head -1)` is allowed. "
+            "Single-quoted text substitutes nothing, so it is never treated as a "
+            "pipe.\n\n"
             "**Only PIPES are restricted — reading a file directly is not.** "
             "`tail -n 40 <file>`, `head -n 40 <file>` and `grep pattern <file>` take "
             "the path as an ARGUMENT, so no pipe exists and this handler never sees "
@@ -843,6 +1020,64 @@ class PipeBlockerHandler(Handler):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes="--dry-run --allow-empty: no commit is created, no side effects",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="expensive producer laundered through a whitelisted outer command",
+                command='[[ "echo $(pytest tests/ | head -1)" == 0 ]]',
+                description=(
+                    "Plan 00221: a pipe inside $( ) truncates the output of the "
+                    "command INSIDE the substitution, so that is the producer to "
+                    "classify. Reading the outer command instead meant `echo` — "
+                    "whitelisted because echoing is cheap — allowed any expensive "
+                    "producer wrapped this way. The block must name pytest."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"Pipe to tail/head",
+                    r"pytest",
+                ],
+                safety_notes="No-op: [[ ... ]] evaluates to false (exit 1), no side effects",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="cheap first pipe does not shadow an expensive second pipe",
+                command="false && git log | head -2 && pytest tests/ | head -1",
+                description=(
+                    "Plan 00221: only the FIRST pipe used to be classified, so "
+                    "prefixing any command with a whitelisted `git log | head -1 &&` "
+                    "laundered it. Every pipe is now judged on its own producer. "
+                    "'false &&' short-circuits so nothing executes."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"Pipe to tail/head",
+                    r"pytest",
+                ],
+                safety_notes=(
+                    "Safe no-op: 'false' exits 1 and short-circuits the chain, so "
+                    "neither git log nor pytest runs."
+                ),
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="whitelisted producer inside a substitution stays allowed",
+                command="echo $(git log --format=%H -1 | head -1)",
+                description=(
+                    "Plan 00221 guard against over-correction: attributing the pipe "
+                    "to the inner command must classify it by the SAME whitelist, "
+                    "not deny every substitution. `git log` is cheap and streaming, "
+                    "so taking one line from it is exactly what the pipe is for."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes=("Read-only: prints one commit hash from the local repository."),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
