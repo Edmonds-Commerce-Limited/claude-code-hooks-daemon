@@ -89,7 +89,9 @@ class TestManifestScopeIsTheClientOwnedSurface:
         client's linter. Listing such an asset here would imply a boundary
         problem that does not exist and dilute the ones that do.
         """
-        offenders = [a.deployed_to for a in CLIENT_OWNED_ASSETS if a.deployed_to.startswith(VENDOR_DIR)]
+        offenders = [
+            a.deployed_to for a in CLIENT_OWNED_ASSETS if a.deployed_to.startswith(VENDOR_DIR)
+        ]
         assert not offenders, (
             f"These entries deploy inside {VENDOR_DIR}, which is git-ignored and "
             f"therefore already outside every client tool's default scope: "

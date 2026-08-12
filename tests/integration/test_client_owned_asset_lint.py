@@ -2,11 +2,11 @@
 
 DBF (``CLAUDE.md`` Core Standard 15). Plan 00217's field report is a defect
 whose *symptom* was three ruff findings in `.claude/ccy/claude-supervise.py`.
-The bug worth fixing is that **nothing was looking**: the daemon deploys five
-lintable artifacts outside its own git-ignored vendor directory, straight into
-directories a client owns, commits and runs quality gates over — and no check
-anywhere asserted that any of them was clean under the tooling a client would
-actually point at them.
+The bug worth fixing is that **nothing was looking**: the daemon deploys four
+kinds of lintable artifact — around 39 files in a typical install — outside its
+own git-ignored vendor directory, straight into directories a client owns,
+commits and runs quality gates over, and no check anywhere asserted that any of
+them was clean under the tooling a client would actually point at them.
 
 That blindness is invisible by construction. This repository's own ruff config
 selects `E,W,F,I,B,C4,UP,ARG,SIM,TCH,PTH,RUF`, and its shellcheck run uses a
@@ -74,7 +74,9 @@ _SHELLCHECK_DEFAULT_ARGS: Final[tuple[str, ...]] = ("--norc", "-x", "--source-pa
 
 def _assets_for(language: AssetLanguage) -> list[tuple[ClientOwnedAsset, Path]]:
     """Manifest entries of one language, resolved to concrete repository files."""
-    return [(asset, path) for asset, path in resolve_sources(_REPO_ROOT) if asset.language is language]
+    return [
+        (asset, path) for asset, path in resolve_sources(_REPO_ROOT) if asset.language is language
+    ]
 
 
 def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
