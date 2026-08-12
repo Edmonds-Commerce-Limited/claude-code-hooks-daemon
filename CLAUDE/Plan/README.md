@@ -50,8 +50,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00216: plan duplicate source detection](00216-plan-duplicate-source-detection/PLAN.md) - Not Started (DBF follow-up to the 00199/00213 duplication: `plan_qa` enforces number collisions and index bijection but is blind to two plans covering the same source document, so a duplicate is only caught if a human happens to notice.)
 
-- [00217: supervisor deployed into client owned path](00217-supervisor-deployed-into-client-owned-path/PLAN.md) - In Progress (daemon-owned assets deploy outside the vendor dir into client-lintable space and none declared it. The field report's premise proved wrong — `ruff --isolated` passes clean; its three findings need `BLE`/`DTZ` selected — so the fix is the ownership boundary, not the rules. Awaiting post-merge QA + daemon restart before closure.)
-
 - Root cause: agents conflate `PLAN.md` with `JOURNAL/` and append narrative progress into the plan. Measured churn proves it — `del/add` ratio 0.00–0.18 across large plans (00104: 885 lines added, **zero** deleted), so plans grow monotonically (57 KB locally, 100 KB+ reported in client projects)
 
 - Enforces the two contracts: **JOURNAL = append-only**; **PLAN.md = lean, surgical, always-correct**, mutated via commit-if-dirty → edit → commit so history lives in git, not in the file body
@@ -167,6 +165,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00217: supervisor deployed into client owned path](Completed/00217-supervisor-deployed-into-client-owned-path/PLAN.md) - Complete (the field report's premise was wrong: `ruff --isolated` passes the supervisor clean, and its three findings need `BLE`/`DTZ` selected. So the fix is the ownership boundary, not the rules — a DAEMON-OWNED banner on every deployed asset, one manifest, client boundary docs, and a guard pinning each asset clean under default rules. Supervisor behaviour unchanged.)
 
 - [00213: planlib plan folder orchestrator tooling](Completed/00213-planlib-plan-folder-orchestrator-tooling/PLAN.md) - Complete (adopts a client project's `planlib` bash library behind a `plan_workflow.scripts` block shipping OFF, deployed through the same seam as `mkplan.bash`. `root_marker` is deliberately defaultless and `.git` is rejected as a marker, since `.git` is the walk's boundary. Supersedes Plan 00199.)
 
@@ -1142,11 +1142,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 219 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 171 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 172 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 35 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 36 + 171 + 5 = **212 folders**, spanning
+- **Folder-to-number reconciliation**: 35 + 172 + 5 = **212 folders**, spanning
   **209 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1157,7 +1157,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work), and one live allocation whose folder is still on
   an in-flight worktree branch (00218). 209 + 10 = 219. ✅
-- **Last reconciled by**: the Plan 00213 closure — recounted from disk. Note
+- **Last reconciled by**: the Plan 00217 closure — recounted from disk. Note
   00218 is allocated but absent here: an agent scaffolded it on an isolated
   worktree branch, so the shared counter advanced while the folder did not
   land in this tree. That is expected during concurrent work and resolves on

@@ -1,6 +1,6 @@
 # Plan 00217: supervisor deployed into client owned path
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -215,15 +215,29 @@ default-clean and we hand you the exclusion for anything stricter.
 
 ## Success Criteria
 
-- [ ] A default `ruff check .` in a client repo reports nothing from
+- [x] A default `ruff check .` in a client repo reports nothing from
   daemon-owned files, and a guard keeps it that way for every daemon-owned asset
-  deployed into client-owned space — not just this one
-- [ ] The supervisor's behaviour is unchanged — no narrowed catch, no
-  timezone-aware terminal markers
-- [ ] The fix survives an upgrade
-- [ ] A client can tell which files under `.claude/` are theirs without guessing
-- [ ] A client running stricter-than-default rules can copy the exclusion rather
-  than derive it
+  deployed into client-owned space — not just this one. Independently
+  re-verified by the merging session: `ruff check --isolated .claude/ccy/claude-supervise.py` → **All checks passed**, while
+  `--select BLE,DTZ` reproduces exactly the report's three findings. That is
+  the whole reframing — the report's stated reproduction did not match what it
+  ran
+- [x] The supervisor's behaviour is unchanged — no narrowed catch, no
+  timezone-aware terminal markers. Confirmed by diff: the file gained six
+  lines, all of them a DAEMON-OWNED comment banner, and no suppression
+  directive anywhere
+- [x] The fix survives an upgrade — the assets are rewritten on every install
+  and upgrade, so the banner and the manifest travel with them by construction
+  rather than needing to be preserved
+- [x] A client can tell which files under `.claude/` are theirs without guessing
+  — `CLAUDE/LLM-INSTALL.md` "Which Files Under `.claude/` Are Yours?", plus a
+  banner in each file so it answers the question at the moment it is opened
+- [x] A client running stricter-than-default rules can copy the exclusion rather
+  than derive it, with the contract stated explicitly: upstream guarantees each
+  asset is clean under its language's DEFAULT rule set and a check enforces
+  that, so a finding under defaults is an upstream bug worth reporting;
+  cleanliness under rules the client chooses is what the documented exclusions
+  are for
 
 ## Delivery & Milestones
 
