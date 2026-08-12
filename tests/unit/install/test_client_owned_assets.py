@@ -137,6 +137,22 @@ class TestManifestScopeIsTheClientOwnedSurface:
         duplicates = {path for path in deployed if deployed.count(path) > 1}
         assert not duplicates, f"Duplicate manifest entries for: {sorted(duplicates)}"
 
+    def test_every_entry_justifies_leaving_the_vendor_directory(self) -> None:
+        """``why`` must be filled in, because the default answer is "it shouldn't".
+
+        Landing daemon-owned code in client-owned space is the defect this plan
+        exists to contain, so every entry has to say why that was unavoidable.
+        Passes today for all entries; it is here to stop the NEXT one being
+        added without a reason, which is how the list became implicit before.
+        """
+        unjustified = [a.deployed_to for a in CLIENT_OWNED_ASSETS if not a.why.strip()]
+        assert not unjustified, (
+            f"These manifest entries give no reason for deploying outside "
+            f"{VENDOR_DIR}: {unjustified}. If there is no reason, the asset "
+            f"belongs in the vendor directory, where .gitignore keeps it out of "
+            f"the client's tooling for free."
+        )
+
 
 class TestBoundaryIsDocumentedWhereAClientReadsIt:
     """A client should never have to infer which files under .claude/ are theirs."""
