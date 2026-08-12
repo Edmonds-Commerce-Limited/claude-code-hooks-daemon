@@ -66,31 +66,35 @@ collapses the feedback loop from a full-suite run to the moment of the write.
 
 ### Phase 1: Single definition of the limit
 
-- [ ] ⬜ **Task 1.1**: Move the 500 limit into `plan_qa/types.py` as
+- [x] ✅ **Task 1.1**: Move the 500 limit into `plan_qa/types.py` as
   `DEFAULT_INDEX_ROW_MAX_CHARS`, and have the integration test import it
   instead of declaring its own literal.
 
 ### Phase 2: The check (TDD)
 
-- [ ] ⬜ **Task 2.1**: Failing unit tests for `index-row-length` — scope,
+- [x] ✅ **Task 2.1**: Failing unit tests for `index-row-length` — scope,
   worsening/steady/shrinking edit tiers, and COMMIT/SWEEP whole-file behaviour.
-- [ ] ⬜ **Task 2.2**: Implement `plan_qa/checks/index_row_length.py` and
+- [x] ✅ **Task 2.2**: Implement `plan_qa/checks/index_row_length.py` and
   register it at EDIT, COMMIT and SWEEP.
-- [ ] ⬜ **Task 2.3**: Give `ReadmeIndex` the source lines the COMMIT/SWEEP
+- [x] ✅ **Task 2.3**: Give `ReadmeIndex` the source lines the COMMIT/SWEEP
   stages need, so the check reads parsed state rather than re-reading the file.
 
 ### Phase 3: Wire the edit surface
 
-- [ ] ⬜ **Task 3.1**: Failing handler test — `PlanQaEditHandler` must match a
+- [x] ✅ **Task 3.1**: Failing handler test — `PlanQaEditHandler` must match a
   Write/Edit of the plan-index `README.md`.
-- [ ] ⬜ **Task 3.2**: Extend `_is_lintable_plan_file` to the plan index and
-  update the handler's `get_claude_md()`.
+- [x] ✅ **Task 3.2**: Extend `_is_lintable_plan_file` to the plan index and
+  update the handler's `get_claude_md()`, `plan_qa_commit_gate`'s invariant
+  list, `HANDLER_REFERENCE.md` and `PlanWorkflow.md`.
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Confirm the new rule flags 0 lines on the current index.
-- [ ] ⬜ **Task 4.2**: Confirm `test_no_index_row_is_a_paragraph` still passes.
-- [ ] ⬜ **Task 4.3**: Run `./scripts/qa/llm_qa.py all`.
+- [x] ✅ **Task 4.1**: Confirm the new rule flags 0 lines on the current index.
+- [x] ✅ **Task 4.2**: Confirm `test_no_index_row_is_a_paragraph` still passes.
+- [x] ✅ **Task 4.3**: Run `./scripts/qa/llm_qa.py all`.
+- [ ] ⬜ **Task 4.4**: Daemon restart verification — deferred to the coordinator
+  after merge. A worktree has no daemon of its own, and restarting the dogfood
+  daemon from here would disturb the live session that owns it.
 
 ## Technical Decisions
 
@@ -137,11 +141,12 @@ acquired a long row stays editable, including by the edit that fixes it.
 
 ## Success Criteria
 
-- [ ] `index-row-length` registered at EDIT, COMMIT and SWEEP
-- [ ] Exactly one definition of 500 in the codebase, imported by the test
-- [ ] `test_no_index_row_is_a_paragraph` passes unchanged in behaviour
-- [ ] The rule flags 0 lines on the current index (matching the test)
-- [ ] QA green
+- [x] `index-row-length` registered at EDIT, COMMIT and SWEEP
+- [x] Exactly one definition of 500 in the codebase, imported by the test
+- [x] `test_no_index_row_is_a_paragraph` passes unchanged in behaviour
+- [x] The rule flags 0 lines on the current index (matching the test)
+- [x] QA green apart from the two worktree-shaped checks (see JOURNAL)
+- [ ] Daemon restart verified after merge (coordinator-owned)
 
 ## Delivery & Milestones
 

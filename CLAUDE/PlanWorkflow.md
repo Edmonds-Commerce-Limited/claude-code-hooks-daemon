@@ -306,7 +306,10 @@ enforcement runs in three stages that share one check catalogue.
 a `PLAN.md` is linted against single-file rules on the content the file *would*
 have. New material with a missing/invalid `**Status**:` line, a header that
 contradicts an all-ticked body, or ad-hoc task markers is **blocked** with the
-exact fix (mode `edit_mode`, default `block`).
+exact fix (mode `edit_mode`, default `block`). The plan-index `README.md` is
+linted too, against one rule — `index-row-length`: keep every line under 500
+characters, because a row is a pointer (link, status, one clause), not a
+summary copied from the linked plan.
 
 **Stage 2 — commit gate** (`plan_qa_commit_gate`, PreToolUse on `git commit`):
 checks the **staged** tree against cross-file invariants -- index-at-birth (a
