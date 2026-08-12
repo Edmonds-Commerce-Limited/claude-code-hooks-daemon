@@ -1,6 +1,6 @@
 # Plan 00206: safe branch delete deterministic proof
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: High
@@ -126,7 +126,12 @@ tool must reason about content, not just commits.
 - [x] ✅ **Task 4.1**: Full QA — 20/20, 11,499 passed / 0 failed / 5 skipped,
   coverage 95.2%
 - [x] ✅ **Task 4.2**: Daemon restart, verify RUNNING (no import errors in logs)
-- [ ] 🔄 **Task 4.3**: Client-mode verification via `scripts/dummy-client-repo.sh`
+- [x] ✅ **Task 4.3**: Client-mode verification via `scripts/dummy-client-repo.sh`
+  — the gate refuses an abandonment with every flag declared and no TTY (exit 1,
+  branch intact), while a `--no-ff` merged branch still deletes unprompted with
+  no flags (exit 0). Run against the PRE-gate install first, which deleted the
+  branch (exit 0), so the fixture is demonstrated to be capable of showing the
+  failure it now shows fixed
 
 ## Dependencies
 
@@ -223,3 +228,9 @@ justify.
      JOURNAL/00206-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Plan created; proof model derived from measurements on seven real branches.
+- Proof engine, CLI, guidance and dogfooding delivered in `45da2af1` (the
+  v3.52.0 release commit); the seven stale branches were classified, reviewed
+  and removed, taking `git_history` from 29 violations to 0.
+- Abandonment made human-gated, and three release-time upgrade gates fixed, in
+  `69475dbc`. Verified in a real client install both ways: refused with every
+  flag and no TTY, still automatic for a provably merged branch.
