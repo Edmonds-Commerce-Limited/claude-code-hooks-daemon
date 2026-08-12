@@ -1,6 +1,6 @@
 # Plan 00222: pipe blocker message redaction overbreadth
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: High
@@ -134,18 +134,21 @@ name its real producer again.
 
 ### Phase 4: Verify
 
-- [ ] 🔄 **Task 4.1**: Full QA suite passes
+- [x] ✅ **Task 4.1**: Full QA suite passes — 20/20
 - [x] ✅ **Task 4.2**: Probed the live daemon through the production forwarder:
   5/5, covering both defects and all three must-not-change controls
 - [x] ✅ **Task 4.3**: `get_claude_md()` now states where the exemption ends
 
 ## Success Criteria
 
-- [ ] `git commit -m "$(pytest … | tail -1)"` is blocked
-- [ ] `git commit -m 'prose with | tail'` is still allowed
-- [ ] `python -m pytest … | tail` names `pytest` as the producer
-- [ ] The Plan 00209 heredoc false-positive case still does not fire
-- [ ] Full QA passes and the daemon restarts RUNNING
+- [x] `git commit -m "$(pytest … | tail -1)"` is blocked
+- [x] `git commit -m 'prose with | tail'` is still allowed
+- [x] `python -m pytest … | tail` names `pytest` as the producer
+- [x] The Plan 00200 heredoc false-positive case still does not fire
+- [x] Full QA passes and the daemon restarts RUNNING
+
+All five verified through the production bash forwarder against the live
+daemon, not only in unit tests.
 
 ## Dependencies
 
@@ -168,3 +171,6 @@ name its real producer again.
      JOURNAL/00222-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Found by dogfooding while running `python -m pytest … | tail` during Plan 00216
+- Delivered at `75c23bf8` — bypass closed, producer naming fixed, and the
+  "double quotes execute" fact given one home in
+  `utils.shell_segmentation.value_can_substitute`
