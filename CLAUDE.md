@@ -1148,6 +1148,9 @@ commit with a TODO list of what the commit must also contain.
 - every folder has a README row in the section matching its
   location, and every row's link resolves
   (`row-folder-bijection`, `stats-recount`)
+- every line of the README index stays under 500 characters
+  (`index-row-length`): a row is a POINTER — a link, a status and
+  one clause — because the rationale belongs in the linked PLAN.md
 - a commit claiming `Plan NNNNN` that stages src/tests/config
   changes should also update that plan's PLAN.md
   (`same-commit-plan-doc`); reference plans as `Plan NNNNN:`
@@ -1176,6 +1179,16 @@ Every Write/Edit of a `PLAN.md` under the plan directory is checked
 against the plan QA edit-stage rules on the content the file WOULD
 have. Block-level violations (in `edit_mode: block`) deny the tool
 call with the exact remediation; fix the content and retry.
+
+The plan-index `README.md` is linted too, against ONE rule:
+`index-row-length`. Keep every line under 500 characters — an index
+row is a POINTER (a link, a status and one clause), not a summary,
+because the rationale belongs in the linked `PLAN.md` and a second
+copy in the index is the one that goes stale. Only an edit that
+makes the index WORSE is blocked (more over-long lines, or a longer
+worst offender), so an index that already has one stays editable —
+including by the edit that fixes it. No other plan-document rule
+applies to the index: it has no `**Status**:` line and needs none.
 
 **Rules that block new plan material**:
 
