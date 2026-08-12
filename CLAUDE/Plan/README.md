@@ -184,7 +184,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
-- [00206: safe branch delete deterministic proof](Completed/00206-safe-branch-delete-deterministic-proof/PLAN.md) - Complete (the force delete is blocked and the safe form refuses everything after a history rewrite, so a legitimately-stale branch had no route but escalation — which stalled the v3.52.0 release. Adds `hooks-daemon delete-branch`: four tiers proven cheapest-first on blob identity, never path presence, since a path existing upstream says nothing about the content at it. `git branch -d` stays the first thing to reach for and the merged tier delegates to it. Abandoning `unproven` work is human-gated at an interactive terminal: flags declare intent, and intent is not consent.)
+- [00206: safe branch delete deterministic proof](Completed/00206-safe-branch-delete-deterministic-proof/PLAN.md) - Complete (`hooks-daemon delete-branch`: four tiers proven cheapest-first on blob identity, never path presence, since a rewrite leaves no ancestor route for `git branch -d`. `unproven` abandonment is human-gated at an interactive terminal.)
 
 - [00202: Sensitive content git metadata surfaces](Completed/00202-sensitive-content-git-metadata-surfaces/PLAN.md) - Complete (contents and paths were 2 of the 7 surfaces cleaning this repo's history had to touch; the other 5 are git metadata — commit messages, author identity, tag/branch names, tag messages — all entering via Bash, which `matches()` rejected outright. Each surface now carries both a write-time and a batch guard, exercised in a 7×2 matrix.)
 
