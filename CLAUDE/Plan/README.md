@@ -56,6 +56,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00216: plan duplicate source detection](00216-plan-duplicate-source-detection/PLAN.md) - Not Started (DBF follow-up to the 00199/00213 duplication: `plan_qa` enforces number collisions and index bijection but is blind to two plans covering the same source document, so a duplicate is only caught if a human happens to notice.)
 
+- [00217: supervisor deployed into client owned path](00217-supervisor-deployed-into-client-owned-path/PLAN.md) - Not Started (field report: `claude-supervise.py` deploys into `.claude/ccy/`, which clients own and lint, rather than the `.claude/hooks-daemon/` vendor path they exclude — so every client lints upstream code that is overwritten on upgrade and that `qa_suppression` forbids them to silence. The three ruff findings themselves are deliberate and correct; the deployment location is the bug.)
+
 - Root cause: agents conflate `PLAN.md` with `JOURNAL/` and append narrative progress into the plan. Measured churn proves it — `del/add` ratio 0.00–0.18 across large plans (00104: 885 lines added, **zero** deleted), so plans grow monotonically (57 KB locally, 100 KB+ reported in client projects)
 
 - Enforces the two contracts: **JOURNAL = append-only**; **PLAN.md = lean, surgical, always-correct**, mutated via commit-if-dirty → edit → commit so history lives in git, not in the file body
@@ -1149,28 +1151,29 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 216 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 217 (count = `hooksdaemon.latestPlanNumber` git counter)
 - **Completed**: 167 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102). A fifth — 00199, superseded by 00213 — is committed on the in-flight planlib branch and lands with that merge; these figures describe `main` as it stands, not the pending merge.
-- **Folder-to-number reconciliation**: 39 + 167 + 4 = **210 folders**, spanning
-  **207 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 40 + 167 + 4 = **211 folders**, spanning
+  **208 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **9** of the
-  216 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  217 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210 — abandoned drafts, numbers burned by transient
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
-  already covered the work). 207 + 9 = 216. ✅
-- **Last reconciled by**: the Plan 00211 + 00212 merges — every figure above
-  re-derived from the folders on disk, not carried forward from either side of
-  the merge. Both sides were wrong in the same way: each itemised 00038 as a
-  deleted draft when its folder is present, and neither accounted for the six
-  other absent numbers or the legacy 3-digit folders. The prior reconciliation
-  was the Plan 00208 / 00209 creations after the v3.52.0 release at `36`/`164`;
-  before that the Plan 00206 completion at `34`/`164`.
+  already covered the work). 208 + 9 = 217. ✅
+- **Last reconciled by**: the Plan 00217 creation — recounted from disk
+  (`active`/`Completed`/`Cancelled` folder counts read directly), not
+  incremented from the previous figures. Before that, the Plan 00211 + 00212
+  merges, where every figure was re-derived because both sides of the merge
+  were wrong in the same way: each itemised 00038 as a deleted draft when its
+  folder is present, and neither accounted for the six other absent numbers or
+  the legacy 3-digit folders. Before that, the Plan 00208 / 00209 creations
+  after the v3.52.0 release at `36`/`164`.
 
 ## Quick Links
 
