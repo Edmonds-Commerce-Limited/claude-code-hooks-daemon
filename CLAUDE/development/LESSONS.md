@@ -198,6 +198,37 @@ instance (Core Standard 15): the durable output here was a test deriving the
 guidance's claims at runtime and asserting the handler honours them, so the two
 cannot drift again in either direction.
 
+## Backticks in a double-quoted `-m` message are executed, not quoted
+
+`git commit -m "... `some command` ..."` does not quote the backticked text —
+bash performs **command substitution** inside double quotes. The command runs,
+and its stdout replaces the span in the message. Two consequences, one
+cosmetic and one not:
+
+- The commit message silently loses the phrase. Nothing errors, because the
+  substitution "succeeded" — it just produced nothing useful.
+- **The command actually executes.** A message describing a destructive
+  command in backticks would run it.
+
+**Why:** a commit here used `` pipe_blocker now allows `git branch ... | head`, so ... `` in a double-quoted `-m`. Bash ran `git branch ... | head`, which
+printed `fatal: '...' is not a valid branch name` to stderr and nothing to
+stdout, so the commit landed reading *"pipe_blocker now allows , so ..."*. The
+`fatal:` looked like git rejecting the commit; it was bash executing a command
+nobody asked it to run. The commit itself succeeded.
+
+This repo's own blocking handlers do inspect the FULL Bash command string, so a
+genuinely destructive backticked command would still be denied by
+`destructive_git`/`sed_blocker` before bash saw it — the string-matching that
+also causes the documented commit-message false positives. That is real
+defence, not luck, but it is the last line, not the first.
+
+**Apply:** in a `-m` message, write command names in single quotes, or in plain
+prose, or pass the message via a file (`git commit -F`). If backticks are
+genuinely wanted for markdown rendering, use a single-quoted `-m '...'` — no
+substitution happens inside single quotes. And note the asymmetry when this
+bites: `git commit --amend` is blocked in this repo, so a corrupted message
+cannot be quietly rewritten — check the message before committing, not after.
+
 ## Verify through the production entry point, not a hand-rolled client
 
 A verification harness that reimplements how production talks to a component
