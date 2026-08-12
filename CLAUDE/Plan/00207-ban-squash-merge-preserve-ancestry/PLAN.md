@@ -1,6 +1,6 @@
 # Plan 00207: ban squash merge preserve ancestry
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: Medium
@@ -96,38 +96,55 @@ Two corrections recorded because both were asserted before being checked:
 
 ### Phase 1: Handler (TDD)
 
-- [ ] ⬜ **Task 1.1**: `pre_tool_use/ancestry_preserving_merge.py`
-  - [ ] ⬜ Failing tests for `git merge --squash` and `gh pr merge --squash`
-  - [ ] ⬜ Failing tests for `gh pr merge --rebase` — the case that widened
+- [x] ✅ **Task 1.1**: `pre_tool_use/ancestry_preserving_merge.py`
+  - [x] ✅ Failing tests for `git merge --squash` and `gh pr merge --squash`
+  - [x] ✅ Failing tests for `gh pr merge --rebase` — the case that widened
     this plan's scope, and the one most likely to be overlooked
-  - [ ] ⬜ Failing tests for the evasion spellings Plan 00202 established:
+  - [x] ✅ Failing tests for the evasion spellings Plan 00202 established:
     `git -C /path merge --squash`, a trailing-backslash continuation
-  - [ ] ⬜ False-positive tests that must stay ALLOWED: `git merge` and
+  - [x] ✅ False-positive tests that must stay ALLOWED: `git merge` and
     `git merge --no-ff`, `gh pr merge --merge`, a LOCAL `git rebase main`
     (which preserves ancestry and is explicitly fine), and the words "squash"
     or "rebase" appearing in a commit message or filename
-  - [ ] ⬜ Implement using the shared `utils/command_evasion.py` grammar rather
+  - [x] ✅ Implement using the shared `utils/command_evasion.py` grammar rather
     than a bespoke regex
-- [ ] ⬜ **Task 1.2**: `mode` option (`block` default, `warn`), mirroring
+- [x] ✅ **Task 1.2**: `mode` option (`block` default, `warn`), mirroring
   `git_stash`, plus a `MUST_SQUASH_BECAUSE` escape hatch
-- [ ] ⬜ **Task 1.3**: `get_claude_md()` explaining the ancestry consequence and
+- [x] ✅ **Task 1.3**: `get_claude_md()` explaining the ancestry consequence and
   naming the alternatives (`--no-ff` merge, rebase-then-fast-forward)
 
 ### Phase 2: Integrate
 
-- [ ] ⬜ **Task 2.1**: Register in config; assign a priority in the 10–20 safety
-  band alongside `destructive_git`
-- [ ] ⬜ **Task 2.2**: `get_acceptance_tests()` covering block and allow cases
-- [ ] ⬜ **Task 2.3**: `docs/guides/HANDLER_REFERENCE.md` entry; changelog and a
+- [x] ✅ **Task 2.1**: Register in config; assign a priority in the 10–20 safety
+  band alongside `destructive_git` (priority 19, co-located with `git_stash`;
+  registered in `HandlerID`/`Priority` constants, the dogfood config, and the
+  shipped `.claude/hooks-daemon.yaml.example`)
+- [x] ✅ **Task 2.2**: `get_acceptance_tests()` covering block and allow cases
+- [x] ✅ **Task 2.3**: `docs/guides/HANDLER_REFERENCE.md` entry; changelog and a
   `config-changes` manifest entry marking it `recommended: true`
 
 ### Phase 3: Verify
 
-- [ ] ⬜ **Task 3.1**: Full QA
+- [x] ✅ **Task 3.1**: Targeted QA (52 handler unit tests, 85 evasion-suite
+  tests, dogfooding config/response-validation integration tests, full
+  `tests/unit`+`tests/integration`, `check_handler_reference.py`, black,
+  ruff, mypy, bandit, and the whole-repo magic-value checker — all clean).
+  **NOT run**: the literal `./scripts/qa/run_all.sh` / `llm_qa.py all` full
+  suite — deferred to the merged tree per host CPU contention across four
+  parallel worktree agents this session; `smoke_test` cannot pass in a
+  worktree regardless (needs a live project-root daemon socket).
 - [ ] ⬜ **Task 3.2**: Daemon restart, verify RUNNING, probe every spelling
-  against the live socket
-- [ ] ⬜ **Task 3.3**: Confirm a `--no-ff` merged branch still deletes with plain
-  `git branch -d`, which is the whole point of the plan
+  against the live socket — **OUTSTANDING**: this worktree has no
+  project-root daemon to restart or probe. Verified the closest available
+  proxy instead: `HandlerRegistry.discover()` + `register_all()` against the
+  real dogfood config (with `ProjectContext` initialized) discovers 107
+  handlers, registers 93, finds `ancestry_preserving_merge` in the live
+  `PreToolUse` chain at priority 19, and dispatches deny/allow correctly for
+  the squash and `--no-ff` cases.
+- [x] ✅ **Task 3.3**: Confirmed a `--no-ff` merged branch still deletes with
+  plain `git branch -d`, which is the whole point of the plan — measured in
+  a throwaway scratch repo (not assumed): `--no-ff` merge → `git branch -d`
+  succeeds; a contrasting squash merge → `git branch -d` correctly refuses.
 
 ## Dependencies
 
@@ -160,16 +177,18 @@ rather than chosen.
 
 ## Success Criteria
 
-- [ ] `git merge --squash`, `gh pr merge --squash` and `gh pr merge --rebase`
+- [x] `git merge --squash`, `gh pr merge --squash` and `gh pr merge --rebase`
   are all DENIED by default
-- [ ] Every Plan 00202 evasion spelling of those commands is also denied
-- [ ] `git merge`, `git merge --no-ff`, `gh pr merge --merge` and a local
+- [x] Every Plan 00202 evasion spelling of those commands is also denied
+- [x] `git merge`, `git merge --no-ff`, `gh pr merge --merge` and a local
   `git rebase main` stay ALLOWED
-- [ ] `mode: warn` downgrades to advisory; the escape hatch permits one
-- [ ] The deny message explains the ancestry consequence, not a style opinion
-- [ ] After a `--no-ff` merge, `git branch -d` deletes the branch — measured,
+- [x] `mode: warn` downgrades to advisory; the escape hatch permits one
+- [x] The deny message explains the ancestry consequence, not a style opinion
+- [x] After a `--no-ff` merge, `git branch -d` deletes the branch — measured,
   not assumed, since that outcome is the entire point of the plan
-- [ ] Full QA passes; daemon restarts RUNNING
+- [ ] Full QA passes; daemon restarts RUNNING — targeted QA is clean (see
+  Task 3.1); the literal full suite + daemon restart are OUTSTANDING,
+  blocked on this being a worktree with no project-root daemon
 
 ## Risks & Mitigations
 
@@ -185,5 +204,13 @@ rather than chosen.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00207-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not started. Deferred out of v3.52.0 to avoid restarting that release's gates
-  a third time; the release was already blocked for two days.
+- Deferred out of v3.52.0 to avoid restarting that release's gates a third
+  time; the release was already blocked for two days.
+- Handler + tests + evasion-guard classification delivered at `54d2ed8f`.
+- Docs/changelog/config-changes manifest delivered at `73ca5e63`.
+- Formatting cleanup + registry/router load verification + measured
+  `--no-ff` vs squash `git branch -d` contrast delivered at `6d732a42`.
+- Outstanding before this plan can close: a real daemon restart + live-socket
+  acceptance probe (Task 3.2) and the literal `run_all.sh`/`llm_qa.py all`
+  full QA suite (Task 3.1), both blocked on worktree isolation — see
+  JOURNAL/00207-Journal-26-08-12.md.
