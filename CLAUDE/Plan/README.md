@@ -48,6 +48,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00213: planlib plan folder orchestrator tooling](00213-planlib-plan-folder-orchestrator-tooling/PLAN.md) - In Progress (adopts a client project's `planlib` bash library. Phase 2 delivered: a `plan_workflow.scripts` config block shipping OFF, deploying `_planlib.inc.bash` through the same seam as `mkplan.bash`, with `root_marker` deliberately defaultless and `.git` rejected as a marker since `.git` is the walk's boundary. Supersedes Plan 00199, which targeted the same proposal.)
 
+- [00219: git commit message backtick substitution guard](00219-git-commit-message-backtick-substitution-guard/PLAN.md) - Not Started (backticks in a double-quoted `git commit -m` are command-substituted by bash: the span is executed and replaced by its stdout, silently deleting text from the message. Hit live; one commit body on `main` lost a phrase this way. The execution half is already covered by full-command-string matching — the corruption half is not.)
+
 - [00216: plan duplicate source detection](00216-plan-duplicate-source-detection/PLAN.md) - Not Started (DBF follow-up to the 00199/00213 duplication: `plan_qa` enforces number collisions and index bijection but is blind to two plans covering the same source document, so a duplicate is only caught if a human happens to notice.)
 
 - [00217: supervisor deployed into client owned path](00217-supervisor-deployed-into-client-owned-path/PLAN.md) - Not Started (field report: `claude-supervise.py` deploys into client-owned `.claude/ccy/` rather than the `.claude/hooks-daemon/` vendor path clients exclude, so every client lints upstream code they cannot fix, silence, or keep. The three ruff findings are deliberate and correct; the deployment location is the bug.)
@@ -1139,22 +1141,28 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 217 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 219 (count = `hooksdaemon.latestPlanNumber` git counter)
 - **Completed**: 170 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 36 + 170 + 5 = **211 folders**, spanning
-  **208 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 37 + 170 + 5 = **212 folders**, spanning
+  **209 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
-  (`001-`, `002-`, `003-`), so they count as present. That leaves **9** of the
-  217 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
-  00145, 00191, 00195, 00210 — abandoned drafts, numbers burned by transient
-  probes (00195, during the v3.51.0 acceptance run), and one withdrawn
+  (`001-`, `002-`, `003-`), so they count as present. That leaves **10** of the
+  219 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  00145, 00191, 00195, 00210, 00218 — abandoned drafts, numbers burned by
+  transient probes (00195, during the v3.51.0 acceptance run), one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
-  already covered the work). 208 + 9 = 217. ✅
-- **Last reconciled by**: the Plan 00207 + 00214 + 00215 closures — recounted
+  already covered the work), and one live allocation whose folder is still on
+  an in-flight worktree branch (00218). 209 + 10 = 219. ✅
+- **Last reconciled by**: the Plan 00219 creation — recounted from disk. Note
+  00218 is allocated but absent here: an agent scaffolded it on an isolated
+  worktree branch, so the shared counter advanced while the folder did not
+  land in this tree. That is expected during concurrent work and resolves on
+  merge; it is a reason to recount rather than to "fix" the counter. Before
+  that, the Plan 00207 + 00214 + 00215 closures — recounted
   from disk after the three `git mv`s. Immediately before, the Plan 00213
   merge, where the figures were taken from the merged tree rather than from
   either side of the conflict because neither was right: `main` still had
