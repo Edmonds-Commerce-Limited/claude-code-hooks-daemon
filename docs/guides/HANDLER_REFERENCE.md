@@ -1895,29 +1895,6 @@ handlers:
 
 These handlers run when a new Claude Code session begins. They provide environment information and configuration checks.
 
-#### yolo_container_detection
-
-| Property       | Value                      |
-| -------------- | -------------------------- |
-| **Config key** | `yolo_container_detection` |
-| **Priority**   | 40                         |
-| **Type**       | Advisory                   |
-| **Event**      | SessionStart               |
-
-**Description:** Detects YOLO container environments (Docker, CI, etc.) using a multi-tier confidence scoring system. Provides informational context about the runtime environment to help Claude adapt its behaviour (e.g., relaxing safety checks in isolated containers).
-
-**Config example:**
-
-```yaml
-handlers:
-  session_start:
-    yolo_container_detection:
-      enabled: true
-      priority: 40
-```
-
----
-
 #### optimal_config_checker
 
 | Property       | Value                    |
@@ -2071,26 +2048,7 @@ It was removed because it protected nothing:
 
 ## SessionEnd Handlers
 
-#### cleanup
-
-| Property       | Value      |
-| -------------- | ---------- |
-| **Config key** | `cleanup`  |
-| **Priority**   | 100        |
-| **Type**       | Advisory   |
-| **Event**      | SessionEnd |
-
-**Description:** Cleans up temporary hook-related files from the `untracked/temp` directory when a session ends.
-
-**Config example:**
-
-```yaml
-handlers:
-  session_end:
-    cleanup:
-      enabled: true
-      priority: 100
-```
+None ship today. `cleanup`, the only one, was removed in Plan 00237: it reaped a `temp/hooks/` directory that nothing in the codebase has ever written. SessionEnd remains a dispatchable event, so a project-level handler can be registered under `session_end` in the usual way.
 
 ---
 
@@ -2408,19 +2366,6 @@ These handlers generate the terminal status line displayed by Claude Code. They 
 
 ---
 
-#### usage_tracking
-
-| Property       | Value            |
-| -------------- | ---------------- |
-| **Config key** | `usage_tracking` |
-| **Priority**   | 15               |
-| **Type**       | Advisory         |
-| **Event**      | StatusLine       |
-
-**Description:** Tracks and displays daily/weekly token usage percentages.
-
----
-
 #### git_branch
 
 | Property       | Value        |
@@ -2463,8 +2408,6 @@ handlers:
 **Description:** Shows daemon uptime, memory usage, log level, and error count in the status line.
 
 ---
-
-> **Note:** `stats_cache_reader` is a helper **module** used by `usage_tracking` to read `~/.claude/stats-cache.json`. It is not a handler, has no config key, and cannot be enabled, disabled or prioritised.
 
 ## Quick Reference Table
 
@@ -2522,7 +2465,6 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `validate_eslint_on_write`   | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes      |
 | `command_hints`              | PostToolUse      | 29       | Config-driven reminder after a command |
 | `bash_error_detector`        | PostToolUse      | 50       | Detects errors in bash output          |
-| `yolo_container_detection`   | SessionStart     | 40       | Detects container environments         |
 | `optimal_config_checker`     | SessionStart     | 52       | Audits Claude Code settings            |
 | `git_filemode_checker`       | SessionStart     | 53       | Warns when core.fileMode=false         |
 | `suggest_status_line`        | SessionStart     | 55       | Suggests status line setup             |
@@ -2534,7 +2476,6 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `remind_prompt_library`      | SubagentStop     | 100      | Reminds about prompt library           |
 | `subagent_completion_logger` | SubagentStop     | 100      | Logs subagent completions              |
 | `notification_logger`        | Notification     | 100      | Logs notifications                     |
-| `cleanup`                    | SessionEnd       | 100      | Cleans up temp files                   |
 
 ---
 

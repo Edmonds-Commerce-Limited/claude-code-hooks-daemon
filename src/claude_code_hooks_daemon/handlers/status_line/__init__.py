@@ -28,9 +28,6 @@ from claude_code_hooks_daemon.handlers.status_line.supervisor_indicator import (
 from claude_code_hooks_daemon.handlers.status_line.upgrade_notifier import (
     UpgradeNotifierHandler,
 )
-from claude_code_hooks_daemon.handlers.status_line.usage_tracking import (
-    UsageTrackingHandler,
-)
 from claude_code_hooks_daemon.handlers.status_line.working_directory import (
     WorkingDirectoryHandler,
 )
@@ -47,6 +44,5 @@ __all__ = [
     "MultithreadIndicatorHandler",
     "SupervisorIndicatorHandler",
     "UpgradeNotifierHandler",
-    "UsageTrackingHandler",
     "WorkingDirectoryHandler",
 ]

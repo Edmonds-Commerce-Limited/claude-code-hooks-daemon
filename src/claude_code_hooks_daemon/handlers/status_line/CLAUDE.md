@@ -11,8 +11,7 @@ This directory contains all handlers for the `status_line` hook event type. Thes
 | `git_repo_name.py`         | `GitRepoNameHandler`          | 3        | Shows git repository name at start (cached for performance)                                                                                                   |
 | `environment_indicator.py` | `EnvironmentIndicatorHandler` | 4        | Shows 💻 desktop / 🐳 docker / 📦 podman / 🧊 lxc from the runtime `ProjectContext` cached at startup                                                         |
 | `account_display.py`       | `AccountDisplayHandler`       | 5        | Reads Claude account username from `~/.claude/.last-launch.conf`                                                                                              |
-| `model_context.py`         | `ModelContextHandler`         | 10       | Formats colour-coded model name (blue=Haiku, green=Sonnet, orange=Opus), 5-tier effort signal bars, and context percentage                                     |
-| `usage_tracking.py`        | `UsageTrackingHandler`        | 15       | Daily/weekly token usage percentages (currently disabled - needs rework)                                                                                      |
+| `model_context.py`         | `ModelContextHandler`         | 10       | Formats colour-coded model name (blue=Haiku, green=Sonnet, orange=Opus), 5-tier effort signal bars, and context percentage                                    |
 | `git_branch.py`            | `GitBranchHandler`            | 20       | Shows current git branch name (🌳 prefix + pink name when inside a linked worktree)                                                                           |
 | `daemon_stats.py`          | `DaemonStatsHandler`          | 30       | Shows daemon uptime, memory usage, log level, and error count (developer diagnostics; OFF by default, on here as a dev-repo exception)                        |
 | `upgrade_notifier.py`      | `UpgradeNotifierHandler`      | 32       | Shows `📦 vX → vY` when a newer daemon version is available (ON by default; reads `version_check_cache.json`). Extracted from `daemon_stats.py` in Plan 00167 |
@@ -57,7 +56,6 @@ The paired writer-side guidance lives at the top of
 
 ## Supporting Modules
 
-| File                    | Description                                                                       |
-| ----------------------- | --------------------------------------------------------------------------------- |
-| `stats_cache_reader.py` | Utility for reading `~/.claude/stats-cache.json` (used by `UsageTrackingHandler`) |
-| `settings_reader.py`    | mtime-cached reader for `~/.claude/settings.json` (used by `ModelContextHandler`) |
+| File                 | Description                                                                       |
+| -------------------- | --------------------------------------------------------------------------------- |
+| `settings_reader.py` | mtime-cached reader for `~/.claude/settings.json` (used by `ModelContextHandler`) |

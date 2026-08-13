@@ -162,7 +162,6 @@ def test_example_config_status_line_handlers_enabled(example_config: dict) -> No
         "git_repo_name",
         "daemon_stats",
         "account_display",
-        "usage_tracking",
     ]
 
     for handler in status_handlers:

@@ -78,7 +78,7 @@ daemon:
 | Setting                        | Default | Description                                                                                                               |
 | ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `idle_timeout_seconds`         | `600`   | Daemon shuts down after this many seconds without a hook call. It restarts automatically on the next call (lazy startup). |
-| `log_level`                    | `INFO`  | Controls how much detail appears in daemon logs. Use `DEBUG` when troubleshooting handler behaviour.                       |
+| `log_level`                    | `INFO`  | Controls how much detail appears in daemon logs. Use `DEBUG` when troubleshooting handler behaviour.                      |
 | `enable_hello_world_handlers`  | `false` | Activates simple test handlers that add context to every event. Useful for confirming hooks are connected.                |
 | `strict_mode`                  | `false` | When `true`, the daemon crashes on any unexpected error instead of continuing. Recommended for development/testing.       |
 | `self_install_mode`            | `false` | Used when the daemon runs from the project root instead of `.claude/hooks-daemon/`. Only needed for daemon development.   |
@@ -244,13 +244,12 @@ handlers:
         - /container-mount/
         - /tmp/claude-code/
 
-    # YOLO container detection with tuning
-    yolo_container_detection:
+    # Upstream check with an explicit pull policy
+    git_upstream_checker:
       enabled: true
-      priority: 10
-      min_confidence_score: 3          # Detection threshold (0-12)
-      show_detailed_indicators: true   # Show what was detected
-      show_workflow_tips: true         # Show container workflow tips
+      priority: 56
+      options:
+        mode: warn                     # warn | agent-pull | auto-pull
 ```
 
 For the complete per-handler options reference (all handlers, all options, defaults, and examples), see **[Handler Reference](HANDLER_REFERENCE.md)**.
@@ -579,7 +578,7 @@ handlers:
     bash_error_detector: {enabled: true, priority: 10}
 
   session_start:
-    yolo_container_detection: {enabled: true, priority: 10}
+    git_upstream_checker: {enabled: true, priority: 56}
 
 plugins:
   paths: []
@@ -616,7 +615,7 @@ handlers:
     validate_eslint_on_write: {enabled: true, priority: 20}
 
   session_start:
-    yolo_container_detection: {enabled: true, priority: 10}
+    git_upstream_checker: {enabled: true, priority: 56}
 
 plugins:
   paths: []

@@ -679,40 +679,8 @@ class TestLintOnEditHandler:
 
 
 # =============================================================================
-# SessionStart Handlers (2 handlers)
+# SessionStart Handlers
 # =============================================================================
-
-
-class TestYoloContainerDetectionHandler:
-    """Test YoloContainerDetectionHandler response validation."""
-
-    @pytest.fixture
-    def handler(self):
-        from claude_code_hooks_daemon.handlers.session_start.yolo_container_detection import (
-            YoloContainerDetectionHandler,
-        )
-
-        return YoloContainerDetectionHandler()
-
-    @pytest.mark.parametrize(
-        "hook_input,expected_decision,description",
-        [
-            # Always returns context (YOLO status)
-            (
-                {"session_id": "test-session", "timestamp": "2026-01-27T00:00:00Z"},
-                Decision.ALLOW,
-                "Detect YOLO container status",
-            ),
-        ],
-    )
-    def test_response_validity(
-        self, handler, hook_input, expected_decision, description, response_validator
-    ):
-        """Test handler returns valid SessionStart response."""
-        result = handler.handle(hook_input)
-        assert result.decision == expected_decision, f"Failed: {description}"
-        response = result.to_json("SessionStart")
-        response_validator.assert_valid("SessionStart", response)
 
 
 # =============================================================================
@@ -835,38 +803,8 @@ class TestNotificationLoggerHandler:
 
 
 # =============================================================================
-# SessionEnd Handlers (1 handler)
+# SessionEnd Handlers (none — `cleanup` removed in Plan 00237)
 # =============================================================================
-
-
-class TestCleanupHandler:
-    """Test CleanupHandler response validation."""
-
-    @pytest.fixture
-    def handler(self):
-        from claude_code_hooks_daemon.handlers.session_end.cleanup_handler import CleanupHandler
-
-        return CleanupHandler()
-
-    @pytest.mark.parametrize(
-        "hook_input,expected_decision,description",
-        [
-            # Performs cleanup
-            (
-                {"session_id": "test-session", "reason": "user_exit"},
-                Decision.ALLOW,
-                "Cleanup on session end",
-            ),
-        ],
-    )
-    def test_response_validity(
-        self, handler, hook_input, expected_decision, description, response_validator
-    ):
-        """Test handler returns valid SessionEnd response."""
-        result = handler.handle(hook_input)
-        assert result.decision == expected_decision, f"Failed: {description}"
-        response = result.to_json("SessionEnd")
-        response_validator.assert_valid("SessionEnd", response)
 
 
 # =============================================================================

@@ -460,10 +460,6 @@ handlers:
 
   # SessionStart handlers (run when session starts)
   session_start:
-    yolo_container_detection:  # Detects YOLO development environments (Docker, etc)
-      enabled: true
-      priority: 10
-
     project_handler_load_checker:  # Loud alert when project handlers failed to load (Plan 00143)
       enabled: true
       priority: 50
@@ -523,11 +519,10 @@ handlers:
       enabled: true
       priority: 20
 
-  # SessionEnd handlers (run when session ends)
-  session_end:
-    cleanup:  # Session cleanup operations
-      enabled: true
-      priority: 10
+  # SessionEnd handlers — none ship today. `cleanup` was the only one and was
+  # removed in Plan 00237 (it reaped a temp/hooks/ directory nothing writes).
+  # The section stays so SessionEnd remains a declared, dispatchable event.
+  session_end: {}
 
   # SubagentStop handlers (run when subagent completes)
   subagent_stop:
@@ -689,9 +684,6 @@ handlers:
       enabled: true
       priority: 14
 
-    usage_tracking: # Tracks and displays usage statistics
-      enabled: true
-      priority: 60
 
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
 plugins:

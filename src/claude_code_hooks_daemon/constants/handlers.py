@@ -337,11 +337,6 @@ class HandlerID:
         config_key="gh_pr_comments",
         display_name="require-gh-pr-comments",
     )
-    YOLO_CONTAINER_DETECTION = HandlerIDMeta(
-        class_name="YoloContainerDetectionHandler",
-        config_key="yolo_container_detection",
-        display_name="yolo-container-detection",
-    )
     PLAN_TIME_ESTIMATES = HandlerIDMeta(
         class_name="PlanTimeEstimatesHandler",
         config_key="plan_time_estimates",
@@ -466,11 +461,6 @@ class HandlerID:
         config_key="remind_prompt_library",
         display_name="remind-capture-prompt",
     )
-    SESSION_CLEANUP = HandlerIDMeta(
-        class_name="CleanupHandler",
-        config_key="cleanup",
-        display_name="session-cleanup",
-    )
 
     # Status line handlers (varied priorities)
     ACCOUNT_DISPLAY = HandlerIDMeta(
@@ -492,11 +482,6 @@ class HandlerID:
         class_name="SupervisorIndicatorHandler",
         config_key="supervisor_indicator",
         display_name="status-supervisor-indicator",
-    )
-    USAGE_TRACKING = HandlerIDMeta(
-        class_name="UsageTrackingHandler",
-        config_key="usage_tracking",
-        display_name="status-usage-tracking",
     )
     UPGRADE_NOTIFIER = HandlerIDMeta(
         class_name="UpgradeNotifierHandler",
@@ -700,7 +685,6 @@ HandlerKey = Literal[
     # Workflow handlers
     "gh_issue_comments",
     "gh_pr_comments",
-    "yolo_container_detection",
     "plan_time_estimates",
     "plan_workflow",
     "npm_command",
@@ -723,12 +707,10 @@ HandlerKey = Literal[
     "notification_logger",
     "subagent_completion_logger",
     "remind_prompt_library",
-    "cleanup",
     # Status line handlers
     "git_repo_name",
     "account_display",
     "model_context",
-    "usage_tracking",
     "working_directory",
     "startup_cleanup",
     # Hook registration checker
@@ -762,5 +744,33 @@ RETIRED_HANDLERS: dict[str, str] = {
         "deletes the original and the original already lives on the same "
         "persistent mount, so the copies protected nothing and nothing ever "
         "read them. Safe to delete this key from your config."
+    ),
+    "usage_tracking": (
+        "removed in Plan 00237 — its matches() had returned a hardcoded False "
+        "since commit 71593163, pending an 'architectural rework' that never "
+        "came, so it rendered nothing in any install while its config said "
+        "enabled: true. The verdict log confirms it: 0 of 44,180 retained "
+        "records. Its hardcoded per-model token-limit table was doubly stale. "
+        "Safe to delete this key from your config."
+    ),
+    "cleanup": (
+        "removed in Plan 00237 — this SessionEnd handler deleted files from "
+        "the daemon's untracked temp/hooks/ directory, which nothing in the "
+        "codebase has ever written and which does not exist on disk. A reaper "
+        "with no producer, the same shape as the transcript_archiver above. "
+        "Nothing it deleted was created by the daemon, so removing it frees "
+        "no disk and loses no cleanup. Safe to delete this key from your "
+        "config."
+    ),
+    "yolo_container_detection": (
+        "removed in Plan 00237 — its SessionStart banner was already turned "
+        "off by default in Plan 00128, on the grounds that the container is "
+        "surfaced better by the status-line icon (environment_indicator) and "
+        "by `hooks-daemon check`. That left a handler whose nested "
+        "show_on_session_start flag defaulted False independently of "
+        "enabled: true, so it was silent in every default install. If you had "
+        "deliberately set show_on_session_start: true you lose that banner — "
+        "the status-line icon shows the same thing continuously. Safe to "
+        "delete this key from your config."
     ),
 }

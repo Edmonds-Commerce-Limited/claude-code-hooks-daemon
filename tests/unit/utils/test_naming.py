@@ -65,12 +65,13 @@ class TestClassNameToConfigKey:
         # Workflow handlers
         assert class_name_to_config_key("GhIssueCommentsHandler") == "gh_issue_comments"
         assert (
-            class_name_to_config_key("YoloContainerDetectionHandler") == "yolo_container_detection"
+            class_name_to_config_key("ProjectHandlerLoadCheckerHandler")
+            == "project_handler_load_checker"
         )
 
         # Status line handlers
         assert class_name_to_config_key("AccountDisplayHandler") == "account_display"
-        assert class_name_to_config_key("UsageTrackingHandler") == "usage_tracking"
+        assert class_name_to_config_key("UpgradeNotifierHandler") == "upgrade_notifier"
 
 
 class TestConfigKeyToDisplayName:

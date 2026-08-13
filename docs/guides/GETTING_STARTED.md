@@ -171,7 +171,7 @@ handlers:
     bash_error_detector: {enabled: true, priority: 10}
 
   session_start:   # Runs when a session begins
-    yolo_container_detection: {enabled: true, priority: 10}
+    git_upstream_checker: {enabled: true, priority: 56}
 
   # ... more event types ...
 

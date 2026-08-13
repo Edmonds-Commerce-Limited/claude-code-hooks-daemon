@@ -78,11 +78,14 @@ class TestConfigKeyConsistency:
     def test_previously_mismatched_handlers_now_fixed(self) -> None:
         """Test that previously mismatched handlers are now fixed.
 
-        These 5 handlers had mismatches between constants and auto-generated keys.
+        These handlers had mismatches between constants and auto-generated keys.
         After the fix, their constants now match the auto-generated keys.
+
+        ``SESSION_CLEANUP`` was one of them and is no longer listed — the
+        handler was removed in Plan 00237, so there is no constant left to
+        check. The remaining entry still guards the same invariant.
         """
         previously_broken = [
-            "SESSION_CLEANUP",
             "SUGGEST_STATUSLINE",
         ]
 
@@ -104,7 +107,6 @@ class TestConfigKeyConsistency:
         test_cases = [
             ("SuggestStatusLineHandler", "suggest_status_line"),
             ("QaSuppressionHandler", "qa_suppression"),
-            ("CleanupHandler", "cleanup"),
             ("DestructiveGitHandler", "destructive_git"),
             ("TddEnforcementHandler", "tdd_enforcement"),
         ]

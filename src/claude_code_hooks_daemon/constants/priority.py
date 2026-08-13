@@ -127,7 +127,6 @@ class Priority:
     # Workflow handlers (Priority: 35-55)
     GH_ISSUE_COMMENTS = 40
     GH_PR_COMMENTS = 40
-    YOLO_CONTAINER_DETECTION = 40
     PLAN_TIME_ESTIMATES = 40
     GLOBAL_NPM_ADVISOR = 40
 
@@ -177,7 +176,6 @@ class Priority:
     NOTIFICATION_LOGGER = 100
     SUBAGENT_COMPLETION_LOGGER = 100
     REMIND_PROMPT_LIBRARY = 100
-    SESSION_CLEANUP = 100
 
     # Status line handlers (varied priorities)
     MULTITHREAD_INDICATOR = 2  # "🧵 Y/X" — first segment; this thread's rank among live threads
@@ -188,7 +186,6 @@ class Priority:
     CONTEXT_SIDECAR = 12  # Observe-only context sidecar for the PTY supervisor (opt-in)
     SUPERVISOR_INDICATOR = 13  # ccy PTY supervisor armed/dryrun/inactive shield (opt-in)
     CURRENT_TIME = 14
-    USAGE_TRACKING = 15
     WORKING_DIRECTORY = 25
     STARTUP_CLEANUP = 28  # Between working_directory (25) and daemon_stats (30)
 

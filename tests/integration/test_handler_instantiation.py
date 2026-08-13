@@ -37,7 +37,6 @@ def _discover_handler_modules() -> list[tuple[str, str]]:
                 continue
             # Skip non-handler utility files
             if py_file.name in (
-                "stats_cache_reader.py",
                 "settings_reader.py",
                 "api_usage_base.py",
                 "context_tiers.py",
