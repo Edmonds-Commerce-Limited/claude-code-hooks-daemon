@@ -3,8 +3,14 @@
 **Judge**: Fable (Opus-class), 2026-08-13
 **Scope**: every handler in `src/claude_code_hooks_daemon/handlers/` — 97 rows
 (96 production handlers plus the 8-variant `hello_world` diagnostic family as
-one row). Project-level handlers in `.claude/project-handlers/` and the plugin
-handler are outside the daemon tree and not judged here.
+one row), **plus Cohort H**: the two project-level handlers in
+`.claude/project-handlers/` and the one plugin handler. **100 rows total.**
+
+Cohort H was outside every research cohort's brief and was judged separately by
+the main thread after the judge flagged the gap. That gap mattered: it holds the
+audit's single highest-impact finding (H-2), and it was invisible to the cohort
+structure because the defect is a contradiction *between* a handler and the
+project's resident documentation, not a defect inside either one.
 
 ## Evidence basis — and what this is NOT based on
 
@@ -32,8 +38,8 @@ broken or overpriced) / `MERGE→target` (duty wanted, better served elsewhere) 
 
 | Verdict | Count |
 | ------- | ----- |
-| KEEP    | 74    |
-| FIX     | 11    |
+| KEEP    | 76    |
+| FIX     | 12    |
 | REMOVE  | 10    |
 | MERGE   | 2     |
 
@@ -173,6 +179,117 @@ Plus one instrument fix outside the handler roster: the verdict log itself
 | idle_housekeeping_advisory   | UserPromptSubmit  | KEEP    | high       | Off-by-default upstream, bounded, documented dogfood opt-in                                                                                                                                                                                   |
 | standing_authorisations      | UserPromptSubmit  | KEEP    | high       | Ships disabled, absence-tested, the anti-fabrication pattern this audit wants everywhere                                                                                                                                                      |
 | hello_world family (×8)      | all events        | KEEP    | high       | Doubly gated off by default, excluded from docs when off, 520 lines of gate tests — governed diagnostics, not stray debug code                                                                                                                |
+
+## Cohort H — project + plugin handlers (3)
+
+Judged by the main thread from direct source reads; no research dossier.
+
+| Handler               | Event        | Verdict | Confidence | Basis                                                                                                                                                                                               |
+| --------------------- | ------------ | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enforce_llm_qa`      | PreToolUse   | KEEP    | high       | Sound per-segment mechanism with a real false-positive fix history (Plan 00200) and a shared `split_unquoted` scanner — but see H-2: the project's own resident docs instruct the command it denies |
+| `release_blocker`     | Stop         | FIX     | high       | Matches any uncommitted edit to `README.md`/`CLAUDE.md` and then DENIES every Stop as "RELEASE IN PROGRESS"; also cites a moved path and a drifted test count                                       |
+| `dogfooding_reminder` | SessionStart | KEEP    | high       | One line, ~30 tokens per session, already trimmed from ~40 lines by Plan 00128; cheapest advisory in the tree                                                                                       |
+
+### H-1: `release_blocker` false-positives on ordinary documentation edits
+
+`RELEASE_FILES` includes `README.md` and `CLAUDE.md` (`release_blocker.py:40-46`),
+and `matches()` returns True on *any* uncommitted modification to them
+(`release_blocker.py:94`). Both files are edited routinely for reasons that have
+nothing to do with a release — the last eight commits touching them are ordinary
+doc work — and **`CLAUDE.md` is regenerated and auto-committed by the daemon
+itself** on restart.
+
+When it fires, it is `terminal=True` and DENIES the Stop with "RELEASE IN
+PROGRESS: Cannot end session until acceptance tests complete". So an ordinary
+README edit, left uncommitted, traps the session until the file is committed or
+the handler is disabled. It has not fired in the observed window, which is why
+this is latent rather than a live incident.
+
+Two smaller defects in the same DENY message: it cites
+`CLAUDE/Plan/00060-release-blocker-handler/example-context.md`, which moved to
+`Completed/` and no longer resolves; and it hardcodes "**89** EXECUTABLE
+acceptance tests", a count that has drifted from the release documentation.
+
+**Not a removal.** The duty is real and postmortem-backed — a v2.13.0 release
+where acceptance testing was repeatedly skipped, and the testing caught a
+shipping bug. Narrow the trigger to the files that genuinely only change during
+a release (`pyproject.toml`, `version.py`, `CHANGELOG.md`, `RELEASES/v*.md`),
+and derive the test count instead of hardcoding it.
+
+### H-2: the resident documentation instructs the exact command a handler denies
+
+`enforce_llm_qa` denies `scripts/qa/run_all.sh`. **Sixteen places in the
+always-in-context documentation instruct the agent to run it**, including the
+two that matter most:
+
+- `CLAUDE.md:84` — the release QA gate: "Main Claude manually runs:
+  `./scripts/qa/run_all.sh`"
+- `CLAUDE/development/RELEASING.md:352` — Step 8, a **BLOCKING GATE**
+
+Plus `CodeLifecycle/{General,Features,Bugs}.md`, which are the documents
+`CLAUDE.md` names as mandatory reading before any code change.
+
+An agent following the release procedure verbatim is denied by a project
+handler at the blocking gate. Whichever side is wrong, the project currently
+tells the agent to do something it then forbids — and both sides are resident in
+every session, so the contradiction is always present.
+
+This is the **claim-vs-mechanism drift** class Cohort A identified in
+`pipe_blocker` and `security_antipattern`, but worse: those were a handler's own
+guidance drifting from its own regex. Here two independent sources of truth
+disagree, and the one with authority in the reader's mind (RELEASING.md, a
+documented blocking gate) is the one the daemon overrules.
+
+Fix in the docs, not the handler: point them at `./scripts/qa/llm_qa.py all`,
+which is what the handler's own DENY message recommends. Noted in passing:
+`CLAUDE/CodeLifecycle/README.md:76` describes the suite as "6 automated checks"
+while it currently runs 21 — the same stale-count drift `CLAUDE.md` already
+warns about having happened once before.
+
+### H-3: `enforce_llm_qa` denies a git commit message written as a quoted heredoc
+
+Found by hitting it: the commit recording H-1 and H-2 was itself DENIED, because
+its message contains the script's name.
+
+That should not happen, and the handler knows it. It carries a deliberate VCS
+allowlist so a commit message mentioning the script is not treated as running
+it, and its own docstring records fixing that exact false positive once
+already — the whole-string `startswith("git ")` test that lost the exemption on
+the ubiquitous `cd /workspace; git commit -m ...`.
+
+The remaining hole is the **heredoc**. `_SEGMENT_SEPARATORS`
+(`enforce_llm_qa.py:53`) includes `"\n"`, so a `git commit -F - <<'EOF'` body is
+split into pseudo-commands and each line is judged on its own leading word. The
+shell never expands a QUOTED heredoc — the body is literal text — so nothing in
+it can invoke anything.
+
+Measured directly against the handler (`matches()`, live):
+
+| Command shape                                  | Verdict  | Correct? |
+| ---------------------------------------------- | -------- | -------- |
+| `git commit -m '…<script>…'` (single-quoted)   | allow    | yes      |
+| `cd /workspace && git commit -m '…<script>…'`  | allow    | yes      |
+| `git commit -F - <<'EOF'` … `<script>` … `EOF` | **DENY** | **no**   |
+| `./scripts/qa/<script>`                        | DENY     | yes      |
+| `cat scripts/qa/<script>`                      | allow    | yes      |
+
+Segment split of the failing case: `[0] git`, `[1] Subject`, **`[2] prose`** ←
+carries the script name with a non-allowlisted leading word, `[3] EOF`.
+
+The sibling `pipe_blocker` already treats a quoted-delimiter heredoc as literal
+and exempt, and `CLAUDE.md` documents that behaviour as deliberate. This handler
+reuses that module's `split_unquoted` scanner but not its heredoc rule.
+
+**Not the intentional-false-positive class.** `CLAUDE.md` says blocking handlers
+matching dangerous patterns inside commit messages is intentional and must not
+be "fixed", because acceptance tests depend on it. That reasoning does not apply
+here: this handler explicitly *intends* to exempt git metadata, and the
+exemption simply fails to reach one spelling of it.
+
+Fix: treat a quoted-delimiter heredoc body as literal, as `pipe_blocker` does —
+ideally by lifting that rule into the shared scanner so the two cannot disagree
+again, which is exactly the reasoning `_split_top_level`'s docstring already
+gives for sharing the scanner in the first place.
 
 ---
 
