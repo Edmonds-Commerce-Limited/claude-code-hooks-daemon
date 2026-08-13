@@ -777,23 +777,36 @@ means `None`.
 1. **Can the handler DENY a tool call?** A denial burns a turn, and Claude
    Code cancels every sibling tool call batched with the denied one. Guidance
    that prevents one denial has already paid for itself. → YES earns.
+
 2. **Is the advice too late for the call it fires on?** If the choice being
    advised about is already baked into the allowed call (`agent_isolation_advisor`
    fires as the agent is already spawning), the agent cannot act on it without
    redoing work → earns. If the advice governs what happens NEXT and arrives
    before it (`task_tdd_advisor` fires as a Task starts, and describes the
    cycle that Task is about to run) → does not earn.
+
 3. **Is it a standing policy rather than a one-shot correction?** Advice the
    agent must hold across many later decisions decays after one delivery
    (`recovery_cron_advisor`: "never treat the cron as a heartbeat"). Stop-time
    behavioural advisories always qualify — they can only ever fire *after* the
    message that broke the norm, so resident text is the only preventive form.
    → YES earns.
+
 4. **Would a reader who already has the fire-time message, and the rest of the
    block, learn anything?** This one OVERRIDES the others. Restating your own
    fire-time message is duplication; restating another handler's section is
    worse, because the fact is now billed twice per session and the two copies
    drift apart. → NO does not earn.
+
+   **If you claim another section covers you, OPEN THAT SECTION AND CHECK IT** —
+   for the same triggers AND the same failure behaviour. Both halves, because
+   this is where the criterion was first got wrong: `validate_eslint_on_write`
+   was exempted as "the ESLint case of `lint_on_edit`", but that section lists
+   nine languages without TypeScript among them, and promises that a missing or
+   timed-out linter never blocks — while the ESLint handler denies on both. The
+   section claimed to cover it stated a guarantee that was false for the very
+   case it was supposed to cover, which is worse than saying nothing. A partial
+   overlap is not cover.
 
 Handlers that emit nothing an agent acts on — status-line renderers, loggers,
 lifecycle handlers, `hello_world` stubs — never reach the tests and are always

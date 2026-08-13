@@ -311,7 +311,9 @@ daemon's venv before `PATH`.
 
 **A linter that is not installed never blocks.** You get an advisory saying it
 was not found and the write stands — so that message means the check was
-SKIPPED, not that it passed.
+SKIPPED, not that it passed. That leniency is specific to THIS handler:
+`.ts`/`.tsx` files are handled by `validate_eslint_on_write`, which denies on
+a timeout and on any failure to run ESLint.
 
 Narrow it under `handlers.post_tool_use.lint_on_edit.options`: `languages`
 restricts which languages are checked, and `command_overrides` replaces a

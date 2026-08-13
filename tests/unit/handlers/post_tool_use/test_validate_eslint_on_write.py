@@ -32,6 +32,59 @@ from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write im
 )
 
 
+class TestResidentGuidance:
+    """This handler DENIES, and no other resident section covers its languages.
+
+    Plan 00203 recorded it as exempt on the grounds that ``lint_on_edit``'s
+    section already said "writes are linted and a failure denies". That reason
+    was wrong in two ways, both found by asking mechanically which EXEMPT
+    handlers contain a DENY path:
+
+    * ``lint_on_edit``'s section lists nine languages and TypeScript is not
+      among them, so a ``.ts`` author reads it and concludes they are unchecked.
+    * the two handlers degrade in OPPOSITE directions. ``lint_on_edit`` ALLOWs
+      when the linter is missing or times out; this one DENIES on a timeout and
+      on any failure to run ESLint at all. The sibling section therefore does
+      not merely omit TypeScript — it states a graceful-degradation guarantee
+      that is false here.
+    """
+
+    @staticmethod
+    def _guidance(tmp_path: Path) -> str:
+        return ValidateEslintOnWriteHandler(workspace_root=tmp_path).get_claude_md() or ""
+
+    def test_provides_guidance(self, tmp_path: Path) -> None:
+        assert ValidateEslintOnWriteHandler(workspace_root=tmp_path).get_claude_md() is not None
+
+    def test_names_the_languages_lint_on_edit_does_not_cover(self, tmp_path: Path) -> None:
+        guidance = self._guidance(tmp_path)
+
+        assert ".ts" in guidance
+        assert ".tsx" in guidance
+
+    def test_states_that_it_denies(self, tmp_path: Path) -> None:
+        assert "DENIES" in self._guidance(tmp_path)
+
+    def test_states_that_the_write_already_landed(self, tmp_path: Path) -> None:
+        guidance = self._guidance(tmp_path).lower()
+
+        assert "already" in guidance
+        assert "disk" in guidance or "written" in guidance
+
+    def test_warns_that_it_denies_where_lint_on_edit_would_allow(self, tmp_path: Path) -> None:
+        """The differentiator. Without it the sibling section actively misleads."""
+        guidance = self._guidance(tmp_path).lower()
+
+        assert "timeout" in guidance or "times out" in guidance
+
+    def test_states_the_package_json_gate_that_enables_enforcement(self, tmp_path: Path) -> None:
+        """Enforcement is conditional; silence is not proof of a clean file."""
+        guidance = self._guidance(tmp_path)
+
+        assert "llm:" in guidance
+        assert "package.json" in guidance
+
+
 class TestValidateEslintOnWriteHandler:
     """Tests for ValidateEslintOnWriteHandler."""
 

@@ -44,7 +44,7 @@ import importlib
 import inspect
 import pkgutil
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -71,6 +71,11 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "GitMessageBacktickHandler": "T1 denies a message whose backticks would execute",
     "GitStashHandler": "T1 denies git stash without the escape hatch",
     "LintOnEditHandler": "T1 denies a write whose lint fails, in nine languages",
+    "ValidateEslintOnWriteHandler": (
+        "T1 denies a .ts/.tsx write on ESLint errors, on timeout, and on any "
+        "failure to run ESLint — languages and failure behaviour that "
+        "lint_on_edit's section does NOT cover"
+    ),
     "LockFileEditBlockerHandler": "T1 denies direct lock-file edits",
     "LspEnforcementHandler": "T1 denies the first symbol-lookup grep in a session",
     "PipBreakSystemHandler": "T1 denies --break-system-packages",
@@ -169,10 +174,6 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "HedgingLanguageNitpickHandler": (
         "T4 batch-audit twin of stop/hedging_language_detector, whose "
         "resident section already carries the guidance"
-    ),
-    "ValidateEslintOnWriteHandler": (
-        "T4 the ESLint-specific case of lint_on_edit, whose resident section "
-        "already states that writes are linted and a failure denies"
     ),
     "ValidatePlanNumberHandler": (
         "T4 fires on a wrongly-numbered new plan folder; plan_number_helper's "
@@ -306,6 +307,85 @@ class TestEveryHandlerHasARecordedVerdict:
             f"{class_name} is classified with an empty reason. A bare name records "
             "that someone typed something, not that they decided anything."
         )
+
+
+class TestAnExemptHandlerCannotQuietlyDeny:
+    """Test 1 is the strongest test, so a `None` that defeats it needs argument.
+
+    Added after this suite shipped, because the suite as first written could
+    not have caught its own worst entry. `ValidateEslintOnWriteHandler` was
+    recorded exempt on the reason that `lint_on_edit`'s section already covered
+    it. Both handlers agreed with their table rows, so every check passed —
+    while the exemption was wrong twice over: `lint_on_edit` lists nine
+    languages and TypeScript is not one of them, and the two degrade in
+    OPPOSITE directions (`lint_on_edit` ALLOWs a missing linter or a timeout;
+    the ESLint handler DENIES both). The section claimed to cover it stated a
+    guarantee that was false for the case it supposedly covered.
+
+    Reading the reasons found nothing. Asking mechanically which exempt
+    handlers contain a DENY path found it immediately — which is the whole
+    argument for a guard over a review.
+
+    A future handler may genuinely deny and still be exempt under Test 4. That
+    is a real possibility, not an impossible one, so the remedy is an entry in
+    `_EXEMPT_DESPITE_DENYING` naming the section that covers it — verified by
+    reading that section, not assumed.
+    """
+
+    # Exempt handlers that CAN deny, each naming the resident section that
+    # genuinely covers them. Deliberately empty: every deny-capable handler
+    # currently earns its own section. An addition here should be argued.
+    _EXEMPT_DESPITE_DENYING: ClassVar[dict[str, str]] = {}
+
+    @staticmethod
+    def _module_can_deny(handler_class: type[Handler]) -> bool:
+        """Whether the handler's own module names a DENY decision.
+
+        Deliberately a static check on the module source, not a call into
+        ``handle()`` — constructing every handler with inputs that reach its
+        deny branch is not tractable, and a guard that is hard to run is a
+        guard that gets deleted.
+
+        Its reach, measured rather than assumed: all 33 handlers currently
+        recorded as passing Test 1 are detected, so there are no false
+        negatives across the known deniers. It would miss a handler that denies
+        via a helper in another module, or through a decision held in a
+        variable. Neither shape exists today; if one appears, this returns
+        False and the handler escapes the check — so a new deny path that does
+        not read ``Decision.DENY`` in its own module needs the classification
+        made by hand.
+        """
+        module = inspect.getmodule(handler_class)
+        source = inspect.getsource(module) if module else ""
+        return "Decision.DENY" in source
+
+    def test_no_exempt_handler_has_an_unargued_deny_path(self) -> None:
+        classes = _discover_handler_classes()
+
+        offenders = sorted(
+            name
+            for name in _EXEMPT_FROM_GUIDANCE
+            if name not in self._EXEMPT_DESPITE_DENYING and self._module_can_deny(classes[name])
+        )
+
+        assert not offenders, (
+            "These handlers are recorded as exempt from resident guidance but can "
+            f"DENY a tool call: {offenders}.\n\n"
+            "Test 1 says a denial burns a turn and cancels every sibling tool call, "
+            "so guidance that prevents one has already paid for itself. Either move "
+            "the handler to _EARNS_GUIDANCE and write the section, or add it to "
+            "_EXEMPT_DESPITE_DENYING naming the resident section that covers it — "
+            "having READ that section and confirmed it covers this handler's "
+            "languages AND its failure behaviour. That check is the one that was "
+            "skipped last time."
+        )
+
+    def test_the_deny_exemption_list_names_real_handlers(self) -> None:
+        discovered = set(_discover_handler_classes())
+
+        stale = sorted(set(self._EXEMPT_DESPITE_DENYING) - discovered)
+
+        assert not stale, f"_EXEMPT_DESPITE_DENYING names handlers that do not exist: {stale}"
 
 
 class TestTheVerdictsMatchReality:

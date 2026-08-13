@@ -187,7 +187,24 @@ class ValidateEslintOnWriteHandler(Handler):
             return HookResult(decision=Decision.DENY, reason=f"Failed to run ESLint: {e!s}")
 
     def get_claude_md(self) -> str | None:
-        return None
+        return """## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
+
+A `Write`/`Edit` to a `.ts` or `.tsx` file is run through ESLint. Reported
+errors DENY the tool call.
+
+**The write has ALREADY landed on disk.** The denial is a failure report, not
+a rollback — the file exists with your content in it. Fix the reported problems
+with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
+sibling tool calls that were cancelled alongside the denied one.
+
+**This is STRICTER than `lint_on_edit`, which covers the other languages.**
+That handler ALLOWs when its linter is missing or when the check times out;
+this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
+Do not carry "a missing linter never blocks" across to TypeScript.
+
+**Enforcement is gated on `llm:` scripts in `package.json`.** With none
+present this handler only advises — and suggests adding `llm:lint` — so silence
+is not evidence that a `.ts` file is clean."""
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""

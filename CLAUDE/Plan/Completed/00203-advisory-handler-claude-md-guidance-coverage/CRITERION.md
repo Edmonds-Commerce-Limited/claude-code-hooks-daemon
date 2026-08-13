@@ -112,6 +112,35 @@ to every session, and the two copies drift apart independently.
   already resident under `plan_qa_commit_gate`, whose `terminal-state-atomic`
   invariant states the same requirement and enforces it.
 
+## Correction: Test 4's "another section covers it" needs verifying, not asserting
+
+Added after this criterion shipped, because the first thing it got wrong was
+an application of Test 4.
+
+`validate_eslint_on_write` was exempted on the reason "the ESLint-specific case
+of `lint_on_edit`, whose section already says writes are linted and a failure
+denies". Both halves of that were false:
+
+- `lint_on_edit`'s section lists **nine languages and TypeScript is not one of
+  them**, so a `.ts` author reads it and concludes they are unchecked.
+- the two handlers degrade in **opposite directions**. `lint_on_edit` ALLOWs a
+  missing or timed-out linter and says so explicitly; the ESLint handler DENIES
+  on a timeout and on any failure to run ESLint at all.
+
+So the covering section did not merely omit the case — it stated a
+graceful-degradation guarantee that was FALSE for it. Guidance that misleads is
+worse than no guidance.
+
+**The rule this adds**: a Test 4 exemption that points at another section must
+be checked against that section's actual text, for BOTH the triggers it covers
+and the failure behaviour it promises. A partial overlap is not cover.
+
+**And the reason it is now a guard, not a rule**: re-reading the reasons found
+nothing — I wrote them, so I re-read my own argument and agreed with it. The
+mechanical question "which EXEMPT handlers contain a `Decision.DENY` path?"
+found it on the first try. `TestAnExemptHandlerCannotQuietlyDeny` now asks that
+question on every run.
+
 ## Handlers exempt by kind, not by test
 
 Three groups never reach the tests, because they emit nothing an agent acts on:
