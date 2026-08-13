@@ -294,3 +294,10 @@ There was nothing to drop.
 
 - Filed as the follow-up Plan 00226 named for itself, after the dedupe scout
   confirmed no live plan covers QA reporting-fidelity contracts
+- `b795e298` filed; `101a38f6` Phase 1 (the enumeration, and Decision 1)
+- `eb0aa5fc` Phases 2–3, the structural guard and the `tests` hint fix
+- `0d578242` Phase 4, the render-time warning
+- `078ad56d` Phase 5 and closure — the broadened invariant, after the guard's
+  own lens found two live instances in the shipped QA scripts. Worth noting
+  for anyone reading this later: the plan as FILED could not have caught the
+  `run_shell_check.sh` case, whose count is zero
