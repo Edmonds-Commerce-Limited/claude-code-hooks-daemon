@@ -205,7 +205,26 @@ class HedgingLanguageDetectorHandler(Handler):
         return HookResult(decision=Decision.ALLOW, context=[context])
 
     def get_claude_md(self) -> str | None:
-        return None
+        return """## hedging_language_detector — the guessing is the defect, not the wording
+
+At Stop time your last message is scanned for hedges — "if I recall", "IIRC",
+"from memory", "probably", "likely", "apparently", "presumably", "I believe" —
+and a non-blocking advisory is injected.
+
+**Do not respond by deleting the word.** Dropping "probably" while still
+guessing is worse than the hedge: it removes the only signal that the claim
+was unverified, and leaves a confident-sounding sentence with nothing behind
+it. The remedy is to verify — `Read` the file, `Grep` the codebase, `Glob` for
+the name, run the command. Almost every hedge in this repository is about
+something one tool call would settle.
+
+**Honest uncertainty is fine — say it plainly, and say what would settle it.**
+"I have not checked whether X still exists" is accurate reporting, not
+hedging. What this handler is looking for is confident prose standing in for a
+check you could have made.
+
+The sibling `dismissive_language_detector` covers the same ground for
+avoidance rather than uncertainty."""
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""

@@ -416,11 +416,37 @@ Issues found = ABORT, fix, re-run `/release`.
 
 ## Step 11: CLAUDE.md Guidance Audit (BLOCKING)
 
-Launch sub-agent to analyse `get_claude_md()` completeness across all handlers.
+**This step is now a gate, not a sub-agent sweep** (Plan 00203). Coverage of
+`get_claude_md()` is enforced continuously by
+`tests/integration/test_claude_md_guidance_coverage.py`, which enumerates every
+handler and fails unless each carries a recorded verdict — covered, or exempt
+with a reason. Step 8's QA run already executes it, so if Step 8 passed, this
+gate has passed.
 
-**Sub-agent prompt**: Analyse `/workspace/src/claude_code_hooks_daemon/handlers/` — for each handler, compare `matches()`/`handle()` logic against `get_claude_md()` return value. Report: MISSING GUIDANCE (blocking/advisory handlers returning None), INACCURATE GUIDANCE (content doesn't match logic), ACCEPTABLE NONES (hello_world, status, lifecycle). Focus on PreToolUse blocking handlers first.
+Confirm explicitly:
 
-Fix any missing/inaccurate guidance. If changes made: run QA, restart daemon, update changelog.
+```bash
+source scripts/lib/resolve_venv.sh
+PY="$(resolve_venv_python /workspace)"
+"$PY" -m pytest tests/integration/test_claude_md_guidance_coverage.py -q
+```
+
+**Why the sweep was replaced.** The v3.52.0 release ran the sub-agent audit and
+reported six PreToolUse *advisory* handlers returning `None`. Plan 00203 then
+applied a written criterion to all 107 handlers and found **all six were
+correct** — while two handlers the audit had not looked at were genuinely
+missing guidance: `lint_on_edit` (PostToolUse, and it DENIES) and
+`hedging_language_detector` (Stop, whose identical twin was covered). A sweep
+scoped to one event type cannot find either, and re-derives the same verdicts
+by hand every release. The table records them once.
+
+**If the gate fails**, it names the handler and what to do. Apply the four
+tests in `CLAUDE/HANDLER_DEVELOPMENT.md`, then either implement
+`get_claude_md()` or record the exemption with its reason. If you change
+`src/`: run QA, restart the daemon, update the changelog, and make sure Step 13
+stages the source file — the daemon auto-commits the regenerated `CLAUDE.md`,
+so a guidance fix can otherwise ship as a generated artifact with no source
+behind it.
 
 ---
 

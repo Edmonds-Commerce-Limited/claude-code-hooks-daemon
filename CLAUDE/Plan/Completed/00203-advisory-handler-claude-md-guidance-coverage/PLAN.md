@@ -1,6 +1,6 @@
 # Plan 00203: Advisory Handler CLAUDE.md Guidance Coverage
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-10
 **Owner**: joseph
 **Priority**: Medium
@@ -96,30 +96,44 @@ resident doc.
   **all six are correctly `None`**; see Decision 2
 - [x] ✅ **Task 1.3**: Apply it to `post_tool_use/lint_on_edit` (now blocking)
   — **EARNS** on Test 1, and is the highest-value section in this plan
-- [ ] 🔄 **Task 1.4**: Apply it to the remaining event types; record which are
+- [x] ✅ **Task 1.4**: Apply it to the remaining event types; record which are
   deliberately `None` and why — delivered AS the Phase 3 classification table
-  rather than as prose, so the reasoning cannot drift from the check
+  rather than as prose, so the reasoning cannot drift from the check. All 107
+  handlers now carry a verdict and a reason
 
 ### Phase 2: Implement (TDD)
 
-- [ ] ⬜ **Task 2.1**: For each handler that earns guidance, write the failing
-  test first (assert `get_claude_md()` is non-empty and names the trigger)
-- [ ] ⬜ **Task 2.2**: Implement `get_claude_md()` bodies
-- [ ] ⬜ **Task 2.3**: Regenerate `.claude/HOOKS-DAEMON.md` and the daemon's
-  `CLAUDE.md` section; review the resident-doc size delta
-- [ ] ⬜ **Task 2.4**: Full QA + daemon restart verification
+- [x] ✅ **Task 2.1**: For each handler that earns guidance, write the failing
+  test first (assert `get_claude_md()` is non-empty and names the trigger) — 9
+  tests, RED confirmed before any implementation
+- [x] ✅ **Task 2.2**: Implement `get_claude_md()` bodies for `lint_on_edit`
+  and `hedging_language_detector`
+- [x] ✅ **Task 2.3**: Regenerate the daemon's `CLAUDE.md` section; review the
+  resident-doc size delta — **+2,452 chars / ~613 tokens for two sections**
+  (1,226 each, below the 1,381 mean). 53 → 55 sections
+- [x] ✅ **Task 2.4**: Full QA + daemon restart verification — 20/20, 12,491
+  tests, 95.3% coverage; daemon RUNNING
 
 ### Phase 3: Make it a gate (DBF)
 
-- [ ] ⬜ **Task 3.1**: Replace the ad-hoc release-time script with a QA check
+- [x] ✅ **Task 3.1**: Replace the ad-hoc release-time script with a QA check
   that enumerates handlers and asserts each is either covered or on an
-  explicit, reasoned exemption list
-  - [ ] ⬜ Model it on `test_blocking_handler_evasion.py`: discovery-based, so
+  explicit, reasoned exemption list —
+  `tests/integration/test_claude_md_guidance_coverage.py`
+  - [x] ✅ Model it on `test_blocking_handler_evasion.py`: discovery-based, so
     a new handler cannot silently escape triage
-  - [ ] ⬜ Exemptions carry a reason string, not a bare name
-- [ ] ⬜ **Task 3.2**: Wire it into `scripts/qa/run_all.sh` and `llm_qa.py`
-- [ ] ⬜ **Task 3.3**: Remove the manual audit step from RELEASING.md Step 11,
-  or reduce it to running the gate
+  - [x] ✅ Exemptions carry a reason string, not a bare name
+  - [x] ✅ Discovery is intolerant: a handler that cannot be CONSTRUCTED fails
+    the suite rather than being skipped, unlike
+    `measure_instruction_footprint.py`, whose silent skip is right for a
+    measurement and would be a hole in a guard
+  - [x] ✅ Vacuity guard: empty discovery fails via the stale-entry check, so
+    the suite cannot go green while checking nothing
+- [x] ✅ **Task 3.2**: Wire it into `scripts/qa/run_all.sh` and `llm_qa.py` —
+  satisfied transitively and verified: `run_tests.sh` runs `tests/`, and the
+  full QA run counted the 217 new assertions
+- [x] ✅ **Task 3.3**: Remove the manual audit step from RELEASING.md Step 11,
+  or reduce it to running the gate — reduced to running the gate
 
 ## Dependencies
 
@@ -198,11 +212,16 @@ thought.
 
 ## Success Criteria
 
-- [ ] Every handler is either covered by `get_claude_md()` or on an explicit
-  exemption list carrying a reason
-- [ ] A QA check enforces that, so the next gap is found automatically
-- [ ] Resident `CLAUDE.md` growth from this work is measured and justified
-- [ ] All QA checks passing; daemon restart verified
+- [x] Every handler is either covered by `get_claude_md()` or on an explicit
+  exemption list carrying a reason — 107/107, no unclassified
+- [x] A QA check enforces that, so the next gap is found automatically — and it
+  proved itself immediately by rejecting a wrong verdict in its own author's
+  table (`ValidatePlanNumberHandler`, classified as earning guidance when it
+  returns `None`)
+- [x] Resident `CLAUDE.md` growth from this work is measured and justified —
+  +2,452 chars (+3.3%) for two sections, against a 73,239-char baseline that
+  this plan measured for the first time
+- [x] All QA checks passing (20/20); daemon restart verified RUNNING
 
 ## Risks & Mitigations
 
@@ -246,3 +265,6 @@ completed plan's backlog where nothing looks.
 <!-- Curated milestones + delivery commit hashes (git is the SSoT for "when"). -->
 
 - Finding raised during the v3.52.0 release gate
+- Phase 1 — criterion written and applied, at `5225bad1`
+- Phases 2 and 3 — two guidance sections, the coverage gate, and the
+  RELEASING.md Step 11 replacement, at the plan-completion commit

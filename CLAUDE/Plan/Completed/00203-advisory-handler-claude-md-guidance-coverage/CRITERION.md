@@ -141,7 +141,7 @@ audit missed both handlers that *do* have a real gap.
 
 ### `post_tool_use/lint_on_edit` — EARNS, Test 1
 
-It DENIES writes, it fires on edits to source files in eleven languages, and
+It DENIES writes, it fires on edits to source files in nine languages, and
 v3.52.0 made it actually run where it had previously been silently inert — so
 its denial rate rose precisely when no client had ever been told it exists.
 

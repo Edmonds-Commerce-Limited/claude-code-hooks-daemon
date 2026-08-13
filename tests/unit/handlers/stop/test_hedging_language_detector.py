@@ -47,6 +47,60 @@ class TestHedgingLanguageDetectorInit:
         assert HandlerTag.NON_TERMINAL in handler.tags
 
 
+class TestResidentGuidance:
+    """A Stop-time norm can only ever fire AFTER the message that broke it.
+
+    Plan 00203 Test 3. This handler and ``dismissive_language_detector`` are
+    structurally identical Stop advisories over the last assistant message,
+    but only the dismissive one had resident guidance — so the same rule was
+    preventive in one case and purely retrospective in the other.
+    """
+
+    @staticmethod
+    def _guidance() -> str:
+        from claude_code_hooks_daemon.handlers.stop.hedging_language_detector import (
+            HedgingLanguageDetectorHandler,
+        )
+
+        return HedgingLanguageDetectorHandler().get_claude_md() or ""
+
+    def test_provides_guidance(self) -> None:
+        from claude_code_hooks_daemon.handlers.stop.hedging_language_detector import (
+            HedgingLanguageDetectorHandler,
+        )
+
+        assert HedgingLanguageDetectorHandler().get_claude_md() is not None
+
+    def test_names_the_remedy_not_just_the_offence(self) -> None:
+        """Naming banned words alone teaches avoidance, not verification.
+
+        The failure is guessing; deleting the word "probably" while still
+        guessing is worse than the hedge, because it removes the signal.
+        """
+        guidance = self._guidance().lower()
+
+        assert "verify" in guidance or "check" in guidance
+        assert any(tool in guidance for tool in ("read", "grep", "glob"))
+
+    def test_permits_honest_uncertainty(self) -> None:
+        """The escape valve, or the guidance reads as "never express doubt"."""
+        guidance = self._guidance().lower()
+
+        assert "say" in guidance or "state" in guidance
+
+    def test_is_consistent_with_its_covered_twin(self) -> None:
+        """Both siblings resident, or the pairing is arbitrary again."""
+        from claude_code_hooks_daemon.handlers.stop.dismissive_language_detector import (
+            DismissiveLanguageDetectorHandler,
+        )
+        from claude_code_hooks_daemon.handlers.stop.hedging_language_detector import (
+            HedgingLanguageDetectorHandler,
+        )
+
+        assert DismissiveLanguageDetectorHandler().get_claude_md() is not None
+        assert HedgingLanguageDetectorHandler().get_claude_md() is not None
+
+
 def _make_transcript(messages: list[dict[str, Any]]) -> str:
     """Create a temporary JSONL transcript file.
 

@@ -38,6 +38,55 @@ class TestInit:
         assert HandlerTag.MULTI_LANGUAGE in handler.tags
 
 
+class TestResidentGuidance:
+    """A handler that DENIES must say so before it fires, not only when it does.
+
+    Plan 00203 Test 1: a denial burns a turn AND cancels every sibling tool
+    call batched with it. This handler denies edits across nine languages and
+    was silently inert until v3.52.0 made it actually run — so its denial rate
+    rose at the exact moment no project had ever been told it existed.
+    """
+
+    def test_provides_guidance(self, handler: LintOnEditHandler) -> None:
+        assert handler.get_claude_md() is not None
+
+    def test_states_that_the_write_already_landed(self, handler: LintOnEditHandler) -> None:
+        """The single most misleading thing about a PostToolUse denial.
+
+        The file IS on disk before the linter runs, so a denial is a failure
+        report, not a rollback. An agent that reads 'blocked' as 'the write
+        did not happen' re-creates the file from scratch and loses any content
+        it did not have in hand.
+        """
+        guidance = handler.get_claude_md() or ""
+
+        assert "already" in guidance.lower()
+        assert "disk" in guidance.lower() or "written" in guidance.lower()
+
+    def test_names_the_recovery_action(self, handler: LintOnEditHandler) -> None:
+        guidance = (handler.get_claude_md() or "").lower()
+
+        assert "edit" in guidance
+        assert "fix" in guidance
+
+    def test_states_that_a_missing_linter_never_blocks(self, handler: LintOnEditHandler) -> None:
+        """Graceful degradation is invisible unless stated.
+
+        A missing tool ALLOWs with an advisory. Without this, a project seeing
+        'lint tool not found' cannot tell whether it is now unprotected or
+        about to be blocked.
+        """
+        guidance = (handler.get_claude_md() or "").lower()
+
+        assert "not installed" in guidance or "not found" in guidance
+
+    def test_points_at_the_config_keys_that_narrow_it(self, handler: LintOnEditHandler) -> None:
+        guidance = handler.get_claude_md() or ""
+
+        assert "languages" in guidance
+        assert "command_overrides" in guidance
+
+
 class TestMatches:
     def test_matches_write_python_file(self, handler: LintOnEditHandler, tmp_path: Path) -> None:
         test_file = tmp_path / "app.py"

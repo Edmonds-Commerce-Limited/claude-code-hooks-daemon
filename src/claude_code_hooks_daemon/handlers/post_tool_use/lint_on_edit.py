@@ -290,7 +290,33 @@ class LintOnEditHandler(Handler):
         return None
 
     def get_claude_md(self) -> str | None:
-        return None
+        return """## lint_on_edit — source writes are linted, and a failure DENIES
+
+Every `Write`/`Edit` to a Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin or
+Dart file is linted immediately. A lint failure DENIES the tool call.
+
+**The write has ALREADY landed on disk.** A PostToolUse denial is a failure
+report, not a rollback — the file exists, with your content in it. Fix the
+reported problems with `Edit`. Do NOT re-`Write` the file from scratch: that
+rewrites content already on disk from memory, and loses anything you no longer
+have in hand.
+
+A denial also cancels every sibling tool call batched in the same turn, so
+re-issue those separately.
+
+Each language runs a cheap syntax check first (`python -m py_compile`, `bash
+-n`, `go vet`, `php -l`, …) and then an optional deeper linter (`ruff`,
+`shellcheck`, `golangci-lint`, `rubocop`, …). Tools are resolved from the
+daemon's venv before `PATH`.
+
+**A linter that is not installed never blocks.** You get an advisory saying it
+was not found and the write stands — so that message means the check was
+SKIPPED, not that it passed.
+
+Narrow it under `handlers.post_tool_use.lint_on_edit.options`: `languages`
+restricts which languages are checked, and `command_overrides` replaces a
+language's `default`/`extended` command (set `extended: null` to run only the
+syntax check)."""
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests aggregated from all registered strategies."""

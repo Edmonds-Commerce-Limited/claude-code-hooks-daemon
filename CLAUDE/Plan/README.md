@@ -14,8 +14,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00189: WorktreeCreate daemon-down raw-path completion](00189-worktree-create-daemon-down-raw-path-completion/PLAN.md) - Not Started (tracked follow-up captured by the v3.49.0 release Code Review Gate per RELEASING.md "never drop a finding".)
 
-- [00203: Advisory handler CLAUDE.md guidance coverage](00203-advisory-handler-claude-md-guidance-coverage/PLAN.md) - Not Started (tracked follow-up captured by the v3.52.0 release CLAUDE.md Guidance Audit per RELEASING.md "never drop a finding": six PreToolUse **advisory** handlers return None from `get_claude_md()`; every **blocking** one is covered.)
-
 - [00204: security_antipattern — the three data-flow categories](00204-security-antipattern-dataflow-categories/PLAN.md) - Not Started (v3.52.0 corrected guidance that claimed SQL injection, weak cryptography and path traversal were blocked when no strategy implements any of them; this decides whether construct-level regexes can carry signal for them without the false-positive rate that gets a handler disabled.)
 
 - [00205: destructive git synonym respellings](00205-destructive-git-synonym-respellings/PLAN.md) - Not Started (tracked follow-up captured by the v3.52.0 release gate per RELEASING.md "never drop a finding": v3.52.0 closed ten *invocation* respellings but not *synonym* ones — `git update-ref -d refs/heads/X` is an unguarded `git branch -D`, and `git push origin +main:main` an unguarded `git push --force`.)
@@ -169,6 +167,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00222: pipe blocker message redaction overbreadth](Completed/00222-pipe-blocker-message-redaction-overbreadth/PLAN.md) - Complete (the `-m` value blanking fired on any command and on double-quoted values the shell *does* substitute, so an executing pipe hid inside a commit message; the "double quotes execute" fact now has one home)
 
 - [00223: standing subagent authorisation and system prompt overrides](Completed/00223-standing-subagent-authorisation-system-prompt-overrides/PLAN.md) - Complete (a project can now record a standing request in config and have it replayed each prompt; the mechanism ships on and every authorisation ships off, so the daemon never asserts consent nobody gave)
+
+- [00203: advisory handler CLAUDE.md guidance coverage](Completed/00203-advisory-handler-claude-md-guidance-coverage/PLAN.md) - Complete (all six audit findings were correct as `None`; the two real gaps were a PostToolUse *blocking* handler and a Stop handler whose twin was covered, so the release-time sweep is replaced by a coverage gate that forces a reasoned verdict per handler)
 
 - [00220: stale exclusion audit in qa suppression files](Completed/00220-stale-exclusion-audit-in-qa-suppression-files/PLAN.md) - Complete (a suppression file was only ever read to REMOVE findings, so nothing asked whether each entry still earned its place. An exclusion matching nothing is now a violation — it means the entry drifted off its target or its code was fixed. Found 6 dead entries on first run.)
 
@@ -1152,11 +1152,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 223 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 179 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 33 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 180 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 33 + 179 + 5 = **217 folders**, spanning
+- **Folder-to-number reconciliation**: 32 + 180 + 5 = **217 folders**, spanning
   **214 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
