@@ -84,10 +84,15 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="type_check.json",
         jq_hint="jq '.errors[] | {file, line, message}'",
     ),
+    # The hint MUST name the array holding the detail, not the summary. It
+    # pointed at `.summary` until Plan 00229 — sending a reader who wanted to
+    # know WHAT failed back to the count they had already been shown. That is
+    # why Plan 00226's missing failure names had no surface on which they could
+    # look wrong. Asserted by test_llm_qa_count_implies_detail.py.
     "tests": ToolConfig(
         command=_bash("run_tests.sh"),
         json_file="tests.json",
-        jq_hint="jq '.summary'",
+        jq_hint="jq '.tests[] | select(.outcome == \"failed\") | .name'",
     ),
     "security": ToolConfig(
         command=_bash("run_security_check.sh"),

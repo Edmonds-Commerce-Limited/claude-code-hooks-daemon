@@ -107,19 +107,32 @@ cannot be under-selected the same way.
 
 ### Phase 2: Build the guard (RED first)
 
-- [ ] ⬜ **Task 2.1**: Failing test: synthesise a report whose summary count is
-  non-zero and whose detail array is empty, and assert the guard rejects it
-- [ ] ⬜ **Task 2.2**: Vacuity and teeth — assert the registry is discovered
-  rather than hardcoded, the in-scope set is non-empty, and every exemption
-  names a real report and states a reason
-- [ ] ⬜ **Task 2.3**: Implement until green across all twenty reports
+- [x] ✅ **Task 2.1**: `tests/unit/qa/test_llm_qa_count_implies_detail.py`.
+  RED first, and it failed on exactly the report Decision 1 predicted:
+  2 failed / 46 passed, both failures `tests`
+- [x] ✅ **Task 2.2**: Vacuity and teeth — the registry is asserted discovered
+  rather than hardcoded, the in-scope set non-empty, every exemption must name
+  a real report and state a reason; and `TestTheGuardHasTeeth` asserts the
+  count-with-empty-array shape is rejected, a populated one accepted, and a
+  `.summary` hint rejected
+- [x] ✅ **Task 2.3**: Green across all twenty (56 passed, including Plan
+  00226's own regression tests). One test was rewritten before it ever ran
+  green: its first draft was `if a != b: return; assert a == b`, which cannot
+  fail. It now probes which arrays a summariser actually reads and asserts
+  that set is a subset of the array its hint names
 
 ### Phase 3: Fix what the guard surfaces
 
-- [ ] ⬜ **Task 3.1**: Treat each finding as a CANDIDATE, not a verdict —
-  Plan 00228's first run produced three hits of which only one was a real bug,
-  so investigate before changing anything
-- [ ] ⬜ **Task 3.2**: Full QA, daemon restart, dogfood live
+- [x] ✅ **Task 3.1**: One finding, investigated rather than assumed: the
+  `tests` hint. Per Decision 1 it was FIXED to
+  `jq '.tests[] | select(.outcome == "failed") | .name'` rather than exempted,
+  and the entry schema was read from the producer (`run_tests.sh` emits
+  `{"name": <nodeid>, "outcome": "failed"}`) instead of guessed. The exemption
+  map ships EMPTY, which is the honest outcome here — unlike Plan 00228, no
+  surfaced report turned out to be correct-as-is
+- [x] ✅ **Task 3.2**: Dogfooded — the rendered line now reads
+  `tests.json | jq '.tests[] | select(.outcome == "failed") | .name'` instead
+  of sending the reader back to `.summary`. Full QA and daemon restart below
 
 ## Technical Decisions
 
