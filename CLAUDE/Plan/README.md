@@ -160,6 +160,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00226: QA runner discards failing test identities](Completed/00226-qa-runner-discards-failing-test-identities/PLAN.md) - Complete (a red QA run reported how many tests failed and never which, so diagnosis needed a full re-run; the text-fallback parser now names them, and Decision 2 records that the count/detail split is structural across every check rather than a pytest quirk)
+
 - [00225: dismissive/hedging detectors use-mention false positive](Completed/00225-dismissive-hedging-detectors-use-mention-false-positive/PLAN.md) - Complete (substring matching could not tell a phrase USED to deflect from one MENTIONED while acknowledging, so the advisory's own instruction to acknowledge re-triggered it; quoted spans are now blanked before matching, at all four scan sites)
 
 - [00224: nitpick offset reset replays whole transcript after daemon restart](Completed/00224-nitpick-offset-reset-replays-whole-transcript-after-daemon-restart/PLAN.md) - Complete (in-memory audit offset returns to 0 on restart, so a mandated restart replayed every past finding — 9,680 messages measured live; fixed by the daemon's own start time, and gated registry-wide so a future pseudo-event cannot inherit it)
@@ -1155,22 +1157,26 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 225 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 182 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Total Plans Created**: 226 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Completed**: 183 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 - **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 32 + 182 + 5 = **219 folders**, spanning
-  **216 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 32 + 183 + 5 = **220 folders**, spanning
+  **217 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **9** of the
-  225 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  226 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210 — abandoned drafts, numbers burned by transient
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
-  already covered the work). 216 + 9 = 225. ✅
-- **Last reconciled by**: the Plan 00225 closure — recounted from disk after
+  already covered the work). 217 + 9 = 226. ✅
+- **Last reconciled by**: the Plan 00226 open-and-close — the folder was
+  created and archived within one working session, so Total rose by one, the
+  counter advanced by `mkplan.bash`, and the folder landed directly in
+  `Completed/` (32 root, 183 `Completed/`, 5 `Cancelled/`) leaving Active
+  unchanged. Before that, the Plan 00225 closure — recounted from disk after
   the archive move (32 root, 182 `Completed/`, 5 `Cancelled/`); the move shifts
   one folder between the Active and Completed splits and leaves the folder
   total unchanged. Before that, the Plan 00225 opening — one new root folder

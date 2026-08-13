@@ -117,46 +117,36 @@ else
         EXIT_CODE=$?
     fi
 
-    # Parse text output
-    python3 << 'EOF' > "${OUTPUT_FILE}"
+    # Parse text output.
+    #
+    # Runs under VENV_PYTHON, not system python3, so the parsing module is
+    # importable. The logic lives in claude_code_hooks_daemon.qa
+    # .pytest_text_report rather than in this heredoc so it can be unit-tested
+    # against real captured pytest output (Plan 00226) — scraping only the
+    # counts here meant a red QA run reported "2 failed" without ever saying
+    # WHICH, and one such failure was never identified.
+    "${VENV_PYTHON}" << 'EOF' > "${OUTPUT_FILE}"
 import json
-import re
 import sys
 from pathlib import Path
 
+from claude_code_hooks_daemon.qa.pytest_text_report import parse_pytest_text_output
+
 raw_file = Path("untracked/qa/tests.json.raw")
-passed = 0
-failed = 0
-skipped = 0
-total = 0
+content = raw_file.read_text() if raw_file.exists() else ""
+report = parse_pytest_text_output(content)
 
-if raw_file.exists():
-    with open(raw_file) as f:
-        content = f.read()
-
-        # Parse pytest summary line
-        # Example: "====== 364 passed in 0.52s ======"
-        match = re.search(r'(\d+) passed', content)
-        if match:
-            passed = int(match.group(1))
-            total += passed
-
-        match = re.search(r'(\d+) failed', content)
-        if match:
-            failed = int(match.group(1))
-            total += failed
-
-        match = re.search(r'(\d+) skipped', content)
-        if match:
-            skipped = int(match.group(1))
-            total += skipped
+# Same record shape as the pytest-json-report path above, so consumers do not
+# have to know which path produced the file. Only failures are listed: the text
+# output names those and is silent about every passing test.
+tests = [{"name": node_id, "outcome": "failed"} for node_id in report["failed_tests"]]
 
 summary = {
-    "total": total,
-    "passed": passed,
-    "failed": failed,
-    "skipped": skipped,
-    "passed_all": failed == 0,
+    "total": report["total"],
+    "passed": report["passed"],
+    "failed": report["failed"],
+    "skipped": report["skipped"],
+    "passed_all": report["passed_all"],
 }
 
 # Read coverage
@@ -174,7 +164,7 @@ if coverage_file.exists():
 output = {
     "tool": "pytest",
     "summary": summary,
-    "tests": [],  # Not parsed from text output
+    "tests": tests,
     "coverage": coverage,
 }
 

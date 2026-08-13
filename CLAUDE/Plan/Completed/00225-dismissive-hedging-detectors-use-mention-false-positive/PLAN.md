@@ -224,3 +224,5 @@ noted so it is not rediscovered as new.
 
 - Found by dogfooding during Plan 00224 closure; evidence measured and recorded
   above before any fix was designed
+- Delivered at `6dba9d88` — shared helper, all four scan sites, tests and plan
+  closure in one commit

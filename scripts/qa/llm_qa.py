@@ -201,13 +201,34 @@ def _summarize_type_check(data: QaReport) -> str:
     return f"{total} errors"
 
 
+# How many failing test names to print inline. This output is read by an LLM on
+# every QA run, so a mass breakage must not flood it; the rest stay in
+# tests.json, which is the complete record.
+_MAX_NAMED_FAILURES = 15
+
+
 def _summarize_tests(data: QaReport) -> str:
     s = data.get("summary", {})
     passed = s.get("passed", 0)
     failed = s.get("failed", 0)
     skipped = s.get("skipped", 0)
     cov = data.get("coverage", {}).get("percent_covered", 0)
-    return f"{passed} passed, {failed} failed, {skipped} skipped | coverage: {cov:.1f}%"
+    line = f"{passed} passed, {failed} failed, {skipped} skipped | coverage: {cov:.1f}%"
+
+    # Name the failures (Plan 00226). A count alone forces a full re-run to
+    # find out what broke, and a re-run may not reproduce an order-dependent
+    # failure — during Plan 00224 one of two real failures was never
+    # identified. Bounded so a mass breakage cannot flood the artifact.
+    names = [t.get("name", "") for t in data.get("tests", []) if t.get("outcome") == "failed"]
+    names = [name for name in names if name]
+    if not names:
+        return line
+
+    shown = names[:_MAX_NAMED_FAILURES]
+    line += "\n   failed: " + "\n           ".join(shown)
+    if len(names) > len(shown):
+        line += f"\n           ... and {len(names) - len(shown)} more (see tests.json)"
+    return line
 
 
 def _summarize_security(data: QaReport) -> str:
