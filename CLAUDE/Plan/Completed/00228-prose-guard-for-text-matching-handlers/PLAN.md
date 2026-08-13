@@ -287,3 +287,9 @@ keeps every 00209/00218 guarantee live rather than quietly parking it.
 - Filed after the fourth instance of the class was hit live and reproduced
   minimally; the guard is built before the instance is fixed, per Core
   Standard 15
+- Delivered at `826816a3` — guard, `pipe_blocker` fix, the `git_stash`
+  exemption, and the Decision 3 retarget of the Plan 00209 fixtures
+- `6f9176c3` is the daemon's own auto-commit of the regenerated `CLAUDE.md`,
+  which landed BEFORE the handler that produces it. Noted because it is the
+  divergence `RELEASING.md` warns about, observed live: the generated artifact
+  can reach git while its source does not
