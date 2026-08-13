@@ -1557,6 +1557,35 @@ PostToolUse advisory (never blocks). When a configured command is detected in a 
 
 **Configure** via `handlers.post_tool_use.command_hints.options`: `mode: additive` (default) appends your `hints` list to the built-in set — a project entry whose `id` matches a built-in one overrides it; `mode: replace` discards the built-in set entirely and uses only your list. Each hint: `id`, `pattern` (a literal command name, matched at the start of a shell segment — path-qualified and `env`-prefixed spellings are recognised, but it never fires on the word appearing as an unrelated argument), `hint` (the reminder text), `ttl_seconds`, and optional `min_calls_between` (secondary count-based gate). Disable with `handlers.post_tool_use.command_hints.enabled: false`.
 
+<!-- handler: lint-on-edit -->
+
+## lint_on_edit — source writes are linted, and a failure DENIES
+
+Every `Write`/`Edit` to a Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin or
+Dart file is linted immediately. A lint failure DENIES the tool call.
+
+**The write has ALREADY landed on disk.** A PostToolUse denial is a failure
+report, not a rollback — the file exists, with your content in it. Fix the
+reported problems with `Edit`. Do NOT re-`Write` the file from scratch: that
+rewrites content already on disk from memory, and loses anything you no longer
+have in hand.
+
+A denial also cancels every sibling tool call batched in the same turn, so
+re-issue those separately.
+
+Each language runs a cheap syntax check first (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) and then an optional deeper linter (`ruff`,
+`shellcheck`, `golangci-lint`, `rubocop`, …). Tools are resolved from the
+daemon's venv before `PATH`.
+
+**A linter that is not installed never blocks.** You get an advisory saying it
+was not found and the write stands — so that message means the check was
+SKIPPED, not that it passed.
+
+Narrow it under `handlers.post_tool_use.lint_on_edit.options`: `languages`
+restricts which languages are checked, and `command_overrides` replaces a
+language's `default`/`extended` command (set `extended: null` to run only the
+syntax check).
+
 <!-- handler: project-handler-load-checker -->
 
 ## project_handler_load_checker — project protection degraded alert
@@ -1728,6 +1757,29 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 **Rule: Read before Edit/Write.** If you must edit a file you have not read, Read it first in the same turn. The daemon's Stop handler will detect a `tool_use_error` followed by a silent stop and re-fire to force recovery.
 
 **On Stop hook re-entry (the hook fires again after a prior block)**: your next response is treated like any other — it must either prefix with `STOPPING BECAUSE:` or continue the work. Re-entry does not exempt you from the explanation rule.
+
+<!-- handler: hedging-language-detector -->
+
+## hedging_language_detector — the guessing is the defect, not the wording
+
+At Stop time your last message is scanned for hedges — "if I recall", "IIRC",
+"from memory", "probably", "likely", "apparently", "presumably", "I believe" —
+and a non-blocking advisory is injected.
+
+**Do not respond by deleting the word.** Dropping "probably" while still
+guessing is worse than the hedge: it removes the only signal that the claim
+was unverified, and leaves a confident-sounding sentence with nothing behind
+it. The remedy is to verify — `Read` the file, `Grep` the codebase, `Glob` for
+the name, run the command. Almost every hedge in this repository is about
+something one tool call would settle.
+
+**Honest uncertainty is fine — say it plainly, and say what would settle it.**
+"I have not checked whether X still exists" is accurate reporting, not
+hedging. What this handler is looking for is confident prose standing in for a
+check you could have made.
+
+The sibling `dismissive_language_detector` covers the same ground for
+avoidance rather than uncertainty.
 
 <!-- handler: dismissive-language-detector -->
 
