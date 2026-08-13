@@ -145,7 +145,17 @@ class IdleHousekeepingAdvisoryHandler(Handler):
 
         reader = TranscriptReader()
         try:
-            reader.load(transcript_path)
+            # Bounded tail read (Plan 00231). ``count_trailing_noop_recovery_ticks``
+            # walks ``reversed(messages)`` and returns at the FIRST boundary, so it
+            # can never inspect more than the trailing handful — while ``load()``
+            # parsed the ENTIRE transcript into dataclasses to supply them. This
+            # handler is hot on every recovery tick once enabled, i.e. exactly the
+            # long-idle sessions whose transcripts are largest.
+            #
+            # A truncated window can only ever UNDERCOUNT consecutive ticks, which
+            # makes housekeeping fire less eagerly rather than more — the safe
+            # direction for an opt-in advisory.
+            reader.load_tail(transcript_path)
         except (OSError, ValueError) as exc:
             logger.debug("housekeeping: could not load transcript %s: %s", transcript_path, exc)
             return HookResult(decision=Decision.ALLOW)

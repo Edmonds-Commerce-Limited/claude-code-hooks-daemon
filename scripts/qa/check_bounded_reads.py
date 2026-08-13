@@ -102,6 +102,9 @@ _EXEMPT_SUBPATHS: Final[tuple[str, ...]] = (
     "scripts/qa/check_bounded_reads.py",
     ".claude/hooks-daemon/",
     ".claude/worktrees/",
+    # The module that DEFINES both methods must be free to call and document
+    # them, mirroring how check_python_var_guidance.py exempts cli_command.py.
+    "src/claude_code_hooks_daemon/core/transcript_reader.py",
 )
 
 #: Inline escape hatch, following the project's existing marker convention.
@@ -109,6 +112,29 @@ _EXEMPT_SUBPATHS: Final[tuple[str, ...]] = (
 _EXEMPT_MARKER: Final[str] = "bounded-read-exempt:"
 
 _RULE_NAME: Final[str] = "bounded-intent-unbounded-read"
+
+#: Second rule, keyed on an API NAME rather than a code shape.
+#:
+#: Some instances of this defect are structurally invisible to a shape rule.
+#: `IdleHousekeepingAdvisoryHandler` called `TranscriptReader.load()` — a whole
+#: transcript parsed into dataclasses — to feed a consumer that walks
+#: `reversed(messages)` and returns at the first boundary. There is no `.read()`
+#: in the expression to key on, and the bound lives in a different function
+#: entirely, so no AST pair rule can reach it. The API name is the only handle.
+#:
+#: `load_tail()` is the bounded twin and its own docstring states it is
+#: transparently substitutable for any consumer that inspects only the tail.
+_READER_RULE_NAME: Final[str] = "unbounded-transcript-read"
+_UNBOUNDED_READER_CLASS: Final[str] = "TranscriptReader"
+_UNBOUNDED_READER_METHOD: Final[str] = "load"
+_BOUNDED_READER_METHOD: Final[str] = "load_tail"
+
+_READER_REMEDIATION: Final[str] = (
+    f"Use {_UNBOUNDED_READER_CLASS}.{_BOUNDED_READER_METHOD}() instead — it seeks "
+    "to a bounded window and populates the same accessors, so any consumer that "
+    f"reads only the recent tail is unaffected. If the whole transcript really is "
+    "required, declare it with an inline bounded-read-exempt: marker."
+)
 
 _REMEDIATION: Final[str] = (
     "Read only the window you asked for: seek to max(0, size - max_bytes) and "
@@ -194,6 +220,46 @@ def _collect_file_handles(tree: ast.AST) -> set[str]:
     return handles
 
 
+def _collect_unbounded_readers(tree: ast.AST) -> set[str]:
+    """Return every name bound to a ``TranscriptReader()`` instance."""
+    readers: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+            continue
+        func = node.value.func
+        name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+        if name != _UNBOUNDED_READER_CLASS:
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                readers.add(target.id)
+    return readers
+
+
+def _is_unbounded_reader_load(node: ast.expr, readers: set[str]) -> bool:
+    """Return True if ``node`` is ``<transcript reader>.load(...)``.
+
+    Bound to names proven to hold a ``TranscriptReader`` so that the many
+    unrelated ``Config.load()`` / ``ConfigLoader.load()`` / ``tomllib.load()``
+    calls in this codebase are never touched.
+    """
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if not isinstance(func, ast.Attribute) or func.attr != _UNBOUNDED_READER_METHOD:
+        return False
+    value = func.value
+    if isinstance(value, ast.Name):
+        return value.id in readers or value.id == _UNBOUNDED_READER_CLASS
+    return isinstance(value, ast.Call) and _is_reader_construction(value)
+
+
+def _is_reader_construction(node: ast.Call) -> bool:
+    func = node.func
+    name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+    return bool(name == _UNBOUNDED_READER_CLASS)
+
+
 def _has_maxlen_keyword(node: ast.Call) -> bool:
     return any(keyword.arg == "maxlen" for keyword in node.keywords)
 
@@ -272,10 +338,26 @@ def scan_file(path: Path) -> list[Violation]:
         return []
 
     handles = _collect_file_handles(tree)
+    readers = _collect_unbounded_readers(tree)
     source_lines = source.splitlines()
     violations: list[Violation] = []
 
     for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _is_unbounded_reader_load(node, readers):
+            if not _exempt_lines(source_lines, node.lineno):
+                violations.append(
+                    Violation(
+                        file=str(path),
+                        line=node.lineno,
+                        rule=_READER_RULE_NAME,
+                        message=(
+                            f"{_UNBOUNDED_READER_CLASS}.{_UNBOUNDED_READER_METHOD}() parses the "
+                            f"ENTIRE transcript, which has no upper bound. {_READER_REMEDIATION}"
+                        ),
+                    )
+                )
+            continue
+
         detail: str | None = None
         line: int = 0
 

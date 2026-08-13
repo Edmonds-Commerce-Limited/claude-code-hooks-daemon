@@ -186,6 +186,60 @@ class TestCorrectPatternsStaySilent:
         assert violations == []
 
 
+class TestUnboundedReaderApi:
+    """A NAME rule, because no shape rule can reach this class.
+
+    `TranscriptReader.load()` materialises an entire transcript; `load_tail()`
+    is the bounded twin and its docstring states it is transparently
+    substitutable for any consumer that only inspects the recent tail. The read
+    is a method call on a helper object — no `.read()` appears in the
+    expression — and the bound (a `reversed()` walk with an early return) lives
+    in a DIFFERENT function. An AST pair rule keyed on shape is structurally
+    blind to it, so the API name is the only available handle.
+    """
+
+    def test_flags_load_on_a_transcript_reader(self, tmp_path: Path) -> None:
+        violations = _violations(
+            tmp_path,
+            "from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader\n"
+            "def peek(path):\n"
+            "    reader = TranscriptReader()\n"
+            "    reader.load(path)\n"
+            "    return reader.get_messages()[-3:]\n",
+        )
+        assert any(v["rule"] == "unbounded-transcript-read" for v in violations)
+
+    def test_load_tail_is_the_remedy_and_is_silent(self, tmp_path: Path) -> None:
+        violations = _violations(
+            tmp_path,
+            "from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader\n"
+            "def peek(path):\n"
+            "    reader = TranscriptReader()\n"
+            "    reader.load_tail(path)\n"
+            "    return reader.get_messages()\n",
+        )
+        assert violations == []
+
+    def test_ignores_load_on_an_unrelated_object(self, tmp_path: Path) -> None:
+        """`Config.load()` and friends are a different API entirely."""
+        violations = _violations(
+            tmp_path,
+            "def build(path):\n    config = Config.load(path)\n    return config\n",
+        )
+        assert violations == []
+
+    def test_message_names_the_bounded_replacement(self, tmp_path: Path) -> None:
+        violations = _violations(
+            tmp_path,
+            "from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader\n"
+            "def peek(path):\n"
+            "    reader = TranscriptReader()\n"
+            "    reader.load(path)\n",
+        )
+        finding = next(v for v in violations if v["rule"] == "unbounded-transcript-read")
+        assert "load_tail" in finding["message"]
+
+
 class TestEscapeHatch:
     """A genuine exception is declared in place, following project convention."""
 
