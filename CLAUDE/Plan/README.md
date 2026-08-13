@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00238: handler cost tuning](00238-handler-cost-tuning/PLAN.md) - In Progress (Plan 00234's last follow-up: `git_branch`'s 2.0s render TTL sits inside the resonance band for a ~1.15s render interval, so it misses exactly 50% of the time by construction — ~6,200 git spawns/hour; plus the uncached-read family and two FIX verdicts off the status line)
+
 ### Security / Presentation Audit
 
 ### Core / Hook Coverage
@@ -1179,25 +1181,27 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 237 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 238 (count = `hooksdaemon.latestPlanNumber` git counter)
 - **Completed**: 193 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 33 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 32 + 193 + 6 = **231 folders**, spanning
-  **228 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 33 + 193 + 6 = **232 folders**, spanning
+  **229 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **9** of the
-  237 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  238 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210 — abandoned drafts, numbers burned by transient
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
-  already covered the work). 228 + 9 = 237. ✅
-- **Last reconciled by**: the Plan 00237 closure — its folder moved from the
-  root into `Completed/`, so Active fell by one and Completed rose by one while
-  Total and Cancelled were untouched. Recounted from disk (32 root,
-  193 `Completed/`, 6 `Cancelled/`). Before that, the Plan 00237 creation — a
+  already covered the work). 229 + 9 = 238. ✅
+- **Last reconciled by**: the Plan 00238 creation — a new plan folder for
+  Plan 00234's last follow-up (cost tuning), so Total and Active each rose by
+  one while Completed and Cancelled were untouched. Recounted from disk
+  (33 root, 193 `Completed/`, 6 `Cancelled/`). Before that, the Plan 00237
+  closure — its folder moved from the root into `Completed/`, so Active fell by
+  one and Completed rose by one. Before that, the Plan 00237 creation — a
   new plan folder for the removal slice of Plan 00234's findings, so Total and
   Active each rose by one. Before that, the Plan 00236 closure — created and completed in the
   same pass, so its folder went straight to `Completed/`: Total and Completed
