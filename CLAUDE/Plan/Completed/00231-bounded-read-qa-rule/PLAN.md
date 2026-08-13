@@ -38,9 +38,10 @@ generalise, and the next occurrence would again be found by accident.
 
 ## Non-Goals
 
-- A general dataflow/taint analysis (see Decision 2)
-- Replacing the repo's bespoke-scanner approach with an off-the-shelf engine
-  (see Decision 3 — a real option, but an architectural call for the owner)
+- Migrating the repo's OTHER bespoke scanners to semgrep. `check_doc_truth`,
+  `check_git_history` and `check_handler_reference` reason about git refs,
+  cross-file consistency and config — none of that is expressible in a
+  code-pattern engine, so the end state is a hybrid, not a replacement.
 
 ## Context & Background
 
@@ -64,7 +65,7 @@ loading a config or a plan document is correct.
   - [x] ✅ Correct remedies stay silent (bounded seek, streaming iteration,
     `itertools.islice`)
   - [x] ✅ Inline `bounded-read-exempt:` escape hatch honoured
-- [x] ✅ **Task 1.2**: Implement `scripts/qa/check_bounded_reads.py` (AST-based)
+- [x] ✅ **Task 1.2**: Implement an AST-based checker (later removed — Phase 6)
 - [x] ✅ **Task 1.3**: Fix the silent `except ValueError` the repo's own
   error-hiding audit caught in the new checker
 
@@ -93,6 +94,20 @@ loading a config or a plan document is correct.
 - [x] ✅ **Task 5.3**: Add a NAME-keyed rule banning `TranscriptReader.load()`
   outside its defining module (Decision 4)
 - [x] ✅ **Task 5.4**: Switch `idle_housekeeping_advisor` to `load_tail()`
+
+### Phase 6: Replace the bespoke checker with semgrep
+
+- [x] ✅ **Task 6.1**: Verify semgrep would not reach client projects — read
+  `scripts/install/venv.sh:674` and confirm the installer runs
+  `uv pip install -e <dir>` with **no** `[dev]` extra
+- [x] ✅ **Task 6.2**: Benchmark both engines on the SAME 11-shape probe
+- [x] ✅ **Task 6.3**: Express the rules as `scripts/qa/semgrep/bounded-reads.yaml`
+- [x] ✅ **Task 6.4**: Add `run_semgrep_check.sh` that FAILS LOUD when semgrep is
+  absent, rather than reporting green over an unexamined tree
+- [x] ✅ **Task 6.5**: Delete `check_bounded_reads.py` and its 19 tests; re-point
+  QA check #20 at semgrep in both entry points
+- [x] ✅ **Task 6.6**: Diagnose the 2 remaining misses rather than hedging (see
+  Decision 5)
 
 ## Technical Decisions
 
@@ -128,24 +143,35 @@ to advisory. The blind spot is recorded in the checker's own docstring.
 
 **Date**: 2026-08-13
 
-### Decision 3: Bespoke AST checker rather than Semgrep / ast-grep
+### Decision 3: Semgrep, not a bespoke AST checker
 
 **Context**: Ruff (0.15.22, installed) has **no** plugin or custom-rule
 mechanism — `--extend-select` selects from built-in codes only. Tools that DO
 support user-defined rules are Semgrep, ast-grep, Pylint plugins and Flake8
-plugins.
+plugins. DBF (Standard 15) makes "add a guard" a routine act, so the cost of
+authoring one guard is a structural cost, not a one-off.
 
-**Decision**: Follow the repo's established pattern — `scripts/qa/` already
-holds 15 bespoke scanners. Introducing a 16th tool is an architectural change,
-not a bug fix.
+**Options considered**:
 
-**Recorded caveat**: Semgrep would express THIS rule better (roughly 15 lines
-of YAML using `pattern-inside` for the `with open(...) as $F` scope, versus a
-Python module that itself needs a test suite). Most of this repo's other guards
-— `check_doc_truth`, `check_git_history`, `check_handler_reference` — reason
-about git refs, cross-file consistency and config, and are not expressible in
-any code-pattern engine. A hybrid is the honest end state and is left to the
-repository owner.
+1. A bespoke AST scanner, following the pattern of the 15 already in
+   `scripts/qa/` — a few hundred lines of Python plus its own test suite.
+2. Semgrep rules — declarative YAML, no test suite of their own.
+
+**Decision**: Option 2. Settled by measurement rather than by argument: run
+against the same 11-shape probe of this defect class, the hand-written checker
+caught **1**, the semgrep rules caught **9**.
+
+**This reverses the decision originally recorded here**, which chose Option 1 to
+avoid "a new runtime dependency in a daemon that clones into client projects".
+That objection was simply false, and one file settled it: `scripts/install/venv.sh:674`
+provisions a client venv with `uv pip install -e <dir>` and no `[dev]` extra,
+so ruff, mypy, black and bandit have never reached a client either. Semgrep is a
+dev dependency in exactly the same sense. The lesson worth keeping is that the
+objection was stated as a fact about the installer without reading the installer.
+
+**Consequence**: adding the next rule now means dropping a `.yaml` into
+`scripts/qa/semgrep/` — it is picked up automatically, with no wiring, no new
+script and no tests. That is the property DBF needs.
 
 **Date**: 2026-08-13
 
@@ -161,19 +187,40 @@ bound lives in a different function.
 bound to names proven to hold a reader so unrelated `Config.load()` calls are
 untouched. The defining module is exempt.
 
-**Measured limitation, recorded rather than glossed**: an 11-shape probe run
-against the shape rule caught 1. It is a tripwire for a specific spelling, not
-coverage of the class — though every missed shape has zero live instances
-today. A shape rule and a name rule cover genuinely different classes; choosing
-the wrong handle yields a guard that is registered, runs, and is blind.
+**Why a name rule is still needed after Decision 3**: semgrep raised shape
+coverage from 1/11 to 9/11, but this instance is not a shape miss at all. There
+is no read expression to match — the cost is inside a method on a helper object.
+A shape rule and a name rule cover genuinely different classes; choosing the
+wrong handle yields a guard that is registered, runs, and is blind.
+
+**Date**: 2026-08-13
+
+### Decision 5: Accept 9/11 as the ceiling, having diagnosed the other 2
+
+**Context**: The semgrep rules miss `a_deferred_slice` and
+`b_deferred_slice_plain` — a whole-file read bound to a name, sliced later.
+
+**Diagnosis, not a hedge**: a minimal three-rule probe isolated the cause.
+`pattern-inside` with a `...` sequence fails to bind the read to the later
+slice, and taint mode does not propagate into a subscript sink. The only
+pattern form that DOES match is a bare `$X[-$N:]`, which would flag every
+negative slice of every list in the repository.
+
+**Decision**: Stop at 9/11. The two misses are the same deferred class the
+hand-written checker also missed, and the one live instance of it
+(`background_process_tracker.py`) is provably benign under Decision 2. Buying
+those two shapes costs a false-positive generator on a gate that blocks
+commits — the trade Decision 2 already refused once.
 
 **Date**: 2026-08-13
 
 ## Success Criteria
 
-- [x] ✅ Checker detects every tested spelling of the defect
-- [x] ✅ Checker reports zero false positives across `src/`, `scripts/`,
+- [x] ✅ The guard catches 9 of the 11 probed spellings, with the other 2
+  diagnosed rather than left as an unknown (Decision 5)
+- [x] ✅ Zero false positives across 417 files in `src/`, `scripts/`,
   `.claude/project-handlers/`
+- [x] ✅ Runs fully offline — local `--config`, metrics off, no registry fetch
 - [x] ✅ Byte accounting proves the fix: 2,396,089 bytes read before, 65,536
   after, marker still found
 - [x] ✅ Full QA green at 21/21 (was 20/20)
@@ -184,9 +231,13 @@ the wrong handle yields a guard that is registered, runs, and is blind.
 | Risk                                                        | Impact | Probability | Mitigation                                                                       |
 | ----------------------------------------------------------- | ------ | ----------- | -------------------------------------------------------------------------------- |
 | Rule is registered but blind (the Plan 00230 failure shape) | High   | Medium      | Byte-accounting test run against a reconstruction of the original defect         |
-| Future widening reintroduces false positives                | Medium | Medium      | Blind spot and its rationale recorded in the checker docstring                   |
+| Future widening reintroduces false positives                | Medium | Medium      | Blind spot and its rationale recorded in the rule file's own header              |
 | Guard's own code trips other guards                         | Low    | Realised    | The repo's error-hiding audit caught a silent `except ValueError`; fixed at root |
+| Guard passes green because semgrep is not installed         | High   | Low         | `run_semgrep_check.sh` exits 1 when the binary is absent — never a silent pass   |
 
 ## Delivery & Milestones
 
-- Guard, wiring, instance fix and tests delivered together in the closing commit
+- Guard, wiring, instance fix and tests delivered together in `a7c799f1`
+- Name-keyed rule and the `load_tail()` switch in `06b873c4`
+- Plan and journal record of Phase 5 in `24e8d0be`
+- Bespoke checker replaced by semgrep in `d868a087` (Phase 6, Decisions 3 and 5)
