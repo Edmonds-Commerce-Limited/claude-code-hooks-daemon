@@ -86,6 +86,14 @@ loading a config or a plan document is correct.
 - [x] ✅ **Task 4.1**: Document the variable-indirection blind spot and why
   widening it is refused (Decision 2)
 
+### Phase 5: Close the class a shape rule cannot reach
+
+- [x] ✅ **Task 5.1**: Audit the new checker for false negatives
+- [x] ✅ **Task 5.2**: Verify the audit's findings independently before acting
+- [x] ✅ **Task 5.3**: Add a NAME-keyed rule banning `TranscriptReader.load()`
+  outside its defining module (Decision 4)
+- [x] ✅ **Task 5.4**: Switch `idle_housekeeping_advisor` to `load_tail()`
+
 ## Technical Decisions
 
 ### Decision 1: Key the rule on the DECLARED bound, not on whole-file reads
@@ -138,6 +146,26 @@ Python module that itself needs a test suite). Most of this repo's other guards
 about git refs, cross-file consistency and config, and are not expressible in
 any code-pattern engine. A hybrid is the honest end state and is left to the
 repository owner.
+
+**Date**: 2026-08-13
+
+### Decision 4: A NAME-keyed rule for the class shape rules cannot reach
+
+**Context**: A false-negative audit found a second live instance —
+`idle_housekeeping_advisor.py:148` calling `TranscriptReader.load()` to feed a
+consumer that returns at the first boundary of a `reversed()` walk. No AST pair
+rule can see it: there is no `.read()` in the expression, and the declared
+bound lives in a different function.
+
+**Decision**: Add a second rule keyed on the API NAME rather than a code shape,
+bound to names proven to hold a reader so unrelated `Config.load()` calls are
+untouched. The defining module is exempt.
+
+**Measured limitation, recorded rather than glossed**: an 11-shape probe run
+against the shape rule caught 1. It is a tripwire for a specific spelling, not
+coverage of the class — though every missed shape has zero live instances
+today. A shape rule and a name rule cover genuinely different classes; choosing
+the wrong handle yields a guard that is registered, runs, and is blind.
 
 **Date**: 2026-08-13
 
