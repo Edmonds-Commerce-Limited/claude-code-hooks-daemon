@@ -320,5 +320,120 @@ config_changes:
         to opt back in -- and expect the retained window to shrink to about
         an hour again while it is on.
   renamed: []
-  removed: []
+  removed:
+    - key: handlers.pre_compact.transcript_archiver
+      recommended: true
+      description: >-
+        REMOVED (Plan 00233). This handler copied the full session transcript
+        into untracked/transcripts/ before every compaction. It protected
+        nothing, and the investigation that removed it established why on all
+        three counts. Compaction never deletes the original transcript -- it
+        shrinks the model's context, not the file on disk. The original
+        already lives on the same persistent storage as the copies: Claude
+        Code writes it under ~/.claude/projects/, which in a containerised
+        setup is commonly a mount into the project itself, so the copy offered
+        no additional durability. And nothing ever read an archive: the only
+        three references in the entire codebase were a disk-usage row, a
+        retention entry bounding a directory that existed solely to be
+        bounded, and a line in the bug-report skill suggesting an agent could
+        read them. No code parsed one, in any release.
+        Left running, it accumulated real cost -- one full copy per
+        compaction, and because transcripts only ever append, each archive was
+        a strict PREFIX of the next. In the daemon's own repository this
+        reached 422 MB of archives guarding 302 MB of originals, including
+        five copies of a single session written in one day.
+      migration_note: >-
+        NO ACTION REQUIRED. A leftover "transcript_archiver:" block in your
+        .claude/hooks-daemon.yaml is explicitly tolerated -- the daemon carries
+        a registry of retired handler names, so an unedited config validates
+        cleanly and will NOT put the daemon into degraded mode. Removing a
+        handler is our decision, not a mistake in your config, so it must not
+        be reported to you as a configuration error.
+        Two optional tidy-ups when convenient: delete the
+        "transcript_archiver:" block from your config, and delete
+        untracked/transcripts/ to reclaim the disk. Those archives are copies
+        of transcripts you still have -- deleting them loses nothing.
+        One thing to know before you delete them: the archives were REDACTED
+        against your secret word list, and Claude Code's original transcripts
+        are NOT redacted by anything. So this removes redacted duplicates and
+        leaves unredacted originals in place. That is an argument for
+        attending to the originals, not for keeping duplicates of them, but
+        you should know which artefact is which before you reach for rm.
+    - key: handlers.status_line.usage_tracking
+      recommended: true
+      description: >-
+        REMOVED (Plan 00237). A status-line segment whose matches() had
+        returned a hardcoded False since commit 71593163, behind a
+        "DISABLED: needs architectural rework" comment, pending a rework that
+        never came. It rendered nothing in any install while its config said
+        enabled: true -- the daemon's own verdict log confirms it at 0 of
+        44,180 retained records. Its per-model token-limit table was doubly
+        stale on top of that.
+      migration_note: >-
+        NO ACTION REQUIRED -- nothing was being rendered, so nothing changes
+        on screen. A leftover "usage_tracking:" block validates cleanly (the
+        daemon carries a registry of retired handler names). Delete the block
+        when convenient. Daily/weekly usage percentages remain available from
+        Claude Code itself.
+    - key: handlers.session_end.cleanup
+      recommended: true
+      description: >-
+        REMOVED (Plan 00237). This SessionEnd handler deleted files from the
+        daemon's untracked temp/hooks/ directory -- a directory nothing in the
+        codebase has ever written, and which does not exist on disk. A reaper
+        with no producer, the same shape as transcript_archiver above.
+        SessionEnd remains a registered, dispatchable event; it simply ships
+        no handlers today, so the "session_end:" section is now empty rather
+        than absent.
+      migration_note: >-
+        NO ACTION REQUIRED. Nothing it deleted was ever created, so removing
+        it frees no disk and loses no cleanup. Delete the "cleanup:" block
+        when convenient. A project-level SessionEnd handler can still be
+        registered under "session_end" in the usual way.
+    - key: handlers.session_start.yolo_container_detection
+      recommended: true
+      description: >-
+        REMOVED (Plan 00237). Its SessionStart banner was already turned OFF
+        by default in Plan 00128, on the grounds that a container is surfaced
+        better by the status-line icon (environment_indicator) and by
+        `hooks-daemon check`. What remained was a handler whose nested
+        show_on_session_start flag defaulted False INDEPENDENTLY of
+        enabled: true, so it was silent in every default install. This
+        completes the earlier decision rather than making a new one.
+      migration_note: >-
+        NO ACTION REQUIRED for a default install -- the banner was already
+        off. If you had deliberately set show_on_session_start: true you lose
+        that one-off banner; the status-line container icon shows the same
+        thing continuously. Delete the "yolo_container_detection:" block when
+        convenient.
+    - key: handlers.notification.notification_logger
+      recommended: true
+      description: >-
+        REMOVED (Plan 00237). It appended every Notification event to
+        notifications.jsonl -- a file no code in the codebase has ever read
+        and no documented diagnostic step ever names. A writer with no reader.
+        The Stop-event log survived the same audit precisely because
+        documented workflows do tell you to read it; this one had no such
+        consumer in any release. Notification remains a registered,
+        dispatchable event; it simply ships no handlers today, so the
+        "notification:" section is now empty rather than absent.
+      migration_note: >-
+        NO ACTION REQUIRED. Delete the "notification_logger:" block when
+        convenient, and delete notifications.jsonl from your daemon untracked
+        dir to reclaim the disk -- nothing reads it. If you want an audit
+        trail of handler DECISIONS, that is what daemon.verdict_log and
+        `hooks-daemon verdicts` provide.
+    - key: handlers.subagent_stop.subagent_completion_logger
+      recommended: true
+      description: >-
+        REMOVED (Plan 00237). The same shape as notification_logger above: it
+        appended every subagent completion to a JSONL file that nothing reads,
+        growing without bound (3.4 MB live in the daemon's own repository).
+        Handler-decision auditing is served instead by the verdict log, which
+        has a real reader in `hooks-daemon verdicts`.
+      migration_note: >-
+        NO ACTION REQUIRED. Delete the "subagent_completion_logger:" block
+        when convenient, and delete subagent_completions.jsonl from your
+        daemon untracked dir to reclaim the disk. remind_prompt_library is
+        unaffected and still runs on SubagentStop.
   changed: []

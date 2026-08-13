@@ -173,8 +173,6 @@ class Priority:
     BRITISH_ENGLISH = 60
 
     # Logging/cleanup handlers (Priority: 100)
-    NOTIFICATION_LOGGER = 100
-    SUBAGENT_COMPLETION_LOGGER = 100
     REMIND_PROMPT_LIBRARY = 100
 
     # Status line handlers (varied priorities)

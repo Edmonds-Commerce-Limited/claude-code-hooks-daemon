@@ -306,7 +306,7 @@ class TestNotificationValidation:
     def test_wrong_field_severity_instead_of_notification_type(self):
         """Using severity instead of notification_type fails.
 
-        This was the bug in NotificationLoggerHandler tests.
+        This was the bug in the old Notification handler's tests.
         """
         hook_input = {
             "hook_event_name": "Notification",

@@ -65,8 +65,6 @@ _STRICT_ONLY_HANDLERS: Final[list[str]] = [
     "lsp_enforcement",
     "npm_command",
     "british_english",
-    "subagent_completion_logger",
-    "notification_logger",
     "remind_prompt_library",
     "validate_eslint_on_write",
 ]

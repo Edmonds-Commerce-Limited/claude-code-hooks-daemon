@@ -526,10 +526,6 @@ handlers:
 
   # SubagentStop handlers (run when subagent completes)
   subagent_stop:
-    subagent_completion_logger:  # Logs subagent completion
-      enabled: true
-      priority: 10
-
     remind_prompt_library:  # Reminds about prompt library after agent work
       enabled: true         # Enable for prompt library reminders
       priority: 20
@@ -585,10 +581,10 @@ handlers:
       enabled: true
       priority: 10
 
-  notification:
-    notification_logger:  # Logs notifications
-      enabled: true
-      priority: 10
+  # Notification handlers — none ship today. `notification_logger` was the only
+  # one and was removed in Plan 00237 (it wrote a JSONL nothing ever read).
+  # The section stays so Notification remains a declared, dispatchable event.
+  notification: {}
 
   stop:
     auto_continue_stop:  # Auto-continues after stop events based on criteria

@@ -17,9 +17,9 @@ wrong mode — is currently unanswerable, and answerable cheaply."
 {daemon untracked dir}/logs/hooks/verdicts.jsonl
 ```
 
-Same directory as `notifications.jsonl` and `subagent_completions.jsonl` —
-normal install: `.claude/hooks-daemon/untracked/logs/hooks/`; self-install:
-`untracked/logs/hooks/`.
+Normal install: `.claude/hooks-daemon/untracked/logs/hooks/`; self-install:
+`untracked/logs/hooks/`. (Note `stop-events.jsonl` is NOT in this directory —
+it sits directly under the daemon's untracked dir.)
 
 ## Schema
 

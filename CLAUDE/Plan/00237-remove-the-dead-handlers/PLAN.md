@@ -58,34 +58,57 @@ effect that must be relocated first.
 Deleting these changes no observable behaviour. Each verdict rests on a
 structural fact, re-verified here before deletion rather than taken on trust.
 
-- [ ] ⬜ **Task 1.1**: `usage_tracking` (Status) — `matches()` has returned a
+- [x] ✅ **Task 1.1**: `usage_tracking` (Status) — `matches()` has returned a
   hardcoded False since commit 71593163; config claims `enabled: true`, which
   is a lie about runtime state. Takes `stats_cache_reader.py` with it
-- [ ] ⬜ **Task 1.2**: `cleanup` (SessionEnd) — reaps `temp/hooks/`, which
+- [x] ✅ **Task 1.2**: `cleanup` (SessionEnd) — reaps `temp/hooks/`, which
   nothing in the codebase writes and which does not exist on disk. The
   Plan 00233 shape exactly
-- [ ] ⬜ **Task 1.3**: `yolo_container_detection` (SessionStart) —
+- [x] ✅ **Task 1.3**: `yolo_container_detection` (SessionStart) —
   `show_on_session_start` defaults False independently of `enabled: true`, so
   it is silent in every install
-- [ ] ⬜ **Task 1.4**: `subagent_completion_logger` — writer with zero readers
+- [x] ✅ **Task 1.4**: `subagent_completion_logger` — writer with zero readers
   repo-wide; superseded in intent by the verdict log. 3.4 MB live
-- [ ] ⬜ **Task 1.5**: `notification_logger` — same class, same corroboration
-- [ ] ⬜ **Task 1.6**: Checkpoint commit with registry + manifest entries
+- [x] ✅ **Task 1.5**: `notification_logger` — same class, same corroboration
+- [x] ✅ **Task 1.6**: Checkpoint commit with registry + manifest entries
+- [x] ✅ **Task 1.7**: DBF — guard the registry/manifest seam. Two checks in
+  `tests/integration/test_config_migrations_integration.py`: every handler a
+  manifest documents as `removed` must carry a `RETIRED_HANDLERS` entry, and
+  every staged manifest must match the `v*.yaml` glob the release step moves.
+  Both found real pre-existing bugs on first run — see Decision 2 and 3
 
 ### Phase 2: The five that DO fire
 
 Each of these reaches the agent's context today, so the question is not "does
 it run" but "does its duty survive elsewhere". Record that answer per handler.
 
+**Correction to that framing, established by live probe**: two of the five do
+NOT fire on an ordinary stop. A Stop dispatched through the live daemon with a
+valid `STOPPING BECAUSE:` transcript returns `{}` — no advisory context at all
+— because `auto_continue_stop` (priority 10, `terminal=True`) matched and broke
+the chain. So `task_completion_checker` (20) and the Stop leg of
+`remind_prompt_library` (100) are shadowed exactly as Plan 00236's guard
+describes, and belong to Phase 1's "cannot fire" class rather than this one.
+They remain reachable only in `auto_continue_stop`'s two narrow non-matching
+cases (confirmed re-entry, AskUserQuestion turn), and `remind_prompt_library`
+also runs on SubagentStop, where no terminal handler precedes it.
+
 - [ ] ⬜ **Task 2.1**: `task_tdd_advisor` — its ~30-line payload is already
   resident via CLAUDE.md's eager `@`-imports; `get_claude_md()` is None
 - [ ] ⬜ **Task 2.2**: `remind_prompt_library` — points at an npm script and a
   `CLAUDE/PromptLibrary/` directory that do not exist, with no existence
-  gating
+  gating (both verified absent; `matches()` is `return True`). Removing it
+  empties SubagentStop, so that section becomes `subagent_stop: {}` on the
+  same footing as `session_end` and `notification`
 - [ ] ⬜ **Task 2.3**: `task_completion_checker` — static checklist whose
   substance `auto_continue_stop` *enforces* rather than reminds
 - [ ] ⬜ **Task 2.4**: `post_clear_auto_execute` — its originating plan is
-  Cancelled as unachievable and rates the surviving code marginal
+  Cancelled as unachievable and rates the surviving code marginal, and its
+  once-per-session contract is implemented with a single `_last_session_id`
+  slot, which cannot hold per-session state in a daemon that parallel sessions
+  deliberately SHARE. Note `scripts/qa/check_handler_reference.py` cites it
+  twice as its worked example of a shipped handler with no `HandlerID` entry —
+  repoint those comments, do not leave a dangling example
 - [ ] ⬜ **Task 2.5**: `bash_error_detector` — decide REMOVE vs narrow +
   rate-limit, and record the decision. It is the most active behavioural
   handler in the log and fires on any common-word hit in output the agent can
@@ -121,6 +144,53 @@ it run" but "does its duty survive elsewhere". Record that answer per handler.
 - [ ] ⬜ **Task 5.4**: Client-mode verification — a real client install with a
   config naming every retired handler must start WITHOUT degraded mode
 - [ ] ⬜ **Task 5.5**: Commit and push
+
+## Technical Decisions
+
+### Decision 1: an event with no handlers keeps its config section
+
+**Context**: removing `cleanup` emptied SessionEnd, and removing
+`notification_logger` emptied Notification. A dogfooding guard
+(`test_config_has_all_event_types`) then failed.
+
+**Options**: drop the event from the expected set, or keep an empty section.
+
+**Decision**: keep `session_end: {}` / `notification: {}`. Both events are
+still registered and dispatchable — probed live, each returns `{}` on a valid
+payload — they simply ship no handlers. Dropping them from the expected set
+would weaken an invariant to make a symptom go away, and would leave a
+project-level handler for those events with no documented place to live.
+
+### Decision 2: six handlers retired before the registry existed were still rejected
+
+**Context**: the new manifest/registry guard failed on first run, naming
+`eslint_disable`, `python_qa_suppression_blocker`, `php_qa_suppression_blocker`,
+`go_qa_suppression_blocker` (v2.9.0) and `validate_sitemap`, `remind_validator`
+(v2.11.0).
+
+Verified rather than assumed: a config naming any of the six was still
+REJECTED by `ConfigValidator.validate_and_raise` today. `RETIRED_HANDLERS`
+arrived in Plan 00233, so every handler removed before it had its documented
+removal on one side and nothing on the other — an unedited v2.x config has been
+tipping client daemons into DEGRADED MODE for every release since, over a
+removal we performed deliberately.
+
+**Decision**: add all six to the registry. This is not scope creep from the
+plan's remit — the registry IS this plan's mechanism, and the bug is the exact
+failure mode the plan exists to prevent, found by the guard rather than by
+hand.
+
+### Decision 3: a staged manifest not matching `v*.yaml` is silently stranded
+
+**Context**: `UNRELEASED/config-changes/` held `transcript-archiver-removal.yaml`.
+`RELEASING.md` Step 6 moves `UNRELEASED/config-changes/v*.yaml`, so that file
+would never have been moved — Plan 00233's entire client-facing removal note
+was set to sit in staging forever, with no error at any point.
+
+**Decision**: merge its content into `v3.53.0.yaml` (alongside this plan's five
+removals), delete the mis-named file, and add a guard asserting every staged
+`*.yaml` also matches `v*.yaml`. The filename is the contract; nothing else
+enforced it.
 
 ## Dependencies
 

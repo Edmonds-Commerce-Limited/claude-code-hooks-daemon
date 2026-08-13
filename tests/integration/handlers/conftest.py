@@ -161,17 +161,6 @@ def make_permission_request_input(
     return result
 
 
-def make_notification_input(
-    title: str = "Test", message: str = "Test notification"
-) -> dict[str, Any]:
-    """Create a Notification hook_input."""
-    return {
-        "hook_event_name": "Notification",
-        "title": title,
-        "message": message,
-    }
-
-
 def make_user_prompt_submit_input(prompt: str = "Hello") -> dict[str, Any]:
     """Create a UserPromptSubmit hook_input."""
     return {

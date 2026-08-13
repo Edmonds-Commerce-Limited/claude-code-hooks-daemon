@@ -159,8 +159,8 @@ The daemon ships with a large library of production handlers spanning every hook
 
 ### Session Management
 
-- **YOLO container detection** (`yolo_container_detection`) — Identifies container environments from OS-level markers
 - **Version checker** (`version_check`) — Alerts when the daemon is out of date
+- **Git upstream checker** (`git_upstream_checker`) — Fetches on session start and advises when a branch is behind its upstream
 
 ---
 

@@ -213,12 +213,6 @@
       "reason": "Returns None on config load failure. Callers receive None and handle it by using defaults or raising with better context. This is the documented contract of the function."
     },
     {
-      "file": "handlers/notification/notification_logger.py",
-      "function": "handle",
-      "rule": "log-and-continue",
-      "reason": "Notification logger: logs OSError at debug level and continues. Monitoring handlers must not crash sessions because a log file is temporarily unavailable. The error is now visible in debug logs rather than silently discarded."
-    },
-    {
       "file": "handlers/pre_compact/compaction_signal.py",
       "function": "_write_signal",
       "rule": "log-and-continue",
@@ -241,12 +235,6 @@
       "function": "register_all",
       "rule": "log-and-continue",
       "reason": "Handler module discovery: log-and-continue when a module fails to import. One broken module should not prevent other handlers from loading. Already logged at warning level."
-    },
-    {
-      "file": "handlers/session_end/cleanup_handler.py",
-      "function": "handle",
-      "rule": "log-and-continue",
-      "reason": "Session cleanup handler: logs OSError at debug level and continues. Cleanup is best-effort; session end must not be blocked by a failed temp file removal. The error is now visible in debug logs."
     },
     {
       "file": "handlers/session_start/hook_registration_checker.py",
@@ -348,13 +336,7 @@
       "file": "handlers/status_line/context_sidecar.py",
       "function": "_write_sidecar",
       "rule": "log-and-continue",
-      "reason": "Plan 00135 observe-only context sidecar: log-and-continue on RuntimeError (ProjectContext not initialised in unit tests / non-daemon callers) and OSError (untracked dir unwritable). Status line handlers are fail-open by design \u2014 a failed best-effort sidecar write must never crash the render or the dispatch. The sidecar is an advisory sensor for the PTY supervisor, not a critical path. Both errors are logged at warning level, never silently swallowed. Same fail-open contract as notification_logger.handle and startup_cleanup.handle."
-    },
-    {
-      "file": "handlers/status_line/stats_cache_reader.py",
-      "function": "read_stats_cache",
-      "rule": "return-none-on-error",
-      "reason": "Stats cache reader: returns None when cache file missing or unparseable. Status line callers handle None by omitting the stats section. Status line must never crash the terminal display."
+      "reason": "Plan 00135 observe-only context sidecar: log-and-continue on RuntimeError (ProjectContext not initialised in unit tests / non-daemon callers) and OSError (untracked dir unwritable). Status line handlers are fail-open by design \u2014 a failed best-effort sidecar write must never crash the render or the dispatch. The sidecar is an advisory sensor for the PTY supervisor, not a critical path. Both errors are logged at warning level, never silently swallowed. Same fail-open contract as startup_cleanup.handle."
     },
     {
       "file": "handlers/status_line/supervisor_indicator.py",
@@ -391,12 +373,6 @@
       "function": "_log_stop_event",
       "rule": "log-and-continue",
       "reason": "_log_stop_event(): Non-critical JSONL append \u2014 logs at debug level and continues when ProjectContext is not initialised (unit tests) or the log file is unwritable. Stop event logging is purely diagnostic and must not affect the handler decision or raise to callers."
-    },
-    {
-      "file": "handlers/subagent_stop/subagent_completion_logger.py",
-      "function": "handle",
-      "rule": "log-and-continue",
-      "reason": "Subagent completion logger: logs OSError at debug level and continues. Monitoring handlers must not crash sessions because a log file is temporarily unavailable. The error is now visible in debug logs rather than silently discarded."
     },
     {
       "file": "install/client_validator.py",
@@ -726,7 +702,7 @@
       "file": "daemon/controller.py",
       "function": "_record_verdicts",
       "rule": "log-and-continue",
-      "reason": "Plan 00209 verdict log: log-and-continue on RuntimeError (ProjectContext not initialised -- the default-config/standalone entry-point branch exercised by many unit tests) and OSError (untracked dir unwritable). The verdict log is a metadata-only audit trail; a failed write must never break hook dispatch, which carries safety-critical handlers. Both errors are logged at warning level, never silently swallowed. Same sanctioned fail-open contract as daemon/server.py::_capture_payload_best_effort and handlers/notification/notification_logger.py::handle."
+      "reason": "Plan 00209 verdict log: log-and-continue on RuntimeError (ProjectContext not initialised -- the default-config/standalone entry-point branch exercised by many unit tests) and OSError (untracked dir unwritable). The verdict log is a metadata-only audit trail; a failed write must never break hook dispatch, which carries safety-critical handlers. Both errors are logged at warning level, never silently swallowed. Same sanctioned fail-open contract as daemon/server.py::_capture_payload_best_effort."
     },
     {
       "file": "daemon/verdict_report.py",

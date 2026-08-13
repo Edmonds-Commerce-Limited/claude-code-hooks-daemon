@@ -1,7 +1,7 @@
 """Integration tests for Stop and SubagentStop handlers.
 
 Tests: TaskCompletionCheckerHandler, AutoContinueStopHandler,
-       SubagentCompletionLoggerHandler, RemindPromptLibraryHandler
+       RemindPromptLibraryHandler
 """
 
 from __future__ import annotations
@@ -198,36 +198,6 @@ class TestAutoContinueStopHandler:
 
     def test_handler_is_terminal(self, handler: Any) -> None:
         assert handler.terminal is True
-
-
-# ---------------------------------------------------------------------------
-# SubagentCompletionLoggerHandler
-# ---------------------------------------------------------------------------
-class TestSubagentCompletionLoggerHandler:
-    """Integration tests for SubagentCompletionLoggerHandler."""
-
-    @pytest.fixture()
-    def handler(self) -> Any:
-        from claude_code_hooks_daemon.handlers.subagent_stop.subagent_completion_logger import (
-            SubagentCompletionLoggerHandler,
-        )
-
-        return SubagentCompletionLoggerHandler()
-
-    def test_matches_all_subagent_events(self, handler: Any) -> None:
-        hook_input = make_subagent_stop_input()
-        assert handler.matches(hook_input) is True
-
-    def test_handle_returns_allow(self, handler: Any) -> None:
-        hook_input = make_subagent_stop_input(
-            transcript_path="/tmp/transcript.jsonl",
-            subagent_type="task",
-        )
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.ALLOW
-
-    def test_handler_is_non_terminal(self, handler: Any) -> None:
-        assert handler.terminal is False
 
 
 # ---------------------------------------------------------------------------

@@ -729,77 +729,8 @@ class TestGitContextInjectorHandler:
 
 
 # =============================================================================
-# SubagentStop Handlers (3 handlers)
+# Notification Handlers (none — `notification_logger` removed in Plan 00237)
 # =============================================================================
-
-
-class TestSubagentCompletionLoggerHandler:
-    """Test SubagentCompletionLoggerHandler response validation."""
-
-    @pytest.fixture
-    def handler(self):
-        from claude_code_hooks_daemon.handlers.subagent_stop.subagent_completion_logger import (
-            SubagentCompletionLoggerHandler,
-        )
-
-        return SubagentCompletionLoggerHandler()
-
-    @pytest.mark.parametrize(
-        "hook_input,expected_decision,description",
-        [
-            # Logs subagent completion
-            (
-                {"subagent_type": "Explore", "status": "completed", "result": "Found 5 files"},
-                Decision.ALLOW,
-                "Log subagent completion",
-            ),
-        ],
-    )
-    def test_response_validity(
-        self, handler, hook_input, expected_decision, description, response_validator
-    ):
-        """Test handler returns valid SubagentStop response."""
-        result = handler.handle(hook_input)
-        assert result.decision == expected_decision, f"Failed: {description}"
-        response = result.to_json("SubagentStop")
-        response_validator.assert_valid("SubagentStop", response)
-
-
-# =============================================================================
-# Notification Handlers (1 handler)
-# =============================================================================
-
-
-class TestNotificationLoggerHandler:
-    """Test NotificationLoggerHandler response validation."""
-
-    @pytest.fixture
-    def handler(self):
-        from claude_code_hooks_daemon.handlers.notification.notification_logger import (
-            NotificationLoggerHandler,
-        )
-
-        return NotificationLoggerHandler()
-
-    @pytest.mark.parametrize(
-        "hook_input,expected_decision,description",
-        [
-            # Logs notifications
-            (
-                {"notification_type": "info", "message": "Test notification"},
-                Decision.ALLOW,
-                "Log notification",
-            ),
-        ],
-    )
-    def test_response_validity(
-        self, handler, hook_input, expected_decision, description, response_validator
-    ):
-        """Test handler returns valid Notification response."""
-        result = handler.handle(hook_input)
-        assert result.decision == expected_decision, f"Failed: {description}"
-        response = result.to_json("Notification")
-        response_validator.assert_valid("Notification", response)
 
 
 # =============================================================================

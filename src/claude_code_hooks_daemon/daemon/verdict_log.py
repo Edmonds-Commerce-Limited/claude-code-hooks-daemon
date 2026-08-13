@@ -56,7 +56,7 @@ from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.utils.retention import cap_log_file
 
 # Filename for the verdict log, resolved by the caller under the daemon's
-# untracked logs dir (mirrors notifications.jsonl / subagent_completions.jsonl).
+# untracked logs/hooks dir.
 VERDICT_LOG_FILENAME = "verdicts.jsonl"
 
 # Decisions that represent the handler actively restricting the tool call.

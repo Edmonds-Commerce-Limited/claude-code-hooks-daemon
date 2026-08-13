@@ -2137,37 +2137,6 @@ handlers:
 
 These handlers run when a subagent (Task tool agent) completes.
 
-#### subagent_completion_logger
-
-| Property       | Value                        |
-| -------------- | ---------------------------- |
-| **Config key** | `subagent_completion_logger` |
-| **Priority**   | 100                          |
-| **Type**       | Advisory                     |
-| **Event**      | SubagentStop                 |
-
-**Description:** Logs subagent completion events to a JSONL file with timestamps for debugging and tracking.
-
-**Options:**
-
-| Option          | Type | Default           | Description                                                                                                                                                                                              |
-| --------------- | ---- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `max_log_bytes` | int  | `5242880` (5 MiB) | Retention cap (Plan 00181): after each append the `subagent_completions.jsonl` log is front-truncated to below this size, keeping the newest whole lines. Bounds a previously unbounded append-only log. |
-
-**Config example:**
-
-```yaml
-handlers:
-  subagent_stop:
-    subagent_completion_logger:
-      enabled: true
-      priority: 100
-      options:
-        max_log_bytes: 5242880
-```
-
----
-
 #### remind_prompt_library
 
 | Property       | Value                   |
@@ -2267,34 +2236,7 @@ Remove an entry (or set `enabled: false`) to withdraw that authorisation. Note t
 
 ## Notification Handlers
 
-#### notification_logger
-
-| Property       | Value                 |
-| -------------- | --------------------- |
-| **Config key** | `notification_logger` |
-| **Priority**   | 100                   |
-| **Type**       | Advisory              |
-| **Event**      | Notification          |
-
-**Description:** Logs all notification events to a JSONL file with timestamps for debugging and audit purposes.
-
-**Options:**
-
-| Option          | Type | Default           | Description                                                                                                                                                                                       |
-| --------------- | ---- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `max_log_bytes` | int  | `5242880` (5 MiB) | Retention cap (Plan 00181): after each append the `notifications.jsonl` log is front-truncated to below this size, keeping the newest whole lines. Bounds a previously unbounded append-only log. |
-
-**Config example:**
-
-```yaml
-handlers:
-  notification:
-    notification_logger:
-      enabled: true
-      priority: 100
-      options:
-        max_log_bytes: 5242880
-```
+None ship today. `notification_logger`, the only one, was removed in Plan 00237: it appended every Notification event to a JSONL file that nothing in the codebase has ever read. Notification remains a dispatchable event, so a project-level handler can be registered under `notification` in the usual way.
 
 ---
 
@@ -2453,29 +2395,27 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 
 ### All Advisory Handlers
 
-| Config Key                   | Event            | Priority | What It Does                           |
-| ---------------------------- | ---------------- | -------- | -------------------------------------- |
-| `daemon_restart_verifier`    | PreToolUse       | 10       | Suggests daemon restart before commits |
-| `global_npm_advisor`         | PreToolUse       | 40       | Suggests npx over global installs      |
-| `task_tdd_advisor`           | PreToolUse       | 45       | Reminds about TDD workflow             |
-| `plan_workflow`              | PreToolUse       | 45       | Guidance for plan creation             |
-| `plan_completion_advisor`    | PreToolUse       | 50       | Reminds about plan completion steps    |
-| `web_search_year`            | PreToolUse       | 55       | Warns about outdated search years      |
-| `british_english`            | PreToolUse       | 60       | Warns about American spellings         |
-| `validate_eslint_on_write`   | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes      |
-| `command_hints`              | PostToolUse      | 29       | Config-driven reminder after a command |
-| `bash_error_detector`        | PostToolUse      | 50       | Detects errors in bash output          |
-| `optimal_config_checker`     | SessionStart     | 52       | Audits Claude Code settings            |
-| `git_filemode_checker`       | SessionStart     | 53       | Warns when core.fileMode=false         |
-| `suggest_status_line`        | SessionStart     | 55       | Suggests status line setup             |
-| `version_check`              | SessionStart     | 55       | Checks for daemon updates              |
-| `plan_qa_sweep`              | SessionStart     | 57       | Reports plan-tree drift once a session |
-| `git_context_injector`       | UserPromptSubmit | 20       | Injects git status context             |
-| `hedging_language_detector`  | Stop             | 30       | Detects guessing language              |
-| `task_completion_checker`    | Stop             | 50       | Reminds about task completion          |
-| `remind_prompt_library`      | SubagentStop     | 100      | Reminds about prompt library           |
-| `subagent_completion_logger` | SubagentStop     | 100      | Logs subagent completions              |
-| `notification_logger`        | Notification     | 100      | Logs notifications                     |
+| Config Key                  | Event            | Priority | What It Does                           |
+| --------------------------- | ---------------- | -------- | -------------------------------------- |
+| `daemon_restart_verifier`   | PreToolUse       | 10       | Suggests daemon restart before commits |
+| `global_npm_advisor`        | PreToolUse       | 40       | Suggests npx over global installs      |
+| `task_tdd_advisor`          | PreToolUse       | 45       | Reminds about TDD workflow             |
+| `plan_workflow`             | PreToolUse       | 45       | Guidance for plan creation             |
+| `plan_completion_advisor`   | PreToolUse       | 50       | Reminds about plan completion steps    |
+| `web_search_year`           | PreToolUse       | 55       | Warns about outdated search years      |
+| `british_english`           | PreToolUse       | 60       | Warns about American spellings         |
+| `validate_eslint_on_write`  | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes      |
+| `command_hints`             | PostToolUse      | 29       | Config-driven reminder after a command |
+| `bash_error_detector`       | PostToolUse      | 50       | Detects errors in bash output          |
+| `optimal_config_checker`    | SessionStart     | 52       | Audits Claude Code settings            |
+| `git_filemode_checker`      | SessionStart     | 53       | Warns when core.fileMode=false         |
+| `suggest_status_line`       | SessionStart     | 55       | Suggests status line setup             |
+| `version_check`             | SessionStart     | 55       | Checks for daemon updates              |
+| `plan_qa_sweep`             | SessionStart     | 57       | Reports plan-tree drift once a session |
+| `git_context_injector`      | UserPromptSubmit | 20       | Injects git status context             |
+| `hedging_language_detector` | Stop             | 30       | Detects guessing language              |
+| `task_completion_checker`   | Stop             | 50       | Reminds about task completion          |
+| `remind_prompt_library`     | SubagentStop     | 100      | Reminds about prompt library           |
 
 ---
 
@@ -2501,6 +2441,6 @@ Priority determines execution order. Lower numbers run first.
 | 25-35 | Code Quality    | qa_suppression, lint_on_edit, markdown_organization |
 | 36-55 | Workflow        | lsp_enforcement, gh_issue_comments, npm_command     |
 | 56-60 | Advisory        | british_english, dismissive_language_detector       |
-| 100   | Logging/Cleanup | notification_logger, cleanup                        |
+| 100   | Logging/Cleanup | remind_prompt_library                               |
 
 When two handlers have the same priority, they run in registration order.

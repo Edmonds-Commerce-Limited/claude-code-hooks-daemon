@@ -446,16 +446,6 @@ class HandlerID:
     )
 
     # Logging/cleanup handlers (Priority: 100)
-    NOTIFICATION_LOGGER = HandlerIDMeta(
-        class_name="NotificationLoggerHandler",
-        config_key="notification_logger",
-        display_name="notification-logger",
-    )
-    SUBAGENT_COMPLETION_LOGGER = HandlerIDMeta(
-        class_name="SubagentCompletionLoggerHandler",
-        config_key="subagent_completion_logger",
-        display_name="subagent-completion-logger",
-    )
     REMIND_PROMPT_LIBRARY = HandlerIDMeta(
         class_name="RemindPromptLibraryHandler",
         config_key="remind_prompt_library",
@@ -704,8 +694,6 @@ HandlerKey = Literal[
     "critical_thinking_advisory",
     "british_english",
     # Logging/cleanup handlers
-    "notification_logger",
-    "subagent_completion_logger",
     "remind_prompt_library",
     # Status line handlers
     "git_repo_name",
@@ -738,6 +726,44 @@ HandlerKey = Literal[
 #
 # Maps config key -> why it went, so a puzzled reader gets an answer here.
 RETIRED_HANDLERS: dict[str, str] = {
+    # Retired BEFORE the registry existed (v2.9.0 / v2.11.0). Their config
+    # keys were rejected as unknown for every release since — an unedited
+    # v2.x config tipped the daemon into DEGRADED MODE with no way for the
+    # user to know why. Surfaced by the manifest/registry guard added in
+    # Plan 00237, not by hand: each was already documented as removed in a
+    # config-changes manifest, and only the registry half was missing.
+    "eslint_disable": (
+        "removed in v2.9.0 — replaced by the qa_suppression handler with a "
+        "JavaScript/TypeScript strategy. Safe to delete this key from your "
+        "config; enable `qa_suppression` instead."
+    ),
+    "python_qa_suppression_blocker": (
+        "removed in v2.9.0 — replaced by the qa_suppression handler with a "
+        "Python strategy. Safe to delete this key from your config; enable "
+        "`qa_suppression` instead."
+    ),
+    "php_qa_suppression_blocker": (
+        "removed in v2.9.0 — replaced by the qa_suppression handler with a "
+        "PHP strategy. Safe to delete this key from your config; enable "
+        "`qa_suppression` instead."
+    ),
+    "go_qa_suppression_blocker": (
+        "removed in v2.9.0 — replaced by the qa_suppression handler with a "
+        "Go strategy. Safe to delete this key from your config; enable "
+        "`qa_suppression` instead."
+    ),
+    "validate_sitemap": (
+        "removed in v2.11.0 — a project-specific handler that did not belong "
+        "in the shared library. Safe to delete this key from your config; if "
+        "you still need it, reimplement it under "
+        ".claude/project-handlers/post_tool_use/."
+    ),
+    "remind_validator": (
+        "removed in v2.11.0 — a project-specific handler that did not belong "
+        "in the shared library. Safe to delete this key from your config; if "
+        "you still need it, reimplement it under "
+        ".claude/project-handlers/subagent_stop/."
+    ),
     "transcript_archiver": (
         "removed in Plan 00233 — it copied each session transcript into "
         "untracked/transcripts/ on every compaction, but compaction never "
@@ -772,5 +798,22 @@ RETIRED_HANDLERS: dict[str, str] = {
         "deliberately set show_on_session_start: true you lose that banner — "
         "the status-line icon shows the same thing continuously. Safe to "
         "delete this key from your config."
+    ),
+    "notification_logger": (
+        "removed in Plan 00237 — it appended every Notification event to "
+        "notifications.jsonl, a file no code in the codebase has ever read "
+        "and no documented diagnostic step ever names. A writer with no "
+        "reader. Contrast the Stop-event log, which survived the same audit "
+        "because documented workflows genuinely tell you to read it. Safe to "
+        "delete this key from your config; the JSONL file it wrote can be "
+        "deleted too."
+    ),
+    "subagent_completion_logger": (
+        "removed in Plan 00237 — the same shape as notification_logger: it "
+        "appended every SubagentStop (and Stop) event to a JSONL file that "
+        "nothing reads, growing without bound. Handler-decision auditing is "
+        "served by the verdict log instead, which has a real reader in "
+        "`hooks-daemon verdicts`. Safe to delete this key from your config; "
+        "the JSONL file it wrote can be deleted too."
     ),
 }

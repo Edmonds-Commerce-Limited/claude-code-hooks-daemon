@@ -15,6 +15,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -362,3 +363,127 @@ class TestCheckConfigMigrationsCLI:
         # Output should always include the version range header
         combined = result.stdout + result.stderr
         assert "2.2.0" in combined and "2.15.2" in combined
+
+
+# ---------------------------------------------------------------------------
+# Removed-handler manifests must agree with the retirement registry
+# ---------------------------------------------------------------------------
+
+_HANDLER_KEY_PREFIX = "handlers."
+_HANDLER_KEY_PART_COUNT = 3
+_HANDLER_NAME_INDEX = 2
+_UNRELEASED_MANIFESTS_DIR = _PROJECT_ROOT / "CLAUDE" / "UPGRADES" / "UNRELEASED" / "config-changes"
+
+
+def _removed_handler_names(manifest: dict[str, Any]) -> set[str]:
+    """Return the handler names a manifest's ``removed`` list retires.
+
+    Only ``handlers.<event>.<name>`` keys name a handler; ``removed`` also
+    carries option and daemon keys, which have no registry entry and must not
+    be reported as missing ones.
+    """
+    names: set[str] = set()
+    for entry in manifest.get("config_changes", {}).get("removed") or []:
+        key = entry.get("key", "")
+        if not key.startswith(_HANDLER_KEY_PREFIX):
+            continue
+        parts = key.split(".")
+        if len(parts) == _HANDLER_KEY_PART_COUNT:
+            names.add(parts[_HANDLER_NAME_INDEX])
+    return names
+
+
+def _undocumented_removals(manifests: list[dict[str, Any]], registry: dict[str, str]) -> set[str]:
+    """Return removed handler names that carry no retirement-registry entry."""
+    removed: set[str] = set()
+    for manifest in manifests:
+        removed |= _removed_handler_names(manifest)
+    return removed - set(registry)
+
+
+class TestRemovedHandlersAreRetired:
+    """A manifest that removes a handler must also retire its config key.
+
+    Plan 00237. Removing a handler touches two places that cannot see each
+    other: the manifest telling users it is gone, and ``RETIRED_HANDLERS``,
+    which is what stops their unedited config tipping the daemon into
+    DEGRADED MODE. Plan 00233 fixed one instance of the pair coming apart by
+    hand; this guard is the reason it cannot come apart again — the manifest
+    IS the release-process record of a removal, so anchoring the check to it
+    means every future removal is covered without anyone remembering to.
+    """
+
+    def _all_manifests(self) -> list[dict[str, Any]]:
+        paths = sorted(_MANIFESTS_DIR.glob("*.yaml"))
+        if _UNRELEASED_MANIFESTS_DIR.exists():
+            paths += sorted(_UNRELEASED_MANIFESTS_DIR.glob("*.yaml"))
+        manifests = [yaml.safe_load(p.read_text()) for p in paths]
+        return [m for m in manifests if isinstance(m, dict)]
+
+    def test_every_removed_handler_has_a_retirement_entry(self) -> None:
+        from claude_code_hooks_daemon.constants import RETIRED_HANDLERS
+
+        missing = _undocumented_removals(self._all_manifests(), RETIRED_HANDLERS)
+        assert not missing, (
+            "These handlers are documented as removed but are absent from "
+            f"RETIRED_HANDLERS: {sorted(missing)}. Every client config still "
+            "naming one would put its daemon into DEGRADED MODE. Add an entry "
+            "to constants/handlers.py::RETIRED_HANDLERS in the same commit."
+        )
+
+    def test_the_check_detects_an_undocumented_removal(self) -> None:
+        """Guard the guard — prove the detector fires rather than never looking.
+
+        Without this, a bug in key parsing would make the test above pass by
+        finding nothing, which reads identically to finding nothing wrong.
+        """
+        synthetic = {
+            "config_changes": {
+                "removed": [
+                    {"key": "handlers.pre_tool_use.never_existed"},
+                    {"key": "daemon.some_option"},
+                ]
+            }
+        }
+
+        missing = _undocumented_removals([synthetic], {"something_else": "reason"})
+
+        assert missing == {"never_existed"}, "detector missed a removal it should flag"
+
+    def test_a_documented_removal_is_not_flagged(self) -> None:
+        """The registry entry is what clears it — nothing else."""
+        synthetic = {
+            "config_changes": {"removed": [{"key": "handlers.notification.notification_logger"}]}
+        }
+
+        assert not _undocumented_removals([synthetic], {"notification_logger": "reason"})
+
+
+class TestStagedManifestsAreReleasable:
+    """A staged manifest must match the glob the release step actually moves.
+
+    Plan 00237. `RELEASING.md` Step 6 moves `UNRELEASED/config-changes/v*.yaml`
+    into the live directory. A manifest named anything else is not an error at
+    any point — it stages fine, it loads fine, and it is simply left behind
+    forever, so the removal it documents never reaches a single client. One
+    was found stranded exactly this way. The filename IS the contract.
+    """
+
+    def test_every_staged_manifest_matches_the_release_glob(self) -> None:
+        if not _UNRELEASED_MANIFESTS_DIR.exists():
+            pytest.skip("no UNRELEASED config-changes directory")
+
+        staged = {p.name for p in _UNRELEASED_MANIFESTS_DIR.glob("*.yaml")}
+        if not staged:
+            # An empty staging dir passes this check trivially. Say so, rather
+            # than reporting a pass that looked at nothing.
+            pytest.skip("no config-changes manifest staged this release cycle")
+        movable = {p.name for p in _UNRELEASED_MANIFESTS_DIR.glob("v*.yaml")}
+
+        assert staged == movable, (
+            f"Staged manifests the release step would NOT move: "
+            f"{sorted(staged - movable)}. Rename each to v{{X.Y.Z}}.yaml (or "
+            "merge its entries into the version manifest for this release) — "
+            "RELEASING.md Step 6 globs v*.yaml, so anything else is stranded "
+            "in UNRELEASED/ and never reaches clients."
+        )

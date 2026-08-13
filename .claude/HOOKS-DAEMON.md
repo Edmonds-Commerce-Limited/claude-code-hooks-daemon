@@ -65,11 +65,10 @@
 | 29 | command_hints | ADVISORY | Inject a rate-limited advisory HINT when a configured command is detected |
 | 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
 
-### SessionStart (12 handlers)
+### SessionStart (11 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
-| 10 | yolo_container_detection | ADVISORY | Detects YOLO container environments using precise OS-level container markers |
 | 50 | project_handler_load_checker | ADVISORY | Loudly alert at session start when project handlers failed to load |
 | 51 | hook_registration_checker | ADVISORY | Validate hook registrations in Claude Code settings on session start |
 | 52 | optimal_config_checker | ADVISORY | Check Claude Code environment for optimal configuration on session start |
@@ -81,12 +80,6 @@
 | 57 | plan_qa_sweep | ADVISORY | Advisory SessionStart sweep over the plan tree (silent when clean) |
 | 58 | ccy_supervisor_integrity | ADVISORY | Advisory: warn when the ccy supervisor is armed but its files are unsafe |
 | 59 | plan_workflow_asset_checker | ADVISORY | Advise when plan_workflow is enabled but its assets are not provisioned |
-
-### SessionEnd (1 handler)
-
-| Priority | Handler | Behaviour | Description |
-|----------|---------|----------|-------------|
-| 10 | cleanup | NON-TERMINAL | Clean up temporary files when session ends |
 
 ### PreCompact (1 handler)
 
@@ -110,13 +103,7 @@
 |----------|---------|----------|-------------|
 | 10 | auto_approve_reads | TERMINAL | Auto-approve read-only tool permission requests |
 
-### Notification (1 handler)
-
-| Priority | Handler | Behaviour | Description |
-|----------|---------|----------|-------------|
-| 10 | notification_logger | NON-TERMINAL | Log all notification events to a JSONL file |
-
-### Stop (6 handlers)
+### Stop (5 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -125,16 +112,14 @@
 | 30 | hedging_language_detector | ADVISORY | Detect hedging language that signals guessing instead of researching |
 | 58 | dismissive_language_detector | ADVISORY | Detect dismissive language that signals avoiding work |
 | 100 | remind_prompt_library | ADVISORY | Remind to capture successful prompts to the library |
-| 100 | subagent_completion_logger | NON-TERMINAL | Log subagent completion events to a JSONL file |
 
-### SubagentStop (2 handlers)
+### SubagentStop (1 handler)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
-| 10 | subagent_completion_logger | NON-TERMINAL | Log subagent completion events to a JSONL file |
 | 20 | remind_prompt_library | ADVISORY | Remind to capture successful prompts to the library |
 
-### Status (14 handlers)
+### Status (13 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -151,7 +136,6 @@
 | 30 | daemon_stats | NON-TERMINAL | Show daemon health: uptime, memory, last error, log level |
 | 32 | upgrade_notifier | NON-TERMINAL | Show a daemon-upgrade-available indicator on the status line |
 | 40 | account_display | NON-TERMINAL | Display Claude account username in status line |
-| 60 | usage_tracking | NON-TERMINAL | Display daily and weekly token usage percentages |
 
 ### WorktreeCreate (1 handler)
 

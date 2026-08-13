@@ -1,8 +1,7 @@
 """Integration tests for user interaction handlers.
 
 Tests: AutoApproveReadsHandler (PermissionRequest),
-       GitContextInjectorHandler (UserPromptSubmit),
-       NotificationLoggerHandler (Notification)
+       GitContextInjectorHandler (UserPromptSubmit)
 """
 
 from __future__ import annotations
@@ -13,7 +12,6 @@ import pytest
 
 from claude_code_hooks_daemon.core import Decision
 from tests.integration.handlers.conftest import (
-    make_notification_input,
     make_permission_request_input,
     make_user_prompt_submit_input,
 )
@@ -102,34 +100,3 @@ class TestGitContextInjectorHandler:
 
     def test_handler_is_non_terminal(self, handler: Any) -> None:
         assert handler.terminal is False
-
-
-# ---------------------------------------------------------------------------
-# NotificationLoggerHandler
-# ---------------------------------------------------------------------------
-class TestNotificationLoggerHandler:
-    """Integration tests for NotificationLoggerHandler."""
-
-    @pytest.fixture()
-    def handler(self) -> Any:
-        from claude_code_hooks_daemon.handlers.notification.notification_logger import (
-            NotificationLoggerHandler,
-        )
-
-        return NotificationLoggerHandler()
-
-    def test_matches_all_notifications(self, handler: Any) -> None:
-        hook_input = make_notification_input(title="Build Complete", message="All tests passed")
-        assert handler.matches(hook_input) is True
-
-    def test_handle_returns_allow(self, handler: Any) -> None:
-        hook_input = make_notification_input(title="Warning", message="Disk space low")
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.ALLOW
-
-    def test_handler_is_non_terminal(self, handler: Any) -> None:
-        assert handler.terminal is False
-
-    def test_matches_empty_notification(self, handler: Any) -> None:
-        hook_input = make_notification_input()
-        assert handler.matches(hook_input) is True

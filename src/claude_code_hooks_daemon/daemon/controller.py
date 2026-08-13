@@ -763,8 +763,8 @@ class DaemonController:
     ) -> None:
         """Append this dispatch's verdict lines to verdicts.jsonl (Plan 00209).
 
-        Fail-open by design, mirroring notification_logger and
-        payload_capture: a logging failure must never break hook dispatch,
+        Fail-open by design, mirroring payload_capture: a logging failure
+        must never break hook dispatch,
         which carries safety-critical handlers. RuntimeError (ProjectContext
         not initialised — the default-config / standalone entry-point branch
         exercised by many unit tests) and OSError (unwritable dir) are

@@ -193,7 +193,7 @@ Priorities determine the order handlers execute within an event type. **Lower nu
 | 25-35 | Code Quality | Enforce development standards  | `lint_on_edit` (25), `qa_suppression` (30)                         |
 | 36-55 | Workflow     | Process and tool guidance      | `plan_workflow` (45), `npm_command` (50), `web_search_year` (55)   |
 | 56-60 | Advisory     | Non-blocking suggestions       | `british_english` (60)                                             |
-| 100+  | Logging      | Metrics and audit trails       | `notification_logger` (100)                                        |
+| 100+  | Logging      | Metrics and audit trails       | `remind_prompt_library` (100)                                      |
 
 ### Why Priority Matters
 

@@ -398,7 +398,7 @@ class TestRealWorldScenarios:
         """Catches the actual bug: severity instead of notification_type."""
         daemon = HooksDaemon(daemon_config_strict_mode, mock_controller)
 
-        # Simulates broken NotificationLoggerHandler test fixture
+        # Simulates a Notification test fixture built against the wrong schema
         request = json.dumps(
             {
                 "event": "Notification",

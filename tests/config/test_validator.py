@@ -214,7 +214,7 @@ class TestConfigValidator:
             "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
             "handlers": {
                 "stop": {
-                    "subagent_completion_logger": {"enabled": True, "priority": 100},
+                    "remind_prompt_library": {"enabled": True, "priority": 100},
                 },
             },
         }

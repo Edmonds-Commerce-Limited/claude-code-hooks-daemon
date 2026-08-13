@@ -414,7 +414,7 @@ class TestValidateHandlers:
         config = {
             "handlers": {
                 "stop": {
-                    "subagent_completion_logger": {"priority": 100},
+                    "remind_prompt_library": {"priority": 100},
                 }
             }
         }
