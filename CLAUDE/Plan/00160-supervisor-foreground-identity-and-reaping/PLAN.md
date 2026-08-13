@@ -1,6 +1,7 @@
 # Plan 00160: Supervisor Foreground Identity & Dead-File Reaping
 
-**Status**: In Progress
+**Status**: Dormant
+**Blocker**: The remaining verification needs a live 2-thread Agent-View session, which requires a ccy re-exec that cannot be forced from inside a supervised session — the same external dependency already recorded at Plan 00168 Task 5.3. Phase 3's signal scoping shipped under Plan 00166 with regression tests at `tests/unit/supervise/test_session_identity.py`.
 **Created**: 2026-07-13
 **Owner**: joseph
 **Priority**: High

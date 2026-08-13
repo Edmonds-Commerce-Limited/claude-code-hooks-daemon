@@ -293,10 +293,17 @@ class TestMdformatRoundTrip:
 
     def test_real_plan_00144_parses(self) -> None:
         # Live dogfooding fixture: this repo's own plan for this work.
+        #
+        # The status is asserted to be a VALID member, never a specific one.
+        # Plan 00144 is a live document whose status legitimately changes over
+        # its lifetime, and pinning the value here made an ordinary status flip
+        # (In Progress -> Dormant) fail the unit suite — the test is named
+        # "parses", so a mutable value was beyond what it exists to check.
+        # Use a synthetic fixture, not this file, to assert a particular status.
         plan_path = Path(__file__).parents[3] / "CLAUDE/Plan/00144-plan-qa-system/PLAN.md"
         doc = PlanDoc.parse(plan_path.read_text())
         assert doc.plan_number == 144
-        assert doc.status == PlanStatus.IN_PROGRESS
+        assert isinstance(doc.status, PlanStatus)
         assert doc.tasks.total_checkboxes > 10
         assert doc.tasks.legacy_marker_lines == 0
 

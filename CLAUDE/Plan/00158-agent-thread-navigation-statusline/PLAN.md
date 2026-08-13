@@ -1,6 +1,7 @@
 # Plan 00158: agent thread navigation statusline
 
-**Status**: In Progress
+**Status**: Dormant
+**Blocker**: Phases 2 and 4 target the `subagentStatusLine` surface, whose rendering pipeline is still at design stage in Plan 00174 (status-line artefact cadence redesign). Building against it now would be rework once that design settles.
 **Created**: 2026-07-13
 **Owner**: joseph
 **Priority**: Medium

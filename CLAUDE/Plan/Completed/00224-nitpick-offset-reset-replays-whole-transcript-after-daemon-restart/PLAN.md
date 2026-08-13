@@ -228,7 +228,7 @@ will not see it.
   messages still audited in the same measurement
 - [x] Regression test covers the cold-start case, plus a registry-wide gate so
   a future pseudo-event cannot inherit the bug silently
-- [x] All QA passing (20/20, 12,502 tests, 95.3% coverage); daemon restart
+- [x] All QA passing (20/20, 12,508 tests, 95.3% coverage); daemon restart
   verified RUNNING on the fixed code
 
 ## Risks & Mitigations
@@ -243,3 +243,5 @@ will not see it.
 <!-- Curated milestones + delivery commit hashes (git is the SSoT for "when"). -->
 
 - Bug found by dogfooding during Plan 00203; evidence recorded above
+- Delivered at `ec247d52` — fix, instance regression tests, registry gate and
+  plan closure in one commit

@@ -26,7 +26,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00174: Status-Line Artefact + Per-Segment Cadence Redesign](00174-status-line-artefact-cadence-redesign/PLAN.md) - In Progress (design brainstorm → looped audit/refine; NOT yet implementation-ready.)
 
-- [00158: Agent Thread Navigation & Status Line](00158-agent-thread-navigation-statusline/PLAN.md) - In Progress (Phase 1 research/dogfood complete; implementation Phases 2–4 not started)
+- [00158: Agent Thread Navigation & Status Line](00158-agent-thread-navigation-statusline/PLAN.md) - Dormant (Phase 1 research/dogfood complete; Phases 2–4 wait on Plan 00174's still-unsettled `subagentStatusLine` rendering design)
 
   - Documents the dogfood-verified Claude Code contract for the main `statusLine` and the newer `subagentStatusLine` surfaces; root-causes the "no status line / whose data?" symptoms under Agent View (arrow-key thread navigation)
   - Scopes daemon support for `subagentStatusLine` (per-thread agent-panel rows) plus a `statusLine` `refreshInterval` so the bar stays live while background agents run
@@ -56,7 +56,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - First-class via the existing plan_qa surfaces (no new handler): six advise-first checks (`journal-dayfile-naming`, `journal-append-only`, `journal-folder-present`, `journal-freshness`, plus deferred …
   - Dogfood in this repo first (Plan 00163 journals itself), then client rollout with a copyable `CLAUDE/PlanJournalling.md` reference doc; `## Notes & Updates` subsumed into JOURNAL with a curated `## Delivery & Milestones` stub kept in PLAN.md
 
-- [00144: Plan QA System — Real-Time Plan Validation & Drift Enforcement](00144-plan-qa-system/PLAN.md) - In Progress (Phase 1 core underway; scope includes mkplan `_TEMPLATE_.md` externalisation)
+- [00144: Plan QA System — Real-Time Plan Validation & Drift Enforcement](00144-plan-qa-system/PLAN.md) - Dormant (all six phases shipped in v3.32.0; blocked only on a human go/no-go to ratchet `commit_gate_mode` from `warn` to `block`)
 
   - Pure `plan_qa` core (PlanTree/PlanDoc/ReadmeIndex parsers + declarative check registry) consumed by three surfaces: edit-time PreToolUse lint, `git commit` cross-file gate (warn→block ratchet), and …
   - Enforces status-header integrity, index-at-birth, terminal-state atomicity (`git mv` + README row + stats in one commit), number-collision defence, and required archive dirs (`Completed/`/`Cancelled/`, configurable)
@@ -68,7 +68,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design**
 
-- [00160: Supervisor Foreground Identity & Dead-File Reaping](00160-supervisor-foreground-identity-and-reaping/PLAN.md) - In Progress (00135 follow-up: reap dead sidecars/signals + bind the supervisor to the foreground session so `/compact` only ever targets the focused Agent-View thread; background-thread looping is out of scope)
+- [00160: Supervisor Foreground Identity & Dead-File Reaping](00160-supervisor-foreground-identity-and-reaping/PLAN.md) - Dormant (00135 follow-up: reap dead sidecars/signals + bind the supervisor to the foreground session; remaining verification needs a live 2-thread Agent-View session that cannot be forced from inside a supervised one)
 
 ### Memory / Documentation Policy
 

@@ -1,6 +1,7 @@
 # Plan 00144: Plan QA System — Real-Time Plan Validation & Drift Enforcement
 
-**Status**: In Progress
+**Status**: Dormant
+**Blocker**: Awaiting a human go/no-go to ratchet `plan_workflow.qa.commit_gate_mode` from `warn` to `block` (Task 4.4). All six phases shipped in v3.32.0 and the gate has run clean in warn mode since, but "clean" rests on absence of recorded incident rather than positive proof of a zero false-positive rate under `block` — and the blast radius is every client project, so the flip is not an agent's call.
 **Created**: 2026-07-07
 **Owner**: joseph
 **Priority**: High
