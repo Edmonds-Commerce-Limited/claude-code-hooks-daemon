@@ -15,6 +15,13 @@ from typing import TYPE_CHECKING, Any
 from claude_code_hooks_daemon.constants import ConfigKey
 from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
+from claude_code_hooks_daemon.pseudo_events.registry import (
+    enabled_pseudo_event_handler_classes,
+)
+
+# Section key for handlers driven by a pseudo-event. Prefixed so the rendered
+# heading reads "Pseudo Nitpick" rather than colliding with a real event type.
+PSEUDO_EVENT_SECTION_PREFIX = "pseudo_"
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
 if TYPE_CHECKING:
@@ -46,6 +53,7 @@ class DocsGenerator:
         "_enable_hello_world_handlers",
         "_plugins",
         "_project_handlers",
+        "_pseudo_events",
         "_registry",
     )
 
@@ -56,6 +64,7 @@ class DocsGenerator:
         plugins: list[Any] | None = None,
         project_handlers: list[Any] | None = None,
         enable_hello_world_handlers: bool = False,
+        pseudo_events: dict[str, Any] | None = None,
     ) -> None:
         """Initialize docs generator.
 
@@ -68,12 +77,19 @@ class DocsGenerator:
                 ``DaemonConfig.enable_hello_world_handlers``), ``HandlerTag.TEST``
                 handlers are reported as disabled so the generated doc reflects the
                 daemon's real active set (Plan 00162 — the flag gates them at load).
+            pseudo_events: Optional ``pseudo_events:`` config section. Pseudo-event
+                handlers have no ``EVENT_TYPE_MAPPING`` entry and no ``handlers:``
+                block, so without this they are absent from the generated document
+                entirely — as both nitpick handlers were until Plan 00237, while
+                ``CLAUDE.md`` described that document as the current active handler
+                summary.
         """
         self._config = config
         self._registry = registry
         self._plugins = plugins or []
         self._project_handlers = project_handlers or []
         self._enable_hello_world_handlers = enable_hello_world_handlers
+        self._pseudo_events = pseudo_events or {}
 
     def generate_markdown(self, include_disabled: bool = False) -> str:
         """Generate documentation markdown from live config and handlers.
@@ -211,6 +227,48 @@ class DocsGenerator:
             return str(raw.value)
         return str(raw)
 
+    def _collect_pseudo_event_handlers(
+        self, handlers_by_event: dict[str, list[CollectedHandler]]
+    ) -> None:
+        """Add handlers driven by a pseudo-event rather than by a hook event.
+
+        Read through the shared registry so a new pseudo-event reaches this
+        document, the acceptance playbook and the CLAUDE.md injector together.
+        Grouped under its own section key rather than folded into a real event
+        type, because the trigger genuinely differs — a ratio on real events,
+        not a hook event of its own — and a reader choosing where to add a
+        handler needs to see that distinction.
+
+        ``include_disabled`` is deliberately not honoured here: the registry
+        filters on the pseudo-event's own ``enabled`` flag and its per-handler
+        flags, and a disabled pseudo-event registers no chain at all, so there
+        is no "disabled but present" state to report.
+
+        Args:
+            handlers_by_event: Dict to populate, keyed by section name
+        """
+        for pseudo_name, entries in enabled_pseudo_event_handler_classes(
+            self._pseudo_events
+        ).items():
+            section = f"{PSEUDO_EVENT_SECTION_PREFIX}{pseudo_name}"
+            for config_key, handler_class in entries.items():
+                try:
+                    instance = handler_class()
+                    handler_info: CollectedHandler = (
+                        handler_class.__name__,
+                        config_key,
+                        section,
+                        instance.priority,
+                        self._detect_behavior(instance),
+                        self._get_description(handler_class),
+                        True,
+                    )
+                    handlers_by_event.setdefault(section, []).append(handler_info)
+                except Exception:
+                    logger.exception(
+                        "Failed to inspect pseudo-event handler %s", handler_class.__name__
+                    )
+
     def _collect_handlers(
         self,
         handlers_by_event: dict[str, list[CollectedHandler]],
@@ -274,6 +332,8 @@ class DocsGenerator:
 
                 except Exception:
                     logger.exception("Failed to inspect handler %s", handler_class_name)
+
+        self._collect_pseudo_event_handlers(handlers_by_event)
 
         # Collect from plugin handlers
         for plugin_handler in self._plugins:

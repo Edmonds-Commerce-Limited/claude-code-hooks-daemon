@@ -149,6 +149,13 @@
 | 12 | ReleaseBlockerHandler | BLOCKING | Blocks Stop event during releases until acceptance tests complete |
 | 41 | EnforceLlmQaHandler | BLOCKING | Block run_all.sh and direct LLM agents to llm_qa.py |
 
+### Pseudo Nitpick (2 handlers)
+
+| Priority | Handler | Behaviour | Description |
+|----------|---------|----------|-------------|
+| 10 | dismissive_language | ADVISORY | Detect dismissive language in assistant messages via nitpick pseudo-event |
+| 20 | hedging_language | ADVISORY | Detect hedging language in assistant messages via nitpick pseudo-event |
+
 ## Quick Config Reference
 
 **Config file**: `.claude/hooks-daemon.yaml`

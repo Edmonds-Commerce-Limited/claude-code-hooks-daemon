@@ -160,7 +160,7 @@ the Stop handler the "single source of truth". The live leg holds only the loop.
   reaches the agent" are different properties and only the first was checked.
   `check_repo_hygiene`'s `orphaned-handler-guidance` covers the opposite
   direction; this is the missing half
-- [ ] ⬜ **Task 3.6**: Pseudo-event handlers are invisible to THREE remaining
+- [x] ✅ **Task 3.6**: Pseudo-event handlers are invisible to THREE remaining
   enumeration surfaces — measured by running each, after reading the code got
   the mechanism wrong twice (JOURNAL 21:38, 21:46):
   - `get_handlers()` (live `handlers` IPC action) — walks router chains
@@ -173,10 +173,48 @@ the Stop handler the "single source of truth". The live leg holds only the loop.
     All pre-existing, none caused by this plan, none covered by the Task 3.5
     guard (which checks CLAUDE.md markers, not these tables). The playbook one
     is the most serious: a handler can ship indefinitely with acceptance tests
-    that are never run and never reported as missing
-- [ ] ⬜ **Task 3.4**: Checkpoint commit
+    that are never run and never reported as missing.
+    Fixed by extracting `pseudo_events/registry.py` as the single source of
+    truth (Decision 7) and reading it from all four surfaces — verified by
+    RUNNING each command, playbook 0 → 8 mentions
+- [x] ✅ **Task 3.7**: A FOURTH dead thing, found while wiring 3.6's filter:
+  `PseudoEventConfig.handler_configs` was parsed and read by nothing, so
+  `enabled: false` on a nitpick handler silently did nothing — no warning, no
+  error, the handler kept firing. Every reader in `src/` was checked; there was
+  no consumer. Same defect class as the whole plan. Dispatch and every
+  reporting surface now filter through the shared registry, so the flag means
+  one thing everywhere. Also fixed: the filter must key on the CONFIG FILE
+  spelling `dismissive_language`, not `HandlerID.config_key`
+  `dismissive_language_nitpick` — these handlers carry two
+- [x] ✅ **Task 3.4**: Checkpoint commit
+
+### Phase 3b: The shadowing hazard is LIVE in this repo
+
+- [ ] ⬜ **Task 3.8**: `ReleaseBlockerHandler` (project handler,
+  `.claude/project-handlers/stop/release_blocker.py`) is registered at priority
+  12, above the terminal `auto_continue_stop` at 10, and has never fired —
+  confirmed by live socket probe on two Stop shapes (JOURNAL 23:20). Its own
+  docstring records the cause: "Priority: 12 (before AutoContinueStop at 15)".
+  It WAS correct; the daemon still ships 15 in `init_config.py`, and this
+  project's config later moved it to 10, silently disabling a handler that
+  guards the RELEASE process. Move it below 10; its `matches()` is narrow
+  (release files modified AND not `stop_hook_active`), so ordinary stops still
+  fall through
+- [ ] ⬜ **Task 3.9**: DBF — the Task 3.3 guard proves the hazard with a
+  synthetic probe but never checks whether THIS project has fallen into it, so
+  it could not have caught Task 3.8. Add a check over the real registered Stop
+  chain (built-in config + project handlers) that fails by name on any handler
+  above the terminal one
 
 ### Phase 4: The two MERGE verdicts
+
+The two are NOT the same shape, and treating them as one bullet hid that
+(JOURNAL 22:50, 22:58). Do them in the order 4.3 → 4.1 → 4.2: the advisor is a
+clean deletion against a strict superset, while `validate_plan_number` carries
+a counter-advancing side effect whose replacement (`counter-sanity`) is a
+Stage 2 COMMIT check that only READS the counter. Delete the handler first and
+the counter stops advancing for hand-created folders, after which
+`counter-sanity` correctly blocks commits for drift the deletion itself caused.
 
 - [ ] ⬜ **Task 4.1**: Relocate `validate_plan_number`'s
   `record_plan_allocation` call — the counter-advance side effect must move
@@ -194,7 +232,12 @@ the Stop handler the "single source of truth". The live leg holds only the loop.
   (`counter-sanity` / `no-new-collisions` are the real check; it never denies)
 - [ ] ⬜ **Task 4.3**: Fold `plan_completion_advisor` into `plan_qa`
   (`terminal-placement-hint` + `terminal-state-atomic` already co-fire on the
-  same tool call with a more complete check)
+  same tool call with a more complete check). Verified line by line (JOURNAL
+  22:50): `terminal-placement-hint` is a strict SUPERSET — same trigger, same
+  three remediation steps, and it also handles Cancelled/Superseded (routing
+  Cancelled to `cancelled_dir`, which the handler would get wrong). No side
+  effect to relocate and `get_claude_md()` is already None, so unlike Task 4.1
+  this is a clean deletion
 
 ### Phase 5: Verification
 

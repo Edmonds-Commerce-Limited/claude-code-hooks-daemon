@@ -38,9 +38,15 @@ if TYPE_CHECKING:
         PluginsConfig,
         ProjectHandlersConfig,
     )
+    from claude_code_hooks_daemon.core.handler import Handler
     from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerDiscovery
 
 logger = logging.getLogger(__name__)
+
+# Key under which get_handlers() reports handlers driven by a pseudo-event.
+# Distinct from every EventType value, because these are not dispatched by the
+# router and a reader must not mistake one for a hook event.
+PSEUDO_EVENT_HANDLERS_KEY = "pseudo-events"
 
 
 @dataclass(slots=True)
@@ -499,6 +505,9 @@ class DaemonController:
             pseudo_events_config: Pseudo-event config dict from hooks-daemon.yaml
         """
         from claude_code_hooks_daemon.core.chain import HandlerChain
+        from claude_code_hooks_daemon.pseudo_events.registry import (
+            enabled_pseudo_event_handler_classes,
+        )
 
         # Registry of known pseudo-event setup functions and handler factories
         setup_registry = self._get_pseudo_event_setup_registry()
@@ -526,11 +535,30 @@ class DaemonController:
 
             setup_fn, handler_factories = setup_registry[name]
 
-            # Build handler chain from factories
+            # Build handler chain from the ENABLED factories. The per-handler
+            # `enabled` flag under `pseudo_events.<name>.handlers` was parsed
+            # into PseudoEventConfig.handler_configs and read by nothing before
+            # Plan 00237, so setting it false silently did nothing. Filtering
+            # here through the shared registry makes the flag mean the same
+            # thing to dispatch as it does to every reporting surface.
+            enabled_classes = enabled_pseudo_event_handler_classes(pseudo_events_config).get(
+                name, {}
+            )
             chain = HandlerChain()
             for factory in handler_factories:
+                if factory not in enabled_classes.values():
+                    logger.info(
+                        "Pseudo-event %r handler %s is disabled in config, skipping",
+                        name,
+                        factory.__name__,
+                    )
+                    continue
                 handler = factory()
                 chain.add(handler)
+
+            if len(chain) == 0:
+                logger.info("Pseudo-event %r has no enabled handlers, skipping", name)
+                continue
 
             dispatcher.register(pe_config, setup_fn=setup_fn, chain=chain)
             registered_count += 1
@@ -549,22 +577,28 @@ class DaemonController:
     def _get_pseudo_event_setup_registry() -> dict[str, tuple[Any, list[Any]]]:
         """Get registry mapping pseudo-event names to (setup_fn, handler_factories).
 
+        The handler half comes from ``pseudo_events.registry``, not from a list
+        maintained here. It used to be maintained here, which meant dispatch was
+        the only component that knew these handlers existed — and the guidance
+        injector, the docs generator and the acceptance playbook each silently
+        omitted the whole category (Plan 00237). Only the SETUP function stays
+        local, since setup is genuinely a dispatch concern.
+
         Returns:
             Dict mapping name to (setup_function, list_of_handler_factory_callables)
         """
-        from claude_code_hooks_daemon.handlers.nitpick.dismissive_language import (
-            DismissiveLanguageNitpickHandler,
-        )
-        from claude_code_hooks_daemon.handlers.nitpick.hedging_language import (
-            HedgingLanguageNitpickHandler,
-        )
         from claude_code_hooks_daemon.pseudo_events.nitpick import NitpickSetup
+        from claude_code_hooks_daemon.pseudo_events.registry import (
+            NITPICK,
+            pseudo_event_handler_classes,
+        )
+
+        setup_functions: dict[str, Any] = {NITPICK: NitpickSetup()}
 
         return {
-            "nitpick": (
-                NitpickSetup(),
-                [DismissiveLanguageNitpickHandler, HedgingLanguageNitpickHandler],
-            ),
+            name: (setup_functions[name], list(entries.values()))
+            for name, entries in pseudo_event_handler_classes().items()
+            if name in setup_functions
         }
 
     def _validate_config(self, config_path: Path) -> None:
@@ -865,20 +899,34 @@ class DaemonController:
     def get_handlers(self) -> dict[str, list[dict[str, Any]]]:
         """Get all registered handlers with details.
 
+        Includes pseudo-event handlers under a ``pseudo:<name>`` key. They
+        dispatch through the PseudoEventDispatcher rather than the router, so
+        a router-only walk reports an incomplete picture — and this is a
+        DIAGNOSTIC, where an incomplete picture is worse than none: it invites
+        the reader to conclude a handler is not loaded.
+
         Returns:
             Dictionary mapping event type to handler details
         """
-        result: dict[str, list[dict[str, Any]]] = {}
-        for event_type, handlers in self._router.get_all_handlers().items():
-            result[event_type] = [
-                {
-                    "name": h.name,
-                    "class": h.__class__.__name__,
-                    "priority": h.priority,
-                    "terminal": h.terminal,
-                }
-                for h in handlers
-            ]
+
+        def _describe(handler: "Handler") -> dict[str, Any]:
+            return {
+                "name": handler.name,
+                "class": handler.__class__.__name__,
+                "priority": handler.priority,
+                "terminal": handler.terminal,
+            }
+
+        result: dict[str, list[dict[str, Any]]] = {
+            event_type: [_describe(h) for h in handlers]
+            for event_type, handlers in self._router.get_all_handlers().items()
+        }
+
+        if self._pseudo_dispatcher is not None:
+            pseudo = self._pseudo_dispatcher.all_handlers()
+            if pseudo:
+                result[PSEUDO_EVENT_HANDLERS_KEY] = [_describe(h) for h in pseudo]
+
         return result
 
     def get_router(self) -> EventRouter:

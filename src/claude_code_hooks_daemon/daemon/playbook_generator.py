@@ -18,6 +18,9 @@ from claude_code_hooks_daemon.constants import ConfigKey
 from claude_code_hooks_daemon.core import AcceptanceTest
 from claude_code_hooks_daemon.core.cli_acceptance_test import CliAcceptanceTest
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
+from claude_code_hooks_daemon.pseudo_events.registry import (
+    enabled_pseudo_event_handler_classes,
+)
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 
 if TYPE_CHECKING:
@@ -29,6 +32,12 @@ logger = logging.getLogger(__name__)
 # Type alias for collected test data tuple:
 # (handler_name, event_type_str, priority, tests, source)
 CollectedTests = list[tuple[str, str, int, list[AcceptanceTest], str]]
+
+# A pseudo-event handler has no EventType, so its "event" column names the
+# pseudo-event that drives it. Prefixed so a reader can tell at a glance that
+# the trigger is a ratio on real events, not a hook event of its own.
+PSEUDO_EVENT_LABEL_PREFIX = "pseudo:"
+PSEUDO_EVENT_SOURCE = "pseudo-event"
 
 
 def _skip_block(test: AcceptanceTest) -> list[str]:
@@ -118,7 +127,14 @@ def find_deny_capable_handlers_without_allow_case(
 class PlaybookGenerator:
     """Generate acceptance test playbooks from handler definitions."""
 
-    __slots__ = ("_cli_acceptance_tests", "_config", "_plugins", "_project_handlers", "_registry")
+    __slots__ = (
+        "_cli_acceptance_tests",
+        "_config",
+        "_plugins",
+        "_project_handlers",
+        "_pseudo_events",
+        "_registry",
+    )
 
     def __init__(
         self,
@@ -127,6 +143,7 @@ class PlaybookGenerator:
         plugins: list[Any] | None = None,
         project_handlers: list[Any] | None = None,
         cli_acceptance_tests: list[CliAcceptanceTest] | None = None,
+        pseudo_events: dict[str, Any] | None = None,
     ) -> None:
         """Initialize playbook generator.
 
@@ -136,12 +153,20 @@ class PlaybookGenerator:
             plugins: Optional list of plugin handler instances to include in playbook
             project_handlers: Optional list of project handler instances to include in playbook
             cli_acceptance_tests: Optional list of CLI feature acceptance tests
+            pseudo_events: Optional ``pseudo_events:`` config section. Pseudo-event
+                handlers are not reachable through ``EVENT_TYPE_MAPPING`` (they have
+                no event type and no ``handlers:`` entry), so without this they are
+                omitted from the playbook entirely — which is what happened to both
+                nitpick handlers until Plan 00237. A release acceptance gate cannot
+                run tests it was never told about, and a generator that omits them
+                reports nothing at all.
         """
         self._config = config
         self._registry = registry
         self._plugins = plugins or []
         self._project_handlers = project_handlers or []
         self._cli_acceptance_tests = cli_acceptance_tests or []
+        self._pseudo_events = pseudo_events or {}
 
     def _collect_tests(
         self, include_disabled: bool = False
@@ -198,6 +223,39 @@ class PlaybookGenerator:
                             )
                 except Exception as e:
                     logger.warning("Failed to get tests from %s: %s", handler_class_name, e)
+
+        # Collect from pseudo-event handlers. Read through the shared registry
+        # so a new pseudo-event reaches this generator, the docs generator and
+        # the CLAUDE.md injector at once, rather than needing a fourth ad-hoc
+        # block here (Plan 00237).
+        for pseudo_name, entries in enabled_pseudo_event_handler_classes(
+            self._pseudo_events
+        ).items():
+            for handler_class in entries.values():
+                try:
+                    instance = handler_class()
+                    tests = instance.get_acceptance_tests()
+                    if tests:
+                        tests_by_handler.append(
+                            (
+                                instance.name,
+                                f"{PSEUDO_EVENT_LABEL_PREFIX}{pseudo_name}",
+                                instance.priority,
+                                tests,
+                                PSEUDO_EVENT_SOURCE,
+                            )
+                        )
+                        logger.debug(
+                            "Collected %d tests from pseudo-event handler %s",
+                            len(tests),
+                            handler_class.__name__,
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to get tests from pseudo-event handler %s: %s",
+                        handler_class.__name__,
+                        e,
+                    )
 
         # Collect from plugin handlers
         for plugin_handler in self._plugins:

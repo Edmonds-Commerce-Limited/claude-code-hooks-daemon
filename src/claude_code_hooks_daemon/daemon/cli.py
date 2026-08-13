@@ -2196,6 +2196,7 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
             registry=registry,
             plugins=plugins,
             cli_acceptance_tests=get_cli_acceptance_tests(),
+            pseudo_events=config.pseudo_events or None,
         )
 
         # Get command-line arguments
@@ -2284,6 +2285,7 @@ def cmd_generate_docs(args: argparse.Namespace) -> int:
             plugins=plugins,
             project_handlers=project_handlers_list,
             enable_hello_world_handlers=config.daemon.enable_hello_world_handlers,
+            pseudo_events=config.pseudo_events or None,
         )
 
         include_disabled = getattr(args, "include_disabled", False)
