@@ -207,52 +207,39 @@ Each follow-up removal inherits the Plan 00233 costs: a `RETIRED_HANDLERS`
 entry, a config-changes manifest entry, doc updates, and daemon restart
 verification. None of these tasks is executed inside this plan.
 
-- [ ] ⬜ **Task 4.1**: Follow-up A — fix the instrument first: exclude
-  `status-*` handlers from verdict recording (or give them a separate cap),
-  extending the retained window from 65 minutes to ~8 days so later removals
-  are verifiable against real firing data
-- [ ] ⬜ **Task 4.2**: Follow-up B — resolve the doc/handler contradiction
-  (Finding #2). Point the sixteen `run_all.sh` references at
-  `./scripts/qa/llm_qa.py all`, starting with `CLAUDE.md:84` and
-  `RELEASING.md:352` because those two sit at a documented blocking gate; fix
-  the stale "6 automated checks" count in `CodeLifecycle/README.md:76`. Docs
-  only, no handler change, no client blast radius — which is why it ranks
-  second despite being the highest-impact finding
-- [ ] ⬜ **Task 4.3**: Follow-up C — two `.claude/project-handlers/` fixes:
-  (a) `enforce_llm_qa` denies a git commit message written as a quoted heredoc,
-  because a newline is a segment separator so the literal body is judged as
-  commands (H-3, reproduced live) — treat a quoted-delimiter heredoc as literal
-  the way `pipe_blocker` already does, ideally by lifting that rule into the
-  shared scanner; (b) narrow `release_blocker` — drop `README.md`/`CLAUDE.md`
-  from `RELEASE_FILES` (the daemon regenerates the latter itself), repoint the
-  moved `Plan/00060` path in its DENY message, and derive the hardcoded
-  "89 acceptance tests" count instead of asserting it
-- [ ] ⬜ **Task 4.4**: Follow-up D — dead-code removals (high confidence, zero
-  behavioural surface): `usage_tracking` + `stats_cache_reader`, `cleanup`
-  (SessionEnd), `subagent_completion_logger`, `notification_logger`,
-  `remind_prompt_library`; delete accumulated `untracked/logs/hooks/*.jsonl`
-- [ ] ⬜ **Task 4.5**: Follow-up E — advisory removals (medium confidence,
-  human sign-off per handler): `bash_error_detector`,
-  `task_completion_checker`, `task_tdd_advisor`, `post_clear_auto_execute`,
-  `yolo_container_detection`
-- [ ] ⬜ **Task 4.6**: Follow-up F — plan-family consolidation: retire
-  `plan_completion_advisor` and `validate_plan_number` in favour of the plan_qa
-  checks, **relocating `_record_allocation`'s counter-advance side effect
-  first**; dedupe `plan_workflow`'s size-tier guidance with `plan_qa_edit`'s;
-  consider flipping `commit_gate_mode` to `block` as the enforcement
-  prerequisite
-- [ ] ⬜ **Task 4.7**: Follow-up G — broken-feature fixes: emit `pgid` in
-  `background_process_tracker` records (or drop the dead TTL path); fix
-  `lsp_enforcement`'s multi-line single-file exemption and verify LSP tool
-  reachability; drop `stop:1/1` from nitpick triggers; add decay cache to
-  `suggest_status_line`
+The full proposal text for each follow-up is in git history at this file's
+Phase 4 as first written; the delivering plans below are the current record of
+what was actually done, and differ from the proposal in places (Follow-up G's
+nitpick item was REVERSED by a live chain trace, not implemented).
+
+- [x] ✅ **Task 4.1**: Follow-up A (fix the instrument first — exclude
+  `status-*` from verdict recording so the retained window is long enough to
+  argue with) — delivered by
+  [Plan 00236](../Completed/00236-fix-what-is-broken-pass/PLAN.md) Tasks 1.1/1.2
+- [x] ✅ **Task 4.2**: Follow-up B (repoint the `run_all.sh` instructions at
+  `llm_qa.py all`; fix the stale check count) — Plan 00236 Tasks 2.1/2.2
+- [x] ✅ **Task 4.3**: Follow-up C (quoted-heredoc handling in
+  `enforce_llm_qa`; narrow `release_blocker`) — Plan 00236 Tasks 3.1/3.2 and
+  [Plan 00235](../Completed/00235-quoted-heredoc-body-shared-strip/PLAN.md)
+- [x] ✅ **Task 4.4**: Follow-up D (dead-code removals) — delivered by
+  [Plan 00237](../Completed/00237-remove-the-dead-handlers/PLAN.md) Phases 1–2
+- [x] ✅ **Task 4.5**: Follow-up E (advisory removals) — Plan 00237 Phase 2,
+  each decided against real verdict-log firing data, which Follow-up A is what
+  made possible
+- [x] ✅ **Task 4.6**: Follow-up F (plan-family consolidation, relocating the
+  counter-advance side effect FIRST) — Plan 00237 Phase 4
+- [x] ✅ **Task 4.7**: Follow-up G (broken-feature fixes) — Plan 00236 Phase 4
 - [ ] ⬜ **Task 4.8**: Follow-up H — cost tuning (lowest urgency): widen
   `git_branch` render TTL past the resonance point; bound
   `supervisor_indicator`'s negative-path `/proc` walk; mtime-gate
   `account_display`; change-detect `git_context_injector`; rate-limit
   `daemon_restart_verifier`
-- [ ] ⬜ **Task 4.9**: Hand this proposal to the human for scope decisions
-  before any follow-up plan is created
+- [x] ✅ **Task 4.9**: Proposal handed to the human, who set the order:
+  A+B+C+G as one "fix what's broken" pass, then D, then H — with E and F held
+  until the verdict log from A had produced real firing data. That data arrived
+  (Plan 00237 Decision 4 measured `bash_error_detector` at 274 fires, 45% of
+  all behavioural handler activity, `allow=274`), which released E and F into
+  Plan 00237. H remains
 
 ## Technical Decisions
 
