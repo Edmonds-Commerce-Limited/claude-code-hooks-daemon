@@ -1660,29 +1660,6 @@ On every new session this handler audits hook configuration across `.claude/sett
 - **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
 - **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry and remove the duplicate in `settings.local.json`.
 
-<!-- handler: plan-qa-sweep -->
-
-## plan_qa_sweep — plan-tree drift report at session start
-
-At the start of each new session the plan directory is swept with the
-plan QA check catalogue (index/folder bijection, number collisions,
-statistics recount, archive structure, status-vs-location coherence,
-staleness). Findings are injected once as advisory context — the
-sweep never blocks.
-
-**When a drift report appears**: fix the listed findings (each names
-its exact remediation) as part of your plan housekeeping, then
-re-check with:
-
-```
-/workspace/bin/hooks-daemon plan-qa --sweep
-```
-
-The CLI exits 1 while findings remain (CI-able). Single-file lint:
-`plan-qa --lint <PLAN.md>`; staged-commit check: `plan-qa --check-staged`.
-Policy lives under `plan_workflow.qa` in `.claude/hooks-daemon.yaml`
-(archive dir names, staleness window, legacy/collision allowlists).
-
 <!-- handler: git-upstream-checker -->
 
 ## git_upstream_checker — additive fetch + pull/cleanup advice on session start
@@ -1714,6 +1691,41 @@ At session start, when the plan workflow is enabled but the daemon-owned `mkplan
 ```
 
 The deploy is idempotent (fills gaps only, never overwrites client-owned files). Silent when `mkplan.bash` is present or the workflow is disabled.
+
+<!-- handler: plan-qa-sweep -->
+
+## plan_qa_sweep — plan-tree drift report at session start
+
+At the start of each new session the plan directory is swept with the
+plan QA check catalogue. That covers the cross-file invariants
+(index/folder bijection, number collisions, statistics recount,
+archive structure, status-vs-location coherence, staleness) AND the
+document-level rules applied to every PLAN.md already on disk —
+status line present, status token in the enum, header/body coherence,
+task grammar, path existence, journal day-file naming. Findings are
+injected once as advisory context — the sweep never blocks.
+
+**A rule that only fires at write time cannot see what predates it.**
+The document-level checks run on BOTH surfaces for that reason, so a
+violation introduced before the rule existed — or by a `git mv`, a
+merge, or any path other than a Write/Edit tool call — is still
+reported. The rules that are deliberately edit-only are the ones
+about the ACT of writing (editing an archived plan, rewriting a
+journal, growing an oversized document); each records its reason in
+`plan_qa/checks/common.py`.
+
+**When a drift report appears**: fix the listed findings (each names
+its exact remediation) as part of your plan housekeeping, then
+re-check with:
+
+```
+/workspace/bin/hooks-daemon plan-qa --sweep
+```
+
+The CLI exits 1 while findings remain (CI-able). Single-file lint:
+`plan-qa --lint <PLAN.md>`; staged-commit check: `plan-qa --check-staged`.
+Policy lives under `plan_workflow.qa` in `.claude/hooks-daemon.yaml`
+(archive dir names, staleness window, legacy/collision allowlists).
 
 <!-- handler: idle-housekeeping-advisory -->
 
