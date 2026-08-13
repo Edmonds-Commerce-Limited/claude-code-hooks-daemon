@@ -757,6 +757,54 @@ def handle(self, hook_input: dict) -> HookResult:
 
 **When validation is disabled**: Handlers should still defensively check for required fields using `.get()` with defaults
 
+## `get_claude_md()` — does your handler earn resident context?
+
+`get_claude_md()` is abstract, so you MUST implement it. That makes it easy to
+write `return None` to satisfy the compiler and move on — which is not a
+decision, it is a deferral. Answer the question properly, because whichever
+way you answer, someone pays.
+
+**What a section costs.** Everything returned here is inlined into the
+project's `CLAUDE.md` and read IN FULL at the start of every session, whether
+or not your handler ever fires. Measured on this repository: the injected
+block is ~73 KB across 53 sections — **68% of the whole file**, ~18,300 tokens
+per session. The mean section costs ~345 tokens *forever*. Returning content
+is the expensive answer; returning `None` is not the lazy one.
+
+Apply these four tests in order. First YES earns a section; reaching the end
+means `None`.
+
+1. **Can the handler DENY a tool call?** A denial burns a turn, and Claude
+   Code cancels every sibling tool call batched with the denied one. Guidance
+   that prevents one denial has already paid for itself. → YES earns.
+2. **Is the advice too late for the call it fires on?** If the choice being
+   advised about is already baked into the allowed call (`agent_isolation_advisor`
+   fires as the agent is already spawning), the agent cannot act on it without
+   redoing work → earns. If the advice governs what happens NEXT and arrives
+   before it (`task_tdd_advisor` fires as a Task starts, and describes the
+   cycle that Task is about to run) → does not earn.
+3. **Is it a standing policy rather than a one-shot correction?** Advice the
+   agent must hold across many later decisions decays after one delivery
+   (`recovery_cron_advisor`: "never treat the cron as a heartbeat"). Stop-time
+   behavioural advisories always qualify — they can only ever fire *after* the
+   message that broke the norm, so resident text is the only preventive form.
+   → YES earns.
+4. **Would a reader who already has the fire-time message, and the rest of the
+   block, learn anything?** This one OVERRIDES the others. Restating your own
+   fire-time message is duplication; restating another handler's section is
+   worse, because the fact is now billed twice per session and the two copies
+   drift apart. → NO does not earn.
+
+Handlers that emit nothing an agent acts on — status-line renderers, loggers,
+lifecycle handlers, `hello_world` stubs — never reach the tests and are always
+`None`.
+
+**Whichever you decide, record it.** Add your handler to the classification
+table in `tests/integration/test_claude_md_guidance_coverage.py`. An exemption
+carries a reason string, so the next person auditing coverage reads your
+reasoning instead of re-deriving it. The test fails if a handler appears in
+neither list.
+
 ## Checklist
 
 Before submitting handler:
@@ -767,6 +815,8 @@ Before submitting handler:
 - [ ] Comprehensive docstring
 - [ ] Efficient pattern matching (regex compiled in __init__)
 - [ ] Clear error messages with alternatives
+- [ ] `get_claude_md()` answered against the four tests above, and the verdict
+  recorded in the guidance-coverage classification table
 - [ ] Unit tests (95%+ coverage)
 - [ ] Integration test (full dispatch cycle)
 - [ ] Documentation in handler file

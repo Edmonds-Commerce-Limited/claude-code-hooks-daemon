@@ -1,6 +1,6 @@
 # Plan 00203: Advisory Handler CLAUDE.md Guidance Coverage
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-10
 **Owner**: joseph
 **Priority**: Medium
@@ -86,15 +86,19 @@ resident doc.
 
 ### Phase 1: Decide what belongs in the resident doc
 
-- [ ] ⬜ **Task 1.1**: Write down the criterion for "earns resident guidance"
-  - [ ] ⬜ Draft it against the handlers already covered, so it describes
-    existing practice rather than inventing a new rule
-  - [ ] ⬜ Record it in `CLAUDE/HANDLER_DEVELOPMENT.md` so new handlers get the
+- [x] ✅ **Task 1.1**: Write down the criterion for "earns resident guidance"
+  - [x] ✅ Draft it against the handlers already covered, so it describes
+    existing practice rather than inventing a new rule — see
+    [CRITERION.md](CRITERION.md)
+  - [x] ✅ Record it in `CLAUDE/HANDLER_DEVELOPMENT.md` so new handlers get the
     question asked at write time
-- [ ] ⬜ **Task 1.2**: Apply the criterion to the six PreToolUse advisories
-- [ ] ⬜ **Task 1.3**: Apply it to `post_tool_use/lint_on_edit` (now blocking)
-- [ ] ⬜ **Task 1.4**: Apply it to the remaining event types; record which are
-  deliberately `None` and why
+- [x] ✅ **Task 1.2**: Apply the criterion to the six PreToolUse advisories —
+  **all six are correctly `None`**; see Decision 2
+- [x] ✅ **Task 1.3**: Apply it to `post_tool_use/lint_on_edit` (now blocking)
+  — **EARNS** on Test 1, and is the highest-value section in this plan
+- [ ] 🔄 **Task 1.4**: Apply it to the remaining event types; record which are
+  deliberately `None` and why — delivered AS the Phase 3 classification table
+  rather than as prose, so the reasoning cannot drift from the check
 
 ### Phase 2: Implement (TDD)
 
@@ -143,6 +147,54 @@ and the remaining work needs deliberate per-handler judgement about resident
 context cost rather than a mechanical sweep.
 
 **Date**: 2026-08-10
+
+### Decision 2: All six audit findings are correct as `None` — the real gaps are elsewhere
+
+**Context**: The plan was filed to add guidance to six PreToolUse advisory
+handlers. Applying the Task 1.1 criterion to them, with the resident-block
+cost measured (73 KB / 68% of `CLAUDE.md` / ~18,300 tokens per session),
+none of the six passes.
+
+**Decision**: Add no guidance to any of the six. Record all six as reasoned
+exemptions instead. Two handlers the audit never looked at DO earn a section:
+
+| handler                          | test | why                                                                                      |
+| -------------------------------- | ---- | ---------------------------------------------------------------------------------------- |
+| `post_tool_use/lint_on_edit`     | 1    | DENIES writes in eleven languages, and v3.52.0 made it actually run where it was inert   |
+| `stop/hedging_language_detector` | 3    | Standing behavioural norm whose identical twin `dismissive_language_detector` is covered |
+
+**Why this matters more than the six**: the v3.52.0 gate scanned *PreToolUse
+advisory* handlers. One real gap is *PostToolUse blocking*; the other is a
+*Stop* handler whose defect is only visible by comparison with a sibling.
+Neither axis was in the scan, so a scan is the wrong instrument — hence
+Decision 3.
+
+**Date**: 2026-08-13
+
+### Decision 3: The gate enforces recorded REASONING, not method presence
+
+**Context**: Task 3.1 says the gate should stop "a new handler silently
+escaping triage". Measurement showed `get_claude_md()` is already
+`@abstractmethod` on `Handler`, and all 107 handler classes on disk implement
+it. Nothing can escape the method.
+
+**Options Considered**:
+
+1. A new standalone script under `scripts/qa/`, wired into `run_all.sh`.
+2. A discovery-based pytest classification table, modelled on
+   `test_blocking_handler_evasion.py` as the plan already suggests — which
+   `run_tests.sh` runs, so `run_all.sh` picks it up transitively.
+
+**Decision**: Option 2. The artefact being defended is a table of reasons, and
+a table with parametrised assertions is test-shaped. It also puts every
+handler's verdict in one file, so an author adding a handler sees how its
+peers were judged — the same property that makes the evasion suite work.
+
+The gate's job is therefore precise: **`return None` must be accompanied by a
+recorded reason.** The ABC already forces the token; only this forces the
+thought.
+
+**Date**: 2026-08-13
 
 ## Success Criteria
 
