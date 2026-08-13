@@ -130,6 +130,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="python_var_guidance.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "bounded_reads": ToolConfig(
+        command=_python("check_bounded_reads.py", "--json"),
+        json_file="bounded_reads.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
     "capture_corruption": ToolConfig(
         command=_bash("run_capture_corruption_check.sh"),
         json_file="capture_corruption.json",
@@ -320,6 +325,11 @@ def _summarize_british_english(data: QaReport) -> str:
     return f"{total} violations"
 
 
+def _summarize_bounded_reads(data: QaReport) -> str:
+    total = data.get("summary", {}).get("total_violations", 0)
+    return f"{total} violations"
+
+
 SUMMARIZERS: dict[str, Summarizer] = {
     "magic_values": _summarize_magic_values,
     "format": _summarize_format,
@@ -341,6 +351,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "git_history": _summarize_git_history,
     "handler_reference": _summarize_handler_reference,
     "british_english": _summarize_british_english,
+    "bounded_reads": _summarize_bounded_reads,
 }
 
 

@@ -231,6 +231,16 @@ else
 fi
 echo ""
 
+echo "20. Running Bounded-Reads Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_bounded_reads.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Bounded-reads check FAILED"
+else
+    echo "✅ Bounded-reads check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -259,6 +269,7 @@ results = {
     "Git History": "untracked/qa/git_history.json",
     "Handler Reference": "untracked/qa/handler_reference.json",
     "British English": "untracked/qa/british_english.json",
+    "Bounded Reads": "untracked/qa/bounded_reads.json",
 }
 
 all_passed = True

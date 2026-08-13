@@ -7,8 +7,8 @@ state and load transcripts — this module provides those as reusable functions.
 
 import json
 import logging
-from collections import deque
-from typing import Any
+import os
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
@@ -19,6 +19,20 @@ _STOP_FEEDBACK_PREFIX = "Stop hook feedback:"
 _HOOK_BLOCKING_ERROR_TYPE = "hook_blocking_error"
 _STOP_EVENT = "Stop"
 _DEFAULT_BLOCK_LOOKBACK = 20
+
+# Byte offset representing the start of a file.
+_FILE_START_OFFSET: Final[int] = 0
+_NEWLINE_BYTE: Final[bytes] = b"\n"
+_NEWLINE_STR: Final[str] = "\n"
+# Step size for the backward walk. 64 KiB holds far more than 20 transcript
+# records in the common case, so the loop almost always runs once.
+_TAIL_CHUNK_BYTES: Final[int] = 65_536
+# Hard ceiling on the backward walk. Only reached when the trailing records are
+# individually enormous (a tool_result carrying megabytes of output). Stopping
+# early yields FEWER than ``lookback`` lines rather than degrading to a
+# whole-file read — and the block marker this function looks for is always among
+# the newest entries, so the newest few megabytes are where it can be.
+_MAX_TAIL_SCAN_BYTES: Final[int] = 4_194_304
 
 
 def is_stop_hook_active(hook_input: dict[str, Any]) -> bool:
@@ -70,6 +84,50 @@ def get_transcript_reader(hook_input: dict[str, Any]) -> TranscriptReader | None
     return reader
 
 
+def _read_tail_lines(transcript_path: str, lookback: int) -> list[str]:
+    """Return up to the last ``lookback`` complete lines of a file.
+
+    Seeks backwards from EOF in bounded chunks, accumulating until enough
+    newlines have been seen. The previous spelling — ``deque(f, maxlen=N)`` —
+    declared exactly the same bound but iterated EVERY line of the file to
+    honour it: measured at 162 ms against 17 ms for this seek on a 74 MB
+    session transcript, and unbounded in growth because transcripts only ever
+    append (Plan 00231).
+
+    Reading backwards means the window normally opens mid-record, so the
+    leading fragment is discarded — the same correction ``_parse_tail`` makes
+    in ``TranscriptReader``. Decoding uses ``errors="replace"`` because a chunk
+    boundary can split a multi-byte character; the affected character is always
+    inside that discarded leading fragment.
+
+    Args:
+        transcript_path: Path to the file to tail.
+        lookback: Maximum number of trailing lines to return.
+
+    Returns:
+        The trailing lines, oldest first. Fewer than ``lookback`` when the file
+        is shorter or when the scan ceiling is reached first.
+    """
+    with open(transcript_path, "rb") as handle:
+        handle.seek(_FILE_START_OFFSET, os.SEEK_END)
+        size = handle.tell()
+        position = size
+        buffer = b""
+        while position > _FILE_START_OFFSET and buffer.count(_NEWLINE_BYTE) <= lookback:
+            if size - position >= _MAX_TAIL_SCAN_BYTES:
+                break
+            step = min(_TAIL_CHUNK_BYTES, position)
+            position -= step
+            handle.seek(position)
+            buffer = handle.read(step) + buffer
+
+    lines = buffer.decode("utf-8", errors="replace").split(_NEWLINE_STR)
+    if position > _FILE_START_OFFSET:
+        # The window opened mid-record; the leading fragment is not a record.
+        lines = lines[1:]
+    return lines[-lookback:]
+
+
 def has_recent_stop_hook_block(
     transcript_path: str | None,
     lookback: int = _DEFAULT_BLOCK_LOOKBACK,
@@ -99,11 +157,8 @@ def has_recent_stop_hook_block(
         return False
 
     try:
-        with open(transcript_path, encoding="utf-8") as f:
-            tail: deque[str] = deque(f, maxlen=lookback)
+        tail = _read_tail_lines(transcript_path, lookback)
     except (FileNotFoundError, IsADirectoryError, PermissionError):
-        return False
-    except UnicodeDecodeError:
         return False
     except OSError as exc:
         logger.debug("Failed to read transcript %s: %s", transcript_path, exc)

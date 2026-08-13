@@ -385,3 +385,97 @@ class TestHasRecentStopHookBlock:
             f.write(json.dumps("plain string") + "\n")
             f.write(json.dumps(42) + "\n")
         assert has_recent_stop_hook_block(str(path)) is False
+
+
+class _CountingHandle:
+    """A file handle that tallies how many bytes are actually read."""
+
+    def __init__(self, handle: Any, tally: list[int]) -> None:
+        self._handle = handle
+        self._tally = tally
+
+    def read(self, *args: Any) -> Any:
+        data = self._handle.read(*args)
+        self._tally.append(len(data))
+        return data
+
+    def __iter__(self) -> Any:
+        # Iteration must be counted too, or this guard is vacuous: the defect
+        # being pinned (``deque(f, maxlen=N)``) consumed the file by ITERATING
+        # it, never calling read(), so a read()-only tally would score the
+        # original bug at zero bytes and pass.
+        for line in self._handle:
+            self._tally.append(len(line))
+            yield line
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._handle, name)
+
+    def __enter__(self) -> "_CountingHandle":
+        self._handle.__enter__()
+        return self
+
+    def __exit__(self, *exc: Any) -> Any:
+        return self._handle.__exit__(*exc)
+
+
+class TestTheTailReadIsBounded:
+    """The read cost must not scale with transcript size (Plan 00231).
+
+    This function is called only when ``stop_hook_active`` is set — that is,
+    only during a deny/re-fire loop — so the path that runs repeatedly was the
+    one paying the whole-file cost. Byte accounting pins the fix behaviourally;
+    ``scripts/qa/check_bounded_reads.py`` pins the code shape that caused it.
+    """
+
+    @staticmethod
+    def _write_large_transcript(path: Path, *, with_marker: bool) -> None:
+        padding = json.dumps(
+            {
+                "type": "assistant",
+                "message": {"role": "assistant", "content": [{"type": "text", "text": "x" * 500}]},
+            }
+        )
+        with path.open("w") as f:
+            for _ in range(4000):
+                f.write(padding + "\n")
+            if with_marker:
+                f.write(
+                    json.dumps(
+                        {
+                            "type": "user",
+                            "message": {"role": "user", "content": "Stop hook feedback:\nstopped"},
+                        }
+                    )
+                    + "\n"
+                )
+
+    def test_reads_far_less_than_the_whole_file(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """A marker at the tail is found without reading the file that precedes it."""
+        import builtins
+
+        from claude_code_hooks_daemon.utils import stop_hook_helpers
+
+        path = tmp_path / "transcript.jsonl"
+        self._write_large_transcript(path, with_marker=True)
+        file_size = path.stat().st_size
+        assert file_size > 2_000_000, "fixture must be large enough to expose a full read"
+
+        tally: list[int] = []
+
+        def counting_open(*args: Any, **kwargs: Any) -> Any:
+            return _CountingHandle(builtins.open(*args, **kwargs), tally)
+
+        monkeypatch.setattr(stop_hook_helpers, "open", counting_open, raising=False)
+
+        assert has_recent_stop_hook_block(str(path)) is True
+        assert sum(tally) < file_size // 4, (
+            f"read {sum(tally)} bytes of a {file_size}-byte transcript — "
+            "the tail read is no longer bounded"
+        )
+
+    def test_lookback_window_still_bounds_the_search(self, tmp_path: Path) -> None:
+        """Reading less must not mean matching more: an old marker stays invisible."""
+        path = tmp_path / "transcript.jsonl"
+        self._write_large_transcript(path, with_marker=False)
+        assert has_recent_stop_hook_block(str(path)) is False

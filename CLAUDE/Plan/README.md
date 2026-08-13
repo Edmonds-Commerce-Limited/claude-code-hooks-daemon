@@ -158,6 +158,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00231: a bounded intent sat next to an unbounded read](Completed/00231-bounded-read-qa-rule/PLAN.md) - Complete (`deque(f, maxlen=20)` iterated all 74 MB of a transcript to keep 20 lines, in the path that runs during a deny/re-fire loop; a new QA check bans the shape repo-wide rather than patching the instance)
+
 - [00230: plan-qa reported clean for what it never examined](Completed/00230-plan-qa-lint-false-clean-and-sweep-parity/PLAN.md) - Complete (the tree reported clean while holding 13 violations, 11 of them BLOCK; `--lint` certified any target it could not classify, and every document-level rule was write-time only, so nothing predating a rule was ever re-examined)
 
 - [00229: QA report count implies reachable detail](Completed/00229-qa-report-count-implies-detail-guard/PLAN.md) - Complete (a report may claim a non-zero count and show nothing; the guard now binds every report's printed `jq` hint to a real detail array, and the artifact reports its own inconsistency at render time — which also surfaced two LIVE cases where a QA script recorded WHY it could not run and nothing ever showed it)
@@ -1165,22 +1167,25 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 230 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 187 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Total Plans Created**: 231 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Completed**: 188 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 - **Active**: 31 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 31 + 187 + 6 = **224 folders**, spanning
-  **221 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 31 + 188 + 6 = **225 folders**, spanning
+  **222 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **9** of the
-  230 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  231 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210 — abandoned drafts, numbers burned by transient
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
-  already covered the work). 221 + 9 = 230. ✅
-- **Last reconciled by**: the Plan 00230 closure — recounted from disk after the
+  already covered the work). 222 + 9 = 231. ✅
+- **Last reconciled by**: the Plan 00231 closure — the plan was created and
+  completed in one pass, so its folder went straight to `Completed/`: Total and
+  Completed each rose by one while Active and Cancelled were untouched (31
+  root, 188 `Completed/`, 6 `Cancelled/`). Before that, the Plan 00230 closure — recounted from disk after the
   archive move (31 root, 187 `Completed/`, 6 `Cancelled/`); the move shifts one
   folder between the Active and Completed splits and leaves Total and the folder
   total unchanged. Before that, the Plan 00230 opening — one new root folder and
