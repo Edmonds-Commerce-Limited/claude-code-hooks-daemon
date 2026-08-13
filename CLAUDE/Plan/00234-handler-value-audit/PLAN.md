@@ -92,12 +92,16 @@ The findings that matter, ranked:
    `post_clear_auto_execute` survives its own Cancelled plan, which rated it
    "marginal". `git_context_injector` is the same cost shape (~460 tokens ×
    every prompt, no change-detection) but its duty is real — FIX, not remove.
-5. **Two real broken features (fix, not delete).**
-   `background_process_tracker` writes records without the `pgid` key its own
-   harvester reads — the designed wall-TTL breach can never fire.
+5. **Two real broken features — FIX verdicts that must NOT be read as
+   removals.** `background_process_tracker` writes records without the `pgid`
+   key its own harvester reads — the designed wall-TTL breach can never fire.
    `lsp_enforcement`'s single-file exemption misses multi-line Bash commands —
-   a live-reproduced false positive in the exact path built to fix the previous
-   one.
+   a live-reproduced false positive in the exact path built to fix the
+   previous one. The same applies to `git_branch` (~6,200 subprocess
+   spawns/hour is a TTL tuning problem on a clearly-wanted segment). In each
+   case the duty is wanted and the mechanism is broken or overpriced;
+   converting any of these to REMOVE in a later pass would delete a wanted
+   feature to save a fix.
 6. **Confirmed structural duplication at Stop.** The nitpick pseudo-event fires
    `dismissive_language`/`hedging_language` on `stop:1/1` while the dedicated
    Stop twins also run — two advisories for one finding, traced through
@@ -175,7 +179,7 @@ a firing count** — see `RESEARCH-verdict-log-is-blind.md`.
 ### Phase 3: Defence before fix
 
 - [x] ✅ **Task 3.1**: Named the guard that failed for each confirmed class —
-  see Technical Decision 5
+  see Decision 5 in [DECISIONS.md](DECISIONS.md)
 - [x] ✅ **Task 3.2**: Proposed the instrument fixes: verdict-log status-\*
   exclusion (continuous firing-rate visibility), a lint forbidding
   `matches(): return False` on registered handlers, and guidance-truth tests
