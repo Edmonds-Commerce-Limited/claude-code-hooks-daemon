@@ -1,6 +1,6 @@
 # Plan 00235: share the quoted-heredoc strip so handlers stop re-deriving it
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-13
 **Owner**: joseph
 **Priority**: Medium
@@ -134,12 +134,15 @@ a test in both suites.
 
 ## Success Criteria
 
-- [ ] A git commit whose quoted-heredoc message mentions the guarded script is
-  allowed, verified against the LIVE daemon and not only in tests
-- [ ] A real invocation of the guarded script is still denied
-- [ ] An invocation inside an UNQUOTED heredoc is still denied
-- [ ] `pipe_blocker` behaviour unchanged (its full suite green)
-- [ ] Full QA green, daemon RUNNING
+- [x] A git commit whose quoted-heredoc message mentions the guarded script is
+  allowed, verified against the LIVE daemon and not only in tests — the delivery
+  commit `e2295c51` is itself that shape
+- [x] A real invocation of the guarded script is still denied — probed through
+  `.claude/hooks/pre-tool-use` against the running daemon: `deny`
+- [x] An invocation inside an UNQUOTED heredoc is still denied — probed the
+  same way: `deny`
+- [x] `pipe_blocker` behaviour unchanged (its full suite green — 367 passed)
+- [x] Full QA green (21/21), daemon RUNNING
 
 ## Risks & Mitigations
 
@@ -152,5 +155,7 @@ a test in both suites.
 ## Delivery & Milestones
 
 - Found by hitting it while committing Plan 00234's audit findings (H-3)
-- Delivered in one commit: shared strip + `pipe_blocker` delegation +
+- Delivered at `e2295c51`: shared strip + `pipe_blocker` delegation +
   `enforce_llm_qa` fix + tests in both suites. QA 21/21, daemon RUNNING
+- That commit's own message is the end-to-end proof: a quoted heredoc naming
+  the guarded script, the exact shape denied before the fix

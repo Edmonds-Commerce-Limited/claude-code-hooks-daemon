@@ -96,8 +96,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Secondary strand: global `--json` mode on [`lts/php-qa-ci`](https://github.com/LongTermSupport/php-qa-ci) (`bin/qa` Bash pipeline) so the whole PHP pipeline emits one machine-readable result, vs. wrapping each PHP tool individually
   - Reference repos cloned to `untracked/repos/`; wrapper repo audit captured in `AUDIT-llm-friendly-qa-wrappers.md`; adoption gated on the audit verdict
 
-- [00235: share the quoted-heredoc strip](00235-quoted-heredoc-body-shared-strip/PLAN.md) - In Progress (a quoted heredoc body is literal text, but only pipe_blocker knew that; enforce_llm_qa split on newlines and denied a git commit message for mentioning the script it guards — Plan 00234 finding H-3)
-
 - [00234: handler value audit](00234-handler-value-audit/PLAN.md) - In Progress (00233 found a handler that had protected nothing for the project's whole life; this audits all ~100 remaining handlers for the same shapes — no consumer, vacuous guard, duplicated elsewhere, cost exceeding value)
 
 ### Infrastructure / Bootstrap
@@ -161,6 +159,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00235: share the quoted-heredoc strip](Completed/00235-quoted-heredoc-body-shared-strip/PLAN.md) - Complete (a quoted heredoc body is literal text bash never parses, but only pipe_blocker knew it; enforce_llm_qa split on newlines and so denied a git commit message for merely naming the script it guards — the rule now lives in the shared scanner both use)
 
 - [00233: remove the transcript archiver](Completed/00233-remove-transcript-archiver/PLAN.md) - Complete (it copied every transcript before each compaction, but compaction never deletes the original and the original already sits on the same persistent mount — 422 MB of copies nothing ever read; also added a retired-handler registry so removals never degrade a client's daemon)
 
@@ -1176,11 +1176,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 235 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 190 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 33 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 191 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 33 + 190 + 6 = **229 folders**, spanning
+- **Folder-to-number reconciliation**: 32 + 191 + 6 = **229 folders**, spanning
   **226 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1190,10 +1190,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work). 226 + 9 = 235. ✅
-- **Last reconciled by**: the Plan 00235 creation — a fix plan opened for a bug
-  found while committing Plan 00234's findings. Total and Active each rose by
-  one; Completed and Cancelled untouched. Recounted from disk (33 root,
-  190 `Completed/`, 6 `Cancelled/`). Before that, the Plan 00233 closure, which
+- **Last reconciled by**: the Plan 00235 closure — opened and completed in one
+  pass for a bug found while committing Plan 00234's findings, so its folder
+  went straight to `Completed/`: Total and Completed each rose by one while
+  Active and Cancelled were untouched. Recounted from disk (32 root,
+  191 `Completed/`, 6 `Cancelled/`). Before that, the Plan 00233 closure, which
   also created Plan 00234
   in the same pass: Total rose by two (00233 + 00234), Completed by one (00233
   archived), and Active by one net (00233 left, 00234 arrived). Recounted from
