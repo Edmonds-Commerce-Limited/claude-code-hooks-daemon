@@ -132,7 +132,24 @@ _CONTINUE_VERBS = (
 _STALE_TAIL_THRESHOLD_SECONDS = 4.0
 
 # Poll budget used to wait for the current turn's assistant text to flush.
-_HAS_EXPLANATION_RETRY_ATTEMPTS = 6
+#
+# Raised from 6 (0.6s) to 30 (3.0s) on measured evidence, not intuition. On a
+# 72 MB session transcript, correlating stop-event denies against the preceding
+# transcript entry produced three denials of messages that DID carry
+# ``STOPPING BECAUSE:``, at gaps of 892 ms, 903 ms and 1752 ms — all beyond the
+# old 600 ms budget. The gap is measured from the entry's recorded timestamp to
+# the deny and already contains the hook-fire delay and the poll itself, so the
+# real flush lag is longer still.
+#
+# Widening this is close to free: ``_resolve_current_turn_message`` returns
+# immediately when the tail is complete and fresh, so the budget is spent ONLY
+# when the text is not yet readable — precisely when waiting is correct. The
+# cost falls on genuinely unexplained stops, which wait longer before being
+# denied, and the forwarder's whole socket budget is 30s, so this stays an
+# order of magnitude inside the ceiling that Plan 00177 was about.
+#
+# Pinned against the measurements by tests/unit/handlers/stop/test_stop_poll_budget.py.
+_HAS_EXPLANATION_RETRY_ATTEMPTS = 30
 _HAS_EXPLANATION_RETRY_DELAY_SECONDS = 0.1
 
 
