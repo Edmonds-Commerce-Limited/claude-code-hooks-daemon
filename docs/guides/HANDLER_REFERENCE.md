@@ -1195,29 +1195,6 @@ handlers:
 
 ---
 
-#### task_tdd_advisor
-
-| Property       | Value              |
-| -------------- | ------------------ |
-| **Config key** | `task_tdd_advisor` |
-| **Priority**   | 45                 |
-| **Type**       | Advisory           |
-| **Event**      | PreToolUse         |
-
-**Description:** Advises on TDD workflow when the Task tool is used to spawn agents for implementation work. Detects keywords like "implement", "create handler", "add feature" and reminds about the Red/Green/Refactor cycle.
-
-**Config example:**
-
-```yaml
-handlers:
-  pre_tool_use:
-    task_tdd_advisor:
-      enabled: true
-      priority: 45
-```
-
----
-
 #### lsp_enforcement
 
 | Property       | Value             |
@@ -1804,29 +1781,6 @@ handlers:
 
 These handlers run **after** a tool call completes. They analyse output and provide feedback.
 
-#### bash_error_detector
-
-| Property       | Value                 |
-| -------------- | --------------------- |
-| **Config key** | `bash_error_detector` |
-| **Priority**   | 50                    |
-| **Type**       | Advisory              |
-| **Event**      | PostToolUse           |
-
-**Description:** Detects errors and warnings in Bash command output. Provides feedback context when commands exit with errors or when output contains error/warning keywords. Non-terminal to allow execution to proceed while providing awareness.
-
-**Config example:**
-
-```yaml
-handlers:
-  post_tool_use:
-    bash_error_detector:
-      enabled: true
-      priority: 50
-```
-
----
-
 #### command_hints
 
 | Property       | Value           |
@@ -2087,29 +2041,6 @@ handlers:
 
 ---
 
-#### task_completion_checker
-
-| Property       | Value                     |
-| -------------- | ------------------------- |
-| **Config key** | `task_completion_checker` |
-| **Priority**   | 50                        |
-| **Type**       | Advisory                  |
-| **Event**      | Stop                      |
-
-**Description:** Reminds the agent to verify task completion before stopping. Provides a context reminder on all stop events to ensure tasks are properly completed.
-
-**Config example:**
-
-```yaml
-handlers:
-  stop:
-    task_completion_checker:
-      enabled: true
-      priority: 50
-```
-
----
-
 #### hedging_language_detector
 
 | Property       | Value                       |
@@ -2136,29 +2067,6 @@ handlers:
 ## SubagentStop Handlers
 
 These handlers run when a subagent (Task tool agent) completes.
-
-#### remind_prompt_library
-
-| Property       | Value                   |
-| -------------- | ----------------------- |
-| **Config key** | `remind_prompt_library` |
-| **Priority**   | 100                     |
-| **Type**       | Advisory                |
-| **Event**      | SubagentStop            |
-
-**Description:** Reminds to capture successful prompts to a prompt library after every subagent completion. Helps build a library of effective prompts for reuse.
-
-**Config example:**
-
-```yaml
-handlers:
-  subagent_stop:
-    remind_prompt_library:
-      enabled: true
-      priority: 100
-```
-
----
 
 ## UserPromptSubmit Handlers
 
@@ -2399,14 +2307,12 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | --------------------------- | ---------------- | -------- | -------------------------------------- |
 | `daemon_restart_verifier`   | PreToolUse       | 10       | Suggests daemon restart before commits |
 | `global_npm_advisor`        | PreToolUse       | 40       | Suggests npx over global installs      |
-| `task_tdd_advisor`          | PreToolUse       | 45       | Reminds about TDD workflow             |
 | `plan_workflow`             | PreToolUse       | 45       | Guidance for plan creation             |
 | `plan_completion_advisor`   | PreToolUse       | 50       | Reminds about plan completion steps    |
 | `web_search_year`           | PreToolUse       | 55       | Warns about outdated search years      |
 | `british_english`           | PreToolUse       | 60       | Warns about American spellings         |
 | `validate_eslint_on_write`  | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes      |
 | `command_hints`             | PostToolUse      | 29       | Config-driven reminder after a command |
-| `bash_error_detector`       | PostToolUse      | 50       | Detects errors in bash output          |
 | `optimal_config_checker`    | SessionStart     | 52       | Audits Claude Code settings            |
 | `git_filemode_checker`      | SessionStart     | 53       | Warns when core.fileMode=false         |
 | `suggest_status_line`       | SessionStart     | 55       | Suggests status line setup             |
@@ -2414,8 +2320,6 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `plan_qa_sweep`             | SessionStart     | 57       | Reports plan-tree drift once a session |
 | `git_context_injector`      | UserPromptSubmit | 20       | Injects git status context             |
 | `hedging_language_detector` | Stop             | 30       | Detects guessing language              |
-| `task_completion_checker`   | Stop             | 50       | Reminds about task completion          |
-| `remind_prompt_library`     | SubagentStop     | 100      | Reminds about prompt library           |
 
 ---
 
@@ -2441,6 +2345,6 @@ Priority determines execution order. Lower numbers run first.
 | 25-35 | Code Quality    | qa_suppression, lint_on_edit, markdown_organization |
 | 36-55 | Workflow        | lsp_enforcement, gh_issue_comments, npm_command     |
 | 56-60 | Advisory        | british_english, dismissive_language_detector       |
-| 100   | Logging/Cleanup | remind_prompt_library                               |
+| 100   | Logging/Cleanup | (none ship today; range reserved)                   |
 
 When two handlers have the same priority, they run in registration order.

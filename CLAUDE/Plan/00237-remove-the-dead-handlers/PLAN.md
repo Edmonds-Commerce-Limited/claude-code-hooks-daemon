@@ -93,36 +93,61 @@ They remain reachable only in `auto_continue_stop`'s two narrow non-matching
 cases (confirmed re-entry, AskUserQuestion turn), and `remind_prompt_library`
 also runs on SubagentStop, where no terminal handler precedes it.
 
-- [ ] ⬜ **Task 2.1**: `task_tdd_advisor` — its ~30-line payload is already
-  resident via CLAUDE.md's eager `@`-imports; `get_claude_md()` is None
-- [ ] ⬜ **Task 2.2**: `remind_prompt_library` — points at an npm script and a
+- [x] ✅ **Task 2.1**: `task_tdd_advisor` — its ~30-line payload is already
+  resident via CLAUDE.md's eager `@`-imports, and its closing step told the
+  agent to run a QA script `enforce_llm_qa` denies
+- [x] ✅ **Task 2.2**: `remind_prompt_library` — points at an npm script and a
   `CLAUDE/PromptLibrary/` directory that do not exist, with no existence
   gating (both verified absent; `matches()` is `return True`). Removing it
-  empties SubagentStop, so that section becomes `subagent_stop: {}` on the
+  empties SubagentStop, so that section is now `subagent_stop: {}` on the
   same footing as `session_end` and `notification`
-- [ ] ⬜ **Task 2.3**: `task_completion_checker` — static checklist whose
-  substance `auto_continue_stop` *enforces* rather than reminds
-- [ ] ⬜ **Task 2.4**: `post_clear_auto_execute` — its originating plan is
+- [x] ✅ **Task 2.3**: `task_completion_checker` — static checklist whose
+  substance `auto_continue_stop` *enforces* rather than reminds, and which the
+  live probe showed is not even reached on an ordinary stop
+- [x] ✅ **Task 2.4**: `post_clear_auto_execute` — its originating plan is
   Cancelled as unachievable and rates the surviving code marginal, and its
   once-per-session contract is implemented with a single `_last_session_id`
   slot, which cannot hold per-session state in a daemon that parallel sessions
-  deliberately SHARE. Note `scripts/qa/check_handler_reference.py` cites it
-  twice as its worked example of a shipped handler with no `HandlerID` entry —
-  repoint those comments, do not leave a dangling example
-- [ ] ⬜ **Task 2.5**: `bash_error_detector` — decide REMOVE vs narrow +
-  rate-limit, and record the decision. It is the most active behavioural
-  handler in the log and fires on any common-word hit in output the agent can
-  already see
+  deliberately SHARE. `scripts/qa/check_handler_reference.py` cited it twice
+  as its worked example; both comments repointed rather than left dangling
+- [x] ✅ **Task 2.5**: `bash_error_detector` — REMOVE, decided on measurement
+  (Decision 4): 274 fires, 45% of all behavioural handler activity,
+  `allow=274`. A rate limit would only reduce the volume of an advisory whose
+  content is "look at the thing you are looking at"
 - [ ] ⬜ **Task 2.6**: Checkpoint commit
 
 ### Phase 3: The shadowed Stop advisories
 
-- [ ] ⬜ **Task 3.1**: Decide `hedging_language_detector` /
-  `dismissive_language_detector` — remove the Stop registration (the nitpick
-  pseudo-event already delivers both) or move them below priority 10
-- [ ] ⬜ **Task 3.2**: Update the Plan 00236 shadowing guard to match whatever
-  the reachable set becomes — the guard exists to fail when this changes, so
-  it must be updated deliberately, never silenced
+Decided: remove the Stop registrations. Re-prioritising below 10 is not a real
+option — that band is the safety range, and putting an advisory ahead of a
+terminal safety handler to win a race is the wrong fix for the wrong problem.
+The `nitpick` pseudo-event already carries both detectors on a `stop:1/1`
+trigger, so nothing is lost.
+
+This is a DEPENDENCY INVERSION, not a deletion. Three times over, the leg that
+cannot run holds what matters: the `get_claude_md()` bodies, and — via
+`from ...handlers.stop.hedging_language_detector import ...` at the top of each
+nitpick module — the compiled pattern sets themselves, under a comment calling
+the Stop handler the "single source of truth". The live leg holds only the loop.
+
+- [ ] ⬜ **Task 3.1**: MOVE the pattern constants and the `get_claude_md()`
+  bodies into the nitpick modules, so the running code owns its own
+  definitions. Deleting first would break the working detectors at import
+  time. Flip the exemption entries in `test_claude_md_guidance_coverage.py` in
+  the same edit
+- [ ] ⬜ **Task 3.1b**: Carry `PREMATURE_STOP_PATTERNS` across too and wire it
+  into the nitpick `_CATEGORY_PATTERNS`. The nitpick leg imports FOUR of the
+  five dismissive sets — premature-halt language ("natural checkpoint",
+  "pausing here") has never been detected by the leg that runs. This is a
+  behaviour CHANGE, not a refactor, so it needs its own RED test rather than
+  riding on the existing ones
+- [ ] ⬜ **Task 3.2**: Delete `stop/hedging_language_detector.py` and
+  `stop/dismissive_language_detector.py`, their tests, constants, priorities
+  and config entries. This empties `stop:` down to `auto_continue_stop` alone
+- [ ] ⬜ **Task 3.3**: Rewrite the Plan 00236 shadowing guard to prove the
+  hazard with a SYNTHETIC probe handler rather than these two. The hazard —
+  any Stop handler above priority 10 is unreachable — outlives the specific
+  handlers, so a guard anchored to them dies with them. Never silence it
 
 ### Phase 4: The two MERGE verdicts
 
@@ -147,50 +172,10 @@ also runs on SubagentStop, where no terminal handler precedes it.
 
 ## Technical Decisions
 
-### Decision 1: an event with no handlers keeps its config section
-
-**Context**: removing `cleanup` emptied SessionEnd, and removing
-`notification_logger` emptied Notification. A dogfooding guard
-(`test_config_has_all_event_types`) then failed.
-
-**Options**: drop the event from the expected set, or keep an empty section.
-
-**Decision**: keep `session_end: {}` / `notification: {}`. Both events are
-still registered and dispatchable — probed live, each returns `{}` on a valid
-payload — they simply ship no handlers. Dropping them from the expected set
-would weaken an invariant to make a symptom go away, and would leave a
-project-level handler for those events with no documented place to live.
-
-### Decision 2: six handlers retired before the registry existed were still rejected
-
-**Context**: the new manifest/registry guard failed on first run, naming
-`eslint_disable`, `python_qa_suppression_blocker`, `php_qa_suppression_blocker`,
-`go_qa_suppression_blocker` (v2.9.0) and `validate_sitemap`, `remind_validator`
-(v2.11.0).
-
-Verified rather than assumed: a config naming any of the six was still
-REJECTED by `ConfigValidator.validate_and_raise` today. `RETIRED_HANDLERS`
-arrived in Plan 00233, so every handler removed before it had its documented
-removal on one side and nothing on the other — an unedited v2.x config has been
-tipping client daemons into DEGRADED MODE for every release since, over a
-removal we performed deliberately.
-
-**Decision**: add all six to the registry. This is not scope creep from the
-plan's remit — the registry IS this plan's mechanism, and the bug is the exact
-failure mode the plan exists to prevent, found by the guard rather than by
-hand.
-
-### Decision 3: a staged manifest not matching `v*.yaml` is silently stranded
-
-**Context**: `UNRELEASED/config-changes/` held `transcript-archiver-removal.yaml`.
-`RELEASING.md` Step 6 moves `UNRELEASED/config-changes/v*.yaml`, so that file
-would never have been moved — Plan 00233's entire client-facing removal note
-was set to sit in staging forever, with no error at any point.
-
-**Decision**: merge its content into `v3.53.0.yaml` (alongside this plan's five
-removals), delete the mis-named file, and add a guard asserting every staged
-`*.yaml` also matches `v*.yaml`. The filename is the contract; nothing else
-enforced it.
+Recorded in [DECISIONS.md](DECISIONS.md) — five so far: empty event
+sections, the six pre-registry retirements the guard surfaced, the stranded
+manifest, `bash_error_detector` removed rather than narrowed, and Phase 3 as
+a dependency inversion.
 
 ## Dependencies
 

@@ -168,7 +168,7 @@ handlers:
     # ... more handlers ...
 
   post_tool_use:   # Runs after tool execution
-    bash_error_detector: {enabled: true, priority: 10}
+    lint_on_edit: {enabled: true, priority: 25}
 
   session_start:   # Runs when a session begins
     git_upstream_checker: {enabled: true, priority: 56}

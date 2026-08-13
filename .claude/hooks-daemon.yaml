@@ -318,9 +318,6 @@ handlers:
       enabled: true        # Enable when using CLAUDE/Plan/ structure
       priority: 33
 
-    task_tdd_advisor:      # Advises on TDD workflow for tasks
-      enabled: true
-      priority: 36
     agent_isolation_advisor:  # Advises worktree isolation for concurrent agents
       enabled: true
       priority: 46
@@ -408,10 +405,6 @@ handlers:
 
   # PostToolUse handlers (run after tool execution)
   post_tool_use:
-    bash_error_detector:   # Detects bash errors and suggests corrections
-      enabled: true
-      priority: 10
-
     validate_eslint_on_write:  # Runs ESLint after file writes
       enabled: true            # Enable for automatic ESLint validation
       priority: 20
@@ -524,21 +517,17 @@ handlers:
   # The section stays so SessionEnd remains a declared, dispatchable event.
   session_end: {}
 
-  # SubagentStop handlers (run when subagent completes)
-  subagent_stop:
-    remind_prompt_library:  # Reminds about prompt library after agent work
-      enabled: true         # Enable for prompt library reminders
-      priority: 20
+  # SubagentStop handlers — none ship today. Both were removed in Plan 00237:
+  # `subagent_completion_logger` wrote a JSONL nothing read, and
+  # `remind_prompt_library` advised an npm script and a docs directory that do
+  # not exist. The section stays so SubagentStop remains a dispatchable event.
+  subagent_stop: {}
 
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:
     git_context_injector:  # Injects git context into user prompts
       enabled: true
       priority: 10
-
-    post_clear_auto_execute:  # Inject guidance on first prompt after /clear
-      enabled: true
-      priority: 54
 
     critical_thinking_advisory:  # Periodic advisory encouraging critical evaluation
       enabled: true
@@ -600,10 +589,6 @@ handlers:
     dismissive_language_detector:  # Detects dismissive language (pre-existing issue, out of scope, etc)
       enabled: true
       priority: 58
-
-    task_completion_checker:  # Checks for task completion
-      enabled: true
-      priority: 20
 
   # Status line handlers (format daemon-based status display)
   status_line:

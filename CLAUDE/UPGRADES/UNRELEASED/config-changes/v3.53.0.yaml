@@ -434,6 +434,106 @@ config_changes:
       migration_note: >-
         NO ACTION REQUIRED. Delete the "subagent_completion_logger:" block
         when convenient, and delete subagent_completions.jsonl from your
-        daemon untracked dir to reclaim the disk. remind_prompt_library is
-        unaffected and still runs on SubagentStop.
+        daemon untracked dir to reclaim the disk.
+    - key: handlers.post_tool_use.bash_error_detector
+      recommended: true
+      description: >-
+        REMOVED (Plan 00237). It substring-matched seven common words --
+        error, failed, failure, fatal, warning, warn, deprecated -- in the
+        combined stdout+stderr of every Bash call, echoed the whole command
+        back into context, and asked the agent to "review the output
+        carefully to ensure the command succeeded". The output in question is
+        output the agent requested one line earlier and can already see, and
+        the command's real exit status is already in front of it.
+        Measured rather than asserted: on the daemon's own verdict log it was
+        the single most active behavioural handler at 274 fires -- 45% of ALL
+        behavioural handler activity, 2.7x the next -- with allow=274. It
+        never once restricted anything. Substring rather than word matching
+        meant an ordinary `ls` listing a file whose NAME contains "error"
+        tripped it.
+      migration_note: >-
+        NO ACTION REQUIRED. Nothing it did was load-bearing: it never blocked,
+        and a failing command already surfaces its own exit status and stderr.
+        Delete the "bash_error_detector:" block from your config when
+        convenient. If you want a real signal on command failure, that is what
+        the exit code and stderr are -- this handler added noise on top of
+        them, not information.
+    - key: handlers.pre_tool_use.task_tdd_advisor
+      recommended: true
+      description: >-
+        REMOVED (Plan 00237). A 30-line TDD reminder injected whenever a Task
+        prompt matched implement|create.*handler|build|develop|... Two
+        problems, both verified in the daemon's own repository. Its stated
+        references were already resident: it pointed at two documents that
+        this project eagerly @-imports into CLAUDE.md, so their full text was
+        in context before the handler said anything. And its final
+        instruction told the agent to run a QA script that this project's own
+        handler DENIES, so following the advice produced a block.
+      migration_note: >-
+        NO ACTION REQUIRED. Delete the "task_tdd_advisor:" block when
+        convenient. If you want TDD guidance in front of the agent, put it in
+        CLAUDE.md (or a .claude/rules/*.md with a paths: glob) where it is
+        read once per session rather than re-injected on every matching Task
+        call -- and where it is somewhere you will notice when it goes stale.
+        Note tdd_enforcement, the handler that actually BLOCKS a source file
+        written before its test, is unaffected and still enabled.
+    - key: handlers.stop.task_completion_checker
+      recommended: true
+      description: >-
+        REMOVED (Plan 00237). A static Stop-time checklist ("all tasks
+        complete? tests passing? files committed?") with matches() == True.
+        It was registered at priority 20, behind auto_continue_stop (priority
+        10, terminal=True), which matches nearly every Stop event and breaks
+        the handler chain the moment it matches -- so on an ordinary stop this
+        handler never ran at all. Confirmed by live dispatch against the
+        daemon (a Stop with a valid explanation returns an empty response) and
+        corroborated by the verdict log, where it fired 3 times in the whole
+        retained window. What it reminded you to do, auto_continue_stop
+        actually enforces.
+      migration_note: >-
+        NO ACTION REQUIRED -- on an ordinary stop it was already producing
+        nothing. Delete the "task_completion_checker:" block when convenient.
+        Worth knowing generally: ANY Stop handler you register above priority
+        10 is shadowed by auto_continue_stop in the same way. If you have
+        custom Stop handlers, that is the thing to check.
+    - key: handlers.subagent_stop.remind_prompt_library
+      recommended: true
+      description: >-
+        REMOVED (Plan 00237). matches() was an unconditional True, so after
+        EVERY sub-agent completion it advised running
+        `npm run llm:prompts -- add --from-json <prompt-file>` and reading
+        `CLAUDE/PromptLibrary/README.md`. In the daemon's own repository
+        neither exists -- there is no package.json at all and no
+        PromptLibrary directory -- and the handler had no existence gating of
+        any kind, so every one of its 15 fires in the retained verdict window
+        pointed at a command that could not be run and a file that could not
+        be read. An advisory nobody re-reads decays into confidently wrong
+        instructions, and nothing notices, because a WRONG advisory still
+        returns allow and still looks healthy in every log.
+      migration_note: >-
+        NO ACTION REQUIRED unless you had actually built the prompt library it
+        described -- if you did, that workflow is yours to keep and belongs in
+        a project-level handler under .claude/project-handlers/subagent_stop/,
+        where it sits next to the npm script it names. Delete the
+        "remind_prompt_library:" block from your config when convenient. This
+        empties SubagentStop, so that section is now "subagent_stop: {}"
+        rather than absent -- the event stays registered and dispatchable.
+    - key: handlers.user_prompt_submit.post_clear_auto_execute
+      recommended: true
+      description: >-
+        REMOVED (Plan 00237). It injected "you have just started a fresh
+        session (likely after /clear), execute the instruction immediately" on
+        the first prompt of each session -- but implemented "first" with a
+        single _last_session_id slot on the handler instance. Parallel
+        sessions with the same (hostname, project root) deliberately SHARE one
+        daemon, so two concurrent sessions flip that slot on every prompt and
+        both are told they are fresh when neither is. A one-slot cache cannot
+        express per-session state in a multi-session process. Its originating
+        plan had already been cancelled as unachievable.
+      migration_note: >-
+        NO ACTION REQUIRED. Delete the "post_clear_auto_execute:" block when
+        convenient. The behaviour it was reaching for -- act on the first
+        instruction rather than acknowledging it -- is better served by a
+        standing line in CLAUDE.md, which is resident for every session and
+        cannot go stale per-session.
   changed: []

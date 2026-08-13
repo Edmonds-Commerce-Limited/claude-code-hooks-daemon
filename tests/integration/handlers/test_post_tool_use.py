@@ -1,6 +1,6 @@
 """Integration tests for PostToolUse handlers.
 
-Tests: BashErrorDetectorHandler, ValidateEslintOnWriteHandler
+Tests: ValidateEslintOnWriteHandler
 """
 
 from __future__ import annotations
@@ -9,86 +9,7 @@ from typing import Any
 
 import pytest
 
-from claude_code_hooks_daemon.core import Decision
-from tests.integration.handlers.conftest import (
-    make_post_tool_bash_input,
-    make_post_tool_write_input,
-)
-
-
-# ---------------------------------------------------------------------------
-# BashErrorDetectorHandler
-# ---------------------------------------------------------------------------
-class TestBashErrorDetectorHandler:
-    """Integration tests for BashErrorDetectorHandler."""
-
-    @pytest.fixture()
-    def handler(self) -> Any:
-        from claude_code_hooks_daemon.handlers.post_tool_use.bash_error_detector import (
-            BashErrorDetectorHandler,
-        )
-
-        return BashErrorDetectorHandler()
-
-    @pytest.mark.parametrize(
-        ("stdout", "stderr", "interrupted"),
-        [
-            ("error: file not found", "", False),
-            ("", "fatal: not a git repository", False),
-            ("Build failed: missing module", "", False),
-            ("", "", True),
-            ("warning: deprecated API", "", False),
-        ],
-        ids=["error-stdout", "fatal-stderr", "failed-stdout", "interrupted", "warning"],
-    )
-    def test_detects_issues(
-        self,
-        handler: Any,
-        stdout: str,
-        stderr: str,
-        interrupted: bool,
-    ) -> None:
-        hook_input = make_post_tool_bash_input(
-            "some command", stdout=stdout, stderr=stderr, interrupted=interrupted
-        )
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.ALLOW
-        assert result.context is not None
-        assert len(result.context) > 0
-
-    @pytest.mark.parametrize(
-        ("stdout", "stderr"),
-        [
-            ("success: all tests passed", ""),
-            ("3 files changed, 10 insertions(+)", ""),
-            ("", ""),
-        ],
-        ids=["success-output", "clean-output", "no-output"],
-    )
-    def test_silent_on_clean_output(self, handler: Any, stdout: str, stderr: str) -> None:
-        hook_input = make_post_tool_bash_input("git status", stdout=stdout, stderr=stderr)
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.ALLOW
-        # No context means silent allow
-        assert result.context is None or len(result.context) == 0
-
-    def test_non_bash_not_matched(self, handler: Any) -> None:
-        hook_input = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/tmp/test.py", "content": "x = 1"},
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_handles_missing_tool_response(self, handler: Any) -> None:
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "echo test"},
-        }
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.ALLOW
+from tests.integration.handlers.conftest import make_post_tool_write_input
 
 
 # ---------------------------------------------------------------------------

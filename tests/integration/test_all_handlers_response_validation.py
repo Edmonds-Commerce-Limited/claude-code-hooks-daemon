@@ -553,63 +553,8 @@ class TestWorktreeFileCopyHandler:
 
 
 # =============================================================================
-# PostToolUse Handlers (2 handlers: bash_error_detector, lint_on_edit)
+# PostToolUse Handlers (1 handler: lint_on_edit)
 # =============================================================================
-
-
-class TestBashErrorDetectorHandler:
-    """Test BashErrorDetectorHandler response validation."""
-
-    @pytest.fixture
-    def handler(self):
-        from claude_code_hooks_daemon.handlers.post_tool_use.bash_error_detector import (
-            BashErrorDetectorHandler,
-        )
-
-        return BashErrorDetectorHandler()
-
-    @pytest.mark.parametrize(
-        "hook_input,expected_decision,description",
-        [
-            # Success cases (allow)
-            (
-                {
-                    "tool_name": "Bash",
-                    "tool_result": {"exit_code": 0, "stdout": "Success", "stderr": ""},
-                },
-                Decision.ALLOW,
-                "Allow successful command",
-            ),
-            # Error cases (context only, still allow)
-            (
-                {
-                    "tool_name": "Bash",
-                    "tool_result": {
-                        "exit_code": 1,
-                        "stdout": "",
-                        "stderr": "Error: file not found",
-                    },
-                },
-                Decision.ALLOW,
-                "Allow with error context",
-            ),
-            # Non-Bash tools
-            (
-                {"tool_name": "Read", "tool_result": {"content": "file contents"}},
-                Decision.ALLOW,
-                "Allow non-Bash tools",
-            ),
-        ],
-    )
-    def test_response_validity(
-        self, handler, hook_input, expected_decision, description, response_validator
-    ):
-        """Test handler returns valid PostToolUse response."""
-        if handler.matches(hook_input):
-            result = handler.handle(hook_input)
-            assert result.decision == expected_decision, f"Failed: {description}"
-            response = result.to_json("PostToolUse")
-            response_validator.assert_valid("PostToolUse", response)
 
 
 class TestLintOnEditHandler:
@@ -739,40 +684,9 @@ class TestGitContextInjectorHandler:
 
 
 # =============================================================================
-# Stop Handlers (1 handler)
+# Stop Handlers (none covered here — task_completion_checker removed in
+# Plan 00237; auto_continue_stop has its own dedicated suites)
 # =============================================================================
-
-
-class TestTaskCompletionCheckerHandler:
-    """Test TaskCompletionCheckerHandler response validation."""
-
-    @pytest.fixture
-    def handler(self):
-        from claude_code_hooks_daemon.handlers.stop.task_completion_checker import (
-            TaskCompletionCheckerHandler,
-        )
-
-        return TaskCompletionCheckerHandler()
-
-    @pytest.mark.parametrize(
-        "hook_input,expected_decision,description",
-        [
-            # Check task completion
-            (
-                {"reason": "user_stop", "tasks_pending": 0},
-                Decision.ALLOW,
-                "Allow stop when no tasks pending",
-            ),
-        ],
-    )
-    def test_response_validity(
-        self, handler, hook_input, expected_decision, description, response_validator
-    ):
-        """Test handler returns valid Stop response."""
-        result = handler.handle(hook_input)
-        assert result.decision == expected_decision, f"Failed: {description}"
-        response = result.to_json("Stop")
-        response_validator.assert_valid("Stop", response)
 
 
 # =============================================================================

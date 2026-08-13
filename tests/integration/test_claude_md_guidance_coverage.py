@@ -141,7 +141,6 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "CompactionSignalHandler": "writes a signal file for the supervisor, not the agent",
     "WorktreeRemoveHandler": "prunes stale registrations; nothing to do differently",
     # -- Test 4: the fire-time message already says all of it ------------
-    "BashErrorDetectorHandler": "T4 reports errors in output just read; nothing precedes it",
     "BritishEnglishHandler": "T4 names the exact spelling and its replacement",
     "DaemonDocsGuardHandler": "T4 one sentence at fire time carries the whole advice",
     "GitContextInjectorHandler": "T4 the injected git status IS the content",
@@ -153,9 +152,6 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "SuggestStatusLineHandler": "T4 fires once at session start with the full remedy",
     "VersionCheckHandler": "T4 fires once at session start with the full remedy",
     "CriticalThinkingAdvisoryHandler": "T4 the injected advisory IS the content",
-    "PostClearAutoExecuteHandler": "T4 the injected guidance IS the content",
-    "RemindPromptLibraryHandler": "T4 a one-line reminder complete in itself",
-    "TaskCompletionCheckerHandler": "T4 restates the checklist it is reminding about",
     # -- Test 4: another resident section already carries it -------------
     "PlanCompletionAdvisorHandler": (
         "T4 its three steps are already resident under plan_qa_commit_gate's "
@@ -173,11 +169,6 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "T4 fires on a wrongly-numbered new plan folder; plan_number_helper's "
         "resident section already names mkplan.bash and the git counter as the "
         "way to get the number right in the first place"
-    ),
-    # -- Test 2: the advice arrives before the work it governs -----------
-    "TaskTddAdvisorHandler": (
-        "T2 fires as a Task starts and describes the RED/GREEN/REFACTOR cycle "
-        "that Task is about to run — in time, not too late"
     ),
     # -- Test handlers ---------------------------------------------------
     "HelloWorldNotificationHandler": "test stub, blocks nothing",

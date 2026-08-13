@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (43 handlers)
+### PreToolUse (42 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -33,7 +33,6 @@
 | 33 | comment_size | BLOCKING | Block/advise on over-long comments, tiered like plan-doc-size |
 | 33 | plan_number_helper | ADVISORY | Detect bash commands attempting to discover plan numbers and provide correct answer |
 | 35 | tdd_enforcement | BLOCKING | Enforce TDD by blocking production file creation without corresponding test file |
-| 36 | task_tdd_advisor | ADVISORY | Advise on TDD workflow when spawning Task agents for implementation work |
 | 38 | lsp_enforcement | BLOCKING | Enforce LSP tool usage instead of Grep/Bash grep for symbol lookups |
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
@@ -52,11 +51,10 @@
 | 57 | daemon_docs_guard | ADVISORY | Warn when reading from the hooks-daemon internal CLAUDE/ docs directory |
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
 
-### PostToolUse (8 handlers)
+### PostToolUse (7 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
-| 10 | bash_error_detector | ADVISORY | Detect errors and warnings in Bash command output |
 | 20 | validate_eslint_on_write | ADVISORY | Run ESLint validation on TypeScript/TSX files after write |
 | 25 | lint_on_edit | NON-TERMINAL | Run language-aware lint validation on files after Write/Edit |
 | 26 | markdown_table_formatter | NON-TERMINAL | Auto-format markdown tables after Write/Edit of .md files |
@@ -87,12 +85,11 @@
 |----------|---------|----------|-------------|
 | 20 | compaction_signal | NON-TERMINAL | Write a ``<session>.compacting`` signal on PreCompact for the supervisor |
 
-### UserPromptSubmit (5 handlers)
+### UserPromptSubmit (4 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | git_context_injector | CONTEXT | Inject current git status as context when user submits a prompt |
-| 54 | post_clear_auto_execute | ADVISORY | Inject execution guidance on the first prompt of a new session |
 | 55 | critical_thinking_advisory | ADVISORY | Periodically inject advisory context encouraging critical evaluation |
 | 56 | idle_housekeeping_advisory | ADVISORY | After N consecutive no-op recovery ticks, advise a report-first |
 | 57 | standing_authorisations | ADVISORY | Inject the authorisations a project has recorded in its config |
@@ -103,21 +100,13 @@
 |----------|---------|----------|-------------|
 | 10 | auto_approve_reads | TERMINAL | Auto-approve read-only tool permission requests |
 
-### Stop (5 handlers)
+### Stop (3 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | auto_continue_stop | TERMINAL | Intercept Stop events and enforce explicit stop reasons or auto-continue |
-| 20 | task_completion_checker | ADVISORY | Remind agent to verify task completion before stopping |
 | 30 | hedging_language_detector | ADVISORY | Detect hedging language that signals guessing instead of researching |
 | 58 | dismissive_language_detector | ADVISORY | Detect dismissive language that signals avoiding work |
-| 100 | remind_prompt_library | ADVISORY | Remind to capture successful prompts to the library |
-
-### SubagentStop (1 handler)
-
-| Priority | Handler | Behaviour | Description |
-|----------|---------|----------|-------------|
-| 20 | remind_prompt_library | ADVISORY | Remind to capture successful prompts to the library |
 
 ### Status (13 handlers)
 

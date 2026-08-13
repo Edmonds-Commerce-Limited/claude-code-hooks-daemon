@@ -252,7 +252,6 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "PlanWorkflowHandler": "matches a plan file path",
     "QaSuppressionHandler": "matches written content",
     "SecurityAntipatternHandler": "matches written content",
-    "TaskTddAdvisorHandler": "matches on the Task tool",
     "TddEnforcementHandler": "matches a file path",
     "ValidateInstructionContentHandler": "matches written content",
     "WebSearchYearHandler": "matches a WebSearch query",

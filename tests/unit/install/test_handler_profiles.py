@@ -89,9 +89,8 @@ class TestApplyProfile:
                   enabled: false           # Enable for automatic lint
                   priority: 25
 
-              stop:
-                task_completion_checker:  # Checks for task completion
-                  enabled: false           # Enable if using task management
+                validate_eslint_on_write:  # ESLint after .ts/.tsx writes
+                  enabled: false           # Strict-only: enable for TS projects
                   priority: 20
         """)
         config_path = tmp_path / "hooks-daemon.yaml"

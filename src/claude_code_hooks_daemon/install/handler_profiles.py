@@ -50,9 +50,7 @@ _RECOMMENDED_HANDLERS: Final[list[str]] = [
     "plan_completion_advisor",
     "markdown_organization",
     # Productivity
-    "task_completion_checker",
     "critical_thinking_advisory",
-    "task_tdd_advisor",
     "agent_isolation_advisor",
     # Plan 00223: the MECHANISM ships on so the options are discoverable;
     # every individual authorisation ships OFF, so this is inert until a
@@ -65,7 +63,6 @@ _STRICT_ONLY_HANDLERS: Final[list[str]] = [
     "lsp_enforcement",
     "npm_command",
     "british_english",
-    "remind_prompt_library",
     "validate_eslint_on_write",
 ]
 

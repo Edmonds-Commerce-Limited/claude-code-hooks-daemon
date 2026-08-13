@@ -193,7 +193,7 @@ Priorities determine the order handlers execute within an event type. **Lower nu
 | 25-35 | Code Quality | Enforce development standards  | `lint_on_edit` (25), `qa_suppression` (30)                         |
 | 36-55 | Workflow     | Process and tool guidance      | `plan_workflow` (45), `npm_command` (50), `web_search_year` (55)   |
 | 56-60 | Advisory     | Non-blocking suggestions       | `british_english` (60)                                             |
-| 100+  | Logging      | Metrics and audit trails       | `remind_prompt_library` (100)                                      |
+| 100+  | Logging      | Metrics and audit trails       | (none ship today; range reserved)                                  |
 
 ### Why Priority Matters
 
@@ -503,7 +503,7 @@ The daemon will log a warning about an unrecognized handler. Check spelling agai
 ```yaml
 handlers:
   pre_tool_use:
-    bash_error_detector: {enabled: true}  # Wrong -- this is a post_tool_use handler
+    lint_on_edit: {enabled: true}  # Wrong -- this is a post_tool_use handler
 ```
 
 Handlers only work under their correct event type. See the example config for the right placement.
@@ -575,7 +575,7 @@ handlers:
     web_search_year: {enabled: true, priority: 55}
 
   post_tool_use:
-    bash_error_detector: {enabled: true, priority: 10}
+    lint_on_edit: {enabled: true, priority: 25}
 
   session_start:
     git_upstream_checker: {enabled: true, priority: 56}
@@ -611,7 +611,7 @@ handlers:
     web_search_year: {enabled: true, priority: 55}
 
   post_tool_use:
-    bash_error_detector: {enabled: true, priority: 10}
+    lint_on_edit: {enabled: true, priority: 25}
     validate_eslint_on_write: {enabled: true, priority: 20}
 
   session_start:

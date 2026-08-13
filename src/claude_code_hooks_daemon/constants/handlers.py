@@ -352,25 +352,10 @@ class HandlerID:
         config_key="npm_command",
         display_name="enforce-npm-commands",
     )
-    TASK_COMPLETION_CHECKER = HandlerIDMeta(
-        class_name="TaskCompletionCheckerHandler",
-        config_key="task_completion_checker",
-        display_name="task-completion-checker",
-    )
-    TASK_TDD_ADVISOR = HandlerIDMeta(
-        class_name="TaskTddAdvisorHandler",
-        config_key="task_tdd_advisor",
-        display_name="task-tdd-advisor",
-    )
     AGENT_ISOLATION_ADVISOR = HandlerIDMeta(
         class_name="AgentIsolationAdvisorHandler",
         config_key="agent_isolation_advisor",
         display_name="agent-isolation-advisor",
-    )
-    BASH_ERROR_DETECTOR = HandlerIDMeta(
-        class_name="BashErrorDetectorHandler",
-        config_key="bash_error_detector",
-        display_name="bash-error-detector",
     )
     GIT_HOOKS_EXECUTABLE_FIXER = HandlerIDMeta(
         class_name="GitHooksExecutableFixerHandler",
@@ -419,11 +404,6 @@ class HandlerID:
     )
 
     # Advisory handlers (Priority: 55-60)
-    POST_CLEAR_AUTO_EXECUTE = HandlerIDMeta(
-        class_name="PostClearAutoExecuteHandler",
-        config_key="post_clear_auto_execute",
-        display_name="post-clear-auto-execute",
-    )
     CRITICAL_THINKING_ADVISORY = HandlerIDMeta(
         class_name="CriticalThinkingAdvisoryHandler",
         config_key="critical_thinking_advisory",
@@ -443,13 +423,6 @@ class HandlerID:
         class_name="BritishEnglishHandler",
         config_key="british_english",
         display_name="enforce-british-english",
-    )
-
-    # Logging/cleanup handlers (Priority: 100)
-    REMIND_PROMPT_LIBRARY = HandlerIDMeta(
-        class_name="RemindPromptLibraryHandler",
-        config_key="remind_prompt_library",
-        display_name="remind-capture-prompt",
     )
 
     # Status line handlers (varied priorities)
@@ -678,14 +651,12 @@ HandlerKey = Literal[
     "plan_time_estimates",
     "plan_workflow",
     "npm_command",
-    "task_completion_checker",
     "hedging_language_detector",
     "dismissive_language_detector",
     "dismissive_language_nitpick",
     "hedging_language_nitpick",
     "optimal_config_checker",
     "git_filemode_checker",
-    "bash_error_detector",
     "web_search_year",
     "suggest_status_line",
     "plan_completion_advisor",
@@ -693,8 +664,6 @@ HandlerKey = Literal[
     # Advisory handlers
     "critical_thinking_advisory",
     "british_english",
-    # Logging/cleanup handlers
-    "remind_prompt_library",
     # Status line handlers
     "git_repo_name",
     "account_display",
@@ -807,6 +776,56 @@ RETIRED_HANDLERS: dict[str, str] = {
         "because documented workflows genuinely tell you to read it. Safe to "
         "delete this key from your config; the JSONL file it wrote can be "
         "deleted too."
+    ),
+    "bash_error_detector": (
+        "removed in Plan 00237 — it substring-matched seven common words "
+        "('error', 'failed', 'failure', 'fatal', 'warning', 'warn', "
+        "'deprecated') in Bash output, echoed the whole command back, and "
+        "asked you to re-read output you had just requested and could already "
+        "see. Measured on the daemon's own verdict log it was the single most "
+        "active behavioural handler — 274 fires, 45% of ALL behavioural "
+        "handler activity, and allow=274: it never once restricted anything. "
+        "Substring matching meant a filename containing 'error' in an `ls` "
+        "listing tripped it. Safe to delete this key from your config; the "
+        "actual exit status and stderr of a command are already in front of "
+        "you."
+    ),
+    "task_tdd_advisor": (
+        "removed in Plan 00237 — a 30-line TDD reminder injected on Task "
+        "prompts matching 'implement|build|develop|…'. Its two reference "
+        "targets are eagerly imported into CLAUDE.md, so their full text was "
+        "already resident before it said anything, and its closing "
+        "instruction told the agent to run a QA script that this project's "
+        "own handler denies. Safe to delete this key from your config; if you "
+        "want TDD guidance resident, put it in CLAUDE.md where it is read "
+        "once rather than re-injected per Task call."
+    ),
+    "task_completion_checker": (
+        "removed in Plan 00237 — a static Stop-time checklist with "
+        "matches() == True. It sat at priority 20 behind auto_continue_stop "
+        "(priority 10, terminal), which matches nearly every Stop and breaks "
+        "the chain, so on an ordinary stop it never ran at all — confirmed by "
+        "live dispatch, and by 3 fires in the whole retained verdict window. "
+        "What it reminded you to do, auto_continue_stop actually enforces. "
+        "Safe to delete this key from your config."
+    ),
+    "post_clear_auto_execute": (
+        "removed in Plan 00237 — it injected 'you have just started a fresh "
+        "session, execute the instruction immediately' on the first prompt of "
+        "each session, tracking 'first' with a SINGLE last-session-id slot. "
+        "Parallel sessions deliberately share one daemon, so two concurrent "
+        "sessions flip that slot on every prompt and both are told they are "
+        "fresh when they are not. Its originating plan was already cancelled "
+        "as unachievable. Safe to delete this key from your config."
+    ),
+    "remind_prompt_library": (
+        "removed in Plan 00237 — matches() was an unconditional True, and "
+        "after every sub-agent completion it advised running "
+        "`npm run llm:prompts` and reading `CLAUDE/PromptLibrary/README.md`. "
+        "Neither the script nor the directory existed anywhere in this "
+        "project, and there was no existence gating of any kind, so every one "
+        "of its fires pointed at something that could not be run or read. "
+        "Safe to delete this key from your config."
     ),
     "subagent_completion_logger": (
         "removed in Plan 00237 — the same shape as notification_logger: it "

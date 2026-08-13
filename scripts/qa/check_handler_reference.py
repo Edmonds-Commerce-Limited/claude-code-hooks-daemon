@@ -26,8 +26,8 @@ Ground truth is the CODE, never another document:
     ``constants/handlers.py`` (via ``scripts/audit_handler_config_keys.py`` —
     reused, not reimplemented, so both surfaces agree about what a config key
     is) UNION the class names the live ``HandlerRegistry`` discovers. The union
-    matters: ``post_clear_auto_execute`` is a real, shipped handler with no
-    ``HandlerID`` entry, so ``HandlerID`` alone would flag it as a phantom.
+    matters because a handler can ship with no ``HandlerID`` entry, and
+    ``HandlerID`` alone would then flag it as a phantom.
 
 ``priorities``
     ``constants/priority.py``, which that module's own docstring declares the
@@ -285,7 +285,7 @@ def load_ground_truth() -> GroundTruth:
             keys.add(info["auto_generated"])
 
     # Source 2 — every handler class the registry actually discovers. Catches
-    # shipped handlers with no HandlerID entry (e.g. post_clear_auto_execute).
+    # shipped handlers that have no HandlerID entry.
     registry = HandlerRegistry()
     registry.discover()
     for class_name in registry.list_handlers():

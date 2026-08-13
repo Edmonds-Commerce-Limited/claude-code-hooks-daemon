@@ -1,7 +1,6 @@
-"""Integration tests for Stop and SubagentStop handlers.
+"""Integration tests for Stop handlers.
 
-Tests: TaskCompletionCheckerHandler, AutoContinueStopHandler,
-       RemindPromptLibraryHandler
+Tests: AutoContinueStopHandler
 """
 
 from __future__ import annotations
@@ -12,40 +11,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.core import Decision
-from tests.integration.handlers.conftest import (
-    make_stop_input,
-    make_subagent_stop_input,
-)
-
-
-# ---------------------------------------------------------------------------
-# TaskCompletionCheckerHandler
-# ---------------------------------------------------------------------------
-class TestTaskCompletionCheckerHandler:
-    """Integration tests for TaskCompletionCheckerHandler."""
-
-    @pytest.fixture()
-    def handler(self) -> Any:
-        from claude_code_hooks_daemon.handlers.stop.task_completion_checker import (
-            TaskCompletionCheckerHandler,
-        )
-
-        return TaskCompletionCheckerHandler()
-
-    def test_matches_all_stop_events(self, handler: Any) -> None:
-        hook_input = make_stop_input()
-        assert handler.matches(hook_input) is True
-
-    def test_provides_completion_reminder(self, handler: Any) -> None:
-        hook_input = make_stop_input()
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.ALLOW
-        assert result.context is not None
-        assert len(result.context) > 0
-        assert "Task Completion Checklist" in result.context[0]
-
-    def test_handler_is_non_terminal(self, handler: Any) -> None:
-        assert handler.terminal is False
+from tests.integration.handlers.conftest import make_stop_input
 
 
 # ---------------------------------------------------------------------------
@@ -195,33 +161,6 @@ class TestAutoContinueStopHandler:
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
         assert "STOPPING BECAUSE" in (result.reason or "")
-
-    def test_handler_is_terminal(self, handler: Any) -> None:
-        assert handler.terminal is True
-
-
-# ---------------------------------------------------------------------------
-# RemindPromptLibraryHandler
-# ---------------------------------------------------------------------------
-class TestRemindPromptLibraryHandler:
-    """Integration tests for RemindPromptLibraryHandler."""
-
-    @pytest.fixture()
-    def handler(self) -> Any:
-        from claude_code_hooks_daemon.handlers.subagent_stop.remind_prompt_library import (
-            RemindPromptLibraryHandler,
-        )
-
-        return RemindPromptLibraryHandler()
-
-    def test_matches_subagent_stop(self, handler: Any) -> None:
-        hook_input = make_subagent_stop_input()
-        assert handler.matches(hook_input) is True
-
-    def test_handle_returns_allow(self, handler: Any) -> None:
-        hook_input = make_subagent_stop_input(subagent_type="explore")
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.ALLOW
 
     def test_handler_is_terminal(self, handler: Any) -> None:
         assert handler.terminal is True

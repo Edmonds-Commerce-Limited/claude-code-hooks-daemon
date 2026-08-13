@@ -63,25 +63,6 @@ def make_edit_hook_input(
     }
 
 
-def make_post_tool_bash_input(
-    command: str,
-    stdout: str = "",
-    stderr: str = "",
-    interrupted: bool = False,
-) -> dict[str, Any]:
-    """Create a PostToolUse hook_input for a Bash command."""
-    return {
-        "hook_event_name": "PostToolUse",
-        "tool_name": "Bash",
-        "tool_input": {"command": command},
-        "tool_response": {
-            "stdout": stdout,
-            "stderr": stderr,
-            "interrupted": interrupted,
-        },
-    }
-
-
 def make_post_tool_write_input(file_path: str) -> dict[str, Any]:
     """Create a PostToolUse hook_input for a Write operation."""
     return {
@@ -122,18 +103,6 @@ def make_stop_input(
         "hook_event_name": "Stop",
         "stop_hook_active": stop_hook_active,
         "transcript_path": transcript_path,
-    }
-
-
-def make_subagent_stop_input(
-    transcript_path: str = "",
-    subagent_type: str = "unknown",
-) -> dict[str, Any]:
-    """Create a SubagentStop hook_input."""
-    return {
-        "hook_event_name": "SubagentStop",
-        "transcript_path": transcript_path,
-        "subagent_type": subagent_type,
     }
 
 
