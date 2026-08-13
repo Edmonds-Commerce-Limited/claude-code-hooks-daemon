@@ -1,6 +1,6 @@
 # Plan 00229: qa report count implies detail guard
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-13
 **Owner**: joseph
 **Priority**: Medium
@@ -151,6 +151,21 @@ cannot be under-selected the same way.
   warning vanish (`fires=True` → `fires=False`), so the assertions genuinely
   depend on the implementation
 
+### Phase 5: The reason the artifact already had and never showed
+
+- [x] ✅ **Task 5.1**: `_report_error()` — surface an explanation the tool
+  recorded, from a top-level `error` or one nested in `summary`. Two locations
+  because the shipped scripts genuinely use both
+- [x] ✅ **Task 5.2**: A recorded reason takes precedence over the generic
+  count warning. That warning says detail "was dropped", which is false for a
+  tool that never ran — see Decision 3
+- [x] ✅ **Task 5.3**: RED first this time (4 failed / 52 passed), correcting
+  the Phase 4 ordering slip. Producers pinned too: a test reads
+  `run_smoke_test.sh` and `run_shell_check.sh` and asserts they still emit the
+  shapes these fixtures assume, so the fixtures cannot go stale silently
+- [x] ✅ **Task 5.4**: Dogfooded — `--read-only all` over the real reports adds
+  ZERO lines on a healthy run
+
 ## Technical Decisions
 
 ### Decision 1: Fix the `tests` hint, do not exempt it
@@ -213,6 +228,36 @@ failure mode would only obscure the real one.
 
 **Date**: 2026-08-13
 
+### Decision 3: A recorded reason beats an inferred one
+
+**Context**: applying this plan's own lens to the QA scripts turned up two LIVE
+instances, not hypotheticals.
+
+- `run_smoke_test.sh` with no daemon socket writes `failed_probes: 3` beside
+  `probes: []` and a top-level `error`. The operator sees "0/3 probes passed
+  (3 failed)", runs the printed `jq '.probes[]'`, and gets silence.
+- `run_shell_check.sh` with shellcheck absent writes `total_issues: 0`,
+  `passed: false`, and an error inside `summary`. The line renders as a RED
+  "0 issues" with no cause.
+
+Both scripts also print the reason to their own stdout — which `run_tool`
+sends to `DEVNULL`. So the only surviving copy is in the JSON, and no
+summariser reads it. The information needed to act is on disk and shown to
+nobody.
+
+**The second case is why this is not a variant of the count warning.** Its
+count is ZERO, so nothing about the count is wrong; what is wrong is that the
+check never ran and the artifact does not say so. A guard keyed on counts is
+structurally incapable of noticing it.
+
+**Decision**: surface a recorded `error` whenever present, and let it take
+precedence over the generic warning. Treating the smoke_test finding as a
+CANDIDATE rather than a verdict mattered here — the generic warning would have
+told the reader the detail "was dropped", which is untrue when no probes ran.
+There was nothing to drop.
+
+**Date**: 2026-08-13
+
 ## Success Criteria
 
 - [x] A report claiming a non-zero count with unreachable detail is caught —
@@ -226,7 +271,12 @@ failure mode would only obscure the real one.
 - [x] The `tests` hint gap is closed — pointed at
   `.tests[] | select(.outcome == "failed") | .name`, with the exemption map
   left empty rather than used to excuse it
-- [ ] All QA passing; daemon restart verified RUNNING
+- [x] All QA passing (20/20, 12634 tests, coverage 95.3%); daemon restart
+  verified RUNNING
+- [x] An explanation the artifact already holds is never swallowed — added
+  after the guard's own lens found two LIVE instances in the shipped QA
+  scripts (Decision 3), one of which has a ZERO count and so was invisible to
+  the invariant this plan was filed on
 
 ## Risks & Mitigations
 

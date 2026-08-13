@@ -213,6 +213,94 @@ class TestTheArtifactReportsItsOwnInconsistency:
         assert passed is False
 
 
+class TestARecordedExplanationIsNeverSwallowed:
+    """Both of these are live in the shipped scripts, not hypotheticals.
+
+    A tool that cannot run records WHY, and then nobody sees it. `llm_qa` runs
+    every tool with `stdout=DEVNULL`, so the script's own console message is
+    discarded, and no summariser reads an `error` field — leaving a red line
+    with a number and no reason, while the explanation sits in the JSON.
+
+    - `run_smoke_test.sh` with no daemon socket writes `failed_probes: 3`,
+      `probes: []` and a TOP-LEVEL `error`
+    - `run_shell_check.sh` with shellcheck absent writes `total_issues: 0`,
+      `passed: false` and an error inside `summary`
+
+    The second is why this cannot be folded into the count-based warning: its
+    count is ZERO, so nothing about the count is wrong. What is wrong is that
+    the check never ran and the artifact does not say so.
+    """
+
+    _SMOKE_TEST_ERROR = "Daemon not running — no socket found."
+    _SHELL_CHECK_ERROR = "shellcheck not installed"
+
+    def test_a_top_level_error_is_surfaced(self, tmp_path: Path) -> None:
+        report = {
+            "summary": {"total_probes": 3, "passed_probes": 0, "failed_probes": 3},
+            "probes": [],
+            "error": self._SMOKE_TEST_ERROR,
+        }
+
+        text = _summarize_synthetic_report(tmp_path, "smoke_test", report)
+
+        assert self._SMOKE_TEST_ERROR in text
+
+    def test_an_error_nested_in_summary_is_surfaced(self, tmp_path: Path) -> None:
+        report = {
+            "summary": {"total_issues": 0, "passed": False, "error": self._SHELL_CHECK_ERROR},
+            "issues": [],
+        }
+
+        text = _summarize_synthetic_report(tmp_path, "shell_audit", report)
+
+        assert self._SHELL_CHECK_ERROR in text
+
+    def test_a_healthy_report_gains_no_error_line(self, tmp_path: Path) -> None:
+        report = {"summary": {"total_violations": 0, "passed": True}}
+
+        text = _summarize_synthetic_report(tmp_path, "magic_values", report)
+
+        assert llm_qa._REPORT_ERROR_LABEL not in text
+
+    def test_the_producers_still_emit_the_shapes_these_tests_assume(self) -> None:
+        """Pin the premise to the PRODUCERS, not to my memory of them.
+
+        The fixtures above are hand-written copies of what two shell scripts
+        emit. A copy can go stale silently: the script changes, the fixture
+        does not, and these tests keep passing against a shape nothing
+        produces any more — asserting an unreachable premise, the failure
+        Plan 00196 closed for acceptance tests.
+
+        Plan 00226 solved the same problem the same way, by reading the
+        producer rather than trusting a remembered token.
+        """
+        project_root = Path(__file__).resolve().parents[3]
+        smoke_test = (project_root / "scripts" / "qa" / "run_smoke_test.sh").read_text()
+        shell_check = (project_root / "scripts" / "qa" / "run_shell_check.sh").read_text()
+
+        assert '"error"' in smoke_test, "run_smoke_test.sh no longer records a reason"
+        assert '"probes": []' in smoke_test, "run_smoke_test.sh no longer emits an empty probes[]"
+        assert '"error"' in shell_check, "run_shell_check.sh no longer records a reason"
+
+    def test_a_recorded_error_replaces_the_generic_warning(self, tmp_path: Path) -> None:
+        """Do not tell the reader detail 'was dropped' when the tool said why.
+
+        The generic warning asserts the detail exists and went missing. For a
+        tool that never ran, that is simply untrue — no probes executed, so
+        there is nothing to have dropped.
+        """
+        report = {
+            "summary": {"total_probes": 3, "passed_probes": 0, "failed_probes": 3},
+            "probes": [],
+            "error": self._SMOKE_TEST_ERROR,
+        }
+
+        text = _summarize_synthetic_report(tmp_path, "smoke_test", report)
+
+        assert self._SMOKE_TEST_ERROR in text
+        assert llm_qa._DETAIL_MISSING_WARNING not in text
+
+
 @pytest.mark.parametrize("name", sorted(_in_scope_reports()))
 def test_every_report_hint_names_a_detail_array(name: str) -> None:
     """Every in-scope report must send the operator somewhere with detail.

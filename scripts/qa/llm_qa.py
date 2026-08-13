@@ -355,6 +355,14 @@ _HINT_DETAIL_ARRAY_PATTERN = re.compile(r"\.(?P<key>\w+)\[\]")
 # fires without pinning the whole sentence, which is prose and may be reworded.
 _DETAIL_MISSING_WARNING: Final[str] = "⚠️  DETAIL MISSING:"
 
+# Prefix for an explanation the tool itself recorded.
+_REPORT_ERROR_LABEL: Final[str] = "⚠️  TOOL ERROR:"
+
+# Where a tool may record why it could not run. Two locations because the
+# shipped scripts genuinely use both: run_smoke_test.sh writes a top-level
+# `error`, run_shell_check.sh nests one inside `summary`.
+_REPORT_ERROR_PATHS: Final[tuple[tuple[str, ...], ...]] = (("error",), ("summary", "error"))
+
 # Summary keys that count BAD things. Detail is owed only when one of these is
 # non-zero; `passed` and `total_probes` say nothing about whether detail is due.
 _FAILURE_COUNT_KEYS: Final[tuple[str, ...]] = (
@@ -399,6 +407,27 @@ def _detail_is_missing(data: QaReport, jq_hint: str) -> bool:
     if key is None:
         return True
     return not data.get(key)
+
+
+def _report_error(data: QaReport) -> str | None:
+    """An explanation the tool recorded, which nothing else would show.
+
+    `run_tool` sends every tool's stdout to DEVNULL, so a script's own console
+    message ("❌ shellcheck not installed") never reaches the reader. If the
+    tool also wrote the reason into its JSON, that copy is the only one left —
+    and no summariser reads it, so the artifact shows a red line with a count
+    and no cause.
+
+    Both shapes below are live in the shipped scripts, which is why this looks
+    in two places rather than one.
+    """
+    for path in _REPORT_ERROR_PATHS:
+        value: Any = data
+        for key in path:
+            value = value.get(key) if isinstance(value, dict) else None
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def _is_passed(data: QaReport) -> bool:
@@ -460,6 +489,16 @@ def summarize_tool(name: str, exit_code: int | None = None) -> tuple[bool, str]:
 
     line1 = f"{icon} {name}: {metrics}{mismatch_note}"
     line2 = f"   {config.json_file} | {config.jq_hint}"
+
+    # A recorded reason beats any inference we could make, and it is the ONLY
+    # copy left once run_tool discards the tool's stdout. It also takes
+    # precedence over the generic warning below: that warning says detail
+    # "was dropped", which is false for a tool that never ran — no probes
+    # executed, so there was never anything to drop (Plan 00229).
+    recorded_error = _report_error(data)
+    if recorded_error is not None:
+        line3 = f"   {_REPORT_ERROR_LABEL} {recorded_error}"
+        return passed, f"{line1}\n{line2}\n{line3}\n"
 
     # A report that counts failures it cannot show is worse than one that
     # counts none: the hint above becomes a promise it does not keep, and an
