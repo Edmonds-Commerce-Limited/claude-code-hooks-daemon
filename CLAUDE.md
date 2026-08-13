@@ -1804,7 +1804,7 @@ When Claude Code creates a worktree (an `isolation: "worktree"` agent or `--work
 
 <!-- handler: nitpick-dismissive-language -->
 
-## dismissive_language_detector — do not deflect or prematurely halt
+## nitpick.dismissive_language — do not deflect or prematurely halt
 
 Your messages are scanned for language patterns signalling avoidance of work. The handler does NOT block anything, but injects context so you self-correct. Identical advisories (same session, same phrase set) are emitted once, not repeated.
 
@@ -1820,7 +1820,7 @@ Your messages are scanned for language patterns signalling avoidance of work. Th
 
 <!-- handler: nitpick-hedging-language -->
 
-## hedging_language_detector — the guessing is the defect, not the wording
+## nitpick.hedging_language — the guessing is the defect, not the wording
 
 Your messages are scanned for hedges — "if I recall", "IIRC", "from memory",
 "probably", "likely", "apparently", "presumably", "I believe" — and a
@@ -1841,7 +1841,7 @@ check you could have made.
 **A QUOTED phrase is a mention, not a hedge.** Naming the phrase is how you
 acknowledge it, so quoting one never re-fires the advisory.
 
-The sibling `dismissive_language_detector` covers the same ground for
+The sibling `nitpick.dismissive_language` covers the same ground for
 avoidance rather than uncertainty.
 
 </hooksdaemon>
