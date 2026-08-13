@@ -1,6 +1,9 @@
 # Plan 00168: supervisor compaction injection not firing
 
-**Status**: In Progress
+**Status**: Dormant
+**Blocker**: Task 5.3 is externally blocked (per commit 1774d698) — live
+verification was carried as far as is possible in-session and cannot progress
+without the external condition.
 **Created**: 2026-07-16
 **Owner**: joseph
 **Priority**: High

@@ -164,3 +164,5 @@ rather than pretending the sweep was complete.
 
 - Found by hitting it during Plan 00224 closure; one of the two failures it
   hid was never identified
+- Delivered at `f3c6bb2f` — parser, shell wiring, failure naming, the
+  producer/consumer coupling guard and plan closure in one commit

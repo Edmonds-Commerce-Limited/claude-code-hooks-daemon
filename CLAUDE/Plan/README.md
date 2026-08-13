@@ -8,7 +8,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Core / Hook Coverage
 
-- [00170: Universal Hook Coverage + Hook-Support Enforcement](00170-universal-hook-coverage-and-enforcement/PLAN.md) - In Progress (fundamental: intercepting hook events is the daemon's raison d'être, yet only **10 of the 30** documented Claude Code hook events are wired — 20 are silently unwired, so a client project cannot even …)
+- [00170: Universal Hook Coverage + Hook-Support Enforcement](00170-universal-hook-coverage-and-enforcement/PLAN.md) - Dormant (fundamental: intercepting hook events is the daemon's raison d'être, yet only **10 of the 30** documented Claude Code hook events are wired — 20 are silently unwired, so a client project cannot even …)
 
 - [00172: Close the HandlersConfig ↔ wired-events coverage gap](00172-handlerconfig-wired-events-coverage-gap/PLAN.md) - Not Started (follow-up from the `status_line` config-drop fix audit: `HandlersConfig` declares only 11 of 31 wired events, so `_build_handler_config_mapping` would silently drop config for any of the 20 …)
 
@@ -22,11 +22,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Status Line / Agent View
 
-- [00175: statusline refreshInterval first-class default + startup validation](00175-statusline-refresh-interval-first-class/PLAN.md) - In Progress (root-caused the Ctrl+Z notice lag to `statusLine.refreshInterval: 10` — Claude Code re-runs the status command only on events (Ctrl+Z is not one) plus this optional timer whose minimum is 1s, so an …)
+- [00175: statusline refreshInterval first-class default + startup validation](00175-statusline-refresh-interval-first-class/PLAN.md) - Dormant, part-shipped (root-caused the Ctrl+Z notice lag to `statusLine.refreshInterval: 10` — Claude Code re-runs the status command only on events (Ctrl+Z is not one) plus this optional timer whose minimum is 1s, so an …)
 
-- [00174: Status-Line Artefact + Per-Segment Cadence Redesign](00174-status-line-artefact-cadence-redesign/PLAN.md) - In Progress (design brainstorm → looped audit/refine; NOT yet implementation-ready.)
-
-- [00158: Agent Thread Navigation & Status Line](00158-agent-thread-navigation-statusline/PLAN.md) - Dormant (Phase 1 research/dogfood complete; Phases 2–4 wait on Plan 00174's still-unsettled `subagentStatusLine` rendering design)
+- [00158: Agent Thread Navigation & Status Line](00158-agent-thread-navigation-statusline/PLAN.md) - Dormant (Phase 1 research/dogfood complete; Phases 2–4 waited on Plan 00174's `subagentStatusLine` rendering design, which is now Superseded — the dependency needs re-deciding, not merely re-pointing, since 00175 concluded the artefact store should not be built)
 
   - Documents the dogfood-verified Claude Code contract for the main `statusLine` and the newer `subagentStatusLine` surfaces; root-causes the "no status line / whose data?" symptoms under Agent View (arrow-key thread navigation)
   - Scopes daemon support for `subagentStatusLine` (per-thread agent-panel rows) plus a `statusLine` `refreshInterval` so the bar stays live while background agents run
@@ -34,7 +32,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00159: Status Writers Thread-Safe Tmp Naming](00159-status-writers-thread-safe-tmp-naming/PLAN.md) - Not Started (v3.39.0 code-review follow-up: the four `.{stem}.{pid}.tmp` atomic writers key on PID not thread — harmless today, hardening only)
 
-- [00168: Supervisor Compaction Injection Not Firing](00168-supervisor-compaction-injection-not-firing/PLAN.md) - In Progress (high-value: user reports the ccy supervisor stopped auto-`/compact`-ing at COMPACT NOW; live diagnostic verified the supervisor armed+running, not stale, session-isolation working single-session …)
+- [00168: Supervisor Compaction Injection Not Firing](00168-supervisor-compaction-injection-not-firing/PLAN.md) - Dormant, Task 5.3 externally blocked (high-value: user reports the ccy supervisor stopped auto-`/compact`-ing at COMPACT NOW; live diagnostic verified the supervisor armed+running, not stale, session-isolation working single-session …)
 
 ### Code Quality / Handler Configuration
 
@@ -50,7 +48,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - Tiered size enforcement (advise → strong warn → hard block) at escalating thresholds via the existing `plan_qa` surfaces, plus consistent doc/SSoT touch-points — no new handler, no context flooding
 
-- [00163: Plan Journalling — first-class per-plan JOURNAL/ support](00163-plan-journalling/PLAN.md) - In Progress (synthesis of two Opus brainstorms delivered; implementation not started)
+- [00163: Plan Journalling — first-class per-plan JOURNAL/ support](00163-plan-journalling/PLAN.md) - Dormant (Phases 1–2 shipped in v3.40.0; Task 3.2 is the sole open item)
 
   - Every plan folder gains a `JOURNAL/` of per-day append-only files `NNNNN-Journal-YY-MM-DD.md` — the linear activity log (findings, decisions, dead-ends, hand-offs) complementary to PLAN.md, with a fixed entry grammar (`## HH:MM · category · REF`)
   - First-class via the existing plan_qa surfaces (no new handler): six advise-first checks (`journal-dayfile-naming`, `journal-append-only`, `journal-folder-present`, `journal-freshness`, plus deferred …
@@ -1130,6 +1128,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Cancelled Plans
 
+- [00174: Status-Line Artefact + Per-Segment Cadence Redesign](Cancelled/00174-status-line-artefact-cadence-redesign/PLAN.md) - Superseded by Plan 00175, which concluded the artefact store is unnecessary because Claude Code's 1s refresh floor caps any benefit a cheaper render could unlock
+
 - [00199: planlib — plan-orchestrator tooling in the daemon](Cancelled/00199-hooks-daemon-plan-lib/PLAN.md) - Superseded
 
   - Superseded by [00213](00213-planlib-plan-folder-orchestrator-tooling/PLAN.md), which targets the SAME upstream proposal and is the plan being executed. Both were authored independently five days apart and neither referenced the other; 00213 additionally tracks the proposal under version control (`PROPOSAL.md`) rather than pointing at `untracked/`. 00199 was never started, so no work is lost.
@@ -1159,10 +1159,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 226 (count = `hooksdaemon.latestPlanNumber` git counter)
 - **Completed**: 183 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 31 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
-- **Cancelled/Abandoned**: 5 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 32 + 183 + 5 = **220 folders**, spanning
+- **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
+- **Folder-to-number reconciliation**: 31 + 183 + 6 = **220 folders**, spanning
   **217 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1172,7 +1172,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work). 217 + 9 = 226. ✅
-- **Last reconciled by**: the Plan 00226 open-and-close — the folder was
+- **Last reconciled by**: the stale-plan sweep that archived Plan 00174 as
+  Superseded — one folder moved from the root into `Cancelled/`, so Active fell
+  by one and Cancelled rose by one (31 root, 183 `Completed/`, 6 `Cancelled/`)
+  while Total and the folder total were untouched. Four sibling plans (00163,
+  00168, 00170, 00175) were flipped to Dormant in the same pass; a status change
+  without a move does not shift any count. Before that, the Plan 00226 open-and-close — the folder was
   created and archived within one working session, so Total rose by one, the
   counter advanced by `mkplan.bash`, and the folder landed directly in
   `Completed/` (32 root, 183 `Completed/`, 5 `Cancelled/`) leaving Active

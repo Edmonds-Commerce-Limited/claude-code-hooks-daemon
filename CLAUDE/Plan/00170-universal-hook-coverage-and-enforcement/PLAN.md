@@ -1,6 +1,9 @@
 # Plan 00170: Universal Hook Coverage + Hook-Support Enforcement
 
-**Status**: In Progress
+**Status**: Dormant
+**Blocker**: Not blocked externally — parked mid-rescope. Phase 4 was re-scoped
+(commit 6f6dffd4) and 10 tasks remain; resuming needs that re-scope confirmed
+first.
 **Created**: 2026-07-16
 **Owner**: joseph
 **Priority**: High

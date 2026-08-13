@@ -1,6 +1,8 @@
 # Plan 00163: Plan Journalling — first-class per-plan JOURNAL/ support
 
-**Status**: In Progress
+**Status**: Dormant
+**Blocker**: Not blocked externally — parked. Phases 1–2 shipped (v3.40.0);
+Task 3.2 is the sole open item and needs a deliberate decision to pick up.
 **Created**: 2026-07-14
 **Owner**: joseph
 **Priority**: Medium

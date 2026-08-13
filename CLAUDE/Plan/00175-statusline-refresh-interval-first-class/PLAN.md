@@ -1,6 +1,10 @@
 # Plan 00175: statusline refresh interval first class
 
-**Status**: In Progress
+**Status**: Dormant
+**Blocker**: Not blocked externally — parked part-shipped. `refreshInterval: 1`
+is live in `.claude/settings.json`, but the `statusline_refresh_checker`
+SessionStart advisory was never built, so the 17 open tasks are real remaining
+work rather than stale bookkeeping.
 **Created**: 2026-07-17
 **Owner**: joseph
 **Priority**: Medium

@@ -1,6 +1,7 @@
 # Plan 00174: Status-Line Artefact + Per-Segment Cadence Redesign
 
-**Status**: In Progress
+**Status**: Superseded
+**Superseded By**: Plan 00175 (statusline refresh interval first class)
 **Created**: 2026-07-17
 **Owner**: joseph
 **Priority**: Medium

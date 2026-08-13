@@ -1,7 +1,7 @@
 # Plan 00158: agent thread navigation statusline
 
 **Status**: Dormant
-**Blocker**: Phases 2 and 4 target the `subagentStatusLine` surface, whose rendering pipeline is still at design stage in Plan 00174 (status-line artefact cadence redesign). Building against it now would be rework once that design settles.
+**Blocker**: Phases 2 and 4 target the `subagentStatusLine` surface, whose rendering pipeline was at design stage in Plan 00174 (status-line artefact cadence redesign). Plan 00174 is now **Superseded** — Plan 00175 concluded the artefact store should not be built, because Claude Code's 1s refresh floor caps any benefit a cheaper render could unlock. So this blocker no longer resolves by waiting: the design it waited for will not arrive. Resuming Phases 2/4 needs a fresh decision about what `subagentStatusLine` renders against, not a re-point at another plan.
 **Created**: 2026-07-13
 **Owner**: joseph
 **Priority**: Medium
