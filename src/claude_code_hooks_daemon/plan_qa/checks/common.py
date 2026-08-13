@@ -132,6 +132,7 @@ class DocumentRuleChecks(NamedTuple):
     edit: CheckSpec
     sweep: CheckSpec
 
+
 # Checks that are about the ACT OF WRITING, not about on-disk state, and so
 # have no batch equivalent by design. Each entry records why, because the
 # totality guard treats an unexplained omission as a gap.

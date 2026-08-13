@@ -99,10 +99,6 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
 
 
 CHECKS: Final[tuple[CheckSpec, CheckSpec]] = (
-    CheckSpec(
-        check_id=CHECK_ID, stage=Stage.EDIT, level=Level.ADVISE, sins=(), run=_run_edit
-    ),
-    CheckSpec(
-        check_id=CHECK_ID, stage=Stage.SWEEP, level=Level.ADVISE, sins=(), run=_run_sweep
-    ),
+    CheckSpec(check_id=CHECK_ID, stage=Stage.EDIT, level=Level.ADVISE, sins=(), run=_run_edit),
+    CheckSpec(check_id=CHECK_ID, stage=Stage.SWEEP, level=Level.ADVISE, sins=(), run=_run_sweep),
 )
