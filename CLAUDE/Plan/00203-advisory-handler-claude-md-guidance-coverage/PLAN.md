@@ -160,6 +160,35 @@ context cost rather than a mechanical sweep.
 | Exemption list becomes a dumping ground                  | Medium | Medium      | Entries require a reason string; mirrors the evasion suite's classification |
 | Guidance drifts from handler logic                       | Medium | Medium      | Existing `handler_reference` truth check covers the reference doc; extend   |
 
+## Related: the three halves of guidance/handler correspondence
+
+This plan is one of three checks on the same correspondence, recorded here
+because two of them arrived after it was filed and this is the doc a future
+session on guidance coverage will actually read.
+
+| case                               | question                        | state                                     |
+| ---------------------------------- | ------------------------------- | ----------------------------------------- |
+| handler exists, guidance MISSING   | which handlers say nothing?     | **this plan**                             |
+| guidance exists, handler MISSING   | which guidance has no producer? | **shipped** — `orphaned-handler-guidance` |
+| guidance exists, and is never READ | which guidance is dead weight?  | unplanned — F19, see below                |
+
+**Orphaned guidance (shipped, commit `f0724656`).** `claude_md_injector` now
+emits a `<!-- handler: <name> -->` provenance marker per section, and
+`check_repo_hygiene`'s `orphaned-handler-guidance` rule asserts every marker
+resolves to a live handler. Relevant to this plan for two reasons: adding
+guidance for the six uncovered handlers will emit markers that the rule then
+polices, and the marker infrastructure is the enabler for the third case.
+
+**F19 "Dead-guidance audit"** (`Completed/00169-.../FEATURE-BACKLOG.md`, sized
+M) proposes finding never-loaded `CLAUDE.md`/`.claude/rules/*` sections so the
+resident surface can be pruned. It is NOT the same as the orphan check — F19 is
+about guidance nobody reads, the orphan rule about guidance nothing produces —
+but it now has a foothold it lacked when filed, since sections are individually
+identifiable. It bears directly on this plan's own risk row "six new sections
+bloat every client's resident CLAUDE.md": F19 is how that would be measured
+rather than estimated. Still unplanned; noted here so it is not left in a
+completed plan's backlog where nothing looks.
+
 ## Delivery & Milestones
 
 <!-- Curated milestones + delivery commit hashes (git is the SSoT for "when"). -->
