@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,99 @@ def _human_entry(content: str, uuid: str = "uuid-h") -> dict[str, Any]:
             "content": content,
         },
     }
+
+
+def _timestamped_assistant_entry(content: str, uuid: str, when: datetime) -> dict[str, Any]:
+    """An assistant entry carrying an ISO timestamp, as real transcripts do."""
+    entry = _assistant_entry(content, uuid)
+    entry["timestamp"] = when.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    return entry
+
+
+class TestRestartDoesNotReplayTheTranscript:
+    """A restarted daemon must not re-report findings it already reported.
+
+    Plan 00224. ``NitpickState`` is in-memory and ``last_byte_offset`` defaults
+    to 0, so a daemon restart made the next fire re-audit the WHOLE transcript.
+    Measured on a live session: 0 pattern hits in the six most recent messages,
+    while the most recent genuine match was 114 messages back — yet six
+    advisories fired. This repo mandates a restart after every handler change,
+    so the misfire was the normal case, and a guard that cries wolf is one that
+    gets switched off.
+
+    The offset alone cannot fix this: a genuinely NEW session also starts at 0
+    and its existing messages SHOULD be audited (see
+    ``TestNitpickSetupIncremental.test_only_reads_new_messages``). The
+    discriminator is the message timestamp against the daemon's start time.
+    """
+
+    def test_messages_written_before_the_daemon_started_are_not_audited(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".jsonl", mode="w", delete=False) as f:
+            path = Path(f.name)
+
+        daemon_start = datetime(2026, 8, 13, 12, 0, tzinfo=UTC)
+        _write_transcript(
+            path,
+            [
+                _timestamped_assistant_entry(
+                    "audited by the PREVIOUS daemon",
+                    "uuid-old",
+                    daemon_start - timedelta(hours=2),
+                )
+            ],
+        )
+
+        setup = NitpickSetup(started_at=daemon_start)
+        result = setup({HookInputField.TRANSCRIPT_PATH: str(path)}, "session-restarted")
+
+        assert result is None, (
+            "A daemon that started after this message was written has no basis for "
+            "calling it new. Re-auditing it replays a finding the previous daemon "
+            "already reported."
+        )
+
+        path.unlink()
+
+    def test_messages_written_after_the_daemon_started_are_still_audited(self) -> None:
+        """The other half. A fix that simply muted the audit would pass the test above."""
+        with tempfile.NamedTemporaryFile(suffix=".jsonl", mode="w", delete=False) as f:
+            path = Path(f.name)
+
+        daemon_start = datetime(2026, 8, 13, 12, 0, tzinfo=UTC)
+        _write_transcript(
+            path,
+            [
+                _timestamped_assistant_entry(
+                    "before", "uuid-old", daemon_start - timedelta(hours=2)
+                ),
+                _timestamped_assistant_entry(
+                    "after", "uuid-new", daemon_start + timedelta(minutes=5)
+                ),
+            ],
+        )
+
+        setup = NitpickSetup(started_at=daemon_start)
+        result = setup({HookInputField.TRANSCRIPT_PATH: str(path)}, "session-restarted")
+
+        assert result is not None
+        assert [m["uuid"] for m in result["assistant_messages"]] == ["uuid-new"]
+
+        path.unlink()
+
+    def test_an_entry_without_a_timestamp_is_still_audited(self) -> None:
+        """Fail OPEN: a redundant advisory beats a silently dropped one."""
+        with tempfile.NamedTemporaryFile(suffix=".jsonl", mode="w", delete=False) as f:
+            path = Path(f.name)
+
+        _write_transcript(path, [_assistant_entry("no timestamp field", "uuid-bare")])
+
+        setup = NitpickSetup(started_at=datetime(2026, 8, 13, 12, 0, tzinfo=UTC))
+        result = setup({HookInputField.TRANSCRIPT_PATH: str(path)}, "session-1")
+
+        assert result is not None
+        assert len(result["assistant_messages"]) == 1
+
+        path.unlink()
 
 
 class TestNitpickSetupBasic:
