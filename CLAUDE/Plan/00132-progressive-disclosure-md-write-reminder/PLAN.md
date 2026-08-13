@@ -1,6 +1,6 @@
 # Plan 00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes
 
-**Status**: Pending Proposal — not started
+**Status**: Not Started (pending proposal)
 **Created**: 2026-06-19
 **Owner**: joseph
 

@@ -240,6 +240,26 @@ class TestPlanDocTasks:
         doc = PlanDoc.parse(CANONICAL_PLAN)
         assert doc.tasks.legacy_marker_lines == 0
 
+    def test_a_marker_named_in_inline_code_is_not_a_marker_in_use(self) -> None:
+        """Plan 00230.
+
+        A plan that DOCUMENTS the legacy markers — or records having removed
+        them — quotes them in inline code. Counting those is the same
+        false-positive class as a text-matching handler firing on prose about
+        itself, and it started mattering once this rule ran over the whole
+        tree rather than only the file being edited.
+        """
+        doc = PlanDoc.parse(
+            "# t\n\n- [x] ✅ replaced the ad-hoc `[✓]` / `[~]` markers\n"
+            "- [x] ✅ documented that `[⏳]` is not template grammar\n"
+        )
+        assert doc.tasks.legacy_marker_lines == 0
+
+    def test_a_marker_actually_in_use_is_still_counted(self) -> None:
+        """The exclusion must not blind the rule to a real violation."""
+        doc = PlanDoc.parse("# t\n\n- [✓] real legacy marker with `code` in the text\n")
+        assert doc.tasks.legacy_marker_lines == 1
+
     def test_fenced_code_blocks_are_ignored(self) -> None:
         doc = PlanDoc.parse(FENCED_TEMPLATE_PLAN)
         # Header status (outside fence) wins; fenced Complete line ignored.

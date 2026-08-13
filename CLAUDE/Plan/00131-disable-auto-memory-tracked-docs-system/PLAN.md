@@ -1,6 +1,6 @@
 # Plan 00131: Block Untracked Claude Memory + Tracked-Docs Progressive Disclosure
 
-**Status**: Shipped v3.23.0 (Phases 1–5 complete; Phase 4 scaffolding-skill + Phase 6 dogfood deferred to follow-ups). Delivery commits: dbcac37 (impl), 9285093 (release). Tag v3.23.0 = 9ed4a5f.
+**Status**: Dormant (Phases 1–5 shipped in v3.23.0; Phase 4 scaffolding-skill + Phase 6 dogfood deferred to follow-ups)
 **Created**: 2026-06-19
 **Owner**: joseph
 **Priority**: High
@@ -213,6 +213,11 @@ when a project opts in by setting it `false`.
 | Contradictory advice vs `optimal_config_checker`                   | Med    | High        | Phase 3 single "policy active" SSoT; suppress the re-enable nag                                 |
 | Specialist message / generic message branch confusion              | Med    | Med         | Distinct, tested branches keyed on path-match + policy flag                                     |
 | Progressive-disclosure scope balloons                              | Med    | High        | Phase 4 keeps the scaffolding skill optional / follow-up; block + guidance ship first           |
+
+## Delivery & Milestones
+
+- Phases 1–5 delivered at `dbcac37` (implementation), released at `9285093`
+- Tag `v3.23.0` = `9ed4a5f`
 
 ## Notes & Updates
 

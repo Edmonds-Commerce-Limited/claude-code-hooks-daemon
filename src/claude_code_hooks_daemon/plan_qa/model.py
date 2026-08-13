@@ -76,6 +76,10 @@ _ICON_CANCELLED: Final[str] = "❌"
 # icon/checkbox tooling, so their presence is surfaced as a finding.
 _LEGACY_MARKERS: Final[tuple[str, ...]] = ("[✓]", "[⏳]", "[~]", r"\[ \]")
 
+# Inline-code spans, stripped before the legacy-marker test so a plan that
+# QUOTES a marker is not read as one that uses it.
+_INLINE_CODE_RE: Final[re.Pattern[str]] = re.compile(r"`[^`\n]*`")
+
 _DONE_MARKER_RE: Final[re.Pattern[str]] = re.compile(
     r"\ball\s+done\b|\ball\s+tasks?\s+complete\b",
     re.IGNORECASE,
@@ -250,7 +254,11 @@ def _count_tasks(lines: list[str]) -> TaskCounts:
             if icon in item_text:
                 icons[icon] += 1
 
-        if any(marker in item_text for marker in _LEGACY_MARKERS):
+        # A marker inside inline code is being NAMED, not used — a plan that
+        # documents the legacy grammar, or records having removed it, quotes
+        # the markers. A marker actually in use never appears in backticks.
+        prose = _INLINE_CODE_RE.sub("", item_text)
+        if any(marker in prose for marker in _LEGACY_MARKERS):
             legacy_marker_lines += 1
 
     return TaskCounts(

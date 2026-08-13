@@ -21,12 +21,12 @@ Implement first-class developer experience for project-level handler development
 
 ## Progress
 
-- [✓] Create feature branch from latest main
-- [✓] Phase 1: Core Infrastructure
-- [✓] Phase 2: Developer Experience CLI
-- [✓] Phase 3: Documentation & Examples
-- [✓] Phase 4: Dogfooding & Refinement
-- [✓] Phase 5: Release
+- [x] ✅ Create feature branch from latest main
+- [x] ✅ Phase 1: Core Infrastructure
+- [x] ✅ Phase 2: Developer Experience CLI
+- [x] ✅ Phase 3: Documentation & Examples
+- [x] ✅ Phase 4: Dogfooding & Refinement
+- [x] ✅ Phase 5: Release
 
 ## Implementation Phases
 
@@ -36,41 +36,41 @@ Implement first-class developer experience for project-level handler development
 
 #### Tasks
 
-- [✓] **Create config models** (TDD)
+- [x] ✅ **Create config models** (TDD)
 
-  - [✓] Add `ProjectHandlersConfig` to `config/models.py`
-  - [✓] Add `project_handlers` field to root `Config` model
-  - [✓] Schema: `enabled`, `path`, `handlers_config`
-  - [✓] Write tests for config validation
-  - [✓] Verify config loads from YAML correctly
+  - [x] ✅ Add `ProjectHandlersConfig` to `config/models.py`
+  - [x] ✅ Add `project_handlers` field to root `Config` model
+  - [x] ✅ Schema: `enabled`, `path`, `handlers_config`
+  - [x] ✅ Write tests for config validation
+  - [x] ✅ Verify config loads from YAML correctly
 
-- [✓] **Create ProjectHandlerLoader** (TDD)
+- [x] ✅ **Create ProjectHandlerLoader** (TDD)
 
-  - [✓] New file: `src/handlers/project_loader.py`
-  - [✓] Implement `discover_handlers(path: Path) -> list[Handler]`
-  - [✓] Use `importlib.util.spec_from_file_location` (same as PluginLoader)
-  - [✓] Walk event-type subdirectories (pre_tool_use/, post_tool_use/, etc.)
-  - [✓] Skip files starting with `_` or `test_`
-  - [✓] Write comprehensive unit tests (95%+ coverage)
+  - [x] ✅ New file: `src/handlers/project_loader.py`
+  - [x] ✅ Implement `discover_handlers(path: Path) -> list[Handler]`
+  - [x] ✅ Use `importlib.util.spec_from_file_location` (same as PluginLoader)
+  - [x] ✅ Walk event-type subdirectories (pre_tool_use/, post_tool_use/, etc.)
+  - [x] ✅ Skip files starting with `_` or `test_`
+  - [x] ✅ Write comprehensive unit tests (95%+ coverage)
 
-- [✓] **Integrate with DaemonController** (TDD)
+- [x] ✅ **Integrate with DaemonController** (TDD)
 
-  - [✓] Add `_load_project_handlers()` method
-  - [✓] Call after built-in handlers and legacy plugins in `initialise()`
-  - [✓] Pass project_handlers config and workspace_root
-  - [✓] Register loaded handlers with EventRouter
-  - [✓] Write integration tests for loading pipeline
+  - [x] ✅ Add `_load_project_handlers()` method
+  - [x] ✅ Call after built-in handlers and legacy plugins in `initialise()`
+  - [x] ✅ Pass project_handlers config and workspace_root
+  - [x] ✅ Register loaded handlers with EventRouter
+  - [x] ✅ Write integration tests for loading pipeline
 
-- [✓] **Conflict Detection** (TDD)
+- [x] ✅ **Conflict Detection** (TDD)
 
-  - [✓] Check for handler_id conflicts with built-in handlers
-  - [✓] Check for priority collisions (log warnings)
-  - [✓] Prefer built-in handlers on conflict (log warning)
-  - [✓] Write tests for conflict scenarios
+  - [x] ✅ Check for handler_id conflicts with built-in handlers
+  - [x] ✅ Check for priority collisions (log warnings)
+  - [x] ✅ Prefer built-in handlers on conflict (log warning)
+  - [x] ✅ Write tests for conflict scenarios
 
-- [✓] **Run full QA**: `./scripts/qa/run_all.sh` — All 7 checks passed, coverage 95.0%
+- [x] ✅ **Run full QA**: `./scripts/qa/run_all.sh` — All 7 checks passed, coverage 95.0%
 
-- [✓] **Verify daemon restarts**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+- [x] ✅ **Verify daemon restarts**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
 
 ### Phase 2: Developer Experience CLI
 
@@ -78,50 +78,50 @@ Implement first-class developer experience for project-level handler development
 
 #### Tasks
 
-- [✓] **Create `init-project-handlers` command** (TDD)
+- [x] ✅ **Create `init-project-handlers` command** (TDD)
 
-  - [✓] Implemented in `src/daemon/cli.py` (cmd_init_project_handlers)
-  - [✓] Create `.claude/project-handlers/` structure
-  - [✓] Generate event-type subdirectories
-  - [✓] Create `conftest.py` with standard fixtures
-  - [✓] Create example handler with test
-  - [✓] Update `hooks-daemon.yaml` if missing `project_handlers` section
-  - [✓] 9 tests in `tests/unit/daemon/test_cli_init_project_handlers.py`
+  - [x] ✅ Implemented in `src/daemon/cli.py` (cmd_init_project_handlers)
+  - [x] ✅ Create `.claude/project-handlers/` structure
+  - [x] ✅ Generate event-type subdirectories
+  - [x] ✅ Create `conftest.py` with standard fixtures
+  - [x] ✅ Create example handler with test
+  - [x] ✅ Update `hooks-daemon.yaml` if missing `project_handlers` section
+  - [x] ✅ 9 tests in `tests/unit/daemon/test_cli_init_project_handlers.py`
 
-- [✓] **Create `validate-project-handlers` command** (TDD)
+- [x] ✅ **Create `validate-project-handlers` command** (TDD)
 
-  - [✓] Implemented in `src/daemon/cli.py` (cmd_validate_project_handlers)
-  - [✓] Discover project handlers via ProjectHandlerLoader
-  - [✓] Attempt to import and instantiate each handler
-  - [✓] Verify subclasses `Handler`
-  - [✓] Verify `get_acceptance_tests()` returns tests
-  - [✓] Output formatted report with counts per event type
-  - [✓] 7 tests in `tests/unit/daemon/test_cli_validate_project_handlers.py`
+  - [x] ✅ Implemented in `src/daemon/cli.py` (cmd_validate_project_handlers)
+  - [x] ✅ Discover project handlers via ProjectHandlerLoader
+  - [x] ✅ Attempt to import and instantiate each handler
+  - [x] ✅ Verify subclasses `Handler`
+  - [x] ✅ Verify `get_acceptance_tests()` returns tests
+  - [x] ✅ Output formatted report with counts per event type
+  - [x] ✅ 7 tests in `tests/unit/daemon/test_cli_validate_project_handlers.py`
 
-- [✓] **Create `test-project-handlers` command** (TDD)
+- [x] ✅ **Create `test-project-handlers` command** (TDD)
 
-  - [✓] Implemented in `src/daemon/cli.py` (cmd_test_project_handlers)
-  - [✓] Run pytest on `.claude/project-handlers/` directory
-  - [✓] Pass correct `--import-mode=importlib`
-  - [✓] Capture and display output
-  - [✓] 8 tests in `tests/unit/daemon/test_cli_test_project_handlers.py`
+  - [x] ✅ Implemented in `src/daemon/cli.py` (cmd_test_project_handlers)
+  - [x] ✅ Run pytest on `.claude/project-handlers/` directory
+  - [x] ✅ Pass correct `--import-mode=importlib`
+  - [x] ✅ Capture and display output
+  - [x] ✅ 8 tests in `tests/unit/daemon/test_cli_test_project_handlers.py`
 
-- [✓] **Update playbook generator** (TDD)
+- [x] ✅ **Update playbook generator** (TDD)
 
-  - [✓] Modified `src/daemon/playbook_generator.py`
-  - [✓] Include project handler acceptance tests in output
-  - [✓] Section header: "## Project Handlers"
-  - [✓] 7 tests in `tests/unit/daemon/test_playbook_generator_project_handlers.py`
+  - [x] ✅ Modified `src/daemon/playbook_generator.py`
+  - [x] ✅ Include project handler acceptance tests in output
+  - [x] ✅ Section header: "## Project Handlers"
+  - [x] ✅ 7 tests in `tests/unit/daemon/test_playbook_generator_project_handlers.py`
 
-- [✓] **Wire CLI subcommands**
+- [x] ✅ **Wire CLI subcommands**
 
-  - [✓] Added 3 subcommands to `src/daemon/cli.py` main()
-  - [✓] Added help text and examples
-  - [✓] Tests verify CLI invocation
+  - [x] ✅ Added 3 subcommands to `src/daemon/cli.py` main()
+  - [x] ✅ Added help text and examples
+  - [x] ✅ Tests verify CLI invocation
 
-- [✓] **Run full QA**: `./scripts/qa/run_all.sh` — ALL CHECKS PASSED
+- [x] ✅ **Run full QA**: `./scripts/qa/run_all.sh` — ALL CHECKS PASSED
 
-- [✓] **Verify daemon restarts**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart` — Status: RUNNING (PID 121279)
+- [x] ✅ **Verify daemon restarts**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart` — Status: RUNNING (PID 121279)
 
 ### Phase 3: Documentation & Examples
 
@@ -129,46 +129,46 @@ Implement first-class developer experience for project-level handler development
 
 #### Tasks
 
-- [✓] **Create PROJECT_HANDLERS.md**
+- [x] ✅ **Create PROJECT_HANDLERS.md**
 
-  - [✓] Location: `CLAUDE/PROJECT_HANDLERS.md`
-  - [✓] Overview and motivation
-  - [✓] Quick start guide
-  - [✓] Directory structure conventions
-  - [✓] Handler development guide
-  - [✓] Testing best practices
-  - [✓] Common patterns and examples
-  - [✓] Troubleshooting section
-  - [✓] CLI reference
+  - [x] ✅ Location: `CLAUDE/PROJECT_HANDLERS.md`
+  - [x] ✅ Overview and motivation
+  - [x] ✅ Quick start guide
+  - [x] ✅ Directory structure conventions
+  - [x] ✅ Handler development guide
+  - [x] ✅ Testing best practices
+  - [x] ✅ Common patterns and examples
+  - [x] ✅ Troubleshooting section
+  - [x] ✅ CLI reference
 
-- [✓] **Update ARCHITECTURE.md**
+- [x] ✅ **Update ARCHITECTURE.md**
 
-  - [✓] Add "Project Handler Loading" section
-  - [✓] Document discovery mechanism
-  - [✓] Document config schema
-  - [✓] Update loading pipeline diagram
+  - [x] ✅ Add "Project Handler Loading" section
+  - [x] ✅ Document discovery mechanism
+  - [x] ✅ Document config schema
+  - [x] ✅ Update loading pipeline diagram
 
-- [✓] **Update HANDLER_DEVELOPMENT.md**
+- [x] ✅ **Update HANDLER_DEVELOPMENT.md**
 
-  - [✓] Add "Project-Level Handlers" section
-  - [✓] Differences from built-in handlers
-  - [✓] Testing with daemon infrastructure
-  - [✓] Acceptance testing integration
+  - [x] ✅ Add "Project-Level Handlers" section
+  - [x] ✅ Differences from built-in handlers
+  - [x] ✅ Testing with daemon infrastructure
+  - [x] ✅ Acceptance testing integration
 
-- [✓] **Create example handlers**
+- [x] ✅ **Create example handlers**
 
-  - [✓] Location: `examples/project-handlers/`
-  - [✓] Example 1: Vendor changes reminder (PreToolUse, advisory)
-  - [✓] Example 2: Branch naming enforcer (SessionStart, blocking)
-  - [✓] Example 3: Build asset checker (PostToolUse, advisory)
-  - [✓] Each with complete tests and documentation
-  - [✓] README.md explaining examples
+  - [x] ✅ Location: `examples/project-handlers/`
+  - [x] ✅ Example 1: Vendor changes reminder (PreToolUse, advisory)
+  - [x] ✅ Example 2: Branch naming enforcer (SessionStart, blocking)
+  - [x] ✅ Example 3: Build asset checker (PostToolUse, advisory)
+  - [x] ✅ Each with complete tests and documentation
+  - [x] ✅ README.md explaining examples
 
-- [✓] **Update CLAUDE.md**
+- [x] ✅ **Update CLAUDE.md**
 
-  - [✓] Add "Project-Level Handlers" section
-  - [✓] Quick reference for LLM agents
-  - [✓] Links to detailed docs
+  - [x] ✅ Add "Project-Level Handlers" section
+  - [x] ✅ Quick reference for LLM agents
+  - [x] ✅ Links to detailed docs
 
 ### Phase 4: Dogfooding & Refinement
 
@@ -176,31 +176,31 @@ Implement first-class developer experience for project-level handler development
 
 #### Tasks
 
-- [✓] **Create handlers in checkout project** (see Plan 006 in checkout repo)
+- [x] ✅ **Create handlers in checkout project** (see Plan 006 in checkout repo)
 
-  - [✓] Vendor changes reminder
-  - [✓] Build asset watcher
-  - [✓] Composer lock sync reminder
-  - [✓] Branch naming enforcer
-  - [✓] Document all issues found
+  - [x] ✅ Vendor changes reminder
+  - [x] ✅ Build asset watcher
+  - [x] ✅ Composer lock sync reminder
+  - [x] ✅ Branch naming enforcer
+  - [x] ✅ Document all issues found
 
-- [✓] **Iterate on DX**
+- [x] ✅ **Iterate on DX**
 
-  - [✓] Fix any issues discovered during dogfooding
-  - [✓] Improve error messages
-  - [✓] Enhance validation output
-  - [✓] Improve scaffolding templates
-  - [✓] Each fix follows TDD cycle
+  - [x] ✅ Fix any issues discovered during dogfooding
+  - [x] ✅ Improve error messages
+  - [x] ✅ Enhance validation output
+  - [x] ✅ Improve scaffolding templates
+  - [x] ✅ Each fix follows TDD cycle
 
-- [✓] **Acceptance testing**
+- [x] ✅ **Acceptance testing**
 
-  - [✓] Add project handler tests to PLAYBOOK.md
-  - [✓] Execute playbook manually
-  - [✓] Document results
+  - [x] ✅ Add project handler tests to PLAYBOOK.md
+  - [x] ✅ Execute playbook manually
+  - [x] ✅ Document results
 
-- [✓] **Run full QA**: `./scripts/qa/run_all.sh`
+- [x] ✅ **Run full QA**: `./scripts/qa/run_all.sh`
 
-- [✓] **Verify daemon restarts**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+- [x] ✅ **Verify daemon restarts**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
 
 ### Phase 5: Release
 
@@ -208,31 +208,31 @@ Implement first-class developer experience for project-level handler development
 
 #### Tasks
 
-- [✓] **Create migration guide**
+- [x] ✅ **Create migration guide**
 
-  - [✓] Document upgrade path for existing plugin users (in README.md migration note)
-  - [✓] Comparison: old plugins vs new project-handlers
-  - [✓] When to use each approach
+  - [x] ✅ Document upgrade path for existing plugin users (in README.md migration note)
+  - [x] ✅ Comparison: old plugins vs new project-handlers
+  - [x] ✅ When to use each approach
 
-- [✓] **Update CHANGELOG.md**
+- [x] ✅ **Update CHANGELOG.md**
 
-  - [✓] Entry added in v2.8.0 release (already shipped)
-  - [✓] No breaking changes (legacy plugins still work)
-  - [✓] New CLI commands documented
+  - [x] ✅ Entry added in v2.8.0 release (already shipped)
+  - [x] ✅ No breaking changes (legacy plugins still work)
+  - [x] ✅ New CLI commands documented
 
-- [✓] **Update README.md**
+- [x] ✅ **Update README.md**
 
-  - [✓] Updated features list: "Project-level handlers" replaces "Plugin system"
-  - [✓] Updated "Creating Your Own" section with project-handlers workflow
-  - [✓] Added migration note from plugins to project-handlers
-  - [✓] Link to PROJECT_HANDLERS.md
+  - [x] ✅ Updated features list: "Project-level handlers" replaces "Plugin system"
+  - [x] ✅ Updated "Creating Your Own" section with project-handlers workflow
+  - [x] ✅ Added migration note from plugins to project-handlers
+  - [x] ✅ Link to PROJECT_HANDLERS.md
 
-- [✓] **Final QA sweep**
+- [x] ✅ **Final QA sweep**
 
-  - [✓] Run full QA suite - ALL 7 CHECKS PASSED
-  - [✓] Daemon restarts successfully
-  - [✓] All examples documented in examples/project-handlers/
-  - [✓] Documentation links verified
+  - [x] ✅ Run full QA suite - ALL 7 CHECKS PASSED
+  - [x] ✅ Daemon restarts successfully
+  - [x] ✅ All examples documented in examples/project-handlers/
+  - [x] ✅ Documentation links verified
 
 - [N/A] **Open PR** - Work merged directly to main (not on feature branch)
 

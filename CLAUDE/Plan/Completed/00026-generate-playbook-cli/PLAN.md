@@ -1,6 +1,6 @@
 # Implementation Plan: Complete Plan 00025 - generate-playbook CLI
 
-**Status**: ✅ COMPLETED
+**Status**: Complete
 **Completed**: 2026-02-03
 
 ## Goal

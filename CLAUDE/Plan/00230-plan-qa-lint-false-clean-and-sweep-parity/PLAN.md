@@ -95,10 +95,11 @@ Blindness 1 — the tests and the documented usage disagree about the input shap
 
 ### Phase 2: Close the `None`-status hole in the sweep
 
-- [ ] ⬜ **Task 2.1**: RED — sweep test: a plan folder whose status is present
+- [x] ✅ **Task 2.1**: RED — sweep test: a plan folder whose status is present
   but unparseable produces a finding
-- [ ] ⬜ **Task 2.2**: GREEN — handle `status_line_present and status is None`
-  explicitly in `location-status-coherence`
+  (`TestTheSweepReadsWhatIsAlreadyOnDisk::test_unparseable_status_on_disk_is_reported`)
+- [x] ✅ **Task 2.2**: ~~handle `status is None` in `location-status-coherence`~~
+  — **not done, and deliberately so**: Phase 3 subsumes it. See Decision 4.
 
 ### Phase 3: EDIT/SWEEP parity for document-level checks
 
@@ -118,11 +119,16 @@ Blindness 1 — the tests and the documented usage disagree about the input shap
 
 ### Phase 4: Fix the instances the guards now surface
 
-- [ ] ⬜ **Task 4.1**: Run the repaired sweep over the live tree and record every finding
-- [ ] ⬜ **Task 4.2**: Fix 00131 and 00132 status tokens (preserving the
+- [x] ✅ **Task 4.1**: Run the repaired sweep over the live tree and record
+  every finding — 19 findings (11 block, 8 advise) where it had reported clean
+- [x] ✅ **Task 4.2**: Fix 00131 and 00132 status tokens (preserving the
   narrative they carry, which belongs after a valid token or in the body)
-- [ ] ⬜ **Task 4.3**: Fix any further findings the repaired sweep surfaces
-- [ ] ⬜ **Task 4.4**: Sweep exits 0 on the live tree for the right reason
+- [x] ✅ **Task 4.3**: Fix the further findings the repaired sweep surfaced
+  - [x] ✅ 00032 `On Hold (…)` → `Blocked (…)` — `On Hold` is a TASK icon in
+    PlanWorkflow.md, never a plan-status token
+  - [x] ✅ 8 archived plans carrying pre-enum prose/emoji → `Complete`
+  - [x] ✅ 2 archived plans using ad-hoc `[✓]` / `[~]` task markers
+- [x] ✅ **Task 4.4**: Sweep exits 0 on the live tree for the right reason
 
 ### Phase 5: Verify
 
@@ -178,6 +184,28 @@ blind and the gap would silently reopen.
 
 **Decision**: Task 3.4's totality guard is the actual deliverable of Phase 3.
 The twins are the instances; the guard is the defence.
+
+### Decision 4: Phase 2's own remedy was the wrong one
+
+**Context**: this plan was filed proposing that `location-status-coherence`
+handle `status_line_present and status is None` explicitly, because a `None`
+status satisfies neither side of its terminal/non-terminal split.
+
+**What changed**: Phase 3 gave `status-enum-and-date` a SWEEP twin, so an
+unparseable token is now reported at BLOCK level by the check whose actual job
+it is. Adding a second finding from `location-status-coherence` for the same
+plan would double-report every occurrence, and the sweep's value depends on
+not being noisy.
+
+**Decision**: leave `location-status-coherence` alone. The consequence is that
+fixing a bad token takes two passes — the enum finding first, then any
+location finding the now-parseable status reveals — which is correct
+sequencing rather than a gap: the enum violation is BLOCK-level and has to be
+fixed regardless.
+
+**Why this is recorded rather than quietly dropped**: the plan proposed a
+specific remedy and the work did not do it. A plan is only useful if it says
+what actually happened.
 
 ## Success Criteria
 

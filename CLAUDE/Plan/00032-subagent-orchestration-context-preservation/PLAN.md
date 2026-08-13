@@ -1,6 +1,6 @@
 # Plan 00032: Sub-Agent Orchestration for Context Preservation
 
-**Status**: On Hold (2026-02-23) - Waiting for upstream delegate mode fix
+**Status**: Blocked (waiting for the upstream Claude Code delegate mode fix)
 **Created**: 2026-02-06
 **Owner**: Main Claude (Orchestrator)
 **Priority**: High (blocked by upstream)
