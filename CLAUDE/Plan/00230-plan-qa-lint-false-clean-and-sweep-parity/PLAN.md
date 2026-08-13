@@ -1,6 +1,6 @@
 # Plan 00230: plan-qa reports clean for what it never examined
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-13
 **Owner**: joseph
 **Priority**: High
@@ -85,13 +85,13 @@ Blindness 1 — the tests and the documented usage disagree about the input shap
 
 ### Phase 1: Close the `--lint` false clean
 
-- [ ] ⬜ **Task 1.1**: RED — add CLI tests that fail today
-  - [ ] ⬜ Relative lint target (CWD-relative) surfaces the same findings as the absolute one
-  - [ ] ⬜ A non-plan-document target exits non-zero with an explicit "not a plan document" message
-  - [ ] ⬜ A clean single-file lint reports the FILE, not "plan tree is clean"
-- [ ] ⬜ **Task 1.2**: GREEN — resolve the lint target at the CLI boundary and
+- [x] ✅ **Task 1.1**: RED — add CLI tests that fail today (4 failed / 12 passed)
+  - [x] ✅ Relative lint target (CWD-relative) surfaces the same findings as the absolute one
+  - [x] ✅ A non-plan-document target exits non-zero with an explicit "not a plan document" message
+  - [x] ✅ A clean single-file lint reports the FILE, not "plan tree is clean"
+- [x] ✅ **Task 1.2**: GREEN — resolve the lint target at the CLI boundary and
   FAIL FAST when `classify()` returns `OUTSIDE`
-- [ ] ⬜ **Task 1.3**: Fix the report wording so `--lint` never over-claims scope
+- [x] ✅ **Task 1.3**: Fix the report wording so `--lint` never over-claims scope
 
 ### Phase 2: Close the `None`-status hole in the sweep
 

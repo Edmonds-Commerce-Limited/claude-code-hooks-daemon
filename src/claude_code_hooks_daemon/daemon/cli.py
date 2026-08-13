@@ -3660,7 +3660,8 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
         staged_context,
         sweep_context,
     )
-    from claude_code_hooks_daemon.plan_qa.report import format_cli_report
+    from claude_code_hooks_daemon.plan_qa.paths import PlanFileKind, classify
+    from claude_code_hooks_daemon.plan_qa.report import CLEAN_SCOPE_TREE, format_cli_report
     from claude_code_hooks_daemon.plan_qa.runner import run_stage
     from claude_code_hooks_daemon.plan_qa.types import Stage
 
@@ -3688,7 +3689,12 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
 
     try:
         if getattr(args, "lint", None) is not None:
-            lint_path = Path(args.lint)
+            # Resolve BEFORE classifying (Plan 00230). ``classify()`` decides
+            # scope with ``is_relative_to(plan_dir)`` against an absolute plan
+            # dir, so an unresolved relative path — the form the shipped skill
+            # documents — classified as OUTSIDE, every check no-matched, and
+            # the run printed a clean bill of health for a file it never read.
+            lint_path = Path(args.lint).resolve()
             if not lint_path.is_file():
                 print(f"ERROR: Lint target does not exist: {lint_path}", file=sys.stderr)
                 return 2
@@ -3700,11 +3706,25 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
                 file_content=lint_path.read_text(),
                 file_exists_before=True,
             )
+            # FAIL FAST on a target no check can apply to. Exiting 0 here would
+            # certify a file that was never examined, and the exit code is what
+            # CI reads.
+            classified = classify(lint_path, context)
+            if classified.kind is PlanFileKind.OUTSIDE:
+                print(
+                    f"ERROR: Lint target is not a plan document: {lint_path}\n"
+                    f"       Expected a markdown file under {context.plan_dir}.",
+                    file=sys.stderr,
+                )
+                return 2
+            clean_scope = f"{classified.rel_path} is clean"
             findings = run_stage(Stage.EDIT, context)
         elif getattr(args, "check_staged", False):
+            clean_scope = CLEAN_SCOPE_TREE
             context = staged_context(project_root, plan_dir_rel, policy)
             findings = run_stage(Stage.COMMIT, context)
         else:
+            clean_scope = CLEAN_SCOPE_TREE
             context = sweep_context(project_root, plan_dir_rel, policy, today=date.today())
             findings = run_stage(Stage.SWEEP, context)
     except FileNotFoundError as exc:
@@ -3724,7 +3744,7 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
         ]
         print(json.dumps(payload, indent=2))
     else:
-        print(format_cli_report(findings))
+        print(format_cli_report(findings, clean_scope))
 
     return 1 if findings else 0
 
