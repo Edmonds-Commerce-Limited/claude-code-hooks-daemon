@@ -1,6 +1,6 @@
 # Plan 00236: Fix What Is Broken Pass
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-13
 **Owner**: joseph
 **Priority**: Medium
@@ -103,9 +103,13 @@ the working copy and kept the dead one. See
 
 ### Phase 5: Verification
 
-- [ ] 🔄 **Task 5.1**: Full QA — `./scripts/qa/llm_qa.py all`
-- [ ] ⬜ **Task 5.2**: Daemon restart verified RUNNING
-- [ ] ⬜ **Task 5.3**: Commit and push
+- [x] ✅ **Task 5.1**: Full QA — 21/21 passed
+  - [x] ✅ First run was 18/21; the three failures were all mine (one
+    unformatted project-handler file, two error-hiding hits in the new
+    counter). The exclusions added for the latter were checked against the
+    existing documented precedents rather than added reflexively
+- [x] ✅ **Task 5.2**: Daemon restart verified RUNNING, no load errors
+- [x] ✅ **Task 5.3**: Commit and push
 
 ## Dependencies
 
@@ -120,13 +124,28 @@ correlation-key choice for the harvester, and why `stop:1/1` stays.
 
 ## Success Criteria
 
-- [ ] Every fix above has a test that FAILED before it
-- [ ] Two seam guards exist where previously both sides were tested in isolation
-- [ ] Full QA passes with zero failures
-- [ ] Daemon restarts and reports RUNNING
-- [ ] No Plan 00234 finding is silently dropped: each is fixed, deferred with a
+- [x] Every fix above has a test that FAILED before it
+- [x] Two seam guards exist where previously both sides were tested in isolation
+- [x] Full QA passes with zero failures (21/21)
+- [x] Daemon restarts and reports RUNNING
+- [x] No Plan 00234 finding is silently dropped: each is fixed, deferred with a
   stated reason, or revised with the evidence that contradicted it
+
+## Follow-on Work
+
+Deliberately left for later passes, not dropped:
+
+- **The REMOVE column** (10 handlers) — including the Stop advisories this plan
+  proved are shadowed by `auto_continue_stop`. Removing or re-prioritising them
+  is a restructure decision with its own retired-handler registry work.
+- **The cost-tuning FIX findings** — `git_branch` TTL, `account_display`
+  caching, `supervisor_indicator` negative cache, `git_context_injector`
+  payload, `daemon_restart_verifier` triplication, `plan_workflow` size-tier
+  duplication. These want real firing data, which the Phase 1 verdict-log fix
+  has only just started producing.
+- **`bash_error_detector`** — observed during this plan firing on essentially
+  every Bash call with no rate limiting, matching Plan 00234's SUSPECT verdict.
 
 ## Delivery & Milestones
 
-- Phases 1-4 delivered at <commit-hash>
+- Phases 1-4 delivered at `54cb60e8`
