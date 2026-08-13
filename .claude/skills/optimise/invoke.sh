@@ -119,14 +119,20 @@ Check handlers.pre_tool_use.<name>.enabled for each:
 
 Score: count enabled / 7
 
-### Area 2: Stop Quality
+### Area 2: Stop & Message Quality
 
-Check handlers.stop.<name>.enabled for each:
+Check handlers.stop.<name>.enabled:
 
   auto_continue_stop          - prevents Claude stopping without explanation
-  task_completion_checker     - verifies work done before stopping
-  hedging_language_detector   - catches guessing instead of researching
-  dismissive_language_detector - catches avoiding-work, out-of-scope deflection
+
+Then check pseudo_events.nitpick.handlers.<name>.enabled (these audit
+assistant messages per turn; they are NOT Stop handlers — anything
+registered above auto_continue_stop's priority 10 never runs):
+
+  hedging_language            - catches guessing instead of researching
+  dismissive_language         - catches avoiding-work, out-of-scope deflection
+
+Also check pseudo_events.nitpick.enabled - the two above are inert without it.
 
 Score: count enabled / 4
 
@@ -197,11 +203,11 @@ the cross character (✗) for disabled/missing items.
     ✓|✗ curl_pipe_shell          enabled: blocks curl piped to shell  |  DISABLED
     ✓|✗ dangerous_permissions    enabled: blocks chmod 777  |  DISABLED
 
-  ━━━ Area 2: Stop Quality ━━━━━━━━━━━━━━━━━━━━━━━━ PASS|WARN|FAIL (N/4)
+  ━━━ Area 2: Stop & Message Quality ━━━━━━━━━━━━━━ PASS|WARN|FAIL (N/4)
     ✓|✗ auto_continue_stop           enabled: prevents unexplained stops  |  DISABLED
-    ✓|✗ task_completion_checker      enabled: verifies work done before stopping  |  DISABLED
-    ✓|✗ hedging_language_detector    enabled: catches guessing language  |  DISABLED
-    ✓|✗ dismissive_language_detector enabled: catches avoiding-work language  |  DISABLED
+    ✓|✗ nitpick (pseudo-event)       enabled: per-turn message auditing  |  DISABLED
+    ✓|✗ nitpick.hedging_language     enabled: catches guessing language  |  DISABLED
+    ✓|✗ nitpick.dismissive_language  enabled: catches avoiding-work language  |  DISABLED
 
   ━━━ Area 3: Plan Workflow ━━━━━━━━━━━━━━━━━━━━━━━ PASS|WARN|FAIL (N/7)
     ✓|✗ plan_workflow (config)        enabled + directory set  |  DISABLED or missing
@@ -243,8 +249,8 @@ Example format:
 
   Recommendations (N improvements available):
     [1] Safety: Enable error_hiding_blocker — catches swallowed exceptions and silent errors
-    [2] Stop Quality: Enable hedging_language_detector — catches guessing instead of researching
-    [2] Stop Quality: Enable dismissive_language_detector — catches avoiding-work deflection
+    [2] Message Quality: Enable nitpick.hedging_language — catches guessing instead of researching
+    [2] Message Quality: Enable nitpick.dismissive_language — catches avoiding-work deflection
     [3] Plan Workflow: Enable plan_completion_advisor — reminds to archive completed plans
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

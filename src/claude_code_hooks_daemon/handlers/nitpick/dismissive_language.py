@@ -3,8 +3,13 @@
 Audits assistant messages (provided by NitpickSetup) for dismissive language
 patterns that signal the agent is deflecting responsibility instead of fixing issues.
 
-Reuses compiled patterns from the Stop-event DismissiveLanguageDetectorHandler
-to maintain a single source of truth.
+Owns the pattern definitions. They previously lived on a Stop-event twin that
+this module imported from, under a comment calling that twin the single source
+of truth — but the twin sat behind ``auto_continue_stop`` (priority 10,
+terminal) and never ran, so the authoritative copy was the one nothing
+executed. This module also imported only FOUR of the five sets, which is why
+premature-halt language went undetected in production entirely. Plan 00237
+inverted the dependency, wired the fifth set in, and deleted the twin.
 """
 
 from __future__ import annotations
@@ -14,20 +19,86 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
-from claude_code_hooks_daemon.handlers.stop.dismissive_language_detector import (
-    DismissiveLanguageDetectorHandler,
-)
 from claude_code_hooks_daemon.utils.quoted_spans import blank_quoted_spans
 
 HANDLER_ID = HandlerID.NITPICK_DISMISSIVE
 HANDLER_PRIORITY = Priority.NITPICK_DISMISSIVE
 
-# Category name -> pattern list, imported from the Stop handler (single source of truth)
+# "Not our problem" - deflecting responsibility for issues
+NOT_OUR_PROBLEM_PATTERNS: list[str] = [
+    r"\bpre-existing issue\b",
+    r"\bpre-existing problem\b",
+    r"\bnot caused by (?:our|my) changes?\b",
+    r"\bunrelated to (?:our|my|what we're)\b",
+    r"\bexisted before (?:our|my) changes\b",
+    r"\bwas already (?:there|present|broken|failing)\b",
+    r"\bnot (?:our|my) (?:problem|issue|concern|fault|bug)\b",
+    r"\bnot something we (?:introduced|caused|broke)\b",
+    r"\bnot (?:introduced|caused|created) by (?:our|my) changes?\b",
+    r"\bnot (?:related|due) to (?:our|my) changes?\b",
+    r"\bnothing to do with (?:our|my) changes?\b",
+    r"\bnot a result of (?:our|my) changes?\b",
+    r"\bnot from (?:our|my) changes?\b",
+    r"\bno issues with (?:our|my)\b",
+    r"\b(?:our|my) (?:code|implementation|changes?) (?:is|are) correct\b",
+]
+
+# "Out of scope" - arbitrarily scoping out encountered issues
+OUT_OF_SCOPE_PATTERNS: list[str] = [
+    r"\boutside (?:the )?scope of\b",
+    r"\bbeyond (?:the )?scope of\b",
+    r"\bout of scope\b",
+    r"\bseparate concern\b",
+    r"\bseparate issue\b",
+    r"\bnot (?:within|in) scope\b",
+    r"\bfalls outside\b",
+]
+
+# "Someone else's job" - pushing work to others
+SOMEONE_ELSES_JOB_PATTERNS: list[str] = [
+    r"\bnot (?:our|my) (?:responsibility|work|task|job)\b",
+    r"\bnot (?:my|our) (?:area|domain)\b",
+    r"\bdifferent task entirely\b",
+    r"\ba different (?:effort|initiative|project)\b",
+    r"\bnot what we're (?:here|working on|doing|tasked)\b",
+]
+
+# "Defer/ignore" - putting off issues instead of fixing them
+DEFER_IGNORE_PATTERNS: list[str] = [
+    r"\bcan be (?:addressed|fixed|handled|resolved) (?:later|separately)\b",
+    r"\bleave (?:that|this|it) for (?:now|later)\b",
+    r"\btackle (?:that|this) separately\b",
+    r"\bdefer (?:that|this) (?:to|for)\b",
+    r"\bnot worth (?:fixing|addressing|worrying)\b",
+    r"\bignore (?:that|this) for now\b",
+    r"\bbest left (?:alone|as-is)\b",
+    r"\blet's not (?:worry|concern ourselves) (?:about|with)\b",
+]
+
+# "Premature stop" - dressing up a mid-task halt as a principled pause.
+# The agent uses these phrases to quit partway through a multi-step plan
+# without actually finishing the next task. "Natural checkpoint",
+# "logical stopping point", "clean break" etc. are thin cover for:
+# "I've done some work, now I want you to explicitly tell me to continue."
+# When the user has issued an auto-continue / proceed directive, these
+# phrases are a direct violation — surface them and challenge explicitly.
+PREMATURE_STOP_PATTERNS: list[str] = [
+    r"\bnatural (?:checkpoint|stopping point|pause|pausing point|break)\b",
+    r"\blogical (?:checkpoint|stopping point|pause|pausing point|break)\b",
+    r"\bclean (?:checkpoint|break)\b",
+    r"\bgood (?:pausing point|place to pause|stopping point|time to stop)\b",
+    r"\bpausing here\b",
+    r"\bready to continue (?:on your cue|when you'?re ready|at your signal)\b",
+    r"\bawait(?:ing)? (?:your|further) (?:instruction|direction|signal|cue|go-?ahead)\b",
+]
+
+# Category name -> pattern list
 _CATEGORY_PATTERNS: list[tuple[str, list[str]]] = [
-    ("not_our_problem", DismissiveLanguageDetectorHandler.NOT_OUR_PROBLEM_PATTERNS),
-    ("out_of_scope", DismissiveLanguageDetectorHandler.OUT_OF_SCOPE_PATTERNS),
-    ("someone_elses_job", DismissiveLanguageDetectorHandler.SOMEONE_ELSES_JOB_PATTERNS),
-    ("defer_ignore", DismissiveLanguageDetectorHandler.DEFER_IGNORE_PATTERNS),
+    ("not_our_problem", NOT_OUR_PROBLEM_PATTERNS),
+    ("out_of_scope", OUT_OF_SCOPE_PATTERNS),
+    ("someone_elses_job", SOMEONE_ELSES_JOB_PATTERNS),
+    ("defer_ignore", DEFER_IGNORE_PATTERNS),
+    ("premature_stop", PREMATURE_STOP_PATTERNS),
 ]
 
 
@@ -115,7 +186,25 @@ class DismissiveLanguageNitpickHandler(Handler):
         return HookResult(decision=Decision.ALLOW, context=context_lines)
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## nitpick.dismissive_language — do not deflect or prematurely halt\n\n"
+            "Your messages are scanned for language patterns signalling avoidance of "
+            "work. The handler does NOT block anything, but injects context so you "
+            "self-correct. Identical advisories (same session, same phrase set) are "
+            "emitted once, not repeated.\n\n"
+            "**Avoid**:\n\n"
+            "- Dismissing issues as `pre-existing`, `out of scope`, `not our problem`, "
+            "  or `not relevant` to deflect work that is in fact yours.\n"
+            "- Premature-halt phrasing like `natural checkpoint`, `ready to continue on your "
+            "  cue`, `pausing here`, `awaiting your instruction` mid-plan when there is "
+            "  more to do — finish the task rather than dressing up a halt.\n"
+            "- Speculative `should be fine` or `probably works` when verification is "
+            "  cheap (run the test, read the file).\n\n"
+            "**Do**: acknowledge the issue, fix it, or — if it genuinely is out of scope — "
+            "say so once with the specific reason and continue with the in-scope work.\n\n"
+            "**A QUOTED phrase is a mention, not a deflection.** Naming the phrase is how "
+            "you acknowledge it, so quoting one never re-fires the advisory."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""

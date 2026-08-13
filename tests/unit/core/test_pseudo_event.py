@@ -11,8 +11,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from claude_code_hooks_daemon.core.chain import ChainExecutionResult
+from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.event import EventType
+from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.pseudo_event import (
     PseudoEventConfig,
@@ -20,6 +21,26 @@ from claude_code_hooks_daemon.core.pseudo_event import (
     PseudoEventTrigger,
     merge_pseudo_results,
 )
+
+
+class _StubPseudoHandler(Handler):
+    """Minimal concrete Handler for chain-membership assertions."""
+
+    def __init__(self, name: str, priority: int) -> None:
+        super().__init__(name=name, priority=priority, terminal=False)
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        return True
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult.allow()
+
+    def get_claude_md(self) -> str | None:
+        return None
+
+    def get_acceptance_tests(self) -> list[Any]:
+        return []
+
 
 # ─── PseudoEventTrigger ───
 
@@ -296,6 +317,49 @@ class TestPseudoEventDispatcherCounters:
 
 
 # ─── PseudoEventDispatcher Setup & Dispatch ───
+
+
+class TestPseudoEventDispatcherAllHandlers:
+    """Pseudo-event handlers must be reachable from outside dispatch.
+
+    Plan 00237: they are registered in chains owned by this dispatcher, not by
+    the EventRouter, so every caller that enumerates handlers by walking the
+    router's chains cannot see them. `ClaudeMdInjector` is one such caller, and
+    the consequence was real — guidance moved onto the nitpick handlers was
+    silently dropped from CLAUDE.md on the next daemon restart, and the
+    deletion auto-committed.
+    """
+
+    @staticmethod
+    def _config(name: str) -> PseudoEventConfig:
+        return PseudoEventConfig.from_dict(name, {"triggers": ["pre_tool_use:1/1"], "handlers": {}})
+
+    def test_returns_handlers_from_a_registered_chain(self) -> None:
+        dispatcher = PseudoEventDispatcher()
+        chain = HandlerChain()
+        first = _StubPseudoHandler("stub-one", priority=10)
+        second = _StubPseudoHandler("stub-two", priority=20)
+        chain.add(first)
+        chain.add(second)
+        dispatcher.register(self._config("nitpick"), setup_fn=MagicMock(), chain=chain)
+
+        assert dispatcher.all_handlers() == [first, second]
+
+    def test_spans_every_registered_pseudo_event(self) -> None:
+        """Not just the first — a second pseudo-event's handlers count too."""
+        dispatcher = PseudoEventDispatcher()
+        first_chain, second_chain = HandlerChain(), HandlerChain()
+        alpha = _StubPseudoHandler("stub-alpha", priority=10)
+        beta = _StubPseudoHandler("stub-beta", priority=10)
+        first_chain.add(alpha)
+        second_chain.add(beta)
+        dispatcher.register(self._config("nitpick"), setup_fn=MagicMock(), chain=first_chain)
+        dispatcher.register(self._config("other"), setup_fn=MagicMock(), chain=second_chain)
+
+        assert set(dispatcher.all_handlers()) == {alpha, beta}
+
+    def test_empty_when_nothing_registered(self) -> None:
+        assert PseudoEventDispatcher().all_handlers() == []
 
 
 class TestPseudoEventDispatcherSetupAndDispatch:

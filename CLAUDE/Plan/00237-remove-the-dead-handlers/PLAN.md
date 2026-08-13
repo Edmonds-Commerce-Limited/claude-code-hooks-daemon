@@ -130,30 +130,66 @@ cannot run holds what matters: the `get_claude_md()` bodies, and — via
 nitpick module — the compiled pattern sets themselves, under a comment calling
 the Stop handler the "single source of truth". The live leg holds only the loop.
 
-- [ ] ⬜ **Task 3.1**: MOVE the pattern constants and the `get_claude_md()`
+- [x] ✅ **Task 3.1**: MOVE the pattern constants and the `get_claude_md()`
   bodies into the nitpick modules, so the running code owns its own
   definitions. Deleting first would break the working detectors at import
   time. Flip the exemption entries in `test_claude_md_guidance_coverage.py` in
   the same edit
-- [ ] ⬜ **Task 3.1b**: Carry `PREMATURE_STOP_PATTERNS` across too and wire it
+- [x] ✅ **Task 3.1b**: Carry `PREMATURE_STOP_PATTERNS` across too and wire it
   into the nitpick `_CATEGORY_PATTERNS`. The nitpick leg imports FOUR of the
   five dismissive sets — premature-halt language ("natural checkpoint",
   "pausing here") has never been detected by the leg that runs. This is a
   behaviour CHANGE, not a refactor, so it needs its own RED test rather than
-  riding on the existing ones
-- [ ] ⬜ **Task 3.2**: Delete `stop/hedging_language_detector.py` and
+  riding on the existing ones. RED confirmed failing before the wiring landed
+- [x] ✅ **Task 3.2**: Delete `stop/hedging_language_detector.py` and
   `stop/dismissive_language_detector.py`, their tests, constants, priorities
   and config entries. This empties `stop:` down to `auto_continue_stop` alone
-- [ ] ⬜ **Task 3.3**: Rewrite the Plan 00236 shadowing guard to prove the
+- [x] ✅ **Task 3.3**: Rewrite the Plan 00236 shadowing guard to prove the
   hazard with a SYNTHETIC probe handler rather than these two. The hazard —
   any Stop handler above priority 10 is unreachable — outlives the specific
-  handlers, so a guard anchored to them dies with them. Never silence it
+  handlers, so a guard anchored to them dies with them. Never silence it.
+  Gained a third test in the rewrite: a probe BELOW priority 10 DOES run, so
+  the guard now distinguishes "shadowed by ordering" from "Stop dispatch is
+  broken" — two very different bugs the old two-test shape could not separate
+- [x] ✅ **Task 3.5**: DOGFOODING BUG found by the move (see JOURNAL 21:12).
+  The injector built its handler list from `EventRouter`'s chains only, so it
+  has never seen a pseudo-event handler — moving the guidance onto the nitpick
+  pair silently DELETED both sections from `CLAUDE.md`, auto-committed. Fixed
+  with `PseudoEventDispatcher.all_handlers()`, and guarded by
+  `TestGuidanceActuallyReachesClaudeMd`: "returns guidance" and "guidance
+  reaches the agent" are different properties and only the first was checked.
+  `check_repo_hygiene`'s `orphaned-handler-guidance` covers the opposite
+  direction; this is the missing half
+- [ ] ⬜ **Task 3.6**: Pseudo-event handlers are invisible to THREE remaining
+  enumeration surfaces — measured by running each, after reading the code got
+  the mechanism wrong twice (JOURNAL 21:38, 21:46):
+  - `get_handlers()` (live `handlers` IPC action) — walks router chains
+  - `generate-docs` — `EVENT_TYPE_MAPPING` × `config.handlers`, and nitpick
+    lives under `pseudo_events:`, so `.claude/HOOKS-DAEMON.md` has no Nitpick
+    section at all
+  - `generate-playbook` — `EVENT_TYPE_MAPPING` × module path, so both nitpick
+    handlers' declared `get_acceptance_tests()` have never appeared in the
+    playbook the BLOCKING release acceptance gate is generated from
+    All pre-existing, none caused by this plan, none covered by the Task 3.5
+    guard (which checks CLAUDE.md markers, not these tables). The playbook one
+    is the most serious: a handler can ship indefinitely with acceptance tests
+    that are never run and never reported as missing
+- [ ] ⬜ **Task 3.4**: Checkpoint commit
 
 ### Phase 4: The two MERGE verdicts
 
-- [ ] ⬜ **Task 4.1**: Relocate `validate_plan_number._record_allocation` —
-  the counter-advance side effect must move BEFORE the handler goes, or plan
-  numbering breaks
+- [ ] ⬜ **Task 4.1**: Relocate `validate_plan_number`'s
+  `record_plan_allocation` call — the counter-advance side effect must move
+  BEFORE the handler goes, or plan numbering breaks. Confirmed by reading both
+  call sites in context (JOURNAL 21:58 → 22:04): the counter has THREE writers
+  and they are NOT redundant — `mkplan.bash` covers the recommended path,
+  `markdown_organization:575` covers the REDIRECT path (it constructs the
+  folder itself after intercepting a flat plan file), and
+  `validate_plan_number:217` covers the DIRECT path (an agent writing or
+  `mkdir`-ing the folder by hand). Deleting the handler outright would stop
+  advancing the counter for hand-created folders, surfacing much later as a
+  duplicate number with nothing pointing back here. Relocate to a surface with
+  the same trigger — `plan_qa_edit` sees PLAN.md writes and is the closest
 - [ ] ⬜ **Task 4.2**: Fold `validate_plan_number` into `plan_qa`
   (`counter-sanity` / `no-new-collisions` are the real check; it never denies)
 - [ ] ⬜ **Task 4.3**: Fold `plan_completion_advisor` into `plan_qa`
@@ -172,10 +208,12 @@ the Stop handler the "single source of truth". The live leg holds only the loop.
 
 ## Technical Decisions
 
-Recorded in [DECISIONS.md](DECISIONS.md) — five so far: empty event
+Recorded in [DECISIONS.md](DECISIONS.md) — seven so far: empty event
 sections, the six pre-registry retirements the guard surfaced, the stranded
-manifest, `bash_error_detector` removed rather than narrowed, and Phase 3 as
-a dependency inversion.
+manifest, `bash_error_detector` removed rather than narrowed, Phase 3 as
+a dependency inversion, fixing the CLAUDE.md injector rather than routing
+the moved guidance around it, and one shared source of truth for pseudo-event
+handlers rather than three independent patches.
 
 ## Dependencies
 

@@ -496,6 +496,52 @@ config_changes:
         Worth knowing generally: ANY Stop handler you register above priority
         10 is shadowed by auto_continue_stop in the same way. If you have
         custom Stop handlers, that is the thing to check.
+    - key: handlers.stop.hedging_language_detector
+      recommended: true
+      description: >-
+        REMOVED (Plan 00237). Shadowed exactly as task_completion_checker was:
+        registered at priority 30, behind auto_continue_stop (priority 10,
+        terminal=True), so it never ran on an ordinary stop. Its detection is
+        NOT lost -- an identical twin already runs on the nitpick
+        pseudo-event (pseudo_events.nitpick.handlers.hedging_language), which
+        fires per TURN rather than once per session and is therefore strictly
+        better placed for auditing assistant messages.
+        The dependency ran the wrong way round: the nitpick handler imported
+        its regex pattern lists FROM this shadowed handler, under a comment
+        naming this one the "single source of truth". The authoritative copy
+        was the one nothing executed. Plan 00237 inverted that -- the patterns
+        and the resident CLAUDE.md guidance now live on the handler that
+        actually runs.
+      migration_note: >-
+        NO ACTION REQUIRED, and nothing is lost -- the nitpick twin has been
+        doing this work all along and now owns the guidance too. Delete the
+        "hedging_language_detector:" block from your config when convenient;
+        a leftover block validates cleanly. Make sure pseudo_events.nitpick is
+        enabled -- that is where the live detection is. If you register your
+        own Stop handlers, check their priority: anything above 10 is shadowed
+        the same way.
+    - key: handlers.stop.dismissive_language_detector
+      recommended: true
+      description: >-
+        REMOVED (Plan 00237). Same story as hedging_language_detector above --
+        priority 58, behind the terminal auto_continue_stop at 10, never ran;
+        live twin on the nitpick pseudo-event
+        (pseudo_events.nitpick.handlers.dismissive_language).
+        This one also carried a REAL loss, now fixed. It owned FIVE pattern
+        sets, but the nitpick twin imported only four: PREMATURE_STOP_PATTERNS
+        (dressing up a mid-task halt as a principled pause -- "natural
+        checkpoint", "pausing here", "awaiting your instruction") was defined
+        only on the shadowed handler and wired into nothing. That category has
+        therefore never fired in any release. Plan 00237 moved all five sets
+        onto the live handler and added tests for the fifth, so premature-halt
+        language is detected for the first time.
+      migration_note: >-
+        NO ACTION REQUIRED. Delete the "dismissive_language_detector:" block
+        when convenient. Expect ONE behaviour change rather than a removal:
+        premature-halt phrasing is now flagged where it previously was not, so
+        you may see a new "Dismissive language detected (premature stop)"
+        advisory. That is the fix, not a regression. Quoted phrases are still
+        exempt (a mention is not a deflection), as for every other category.
     - key: handlers.subagent_stop.remind_prompt_library
       recommended: true
       description: >-

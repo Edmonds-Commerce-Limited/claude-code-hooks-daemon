@@ -22,6 +22,48 @@ def _make_hook_input(messages: list[dict[str, str]]) -> dict[str, Any]:
     }
 
 
+class TestPrematureHaltIsDetected:
+    """Plan 00237: the running detector must see premature-halt language.
+
+    ``PREMATURE_STOP_PATTERNS`` lived only on the Stop-event twin, which
+    ``auto_continue_stop`` shadows, and the nitpick handler imported four of
+    the five dismissive pattern sets — so this whole category has never fired
+    in production. The Stop twin is being deleted, which makes carrying this
+    set across a behaviour CHANGE rather than a refactor, and it gets its own
+    test rather than riding on the four that were already wired.
+    """
+
+    def test_dressing_up_a_mid_task_halt_fires(self) -> None:
+        handler = DismissiveLanguageNitpickHandler()
+        text = "Phase 1 is done — this is a natural checkpoint, pausing here."
+        result = handler.handle(_make_hook_input([{"uuid": "u1", "content": text}]))
+        assert result.context, "premature-halt phrasing must be flagged"
+
+    def test_awaiting_instruction_fires(self) -> None:
+        handler = DismissiveLanguageNitpickHandler()
+        text = "I have committed the change and am awaiting your instruction."
+        result = handler.handle(_make_hook_input([{"uuid": "u1", "content": text}]))
+        assert result.context
+
+    def test_quoting_the_phrase_is_still_a_mention_not_a_halt(self) -> None:
+        """The Plan 00225 quoting rule must hold for this category too.
+
+        Without this, carrying the set across would reintroduce the exact
+        unsatisfiable-advisory bug that rule exists to prevent.
+        """
+        handler = DismissiveLanguageNitpickHandler()
+        text = 'The hook flagged my "pausing here" and it was right — continuing now.'
+        result = handler.handle(_make_hook_input([{"uuid": "u1", "content": text}]))
+        assert not result.context
+
+    def test_ordinary_completion_prose_does_not_fire(self) -> None:
+        """Guard the guard: the category must not fire on any finished-work text."""
+        handler = DismissiveLanguageNitpickHandler()
+        text = "All five handlers are removed, QA passes, and the daemon restarts."
+        result = handler.handle(_make_hook_input([{"uuid": "u1", "content": text}]))
+        assert not result.context
+
+
 class TestMentioningAPhraseIsNotDeflecting:
     """Plan 00225: a QUOTED trigger phrase is a mention, not a deflection.
 

@@ -19,11 +19,14 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.core.handler import Handler
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +186,27 @@ class PseudoEventDispatcher:
         self._registered.append(
             _RegisteredPseudoEvent(config=config, setup_fn=setup_fn, chain=chain)
         )
+
+    def all_handlers(self) -> list[Handler]:
+        """Every handler registered across all pseudo-events, in chain order.
+
+        Exists because a pseudo-event handler is a handler like any other to
+        everything OUTSIDE dispatch — CLAUDE.md guidance injection, docs
+        generation, acceptance-test collection. Those callers walk the
+        EventRouter's chains, which pseudo-event handlers deliberately do not
+        join (they dispatch through this class instead), so without an
+        accessor they are invisible to every one of them.
+
+        That invisibility was not theoretical: Plan 00237 moved the language
+        detectors' resident guidance from their shadowed Stop twins onto these
+        handlers, and the next daemon restart silently DELETED both sections
+        from CLAUDE.md — the guidance existed, was returned by a live handler,
+        and reached nothing.
+
+        Returns:
+            Handlers from every registered pseudo-event chain.
+        """
+        return [handler for entry in self._registered for handler in entry.chain.handlers]
 
     def check_and_fire(
         self,

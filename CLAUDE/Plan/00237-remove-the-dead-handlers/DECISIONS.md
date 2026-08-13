@@ -101,3 +101,92 @@ is the wrong fix for the wrong problem.
 completely apart, and nothing in the type system or the test suite could see it
 — both modules import cleanly and both are unit-tested in isolation. It took a
 live chain trace to notice at all.
+
+## Decision 6: fix the injector, do not route the guidance around it
+
+**Context**: Phase 3's dependency inversion moved the language detectors'
+`get_claude_md()` bodies onto the nitpick handlers. The next daemon restart
+deleted both sections from `CLAUDE.md` and auto-committed the deletion.
+`ClaudeMdInjector` is handed a list built by walking `EventRouter`'s chains,
+and pseudo-event handlers are registered into a chain owned by
+`PseudoEventDispatcher` instead — so the injector could never see them.
+
+**Options considered**:
+
+1. Leave the `get_claude_md()` bodies on the Stop handlers and keep those
+   handlers alive purely as guidance carriers.
+2. Move the guidance onto some third, router-registered handler that "speaks
+   for" the nitpick pair.
+3. Fix the injector so pseudo-event handlers are included, and guard the
+   property that broke.
+
+**Decision**: option 3.
+
+Option 1 is the status quo ante and is exactly the inversion this phase exists
+to remove — a section owned by a handler that never runs, whose text describes
+a trigger that never fires. Option 2 is worse: it puts the guidance a second
+step away from the code it describes, which is how guidance goes stale without
+anyone noticing.
+
+Neither addresses the actual defect. A pseudo-event handler is a handler like
+any other to everything outside dispatch — guidance injection, docs
+generation, acceptance-test collection all walk handler lists — so the
+router-only walk is a latent bug for every one of those consumers, not a
+special property of guidance.
+
+**The guard matters more than the fix** (Core Standard 15). The suite already
+asserted that an `_EARNS_GUIDANCE` handler RETURNS content; both handlers did,
+throughout. `check_repo_hygiene`'s `orphaned-handler-guidance` rule asserts the
+opposite direction — a section with no handler behind it. The direction that
+broke was neither: a handler with guidance and no section.
+`TestGuidanceActuallyReachesClaudeMd` closes it, checked against the repo's own
+`CLAUDE.md` through the injector's own marker reader.
+
+**Measured before asserting**: exactly 2 of 54 markers were missing, both the
+nitpick pair. Zero other false positives, so the check could be written as a
+strict assertion rather than an allowlist that would have hidden the next one.
+
+## Decision 7: one source of truth for pseudo-event handlers, not three patches
+
+**Context**: after fixing the injector, three more enumeration surfaces turned
+out to omit pseudo-event handlers — the live `handlers` IPC action,
+`generate-docs`, and `generate-playbook`. Two distinct mechanisms are at work:
+walking `EventRouter` chains (which pseudo-event handlers never join), and
+iterating `EVENT_TYPE_MAPPING` (which has no `nitpick` entry, correctly, since
+nitpick is not a dispatchable `EventType`).
+
+**Rejected: add `nitpick` to `EVENT_TYPE_MAPPING`.** It maps directory names to
+real `EventType` values and is consumed by handler REGISTRATION as well as by
+the generators. An entry there would make nitpick look dispatchable to the
+router, which is exactly what it is not. Convenient for two generators, wrong
+for the thing the map is actually for.
+
+**Rejected: patch each generator independently.** Three ad-hoc "and also check
+the pseudo-events config" blocks, each free to drift, is how the current state
+arose — every consumer re-derives "the set of live handlers" its own way, and
+each derivation is separately wrong. A fourth consumer would start from the
+same blank page.
+
+**Decision**: extract the pseudo-event handler registry — today a private
+static method, `DaemonController._get_pseudo_event_setup_registry()` — into a
+module the generators can import, and have every surface read the live handler
+set from shared code rather than reconstructing it.
+
+**The deeper point, worth stating because it outlives this fix**: a pseudo-event
+handler is a handler to everything EXCEPT dispatch. Dispatch is the one place
+the distinction is real. Every other consumer — guidance, docs, playbook,
+introspection — wants "all live handlers" and gets a router-shaped or
+config-shaped answer that silently excludes an entire category.
+
+**Severity ordering** (fix in this order if the work is ever split): the
+playbook first, because the release process has a BLOCKING acceptance gate and
+these handlers' declared tests have never been in it — a handler can ship
+indefinitely with acceptance tests that are never run and never reported
+missing. Then docs, since `CLAUDE.md` points agents at `HOOKS-DAEMON.md` as
+"the current active handler summary" and it is not one. The IPC list last: it
+is a diagnostic, and a wrong diagnostic is misleading but not load-bearing.
+
+**Guard**: whatever the shape, the test must assert the OUTCOME (a nitpick
+handler appears in the generated artefact) and not the mechanism. Every
+mechanism-level conclusion drawn in this phase by reading code was wrong —
+twice — and settled in seconds by running the command.

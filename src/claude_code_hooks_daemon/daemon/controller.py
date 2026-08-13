@@ -254,8 +254,17 @@ class DaemonController:
         logger.info("DaemonController initialised with %d total handlers", total_count)
         self._initialised = True
 
-        # Inject handler guidance into project CLAUDE.md (advisory, never raises)
+        # Inject handler guidance into project CLAUDE.md (advisory, never raises).
+        # Pseudo-event handlers must be included: they dispatch through the
+        # PseudoEventDispatcher rather than the EventRouter, so walking only
+        # the router's chains makes them invisible here. Plan 00237 hit this
+        # for real — guidance moved onto the nitpick handlers was silently
+        # DROPPED from CLAUDE.md on the next restart (and auto-committed),
+        # because a live handler returning a section is not the same thing as
+        # that section reaching the file.
         all_handlers = [h for chain in self._router._chains.values() for h in chain._handlers]
+        if self._pseudo_dispatcher is not None:
+            all_handlers.extend(self._pseudo_dispatcher.all_handlers())
         ClaudeMdInjector(workspace_root=workspace_root, handlers=all_handlers).inject()
 
         # Validate configuration at startup (fail-open: degraded mode on errors)

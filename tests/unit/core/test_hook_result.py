@@ -329,11 +329,18 @@ class TestToJsonEventName:
         Regression test: per Claude Code's official hooks documentation,
         Stop and SubagentStop accept `hookSpecificOutput.additionalContext`
         for non-blocking advisory feedback that continues the conversation.
-        Several advisory Stop handlers (task_completion_checker,
-        hedging_language_detector, dismissive_language_detector,
-        remind_prompt_library) rely on this to inject guidance without
-        blocking - previously `_format_stop_response` ignored `context`
-        entirely, silently dropping their advisory messages.
+        `_format_stop_response` originally ignored `context` entirely,
+        returning {} for any ALLOW, which silently dropped the advisory
+        output of four Stop/SubagentStop handlers.
+
+        Those four handlers were all removed in Plan 00237 (each for its own
+        reasons - shadowed, stale, or writing to nothing), so today NO shipped
+        handler exercises this path. The test stays regardless: this pins
+        Claude Code's response contract, not our handlers' use of it, and the
+        failure mode is silent by construction. A handler that emits context
+        and has it dropped still returns allow and still looks healthy in
+        every log - which is exactly how the bug survived to begin with. The
+        next Stop handler (project-level or ours) must not rediscover it.
         """
         result = HookResult(decision=Decision.ALLOW, context=["Advisory guidance"])
         output = result.to_json("Stop")

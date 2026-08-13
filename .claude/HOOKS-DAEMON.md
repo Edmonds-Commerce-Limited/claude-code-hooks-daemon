@@ -100,13 +100,11 @@
 |----------|---------|----------|-------------|
 | 10 | auto_approve_reads | TERMINAL | Auto-approve read-only tool permission requests |
 
-### Stop (3 handlers)
+### Stop (1 handler)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | auto_continue_stop | TERMINAL | Intercept Stop events and enforce explicit stop reasons or auto-continue |
-| 30 | hedging_language_detector | ADVISORY | Detect hedging language that signals guessing instead of researching |
-| 58 | dismissive_language_detector | ADVISORY | Detect dismissive language that signals avoiding work |
 
 ### Status (13 handlers)
 

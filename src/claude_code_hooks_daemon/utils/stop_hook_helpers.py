@@ -1,8 +1,12 @@
 """Shared utilities for Stop event handlers.
 
-DRY extraction of common logic used by AutoContinueStopHandler and
-HedgingLanguageDetectorHandler. Both handlers need to check stop_hook_active
-state and load transcripts — this module provides those as reusable functions.
+DRY extraction of common logic used by Stop handlers that need to check
+stop_hook_active state and load transcripts. Extracted when three handlers
+shared it; ``AutoContinueStopHandler`` is now its only importer (Plan 00237
+removed the other two, which were unreachable behind it), so the sharing is
+latent rather than live. The module stays as a public ``utils`` export that a
+project-level Stop handler can use, and because the next Stop handler will
+need exactly this.
 """
 
 import json

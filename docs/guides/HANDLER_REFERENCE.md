@@ -2041,26 +2041,23 @@ handlers:
 
 ---
 
-#### hedging_language_detector
+### Why `auto_continue_stop` is the only Stop handler
 
-| Property       | Value                       |
-| -------------- | --------------------------- |
-| **Config key** | `hedging_language_detector` |
-| **Priority**   | 30                          |
-| **Type**       | Advisory                    |
-| **Event**      | Stop                        |
+`auto_continue_stop` is **terminal** and its `matches()` returns true for
+almost every Stop event. The handler chain stops at the first matching terminal
+handler *regardless of the decision it returns*, so an ordinary ALLOW ends the
+chain just as completely as a deny. **Any Stop handler you register above
+priority 10 will never run on a normal stop.**
 
-**Description:** Detects hedging language in Claude's responses that signals guessing instead of researching. Scans the last assistant message for phrases like "if I recall", "IIRC", "should probably", "I'm not sure but", "I believe" and injects a warning telling the agent to verify with tools (Read, Grep, Glob) instead of guessing.
+This is not theoretical: `hedging_language_detector`, `dismissive_language_detector`
+and `task_completion_checker` all shipped under `stop:`, all looked live in the
+config, and none of them ever executed. They were removed in v3.53.0.
 
-**Config example:**
-
-```yaml
-handlers:
-  stop:
-    hedging_language_detector:
-      enabled: true
-      priority: 30
-```
+If you want to audit assistant messages, use the **`nitpick` pseudo-event**
+instead — it fires per turn rather than once per session, and nothing shadows
+it. See [Pseudo-Events](CONFIGURATION.md). If you genuinely need the Stop event,
+register **below** priority 10 and confirm it fires;
+`tests/integration/test_stop_chain_terminal_shadowing.py` pins the boundary.
 
 ---
 
@@ -2303,23 +2300,23 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 
 ### All Advisory Handlers
 
-| Config Key                  | Event            | Priority | What It Does                           |
-| --------------------------- | ---------------- | -------- | -------------------------------------- |
-| `daemon_restart_verifier`   | PreToolUse       | 10       | Suggests daemon restart before commits |
-| `global_npm_advisor`        | PreToolUse       | 40       | Suggests npx over global installs      |
-| `plan_workflow`             | PreToolUse       | 45       | Guidance for plan creation             |
-| `plan_completion_advisor`   | PreToolUse       | 50       | Reminds about plan completion steps    |
-| `web_search_year`           | PreToolUse       | 55       | Warns about outdated search years      |
-| `british_english`           | PreToolUse       | 60       | Warns about American spellings         |
-| `validate_eslint_on_write`  | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes      |
-| `command_hints`             | PostToolUse      | 29       | Config-driven reminder after a command |
-| `optimal_config_checker`    | SessionStart     | 52       | Audits Claude Code settings            |
-| `git_filemode_checker`      | SessionStart     | 53       | Warns when core.fileMode=false         |
-| `suggest_status_line`       | SessionStart     | 55       | Suggests status line setup             |
-| `version_check`             | SessionStart     | 55       | Checks for daemon updates              |
-| `plan_qa_sweep`             | SessionStart     | 57       | Reports plan-tree drift once a session |
-| `git_context_injector`      | UserPromptSubmit | 20       | Injects git status context             |
-| `hedging_language_detector` | Stop             | 30       | Detects guessing language              |
+| Config Key                 | Event            | Priority | What It Does                           |
+| -------------------------- | ---------------- | -------- | -------------------------------------- |
+| `daemon_restart_verifier`  | PreToolUse       | 10       | Suggests daemon restart before commits |
+| `global_npm_advisor`       | PreToolUse       | 40       | Suggests npx over global installs      |
+| `plan_workflow`            | PreToolUse       | 45       | Guidance for plan creation             |
+| `plan_completion_advisor`  | PreToolUse       | 50       | Reminds about plan completion steps    |
+| `web_search_year`          | PreToolUse       | 55       | Warns about outdated search years      |
+| `british_english`          | PreToolUse       | 60       | Warns about American spellings         |
+| `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes      |
+| `command_hints`            | PostToolUse      | 29       | Config-driven reminder after a command |
+| `optimal_config_checker`   | SessionStart     | 52       | Audits Claude Code settings            |
+| `git_filemode_checker`     | SessionStart     | 53       | Warns when core.fileMode=false         |
+| `suggest_status_line`      | SessionStart     | 55       | Suggests status line setup             |
+| `version_check`            | SessionStart     | 55       | Checks for daemon updates              |
+| `plan_qa_sweep`            | SessionStart     | 57       | Reports plan-tree drift once a session |
+| `git_context_injector`     | UserPromptSubmit | 20       | Injects git status context             |
+| `nitpick.hedging_language` | Nitpick          | 20       | Detects guessing language per turn     |
 
 ---
 
@@ -2344,7 +2341,7 @@ Priority determines execution order. Lower numbers run first.
 | 10-20 | Safety          | destructive_git, sed_blocker, pip_break_system      |
 | 25-35 | Code Quality    | qa_suppression, lint_on_edit, markdown_organization |
 | 36-55 | Workflow        | lsp_enforcement, gh_issue_comments, npm_command     |
-| 56-60 | Advisory        | british_english, dismissive_language_detector       |
+| 56-60 | Advisory        | british_english, daemon_docs_guard                  |
 | 100   | Logging/Cleanup | (none ship today; range reserved)                   |
 
 When two handlers have the same priority, they run in registration order.

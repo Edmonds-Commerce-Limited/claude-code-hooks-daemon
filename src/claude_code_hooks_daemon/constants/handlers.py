@@ -567,20 +567,6 @@ class HandlerID:
         display_name="markdown-table-formatter",
     )
 
-    # Hedging language detector (Stop handler)
-    HEDGING_LANGUAGE_DETECTOR = HandlerIDMeta(
-        class_name="HedgingLanguageDetectorHandler",
-        config_key="hedging_language_detector",
-        display_name="hedging-language-detector",
-    )
-
-    # Dismissive language detector (Stop handler)
-    DISMISSIVE_LANGUAGE_DETECTOR = HandlerIDMeta(
-        class_name="DismissiveLanguageDetectorHandler",
-        config_key="dismissive_language_detector",
-        display_name="dismissive-language-detector",
-    )
-
     # Nitpick pseudo-event handlers (transcript quality auditing)
     NITPICK_DISMISSIVE = HandlerIDMeta(
         class_name="DismissiveLanguageNitpickHandler",
@@ -651,8 +637,6 @@ HandlerKey = Literal[
     "plan_time_estimates",
     "plan_workflow",
     "npm_command",
-    "hedging_language_detector",
-    "dismissive_language_detector",
     "dismissive_language_nitpick",
     "hedging_language_nitpick",
     "optimal_config_checker",
@@ -776,6 +760,28 @@ RETIRED_HANDLERS: dict[str, str] = {
         "because documented workflows genuinely tell you to read it. Safe to "
         "delete this key from your config; the JSONL file it wrote can be "
         "deleted too."
+    ),
+    "hedging_language_detector": (
+        "removed in Plan 00237 — this Stop-event handler sat at priority 30 "
+        "behind auto_continue_stop (priority 10, terminal), which matches "
+        "nearly every Stop and breaks the chain, so it never ran on an "
+        "ordinary stop. Its live twin is the `hedging_language` handler on the "
+        "nitpick pseudo-event, which fires on a stop:1/1 trigger and now owns "
+        "the patterns and the CLAUDE.md guidance the Stop copy used to hold. "
+        "Detection is UNCHANGED — only the leg that delivers it. Safe to "
+        "delete this key from your config; keep `pseudo_events.nitpick` "
+        "enabled to keep the behaviour."
+    ),
+    "dismissive_language_detector": (
+        "removed in Plan 00237 — same story as hedging_language_detector "
+        "above: priority 58, shadowed by the terminal auto_continue_stop, "
+        "superseded by the `dismissive_language` nitpick handler. Detection "
+        "is not merely preserved but IMPROVED: the nitpick handler had only "
+        "ever imported four of the Stop handler's five pattern sets, so "
+        "premature-halt phrasing ('natural checkpoint', 'pausing here', "
+        "'awaiting your instruction') was defined but never detected "
+        "anywhere. That fifth set is now wired in. Safe to delete this key "
+        "from your config; keep `pseudo_events.nitpick` enabled."
     ),
     "bash_error_detector": (
         "removed in Plan 00237 — it substring-matched seven common words "

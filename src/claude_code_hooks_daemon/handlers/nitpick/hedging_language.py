@@ -3,8 +3,11 @@
 Audits assistant messages (provided by NitpickSetup) for hedging language
 patterns that signal the agent is guessing instead of researching with tools.
 
-Reuses compiled patterns from the Stop-event HedgingLanguageDetectorHandler
-to maintain a single source of truth.
+Owns the pattern definitions. They previously lived on a Stop-event twin that
+this module imported from, under a comment calling that twin the single source
+of truth — but the twin sat behind ``auto_continue_stop`` (priority 10,
+terminal) and never ran, so the authoritative copy was the one nothing
+executed. Plan 00237 inverted the dependency and deleted the twin.
 """
 
 from __future__ import annotations
@@ -14,19 +17,50 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
-from claude_code_hooks_daemon.handlers.stop.hedging_language_detector import (
-    HedgingLanguageDetectorHandler,
-)
 from claude_code_hooks_daemon.utils.quoted_spans import blank_quoted_spans
 
 HANDLER_ID = HandlerID.NITPICK_HEDGING
 HANDLER_PRIORITY = Priority.NITPICK_HEDGING
 
-# Category name -> pattern list, imported from the Stop handler (single source of truth)
+# Memory-based guessing - agent relying on recall instead of looking
+MEMORY_PATTERNS: list[str] = [
+    r"\bif I recall\b",
+    r"\bIIRC\b",
+    r"\bfrom memory\b",
+    r"\bif memory serves\b",
+    r"\bfrom what I remember\b",
+]
+
+# Uncertainty hedging - agent unsure about verifiable facts
+UNCERTAINTY_PATTERNS: list[str] = [
+    r"\bshould probably\b",
+    r"\blikely\b",
+    r"\bprobably\b",
+    r"\bapparently\b",
+    r"\bseemingly\b",
+    r"\bpossibly\b",
+    r"\bmost likely\b",
+    r"\bpresumably\b",
+    r"\bI assume\b",
+    r"\bI believe\b",
+    r"\bI suspect\b",
+]
+
+# Weak confidence - agent hedging on things it could verify
+WEAK_CONFIDENCE_PATTERNS: list[str] = [
+    r"\bI'm not sure but\b",
+    r"\bI'm fairly confident\b",
+    r"\bI'm pretty sure\b",
+    r"\bit seems like\b",
+    r"\bmight be\b",
+    r"\bcould be\b",
+]
+
+# Category name -> pattern list
 _CATEGORY_PATTERNS: list[tuple[str, list[str]]] = [
-    ("memory_guessing", HedgingLanguageDetectorHandler.MEMORY_PATTERNS),
-    ("uncertainty", HedgingLanguageDetectorHandler.UNCERTAINTY_PATTERNS),
-    ("weak_confidence", HedgingLanguageDetectorHandler.WEAK_CONFIDENCE_PATTERNS),
+    ("memory_guessing", MEMORY_PATTERNS),
+    ("uncertainty", UNCERTAINTY_PATTERNS),
+    ("weak_confidence", WEAK_CONFIDENCE_PATTERNS),
 ]
 
 
@@ -112,7 +146,29 @@ class HedgingLanguageNitpickHandler(Handler):
         return HookResult(decision=Decision.ALLOW, context=context_lines)
 
     def get_claude_md(self) -> str | None:
-        return None
+        return """## nitpick.hedging_language — the guessing is the defect, not the wording
+
+Your messages are scanned for hedges — "if I recall", "IIRC", "from memory",
+"probably", "likely", "apparently", "presumably", "I believe" — and a
+non-blocking advisory is injected.
+
+**Do not respond by deleting the word.** Dropping "probably" while still
+guessing is worse than the hedge: it removes the only signal that the claim
+was unverified, and leaves a confident-sounding sentence with nothing behind
+it. The remedy is to verify — `Read` the file, `Grep` the codebase, `Glob` for
+the name, run the command. Almost every hedge in this repository is about
+something one tool call would settle.
+
+**Honest uncertainty is fine — say it plainly, and say what would settle it.**
+"I have not checked whether X still exists" is accurate reporting, not
+hedging. What this handler is looking for is confident prose standing in for a
+check you could have made.
+
+**A QUOTED phrase is a mention, not a hedge.** Naming the phrase is how you
+acknowledge it, so quoting one never re-fires the advisory.
+
+The sibling `nitpick.dismissive_language` covers the same ground for
+avoidance rather than uncertainty."""
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""

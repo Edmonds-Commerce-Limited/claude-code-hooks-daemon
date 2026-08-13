@@ -4,12 +4,23 @@ DBF. The v3.52.0 release ran a hand-written audit of `get_claude_md()`
 coverage, found six PreToolUse *advisory* handlers returning `None`, and filed
 them. Plan 00203 then applied a written criterion to all 107 handlers and found
 that **all six were correct** — while two handlers the audit never looked at
-were not: `LintOnEditHandler` (PostToolUse, and it DENIES) and
-`HedgingLanguageDetectorHandler` (Stop, whose identical twin was covered).
+were not: `LintOnEditHandler` (PostToolUse, and it DENIES) and the Stop-event
+hedging detector (whose identical twin was covered).
 
 A scan of one event type could not have found either. So the audit is replaced
 by this table, which enumerates every handler and forces a verdict with a
 reason attached.
+
+**A verdict can be right about the section and wrong about the handler.** Both
+language detectors existed twice — a Stop-event copy and a `nitpick`
+pseudo-event copy — and this table exempted the nitpick pair *because the Stop
+pair's resident section already carried the guidance*. That was true and
+useless: the Stop pair sat behind `auto_continue_stop` (terminal, priority 10)
+and never ran, so the handler holding the section was the dead one and the one
+that fires was exempt. Plan 00237 deleted the Stop pair and moved the sections
+onto the handlers that actually run. Nothing in this file could have caught
+that — every reason here was accurate. `test_stop_chain_terminal_shadowing.py`
+is the guard that can, which is why it must never be silenced.
 
 `get_claude_md()` is `@abstractmethod`, so the method itself can never be
 missing — every one of the handler classes on disk implements it. What escapes
@@ -105,8 +116,16 @@ _EARNS_GUIDANCE: dict[str, str] = {
     # -- Test 3: standing policy that decays after one delivery ----------
     "BackgroundProcessTrackerHandler": "T3 watchdog protocol outlives the command",
     "CommandHintsHandler": "T3 explains the rate-limited hint mechanism itself",
-    "DismissiveLanguageDetectorHandler": "T3 Stop-time norm; can only fire after the breach",
-    "HedgingLanguageDetectorHandler": "T3 Stop-time norm; can only fire after the breach",
+    "DismissiveLanguageNitpickHandler": (
+        "T3 standing norm about deflecting; the fire-time line is one sentence "
+        "and the remedy (acknowledge, then fix) is a habit, not a correction. "
+        "Held by the Stop twin until Plan 00237 deleted it as unreachable"
+    ),
+    "HedgingLanguageNitpickHandler": (
+        "T3 standing norm about guessing; the section's whole argument — that "
+        "deleting the hedge is WORSE than the hedge — cannot fit in the "
+        "fire-time line. Held by the Stop twin until Plan 00237 deleted it"
+    ),
     "IdleHousekeepingAdvisoryHandler": "T3 a mode the agent opts into and sustains",
     "RecoveryCronAdvisorHandler": "T3 cron-is-not-a-heartbeat governs the whole session",
     "StandingAuthorisationsHandler": "T3 replaying a recorded request is the whole point",
@@ -156,14 +175,6 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "PlanCompletionAdvisorHandler": (
         "T4 its three steps are already resident under plan_qa_commit_gate's "
         "terminal-state-atomic invariant, which also ENFORCES them"
-    ),
-    "DismissiveLanguageNitpickHandler": (
-        "T4 batch-audit twin of stop/dismissive_language_detector, whose "
-        "resident section already carries the guidance"
-    ),
-    "HedgingLanguageNitpickHandler": (
-        "T4 batch-audit twin of stop/hedging_language_detector, whose "
-        "resident section already carries the guidance"
     ),
     "ValidatePlanNumberHandler": (
         "T4 fires on a wrongly-numbered new plan folder; plan_number_helper's "
@@ -396,4 +407,71 @@ class TestTheVerdictsMatchReality:
             "but get_claude_md() now returns content. Every client project pays for "
             "that content on every session. Move it to _EARNS_GUIDANCE naming the test "
             "it passes, or remove the guidance."
+        )
+
+
+class TestGuidanceActuallyReachesClaudeMd:
+    """Returning a section is not the same as the section arriving.
+
+    Everything above this class checks what a handler RETURNS. Plan 00237
+    proved that is only half the property: the language detectors' guidance was
+    moved onto the `nitpick` handlers — live, enabled, returning a full section
+    that `test_a_covered_handler_actually_returns_guidance` was perfectly happy
+    with — and the next daemon restart DELETED both sections from CLAUDE.md and
+    auto-committed the deletion. Pseudo-event handlers dispatch through
+    `PseudoEventDispatcher`, and the injector walked only `EventRouter`'s
+    chains, so it never saw them.
+
+    Every check in this file passed throughout. So did the whole QA suite. The
+    only visible symptom was a commit titled "Auto: hooks daemon regenerated
+    CLAUDE.md handler guidance" whose diff was 37 deletions and no additions.
+
+    `check_repo_hygiene.py`'s `orphaned-handler-guidance` rule covers the
+    OPPOSITE direction — a section in CLAUDE.md with no handler behind it. This
+    is the missing half: a handler with guidance and no section. Both
+    directions are needed; neither implies the other.
+    """
+
+    def _markers_in_claude_md(self) -> set[str]:
+        """Handler display names recorded in the repo's own CLAUDE.md.
+
+        Read through the injector's own reader, never a local regex — a second
+        copy of the marker format is the copy that silently stops matching.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import handler_names_in_guidance
+
+        claude_md = _project_root() / "CLAUDE.md"
+        return set(handler_names_in_guidance(claude_md.read_text(encoding="utf-8")))
+
+    def test_the_markers_are_readable_at_all(self) -> None:
+        """Vacuity guard: an empty marker set would make the next test pass blind."""
+        assert self._markers_in_claude_md(), (
+            "No handler provenance markers found in CLAUDE.md. Either the guidance "
+            "block is missing entirely or the marker format changed — in both cases "
+            "the coverage check below would pass while checking nothing."
+        )
+
+    def test_every_earning_handler_has_a_section_in_claude_md(self) -> None:
+        classes = _discover_handler_classes()
+        present = self._markers_in_claude_md()
+
+        missing = sorted(
+            f"{class_name} (name={classes[class_name]().name})"
+            for class_name in _EARNS_GUIDANCE
+            if classes[class_name]().name not in present
+        )
+
+        assert not missing, (
+            "These handlers are recorded as earning resident guidance, and their "
+            "get_claude_md() returns it, but no section for them reached this "
+            "repository's CLAUDE.md:\n  " + "\n  ".join(missing) + "\n\n"
+            "The guidance is being produced and dropped. Check that the handler is "
+            "reachable by ClaudeMdInjector — the injector is handed a list built in "
+            "DaemonController.initialise(), and a handler registered anywhere other "
+            "than an EventRouter chain (a pseudo-event, for instance) has to be added "
+            "to that list explicitly. Restart the daemon after fixing, since the block "
+            "is only regenerated on startup.\n"
+            "If the handler is instead DISABLED in this project's config, that is "
+            "worth fixing too: this repo dogfoods its own handlers, so an earning "
+            "handler that is off here is untested guidance."
         )

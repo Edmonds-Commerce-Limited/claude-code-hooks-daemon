@@ -575,20 +575,17 @@ handlers:
   # The section stays so Notification remains a declared, dispatchable event.
   notification: {}
 
+  # auto_continue_stop is terminal at priority 10 and matches nearly every Stop,
+  # so ANY handler added above it is unreachable on an ordinary stop (Plan 00237
+  # removed three that sat there silently). Message-auditing belongs on the
+  # nitpick pseudo-event, which fires per-turn. See
+  # tests/integration/test_stop_chain_terminal_shadowing.py.
   stop:
     auto_continue_stop:  # Auto-continues after stop events based on criteria
       enabled: true
       priority: 10
       options:
         continue_on_errors: true
-
-    hedging_language_detector:  # Detects guessing language (should probably, IIRC, I believe, etc)
-      enabled: true
-      priority: 30
-
-    dismissive_language_detector:  # Detects dismissive language (pre-existing issue, out of scope, etc)
-      enabled: true
-      priority: 58
 
   # Status line handlers (format daemon-based status display)
   status_line:
