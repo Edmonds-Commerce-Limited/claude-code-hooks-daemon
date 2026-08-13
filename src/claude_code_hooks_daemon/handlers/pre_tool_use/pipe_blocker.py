@@ -238,6 +238,20 @@ _MESSAGE_BODY_PATTERN = re.compile(
 # redaction placeholder, handing the caller a remediation they cannot run.
 _MESSAGE_TAKING_COMMANDS: tuple[str, ...] = ("git", "hg", "svn", "jj")
 
+# A heredoc whose DELIMITER IS QUOTED (`<<'EOF'` or `<<"EOF"`). Quoting the
+# delimiter disables every expansion, so bash passes the body through verbatim
+# and never parses it as shell syntax — a truncating pipe inside it is data.
+# The delimiter MUST be quoted here: a bare `<<EOF` still expands `$(...)` and
+# backticks, so its body can genuinely run a command and is left alone.
+# DOTALL so the body may span newlines; non-greedy so the FIRST matching
+# closing delimiter ends the body rather than the last one in the command.
+_QUOTED_HEREDOC_BODY_PATTERN = re.compile(
+    r"(?P<opener><<-?\s*(?P<quote>['\"])(?P<delim>\w+)(?P=quote))"
+    r"\n.*?\n"
+    r"(?P<closer>[ \t]*(?P=delim))",
+    re.DOTALL,
+)
+
 # Path separator, for reducing `/usr/bin/git` to `git` before that comparison.
 _PATH_SEPARATOR = "/"
 
@@ -358,6 +372,35 @@ class PipeBlockerHandler(Handler):
 
         return _MESSAGE_BODY_PATTERN.sub(_blank_if_inert, command)
 
+    @staticmethod
+    def _strip_quoted_heredoc_bodies(command: str) -> str:
+        """Blank the body of a heredoc whose DELIMITER IS QUOTED.
+
+        `<<'EOF'` and `<<"EOF"` disable every expansion, so bash hands the body
+        to the receiving command verbatim and never parses it as shell syntax.
+        A truncating pipe inside such a body — say a Python string literal in a
+        script being written to disk — is DATA.
+
+        This generalises a principle the handler already relies on: the
+        `-m "$(cat <<'EOF' ... EOF)"` branch of `_MESSAGE_BODY_PATTERN` is
+        exempt for exactly this reason, but only in that one shape, and only
+        for commands that take a message. A heredoc feeding an interpreter's
+        stdin is the same fact about bash and was not covered.
+
+        An UNQUOTED `<<EOF` is deliberately NOT blanked: bash expands `$(...)`
+        and backticks inside it, so its body can genuinely run a command.
+        """
+        return _QUOTED_HEREDOC_BODY_PATTERN.sub(
+            lambda match: f"{match.group('opener')}\n{_MESSAGE_BODY_PLACEHOLDER}\n"
+            f"{match.group('closer')}",
+            command,
+        )
+
+    @classmethod
+    def _strip_inert_spans(cls, command: str) -> str:
+        """Blank every span bash will hand over as data rather than execute."""
+        return cls._strip_quoted_heredoc_bodies(cls._strip_message_bodies(command))
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if command pipes a non-whitelisted operation to tail/head.
 
@@ -382,7 +425,7 @@ class PipeBlockerHandler(Handler):
         # them blanked out so prose inside a commit message can never be
         # mistaken for a real pipe. A real pipe elsewhere in the SAME
         # command is untouched and still detected.
-        scan_target = self._strip_message_bodies(command)
+        scan_target = self._strip_inert_spans(command)
 
         # EVERY pipe is classified, not just the first one (Plan 00221).
         return self._find_offending_producer(scan_target) is not None
@@ -873,7 +916,7 @@ class PipeBlockerHandler(Handler):
         # inside a -m/-F value earlier in the string can never be mistaken
         # for the real one that triggered the block. The displayed COMMAND
         # below still shows the full, un-redacted original.
-        scan_target = self._strip_message_bodies(command)
+        scan_target = self._strip_inert_spans(command)
 
         # Report the producer of the OFFENDING pipe, which is not necessarily
         # the first one: naming a whitelisted `git log` as the reason a
@@ -969,15 +1012,22 @@ class PipeBlockerHandler(Handler):
             "the body literal. The exemption is also scoped to commands that "
             "actually take a message: `python -m pytest ... | tail` names "
             "`pytest` as its producer, because `-m` there means module.\n\n"
-            "**A heredoc body describing a pipe pattern can false-trigger this "
-            "handler** (the literal characters `| tail`/`| head` are matched even "
-            "inside prose). When the matched text reads as ENGLISH rather than as "
-            'a command — it starts with a function word like "the", or such words '
-            "make up a large share of it — the block reason is short and does NOT "
-            "echo your text back or suggest a fabricated `extra_whitelist` entry. "
-            "If this happens, just retry (nothing to fix); to avoid it entirely, "
-            "write prose content with the `Write` tool instead of a `cat <<EOF` "
-            "heredoc.\n\n"
+            "**A heredoc whose DELIMITER IS QUOTED is never scanned at all.** "
+            "`cat >> notes.md <<'EOF' ... EOF` writes its body out verbatim — the "
+            "shell expands nothing in it — so a `| tail` sitting in that body was "
+            "never going to run, and blocking it would be wrong. Quote the "
+            "delimiter (`<<'EOF'`) whenever the body is prose, a code snippet, or "
+            "anything else you are writing rather than executing.\n\n"
+            "**An UNQUOTED `<<EOF` IS still scanned, and that boundary is "
+            "deliberate.** Bash performs command substitution inside an unquoted "
+            "heredoc, so `cat <<EOF` with `$(pytest | tail -1)` in the body really "
+            "does run pytest and truncate it. A bare `| tail` in unquoted prose can "
+            "therefore still false-trigger: when the matched text reads as ENGLISH "
+            'rather than as a command — it starts with a function word like "the", '
+            "or such words make up a large share of it — the block reason is short "
+            "and does NOT echo your text back or suggest a fabricated "
+            "`extra_whitelist` entry. Just quote the delimiter and retry, or write "
+            "prose content with the `Write` tool instead of a heredoc.\n\n"
             "**Length is NOT part of that judgement.** A long command is still a "
             "command: a 100-character invocation with a worktree branch name and "
             "absolute paths gets the normal block reason, naming what matched and "
@@ -1183,20 +1233,22 @@ class PipeBlockerHandler(Handler):
                 requires_main_thread=False,
             ),
             AcceptanceTest(
-                title="heredoc prose describing a pipe pattern gets a short reason, no fabricated remediation",
+                title="unquoted heredoc prose gets a short reason, no fabricated remediation",
                 command=(
-                    "false && cat >> /tmp/never-created-$$.md <<'EOF'\n"
+                    "false && cat >> /tmp/never-created-$$.md <<EOF\n"
                     "the guardrail described above blocks piping straight to a pager e.g. output | tail -20\n"
                     "EOF"
                 ),
                 description=(
                     "Plan 00209 §1: a heredoc body whose PROSE contains the literal "
-                    "characters of a pipe-to-pager still gets blocked (detection is "
-                    "unchanged — correct, cautious behaviour), but must NOT be run "
-                    "through the extra_whitelist/echd-capture template (the field-report "
-                    "defect: 'the' extracted as a binary name from a sentence) and must "
-                    "NOT echo the prose back. 'false &&' short-circuits so the heredoc "
-                    "write never executes even if the hook fails to block."
+                    "characters of a pipe-to-pager still gets blocked, but must NOT be "
+                    "run through the extra_whitelist/echd-capture template (the "
+                    "field-report defect: 'the' extracted as a binary name from a "
+                    "sentence) and must NOT echo the prose back. The delimiter is "
+                    "UNQUOTED deliberately: Plan 00228 made a QUOTED-delimiter body "
+                    "inert, so re-quoting this would assert a premise the handler can "
+                    "no longer reach and the test would fail. 'false &&' short-circuits "
+                    "so the heredoc write never executes even if the hook fails to block."
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

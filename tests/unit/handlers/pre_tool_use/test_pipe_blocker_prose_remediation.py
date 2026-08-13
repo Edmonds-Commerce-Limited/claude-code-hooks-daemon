@@ -13,6 +13,21 @@ re-quoting text the agent had just written.
 
 These tests are Task 1.1 (RED first): a heredoc body of prose must produce a
 SHORT block reason with NO remediation template and NO echoed prose.
+
+DELIMITER CHOICE (Plan 00228). Every fixture below uses an UNQUOTED ``<<EOF``,
+and that is load-bearing rather than incidental. Plan 00209 declared the
+detection itself out of scope ("the detection is correct and out of scope per
+Non-Goals") while naming the trigger a FALSE one; Plan 00228 then fixed the
+detection for the case 00209 deferred — a heredoc whose delimiter is QUOTED
+has a literal body the shell never executes, so it is no longer scanned at all
+and no longer reaches these code paths.
+
+An unquoted heredoc still is scanned, and correctly: bash performs command
+substitution inside one, so ``$(pytest | tail -1)`` in an unquoted body really
+does run and truncate. That keeps the prose heuristic reachable and these
+guarantees live. Re-quoting any delimiter below would make its test assert a
+premise the handler can no longer reach — see
+TestQuotedDelimiterBodiesAreInert for the behaviour that replaced it.
 """
 
 from claude_code_hooks_daemon.core.hook_result import Decision
@@ -29,7 +44,7 @@ class TestProseFalseTriggerGetsNoRemediationTemplate:
         whose body prose describes an earlier pipe block, with "the" as the
         first word of the line containing the literal "| tail" text."""
         return (
-            "cat >> JOURNAL.md <<'EOF'\n"
+            "cat >> JOURNAL.md <<EOF\n"
             "We fixed two earlier issues today.\n"
             "the guardrail blocks piping straight to a pager e.g. echo x | tail -5\n"
             "EOF\n"
@@ -37,8 +52,12 @@ class TestProseFalseTriggerGetsNoRemediationTemplate:
 
     def test_matches_the_prose_heredoc(self) -> None:
         """Sanity: this really is the scenario the field report hit — the
-        handler's pipe-detection regex does match literal heredoc prose
-        (the detection itself is correct and out of scope per Non-Goals)."""
+        handler's pipe-detection regex does match literal heredoc prose.
+
+        Positive control for the whole class: every assertion below inspects a
+        block reason, so if this stopped matching they would all pass
+        vacuously against a command that was never blocked at all.
+        """
         handler = PipeBlockerHandler()
         hook_input = {
             "tool_name": "Bash",
@@ -131,7 +150,7 @@ class TestProseIsDetectedEvenWhenItStartsWithACommandName:
         )
         hook_input = {
             "tool_name": "Bash",
-            "tool_input": {"command": f"cat >> f.md <<'EOF'\n{long_prose}\nEOF\n"},
+            "tool_input": {"command": f"cat >> f.md <<EOF\n{long_prose}\nEOF\n"},
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
@@ -255,7 +274,7 @@ class TestLongRealCommandsAreNotProse:
         result = handler.handle(
             {
                 "tool_name": "Bash",
-                "tool_input": {"command": f"cat >> f.md <<'EOF'\n{prose} | tail -5\nEOF\n"},
+                "tool_input": {"command": f"cat >> f.md <<EOF\n{prose} | tail -5\nEOF\n"},
             }
         )
         assert result.decision == Decision.DENY
@@ -286,3 +305,58 @@ class TestRealPipeBlocksAreUnaffected:
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
         assert "extra_whitelist" in result.reason
+
+
+class TestQuotedDelimiterBodiesAreInert:
+    """Plan 00228: what REPLACED the premise the fixtures above used to assert.
+
+    Plan 00209 called the heredoc trigger a FALSE one and then explicitly
+    deferred the detection ("out of scope per Non-Goals"), fixing only the
+    remediation text. Plan 00228 fixed the deferred half: a heredoc whose
+    delimiter is QUOTED has a body the shell writes out verbatim, so a pipe
+    inside it was never going to run and blocking it was wrong.
+
+    Without this class the improvement would be invisible to the suite — the
+    old tests were simply retargeted onto unquoted heredocs, which would leave
+    a silent revert of the fix passing every remaining test in the file.
+    """
+
+    PROSE_WITH_PIPE = "the guardrail blocks piping straight to a pager e.g. echo x | tail -5"
+
+    def test_quoted_delimiter_prose_body_is_not_blocked_at_all(self) -> None:
+        """Strictly better than the short prose reason: no block whatsoever."""
+        handler = PipeBlockerHandler()
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": f"cat >> JOURNAL.md <<'EOF'\n{self.PROSE_WITH_PIPE}\nEOF\n"},
+        }
+
+        assert handler.matches(hook_input) is False
+
+    def test_quoted_delimiter_suppresses_substitution_too(self) -> None:
+        """A quoted delimiter makes the WHOLE body literal, substitutions included."""
+        handler = PipeBlockerHandler()
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat >> f.md <<'EOF'\n$(pytest tests/ | tail -1)\nEOF\n"},
+        }
+
+        assert handler.matches(hook_input) is False
+
+    def test_unquoted_delimiter_with_substitution_is_still_denied(self) -> None:
+        """The teeth of the exemption's boundary, and why it stops at quoting.
+
+        Bash DOES substitute inside an unquoted heredoc, so this genuinely
+        runs pytest and truncates it. Extending the exemption to unquoted
+        delimiters would turn a correct fix into a one-character bypass.
+        """
+        handler = PipeBlockerHandler()
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat >> f.md <<EOF\n$(pytest tests/ | tail -1)\nEOF\n"},
+        }
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert "does not look like a real shell command" not in (result.reason or "")

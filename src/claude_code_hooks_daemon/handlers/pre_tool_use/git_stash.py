@@ -50,6 +50,13 @@ class GitStashHandler(Handler):
         if not command:
             return False
 
+        # Matched against the RAW command, INCLUDING quoted literals. That is
+        # deliberate and is asserted by `test_matches_git_stash_in_echo_quotes`:
+        # the acceptance suite verifies blocking handlers by embedding the
+        # command in a string, exactly as CLAUDE.md prescribes. Plan 00228
+        # considered exempting quoted spans here and rejected it — those tests
+        # are the specification, not an accident.
+
         # Allow recovery/query operations unconditionally
         # pop, apply, list, show — these retrieve stashed work
         # Note: drop/clear are blocked by DestructiveGitHandler
