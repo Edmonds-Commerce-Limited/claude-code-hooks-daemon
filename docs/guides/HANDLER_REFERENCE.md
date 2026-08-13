@@ -2019,7 +2019,13 @@ handlers:
 | **Type**       | Advisory        |
 | **Event**      | SessionStart    |
 
-**Description:** At the start of each new session, sweeps the whole plan directory with the plan QA check catalogue (index/folder bijection, number collisions, statistics recount, index row length, archive structure, status-vs-location coherence, staleness and dormancy) and injects ONE compact drift report as advisory context. Silent when the tree is clean; skipped on session resume.
+**Description:** At the start of each new session, sweeps the whole plan directory with the plan QA check catalogue and injects ONE compact drift report as advisory context. Silent when the tree is clean; skipped on session resume.
+
+The catalogue has two halves. The **cross-file** checks compare documents against each other and against git (index/folder bijection, number collisions, statistics recount, index row length, archive structure, status-vs-location coherence, staleness and dormancy). The **document-level** checks apply single-document rules to every `PLAN.md` already on disk: `status-line-present`, `status-enum-and-date`, `header-body-coherence`, `task-grammar`, `path-existence` and `journal-dayfile-naming`.
+
+That second half exists because a rule enforced only at write time cannot see what predates it — a violation introduced before the rule shipped, or by a `git mv`, a merge, or any path other than a Write/Edit tool call, would otherwise never be examined again. The rules that stay edit-only are the ones about the *act of writing* rather than about on-disk state (`archive-immutability`, `journal-append-only`, `journal-dayfile-is-today`, `plan-doc-size`, `template-metadata`), plus `terminal-placement-hint`, whose condition `location-status-coherence` already reports at sweep. Each records its reason in `src/claude_code_hooks_daemon/plan_qa/checks/common.py`, and a test enforces that the classification stays total.
+
+`path-existence` is scoped to plans whose work has begun: a `Not Started`, `Blocked` or `Dormant` plan names the files it *intends* to create, so a missing path there is the expected state rather than drift.
 
 **Fires when:** a new (non-resumed) session starts with `plan_workflow.qa.enabled` true and `sweep_mode: advise`. A configured plan directory that does not exist is itself reported as a structural finding.
 
@@ -2028,6 +2034,8 @@ handlers:
 **Policy configuration:** shares the top-level `plan_workflow.qa` block documented under [`plan_qa_edit`](#plan_qa_edit) -- the archive dir names, `staleness_days`, and the legacy/collision allowlists all apply to the sweep.
 
 **CLI:** the same catalogue runs against the HEAD tree with `.claude/hooks-daemon/bin/hooks-daemon plan-qa --sweep`, which exits 1 while findings remain (CI-able). Single-file lint is `plan-qa --lint <PLAN.md>` and the staged-commit check is `plan-qa --check-staged`; add `--json` to any of these for machine-readable output.
+
+`--lint` accepts a relative or absolute path — a relative one resolves against the current directory — and it never reports "clean" for a file it did not examine: a target outside the plan tree exits 2 naming the directory it expected, and a clean single-file run names the file it read rather than claiming the whole tree is clean.
 
 **Config example:**
 
