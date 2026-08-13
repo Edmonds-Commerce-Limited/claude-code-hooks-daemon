@@ -1,20 +1,25 @@
-"""Check ``status-line-present`` (Stage 1, block; sins A2, E8).
+"""Check ``status-line-present`` (Stage 1 + 3, block; sins A2, E8).
 
-A PLAN.md being written must contain a parseable ``**Status**:`` line.
-Without one the plan has no machine-readable state at all — the root
-enabler of "finished work marked Not Started" rot: tooling and humans both
-fall back to guessing from prose.
+A PLAN.md must contain a parseable ``**Status**:`` line. Without one the plan
+has no machine-readable state at all — the root enabler of "finished work
+marked Not Started" rot: tooling and humans both fall back to guessing from
+prose. Registered at EDIT *and* SWEEP (Plan 00230), because a document with no
+status line is exactly as unreadable whether it was just written or has been
+sitting on disk for a year.
 """
 
 from typing import Final
 
-from claude_code_hooks_daemon.plan_qa.checks.common import edit_target, level_for_plan
+from claude_code_hooks_daemon.plan_qa.checks.common import (
+    DocumentRuleChecks,
+    DocumentTarget,
+    document_rule_checks,
+    level_for_plan,
+)
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
-    CheckSpec,
     Finding,
     Level,
-    Stage,
 )
 
 CHECK_ID: Final[str] = "status-line-present"
@@ -26,9 +31,8 @@ _REMEDIATION: Final[str] = (
 )
 
 
-def _run(context: CheckContext) -> list[Finding]:
-    target = edit_target(context)
-    if target is None or target.doc.status_line_present:
+def _rule(context: CheckContext, target: DocumentTarget) -> list[Finding]:
+    if target.doc.status_line_present:
         return []
     return [
         Finding(
@@ -41,10 +45,9 @@ def _run(context: CheckContext) -> list[Finding]:
     ]
 
 
-CHECK: Final[CheckSpec] = CheckSpec(
+CHECKS: Final[DocumentRuleChecks] = document_rule_checks(
     check_id=CHECK_ID,
-    stage=Stage.EDIT,
     level=Level.BLOCK,
     sins=("A2", "E8"),
-    run=_run,
+    rule=_rule,
 )

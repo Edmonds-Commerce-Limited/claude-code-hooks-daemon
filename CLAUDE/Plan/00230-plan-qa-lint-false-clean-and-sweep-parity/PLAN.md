@@ -102,15 +102,19 @@ Blindness 1 — the tests and the documented usage disagree about the input shap
 
 ### Phase 3: EDIT/SWEEP parity for document-level checks
 
-- [ ] ⬜ **Task 3.1**: Classify all 12 EDIT-stage checks as *batchable* (pure
+- [x] ✅ **Task 3.1**: Classify all 12 EDIT-stage checks as *batchable* (pure
   function of on-disk state) or *write-act-only*; record the verdict per check
   with its reason, so the split is decided once rather than re-derived
-- [ ] ⬜ **Task 3.2**: RED — for each batchable check, a sweep test over a tree
+  — 6 batchable, 6 exempt (`common.WRITE_ACT_ONLY_RULES`)
+- [x] ✅ **Task 3.2**: RED — for each batchable check, a sweep test over a tree
   containing a pre-existing violation
-- [ ] ⬜ **Task 3.3**: GREEN — register the SWEEP twin for each batchable check
-- [ ] ⬜ **Task 3.4**: Add a guard test asserting the classification is TOTAL —
+- [x] ✅ **Task 3.3**: GREEN — register the SWEEP twin for each batchable check
+- [x] ✅ **Task 3.4**: Add a guard test asserting the classification is TOTAL —
   every EDIT check is either registered at SWEEP or carries a recorded
   write-act-only exemption, so a future EDIT check cannot be added blind
+- [x] ✅ **Task 3.5**: Scope `path-existence` to plans whose work has begun —
+  every one of its six first-scan findings was a not-yet-started plan naming
+  a file it proposes to CREATE
 
 ### Phase 4: Fix the instances the guards now surface
 
@@ -150,6 +154,22 @@ that accepts human input, so validation belongs there.
 **Decision**: Exit non-zero with a message naming why the file is not a plan
 document. FAIL FAST: a lint tool that certifies files outside its remit is worse
 than one that refuses them, because the exit code is what CI reads.
+
+### Decision 3a: Re-registering an EDIT check at SWEEP is a NEW blindness
+
+**Context**: the obvious fix — add `Stage.SWEEP` to each existing `CheckSpec` —
+looks right and is worse than doing nothing.
+
+**Why**: a sweep context carries no `file_path`/`file_content`, so
+`edit_target()` returns `None` and the check no-matches every folder. It would
+appear in the registry, run on every sweep, and find nothing — registered,
+never firing, indistinguishable from passing.
+
+**Decision**: batch rules iterate the tree. Each document rule is written once
+against a `DocumentTarget` and `document_rule_checks()` supplies it from the
+edit payload on one surface and from `tree_targets()` on the other.
+`TestNaiveReRegistrationWouldBeASilentNoOp` pins the trap so the reasoning
+survives.
 
 ### Decision 3: Guard the classification, not just the checks
 

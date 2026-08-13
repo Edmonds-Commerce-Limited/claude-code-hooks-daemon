@@ -13,11 +13,20 @@ midnight rollover"; that tolerance is exactly the confusion the newer check
 was written to close, so it moved rather than staying duplicated here).
 
 Ships ADVISE (Decision 4); honours ``plan_workflow.qa.journal.mode: block``.
+
+Registered at EDIT *and* SWEEP (Plan 00230). The rule is a pure function of a
+FILENAME, so a day-file whose name predates the grammar is an on-disk fact a
+write-time-only registration can never revisit.
 """
 
 from typing import Final
 
-from claude_code_hooks_daemon.plan_qa.checks.common import journal_edit_target, journal_level
+from claude_code_hooks_daemon.plan_qa.checks.common import (
+    JournalEditTarget,
+    journal_edit_target,
+    journal_level,
+    journal_tree_targets,
+)
 from claude_code_hooks_daemon.plan_qa.model import parse_journal_dayfile_name
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
@@ -36,11 +45,7 @@ _REMEDIATION: Final[str] = (
 )
 
 
-def _run(context: CheckContext) -> list[Finding]:
-    target = journal_edit_target(context)
-    if target is None:
-        return []
-
+def _rule(context: CheckContext, target: JournalEditTarget) -> list[Finding]:
     level = journal_level(context)
     parsed = parse_journal_dayfile_name(target.basename)
     if parsed is None:
@@ -81,10 +86,23 @@ def _run(context: CheckContext) -> list[Finding]:
     ]
 
 
-CHECK: Final[CheckSpec] = CheckSpec(
-    check_id=CHECK_ID,
-    stage=Stage.EDIT,
-    level=Level.ADVISE,
-    sins=(),
-    run=_run,
+def _run_edit(context: CheckContext) -> list[Finding]:
+    target = journal_edit_target(context)
+    return [] if target is None else _rule(context, target)
+
+
+def _run_sweep(context: CheckContext) -> list[Finding]:
+    findings: list[Finding] = []
+    for target in journal_tree_targets(context):
+        findings.extend(_rule(context, target))
+    return findings
+
+
+CHECKS: Final[tuple[CheckSpec, CheckSpec]] = (
+    CheckSpec(
+        check_id=CHECK_ID, stage=Stage.EDIT, level=Level.ADVISE, sins=(), run=_run_edit
+    ),
+    CheckSpec(
+        check_id=CHECK_ID, stage=Stage.SWEEP, level=Level.ADVISE, sins=(), run=_run_sweep
+    ),
 )

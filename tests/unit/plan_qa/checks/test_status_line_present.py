@@ -7,8 +7,12 @@ blocks new material, advises on grandfathered legacy plans.
 
 from pathlib import Path
 
-from claude_code_hooks_daemon.plan_qa.checks.status_line_present import CHECK
+from claude_code_hooks_daemon.plan_qa.checks.status_line_present import CHECKS
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level, Stage
+
+# These tests exercise the edit-time surface; the sweep twin is covered by
+# tests/unit/plan_qa/checks/test_document_rule_stage_parity.py.
+CHECK = CHECKS.edit
 
 _PROJECT_ROOT = Path("/repo")
 _PLAN_DIR_REL = "CLAUDE/Plan"

@@ -1,21 +1,26 @@
-"""Check ``header-body-coherence`` (Stage 1, block; sins A3, A1).
+"""Check ``header-body-coherence`` (Stage 1 + 3, block; sins A3, A1).
 
 A plan whose header claims ``Not Started`` or ``In Progress`` but whose body
 already claims completion (every checkbox ticked, or a prose "all done"
 marker) is lying to the reader: the header is the source of truth tooling
-reads, and it must not contradict the body it summarises.
+reads, and it must not contradict the body it summarises. Registered at EDIT
+*and* SWEEP (Plan 00230) — a plan that drifted into this state is precisely
+the "finished work still marked In Progress" rot the sweep exists to surface.
 """
 
 from typing import Final
 
-from claude_code_hooks_daemon.plan_qa.checks.common import edit_target, level_for_plan
+from claude_code_hooks_daemon.plan_qa.checks.common import (
+    DocumentRuleChecks,
+    DocumentTarget,
+    document_rule_checks,
+    level_for_plan,
+)
 from claude_code_hooks_daemon.plan_qa.model import PlanStatus
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
-    CheckSpec,
     Finding,
     Level,
-    Stage,
 )
 
 CHECK_ID: Final[str] = "header-body-coherence"
@@ -31,11 +36,7 @@ _REMEDIATION: Final[str] = (
 )
 
 
-def _run(context: CheckContext) -> list[Finding]:
-    target = edit_target(context)
-    if target is None:
-        return []
-
+def _rule(context: CheckContext, target: DocumentTarget) -> list[Finding]:
     doc = target.doc
     if doc.status not in _NON_TERMINAL_STATUSES:
         return []
@@ -54,10 +55,9 @@ def _run(context: CheckContext) -> list[Finding]:
     ]
 
 
-CHECK: Final[CheckSpec] = CheckSpec(
+CHECKS: Final[DocumentRuleChecks] = document_rule_checks(
     check_id=CHECK_ID,
-    stage=Stage.EDIT,
     level=Level.BLOCK,
     sins=("A3", "A1"),
-    run=_run,
+    rule=_rule,
 )

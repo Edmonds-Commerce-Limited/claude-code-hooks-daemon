@@ -50,17 +50,21 @@ from claude_code_hooks_daemon.plan_qa.types import CheckSpec
 def all_checks() -> tuple[CheckSpec, ...]:
     """The full registered check catalogue (Plan 00144)."""
     return (
-        # Stage 1 — edit-time single-file checks
-        status_line_present.CHECK,
-        status_enum_and_date.CHECK,
-        header_body_coherence.CHECK,
+        # Document-level rules — dual EDIT + SWEEP registration (Plan 00230).
+        # The sweep half is what examines plans already on disk; without it a
+        # violation predating the rule is never looked at again.
+        *status_line_present.CHECKS,
+        *status_enum_and_date.CHECKS,
+        *header_body_coherence.CHECKS,
+        *task_grammar.CHECKS,
+        *path_existence.CHECKS,
+        *journal_dayfile_naming.CHECKS,
+        # Stage 1 — checks about the ACT OF WRITING, with no batch equivalent
+        # by design (see common.WRITE_ACT_ONLY_RULES for the reason each).
         template_metadata.CHECK,
-        task_grammar.CHECK,
         terminal_placement_hint.CHECK,
         archive_immutability.CHECK,
-        path_existence.CHECK,
         plan_doc_size.CHECK,
-        journal_dayfile_naming.CHECK,
         journal_dayfile_is_today.CHECK,
         journal_append_only.CHECK,
         # Cross-file tree checks — dual COMMIT + SWEEP registration

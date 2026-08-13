@@ -1,21 +1,30 @@
-"""Check ``status-enum-and-date`` (Stage 1, block; sin A1).
+"""Check ``status-enum-and-date`` (Stage 1 + 3, block; sin A1).
 
 A ``**Status**:`` line must parse to one of the allowed :class:`PlanStatus`
 tokens, and — only when the project opts in via ``require_terminal_date``
 — a terminal status must carry a ``(YYYY-MM-DD)`` qualifier. This repo's own
 convention forbids completion dates, so ``require_terminal_date`` defaults
 to ``False`` and the date finding never fires here.
+
+Registered at EDIT *and* SWEEP (Plan 00230). An unparseable token is a pure
+property of the document, so a write-time-only rule left every plan already on
+disk unexamined — and an unparseable status is invisible to
+``location-status-coherence``, whose terminal/non-terminal split a ``None``
+status satisfies neither side of.
 """
 
 from typing import Final
 
-from claude_code_hooks_daemon.plan_qa.checks.common import edit_target, level_for_plan
+from claude_code_hooks_daemon.plan_qa.checks.common import (
+    DocumentRuleChecks,
+    DocumentTarget,
+    document_rule_checks,
+    level_for_plan,
+)
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
-    CheckSpec,
     Finding,
     Level,
-    Stage,
 )
 
 CHECK_ID: Final[str] = "status-enum-and-date"
@@ -25,9 +34,8 @@ _ALLOWED_TOKENS: Final[str] = (
 )
 
 
-def _run(context: CheckContext) -> list[Finding]:
-    target = edit_target(context)
-    if target is None or not target.doc.status_line_present:
+def _rule(context: CheckContext, target: DocumentTarget) -> list[Finding]:
+    if not target.doc.status_line_present:
         return []
 
     findings: list[Finding] = []
@@ -61,10 +69,9 @@ def _run(context: CheckContext) -> list[Finding]:
     return findings
 
 
-CHECK: Final[CheckSpec] = CheckSpec(
+CHECKS: Final[DocumentRuleChecks] = document_rule_checks(
     check_id=CHECK_ID,
-    stage=Stage.EDIT,
     level=Level.BLOCK,
     sins=("A1",),
-    run=_run,
+    rule=_rule,
 )

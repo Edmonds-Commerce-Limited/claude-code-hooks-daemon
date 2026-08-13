@@ -2,8 +2,14 @@
 
 from pathlib import Path
 
-from claude_code_hooks_daemon.plan_qa.checks.path_existence import CHECK
+import pytest
+
+from claude_code_hooks_daemon.plan_qa.checks.path_existence import CHECKS
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level, Stage
+
+# These tests exercise the edit-time surface; the sweep twin is covered by
+# tests/unit/plan_qa/checks/test_document_rule_stage_parity.py.
+CHECK = CHECKS.edit
 
 _PLAN_DIR_REL = "CLAUDE/Plan"
 
@@ -39,6 +45,35 @@ class TestMatchesScope:
         content = "See `src/missing.py` for details.\n"
         context = _context(tmp_path, "CLAUDE/Plan/Completed/00042-widget/PLAN.md", content)
         assert CHECK.run(context) == []
+
+
+class TestUnstartedPlansNamePathsTheyIntendToCreate:
+    """Plan 00230.
+
+    This check is about paths going STALE — named for orientation, then moved
+    or deleted by a later refactor. A plan whose work has not begun names the
+    files it INTENDS to create, so "does not exist" is the expected state, not
+    drift. Running the rule over the whole tree made that distinction matter:
+    all six findings on this repo's first batch scan were plans in exactly
+    this state.
+    """
+
+    def _content(self, status: str) -> str:
+        return f"# Plan 00042: Widget\n\n**Status**: {status}\n\nWill add `src/planned.py`.\n"
+
+    @pytest.mark.parametrize("status", ["Not Started", "Blocked", "Dormant"])
+    def test_work_not_begun_is_not_flagged(self, tmp_path: Path, status: str) -> None:
+        context = _context(tmp_path, "CLAUDE/Plan/00042-widget/PLAN.md", self._content(status))
+        assert CHECK.run(context) == []
+
+    def test_in_progress_plan_is_still_flagged(self, tmp_path: Path) -> None:
+        """Work has started, so a missing path may genuinely have moved."""
+        context = _context(
+            tmp_path, "CLAUDE/Plan/00042-widget/PLAN.md", self._content("In Progress")
+        )
+        findings = CHECK.run(context)
+        assert len(findings) == 1
+        assert "src/planned.py" in findings[0].message
 
 
 class TestFindings:

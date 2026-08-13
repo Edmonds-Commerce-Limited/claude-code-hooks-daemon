@@ -136,8 +136,9 @@ class TestRegistryCatalogue:
         # + plan-shrink-without-journal (Plan 00190) + index-row-length (Plan 00218)
         assert len(by_stage[Stage.COMMIT]) == 14
         # 3 sweep-only + 5 dual tree checks + 2 journal SWEEP checks (Plan 00163)
-        # + index-row-length (Plan 00218)
-        assert len(by_stage[Stage.SWEEP]) == 11
+        # + index-row-length (Plan 00218) + 5 document-rule sweep twins and
+        # the journal-dayfile-naming sweep twin (Plan 00230)
+        assert len(by_stage[Stage.SWEEP]) == 17
 
     def test_dual_stage_checks_share_run_function(self) -> None:
         from claude_code_hooks_daemon.plan_qa.checks import all_checks

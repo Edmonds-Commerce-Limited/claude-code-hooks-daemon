@@ -1,21 +1,28 @@
-"""Check ``task-grammar`` (Stage 1, advise; sin E6).
+"""Check ``task-grammar`` (Stage 1 + 3, advise; sin E6).
 
 Ad-hoc progress markers (``[✓]``, ``[⏳]``, ``[~]``) are unparseable by
 tooling that expects the template's checkbox + status-icon grammar. New
 material is held to the block-level standard (via :func:`level_for_plan`);
 existing files being edited for other reasons only get advice so a small
 edit does not force a full grammar rewrite.
+
+Registered at EDIT *and* SWEEP (Plan 00230). A sweep context has no
+``file_exists_before``, so batch findings land at ADVISE — which is exactly
+the intent: on-disk material is by definition not new.
 """
 
 from typing import Final
 
-from claude_code_hooks_daemon.plan_qa.checks.common import edit_target, level_for_plan
+from claude_code_hooks_daemon.plan_qa.checks.common import (
+    DocumentRuleChecks,
+    DocumentTarget,
+    document_rule_checks,
+    level_for_plan,
+)
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
-    CheckSpec,
     Finding,
     Level,
-    Stage,
 )
 
 CHECK_ID: Final[str] = "task-grammar"
@@ -26,9 +33,8 @@ _REMEDIATION: Final[str] = (
 )
 
 
-def _run(context: CheckContext) -> list[Finding]:
-    target = edit_target(context)
-    if target is None or target.doc.tasks.legacy_marker_lines == 0:
+def _rule(context: CheckContext, target: DocumentTarget) -> list[Finding]:
+    if target.doc.tasks.legacy_marker_lines == 0:
         return []
 
     level = (
@@ -48,10 +54,9 @@ def _run(context: CheckContext) -> list[Finding]:
     ]
 
 
-CHECK: Final[CheckSpec] = CheckSpec(
+CHECKS: Final[DocumentRuleChecks] = document_rule_checks(
     check_id=CHECK_ID,
-    stage=Stage.EDIT,
     level=Level.ADVISE,
     sins=("E6",),
-    run=_run,
+    rule=_rule,
 )

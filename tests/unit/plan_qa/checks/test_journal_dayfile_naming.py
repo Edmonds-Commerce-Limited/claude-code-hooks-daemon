@@ -14,6 +14,11 @@ from pathlib import Path
 from claude_code_hooks_daemon.plan_qa.checks import journal_dayfile_naming
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level, Stage
 
+# These tests exercise the edit-time surface. The sweep twin, which applies the
+# same grammar to day-files already on disk, is covered by
+# tests/unit/plan_qa/checks/test_document_rule_stage_parity.py.
+_CHECK = next(spec for spec in journal_dayfile_naming.CHECKS if spec.stage is Stage.EDIT)
+
 
 def _ctx(
     basename: str,
@@ -41,7 +46,7 @@ def _ctx(
 
 class TestSpec:
     def test_registered_edit_advise(self) -> None:
-        spec = journal_dayfile_naming.CHECK
+        spec = _CHECK
         assert spec.check_id == "journal-dayfile-naming"
         assert spec.stage == Stage.EDIT
         assert spec.level == Level.ADVISE
@@ -49,15 +54,15 @@ class TestSpec:
 
 class TestRun:
     def test_well_formed_name_today_passes(self) -> None:
-        assert journal_dayfile_naming.CHECK.run(_ctx("00163-Journal-26-07-14.md")) == []
+        assert _CHECK.run(_ctx("00163-Journal-26-07-14.md")) == []
 
     def test_well_formed_past_date_passes_naming(self) -> None:
         # Recency is journal-dayfile-is-today's concern (Plan 00197); a
         # well-formed but stale name is still grammatically clean.
-        assert journal_dayfile_naming.CHECK.run(_ctx("00163-Journal-26-07-01.md")) == []
+        assert _CHECK.run(_ctx("00163-Journal-26-07-01.md")) == []
 
     def test_well_formed_future_date_passes_naming(self) -> None:
-        assert journal_dayfile_naming.CHECK.run(_ctx("00163-Journal-26-12-25.md")) == []
+        assert _CHECK.run(_ctx("00163-Journal-26-12-25.md")) == []
 
     def test_non_journal_file_is_ignored(self) -> None:
         # A PLAN.md edit (not under JOURNAL/) is not this check's concern.
@@ -69,29 +74,29 @@ class TestRun:
             file_content="x",
             journal_enabled=True,
         )
-        assert journal_dayfile_naming.CHECK.run(ctx) == []
+        assert _CHECK.run(ctx) == []
 
     def test_malformed_name_advises(self) -> None:
-        findings = journal_dayfile_naming.CHECK.run(_ctx("my-journal.md"))
+        findings = _CHECK.run(_ctx("my-journal.md"))
         assert len(findings) == 1
         assert findings[0].level == Level.ADVISE
         assert "NNNNN-Journal-YY-MM-DD.md" in findings[0].remediation
 
     def test_number_mismatch_advises(self) -> None:
-        findings = journal_dayfile_naming.CHECK.run(_ctx("00099-Journal-26-07-14.md"))
+        findings = _CHECK.run(_ctx("00099-Journal-26-07-14.md"))
         assert len(findings) == 1
         assert "00099" in findings[0].message
         assert "00163" in findings[0].message
 
     def test_impossible_date_advises(self) -> None:
-        findings = journal_dayfile_naming.CHECK.run(_ctx("00163-Journal-26-13-45.md"))
+        findings = _CHECK.run(_ctx("00163-Journal-26-13-45.md"))
         assert len(findings) == 1
         assert "calendar date" in findings[0].message
 
     def test_block_mode_escalates_level(self) -> None:
-        findings = journal_dayfile_naming.CHECK.run(_ctx("bad.md", journal_mode="block"))
+        findings = _CHECK.run(_ctx("bad.md", journal_mode="block"))
         assert findings[0].level == Level.BLOCK
 
     def test_disabled_journalling_is_ignored(self) -> None:
-        assert journal_dayfile_naming.CHECK.run(_ctx("bad.md", journal_enabled=False)) == []
-        assert journal_dayfile_naming.CHECK.run(_ctx("bad.md", journal_mode="off")) == []
+        assert _CHECK.run(_ctx("bad.md", journal_enabled=False)) == []
+        assert _CHECK.run(_ctx("bad.md", journal_mode="off")) == []
