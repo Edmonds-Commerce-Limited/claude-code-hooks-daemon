@@ -1,6 +1,6 @@
 # Plan 00230: plan-qa reports clean for what it never examined
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-13
 **Owner**: joseph
 **Priority**: High
@@ -132,10 +132,16 @@ Blindness 1 — the tests and the documented usage disagree about the input shap
 
 ### Phase 5: Verify
 
-- [ ] ⬜ **Task 5.1**: Full QA: `./scripts/qa/llm_qa.py all`
-- [ ] ⬜ **Task 5.2**: Daemon restart verification (`restart` then `status` = RUNNING)
-- [ ] ⬜ **Task 5.3**: Confirm the shipped skill's documented relative-path
+- [x] ✅ **Task 5.1**: Full QA: `./scripts/qa/llm_qa.py all` — 20/20
+- [x] ✅ **Task 5.2**: Daemon restart verification (`restart` then `status` = RUNNING)
+- [x] ✅ **Task 5.3**: Confirm the shipped skill's documented relative-path
   invocation now behaves correctly
+- [x] ✅ **Task 5.4**: Client-mode verification — this change alters CLI path
+  resolution, which self-install mode cannot represent. Six probes against a
+  provisioned `dummy-client-repo`, including a relative path resolved from a
+  different cwd (exit 2 naming the resolved path, not a false clean)
+- [x] ✅ **Task 5.5**: Document what the sweep now covers and why, in
+  `plan_qa_sweep.get_claude_md()` and `HANDLER_REFERENCE.md`
 
 ## Technical Decisions
 
@@ -209,14 +215,15 @@ what actually happened.
 
 ## Success Criteria
 
-- [ ] `plan-qa --lint` with a relative path reports what the absolute path reports
-- [ ] `plan-qa --lint` on a non-plan file exits non-zero and says why
-- [ ] A pre-existing unparseable status is reported by `--sweep`
-- [ ] Every EDIT check is registered at SWEEP or carries a recorded exemption,
+- [x] `plan-qa --lint` with a relative path reports what the absolute path reports
+- [x] `plan-qa --lint` on a non-plan file exits non-zero and says why
+- [x] A pre-existing unparseable status is reported by `--sweep`
+- [x] Every EDIT check is registered at SWEEP or carries a recorded exemption,
   enforced by a test
-- [ ] 00131 and 00132 carry valid status tokens
-- [ ] `plan-qa --sweep` exits 0 on the live tree
-- [ ] Full QA passes; daemon restarts RUNNING
+- [x] 00131 and 00132 carry valid status tokens
+- [x] `plan-qa --sweep` exits 0 on the live tree
+- [x] Full QA passes (20/20); daemon restarts RUNNING
+- [x] Verified in a real client install, not only in self-install mode
 
 ## Risks & Mitigations
 
@@ -232,4 +239,9 @@ what actually happened.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00230-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Filed after live-tree probes confirmed both blindnesses
+- Filed after live-tree probes confirmed both blindnesses — `f633329b`
+- Phase 1, `--lint` never certifies an unexamined target — `562de4e5`
+- Phase 3, document rules gain SWEEP twins + the totality guard — `a2393dd9`
+- Phase 4, the 13 findings the repaired sweep surfaced — `18423a76`
+- Formatting follow-up — `f911628d`
+- Sweep coverage documented at source and in HANDLER_REFERENCE — `da92323c`
