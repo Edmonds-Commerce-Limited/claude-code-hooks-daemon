@@ -81,8 +81,8 @@ The `/release` skill includes TWO mandatory blocking gates that MUST pass before
 
 1. **QA Verification Gate** (after Opus review):
 
-   - Main Claude manually runs: `./scripts/qa/run_all.sh`
-   - EVERY check in `scripts/qa/run_all.sh` must pass — the script is the single source of truth for which checks exist, so do not restate the list or the count here (it drifted to "10" while the suite ran 13, and enumerated a "Smoke Test" the suite does not run)
+   - Main Claude manually runs: `./scripts/qa/llm_qa.py all`
+   - EVERY check in `scripts/qa/run_all.sh` must pass — the script is the single source of truth for which checks exist, so do not restate the list or the count here (it drifted to "10" while the suite ran 13, and enumerated a "Smoke Test" the suite does not run). `llm_qa.py all` runs the same suite in LLM-optimised form; see the Quick Commands section below.
    - If ANY check fails → ABORT release immediately
 
 2. **Acceptance Testing Gate** (after QA passes):
@@ -346,8 +346,9 @@ its own `HOSTNAME`, so it cannot disturb the dogfood daemon.
 ./bin/hooks-daemon restart
 
 # Development
-./scripts/qa/llm_qa.py all       # QA before commits (LLM-optimized, ~16 lines)
-./scripts/qa/run_all.sh          # QA before commits (verbose, human-readable)
+./scripts/qa/llm_qa.py all       # QA before commits — AGENTS use this one; the enforce_llm_qa
+                                  # project handler denies a direct run_all.sh invocation
+./scripts/qa/run_all.sh          # Same checks, verbose human-readable output — for a human at a terminal
 ./scripts/debug_hooks.sh start   # Debug hook events
 ```
 
@@ -639,7 +640,7 @@ daemon:
 **MUST pass before commits:**
 
 - Black (format), Ruff (lint), MyPy (types), Pytest (95% coverage), Bandit (security), shellcheck (shell scripts)
-- Run: `./scripts/qa/run_all.sh`
+- Run: `./scripts/qa/llm_qa.py all`
 
 **See CONTRIBUTING.md for QA standards and CI/CD details**
 
