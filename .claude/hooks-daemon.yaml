@@ -519,10 +519,6 @@ handlers:
 
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
-    transcript_archiver:  # Archives transcripts before compaction
-      enabled: true
-      priority: 10
-
     compaction_signal:  # Dogfood: drop <session>.compacting so the supervisor auto-continues
       enabled: true
       priority: 20

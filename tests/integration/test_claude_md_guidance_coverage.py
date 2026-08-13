@@ -143,7 +143,6 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "CompactionSignalHandler": "writes a signal file for the supervisor, not the agent",
     "NotificationLoggerHandler": "appends to a JSONL log, changes no behaviour",
     "SubagentCompletionLoggerHandler": "appends to a JSONL log, changes no behaviour",
-    "TranscriptArchiverHandler": "archives a transcript, changes no behaviour",
     "WorktreeRemoveHandler": "prunes stale registrations; nothing to do differently",
     # -- Test 4: the fire-time message already says all of it ------------
     "BashErrorDetectorHandler": "T4 reports errors in output just read; nothing precedes it",

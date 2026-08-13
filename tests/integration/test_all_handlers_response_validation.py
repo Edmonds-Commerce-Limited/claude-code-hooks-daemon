@@ -716,40 +716,11 @@ class TestYoloContainerDetectionHandler:
 
 
 # =============================================================================
-# PreCompact Handlers (2 handlers)
+# PreCompact Handlers (1 handler)
 # =============================================================================
-
-
-class TestTranscriptArchiverHandler:
-    """Test TranscriptArchiverHandler response validation."""
-
-    @pytest.fixture
-    def handler(self):
-        from claude_code_hooks_daemon.handlers.pre_compact.transcript_archiver import (
-            TranscriptArchiverHandler,
-        )
-
-        return TranscriptArchiverHandler()
-
-    @pytest.mark.parametrize(
-        "hook_input,expected_decision,description",
-        [
-            # Always archives and returns context
-            (
-                {"session_id": "test-session", "transcript_path": "/tmp/transcript.jsonl"},
-                Decision.ALLOW,
-                "Archive transcript before compaction",
-            ),
-        ],
-    )
-    def test_response_validity(
-        self, handler, hook_input, expected_decision, description, response_validator
-    ):
-        """Test handler returns valid PreCompact response."""
-        result = handler.handle(hook_input)
-        assert result.decision == expected_decision, f"Failed: {description}"
-        response = result.to_json("PreCompact")
-        response_validator.assert_valid("PreCompact", response)
+#
+# Plan 00233 removed transcript_archiver. Its response-validation class lived
+# here; compaction_signal is covered by its own unit tests.
 
 
 # =============================================================================

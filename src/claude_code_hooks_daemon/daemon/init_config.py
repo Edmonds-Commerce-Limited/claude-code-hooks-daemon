@@ -263,7 +263,6 @@ class ConfigTemplate:
             "\n"
             "  # PreCompact - Before conversation compaction\n"
             "  pre_compact:\n"
-            "    transcript_archiver: {enabled: true, priority: 10}  # Archive transcripts\n"
             "    compaction_signal: {enabled: false, priority: 20}  # Drop compaction signal for PTY supervisor (opt-in)\n"
             "\n"
             "  # Status - Status line generation\n"

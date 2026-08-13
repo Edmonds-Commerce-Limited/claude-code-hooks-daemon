@@ -18,7 +18,12 @@ import re
 from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.config.models import LogLevel
-from claude_code_hooks_daemon.constants import ConfigKey, ValidationLimit, wired_event_metas
+from claude_code_hooks_daemon.constants import (
+    RETIRED_HANDLERS,
+    ConfigKey,
+    ValidationLimit,
+    wired_event_metas,
+)
 from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
 
 logger = logging.getLogger(__name__)
@@ -366,7 +371,18 @@ class ConfigValidator:
                     )
 
                 # CRITICAL: Check if handler name exists (catch typos)
-                if validate_handler_names and handler_name not in available_handlers:
+                if (
+                    validate_handler_names
+                    and handler_name not in available_handlers
+                    and handler_name not in RETIRED_HANDLERS
+                ):
+                    # A RETIRED name is exempted above, never reported here. The
+                    # client's config is their file: removing a handler upstream
+                    # does not remove their key, so treating it as a typo put the
+                    # daemon into degraded mode every session for a decision that
+                    # was ours, not theirs (Plan 00233). Retirements are surfaced
+                    # through the upgrade manifests instead. Unknown names that
+                    # are NOT retired are still hard errors — that is the point.
                     # Find similar names to suggest
                     similar = ConfigValidator._find_similar_names(handler_name, available_handlers)
 

@@ -1,0 +1,109 @@
+NOTE: these figures describe the RETAINED WINDOW of verdicts.jsonl (a bounded rolling sample, capped like every other daemon JSONL log) — they are NOT lifetime totals. A handler that fired long ago and was since trimmed from the log will not appear here.
+
+Total recorded decisions: 44168
+Overrides (MUST_..._BECAUSE used): 0 (0.0%)
+
+Per-handler fire counts:
+  status-startup-cleanup: 3382 (allow=3382)
+  status-daemon-stats: 3382 (allow=3382)
+  status-upgrade-notifier: 3382 (allow=3382)
+  status-account-display: 3382 (allow=3382)
+  status-multithread-indicator: 3381 (allow=3381)
+  status-model-context: 3381 (allow=3381)
+  status-environment-indicator: 3381 (allow=3381)
+  status-context-sidecar: 3381 (allow=3381)
+  status-supervisor-indicator: 3381 (allow=3381)
+  status-current-time: 3381 (allow=3381)
+  status-git-branch: 3381 (allow=3381)
+  status-git-repo-name: 3381 (allow=3381)
+  status-working-directory: 3381 (allow=3381)
+  bash-error-detector: 124 (allow=124)
+  lint-on-edit: 9 (allow=9)
+  auto-continue-stop: 8 (allow=4, deny=4)
+  enforce-lsp-usage: 7 (allow=5, deny=2)
+  markdown-table-formatter: 6 (allow=6)
+  git-context-injector: 5 (allow=5)
+  critical-thinking-advisory: 5 (allow=5)
+  idle-housekeeping-advisory: 5 (allow=5)
+  standing-authorisations: 5 (allow=5)
+  subagent-completion-logger: 5 (allow=5)
+  remind-capture-prompt: 5 (allow=5)
+  plan-qa-edit: 4 (allow=4)
+  notification-logger: 3 (allow=3)
+  block-sed-command: 3 (deny=3)
+  pipe-blocker: 3 (deny=3)
+  recovery-cron-advisor: 3 (allow=3)
+  require-absolute-paths: 3 (deny=3)
+  verify-daemon-restart: 1 (allow=1)
+  plan-number-helper: 1 (deny=1)
+  plan-workflow-guidance: 1 (allow=1)
+  background-process-tracker: 1 (allow=1)
+  validate-instruction-content: 1 (allow=1)
+  compaction-signal: 1 (allow=1)
+  dogfooding-reminder: 1 (allow=1)
+  post-clear-auto-execute: 1 (allow=1)
+
+Verdict mix (all handlers, includes overrides):
+  allow: 44152
+  deny: 16
+
+Never-fired handlers (59):
+  advise-global-npm
+  agent-isolation-advisor
+  auto-approve-reads
+  block-ancestry-severing-merge
+  block-ask-user-question
+  block-comment-changelog
+  block-comment-size
+  block-curl-pipe-shell
+  block-dangerous-permissions
+  block-git-message-backtick
+  block-git-stash
+  block-pip-break-system
+  block-plan-time-estimates
+  block-security-antipatterns
+  block-sensitive-content
+  block-sudo-pip
+  ccy-supervisor-integrity
+  command-hints
+  daemon-docs-guard
+  daemon-location-guard
+  dismissive-language-detector
+  enforce-british-english
+  enforce-llm-qa
+  enforce-markdown-organization
+  enforce-npm-commands
+  enforce-tdd
+  error-hiding-blocker
+  git-filemode-checker
+  git-hooks-executable-fixer
+  git-upstream-checker
+  gitignore-safety-checker
+  hedging-language-detector
+  hook-registration-checker
+  lock-file-edit-blocker
+  optimal-config-checker
+  plan-completion-advisor
+  plan-qa-commit-gate
+  plan-qa-sweep
+  plan-workflow-asset-checker
+  prevent-destructive-git
+  prevent-worktree-file-copying
+  project-handler-load-checker
+  qa-suppression-blocker
+  release-blocker
+  require-gh-issue-comments
+  require-gh-pr-comments
+  root-recursion-guard
+  session-cleanup
+  status-usage-tracking
+  suggest-statusline
+  task-completion-checker
+  task-tdd-advisor
+  validate-eslint-on-write
+  validate-plan-number
+  validate-websearch-year
+  version-check
+  worktree-create
+  worktree-remove
+  yolo-container-detection

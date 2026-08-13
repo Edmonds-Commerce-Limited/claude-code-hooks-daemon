@@ -219,16 +219,10 @@
       "reason": "Notification logger: logs OSError at debug level and continues. Monitoring handlers must not crash sessions because a log file is temporarily unavailable. The error is now visible in debug logs rather than silently discarded."
     },
     {
-      "file": "handlers/pre_compact/transcript_archiver.py",
-      "function": "handle",
-      "rule": "log-and-continue",
-      "reason": "Transcript archiver: logs OSError at debug level and continues. Archiving is best-effort; compaction must proceed even if the archive write fails. The error is now visible in debug logs."
-    },
-    {
       "file": "handlers/pre_compact/compaction_signal.py",
       "function": "_write_signal",
       "rule": "log-and-continue",
-      "reason": "Plan 00135 compaction signal: logs RuntimeError (ProjectContext not initialised in unit tests / non-daemon callers) and OSError (untracked dir unwritable) at warning level and continues. Dropping the <session>.compacting marker is a best-effort observability signal for the PTY supervisor; a failed write must never block or fail a compaction. Same fail-open contract as transcript_archiver.handle and context_sidecar._write_sidecar."
+      "reason": "Plan 00135 compaction signal: logs RuntimeError (ProjectContext not initialised in unit tests / non-daemon callers) and OSError (untracked dir unwritable) at warning level and continues. Dropping the <session>.compacting marker is a best-effort observability signal for the PTY supervisor; a failed write must never block or fail a compaction. Same fail-open contract as context_sidecar._write_sidecar."
     },
     {
       "file": "handlers/project_loader.py",

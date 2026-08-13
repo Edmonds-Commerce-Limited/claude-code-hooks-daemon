@@ -49,8 +49,6 @@ _RECOMMENDED_HANDLERS: Final[list[str]] = [
     "plan_workflow",
     "plan_completion_advisor",
     "markdown_organization",
-    # Workflow state
-    "transcript_archiver",
     # Productivity
     "task_completion_checker",
     "critical_thinking_advisory",

@@ -44,7 +44,12 @@ from claude_code_hooks_daemon.constants.events import (
     wired_event_metas,
 )
 from claude_code_hooks_daemon.constants.formatting import FormatLimit
-from claude_code_hooks_daemon.constants.handlers import HandlerID, HandlerIDMeta, HandlerKey
+from claude_code_hooks_daemon.constants.handlers import (
+    RETIRED_HANDLERS,
+    HandlerID,
+    HandlerIDMeta,
+    HandlerKey,
+)
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.constants.paths import DaemonPath, ProjectPath
 from claude_code_hooks_daemon.constants.priority import Priority
@@ -60,6 +65,7 @@ from claude_code_hooks_daemon.constants.tools import ToolName, ToolNameLiteral
 from claude_code_hooks_daemon.constants.validation import ValidationLimit
 
 __all__ = [
+    "RETIRED_HANDLERS",
     # Config key constants
     "ConfigKey",
     # Mode constants

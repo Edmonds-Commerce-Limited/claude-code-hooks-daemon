@@ -2053,38 +2053,19 @@ handlers:
 
 These handlers run before Claude Code compacts (summarises) the conversation to save context window space.
 
-#### transcript_archiver
+#### transcript_archiver — REMOVED
 
-| Property       | Value                 |
-| -------------- | --------------------- |
-| **Config key** | `transcript_archiver` |
-| **Priority**   | 10                    |
-| **Type**       | Advisory              |
-| **Event**      | PreCompact            |
+This handler archived the full conversation transcript to a timestamped file before each compaction. It was **removed in Plan 00233**, and the daemon now accepts a leftover `transcript_archiver:` config key without complaint, so an unedited config keeps working.
 
-**Description:** Archives the full conversation transcript to a timestamped file before compaction. Provides a historical record for debugging and audit purposes.
+It was removed because it protected nothing:
 
-**Options:**
+- Compaction never deletes the original transcript.
+- The original already lives on the same persistent storage as the copies.
+- Nothing ever read the archives — no code parsed one.
 
-| Option                 | Type | Default | Description                                                                                                                                                       |
-| ---------------------- | ---- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `max_archives`         | int  | `40`    | Retention cap (Plan 00181): after each write the `transcripts/` directory is pruned to the newest `max_archives` files. The just-written archive always survives. |
-| `max_archive_age_days` | int  | `14`    | Retention cap (Plan 00181): archives older than this many days are pruned after each write, independent of `max_archives`.                                        |
+**Action on upgrade:** delete the `transcript_archiver:` block from your config (optional — it is ignored), and delete `untracked/transcripts/` to reclaim the disk. Those archives are copies of transcripts you still have.
 
-Both caps apply together (a file is removed if it exceeds *either* the count or the age limit), bounding what was an unbounded `transcripts/` directory.
-
-**Config example:**
-
-```yaml
-handlers:
-  pre_compact:
-    transcript_archiver:
-      enabled: true
-      priority: 10
-      options:
-        max_archives: 40
-        max_archive_age_days: 14
-```
+**If you want the transcript:** read Claude Code's own file at `~/.claude/projects/<project-slug>/<session-id>.jsonl`. Note it is **not** redacted.
 
 ---
 
@@ -2547,7 +2528,6 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `suggest_status_line`        | SessionStart     | 55       | Suggests status line setup             |
 | `version_check`              | SessionStart     | 55       | Checks for daemon updates              |
 | `plan_qa_sweep`              | SessionStart     | 57       | Reports plan-tree drift once a session |
-| `transcript_archiver`        | PreCompact       | 10       | Archives transcripts                   |
 | `git_context_injector`       | UserPromptSubmit | 20       | Injects git status context             |
 | `hedging_language_detector`  | Stop             | 30       | Detects guessing language              |
 | `task_completion_checker`    | Stop             | 50       | Reminds about task completion          |

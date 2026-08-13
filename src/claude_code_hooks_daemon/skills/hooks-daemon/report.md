@@ -50,14 +50,13 @@ Read `.claude/hooks-daemon.yaml` — include the full contents in the report.
 
 #### 2e. Recent transcript data
 
-Look for transcript archives in `untracked/transcripts/` or `.claude/transcripts/`. These contain conversation history that may reveal what Claude was doing when the issue occurred.
+The session transcript is a **Claude Code** artefact, not a daemon one. It lives at `~/.claude/projects/<project-slug>/<session-id>.jsonl`, and compaction never deletes it.
 
-**Do NOT read one whole.** An archive is a full session transcript and can be tens of megabytes. Two formats exist:
+**Do NOT read one whole.** A transcript is a full session and can be tens of megabytes. It is JSONL — one entry per line — so sample it instead: `grep` it, or `tail -n 200 <file>` / `head -n 200 <file>` (a path ARGUMENT, so no pipe and no truncation). Quote only the entries around the time of the issue.
 
-- `transcript_*.jsonl` (current) — line 1 is a JSON metadata header, every line after it is one transcript entry. Being line-oriented, it can be sampled directly: `grep` it, or `tail -n 200 <file>` / `head -n 200 <file>` (a path ARGUMENT, so no pipe and no truncation).
-- `transcript_*.json` (legacy) — a single JSON object whose `transcript` key holds the whole session as one escaped string. There is no way to sample it cheaply; prefer a `.jsonl` archive whenever one exists.
+**Redact before pasting into a report.** These files are NOT redacted by anything — a secret pasted into the conversation is in there verbatim. Check the content you are about to quote against the project's secret word list if it has one.
 
-Sample the most recent 1-3 archives around the time of the issue rather than quoting them in full.
+(Older installs may also have `untracked/transcripts/transcript_*.json*`, written by the retired `transcript_archiver` handler. Those are redacted copies of the same transcripts and are safe to delete.)
 
 #### 2f. Git context
 

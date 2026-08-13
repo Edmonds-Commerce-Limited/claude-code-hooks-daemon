@@ -3,14 +3,21 @@
 
 No-echo threat model: a deny ``reason`` is shown to the user, written to the
 session transcript, and may be pasted into a bug report. So a secret term
-must never appear verbatim in a deny reason, a daemon log line, a
-payload-capture file, or a transcript archive — only an INDEX into the
-gitignored (hence meaningless-without-it) word list may ever be surfaced.
+must never appear verbatim in a deny reason, a daemon log line, or a
+payload-capture file — only an INDEX into the gitignored (hence
+meaningless-without-it) word list may ever be surfaced.
 This module is imported by the ``sensitive_content`` handler (for matching)
 and by every low-level leak vector (``daemon/payload_capture.py``,
-``core/router.py``'s debug log, ``core/front_controller.py``'s error log,
-``handlers/pre_compact/transcript_archiver.py``) so there is exactly one
-code path that ever reads the raw terms — DRY, and it cannot drift.
+``core/router.py``'s debug log, ``core/front_controller.py``'s error log) so
+there is exactly one code path that ever reads the raw terms — DRY, and it
+cannot drift.
+
+KNOWN GAP, recorded deliberately (Plan 00233): these vectors are all
+DAEMON-OWNED outputs. Claude Code's own session transcripts are not redacted
+by anything — a term pasted into a conversation persists there verbatim. The
+enumeration above was drawn by listing code sites the daemon writes to, not
+by reasoning about which artefacts on disk hold secrets, so a clean scan of
+daemon outputs is not evidence that a term is absent from the machine.
 
 Two independent caches, two different lifetimes:
 

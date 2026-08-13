@@ -13,6 +13,64 @@ Class DestructiveGitHandler -> config key "destructive_git"
 import pytest
 
 from claude_code_hooks_daemon.config.validator import ConfigValidator, ValidationError
+from claude_code_hooks_daemon.constants import RETIRED_HANDLERS
+
+
+class TestRetiredHandlerNames:
+    """A REMOVED handler's config key must not degrade a client's daemon.
+
+    Plan 00233. When `transcript_archiver` was deleted, every client config
+    still naming it put the daemon into DEGRADED MODE on every session — a
+    handler removal is not a user error, and the user cannot act on it until
+    they read an upgrade note. Retired names are therefore accepted and
+    reported through the upgrade manifests instead.
+
+    The second test is the important one: this must not become a hole that
+    swallows genuine typos, which is the whole reason name validation exists.
+    """
+
+    def test_retired_handler_key_does_not_error(self) -> None:
+        """A config still naming a removed handler validates cleanly."""
+        retired_name = next(iter(RETIRED_HANDLERS))
+        config = {
+            "version": "1.0",
+            "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
+            "handlers": {"pre_compact": {retired_name: {"enabled": True, "priority": 10}}},
+        }
+
+        ConfigValidator.validate_and_raise(config)
+
+    def test_retired_registry_is_not_empty(self) -> None:
+        """Guard the guard — an empty registry would make the test above vacuous."""
+        assert RETIRED_HANDLERS
+        assert all(isinstance(reason, str) and reason for reason in RETIRED_HANDLERS.values())
+
+    def test_typos_are_still_caught(self) -> None:
+        """Retirement must not weaken typo detection."""
+        config = {
+            "version": "1.0",
+            "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
+            "handlers": {"pre_tool_use": {"destructive_git_handler": {"enabled": False}}},
+        }
+
+        with pytest.raises(ValidationError):
+            ConfigValidator.validate_and_raise(config)
+
+    def test_retired_name_under_the_wrong_event_is_still_accepted(self) -> None:
+        """Retirement is by NAME, not by event.
+
+        A client may have had the key under any event section, and after
+        removal there is no correct event to check it against — the handler
+        no longer exists anywhere.
+        """
+        retired_name = next(iter(RETIRED_HANDLERS))
+        config = {
+            "version": "1.0",
+            "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
+            "handlers": {"pre_tool_use": {retired_name: {"enabled": True}}},
+        }
+
+        ConfigValidator.validate_and_raise(config)
 
 
 class TestHandlerNameValidation:

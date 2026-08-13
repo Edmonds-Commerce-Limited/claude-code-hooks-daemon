@@ -88,11 +88,10 @@
 |----------|---------|----------|-------------|
 | 10 | cleanup | NON-TERMINAL | Clean up temporary files when session ends |
 
-### PreCompact (2 handlers)
+### PreCompact (1 handler)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
-| 10 | transcript_archiver | NON-TERMINAL | Archive conversation transcript before compaction |
 | 20 | compaction_signal | NON-TERMINAL | Write a ``<session>.compacting`` signal on PreCompact for the supervisor |
 
 ### UserPromptSubmit (5 handlers)

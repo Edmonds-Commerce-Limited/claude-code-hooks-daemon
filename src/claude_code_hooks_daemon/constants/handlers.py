@@ -166,11 +166,6 @@ class HandlerID:
         config_key="validate_eslint_on_write",
         display_name="validate-eslint-on-write",
     )
-    TRANSCRIPT_ARCHIVER = HandlerIDMeta(
-        class_name="TranscriptArchiverHandler",
-        config_key="transcript_archiver",
-        display_name="transcript-archiver",
-    )
     COMPACTION_SIGNAL = HandlerIDMeta(
         class_name="CompactionSignalHandler",
         config_key="compaction_signal",
@@ -676,7 +671,6 @@ HandlerKey = Literal[
     "auto_approve_reads",
     "ask_user_question_blocker",
     "validate_eslint_on_write",
-    "transcript_archiver",
     "absolute_path",
     "tdd_enforcement",
     "auto_continue_stop",
@@ -743,3 +737,30 @@ HandlerKey = Literal[
     "worktree_create",
     "worktree_remove",
 ]
+
+
+# Config keys of handlers this daemon USED to ship and has deliberately removed.
+#
+# Why this exists (Plan 00233): a client's `.claude/hooks-daemon.yaml` is their
+# file, not ours. Deleting a handler does not delete their config key, so on the
+# next upgrade the validator saw a name it did not recognise and put the daemon
+# into DEGRADED MODE — on every session, until a human hand-edited the file.
+# That is wrong twice over: a handler removal is our decision rather than a user
+# error, and the user cannot even know what to do until they read an upgrade
+# note. Retired names are therefore ACCEPTED silently and surfaced through the
+# upgrade manifests (`CLAUDE/UPGRADES/*/config-changes/`) instead.
+#
+# This is NOT a general escape hatch for unknown names: an entry must be added
+# deliberately, in the same commit that removes the handler. Typos remain hard
+# errors, which is the entire reason handler-name validation exists.
+#
+# Maps config key -> why it went, so a puzzled reader gets an answer here.
+RETIRED_HANDLERS: dict[str, str] = {
+    "transcript_archiver": (
+        "removed in Plan 00233 — it copied each session transcript into "
+        "untracked/transcripts/ on every compaction, but compaction never "
+        "deletes the original and the original already lives on the same "
+        "persistent mount, so the copies protected nothing and nothing ever "
+        "read them. Safe to delete this key from your config."
+    ),
+}
