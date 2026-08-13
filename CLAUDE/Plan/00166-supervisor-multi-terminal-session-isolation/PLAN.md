@@ -1,6 +1,14 @@
 # Plan 00166: supervisor multi terminal session isolation
 
-**Status**: In Progress
+**Status**: Dormant
+**Blocker**: Needs a human at TWO terminals — not a decision to resume. All 17
+tasks across Phases 1–5 are ticked and the implementation shipped; what remains
+is closure verification. Success criteria 3–5 are met (22 tests in
+`tests/unit/supervise/test_session_identity.py` pass; QA green; daemon restarts
+RUNNING). Criteria 1–2 require live two-terminal / Agent-View dogfooding that
+cannot be performed from inside a single session. Commit 26e4a71f asserts
+criterion 1 was confirmed live, but that is left UNTICKED here because it is a
+commit message rather than a check this plan witnessed.
 **Created**: 2026-07-15
 **Owner**: joseph
 **Priority**: High
