@@ -476,38 +476,38 @@ The Claude Code Hooks Daemon includes optional handlers that support the Plan Sy
 **Configuration**:
 
 ```yaml
+plan_workflow:
+  directory: "CLAUDE/Plan"   # top-level, NOT a per-handler option
+
 handlers:
-  post_tool_use:
+  pre_tool_use:
     markdown_organization:
       enabled: true
-      priority: 40
-      track_plans_in_project: "CLAUDE/Plan"
+      priority: 50
 ```
 
-### 2. PlanCompletionAdvisorHandler (Optional)
+### 2. PlanQaEditHandler (Optional)
 
 **Event**: PreToolUse (Write/Edit)
-**Priority**: 36
-**Type**: Non-blocking (advisory)
+**Priority**: 44
+**Type**: Mixed — blocking for document-level violations, advisory for the rest
 
-**Purpose**: Reminds agent to properly close out completed plans.
+**Purpose**: Lints every PLAN.md write, including properly closing out finished plans.
 
-**What it does**:
+**What it does** (closure-related checks):
 
-- Detects edits to PLAN.md that change status to "Complete"
-- Provides advisory about completion steps:
-  - Move folder to Completed/
+- `terminal-placement-hint` — detects a PLAN.md whose status has flipped to a
+  terminal value (Complete, Cancelled or Superseded) while its folder is still
+  in the active plan root, and advises the completion steps:
+  - `git mv` the folder into the configured archive directory
   - Update README.md (remove from Active, add to Completed)
   - Update plan statistics
+- `terminal-state-atomic` (at commit time, via `plan_qa_commit_gate`) — checks
+  that all three land in the SAME commit, so a half-closed plan cannot ship.
 
-**Example advisory**:
-
-```
-Plan 00042-feature appears to be marked as complete. Remember to:
-1. Move to Completed/: git mv CLAUDE/Plan/00042-feature CLAUDE/Plan/Completed/
-2. Update CLAUDE/Plan/README.md (move from Active to Completed section, update link path)
-3. Update plan statistics in README.md (increment Completed count, update total)
-```
+This replaced a dedicated `plan_completion_advisor` handler, which matched only
+"Complete"/"Completed" and always named `Completed/` — wrong for a cancelled
+plan when the project configures a separate cancelled directory.
 
 ### 3. GitContextInjectorHandler (Optional)
 
@@ -601,17 +601,17 @@ cp CLAUDE/Plan/TEMPLATE.md CLAUDE/Plan/00001-my-first-feature/PLAN.md
 If using the Claude Code Hooks Daemon, edit `.claude/hooks-daemon.yaml`:
 
 ```yaml
+plan_workflow:
+  directory: "CLAUDE/Plan"
+
 handlers:
-  post_tool_use:
+  pre_tool_use:
     markdown_organization:
       enabled: true
-      priority: 40
-      track_plans_in_project: "CLAUDE/Plan"
-
-  pre_tool_use:
-    plan_completion_advisor:
-      enabled: true
-      priority: 36
+      priority: 50
+    plan_qa_edit:            # lints PLAN.md writes, including the
+      enabled: true          # "terminal status, still in the active root"
+      priority: 44           # case that used to need its own advisor
 ```
 
 See [Installation Guide](../CLAUDE/LLM-INSTALL.md) for daemon installation.

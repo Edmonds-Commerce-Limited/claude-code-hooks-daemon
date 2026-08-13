@@ -582,4 +582,57 @@ config_changes:
         instruction rather than acknowledging it -- is better served by a
         standing line in CLAUDE.md, which is resident for every session and
         cannot go stale per-session.
+    - key: handlers.pre_tool_use.plan_completion_advisor
+      recommended: true
+      description: >-
+        REMOVED (Plan 00237). Folded into plan QA, which already ran the same
+        check more completely on the same tool call. On a PLAN.md write whose
+        status has flipped to a terminal value while the folder is still in
+        the active plan root, plan_qa_edit's "terminal-placement-hint" check
+        advises the same three steps -- git mv into the archive directory,
+        update the plan README row, recount the statistics -- and
+        plan_qa_commit_gate's "terminal-state-atomic" then enforces that they
+        all land in ONE commit, which the advisor could only ask for.
+        The QA check is a strict superset, not merely an equivalent. The
+        advisor matched only "Complete"/"Completed", so a plan flipped to
+        Cancelled or Superseded got nothing; and it always named Completed/ as
+        the destination, which is wrong for a cancelled plan when the project
+        configures a separate cancelled directory. The check reads the
+        configured directory for each terminal status.
+      migration_note: >-
+        NO ACTION REQUIRED if you already run plan_qa_edit -- it is enabled by
+        default and has been carrying this check. If you have plan_qa_edit
+        disabled and want the reminder back, enable it: it is the same
+        guidance plus the cancelled/superseded cases. A leftover
+        "plan_completion_advisor:" block validates cleanly (the daemon carries
+        a registry of retired handler names); delete it when convenient.
+    - key: handlers.pre_tool_use.validate_plan_number
+      recommended: true
+      description: >-
+        REMOVED (Plan 00237). Folded into plan QA. It compared a new plan
+        folder's number against the git-anchored counter, printed "PLAN NUMBER
+        INCORRECT, expected N" -- and then ALLOWED the write anyway, because it
+        was advisory. Both halves of that are now better covered:
+        plan_number_helper tells you the correct number BEFORE you pick one
+        (and points at mkplan.bash, which allocates atomically under a lock),
+        and plan_qa's "counter-sanity" check makes the same comparison against
+        the same counter at COMMIT time, where it can actually stop a
+        wrongly-numbered plan from landing.
+        What was genuinely unique was a side effect, not the message: it
+        advanced hooksdaemon.latestPlanNumber when a plan folder was created by
+        hand rather than by mkplan.bash. That writer has moved to
+        plan_qa_edit, which sees the same PLAN.md write. It carries the same
+        guard the handler had -- only a number inside the expected window is
+        recorded -- because counter-sanity READS that counter, so recording a
+        typo'd number would silently disarm the check.
+      migration_note: >-
+        NO ACTION REQUIRED if you run plan_qa_edit and plan_qa_commit_gate;
+        both are enabled by default and between them cover the advisory and
+        the enforcement. A leftover "validate_plan_number:" block validates
+        cleanly (the daemon carries a registry of retired handler names);
+        delete it when convenient.
+        One behaviour change worth knowing: a wrongly-numbered plan is no
+        longer mentioned at write time. It is caught at commit instead, by
+        counter-sanity, which BLOCKS rather than advises -- so you find out
+        later but the outcome is stricter, not laxer.
   changed: []

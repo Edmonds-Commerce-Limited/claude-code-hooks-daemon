@@ -244,8 +244,8 @@ Use these guidelines — when in doubt, **enable it**. Handlers can always be di
 | **Code Quality** (priority 25-35) | `qa_suppression`, `tdd_enforcement`, `lint_on_edit`                                                                                                                                                                     | **Enable ALL** — prevents suppressed linting, enforces TDD, validates edits |
 | **Workflow** (priority 36-55)     | `npm_command`, `global_npm_advisor`, `gh_issue_comments`, `daemon_restart_verifier`                                                                                                                                     | **Enable ALL** — enforces best practices                                    |
 | **Advisory** (priority 55-60)     | `british_english`, `web_search_year`                                                                                                                                                                                    | Enable based on project preferences                                         |
-| **Session/Lifecycle**             | `git_context_injector`, `bash_error_detector`, `version_check`, `optimal_config_checker`                                                                                                                                | **Enable ALL** — provides valuable context at zero cost                     |
-| **Planning**                      | `plan_workflow`, `validate_plan_number`, `plan_time_estimates`, `plan_completion_advisor`, `markdown_organization`                                                                                                      | Enable if using the planning workflow (see Planning section below)          |
+| **Session/Lifecycle**             | `git_context_injector`, `version_check`, `optimal_config_checker`                                                                                                                                                       | **Enable ALL** — provides valuable context at zero cost                     |
+| **Planning**                      | `plan_workflow`, `plan_time_estimates`, `plan_qa_edit`, `plan_qa_commit_gate`, `markdown_organization`                                                                                                                  | Enable if using the planning workflow (see Planning section below)          |
 
 **Step 6.3: Edit `.claude/hooks-daemon.yaml` and enable handlers:**
 
@@ -284,7 +284,6 @@ handlers:
     british_english: {enabled: false, priority: 60}  # Enable for UK English projects
 
   post_tool_use:
-    bash_error_detector: {enabled: true, priority: 10}
     lint_on_edit: {enabled: true, priority: 25}
 
   session_start:
@@ -445,23 +444,21 @@ fi
 handlers:
   pre_tool_use:
     plan_workflow: {enabled: true, priority: 46}
-    validate_plan_number: {enabled: true, priority: 41}
     plan_time_estimates: {enabled: true, priority: 45}
-    plan_completion_advisor: {enabled: true, priority: 48}
+    plan_qa_edit: {enabled: true, priority: 44}
     plan_number_helper: {enabled: true, priority: 33}
     markdown_organization: {enabled: true, priority: 50}
 ```
 
 **What each handler does:**
 
-| Handler                   | What It Enforces                                                |
-| ------------------------- | --------------------------------------------------------------- |
-| `plan_workflow`           | Guides agents through proper planning steps when creating plans |
-| `validate_plan_number`    | Ensures plan folders use sequential numbering (001, 002, ...)   |
-| `plan_time_estimates`     | Blocks time estimates in plan documents (they are always wrong) |
-| `plan_completion_advisor` | Reminds to follow the completion checklist when closing plans   |
-| `plan_number_helper`      | Provides the correct next plan number when agents search for it |
-| `markdown_organization`   | Enforces markdown file placement rules in CLAUDE/ directory     |
+| Handler                 | What It Enforces                                                                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `plan_workflow`         | Guides agents through proper planning steps when creating plans                                                                                  |
+| `plan_time_estimates`   | Blocks time estimates in plan documents (they are always wrong)                                                                                  |
+| `plan_qa_edit`          | Lints PLAN.md writes — including a terminal status left in the active plan root, which needs the archive move, README row and statistics recount |
+| `plan_number_helper`    | Provides the correct next plan number when agents search for it                                                                                  |
+| `markdown_organization` | Enforces markdown file placement rules in CLAUDE/ directory                                                                                      |
 
 **3. Restart daemon:**
 

@@ -190,27 +190,16 @@ the Stop handler the "single source of truth". The live leg holds only the loop.
 
 ### Phase 3b: The shadowing hazard is LIVE in this repo
 
-- [x] ✅ **Task 3.8**: `ReleaseBlockerHandler` (project handler,
-  `.claude/project-handlers/stop/release_blocker.py`) is registered at priority
-  12, above the terminal `auto_continue_stop` at 10, and has never fired —
-  confirmed by live socket probe on two Stop shapes (JOURNAL 23:20). Its own
-  docstring records the cause: "Priority: 12 (before AutoContinueStop at 15)".
-  It WAS correct; the daemon still ships 15 in `init_config.py`, and this
-  project's config later moved it to 10, silently disabling a handler that
-  guards the RELEASE process. Move it below 10; its `matches()` is narrow
-  (release files modified AND not `stop_hook_active`), so ordinary stops still
-  fall through
-- [x] ✅ **Task 3.9**: DBF — the Task 3.3 guard proves the hazard with a
-  synthetic probe but never checks whether THIS project has fallen into it, so
-  it could not have caught Task 3.8. Added `TestThisProjectHasNotFallenIntoTheTrap`
-  over the real registered Stop chain (built-in config + project handlers),
-  failing by name on any handler the chain cannot reach. The check is
-  BEHAVIOURAL, not "anything after the lowest terminal priority" — it walks the
-  chain against a real Stop input and finds the first terminal handler that
-  MATCHES, so a narrowly-matching terminal handler ahead of the catch-all is
-  correctly not flagged. Paired with a vacuity companion asserting the fixture
-  actually sees the project handlers, since `initialise()` without
-  `project_handlers_config` silently loads none
+- [x] ✅ **Task 3.8**: `ReleaseBlockerHandler` (`.claude/project-handlers/stop/`)
+  had never fired. Two bugs, the first hiding the second: priority 12 above the
+  terminal `auto_continue_stop` at 10, and a bare `git status` inheriting the
+  daemon's cwd of `/`. Both fixed and live-verified in both directions
+  (JOURNAL 23:20, 23:45)
+- [x] ✅ **Task 3.9**: DBF — the Task 3.3 guard used a synthetic probe and never
+  asked whether THIS project had fallen into the trap, so it could not have
+  caught 3.8. `TestThisProjectHasNotFallenIntoTheTrap` now walks the real
+  registered Stop chain (config + project handlers) BEHAVIOURALLY, plus a
+  vacuity companion (JOURNAL 23:45)
 
 ### Phase 4: The two MERGE verdicts
 
@@ -222,28 +211,22 @@ Stage 2 COMMIT check that only READS the counter. Delete the handler first and
 the counter stops advancing for hand-created folders, after which
 `counter-sanity` correctly blocks commits for drift the deletion itself caused.
 
-- [ ] ⬜ **Task 4.1**: Relocate `validate_plan_number`'s
-  `record_plan_allocation` call — the counter-advance side effect must move
-  BEFORE the handler goes, or plan numbering breaks. Confirmed by reading both
-  call sites in context (JOURNAL 21:58 → 22:04): the counter has THREE writers
-  and they are NOT redundant — `mkplan.bash` covers the recommended path,
-  `markdown_organization:575` covers the REDIRECT path (it constructs the
-  folder itself after intercepting a flat plan file), and
-  `validate_plan_number:217` covers the DIRECT path (an agent writing or
-  `mkdir`-ing the folder by hand). Deleting the handler outright would stop
-  advancing the counter for hand-created folders, surfacing much later as a
-  duplicate number with nothing pointing back here. Relocate to a surface with
-  the same trigger — `plan_qa_edit` sees PLAN.md writes and is the closest
-- [ ] ⬜ **Task 4.2**: Fold `validate_plan_number` into `plan_qa`
-  (`counter-sanity` / `no-new-collisions` are the real check; it never denies)
-- [ ] ⬜ **Task 4.3**: Fold `plan_completion_advisor` into `plan_qa`
-  (`terminal-placement-hint` + `terminal-state-atomic` already co-fire on the
-  same tool call with a more complete check). Verified line by line (JOURNAL
-  22:50): `terminal-placement-hint` is a strict SUPERSET — same trigger, same
-  three remediation steps, and it also handles Cancelled/Superseded (routing
-  Cancelled to `cancelled_dir`, which the handler would get wrong). No side
-  effect to relocate and `get_claude_md()` is already None, so unlike Task 4.1
-  this is a clean deletion
+- [x] ✅ **Task 4.1**: Relocate `validate_plan_number`'s counter-advance side
+  effect BEFORE deleting the handler — the counter has three non-redundant
+  writers and this was the DIRECT path (JOURNAL 21:58 → 22:04). Now
+  `record_new_plan_document()` in `handlers/utils/plan_numbering.py`, called
+  from `plan_qa_edit` on CREATION only, carrying the sanity WINDOW with it —
+  see [DECISIONS.md](DECISIONS.md) Decision 8 for why the window is
+  load-bearing. Live-proven both ways (JOURNAL 01:50)
+- [x] ✅ **Task 4.2**: Fold `validate_plan_number` into `plan_qa`
+  (`counter-sanity` / `no-new-collisions` are the real check; it never denied).
+  Handler + tests deleted, registry and manifest entries added, stale
+  `error_hiding_exclusions.json` sanction repointed (JOURNAL 01:50)
+- [x] ✅ **Task 4.3**: Fold `plan_completion_advisor` into `plan_qa`.
+  `terminal-placement-hint` is a strict SUPERSET — same trigger, same three
+  steps, and it also handles Cancelled/Superseded with the configured archive
+  directory, which the handler got wrong. Clean deletion, live-proven, and both
+  handlers ship enabled so no default install loses the reminder (JOURNAL 00:40)
 
 ### Phase 5: Verification
 
@@ -273,8 +256,12 @@ handlers rather than three independent patches.
 
 ## Success Criteria
 
-- [ ] Every removed handler has a `RETIRED_HANDLERS` entry and a
-  `config-changes` manifest row
+- [x] Every removed handler has a `RETIRED_HANDLERS` entry and a
+  `config-changes` manifest row — 21 retired entries, 15 manifest removals,
+  zero overlap with the 93 live `HandlerID` config keys. Enforced by
+  `TestRemovedHandlersAreRetired`, which anchors to the MANIFEST rather than a
+  hand-maintained list, so future removals are covered without anyone
+  remembering to
 - [ ] A client config naming every retired handler starts cleanly, verified in
   a real client install rather than inferred from self-install mode
 - [ ] Nothing removed leaves an orphan behind — dead readers, state files and

@@ -1298,29 +1298,6 @@ handlers:
 
 ---
 
-#### validate_plan_number
-
-| Property       | Value                  |
-| -------------- | ---------------------- |
-| **Config key** | `validate_plan_number` |
-| **Priority**   | 30                     |
-| **Type**       | Blocking               |
-| **Event**      | PreToolUse             |
-
-**Description:** Validates plan folder numbering before directory creation to ensure sequential plan numbers. Prevents gaps or duplicates in the `CLAUDE/Plan/` numbering scheme.
-
-**Config example:**
-
-```yaml
-handlers:
-  pre_tool_use:
-    validate_plan_number:
-      enabled: true
-      priority: 30
-```
-
----
-
 #### global_npm_advisor
 
 | Property       | Value                |
@@ -1610,29 +1587,6 @@ handlers:
     plan_workflow:
       enabled: true
       priority: 45
-```
-
----
-
-#### plan_completion_advisor
-
-| Property       | Value                     |
-| -------------- | ------------------------- |
-| **Config key** | `plan_completion_advisor` |
-| **Priority**   | 50                        |
-| **Type**       | Advisory                  |
-| **Event**      | PreToolUse                |
-
-**Description:** Detects when a plan's PLAN.md status is being changed to "Complete" and reminds to follow the plan completion checklist: move to `Completed/` folder, update `README.md` index, and update plan statistics.
-
-**Config example:**
-
-```yaml
-handlers:
-  pre_tool_use:
-    plan_completion_advisor:
-      enabled: true
-      priority: 50
 ```
 
 ---
@@ -2285,7 +2239,6 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `ancestry_preserving_merge`    | PreToolUse        | 19       | git merge --squash, gh pr merge --squash/--rebase (severs ancestry)  |
 | `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)          |
 | `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                |
-| `validate_plan_number`         | PreToolUse        | 30       | Invalid plan numbering                                               |
 | `comment_changelog`            | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries) |
 | `comment_size`                 | PreToolUse        | 33       | Over-long comments growing past the size limit                       |
 | `markdown_organization`        | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                |
@@ -2305,7 +2258,6 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `daemon_restart_verifier`  | PreToolUse       | 10       | Suggests daemon restart before commits |
 | `global_npm_advisor`       | PreToolUse       | 40       | Suggests npx over global installs      |
 | `plan_workflow`            | PreToolUse       | 45       | Guidance for plan creation             |
-| `plan_completion_advisor`  | PreToolUse       | 50       | Reminds about plan completion steps    |
 | `web_search_year`          | PreToolUse       | 55       | Warns about outdated search years      |
 | `british_english`          | PreToolUse       | 60       | Warns about American spellings         |
 | `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes      |

@@ -190,3 +190,57 @@ is a diagnostic, and a wrong diagnostic is misleading but not load-bearing.
 handler appears in the generated artefact) and not the mechanism. Every
 mechanism-level conclusion drawn in this phase by reading code was wrong —
 twice — and settled in seconds by running the command.
+
+---
+
+## Decision 8: the relocated counter writer keeps the sanity WINDOW, not just the write
+
+**Context**: Task 4.1 must move `validate_plan_number`'s `record_plan_allocation`
+call somewhere that survives the handler's deletion. The obvious reading of
+"relocate the side effect" is: find the new trigger, call the same function.
+That reading is wrong, and reading the handler's own tests is what showed it.
+
+`validate_plan_number` does not record every number it sees. It records only a
+number inside the window `(expected, expected - 1)`, and one of its tests says
+why in its name: `test_handle_wrong_number_does_not_advance_counter` — "a
+rejected (out-of-range) number must NOT poison the counter — next stays
+counter + 1 so a typo doesn't blow a huge gap."
+
+**Why that guard is load-bearing, and more so after this plan than before.**
+`counter-sanity` (Stage 2, BLOCK) fires on a staged plan folder whose number
+**exceeds** the counter. It only ever READS. So the counter is not merely a
+convenience for picking the next number — it is the reference value that check
+compares against. Record a typo'd `99999` and the counter becomes 99999, at
+which point every plan number below it passes `counter-sanity` silently. The
+check would go on reporting clean while having stopped checking anything.
+
+That is the same failure shape this plan keeps finding — a guard that returns
+"nothing wrong" for two indistinguishable reasons — except reached by writing
+to the guard's own reference value rather than by shadowing or a dead matcher.
+
+**Decision**: the relocated writer carries the window with it.
+`record_new_plan_document()` computes `next_plan_number_for_target()` and
+records only within `(expected, expected - 1)`, returning `None` otherwise. A
+plain `record_plan_allocation()` call at the new site would have been a
+faithful-looking port that quietly removed the guard.
+
+**Where it lives**: `handlers/utils/plan_numbering.py`, beside the counter
+primitives it composes, rather than inline in the handler. One testable unit,
+one home for the window rule, and the handler stays a linter that calls it.
+
+**Shape rule, deliberately structural**: a plan document counts as a new
+allocation when it is `PLAN.md` whose parent matches `NNNNN-name` and whose
+grandparent ends with the configured plan directory. That excludes
+`Completed/00111-x/PLAN.md` **without knowing any archive directory's name** —
+an archived plan is one level deeper, so the grandparent test fails. Archiving
+happens by `git mv`, never by writing a PLAN.md, so a write under an archive
+directory is an edit to an existing plan and not an allocation.
+
+**Coverage note, recorded rather than glossed**: `validate_plan_number` also
+observed `mkdir CLAUDE/Plan/NNNNN-name`. `plan_qa_edit` does not see Bash, so
+that trigger is not carried over. A bare `mkdir` with no PLAN.md leaves an
+empty directory that is not yet a plan, and the window guard means the first
+PLAN.md write into it still records the number (the `expected - 1` half of the
+window exists precisely for the mkdir-then-write ordering). What is genuinely
+lost is a folder created by `mkdir` and then never given a PLAN.md — which is
+not a plan the counter should be advancing for.

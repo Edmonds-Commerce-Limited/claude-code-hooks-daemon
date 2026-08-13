@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (42 handlers)
+### PreToolUse (40 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -36,14 +36,12 @@
 | 38 | lsp_enforcement | BLOCKING | Enforce LSP tool usage instead of Grep/Bash grep for symbol lookups |
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
-| 41 | validate_plan_number | ADVISORY | Validate plan folder numbering to ensure sequential plans |
 | 42 | global_npm_advisor | NON-TERMINAL | Advise on global npm/yarn package installations |
 | 44 | plan_qa_commit_gate | NON-TERMINAL | Warn-first cross-file plan QA gate on git commit |
 | 44 | plan_qa_edit | NON-TERMINAL | Blocking/advisory edit-time lint for plan documents |
 | 45 | plan_time_estimates | ADVISORY | Block time estimates in plan documents |
 | 46 | agent_isolation_advisor | ADVISORY | Advise ``isolation: worktree`` when peers are already active in this checkout |
 | 46 | plan_workflow | ADVISORY | Provide guidance when creating plan files |
-| 48 | plan_completion_advisor | ADVISORY | Advise when a plan is being marked as complete |
 | 49 | npm_command | ADVISORY | Enforce llm: prefixed npm commands and block direct npx tool usage |
 | 50 | markdown_organization | BLOCKING | Enforce markdown file organization rules |
 | 50 | validate_instruction_content | TERMINAL | Validates content being written to CLAUDE.md and README.md files |
@@ -146,7 +144,7 @@
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
-| 12 | ReleaseBlockerHandler | BLOCKING | Blocks Stop event during releases until acceptance tests complete |
+| 8 | ReleaseBlockerHandler | BLOCKING | Blocks Stop event during releases until acceptance tests complete |
 | 41 | EnforceLlmQaHandler | BLOCKING | Block run_all.sh and direct LLM agents to llm_qa.py |
 
 ### Pseudo Nitpick (2 handlers)

@@ -30,7 +30,7 @@ def _make_pre_tool_use_config(**overrides: dict[str, Any]) -> dict[str, Any]:
     base: dict[str, Any] = {
         "markdown_organization": {"enabled": True},
         "plan_number_helper": {"enabled": True},
-        "validate_plan_number": {"enabled": True},
+        "plan_qa_edit": {"enabled": True},
     }
     base.update(overrides)
     return base
@@ -64,10 +64,10 @@ def test_plan_workflow_injected_into_planning_tagged_handlers() -> None:
     assert plan_helper._track_plans_in_project == "CLAUDE/Plan"
     assert plan_helper._plan_workflow_docs == "CLAUDE/PlanWorkflow.md"
 
-    # validate_plan_number should also receive plan_workflow values
-    validator = next((h for h in handlers if h.name == "validate-plan-number"), None)
-    assert validator is not None
-    assert validator._track_plans_in_project == "CLAUDE/Plan"
+    # plan_qa_edit should also receive plan_workflow values
+    plan_qa_edit = next((h for h in handlers if h.name == "plan-qa-edit"), None)
+    assert plan_qa_edit is not None
+    assert plan_qa_edit._track_plans_in_project == "CLAUDE/Plan"
 
     # markdown_organization should also receive plan_workflow values (has PLANNING tag)
     md_org = next((h for h in handlers if h.name == "enforce-markdown-organization"), None)

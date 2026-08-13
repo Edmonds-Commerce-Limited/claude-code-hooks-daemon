@@ -43,10 +43,8 @@ class TestProfileDefinitions:
         rec = PROFILES["recommended"]
         for handler in [
             "plan_number_helper",
-            "validate_plan_number",
             "plan_time_estimates",
             "plan_workflow",
-            "plan_completion_advisor",
             "markdown_organization",
         ]:
             assert handler in rec, f"Missing plan handler: {handler}"

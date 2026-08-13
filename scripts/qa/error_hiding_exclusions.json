@@ -423,10 +423,10 @@
       "reason": "Returns None when the per-repo plan counter is unset or non-integer (corrupt). None is the documented 'no counter yet' signal that triggers bootstrap-from-scan in next_plan_number_for_target \u2014 it is the intended control-flow path, not a swallowed error."
     },
     {
-      "file": "handlers/pre_tool_use/validate_plan_number.py",
+      "file": "handlers/pre_tool_use/plan_qa_edit.py",
       "function": "_record_allocation",
       "rule": "log-and-continue",
-      "reason": "Advisory handler: a git-config counter-write failure must not block plan creation. Logs the failure with a full traceback (exc_info=True) and continues \u2014 the next read re-bootstraps the counter from a filesystem scan, so the counter self-heals rather than going silently stale. Same sanctioned pattern as transcript_reader._parse."
+      "reason": "A git-config counter-write failure must not block plan creation. Logs the failure with a full traceback (exc_info=True) and continues \u2014 the next read re-bootstraps the counter from a filesystem scan, so the counter self-heals rather than going silently stale. Same sanctioned pattern as transcript_reader._parse. Relocated from validate_plan_number in Plan 00237 along with the writer itself."
     },
     {
       "file": "daemon/background_harvester.py",

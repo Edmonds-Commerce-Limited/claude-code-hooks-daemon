@@ -171,16 +171,6 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "SuggestStatusLineHandler": "T4 fires once at session start with the full remedy",
     "VersionCheckHandler": "T4 fires once at session start with the full remedy",
     "CriticalThinkingAdvisoryHandler": "T4 the injected advisory IS the content",
-    # -- Test 4: another resident section already carries it -------------
-    "PlanCompletionAdvisorHandler": (
-        "T4 its three steps are already resident under plan_qa_commit_gate's "
-        "terminal-state-atomic invariant, which also ENFORCES them"
-    ),
-    "ValidatePlanNumberHandler": (
-        "T4 fires on a wrongly-numbered new plan folder; plan_number_helper's "
-        "resident section already names mkplan.bash and the git counter as the "
-        "way to get the number right in the first place"
-    ),
     # -- Test handlers ---------------------------------------------------
     "HelloWorldNotificationHandler": "test stub, blocks nothing",
     "HelloWorldPermissionRequestHandler": "test stub, blocks nothing",

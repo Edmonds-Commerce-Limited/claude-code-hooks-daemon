@@ -283,11 +283,6 @@ class HandlerID:
         config_key="qa_suppression",
         display_name="qa-suppression-blocker",
     )
-    VALIDATE_PLAN_NUMBER = HandlerIDMeta(
-        class_name="ValidatePlanNumberHandler",
-        config_key="validate_plan_number",
-        display_name="validate-plan-number",
-    )
     PLAN_NUMBER_HELPER = HandlerIDMeta(
         class_name="PlanNumberHelperHandler",
         config_key="plan_number_helper",
@@ -376,11 +371,6 @@ class HandlerID:
         class_name="VersionCheckHandler",
         config_key="version_check",
         display_name="version-check",
-    )
-    PLAN_COMPLETION_ADVISOR = HandlerIDMeta(
-        class_name="PlanCompletionAdvisorHandler",
-        config_key="plan_completion_advisor",
-        display_name="plan-completion-advisor",
     )
     RECOVERY_CRON_ADVISOR = HandlerIDMeta(
         class_name="RecoveryCronAdvisorHandler",
@@ -620,7 +610,6 @@ HandlerKey = Literal[
     "security_antipattern",
     # QA enforcement handlers
     "qa_suppression",
-    "validate_plan_number",
     "plan_number_helper",
     "daemon_stats",
     "comment_changelog",
@@ -643,7 +632,6 @@ HandlerKey = Literal[
     "git_filemode_checker",
     "web_search_year",
     "suggest_status_line",
-    "plan_completion_advisor",
     "global_npm_advisor",
     # Advisory handlers
     "critical_thinking_advisory",
@@ -840,5 +828,30 @@ RETIRED_HANDLERS: dict[str, str] = {
         "served by the verdict log instead, which has a real reader in "
         "`hooks-daemon verdicts`. Safe to delete this key from your config; "
         "the JSONL file it wrote can be deleted too."
+    ),
+    "plan_completion_advisor": (
+        "removed in Plan 00237 — folded into plan QA, which already ran the "
+        "same check more completely on the same tool call. The "
+        "`terminal-placement-hint` check fires on a PLAN.md write whose status "
+        "is terminal while the folder is still in the active plan root, and "
+        "gives the same three remediation steps (git mv to the archive, update "
+        "the README row, recount the statistics) — plus it covers Cancelled "
+        "and Superseded, routing Cancelled to the configured cancelled "
+        "directory, which this handler got wrong by always naming Completed/. "
+        "`terminal-state-atomic` then enforces the same thing at commit time. "
+        "Safe to delete this key from your config; keep `plan_qa_edit` "
+        "enabled to keep the behaviour."
+    ),
+    "validate_plan_number": (
+        "removed in Plan 00237 — folded into plan QA. Its advisory said 'PLAN "
+        "NUMBER INCORRECT, expected N' and then ALLOWED the write anyway; plan "
+        "QA's `counter-sanity` check makes the same comparison against the "
+        "same git counter at commit time and can actually stop it, and "
+        "`plan_number_helper` already tells you the right number BEFORE you "
+        "pick one. What was genuinely unique was its side effect — advancing "
+        "`hooksdaemon.latestPlanNumber` when a plan folder was hand-created — "
+        "and that moved to `plan_qa_edit`, which sees the same PLAN.md write. "
+        "Safe to delete this key from your config; keep `plan_qa_edit` and "
+        "`plan_number_helper` enabled to keep the behaviour."
     ),
 }

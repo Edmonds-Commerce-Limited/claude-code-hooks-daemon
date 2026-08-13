@@ -24,7 +24,6 @@ from .security_antipattern import SecurityAntipatternHandler
 from .sed_blocker import SedBlockerHandler
 from .tdd_enforcement import TddEnforcementHandler
 from .validate_instruction_content import ValidateInstructionContentHandler
-from .validate_plan_number import ValidatePlanNumberHandler
 from .web_search_year import WebSearchYearHandler
 from .worktree_file_copy import WorktreeFileCopyHandler
 
@@ -53,7 +52,6 @@ __all__ = [
     "SedBlockerHandler",
     "TddEnforcementHandler",
     "ValidateInstructionContentHandler",
-    "ValidatePlanNumberHandler",
     "WebSearchYearHandler",
     "WorktreeFileCopyHandler",
 ]

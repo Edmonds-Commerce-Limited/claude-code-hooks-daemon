@@ -44,10 +44,8 @@ _RECOMMENDED_HANDLERS: Final[list[str]] = [
     "validate_instruction_content",
     # Plan workflow
     "plan_number_helper",
-    "validate_plan_number",
     "plan_time_estimates",
     "plan_workflow",
-    "plan_completion_advisor",
     "markdown_organization",
     # Productivity
     "critical_thinking_advisory",
@@ -71,15 +69,6 @@ PROFILES: Final[dict[str, list[str]]] = {
     "recommended": list(_RECOMMENDED_HANDLERS),
     "strict": list(_RECOMMENDED_HANDLERS) + list(_STRICT_ONLY_HANDLERS),
 }
-
-# Pattern to find a handler block and its enabled line.
-# Matches: "    handler_name:" followed within 2 lines by "enabled: false"
-_HANDLER_BLOCK_PATTERN = re.compile(
-    r"^(\s+)({handler_name}):\s*(?:#.*)?\n"
-    r"((?:\s+(?:#.*)?\n)*)"  # Optional comment-only lines between
-    r"(\s+enabled:\s*)false(\s*(?:#.*)?)\n",
-    re.MULTILINE,
-)
 
 
 def get_profile_names() -> list[str]:

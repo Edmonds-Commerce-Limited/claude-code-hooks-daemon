@@ -387,3 +387,72 @@ class TestGuidance:
 
     def test_default_enabled(self) -> None:
         assert PlanQaEditHandler().get_default_enabled() is True
+
+
+class TestCounterAllocationOnNewPlan:
+    """Plan 00237 Task 4.1: the DIRECT-path plan-counter writer lives here now.
+
+    It moved off ``validate_plan_number``, which is being deleted. The counter
+    is not just how the next number is chosen — it is the reference value the
+    commit-stage ``counter-sanity`` check compares a staged plan folder
+    against, and that check only READS. So a plan created by hand with no
+    writer on this path leaves the counter behind, and the NEXT plan is
+    blocked at commit for drift the missing writer caused.
+
+    These tests pin the WIRING (is it called, with what, and does a failure
+    stay non-fatal). The window rule itself is pinned in
+    ``tests/unit/handlers/utils/test_plan_numbering.py``.
+    """
+
+    _RECORDER = (
+        "claude_code_hooks_daemon.handlers.pre_tool_use.plan_qa_edit." "record_new_plan_document"
+    )
+
+    def test_creating_a_plan_document_records_the_allocation(self, tmp_path: Path) -> None:
+        target = tmp_path / _PLAN_DIR_REL / "00042-widget" / "PLAN.md"
+        with _patched_root(tmp_path), patch(self._RECORDER) as recorder:
+            _handler().handle(_write_input(target, _VALID_PLAN))
+
+        recorder.assert_called_once_with(target, _PLAN_DIR_REL, tmp_path)
+
+    def test_editing_an_existing_plan_does_not_record(self, tmp_path: Path) -> None:
+        """Only CREATION is an allocation.
+
+        Recording on every PLAN.md write would be harmless arithmetic (the
+        counter is a max) but it would spend a git subprocess on every edit
+        and blur what the counter records.
+        """
+        target = tmp_path / _PLAN_DIR_REL / "00042-widget" / "PLAN.md"
+        target.parent.mkdir(parents=True)
+        target.write_text(_VALID_PLAN)
+
+        with _patched_root(tmp_path), patch(self._RECORDER) as recorder:
+            _handler().handle(_write_input(target, _VALID_PLAN))
+
+        recorder.assert_not_called()
+
+    def test_a_counter_write_failure_never_blocks_the_plan(self, tmp_path: Path) -> None:
+        """FAIL-SAFE. Losing the counter is recoverable — it self-heals from a
+        filesystem scan on the next read. Losing the agent's plan document
+        because git config misbehaved is not.
+        """
+        target = tmp_path / _PLAN_DIR_REL / "00042-widget" / "PLAN.md"
+        with _patched_root(tmp_path), patch(self._RECORDER, side_effect=OSError("git gone")):
+            result = _handler().handle(_write_input(target, _VALID_PLAN))
+
+        assert result.decision == Decision.ALLOW
+
+    def test_a_journal_write_is_delegated_unchanged(self, tmp_path: Path) -> None:
+        """The handler also lints journal day-files and plan-index READMEs.
+
+        It does NOT pre-filter those — it hands the path over and lets the
+        helper decide, because "is this a new plan allocation?" is one rule
+        with one home. ``test_plan_numbering.py`` proves the helper records
+        nothing for a non-``PLAN.md`` path; duplicating that judgement here
+        would give the rule two homes that can disagree.
+        """
+        target = tmp_path / _PLAN_DIR_REL / "00042-widget" / "JOURNAL" / "00042-Journal-26-08-13.md"
+        with _patched_root(tmp_path), patch(self._RECORDER) as recorder:
+            _handler().handle(_write_input(target, "## 10:00 · note\n"))
+
+        recorder.assert_called_once_with(target, _PLAN_DIR_REL, tmp_path)

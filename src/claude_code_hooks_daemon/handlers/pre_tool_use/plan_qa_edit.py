@@ -7,8 +7,17 @@ for Edit the old/new replacement is applied to the current file first. In
 exact remediation; ``warn`` downgrades everything to advisory context;
 grandfathered legacy plans (``legacy_plan_allowlist``) only ever advise.
 
-Deliberately hot-path cheap: no tree scan, no git subprocess — single-file
-invariants only (cross-file invariants belong to the commit gate and sweep).
+Deliberately hot-path cheap for LINTING: no tree scan, no git subprocess —
+single-file invariants only (cross-file invariants belong to the commit gate
+and sweep).
+
+One exception, and it is not a lint: creating a new ``PLAN.md`` advances the
+per-repo plan counter, which does touch git. That writer lived on
+``validate_plan_number`` until Plan 00237 removed it, and it has to live
+somewhere — the counter is the value the commit-stage ``counter-sanity`` check
+reads, so a plan created with no writer on this path leaves the counter behind
+and blocks the NEXT plan's commit. It fires only on CREATION of a plan
+document, not on edits, so the hot path is unchanged.
 """
 
 import logging
@@ -20,6 +29,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.handlers.utils.plan_numbering import record_new_plan_document
 from claude_code_hooks_daemon.plan_qa.context import edit_context
 from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME, README_FILENAME
 from claude_code_hooks_daemon.plan_qa.remedy import remedy_sentence
@@ -127,6 +137,9 @@ class PlanQaEditHandler(Handler):
             # itself will fail with its own error — nothing to lint.
             return HookResult(decision=Decision.ALLOW, context=[])
 
+        if not exists_before:
+            self._record_allocation(file_path)
+
         content_before = file_path.read_text(encoding="utf-8") if exists_before else None
         context = edit_context(
             project_root=ProjectContext.project_root(),
@@ -146,6 +159,37 @@ class PlanQaEditHandler(Handler):
         if blockers and self._plan_qa.edit_mode == _EDIT_MODE_BLOCK:
             return HookResult(decision=Decision.DENY, reason=format_block_reason(blockers))
         return self._advisory_result(findings)
+
+    def _record_allocation(self, file_path: Path) -> None:
+        """Advance the per-repo plan counter for a newly-created plan document.
+
+        Relocated from ``validate_plan_number`` (Plan 00237). The helper does
+        the deciding — whether this path is a new plan document at all, and
+        whether its number is inside the window the counter could have
+        allocated — so a non-plan write costs one cheap path check here.
+
+        FAIL-SAFE, and the asymmetry is the point: losing the counter is
+        recoverable (the next read re-bootstraps it from a filesystem scan),
+        while losing the agent's plan document because git config misbehaved
+        is not. So the failure is logged with its traceback and the write
+        proceeds. Logged rather than swallowed — a writer that has silently
+        stopped working looks exactly like one with nothing to do.
+        """
+        try:
+            recorded = record_new_plan_document(
+                file_path,
+                str(self._track_plans_in_project),
+                ProjectContext.project_root(),
+            )
+        except Exception:
+            logger.warning(
+                "plan_qa_edit: failed to record plan allocation for %s",
+                file_path,
+                exc_info=True,
+            )
+        else:
+            if recorded is not None:
+                logger.info("plan_qa_edit: plan counter advanced to %d", recorded)
 
     def _would_be_content(
         self,

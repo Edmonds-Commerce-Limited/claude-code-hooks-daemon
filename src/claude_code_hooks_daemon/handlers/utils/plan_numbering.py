@@ -19,12 +19,20 @@ Two layers:
 import re
 from pathlib import Path
 
+from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
 
 # git config key holding the per-repo plan high-water mark (highest number
 # ever allocated). Section names are case-insensitive in git; stored lowercased.
 _PLAN_COUNTER_CONFIG_KEY = "hooksdaemon.latestPlanNumber"
 PLAN_NUMBER_WIDTH = 5
+
+# A plan folder is ``NNNNN-name``. The name must start with a LETTER so that a
+# date-shaped directory ("2026-01-12", digit after the hyphen) is not read as
+# plan 2026, while "00032-svc-feature" and "00032-Feature" both match. Shared
+# by the filesystem scan and the new-document check so the two cannot drift
+# into disagreeing about what a plan folder looks like.
+_PLAN_FOLDER_RE = re.compile(r"^(\d{1,5})-[a-zA-Z]")
 
 
 def get_next_plan_number(plan_folder: Path) -> str:
@@ -80,10 +88,7 @@ def highest_plan_number(plan_folder: Path) -> int:
     (``Completed/``, ``archive/``, ...) so archived plans are counted.
     """
     highest_number = 0
-    # Require a letter after hyphen to exclude date-formatted dirs
-    # like "2026-01-12" (digit after hyphen) while matching plan dirs like
-    # "00032-svc-feature" or "00032-Feature" (letter after hyphen).
-    pattern = re.compile(r"^(\d{1,5})-[a-zA-Z]")
+    pattern = _PLAN_FOLDER_RE
 
     def scan_directory(directory: Path) -> None:
         nonlocal highest_number
@@ -180,6 +185,86 @@ def next_plan_number_for_target(
     highest = highest_plan_number(repo_root / plan_subdir)
     write_plan_counter(repo_root, highest)
     return f"{highest + 1:0{PLAN_NUMBER_WIDTH}d}"
+
+
+def record_new_plan_document(
+    plan_doc_path: Path,
+    plan_subdir: str,
+    fallback_root: Path,
+) -> int | None:
+    """Advance the counter for a plan document that has just been CREATED.
+
+    This is the DIRECT-path counter writer: an agent hand-creating
+    ``{plan_subdir}/NNNNN-name/PLAN.md`` rather than going through
+    ``mkplan.bash`` (the recommended path) or the flat-plan redirect in
+    ``markdown_organization`` (which creates the folder itself and records its
+    own allocation). Relocated here from the ``validate_plan_number`` handler
+    in Plan 00237, which is being removed.
+
+    Only a number the counter could plausibly have allocated is recorded --
+    ``expected`` or ``expected - 1``, the same window ``validate_plan_number``
+    accepted. The lower half of that window exists for the mkdir-then-write
+    ordering: the folder may already be on disk by the time the PLAN.md write
+    is seen, in which case a bootstrap scan counts it and ``expected`` has
+    already moved one ahead.
+
+    The window is not cosmetic. The commit-stage ``counter-sanity`` check
+    blocks a staged plan folder whose number EXCEEDS the counter, and it only
+    ever READS. Recording a typo'd ``99999`` would raise the counter to 99999,
+    after which every smaller number passes that check silently -- it would go
+    on reporting clean while having stopped checking.
+
+    Args:
+        plan_doc_path: The ``PLAN.md`` about to be written.
+        plan_subdir: Plan folder relative to the repo root (e.g. ``CLAUDE/Plan``).
+        fallback_root: Project root used when the path is not inside a git repo.
+
+    Returns:
+        The number recorded, or ``None`` when the path is not a new plan
+        document or its number falls outside the window.
+    """
+    plan_number = _plan_number_of_new_document(plan_doc_path, plan_subdir)
+    if plan_number is None:
+        return None
+
+    # No enclosing repo means no counter to persist to. Bail before the window
+    # check so the return value never claims a write that did not happen --
+    # ``record_plan_allocation`` would no-op here and say nothing about it.
+    if resolve_plan_repo_root(plan_doc_path) is None:
+        return None
+
+    expected = int(next_plan_number_for_target(plan_doc_path, plan_subdir, fallback_root))
+    if plan_number not in (expected, expected - 1):
+        return None
+
+    record_plan_allocation(plan_doc_path, plan_number)
+    return plan_number
+
+
+def _plan_number_of_new_document(plan_doc_path: Path, plan_subdir: str) -> int | None:
+    """Plan number when ``plan_doc_path`` is a plan doc in the ACTIVE plan root.
+
+    Structural, deliberately: the document must be ``PLAN.md``, its parent must
+    be an ``NNNNN-name`` folder, and that folder's parent must end with the
+    configured plan directory. The last condition excludes an ARCHIVED plan
+    (``{plan_subdir}/Completed/00111-x/PLAN.md``) without needing to know any
+    archive directory's configured name -- an archived plan sits one level
+    deeper, so the grandparent test fails. Archiving happens by ``git mv``, not
+    by writing a PLAN.md, so a write under an archive directory is an edit to
+    an existing plan and never an allocation.
+    """
+    if plan_doc_path.name != PLAN_DOC_FILENAME:
+        return None
+
+    match = _PLAN_FOLDER_RE.match(plan_doc_path.parent.name)
+    if match is None:
+        return None
+
+    expected_parts = Path(plan_subdir).parts
+    if plan_doc_path.parent.parent.parts[-len(expected_parts) :] != expected_parts:
+        return None
+
+    return int(match.group(1))
 
 
 def record_plan_allocation(target_path: Path, plan_number: int) -> None:

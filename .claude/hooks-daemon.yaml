@@ -330,10 +330,6 @@ handlers:
       enabled: true
       priority: 40
 
-    validate_plan_number:  # Validates plan number format (001-, 002-, etc)
-      enabled: true        # Enable for projects using CLAUDE/Plan/
-      priority: 41
-
     global_npm_advisor:    # Advises against global npm installs
       enabled: true
       priority: 42
@@ -353,10 +349,6 @@ handlers:
     plan_workflow:         # Provides guidance when creating plans
       enabled: true        # Enable for projects using CLAUDE/Plan/
       priority: 46
-
-    plan_completion_advisor: # Advises on plan completion workflow
-      enabled: true
-      priority: 48
 
     npm_command:           # Restricts npm commands to approved list
       enabled: true        # Enable for strict npm usage control

@@ -10,6 +10,7 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     get_next_plan_number,
     next_plan_number_for_target,
     read_plan_counter,
+    record_new_plan_document,
     record_plan_allocation,
     resolve_plan_repo_root,
     write_plan_counter,
@@ -533,3 +534,95 @@ class TestRecordPlanAllocation:
         target = plain / "CLAUDE" / "Plan" / "00007-x" / "PLAN.md"
 
         record_plan_allocation(target, 7)  # must not raise
+
+
+class TestRecordNewPlanDocument:
+    """The DIRECT-path counter writer, relocated from validate_plan_number.
+
+    Plan 00237 Task 4.1. The counter has three writers and they are not
+    redundant: ``mkplan.bash`` covers the recommended path,
+    ``markdown_organization`` covers the redirect path (it creates the folder
+    itself), and this covers an agent hand-creating the folder. Without a
+    writer on the direct path the counter stops advancing for hand-made
+    plans, and the commit-stage ``counter-sanity`` check — which only READS
+    the counter — starts blocking commits for drift the missing writer caused.
+    """
+
+    def test_records_a_newly_created_plan_document(self, tmp_path: Path) -> None:
+        repo = _git_init(tmp_path / "proj")
+        write_plan_counter(repo, 110)
+        doc = repo / "CLAUDE" / "Plan" / "00111-new" / "PLAN.md"
+
+        recorded = record_new_plan_document(doc, "CLAUDE/Plan", repo)
+
+        assert recorded == 111
+        assert read_plan_counter(repo) == 111
+
+    def test_accepts_the_toctou_number_one_below_expected(self, tmp_path: Path) -> None:
+        """The folder may already exist by the time we see the PLAN.md write.
+
+        A bootstrap scan then counts it as the high-water mark and ``expected``
+        jumps one ahead, so ``expected - 1`` is the number actually being
+        created. validate_plan_number accepted the same window; dropping it
+        here would refuse to record exactly the plans created by mkdir-then-write.
+        """
+        repo = _git_init(tmp_path / "proj")
+        write_plan_counter(repo, 111)
+        doc = repo / "CLAUDE" / "Plan" / "00111-new" / "PLAN.md"
+
+        assert record_new_plan_document(doc, "CLAUDE/Plan", repo) == 111
+
+    def test_a_wild_number_is_not_recorded(self, tmp_path: Path) -> None:
+        """A typo must not poison the counter.
+
+        This is the guard that makes the whole thing safe. If 99999 were
+        recorded, ``counter-sanity`` — which blocks a staged plan folder whose
+        number EXCEEDS the counter — would silently start passing every number
+        below 99999, which is all of them. The check would report clean while
+        having stopped checking.
+        """
+        repo = _git_init(tmp_path / "proj")
+        write_plan_counter(repo, 110)
+        doc = repo / "CLAUDE" / "Plan" / "99999-typo" / "PLAN.md"
+
+        assert record_new_plan_document(doc, "CLAUDE/Plan", repo) is None
+        assert read_plan_counter(repo) == 110
+
+    def test_a_document_that_is_not_a_plan_doc_is_ignored(self, tmp_path: Path) -> None:
+        repo = _git_init(tmp_path / "proj")
+        write_plan_counter(repo, 110)
+        doc = repo / "CLAUDE" / "Plan" / "00111-new" / "RESEARCH.md"
+
+        assert record_new_plan_document(doc, "CLAUDE/Plan", repo) is None
+        assert read_plan_counter(repo) == 110
+
+    def test_an_archived_plan_is_ignored(self, tmp_path: Path) -> None:
+        """``Completed/00111-x/PLAN.md`` is not a new allocation.
+
+        Archiving happens by ``git mv``, not by writing a PLAN.md, so a write
+        under the archive directory is an edit to an existing plan. Recording
+        it would be harmless arithmetic (the counter is a max) but it is not
+        an allocation, and treating it as one blurs what the counter means.
+        """
+        repo = _git_init(tmp_path / "proj")
+        write_plan_counter(repo, 110)
+        doc = repo / "CLAUDE" / "Plan" / "Completed" / "00111-old" / "PLAN.md"
+
+        assert record_new_plan_document(doc, "CLAUDE/Plan", repo) is None
+        assert read_plan_counter(repo) == 110
+
+    def test_a_plan_doc_outside_the_plan_directory_is_ignored(self, tmp_path: Path) -> None:
+        repo = _git_init(tmp_path / "proj")
+        write_plan_counter(repo, 110)
+        doc = repo / "docs" / "00111-new" / "PLAN.md"
+
+        assert record_new_plan_document(doc, "CLAUDE/Plan", repo) is None
+        assert read_plan_counter(repo) == 110
+
+    def test_no_op_outside_a_git_repo(self, tmp_path: Path) -> None:
+        """Must not raise: a non-git project has nowhere to persist a counter."""
+        plain = tmp_path / "no-repo"
+        (plain / "CLAUDE" / "Plan" / "00001-x").mkdir(parents=True)
+        doc = plain / "CLAUDE" / "Plan" / "00001-x" / "PLAN.md"
+
+        assert record_new_plan_document(doc, "CLAUDE/Plan", plain) is None

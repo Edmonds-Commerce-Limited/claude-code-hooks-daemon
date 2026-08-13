@@ -115,9 +115,7 @@ def test_example_config_workflow_handlers_disabled(example_config: dict) -> None
     workflow_handlers = [
         "plan_number_helper",
         "plan_workflow",
-        "validate_plan_number",
         "plan_time_estimates",
-        "plan_completion_advisor",
         "markdown_organization",
         "tdd_enforcement",
     ]

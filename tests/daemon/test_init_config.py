@@ -337,7 +337,6 @@ class TestConfigHandlerCoverage:
     # (e.g., workflow-specific handlers that need explicit opt-in)
     EXCLUDED_HANDLERS: ClassVar[set[str]] = {
         # Plan workflow handlers - require CLAUDE/Plan/ directory structure
-        "validate_plan_number",
         "plan_time_estimates",
         "plan_workflow",
         "plan_number_helper",

@@ -104,7 +104,6 @@ class Priority:
 
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
-    VALIDATE_PLAN_NUMBER = 30
     PLAN_NUMBER_HELPER = 30
     DAEMON_STATS = 30
     # Extracted from DAEMON_STATS (Plan 00167) so the upgrade prompt reaches
@@ -136,7 +135,6 @@ class Priority:
     AGENT_ISOLATION_ADVISOR = 46
 
     NPM_COMMAND = 50
-    PLAN_COMPLETION_ADVISOR = 50
     VALIDATE_INSTRUCTION_CONTENT = 50
 
     WEB_SEARCH_YEAR = 55
