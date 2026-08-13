@@ -1796,43 +1796,6 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 
 **On Stop hook re-entry (the hook fires again after a prior block)**: your next response is treated like any other — it must either prefix with `STOPPING BECAUSE:` or continue the work. Re-entry does not exempt you from the explanation rule.
 
-<!-- handler: hedging-language-detector -->
-
-## hedging_language_detector — the guessing is the defect, not the wording
-
-At Stop time your last message is scanned for hedges — "if I recall", "IIRC",
-"from memory", "probably", "likely", "apparently", "presumably", "I believe" —
-and a non-blocking advisory is injected.
-
-**Do not respond by deleting the word.** Dropping "probably" while still
-guessing is worse than the hedge: it removes the only signal that the claim
-was unverified, and leaves a confident-sounding sentence with nothing behind
-it. The remedy is to verify — `Read` the file, `Grep` the codebase, `Glob` for
-the name, run the command. Almost every hedge in this repository is about
-something one tool call would settle.
-
-**Honest uncertainty is fine — say it plainly, and say what would settle it.**
-"I have not checked whether X still exists" is accurate reporting, not
-hedging. What this handler is looking for is confident prose standing in for a
-check you could have made.
-
-The sibling `dismissive_language_detector` covers the same ground for
-avoidance rather than uncertainty.
-
-<!-- handler: dismissive-language-detector -->
-
-## dismissive_language_detector — do not deflect or prematurely halt
-
-Stop-time advisory that fires on language patterns signalling avoidance of work. The handler does NOT block the stop, but injects context for the next turn so the agent self-corrects. Identical advisories (same session, same phrase set) are emitted once, not repeated on every subsequent stop.
-
-**Avoid**:
-
-- Dismissing issues as `pre-existing`, `out of scope`, `not our problem`, or `not relevant` to deflect work that is in fact yours.
-- Premature-halt phrasing like `natural checkpoint`, `ready to continue on your   cue`, `pausing here` mid-plan when there is more to do — finish the task rather than dressing up a halt.
-- Speculative `should be fine` or `probably works` when verification is cheap (run the test, read the file).
-
-**Do**: acknowledge the issue, fix it, or — if it genuinely is out of scope — say so once with the specific reason and continue with the in-scope work.
-
 <!-- handler: worktree-create -->
 
 ## worktree_create — semantic worktree naming
