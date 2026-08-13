@@ -22,6 +22,34 @@ def _make_hook_input(messages: list[dict[str, str]]) -> dict[str, Any]:
     }
 
 
+class TestMentioningAPhraseIsNotDeflecting:
+    """Plan 00225: a QUOTED trigger phrase is a mention, not a deflection.
+
+    The advisory says "acknowledge and offer to fix instead of deflecting".
+    Naming the phrase is how one acknowledges, so quoting it re-fired the
+    advisory and made the instruction unsatisfiable.
+    """
+
+    def test_a_quoted_phrase_does_not_fire(self) -> None:
+        handler = DismissiveLanguageNitpickHandler()
+        text = 'The hook flagged my "out of scope" and it was right — I will fix it.'
+        result = handler.handle(_make_hook_input([{"uuid": "u1", "content": text}]))
+        assert not result.context
+
+    def test_a_genuine_deflection_still_fires(self) -> None:
+        """The other half: a fix that merely muted the detector must not pass."""
+        handler = DismissiveLanguageNitpickHandler()
+        text = "That is out of scope for this change."
+        result = handler.handle(_make_hook_input([{"uuid": "u1", "content": text}]))
+        assert result.context
+
+    def test_quoting_elsewhere_does_not_launder_a_real_deflection(self) -> None:
+        handler = DismissiveLanguageNitpickHandler()
+        text = 'She said "hello" but that is out of scope and I will not fix it.'
+        result = handler.handle(_make_hook_input([{"uuid": "u1", "content": text}]))
+        assert result.context
+
+
 class TestDismissiveLanguageNitpickInit:
     """Test handler initialisation."""
 

@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.handlers.stop.dismissive_language_detector import (
     DismissiveLanguageDetectorHandler,
 )
+from claude_code_hooks_daemon.utils.quoted_spans import blank_quoted_spans
 
 HANDLER_ID = HandlerID.NITPICK_DISMISSIVE
 HANDLER_PRIORITY = Priority.NITPICK_DISMISSIVE
@@ -94,8 +95,15 @@ class DismissiveLanguageNitpickHandler(Handler):
             text = msg.get("content", "")
             if not text:
                 continue
+            # Scan a copy with quoted spans blanked (Plan 00225): a QUOTED
+            # phrase is being mentioned, not used to deflect. The advisory asks
+            # the agent to acknowledge rather than deflect, and naming the
+            # phrase is how one acknowledges — so complying re-fired it. The
+            # patterns are unchanged; only the scanned text is normalised, so a
+            # real trigger elsewhere in the same message is still found.
+            scan_target = blank_quoted_spans(text)
             for category, compiled in self._compiled:
-                if category not in found_categories and compiled.search(text):
+                if category not in found_categories and compiled.search(scan_target):
                     found_categories[category] = None
 
         context_lines = [

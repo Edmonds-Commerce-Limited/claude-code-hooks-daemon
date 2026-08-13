@@ -160,6 +160,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00225: dismissive/hedging detectors use-mention false positive](Completed/00225-dismissive-hedging-detectors-use-mention-false-positive/PLAN.md) - Complete (substring matching could not tell a phrase USED to deflect from one MENTIONED while acknowledging, so the advisory's own instruction to acknowledge re-triggered it; quoted spans are now blanked before matching, at all four scan sites)
+
 - [00224: nitpick offset reset replays whole transcript after daemon restart](Completed/00224-nitpick-offset-reset-replays-whole-transcript-after-daemon-restart/PLAN.md) - Complete (in-memory audit offset returns to 0 on restart, so a mandated restart replayed every past finding — 9,680 messages measured live; fixed by the daemon's own start time, and gated registry-wide so a future pseudo-event cannot inherit it)
 
 - [00221: pipe blocker producer attribution and per-pipe evaluation](Completed/00221-pipe-blocker-command-substitution-producer-attribution/PLAN.md) - Complete (three bypasses, one root cause: the handler judged the whole command rather than each pipe, so a whitelisted outer command, a cheap earlier pipe, or an unrelated tail -f each laundered an expensive producer)
@@ -1153,22 +1155,27 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 224 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 181 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Total Plans Created**: 225 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Completed**: 182 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 - **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 32 + 181 + 5 = **218 folders**, spanning
-  **215 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 32 + 182 + 5 = **219 folders**, spanning
+  **216 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **9** of the
-  224 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  225 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210 — abandoned drafts, numbers burned by transient
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
-  already covered the work). 215 + 9 = 224. ✅
-- **Last reconciled by**: the Plan 00224 closure — recounted from disk after
+  already covered the work). 216 + 9 = 225. ✅
+- **Last reconciled by**: the Plan 00225 closure — recounted from disk after
+  the archive move (32 root, 182 `Completed/`, 5 `Cancelled/`); the move shifts
+  one folder between the Active and Completed splits and leaves the folder
+  total unchanged. Before that, the Plan 00225 opening — one new root folder
+  and the counter advanced by `mkplan.bash`, so Total and Active each rose by
+  one while Completed and Cancelled were untouched. Before that, the Plan 00224 closure — recounted from disk after
   the archive move (32 root, 181 `Completed/`, 5 `Cancelled/`); the move shifts
   one folder between the Active and Completed splits and leaves the folder
   total unchanged. Before that, the Plan 00224 opening — one new root folder

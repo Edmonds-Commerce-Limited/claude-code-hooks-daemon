@@ -22,6 +22,27 @@ def _make_hook_input(messages: list[dict[str, str]]) -> dict[str, Any]:
     }
 
 
+class TestMentioningAHedgeIsNotHedging:
+    """Plan 00225: a QUOTED hedge word is a mention, not a guess.
+
+    The advisory says to verify instead of guessing. Reporting that one hedged
+    and then verified requires naming the word, which re-fired the advisory.
+    """
+
+    def test_a_quoted_hedge_word_does_not_fire(self) -> None:
+        handler = HedgingLanguageNitpickHandler()
+        text = 'The hook flagged "probably" in my last message, so I ran the test.'
+        result = handler.handle(_make_hook_input([{"uuid": "u1", "content": text}]))
+        assert not result.context
+
+    def test_a_genuine_hedge_still_fires(self) -> None:
+        """The other half: muting the detector must not pass this suite."""
+        handler = HedgingLanguageNitpickHandler()
+        text = "I think it probably works, from memory."
+        result = handler.handle(_make_hook_input([{"uuid": "u1", "content": text}]))
+        assert result.context
+
+
 class TestHedgingLanguageNitpickInit:
     """Test handler initialisation."""
 

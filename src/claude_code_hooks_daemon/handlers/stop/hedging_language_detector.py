@@ -17,6 +17,7 @@ from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.utils.quoted_spans import blank_quoted_spans
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     is_stop_hook_active,
@@ -119,9 +120,15 @@ class HedgingLanguageDetectorHandler(Handler):
         Returns:
             List of matched phrase patterns (human-readable)
         """
+        # Scan a copy with quoted spans blanked (Plan 00225): a QUOTED hedge is
+        # being mentioned, not asserted. This advisory tells the agent to verify
+        # rather than guess, and naming the word is how one reports having done
+        # so — complying re-fired it. The patterns are unchanged; only the
+        # scanned text is normalised.
+        scan_target = blank_quoted_spans(text)
         found: list[str] = []
         for pattern_str, compiled in self._all_patterns:
-            if compiled.search(text):
+            if compiled.search(scan_target):
                 # Extract the readable phrase from the regex (strip \b markers)
                 readable = pattern_str.replace(r"\b", "")
                 found.append(readable)

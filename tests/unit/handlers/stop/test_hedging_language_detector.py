@@ -14,6 +14,31 @@ from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
 from claude_code_hooks_daemon.core import Decision
 
 
+class TestMentioningAHedgeIsNotHedging:
+    """Plan 00225: a QUOTED hedge word is a mention, not a guess.
+
+    Asserted on the Stop surface directly rather than inferred from the nitpick
+    tests, even though both share one pattern set.
+    """
+
+    def test_a_quoted_hedge_word_is_not_reported(self) -> None:
+        from claude_code_hooks_daemon.handlers.stop.hedging_language_detector import (
+            HedgingLanguageDetectorHandler,
+        )
+
+        handler = HedgingLanguageDetectorHandler()
+        text = 'The hook flagged "probably" in my last message, so I ran the test.'
+        assert handler._find_hedging_phrases(text) == []
+
+    def test_a_genuine_hedge_is_still_reported(self) -> None:
+        from claude_code_hooks_daemon.handlers.stop.hedging_language_detector import (
+            HedgingLanguageDetectorHandler,
+        )
+
+        handler = HedgingLanguageDetectorHandler()
+        assert handler._find_hedging_phrases("I think it probably works, from memory.")
+
+
 class TestHedgingLanguageDetectorInit:
     """Test handler initialization."""
 

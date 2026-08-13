@@ -22,6 +22,7 @@ from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.utils.quoted_spans import blank_quoted_spans
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     is_stop_hook_active,
@@ -183,9 +184,16 @@ class DismissiveLanguageDetectorHandler(Handler):
         Returns:
             List of matched phrase patterns (human-readable)
         """
+        # Scan a copy with quoted spans blanked (Plan 00225): a QUOTED phrase
+        # is being mentioned, not used to deflect. This advisory asks the agent
+        # to acknowledge rather than deflect, and naming the phrase is how one
+        # acknowledges — so complying re-fired it. The patterns are unchanged;
+        # only the scanned text is normalised, so a real trigger elsewhere in
+        # the same message is still found.
+        scan_target = blank_quoted_spans(text)
         found: list[str] = []
         for pattern_str, compiled in self._all_patterns:
-            if compiled.search(text):
+            if compiled.search(scan_target):
                 # Extract the readable phrase from the regex (strip \b markers)
                 readable = pattern_str.replace(r"\b", "")
                 found.append(readable)

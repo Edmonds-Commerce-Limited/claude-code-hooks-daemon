@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.handlers.stop.hedging_language_detector import (
     HedgingLanguageDetectorHandler,
 )
+from claude_code_hooks_daemon.utils.quoted_spans import blank_quoted_spans
 
 HANDLER_ID = HandlerID.NITPICK_HEDGING
 HANDLER_PRIORITY = Priority.NITPICK_HEDGING
@@ -92,8 +93,14 @@ class HedgingLanguageNitpickHandler(Handler):
             text = msg.get("content", "")
             if not text:
                 continue
+            # Scan a copy with quoted spans blanked (Plan 00225): a QUOTED
+            # hedge is being mentioned, not asserted. The advisory tells the
+            # agent to verify rather than guess, and naming the hedge is how
+            # one reports having done so — so complying re-fired it. The
+            # patterns are unchanged; only the scanned text is normalised.
+            scan_target = blank_quoted_spans(text)
             for category, compiled in self._compiled:
-                if category not in found_categories and compiled.search(text):
+                if category not in found_categories and compiled.search(scan_target):
                     found_categories[category] = None
 
         context_lines = [

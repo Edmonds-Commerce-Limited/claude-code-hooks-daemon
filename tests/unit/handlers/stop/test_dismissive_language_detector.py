@@ -45,6 +45,31 @@ def _human_message(text: str) -> dict[str, Any]:
     }
 
 
+class TestMentioningAPhraseIsNotDeflecting:
+    """Plan 00225: the Stop surface shares the nitpick surface's pattern lists.
+
+    Both scan through one choke point each, so the quoted-span exemption is
+    asserted here too rather than inferred from the nitpick tests passing.
+    """
+
+    def test_a_quoted_phrase_is_not_reported(self) -> None:
+        from claude_code_hooks_daemon.handlers.stop.dismissive_language_detector import (
+            DismissiveLanguageDetectorHandler,
+        )
+
+        handler = DismissiveLanguageDetectorHandler()
+        text = 'The hook flagged my "out of scope" and it was right — fixing it now.'
+        assert handler._find_dismissive_phrases(text) == []
+
+    def test_a_genuine_deflection_is_still_reported(self) -> None:
+        from claude_code_hooks_daemon.handlers.stop.dismissive_language_detector import (
+            DismissiveLanguageDetectorHandler,
+        )
+
+        handler = DismissiveLanguageDetectorHandler()
+        assert handler._find_dismissive_phrases("That is out of scope for this change.")
+
+
 class TestDismissiveLanguageDetectorInit:
     """Test handler initialization."""
 
