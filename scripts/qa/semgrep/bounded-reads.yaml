@@ -1,0 +1,135 @@
+# Semgrep expression of the bounded-intent/unbounded-read class (Plan 00231).
+#
+# Benchmarked against the same 11-shape probe used to score the hand-written
+# AST checker in scripts/qa/check_bounded_reads.py, which caught 1 of 11.
+#
+# The defect: code that DECLARES a bound (maxlen=N, a slice, an early exit)
+# while reading a file UNBOUNDEDLY. Measured cost on a 72 MB session
+# transcript: 162 ms versus 17 ms for the equivalent bounded seek.
+
+rules:
+  - id: bounded-intent-unbounded-read
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A bounded window is applied to an unbounded whole-file read. The declared
+      bound is the intent; the read ignores it. Seek to max(0, size - max_bytes)
+      and parse forward (see TranscriptReader._parse_tail), or use
+      itertools.islice for a head, which stops at N instead of materialising
+      the file first.
+    patterns:
+      - pattern-either:
+          # --- slice applied directly to a whole-file read ---
+          - pattern: $P.read_text().splitlines()[$A:$B]
+          - pattern: $P.read_text().splitlines()[:$B]
+          - pattern: $P.read_text().splitlines()[$A:]
+          - pattern: $P.read_text().split(...)[$A:]
+          - pattern: $P.read_text().split(...)[:$B]
+          - pattern: $F.readlines()[$A:$B]
+          - pattern: $F.readlines()[:$B]
+          - pattern: $F.readlines()[$A:]
+          - pattern: $F.read().splitlines()[$A:]
+          - pattern: $F.read().splitlines()[:$B]
+
+          # --- index (not slice) on a whole-file read: same waste ---
+          - pattern: $P.read_text().splitlines()[$I]
+          - pattern: $F.readlines()[$I]
+
+          # --- len() of a whole-file read: counting by materialising ---
+          - pattern: len($P.read_text().splitlines())
+          - pattern: len($F.readlines())
+          - pattern: len($P.read_text().split(...))
+
+          # --- deque(..., maxlen=N): bounded intent stated outright ---
+          - pattern: deque($P.read_text().splitlines(), maxlen=$N)
+          - pattern: deque($F.readlines(), maxlen=$N)
+
+          # --- reversed()/list() drains of a whole-file read ---
+          - pattern: reversed($F.readlines())
+          - pattern: list(reversed(list($F)))[:$N]
+          - pattern: list(reversed(list($F)))[$A:$B]
+
+          # --- deferred: read bound to a name, sliced later in the same scope ---
+          - patterns:
+              - pattern-inside: |
+                  $X = $P.read_text().splitlines()
+                  ...
+              - pattern: $X[$A:$B]
+          - patterns:
+              - pattern-inside: |
+                  $X = [$E for $L in $P.read_text().splitlines() if ...]
+                  ...
+              - pattern: $X[$A:$B]
+          - patterns:
+              - pattern-inside: |
+                  $X = $F.readlines()
+                  ...
+              - pattern: $X[$A:$B]
+
+  - id: bounded-intent-unbounded-read-over-handle
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A bounded window is applied to an open file handle, so every line is read
+      to produce a small window. Seek to the window instead, or use
+      itertools.islice for a head.
+    patterns:
+      - pattern-inside: |
+          with open(...) as $F:
+              ...
+      - pattern-either:
+          # deque over the handle itself, or over anything derived from it
+          - pattern: deque($F, maxlen=$N)
+          - pattern: deque(..., maxlen=$N)
+          - pattern: list($F)[$A:$B]
+          - pattern: list($F)[:$B]
+          - pattern: list($F)[$A:]
+          - pattern: tuple($F)[$A:$B]
+      - pattern-not: deque($F)
+      - pattern-not: islice(...)
+
+  # Deferred flows: the read is bound to a name and the bound is applied later,
+  # possibly through an alias. This is the class the hand-written AST checker
+  # declared unreachable (Plan 00231 Decision 2) — a pair rule cannot see it
+  # because the two halves are different statements. Taint tracking can.
+  - id: bounded-intent-unbounded-read-deferred
+    languages: [python]
+    severity: WARNING
+    mode: taint
+    message: >-
+      A whole-file read flows into a bounded window (a slice, or a maxlen
+      deque). The file is materialised in full and then discarded down to the
+      window. Read only the window: seek to max(0, size - max_bytes) and parse
+      forward, or use itertools.islice for a head.
+    pattern-sources:
+      - pattern: $P.read_text().splitlines()
+      - pattern: $P.read_text().split(...)
+      - pattern: $F.readlines()
+      - pattern: $F.read().splitlines()
+      - pattern: open(...)
+    pattern-sinks:
+      - pattern: $X[$A:$B]
+      - pattern: $X[:$B]
+      - pattern: $X[$A:]
+      - pattern: deque(..., maxlen=$N)
+      - pattern: list(...)[$A:$B]
+
+  - id: unbounded-transcript-read
+    languages: [python]
+    severity: WARNING
+    message: >-
+      TranscriptReader.load() parses the ENTIRE transcript, which has no upper
+      bound. Use load_tail(), which seeks to a bounded window and populates the
+      same accessors, so any consumer reading only the recent tail is
+      unaffected.
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-inside: |
+                  $R = TranscriptReader(...)
+                  ...
+              - pattern: $R.load($P)
+          - pattern: TranscriptReader(...).load(...)
+    paths:
+      exclude:
+        - "**/transcript_reader.py"

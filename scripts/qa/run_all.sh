@@ -231,13 +231,13 @@ else
 fi
 echo ""
 
-echo "20. Running Bounded-Reads Check..."
+echo "20. Running Semgrep Custom-Rules Check..."
 echo "----------------------------------------"
-if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_bounded_reads.py" --json; then
+if ! bash "${SCRIPT_DIR}/run_semgrep_check.sh"; then
     OVERALL_EXIT_CODE=1
-    echo "❌ Bounded-reads check FAILED"
+    echo "❌ Semgrep check FAILED"
 else
-    echo "✅ Bounded-reads check PASSED"
+    echo "✅ Semgrep check PASSED"
 fi
 echo ""
 
@@ -269,7 +269,7 @@ results = {
     "Git History": "untracked/qa/git_history.json",
     "Handler Reference": "untracked/qa/handler_reference.json",
     "British English": "untracked/qa/british_english.json",
-    "Bounded Reads": "untracked/qa/bounded_reads.json",
+    "Semgrep": "untracked/qa/semgrep.json",
 }
 
 all_passed = True

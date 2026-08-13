@@ -50,6 +50,14 @@ dev = [
     "types-jsonschema>=4.0",
     "types-psutil>=5.9",
     "deptry>=0.20",
+    # Custom static-analysis rules (Plan 00231). Ruff has no plugin mechanism,
+    # so project-specific "ban this code shape" rules previously meant a
+    # bespoke AST scanner per rule. Benchmarked against an 11-shape probe of
+    # one defect class, a hand-written checker caught 1 and these rules caught
+    # 9, for a fraction of the code and no test suite of their own. Dev-only:
+    # the client installer runs `uv pip install -e <dir>` with no [dev] extra,
+    # so this never reaches a client project (scripts/install/venv.sh).
+    "semgrep>=1.100",
     # CONTRIBUTING.md instructs `pre-commit install`; without this the command
     # is not found on a fresh dev setup. The hooks themselves run the tools
     # above from this same environment (see .pre-commit-config.yaml), so there
