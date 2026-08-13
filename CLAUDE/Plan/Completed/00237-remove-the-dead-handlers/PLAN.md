@@ -1,6 +1,6 @@
 # Plan 00237: Remove The Dead Handlers
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-13
 **Owner**: joseph
 **Priority**: Medium
@@ -114,7 +114,7 @@ also runs on SubagentStop, where no terminal handler precedes it.
   (Decision 4): 274 fires, 45% of all behavioural handler activity,
   `allow=274`. A rate limit would only reduce the volume of an advisory whose
   content is "look at the thing you are looking at"
-- [ ] ⬜ **Task 2.6**: Checkpoint commit
+- [x] ✅ **Task 2.6**: Checkpoint commit — `f782d0a2`
 
 ### Phase 3: The shadowed Stop advisories
 
@@ -230,13 +230,20 @@ the counter stops advancing for hand-created folders, after which
 
 ### Phase 5: Verification
 
-- [ ] ⬜ **Task 5.1**: Config template, `.claude/hooks-daemon.yaml`, and
-  generated docs regenerated
-- [ ] ⬜ **Task 5.2**: Full QA — `./scripts/qa/llm_qa.py all`
-- [ ] ⬜ **Task 5.3**: Daemon restart verified RUNNING
-- [ ] ⬜ **Task 5.4**: Client-mode verification — a real client install with a
-  config naming every retired handler must start WITHOUT degraded mode
-- [ ] ⬜ **Task 5.5**: Commit and push
+- [x] ✅ **Task 5.1**: Config template, `.claude/hooks-daemon.yaml`, and
+  generated docs regenerated. Also swept the user-facing docs for handlers
+  removed EARLIER in this plan and found `LLM-INSTALL.md` still telling users
+  to enable `bash_error_detector` in two places
+- [x] ✅ **Task 5.2**: Full QA — 21/21, 12,183 tests, coverage 95.2%
+- [x] ✅ **Task 5.3**: Daemon restart verified RUNNING, zero errors in the log
+- [x] ✅ **Task 5.4**: Client-mode verification, both directions — a real
+  client install (production installer, own venv/socket/hostname) with all 21
+  retired keys reports `Daemon: HEALTHY` (exit 0); adding ONE bogus name
+  reports `Daemon: DEGRADED` (exit 1). The paired negative is what makes the
+  first result mean anything: `status`, `check` and `logs` show nothing in
+  EITHER case, so checking those alone — which is what I did first — would
+  have been a vacuous pass (JOURNAL 03:10)
+- [x] ✅ **Task 5.5**: Commit and push
 
 ## Technical Decisions
 
@@ -262,13 +269,24 @@ handlers rather than three independent patches.
   `TestRemovedHandlersAreRetired`, which anchors to the MANIFEST rather than a
   hand-maintained list, so future removals are covered without anyone
   remembering to
-- [ ] A client config naming every retired handler starts cleanly, verified in
-  a real client install rather than inferred from self-install mode
-- [ ] Nothing removed leaves an orphan behind — dead readers, state files and
-  cache modules go with their handler
-- [ ] Each Phase 2 removal records where its duty survives, or that it had none
-- [ ] Full QA passes; daemon restarts RUNNING
+- [x] A client config naming every retired handler starts cleanly, verified in
+  a real client install rather than inferred from self-install mode — HEALTHY
+  with all 21, DEGRADED with one bogus name added, so the pass is not vacuous
+- [x] Nothing removed leaves an orphan behind — dead readers, state files and
+  cache modules go with their handler. Also caught: a QA sanctioned-exception
+  entry pointing at a deleted file, and a compiled regex referenced nowhere
+- [x] Each Phase 2 removal records where its duty survives, or that it had none
+- [x] Full QA passes; daemon restarts RUNNING — 21/21, 12,183 tests, 95.2%
 
 ## Delivery & Milestones
 
-- <!-- milestone or delivery commit hash -->
+- Phase 1 delivered at `d46c3381` and `03eec8f0` — three handlers that could
+  not fire, plus the guard that found two real bugs
+- Phase 2 delivered at `f782d0a2` — five that fire and two that turned out not to
+- Phase 3 delivered at `b8aa578d` and `a232db12` — the shadowed Stop detectors,
+  their guidance, and the pseudo-event handlers that were invisible to every
+  enumeration surface
+- Phase 3b delivered at `c5584c67` — this repo's own release guard, which had
+  never fired, and a guard over the REAL registered Stop chain
+- Phase 4 delivered at `17131953` — the two MERGE verdicts, with the plan
+  counter's writer relocated before its handler was deleted

@@ -98,8 +98,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00234: handler value audit](00234-handler-value-audit/PLAN.md) - In Progress (00233 found a handler that had protected nothing for the project's whole life; this audits all ~100 remaining handlers for the same shapes — no consumer, vacuous guard, duplicated elsewhere, cost exceeding value)
 
-- [00237: remove the dead handlers](00237-remove-the-dead-handlers/PLAN.md) - In Progress (takes the 10 REMOVE + 2 MERGE verdicts from Plan 00234, each with a retired-handler registry entry and an upgrade manifest row so client configs never enter degraded mode)
-
 ### Infrastructure / Bootstrap
 
 - [00176: settings.json merge — preserve client customizations on upgrade](00176-settings-json-merge-preserve-on-upgrade/PLAN.md) - Not Started (surfaced from Plan 00175: the installer/upgrader deploy the daemon's own `.claude/settings.json` by **verbatim copy** — fresh install backs up then overwrites (`install_version.sh:357-363`), and …)
@@ -161,6 +159,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00237: remove the dead handlers](Completed/00237-remove-the-dead-handlers/PLAN.md) - Complete at `17131953` (12 handlers gone — 10 REMOVE plus 2 folded into plan QA — each with a retired-registry entry and upgrade manifest row, verified in a real client install; the shadowing guard it built then found this repo's own release blocker had never fired)
 
 - [00236: fix what is broken pass](Completed/00236-fix-what-is-broken-pass/PLAN.md) - Complete at `54cb60e8` (repaired four Plan 00234 mechanisms that could not fire, plus the verdict log's 99% status-render noise; one audit finding was reversed by a live chain trace and a guard added instead)
 
@@ -1180,11 +1180,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 237 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 192 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 33 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 193 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 33 + 192 + 6 = **231 folders**, spanning
+- **Folder-to-number reconciliation**: 32 + 193 + 6 = **231 folders**, spanning
   **228 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1194,10 +1194,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work). 228 + 9 = 237. ✅
-- **Last reconciled by**: the Plan 00237 creation — a new plan folder for the
-  removal slice of Plan 00234's findings, so Total and Active each rose by one
-  while Completed and Cancelled were untouched. Recounted from disk (33 root,
-  192 `Completed/`, 6 `Cancelled/`). Before that, the Plan 00236 closure — created and completed in the
+- **Last reconciled by**: the Plan 00237 closure — its folder moved from the
+  root into `Completed/`, so Active fell by one and Completed rose by one while
+  Total and Cancelled were untouched. Recounted from disk (32 root,
+  193 `Completed/`, 6 `Cancelled/`). Before that, the Plan 00237 creation — a
+  new plan folder for the removal slice of Plan 00234's findings, so Total and
+  Active each rose by one. Before that, the Plan 00236 closure — created and completed in the
   same pass, so its folder went straight to `Completed/`: Total and Completed
   each rose by one while Active and Cancelled ended where they started (up one
   on creation, down one on archival). Recounted from disk (32 root,
