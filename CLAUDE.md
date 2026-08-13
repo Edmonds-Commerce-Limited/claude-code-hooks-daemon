@@ -567,7 +567,7 @@ class MyHandler(Handler):
 - **25-35**: Code quality (ESLint, TDD, QA suppression)
 - **36-55**: Workflow (planning, npm, config checker)
 - **56-60**: Advisory (British English)
-- **100+**: Logging/cleanup (notification logger, session cleanup)
+- **100+**: Logging/cleanup (remind_prompt_library)
 
 ### Terminal vs Non-Terminal
 
