@@ -1,6 +1,6 @@
 # Plan 00229: qa report count implies detail guard
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-13
 **Owner**: joseph
 **Priority**: Medium
@@ -82,13 +82,28 @@ cannot be under-selected the same way.
 
 ### Phase 1: Establish the contract
 
-- [ ] ⬜ **Task 1.1**: Enumerate every `TOOL_REGISTRY` entry and record, per
-  report, the summary count key, the detail array the SUMMARIZER reads, and
-  the detail array the printed `jq_hint` names — the three can differ, and the
-  `tests` entry proves it
-- [ ] ⬜ **Task 1.2**: Decide the contract's exact wording where a report has
-  no detail array by design, so an exemption is explicit and reasoned rather
-  than an unnoticed hole
+- [x] ✅ **Task 1.1**: Enumerated all twenty. The result is uniform enough to
+  state rather than tabulate:
+
+  - **Count key**: `summary.total_violations` for 15 reports;
+    `total_errors` (`type_check`), `total_issues` (`security`,
+    `dependencies`), `failed` (`tests`), `failed_probes` (`smoke_test`)
+  - **Hint's detail array**: `.violations[]` for 15, `.errors[]`, `.issues[]`
+    (×2), `.probes[]` — and `.summary` for `tests`, the lone exception
+  - **Summariser's detail array**: none for 19 (they render a count only and
+    delegate to the hint); `.tests[]` filtered on `outcome == "failed"` for
+    `tests`
+
+  So the array a report's detail lives in is derivable from its `jq_hint` by
+  reading the leading `.<key>[]` — no parallel table, and a newly added report
+  is covered without anyone extending a list. `tests` is the single entry where
+  that derivation yields nothing, which is precisely the report whose detail
+  went missing in Plan 00226
+
+- [x] ✅ **Task 1.2**: Decided — FIX the `tests` hint rather than exempt it,
+  see Decision 1. `jq_hint` is referenced nowhere outside `llm_qa.py` (checked
+  via `findReferences`: 20 registry definitions, the field declaration, and one
+  render site), so nothing is coupled to its current value
 
 ### Phase 2: Build the guard (RED first)
 
@@ -105,6 +120,37 @@ cannot be under-selected the same way.
   Plan 00228's first run produced three hits of which only one was a real bug,
   so investigate before changing anything
 - [ ] ⬜ **Task 3.2**: Full QA, daemon restart, dogfood live
+
+## Technical Decisions
+
+### Decision 1: Fix the `tests` hint, do not exempt it
+
+**Context**: nineteen reports carry a `jq_hint` naming a detail array, so the
+array is derivable from the hint. `tests` alone points at `jq '.summary'`,
+which yields the counts the summary line has already printed. The guard needs
+a rule for that case, and there are two: exempt the report, or fix the hint.
+
+**Exempting it would preserve the exact blindness this plan exists to remove.**
+`tests` is not a report that legitimately has no detail — it HAS a `.tests[]`
+array, which is where Plan 00226's missing failure names lived all along. The
+hint simply does not point at it. An exemption would say "this report has no
+reachable detail, and that is fine", which is false, and would leave the one
+report with a proven history of losing detail as the one report the guard does
+not check.
+
+**Decision**: point the hint at the failing tests. That removes the exception
+instead of recording it, makes the guard's derivation uniform across all
+twenty reports, and incidentally fixes an operator-facing defect — the current
+hint sends a reader who wants detail back to the number they already had.
+
+Safe to change: `findReferences` on `jq_hint` returns only definitions inside
+`llm_qa.py` plus one render site, and no test asserts a hint's value.
+
+**Applies in Phase 3**, not here — this plan builds the guard first, so the
+fix arrives as the failing test the guard produces (Core Standard 15, and the
+sequencing Plan 00228 validated).
+
+**Date**: 2026-08-13
 
 ## Success Criteria
 
