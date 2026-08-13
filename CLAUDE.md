@@ -669,6 +669,8 @@ The handlers listed below are active in this project. Read this section to avoid
 
 **When a tool is blocked by a handler, do not stop working.** Read the block reason, modify your approach, and continue with your task.
 
+<!-- handler: prevent-destructive-git -->
+
 ## destructive_git — blocked git commands
 
 The following git commands are permanently blocked and will always be denied:
@@ -701,6 +703,8 @@ hooks-daemon delete-branch <name>              # deletes only if provably safe
 
 **Safe alternatives**: `git stash` (recoverable), `git diff` / `git status` (inspect first), `git commit` (save changes permanently first).
 
+<!-- handler: block-sed-command -->
+
 ## sed_blocker — sed is forbidden for file modification
 
 `sed` is blocked because Claude gets sed syntax wrong and a single error can silently destroy hundreds of files with no recovery possible.
@@ -724,6 +728,8 @@ hooks-daemon delete-branch <name>              # deletes only if provably safe
   2. Dispatch one Haiku agent per file
   3. Each agent uses the `Edit` tool (never `sed`)
 
+<!-- handler: daemon-location-guard -->
+
 ## daemon_location_guard — do not cd into .claude/hooks-daemon/
 
 Bash commands that change directory into `.claude/hooks-daemon/` (or `cd` into a daemon-internal subdirectory and then run something) are blocked. The daemon is an upstream dependency that must remain untouched in client repos.
@@ -738,6 +744,8 @@ Bash commands that change directory into `.claude/hooks-daemon/` (or `cd` into a
 
 If you need to inspect daemon source for debugging, use `Read` from the project root with the absolute path — never `cd` in. Do NOT edit anything inside `.claude/hooks-daemon/`; changes will be overwritten on the next upgrade.
 
+<!-- handler: require-absolute-paths -->
+
 ## absolute_path — always use absolute paths
 
 The `Read`, `Write`, and `Edit` tools require absolute paths. Relative paths are blocked.
@@ -746,6 +754,8 @@ The `Read`, `Write`, and `Edit` tools require absolute paths. Relative paths are
 - **Blocked**: `src/main.py`, `./config.yaml`, `../other/file.txt`
 
 The working directory is `/workspace`. Prepend `/workspace/` to any relative path before calling these tools.
+
+<!-- handler: error-hiding-blocker -->
 
 ## error_hiding_blocker — error-suppression patterns are blocked
 
@@ -761,6 +771,8 @@ Writing code that silently swallows errors is blocked. All errors must be handle
 **Required action**: Handle errors explicitly — log them, return them to the caller, or propagate them. Silent error suppression masks bugs and makes debugging impossible.
 
 **Excluded paths**: vendor/, node_modules/, and test-fixture dirs (tests/fixtures/, tests/assets/, __fixtures__/) are skipped by default. Exempt more paths with glob patterns via `handlers.pre_tool_use.error_hiding_blocker.options.exclude_paths` or the project-wide `daemon.exclude_paths` — use these for fixtures of deliberately-broken code instead of disabling the handler.
+
+<!-- handler: block-security-antipatterns -->
 
 ## security_antipattern — OWASP security antipatterns are blocked
 
@@ -780,6 +792,8 @@ Writing code that contains security antipatterns is blocked across all supported
 
 **Excluded paths**: vendor/, node_modules/, and test fixtures are skipped by default. Exempt more paths with glob patterns via `handlers.pre_tool_use.security_antipattern.options.exclude_paths` or the project-wide `daemon.exclude_paths`.
 
+<!-- handler: block-sensitive-content -->
+
 ## sensitive_content — blocked patterns and secret terms are never written
 
 Writing content that matches a configured public pattern or a gitignored secret word list is blocked. Two sources, two different disclosure rules:
@@ -796,6 +810,8 @@ If a compound command is denied because an unrelated part of it carries a term (
 
 Missing/empty/comments-only secret file = this source is silently inert.
 
+<!-- handler: prevent-worktree-file-copying -->
+
 ## worktree_file_copy — do not copy files between worktrees and the main repo
 
 `cp`, `mv`, and `rsync` operations that move files from a worktree directory (`untracked/worktrees/` or `.claude/worktrees/`) into the main repo (`src/`, `tests/`, `config/`) — or vice versa — are blocked.
@@ -803,6 +819,8 @@ Missing/empty/comments-only secret file = this source is silently inert.
 Worktrees are isolated branches. Cross-copying corrupts that isolation and can silently overwrite in-progress work.
 
 **Allowed**: operations within the same worktree branch. **To merge changes**: use `git merge` or `git cherry-pick` instead.
+
+<!-- handler: root-recursion-guard -->
 
 ## root_recursion_guard — recursive scans rooted at / are blocked
 
@@ -823,6 +841,8 @@ A recursive scanner whose path argument resolves to a catastrophic root location
 MUST_SCAN_ROOT_BECAUSE="explain why"; grep -rl x /
 ```
 
+<!-- handler: block-curl-pipe-shell -->
+
 ## curl_pipe_shell — never pipe curl/wget to bash/sh
 
 Piping network content directly to a shell is blocked. It executes untrusted remote code without any inspection.
@@ -836,6 +856,8 @@ curl -o /tmp/script.sh URL
 cat /tmp/script.sh          # inspect
 bash /tmp/script.sh         # execute if safe
 ```
+
+<!-- handler: pipe-blocker -->
 
 ### Pipe Blocker
 
@@ -875,6 +897,8 @@ pytest tests/ 2>&1 | /…/scripts/echd-capture 20
 
 **Length is NOT part of that judgement.** A long command is still a command: a 100-character invocation with a worktree branch name and absolute paths gets the normal block reason, naming what matched and how to whitelist it. If you ever see the short prose reason for text that really was a command, that is a bug worth reporting — retrying it unchanged will block again.
 
+<!-- handler: block-dangerous-permissions -->
+
 ## dangerous_permissions — chmod 777 is blocked
 
 `chmod 777` and other world-writable permission commands are blocked. Overly permissive file permissions are a security vulnerability.
@@ -886,6 +910,8 @@ pytest tests/ 2>&1 | /…/scripts/echd-capture 20
 - Executable scripts: `chmod 755` (owner rwx, group/other rx)
 - Regular files: `chmod 644` (owner rw, group/other r)
 - Private files: `chmod 600` (owner rw only)
+
+<!-- handler: block-ancestry-severing-merge -->
 
 ## ancestry_preserving_merge — ancestry-severing merges are blocked by default
 
@@ -910,6 +936,8 @@ MUST_SQUASH_BECAUSE="explain why"; git merge --squash <branch>
 
 Configure via `handlers.pre_tool_use.ancestry_preserving_merge.options.mode: warn` for advisory-only mode.
 
+<!-- handler: block-git-stash -->
+
 ## git_stash — git stash is blocked by default
 
 `git stash`, `git stash push`, and `git stash save` are blocked. `git stash pop`, `git stash apply`, `git stash list`, and `git stash show` are always allowed.
@@ -923,6 +951,8 @@ MUST_STASH_BECAUSE="explain why"; git stash
 ```
 
 Configure via `handlers.pre_tool_use.git_stash.options.mode: warn` for advisory-only mode.
+
+<!-- handler: block-git-message-backtick -->
 
 ## git_message_backtick — backticks in a double-quoted git message
 
@@ -940,6 +970,8 @@ Bash runs command substitution inside DOUBLE quotes, so backticks in `git commit
 
 Note this handler covers the CORRUPTION case only. A *dangerous* command inside backticks is already denied by the full-command-string matching in `destructive_git` and friends, which run at a lower priority and give the better reason.
 
+<!-- handler: lock-file-edit-blocker -->
+
 ## lock_file_edit_blocker — never directly edit lock files
 
 Direct `Write` or `Edit` to package manager lock files is blocked. Lock files are generated artifacts; manual edits create checksum mismatches and broken dependency graphs.
@@ -953,6 +985,8 @@ Direct `Write` or `Edit` to package manager lock files is blocked. Lock files ar
 - Ruby: `bundle install` / `bundle add gem`
 - Rust: `cargo add crate`
 - Go: `go get module`
+
+<!-- handler: block-pip-break-system -->
 
 ## pip_break_system — --break-system-packages is blocked
 
@@ -968,6 +1002,8 @@ pip install --user <package>
 
 If a tool's installer insists on `--break-system-packages` (some quick-start scripts do), download it first, inspect, and run it inside a venv — do not shortcut by adding the flag.
 
+<!-- handler: block-sudo-pip -->
+
 ## sudo_pip — sudo pip install is blocked
 
 `sudo pip install` (and the `sudo pip3` / `sudo python -m pip` / `sudo python3 -m pip` variants) is blocked. Installing as root corrupts the system Python managed by the OS package manager and creates permission/ownership issues that are painful to recover from.
@@ -981,6 +1017,8 @@ pip install --user <package>
 ```
 
 Even in a container running as root, `sudo` adds nothing — drop it and use a venv.
+
+<!-- handler: block-ask-user-question -->
 
 ## ask_user_question_blocker — questions need `ASKING BECAUSE:` justification
 
@@ -1003,6 +1041,8 @@ Proceeding on that basis; the user will interrupt if wrong.
 
 **Escape hatch** (genuine ambiguity): prefix every question text with `ASKING BECAUSE: <reason>`. Mixing prefixed and non-prefixed questions in one call still triggers a block — prefix all or none.
 
+<!-- handler: verify-daemon-restart -->
+
 ## daemon_restart_verifier — restart the daemon before committing
 
 Before making a `git commit` in the hooks daemon repository, this handler advises verifying that the daemon can restart successfully with the current code changes. This is advisory — it adds context but does not block the commit.
@@ -1011,6 +1051,8 @@ Before making a `git commit` in the hooks daemon repository, this handler advise
 
 **Run before committing** (in this repo only):
 `/workspace/bin/hooks-daemon restart` then verify status shows RUNNING.
+
+<!-- handler: qa-suppression-blocker -->
 
 ## qa_suppression — QA suppression annotations are blocked
 
@@ -1029,6 +1071,8 @@ Writing QA suppression directives into source files is blocked across all suppor
 **Required action**: Fix the code so QA passes without suppression. If a suppression is genuinely necessary, ask the user to add it manually — this signals a conscious decision rather than a shortcut.
 
 **Excluded paths**: per-language vendor/build/node_modules dirs are skipped by default. Exempt more paths with glob patterns via `handlers.pre_tool_use.qa_suppression.options.exclude_paths` or the project-wide `daemon.exclude_paths` — use these for fixtures that must contain suppression annotations.
+
+<!-- handler: block-comment-changelog -->
 
 ## comment_changelog — no changelog narrative in code comments
 
@@ -1050,6 +1094,8 @@ Both were measured with ZERO false positives across this project's own ~1,080 so
 **Scope**: only comment spans are scanned (not code), via the same Strategy Pattern language registry as `qa_suppression`. `.md` files are skipped entirely — markdown prose is not a comment. Only the ADDED text is checked on `Edit` (`new_string`) — removing changelog content is never blocked.
 
 **Excluded paths**: vendor/build/fixture dirs are skipped by default. Exempt more paths via `handlers.pre_tool_use.comment_changelog.options.exclude_paths` or the project-wide `daemon.exclude_paths`.
+
+<!-- handler: block-comment-size -->
 
 ## comment_size — over-long comments are capped, tiered like plan-doc-size
 
@@ -1076,6 +1122,8 @@ A `Write`/`Edit` whose content contains an over-limit comment is blocked or advi
 
 **Excluded paths**: vendor/build/fixture dirs are skipped by default. Exempt more paths via `handlers.pre_tool_use.comment_size.options.exclude_paths` or the project-wide `daemon.exclude_paths`.
 
+<!-- handler: plan-number-helper -->
+
 ## plan_number_helper — use `mkplan.bash` to create a plan
 
 **Before creating one, check nothing already covers it.** Dispatch the `hooks-daemon-plan-dedupe-scout` agent with a sentence describing the intended work; it reads the still-live plans and names any that already cover it, so you can merge or supersede instead of filing alongside. This is a SUGGESTION — it never blocks, it is a judgement call rather than a rule, and it can be wrong. It is worth the few seconds because the alternative failure is expensive and silent: a duplicate plan is usually discovered only after an agent has spent a lot of context re-deriving conclusions that already existed on disk.
@@ -1098,6 +1146,8 @@ Add 1 to that value (zero-pad to 5 digits, e.g. counter `117` → next plan `001
 
 **Do NOT** scan `CLAUDE/Plan/` with `ls`/`find`/glob pipelines to discover the next number. Folder scans miss plans in `Completed/` and other subdirectories, and disagree across branches. The folder scan is only used to bootstrap the counter when the git key is unset (which `mkplan.bash` and the daemon both handle).
 
+<!-- handler: enforce-tdd -->
+
 ## tdd_enforcement — test file must exist before source file
 
 Creating a production source file is blocked until a corresponding test file exists.
@@ -1119,6 +1169,8 @@ Creating a production source file is blocked until a corresponding test file exi
 
 **Allowed through without blocking**: vendor dirs, node_modules, build outputs, generated files, and file extensions not in the supported language list.
 
+<!-- handler: enforce-lsp-usage -->
+
 ## lsp_enforcement — use LSP tools for code symbol lookups
 
 Using `Grep` or `Bash` (grep/rg) to find class definitions, function signatures, or symbol references is blocked or redirected to LSP tools, which are faster and semantically accurate.
@@ -1135,6 +1187,8 @@ Using `Grep` or `Bash` (grep/rg) to find class definitions, function signatures,
 
 Default mode (`block_once`): the first symbol-lookup grep in a session is denied with guidance; subsequent retries are allowed.
 
+<!-- handler: require-gh-issue-comments -->
+
 ## gh_issue_comments — always include --comments on gh issue view
 
 `gh issue view` without `--comments` is blocked. Issue comments often contain critical context, clarifications, and updates not in the issue body.
@@ -1145,6 +1199,8 @@ Default mode (`block_once`): the first symbol-lookup grep in a session is denied
 
 If using `--json`, include `comments` in the field list instead of adding `--comments`.
 
+<!-- handler: require-gh-pr-comments -->
+
 ## gh_pr_comments — always include --comments on gh pr view
 
 `gh pr view` without `--comments` is blocked. PR comments often contain review feedback, reviewer requests, and decisions not in the PR body.
@@ -1154,6 +1210,8 @@ If using `--json`, include `comments` in the field list instead of adding `--com
 **Allowed**: `gh pr view 123 --comments`, `gh pr view 123 --json title,body,comments`
 
 If using `--json`, include `comments` in the field list instead of adding `--comments`.
+
+<!-- handler: plan-qa-commit-gate -->
 
 ## plan_qa_commit_gate — cross-file plan checks at git commit
 
@@ -1198,6 +1256,8 @@ commit with a TODO list of what the commit must also contain.
 Check the staged tree any time without committing:
 `/workspace/bin/hooks-daemon plan-qa --check-staged`.
 Commits inside nested/vendor repos or foreign worktrees are exempt.
+
+<!-- handler: plan-qa-edit -->
 
 ## plan_qa_edit — PLAN.md writes are linted in real time
 
@@ -1272,6 +1332,8 @@ Grandfathered plans in `plan_workflow.qa.legacy_plan_allowlist`
 only ever advise. Lint any file on demand:
 `/workspace/bin/hooks-daemon plan-qa --lint <file>`.
 
+<!-- handler: block-plan-time-estimates -->
+
 ## plan_time_estimates — plans describe WHAT, not WHEN
 
 Writing time estimates into a plan document is blocked — that is any `CLAUDE/Plan/**/*.md` EXCEPT anything under a plan's `JOURNAL/`. Plans capture the work to be done, not how long it will take.
@@ -1287,6 +1349,8 @@ Writing time estimates into a plan document is blocked — that is any `CLAUDE/P
 
 **Instead:** break work into concrete tasks and implementation steps, and let the user decide scheduling. Technical durations that describe a feature (cache TTL, session timeout, retention window) are allowed — only work/effort estimates are blocked.
 
+<!-- handler: agent-isolation-advisor -->
+
 ## agent_isolation_advisor — isolate concurrent agents
 
 When more than one agent thread is live in this checkout, spawning another Agent without isolation is flagged (advisory, never blocked).
@@ -1296,6 +1360,8 @@ Agents in one working tree share a single `.git/index`, so a peer's bare `git co
 **Prefer**: `isolation: "worktree"` on the Agent tool, then `git merge` or `git cherry-pick` to bring work back.
 
 **Keep the shared tree** for agents that need the real project root — daemon restart verification and client-mode testing do not work in a worktree.
+
+<!-- handler: plan-workflow-guidance -->
 
 ## plan_workflow — PLAN.md, supporting docs and JOURNAL/ obey DIFFERENT contracts
 
@@ -1322,6 +1388,8 @@ Confusing these is the single most common plan-hygiene failure: narrative AND du
 
 **Task status icons**: ⬜ not started, 🔄 in progress, ✅ complete. Include a Success Criteria section and break work into phases.
 
+<!-- handler: enforce-npm-commands -->
+
 ## npm_command — use llm: prefixed npm commands
 
 Direct `npm run` and `npx` commands are blocked or advised against. Projects with `llm:` prefixed scripts in `package.json` should use those instead.
@@ -1331,6 +1399,8 @@ Direct `npm run` and `npx` commands are blocked or advised against. Projects wit
 **Example**: Use `npm run llm:build` instead of `npm run build`.
 
 If no `llm:` commands exist in `package.json`, the handler operates in advisory mode (warns but does not block).
+
+<!-- handler: enforce-markdown-organization -->
 
 ## markdown_organization — tracked-docs policy (untracked Claude memory BLOCKED)
 
@@ -1351,6 +1421,8 @@ Keep ONE source of truth per fact and link to it. Normal markdown-location rules
 
 **Allowed locations**: `CLAUDE/`, `docs/`, `RELEASES/`, `CLAUDE/Plan/`, root-level `README.md`, `.claude/rules/`, or any `extra_allowed_markdown_paths` pattern.
 
+<!-- handler: validate-instruction-content -->
+
 ## validate_instruction_content — CLAUDE.md and README.md must have stable content
 
 Writing ephemeral or session-specific content to `CLAUDE.md` or `README.md` is blocked. These files should contain only stable instructions, not implementation logs or session state.
@@ -1364,6 +1436,8 @@ Writing ephemeral or session-specific content to `CLAUDE.md` or `README.md` is b
 - LLM summary section headings ('## Summary', '## Key Points')
 
 Content inside markdown code blocks is exempt from validation.
+
+<!-- handler: recovery-cron-advisor -->
 
 ## recovery_cron_advisor — failsafe recovery cron lifecycle advisory
 
@@ -1428,6 +1502,8 @@ handlers:
       enabled: false
 ```
 
+<!-- handler: background-process-tracker -->
+
 ## background_process_tracker — backgrounded processes are tracked
 
 A PostToolUse advisory that fires when a Bash call backgrounds a process (`run_in_background: true`, or a `&`/`nohup`/`setsid`/`disown` command). It records the command to `background-processes.jsonl` and injects rate-limited guidance.
@@ -1443,6 +1519,8 @@ When you background a long-lived process:
 - Delete the watchdog cron (CronDelete) when no backgrounded work remains.
 
 Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
+
+<!-- handler: markdown-table-formatter -->
 
 ## markdown_table_formatter — markdown tables are auto-aligned
 
@@ -1463,9 +1541,13 @@ After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-
 /workspace/bin/hooks-daemon format-markdown <path>
 ```
 
+<!-- handler: git-hooks-executable-fixer -->
+
 ## git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
 When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
+
+<!-- handler: command-hints -->
 
 ## command_hints — advisory reminders after specific commands
 
@@ -1474,6 +1556,8 @@ PostToolUse advisory (never blocks). When a configured command is detected in a 
 **Rate-limited per hint** — each hint has a `ttl_seconds` cooldown (tracked per session + hint id) so it does not repeat on every matching command; state resets on daemon restart, so a hint may fire once more after a restart.
 
 **Configure** via `handlers.post_tool_use.command_hints.options`: `mode: additive` (default) appends your `hints` list to the built-in set — a project entry whose `id` matches a built-in one overrides it; `mode: replace` discards the built-in set entirely and uses only your list. Each hint: `id`, `pattern` (a literal command name, matched at the start of a shell segment — path-qualified and `env`-prefixed spellings are recognised, but it never fires on the word appearing as an unrelated argument), `hint` (the reminder text), `ttl_seconds`, and optional `min_calls_between` (secondary count-based gate). Disable with `handlers.post_tool_use.command_hints.enabled: false`.
+
+<!-- handler: project-handler-load-checker -->
 
 ## project_handler_load_checker — project protection degraded alert
 
@@ -1488,6 +1572,8 @@ At session start this handler reports any **project handlers** (`.claude/project
 
 The handler is silent when every project handler loads, so seeing this alert always means real action is required.
 
+<!-- handler: ccy-supervisor-integrity -->
+
 ## ccy_supervisor_integrity — keep the ccy supervisor properly set up
 
 At session start this handler checks a ccy project (`.claude/ccy/`) whose supervisor is **armed** (`ccy.env` exports `CCY_CLAUDE_WRAPPER` referencing `claude-supervise.py`). It warns — never blocks — when the setup is brick-risky:
@@ -1500,6 +1586,8 @@ At session start this handler checks a ccy project (`.claude/ccy/`) whose superv
 It also detects a **stale running supervisor** (Plan 00164): when a daemon upgrade has put a NEWER `claude-supervise.py` on disk than the live process (compared by source fingerprint, not just version), it advises restarting ccy so the wrapper re-execs the updated supervisor. Nothing is broken meanwhile — the old supervisor keeps working until the session is relaunched.
 
 When you see this alert, fix the listed item(s) and commit the ccy files so the supervisor works for everyone.
+
+<!-- handler: hook-registration-checker -->
 
 ## hook_registration_checker — hooks configuration policy
 
@@ -1517,6 +1605,8 @@ On every new session this handler audits hook configuration across `.claude/sett
 - **Legacy-style commands**: replace them with a project-level handler. Run `/workspace/bin/hooks-daemon init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
 - **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
 - **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry and remove the duplicate in `settings.local.json`.
+
+<!-- handler: plan-qa-sweep -->
 
 ## plan_qa_sweep — plan-tree drift report at session start
 
@@ -1539,6 +1629,8 @@ The CLI exits 1 while findings remain (CI-able). Single-file lint:
 Policy lives under `plan_workflow.qa` in `.claude/hooks-daemon.yaml`
 (archive dir names, staleness window, legacy/collision allowlists).
 
+<!-- handler: git-upstream-checker -->
+
 ## git_upstream_checker — additive fetch + pull/cleanup advice on session start
 
 On each new session the daemon runs an **additive** `git fetch --all` (never `--prune` — it never removes anything automatically) and then:
@@ -1555,6 +1647,8 @@ On each new session the daemon runs an **additive** `git fetch --all` (never `--
 
 It is silent when up to date with no gone branches, not in a git repo, on a detached HEAD, or without an upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
 
+<!-- handler: plan-workflow-asset-checker -->
+
 ## plan_workflow_asset_checker — plan tooling provisioning alert
 
 At session start, when the plan workflow is enabled but the daemon-owned `mkplan.bash` is missing from the plan directory, this advisory fires (it never blocks). A missing `mkplan.bash` means `CLAUDE.md` and `plan_number_helper` reference a scaffolder that does not exist and journalling is inert.
@@ -1567,9 +1661,13 @@ At session start, when the plan workflow is enabled but the daemon-owned `mkplan
 
 The deploy is idempotent (fills gaps only, never overwrites client-owned files). Silent when `mkplan.bash` is present or the workflow is disabled.
 
+<!-- handler: idle-housekeeping-advisory -->
+
 ## idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
 
 When the session is idle and caught up (repeated no-op failsafe-recovery ticks), this advisory suggests a bounded HOUSEKEEPING MODE: dispatch specialist housekeeping sub-agents that run read-only audits and write shareable **markdown report files** (default `untracked/reports/`). It is REPORT-ONLY — never auto-fix or auto-commit — and strictly lower priority than real work (a real user prompt aborts it). Off by default; enable via `handlers.user_prompt_submit.idle_housekeeping_advisory.enabled: true`. A project can point it at its own doc via the `custom_guidance_doc` option (`custom_guidance_mode: additive` appends it to the default, `replace` uses only the project doc). See docs/guides/CREATING_REPORTS.md.
+
+<!-- handler: standing-authorisations -->
 
 ## standing_authorisations — a project can record a standing request
 
@@ -1579,6 +1677,8 @@ Configured in `.claude/hooks-daemon.yaml` under `handlers.user_prompt_submit.sta
 
 **Every entry ships disabled.** The handler is enabled so the options are discoverable, but nothing is authorised until the project turns it on — the daemon must never assert consent that was not given. Enabling one is a deliberate act by whoever owns the repository, and removing it withdraws the authorisation.
 
+<!-- handler: auto-approve-reads -->
+
 ## auto_approve_reads — gated on bypassPermissions mode
 
 Read-only tool permission requests (`Read`, `Glob`, `Grep`) are auto-approved **only** when Claude Code reports `permission_mode == "bypassPermissions"` (YOLO mode).
@@ -1586,6 +1686,8 @@ Read-only tool permission requests (`Read`, `Glob`, `Grep`) are auto-approved **
 In every other mode (`default`, `plan`, `acceptEdits`, `dontAsk`) the handler defers and Claude Code's normal approval prompt is shown — the user has not opted out of per-tool approvals, so the daemon must not silently approve on their behalf.
 
 If a permission prompt for `Read` appears in `default` mode, that is correct behaviour — approve it via Claude Code's UI.
+
+<!-- handler: auto-continue-stop -->
 
 ### Stop Explanation Required
 
@@ -1627,6 +1729,8 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 
 **On Stop hook re-entry (the hook fires again after a prior block)**: your next response is treated like any other — it must either prefix with `STOPPING BECAUSE:` or continue the work. Re-entry does not exempt you from the explanation rule.
 
+<!-- handler: dismissive-language-detector -->
+
 ## dismissive_language_detector — do not deflect or prematurely halt
 
 Stop-time advisory that fires on language patterns signalling avoidance of work. The handler does NOT block the stop, but injects context for the next turn so the agent self-corrects. Identical advisories (same session, same phrase set) are emitted once, not repeated on every subsequent stop.
@@ -1638,6 +1742,8 @@ Stop-time advisory that fires on language patterns signalling avoidance of work.
 - Speculative `should be fine` or `probably works` when verification is cheap (run the test, read the file).
 
 **Do**: acknowledge the issue, fix it, or — if it genuinely is out of scope — say so once with the specific reason and continue with the in-scope work.
+
+<!-- handler: worktree-create -->
 
 ## worktree_create — semantic worktree naming
 
