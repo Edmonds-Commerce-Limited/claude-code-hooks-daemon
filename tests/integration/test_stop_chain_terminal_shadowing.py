@@ -229,3 +229,126 @@ class TestStopChainTerminalShadowing:
             "auto_continue_stop — did not reach the response. Its context should survive "
             f"the terminal handler's result. Response: {rendered[:400]}"
         )
+
+
+class TestThisProjectHasNotFallenIntoTheTrap:
+    """Proving the hazard exists is not the same as checking the floor.
+
+    The probe tests above establish that a Stop handler above priority 10 is
+    unreachable. They say nothing about whether THIS repository has one — and
+    it did. `ReleaseBlockerHandler`, a project handler whose job is to block
+    the Stop event during a release until acceptance testing is done, was
+    registered at priority 12 and had never fired.
+
+    Its own docstring records why, and it was not a mistake by its author:
+
+        Priority: 12 (before AutoContinueStop at 15)
+
+    It WAS before AutoContinueStop. The daemon still ships 15 in its config
+    template. This project's `.claude/hooks-daemon.yaml` later set it to 10,
+    and that edit silently disabled a guard on the release process. Nothing
+    noticed, because a shadowed handler and a handler that did not match
+    produce identical output: nothing at all.
+
+    So this reads the project's REAL Stop registrations — config plus project
+    handlers — and fails by name on anything the terminal handler would
+    swallow. A guard that documents a trap without checking the floor is half
+    a guard.
+    """
+
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+
+    @staticmethod
+    def _project_root() -> Path:
+        return Path(__file__).resolve().parents[2]
+
+    def _registered_stop_handlers(self) -> list[Handler]:
+        """Every Stop handler this project actually registers, in chain order.
+
+        Built from the project's OWN config file, including
+        ``project_handlers_config`` — omitting that made the first draft of
+        this check pass vacuously against the very handler it was written for,
+        because project handlers are only loaded when that argument is passed.
+        A guard whose fixture cannot produce the failure is not a guard.
+        """
+        from claude_code_hooks_daemon.config.models import Config
+
+        workspace = self._project_root()
+        config = Config.load(workspace / ".claude" / "hooks-daemon.yaml")
+
+        controller = DaemonController()
+        with _mock_git_subprocess():
+            controller.initialise(
+                handler_config=config.handlers.model_dump(),
+                workspace_root=workspace,
+                project_handlers_config=config.project_handlers,
+            )
+
+        return list(controller.get_router().get_chain(EventType.STOP).handlers)
+
+    def test_the_fixture_sees_the_project_handlers(self) -> None:
+        """Vacuity guard for the check below.
+
+        The shadowing check is an absence assertion over a list. If that list
+        silently excluded project handlers — as it did on the first draft —
+        the check would pass while looking at half the chain.
+        """
+        names = {h.name for h in self._registered_stop_handlers()}
+
+        assert len(names) > 1, (
+            f"Only {names} registered on Stop. The fixture is not loading this "
+            "project's handlers, so the shadowing check below has nothing to find."
+        )
+
+    def test_nothing_is_registered_after_the_handler_that_breaks_the_chain(self) -> None:
+        """Shadowing is BEHAVIOURAL: only a terminal handler that MATCHES breaks it.
+
+        "Anything after the lowest-numbered terminal handler" is the wrong
+        test, and the first draft of this check used it and was wrong in the
+        opposite direction — it flagged `auto_continue_stop` as shadowed by
+        `release_blocker`, which sits at 8 and is terminal but matches only
+        when release files are dirty. A narrowly-matching terminal handler is
+        exactly how you place a guard AHEAD of the catch-all, and the check
+        must not forbid the correct pattern while hunting the broken one.
+
+        So the chain is walked in real priority order against an ordinary Stop
+        event, with git stubbed to a clean tree so the release guard's own
+        `matches()` is deterministic rather than depending on whatever happens
+        to be uncommitted when the suite runs.
+        """
+        handlers = self._registered_stop_handlers()
+        hook_input: dict[str, Any] = {
+            "hook_event_name": "Stop",
+            "stop_hook_active": False,
+            "session_id": "shadow-audit",
+            "cwd": str(self._project_root()),
+        }
+
+        breaker: Handler | None = None
+        after: list[tuple[str, int]] = []
+        with patch("subprocess.run", return_value=Mock(returncode=0, stdout="", stderr="")):
+            for handler in handlers:
+                if breaker is not None:
+                    after.append((handler.name, handler.priority))
+                elif handler.terminal and handler.matches(hook_input):
+                    breaker = handler
+
+        assert breaker is not None, (
+            "No terminal Stop handler matched an ordinary stop, so this check has "
+            "nothing to measure against. If auto_continue_stop was deliberately "
+            "removed, delete this test with it rather than leaving it green."
+        )
+
+        assert not after, (
+            f"These Stop handlers are registered AFTER {breaker.name!r} (priority "
+            f"{breaker.priority}), which is terminal and matches an ordinary stop, so "
+            f"they can never run: {sorted(after)}.\n\n"
+            "A handler in this state is silently disabled and indistinguishable from "
+            "one that simply did not match — no error, no log, nothing. Either give it "
+            "a priority below the breaking handler, or move its work to the `nitpick` "
+            "pseudo-event, which fires per turn and is not shadowed.\n\n"
+            "If a PROJECT handler is involved, check its priority against the value "
+            "THIS project's config sets, not the value the daemon's template ships — "
+            "that disagreement is what disabled release-blocker (Plan 00237)."
+        )

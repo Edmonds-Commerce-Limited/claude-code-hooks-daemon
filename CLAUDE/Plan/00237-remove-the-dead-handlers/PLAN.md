@@ -190,7 +190,7 @@ the Stop handler the "single source of truth". The live leg holds only the loop.
 
 ### Phase 3b: The shadowing hazard is LIVE in this repo
 
-- [ ] ⬜ **Task 3.8**: `ReleaseBlockerHandler` (project handler,
+- [x] ✅ **Task 3.8**: `ReleaseBlockerHandler` (project handler,
   `.claude/project-handlers/stop/release_blocker.py`) is registered at priority
   12, above the terminal `auto_continue_stop` at 10, and has never fired —
   confirmed by live socket probe on two Stop shapes (JOURNAL 23:20). Its own
@@ -200,11 +200,17 @@ the Stop handler the "single source of truth". The live leg holds only the loop.
   guards the RELEASE process. Move it below 10; its `matches()` is narrow
   (release files modified AND not `stop_hook_active`), so ordinary stops still
   fall through
-- [ ] ⬜ **Task 3.9**: DBF — the Task 3.3 guard proves the hazard with a
+- [x] ✅ **Task 3.9**: DBF — the Task 3.3 guard proves the hazard with a
   synthetic probe but never checks whether THIS project has fallen into it, so
-  it could not have caught Task 3.8. Add a check over the real registered Stop
-  chain (built-in config + project handlers) that fails by name on any handler
-  above the terminal one
+  it could not have caught Task 3.8. Added `TestThisProjectHasNotFallenIntoTheTrap`
+  over the real registered Stop chain (built-in config + project handlers),
+  failing by name on any handler the chain cannot reach. The check is
+  BEHAVIOURAL, not "anything after the lowest terminal priority" — it walks the
+  chain against a real Stop input and finds the first terminal handler that
+  MATCHES, so a narrowly-matching terminal handler ahead of the catch-all is
+  correctly not flagged. Paired with a vacuity companion asserting the fixture
+  actually sees the project handlers, since `initialise()` without
+  `project_handlers_config` silently loads none
 
 ### Phase 4: The two MERGE verdicts
 

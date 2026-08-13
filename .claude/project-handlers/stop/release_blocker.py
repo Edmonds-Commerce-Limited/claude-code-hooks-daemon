@@ -13,16 +13,33 @@ Why This Exists: During v2.13.0 release, Claude repeatedly tried to skip accepta
 testing despite it being mandatory. Acceptance testing caught a real bug that would
 have shipped. This handler enforces the workflow.
 
-Priority: 12 (before AutoContinueStop at 15)
+Priority: 8 — BELOW this project's AutoContinueStop, which is terminal.
+
+That number is not arbitrary and must not be raised. AutoContinueStop is
+terminal and matches nearly every Stop event, so the chain breaks there: any
+Stop handler with a higher priority number never runs at all. This handler
+previously sat at 12, chosen when the daemon's config template put
+AutoContinueStop at 15 — which the template still does. This project's
+`.claude/hooks-daemon.yaml` sets it to 10 instead, and that made this handler
+unreachable, silently, for as long as both values have disagreed. Nothing
+reported it, because a shadowed handler and a handler that did not match look
+identical from outside: no output either way.
+
+`tests/integration/test_stop_chain_terminal_shadowing.py` now fails by name if
+any Stop handler drifts back above the terminal one.
+
 Terminal: True (blocks session ending when release detected)
 """
 
+import logging
 import subprocess
 from typing import ClassVar
 
 from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+
+logger = logging.getLogger(__name__)
 
 
 class ReleaseBlockerHandler(Handler):
@@ -56,13 +73,41 @@ class ReleaseBlockerHandler(Handler):
     }
 
     def __init__(self) -> None:
-        """Initialize ReleaseBlockerHandler with priority 12 (before AutoContinueStop)."""
+        """Initialise with a priority BELOW the terminal AutoContinueStop.
+
+        See the module docstring: anything above it is unreachable, and this
+        handler spent that period silently disabled.
+        """
         super().__init__(
             name="release-blocker",
-            priority=12,
+            priority=8,
             terminal=True,
             tags=[HandlerTag.WORKFLOW, HandlerTag.BLOCKING],
         )
+
+    @staticmethod
+    def _repo_root(hook_input: dict) -> str | None:
+        """Resolve the repository to inspect, never relying on process cwd.
+
+        Prefers the ``cwd`` Claude Code sends with the event, since that is
+        the session's actual working directory. Falls back to the daemon's
+        own project root, which is correct for a single-project daemon and is
+        the only option when the event carries no cwd.
+
+        Returns None when neither is available, which the caller treats as
+        "cannot tell" and allows the stop — a release guard must never trap a
+        session because it could not locate the repository.
+        """
+        cwd = hook_input.get("cwd")
+        if isinstance(cwd, str) and cwd:
+            return cwd
+
+        try:
+            from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+            return str(ProjectContext.project_root())
+        except (RuntimeError, AttributeError):
+            return None
 
     def matches(self, hook_input: dict) -> bool:
         """Check if handler should trigger.
@@ -78,18 +123,38 @@ class ReleaseBlockerHandler(Handler):
         if hook_input.get("stop_hook_active") or hook_input.get("stopHookActive"):
             return False
 
-        # 2. Check for modified release files via git status
+        # 2. Check for modified release files via git status.
+        #
+        # `git -C <root>`, never a bare `git status`. The daemon is a
+        # long-lived process whose working directory is `/` — not the project
+        # — so a bare invocation runs outside any repository, exits non-zero,
+        # and is swallowed by the fail-safe below. That combination made this
+        # handler unable to fire even once its priority was corrected: the
+        # ordering bug hid a second bug behind it, and the fail-safe made both
+        # look like "no release in progress".
+        repo_root = self._repo_root(hook_input)
+        if repo_root is None:
+            logger.warning("release-blocker: no project root resolved, allowing stop")
+            return False
+
         try:
             result = subprocess.run(
-                ["git", "status", "--short"],
+                ["git", "-C", repo_root, "status", "--short"],
                 capture_output=True,
                 text=True,
                 timeout=Timeout.GIT_CONTEXT,
                 check=False,
             )
 
-            # Silent allow on git error
+            # Fail-safe: never trap a session because git misbehaved. Logged
+            # rather than silent, so a handler that has stopped working says so
+            # instead of looking exactly like a handler with nothing to report.
             if result.returncode != 0:
+                logger.warning(
+                    "release-blocker: git status failed in %s (rc=%d), allowing stop",
+                    repo_root,
+                    result.returncode,
+                )
                 return False
 
             # Parse git status output (format: "M  filename")

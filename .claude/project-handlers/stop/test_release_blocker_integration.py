@@ -8,6 +8,10 @@ from unittest.mock import MagicMock, patch
 
 from .release_blocker import ReleaseBlockerHandler
 
+# The handler scopes git to an explicit repository rather than inheriting the
+# process working directory, so the event must carry one (Plan 00237).
+_REPO = "/workspace"
+
 
 class TestReleaseBlockerIntegration:
     """Test ReleaseBlockerHandler integration with daemon system."""
@@ -21,7 +25,7 @@ class TestReleaseBlockerIntegration:
         mock_run.return_value = MagicMock(returncode=0, stdout="M  pyproject.toml\n")
 
         # Verify handler matches (release context)
-        hook_input = {}
+        hook_input = {"cwd": _REPO}
         assert handler.matches(hook_input) is True
 
         # Execute handler
@@ -42,7 +46,7 @@ class TestReleaseBlockerIntegration:
         # Mock no release files modified
         mock_run.return_value = MagicMock(returncode=0, stdout="M  tests/test_something.py\n")
 
-        hook_input = {}
+        hook_input = {"cwd": _REPO}
         assert handler.matches(hook_input) is False
 
     def test_handler_has_required_attributes(self) -> None:
