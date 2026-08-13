@@ -1557,6 +1557,27 @@ PostToolUse advisory (never blocks). When a configured command is detected in a 
 
 **Configure** via `handlers.post_tool_use.command_hints.options`: `mode: additive` (default) appends your `hints` list to the built-in set — a project entry whose `id` matches a built-in one overrides it; `mode: replace` discards the built-in set entirely and uses only your list. Each hint: `id`, `pattern` (a literal command name, matched at the start of a shell segment — path-qualified and `env`-prefixed spellings are recognised, but it never fires on the word appearing as an unrelated argument), `hint` (the reminder text), `ttl_seconds`, and optional `min_calls_between` (secondary count-based gate). Disable with `handlers.post_tool_use.command_hints.enabled: false`.
 
+<!-- handler: validate-eslint-on-write -->
+
+## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
+
+A `Write`/`Edit` to a `.ts` or `.tsx` file is run through ESLint. Reported
+errors DENY the tool call.
+
+**The write has ALREADY landed on disk.** The denial is a failure report, not
+a rollback — the file exists with your content in it. Fix the reported problems
+with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
+sibling tool calls that were cancelled alongside the denied one.
+
+**This is STRICTER than `lint_on_edit`, which covers the other languages.**
+That handler ALLOWs when its linter is missing or when the check times out;
+this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
+Do not carry "a missing linter never blocks" across to TypeScript.
+
+**Enforcement is gated on `llm:` scripts in `package.json`.** With none
+present this handler only advises — and suggests adding `llm:lint` — so silence
+is not evidence that a `.ts` file is clean.
+
 <!-- handler: lint-on-edit -->
 
 ## lint_on_edit — source writes are linted, and a failure DENIES
@@ -1579,7 +1600,9 @@ daemon's venv before `PATH`.
 
 **A linter that is not installed never blocks.** You get an advisory saying it
 was not found and the write stands — so that message means the check was
-SKIPPED, not that it passed.
+SKIPPED, not that it passed. That leniency is specific to THIS handler:
+`.ts`/`.tsx` files are handled by `validate_eslint_on_write`, which denies on
+a timeout and on any failure to run ESLint.
 
 Narrow it under `handlers.post_tool_use.lint_on_edit.options`: `languages`
 restricts which languages are checked, and `command_overrides` replaces a
