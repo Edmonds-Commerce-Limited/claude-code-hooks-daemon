@@ -443,3 +443,151 @@ def test_repo_without_a_plan_directory_is_clean(tmp_path: Path) -> None:
     exit_code, report = _run_checker(repo)
 
     assert exit_code == 0, report
+
+
+# ---------------------------------------------------------------------------
+# orphaned-handler-guidance
+#
+# The daemon regenerates the <hooksdaemon> block in CLAUDE.md on restart and
+# auto-commits it. A handler that is later renamed or deleted therefore leaves
+# its guidance behind: resident instructions, in every session's context,
+# describing behaviour nothing in the tree implements. Agents are told to obey
+# that block, so stale guidance is not merely untidy — it is actively wrong.
+#
+# The rule is keyed on EXISTS, deliberately not on is-committed. The
+# restart-to-verify step necessarily runs BEFORE the commit, so every new
+# handler passes through a transient state where its guidance is committed and
+# its source is not. A committed-ness check would fire on that every time and
+# be disabled within a day — the failure mode Core Standard 15 warns about.
+# ---------------------------------------------------------------------------
+
+_MARKER = "<!-- handler: {name} -->"
+
+
+def _claude_md_with_guidance(*handler_names: str) -> str:
+    """Build a CLAUDE.md whose guidance block names ``handler_names``."""
+    sections = "\n\n".join(
+        f"{_MARKER.format(name=name)}\n\n## {name}\n\nGuidance for {name}."
+        for name in handler_names
+    )
+    return f"# Project\n\n<hooksdaemon>\n\n{sections}\n\n</hooksdaemon>\n"
+
+
+_HANDLER_REL = "src/claude_code_hooks_daemon/handlers/pre_tool_use/{name}.py"
+
+
+def test_flags_guidance_whose_handler_no_longer_exists(tmp_path: Path) -> None:
+    """The orphan: a section for a handler absent from the tree.
+
+    The repo must contain a handlers directory — that is what makes "absent"
+    a judgement rather than a guess (see the inertness test below).
+    """
+    repo = _make_repo(
+        tmp_path,
+        {
+            "CLAUDE.md": _claude_md_with_guidance("deleted_handler"),
+            _HANDLER_REL.format(name="some_other_handler"): "# handler\n",
+            "README.md": "# fixture\n",
+        },
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1
+    assert "orphaned-handler-guidance" in _rules(report)
+
+
+def test_inert_when_no_handlers_directory_can_be_found(tmp_path: Path) -> None:
+    """Deliberate: no handler source visible means NO judgement, not "all orphaned".
+
+    A client project keeps the daemon under ``.claude/hooks-daemon/``, so its
+    project root has no ``src/claude_code_hooks_daemon/handlers`` at all. A
+    checker that treated "cannot see the handlers" as "every section is
+    orphaned" would fire on every client repo and be switched off — so
+    absence of evidence is explicitly not evidence of absence here.
+    """
+    repo = _make_repo(
+        tmp_path,
+        {
+            "CLAUDE.md": _claude_md_with_guidance("some_handler"),
+            "README.md": "# fixture\n",
+        },
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, report
+
+
+def test_guidance_with_a_live_handler_is_clean(tmp_path: Path) -> None:
+    repo = _make_repo(
+        tmp_path,
+        {
+            "CLAUDE.md": _claude_md_with_guidance("real_handler"),
+            _HANDLER_REL.format(name="real_handler"): "# handler\n",
+            "README.md": "# fixture\n",
+        },
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, report
+
+
+def test_flags_only_the_orphan_when_mixed_with_live_handlers(tmp_path: Path) -> None:
+    repo = _make_repo(
+        tmp_path,
+        {
+            "CLAUDE.md": _claude_md_with_guidance("real_handler", "ghost_handler"),
+            _HANDLER_REL.format(name="real_handler"): "# handler\n",
+            "README.md": "# fixture\n",
+        },
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1
+    messages = " ".join(v["message"] for v in report["violations"])
+    assert "ghost_handler" in messages
+    assert "real_handler" not in messages
+
+
+def test_an_uncommitted_handler_is_not_an_orphan(tmp_path: Path) -> None:
+    """EXISTS, not is-committed.
+
+    This is the transient state every new handler passes through: the daemon
+    restart regenerated and committed the guidance, and the source file is on
+    disk but not yet staged. Flagging it would make the rule fire during
+    normal development, which is how a guard gets switched off.
+    """
+    repo = _make_repo(
+        tmp_path,
+        {
+            "CLAUDE.md": _claude_md_with_guidance("brand_new_handler"),
+            "README.md": "# fixture\n",
+        },
+    )
+    untracked = repo / _HANDLER_REL.format(name="brand_new_handler")
+    untracked.parent.mkdir(parents=True, exist_ok=True)
+    untracked.write_text("# not staged yet\n", encoding="utf-8")
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, report
+
+
+def test_repo_without_a_guidance_block_is_clean(tmp_path: Path) -> None:
+    """Inert for any project that has never run the injector."""
+    repo = _make_repo(tmp_path, {"CLAUDE.md": "# Project\n\nNo daemon block.\n"})
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, report
+
+
+def test_repo_without_a_claude_md_is_clean(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path, {"README.md": "# fixture\n"})
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, report

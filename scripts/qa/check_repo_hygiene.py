@@ -78,6 +78,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+# Imported rather than re-derived: the marker format has exactly ONE home, in
+# the module that WRITES it. A second copy of the regex here is the copy that
+# silently stops matching when the writer changes, which would turn this guard
+# green while it saw nothing — the precise failure it exists to prevent.
+from claude_code_hooks_daemon.constants import HandlerID
+from claude_code_hooks_daemon.core.claude_md_injector import handler_names_in_guidance
+
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR_PARTS: Final[tuple[str, str]] = ("untracked", "qa")
 _OUTPUT_FILENAME: Final[str] = "repo_hygiene.json"
@@ -93,6 +100,7 @@ RULE_ROOT_TEST_SCRIPT: Final[str] = "root-test-script"
 RULE_FROZEN_SUMMARY: Final[str] = "frozen-session-summary"
 RULE_SRC_TEST_STUB: Final[str] = "src-test-stub"
 RULE_IGNORED_PLAN_DOC: Final[str] = "ignored-plan-document"
+RULE_ORPHANED_GUIDANCE: Final[str] = "orphaned-handler-guidance"
 
 _ALL_RULES: Final[tuple[str, ...]] = (
     RULE_TRACKED_ARTIFACT,
@@ -100,7 +108,23 @@ _ALL_RULES: Final[tuple[str, ...]] = (
     RULE_FROZEN_SUMMARY,
     RULE_SRC_TEST_STUB,
     RULE_IGNORED_PLAN_DOC,
+    RULE_ORPHANED_GUIDANCE,
 )
+
+# ── orphaned-handler-guidance ──────────────────────────────────────────────
+# The daemon regenerates the <hooksdaemon> block in CLAUDE.md on restart and
+# auto-commits it, so a renamed or deleted handler leaves its guidance behind:
+# resident instructions, in every session's context, describing behaviour
+# nothing in the tree implements. Agents are told to obey that block, so stale
+# guidance is not untidiness, it is an actively wrong instruction.
+#
+# Detection is only possible because the injector emits a provenance marker
+# per section. Matching on section HEADINGS was considered and rejected —
+# they are whatever each get_claude_md() wrote, ranging from
+# `## destructive_git` to prose like `### Stop Explanation Required`.
+_CLAUDE_MD_FILENAME: Final[str] = "CLAUDE.md"
+_HANDLERS_DIR: Final[str] = "src/claude_code_hooks_daemon/handlers"
+_PROJECT_HANDLERS_DIR: Final[str] = ".claude/project-handlers"
 
 # Directory whose contents are tracked source BY POLICY (CLAUDE/Plan/CLAUDE.md:
 # "never let a plan folder linger untracked"). Nothing under it may be caught
@@ -234,6 +258,17 @@ _REMEDIATION_IGNORED_PLAN_DOC: Final[str] = (
     "too. This is a silent loss — git status stays clean, so the document is "
     "missing for everyone except its author, who still sees it on disk and "
     "whose PLAN.md link still resolves locally."
+)
+
+_REMEDIATION_ORPHANED_GUIDANCE: Final[str] = (
+    "Restart the daemon so the injector regenerates the <hooksdaemon> block "
+    "without the dead section, then commit the regenerated CLAUDE.md. If the "
+    "handler was RENAMED, this is the old name lingering; if it was DELETED, "
+    "its instructions are still resident in every session. Do NOT hand-edit "
+    "the block — it is regenerated on every restart, so an edit is discarded "
+    "and the guidance returns. This matters because agents are told to obey "
+    "that block: guidance no handler implements is not clutter, it is an "
+    "instruction to expect behaviour that will never happen."
 )
 
 
@@ -450,6 +485,71 @@ def _is_src_test_stub(rel_path: str) -> bool:
     return basename.startswith(_TEST_SCRIPT_PREFIX) and basename.endswith(_PYTHON_SUFFIX)
 
 
+def orphaned_guidance_handlers(root: Path) -> tuple[str, ...]:
+    """Handler names whose CLAUDE.md guidance has no handler module on disk.
+
+    Keyed on EXISTS, deliberately NOT on is-committed. The mandatory
+    restart-to-verify step runs BEFORE the commit, so every new handler passes
+    through a state where its guidance is committed and its source is not. A
+    committed-ness check would fire on that every single time and be switched
+    off within a day — which is the failure Core Standard 15 warns about, not
+    a stricter version of it.
+
+    Returns:
+        Orphaned handler names, sorted. Empty when there is no CLAUDE.md, no
+        guidance block, or every marker resolves.
+    """
+    claude_md = root / _CLAUDE_MD_FILENAME
+    if not claude_md.is_file():
+        return ()
+
+    names = handler_names_in_guidance(claude_md.read_text(encoding="utf-8"))
+    if not names:
+        return ()
+
+    handlers_dir = root / _HANDLERS_DIR
+    if not handlers_dir.is_dir():
+        return ()
+
+    return tuple(sorted(set(names) - _known_handler_identities(root)))
+
+
+def _known_handler_identities(root: Path) -> set[str]:
+    """Every spelling by which a live handler may be named in a marker.
+
+    Three sources unioned, deliberately permissive. A marker survives if ANY
+    of them recognises it, because a false positive here is far more costly
+    than a missed orphan: it would fire on a healthy repo and get the guard
+    switched off, which is the outcome Core Standard 15 exists to avoid.
+
+    The DISPLAY NAME is the one the injector actually writes (``handler.name``
+    is ``prevent-destructive-git``, not the module stem ``destructive_git``) —
+    measured, after a first draft matched module stems and flagged all 53 live
+    sections. Config keys and module stems are included anyway so the rule
+    keeps working if the injector's choice of identity ever changes.
+    """
+    identities: set[str] = set()
+
+    for attr_name in dir(HandlerID):
+        if attr_name.startswith("_"):
+            continue
+        meta = getattr(HandlerID, attr_name)
+        display = getattr(meta, "display_name", None)
+        if isinstance(display, str):
+            identities.add(display)
+        config_key = getattr(meta, "config_key", None)
+        if isinstance(config_key, str):
+            identities.add(config_key)
+
+    # Project handlers live outside HandlerID entirely, so a project that gives
+    # one CLAUDE.md guidance would otherwise be flagged for its own handler.
+    for handlers_root in (root / _HANDLERS_DIR, root / _PROJECT_HANDLERS_DIR):
+        if handlers_root.is_dir():
+            identities.update(path.stem for path in handlers_root.rglob(f"*{_PYTHON_SUFFIX}"))
+
+    return identities
+
+
 def scan(root: Path) -> Report:
     """Check every tracked path in ``root`` against every rule family."""
     report = Report()
@@ -503,6 +603,19 @@ def scan(root: Path) -> Report:
                 path=rel_path,
                 message="plan document silently ignored by .gitignore",
                 remediation=_REMEDIATION_IGNORED_PLAN_DOC,
+            )
+        )
+
+    for handler_name in orphaned_guidance_handlers(root):
+        report.violations.append(
+            Violation(
+                rule=RULE_ORPHANED_GUIDANCE,
+                path=_CLAUDE_MD_FILENAME,
+                message=(
+                    f"resident guidance for handler '{handler_name}', "
+                    "which has no module in the tree"
+                ),
+                remediation=_REMEDIATION_ORPHANED_GUIDANCE,
             )
         )
     return report

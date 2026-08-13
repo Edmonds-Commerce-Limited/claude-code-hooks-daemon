@@ -38,6 +38,96 @@ class _StubHandler:
         return []
 
 
+class TestHandlerProvenanceMarkers:
+    """Each emitted section must name the handler that produced it.
+
+    Built under DBF (``CLAUDE.md`` Core Standard 15). The injector already
+    holds ``handler.name`` when assembling the block, so discarding it would
+    leave the generated guidance with no machine-readable link back to its
+    producing handler. That blindness is what makes an ORPHANED section --
+    guidance for a handler absent from the tree -- undetectable by any check.
+    The section HEADINGS cannot serve instead: they are whatever each
+    ``get_claude_md()`` chose to write, and in practice range from
+    ``## destructive_git`` to prose like ``### Stop Explanation Required``.
+    """
+
+    def test_section_is_preceded_by_a_marker_naming_its_handler(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import (
+            ClaudeMdInjector,
+            handler_names_in_guidance,
+        )
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# My Project\n")
+
+        handler = _StubHandler("pipe_blocker", "## Pipe Blocker\n\nDo not pipe to tail.")
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        assert handler_names_in_guidance(claude_md.read_text()) == ["pipe_blocker"]
+
+    def test_every_emitted_handler_is_recoverable(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import (
+            ClaudeMdInjector,
+            handler_names_in_guidance,
+        )
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# My Project\n")
+
+        handlers = [
+            _StubHandler("destructive_git", "## destructive_git\n\nBlocked."),
+            _StubHandler("sed_blocker", "## sed_blocker\n\nBlocked."),
+            _StubHandler("stop_explainer", "### Stop Explanation Required\n\nPrefix it."),
+        ]
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=handlers).inject()
+
+        assert handler_names_in_guidance(claude_md.read_text()) == [
+            "destructive_git",
+            "sed_blocker",
+            "stop_explainer",
+        ]
+
+    def test_a_handler_returning_no_guidance_emits_no_marker(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import (
+            ClaudeMdInjector,
+            handler_names_in_guidance,
+        )
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# My Project\n")
+
+        handlers = [
+            _StubHandler("silent_handler", None),
+            _StubHandler("loud_handler", "## loud_handler\n\nSomething."),
+        ]
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=handlers).inject()
+
+        assert handler_names_in_guidance(claude_md.read_text()) == ["loud_handler"]
+
+    def test_marker_survives_markdown_formatting(self, tmp_path: Path) -> None:
+        """The block is run through mdformat; a marker it eats is useless."""
+        from claude_code_hooks_daemon.core.claude_md_injector import (
+            ClaudeMdInjector,
+            handler_names_in_guidance,
+        )
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# My Project\n")
+
+        handler = _StubHandler(
+            "table_handler",
+            "## table_handler\n\n| a | b |\n| - | - |\n| 1 | 2 |\n",
+        )
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        assert handler_names_in_guidance(claude_md.read_text()) == ["table_handler"]
+
+    def test_no_markers_found_in_content_without_a_block(self) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import handler_names_in_guidance
+
+        assert handler_names_in_guidance("# Just a project\n\nNo daemon here.\n") == []
+
+
 class TestClaudeMdInjectorCreateSection:
     """Tests for creating/updating <hooksdaemon> section."""
 

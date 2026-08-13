@@ -11,6 +11,7 @@ Usage:
 """
 
 import logging
+import re
 import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -38,6 +39,43 @@ _SECTION_INTRO = (
     "**When a tool is blocked by a handler, do not stop working.** "
     "Read the block reason, modify your approach, and continue with your task."
 )
+
+# Provenance marker emitted before each handler's guidance (DBF, Core
+# Standard 15). The injector holds `handler.name` while assembling the block;
+# writing it out is what lets a checker ask "does the handler that produced
+# this section still exist?". Section HEADINGS cannot answer that — they are
+# whatever each `get_claude_md()` chose to write, ranging from
+# `## destructive_git` to prose like `### Stop Explanation Required`, so any
+# heading-based match would be part heuristic and part false-positive.
+#
+# An HTML comment is used because it is invisible to a human reader and
+# survives `format_markdown_text` untouched, exactly as `_AUTO_COMMENT` does.
+_HANDLER_MARKER_PREFIX = "<!-- handler: "
+_HANDLER_MARKER_SUFFIX = " -->"
+_HANDLER_MARKER_PATTERN = re.compile(
+    rf"{re.escape(_HANDLER_MARKER_PREFIX)}(?P<name>[^>]+?){re.escape(_HANDLER_MARKER_SUFFIX)}"
+)
+
+
+def handler_names_in_guidance(content: str) -> list[str]:
+    """Return the handler names recorded in ``content``'s guidance block.
+
+    The single reader of the provenance markers, so callers never re-derive
+    the format. Returns names in emission order; returns an empty list for
+    content with no guidance block at all.
+
+    Args:
+        content: Full text of a ``CLAUDE.md`` (or any string).
+
+    Returns:
+        Handler names, in the order their sections appear.
+    """
+    open_pos = content.find(_OPEN_TAG)
+    close_pos = content.find(_CLOSE_TAG)
+    if open_pos == -1 or close_pos == -1 or close_pos < open_pos:
+        return []
+    block = content[open_pos : close_pos + len(_CLOSE_TAG)]
+    return [match.group("name").strip() for match in _HANDLER_MARKER_PATTERN.finditer(block)]
 
 
 @runtime_checkable
@@ -312,7 +350,9 @@ class ClaudeMdInjector:
             _SECTION_INTRO,
             "",
         ]
-        for _name, content in sections:
+        for name, content in sections:
+            parts.append(f"{_HANDLER_MARKER_PREFIX}{name}{_HANDLER_MARKER_SUFFIX}")
+            parts.append("")
             parts.append(content.strip())
             parts.append("")
         parts.append(_CLOSE_TAG)
