@@ -50,7 +50,14 @@ Read `.claude/hooks-daemon.yaml` — include the full contents in the report.
 
 #### 2e. Recent transcript data
 
-Look for transcript archives in `untracked/transcripts/` or `.claude/transcripts/`. Read the most recent 1-3 files if they exist. These contain conversation history that may reveal what Claude was doing when the issue occurred.
+Look for transcript archives in `untracked/transcripts/` or `.claude/transcripts/`. These contain conversation history that may reveal what Claude was doing when the issue occurred.
+
+**Do NOT read one whole.** An archive is a full session transcript and can be tens of megabytes. Two formats exist:
+
+- `transcript_*.jsonl` (current) — line 1 is a JSON metadata header, every line after it is one transcript entry. Being line-oriented, it can be sampled directly: `grep` it, or `tail -n 200 <file>` / `head -n 200 <file>` (a path ARGUMENT, so no pipe and no truncation).
+- `transcript_*.json` (legacy) — a single JSON object whose `transcript` key holds the whole session as one escaped string. There is no way to sample it cheaply; prefer a `.jsonl` archive whenever one exists.
+
+Sample the most recent 1-3 archives around the time of the issue rather than quoting them in full.
 
 #### 2f. Git context
 

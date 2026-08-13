@@ -5,7 +5,7 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 logger = logging.getLogger(__name__)
 
@@ -13,13 +13,26 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.retention import prune_directory
-from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms, redact_text
+from claude_code_hooks_daemon.utils.secret_redaction import (
+    get_active_secret_terms,
+    redact_structure,
+    redact_text,
+)
 
 # Subdirectory under the daemon's untracked dir where archives are written.
 _ARCHIVE_SUBDIR = "transcripts"
 
 # Glob matching this handler's own archive files (used for retention pruning).
-_ARCHIVE_GLOB = "transcript_*.json"
+#
+# Deliberately matches BOTH extensions. Plan 00232 changed the archive from a
+# single JSON envelope (``.json``) to line-oriented JSONL (``.jsonl``); archives
+# written by earlier versions are still on disk in client projects. A glob
+# scoped to one extension would leave the other set permanently uncollected, so
+# both share ONE retention budget rather than getting one each.
+_ARCHIVE_GLOB = "transcript_*.json*"
+
+# Extension for archives this version writes.
+_ARCHIVE_EXTENSION = ".jsonl"
 
 # Plan 00181 retention defaults: one full-transcript snapshot is written per
 # compaction, so without a bound this directory grows forever (57 MB / 16 files
@@ -34,17 +47,28 @@ _SECONDS_PER_DAY = 86400
 # Timestamp format for archive filenames (year-month-day_hour-minute-second).
 _ARCHIVE_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
 
-# Key under which the embedded transcript content is stored in the archive.
-_ARCHIVE_KEY_TRANSCRIPT = "transcript"
-
-# Key under which the archive timestamp is stored in the archive.
+# Key under which the archive timestamp is stored in the header line.
 _ARCHIVE_KEY_ARCHIVED_AT = "archived_at"
 
-# Key under which the originating transcript path is stored in the archive.
+# Key under which the originating transcript path is stored in the header line.
 _ARCHIVE_KEY_SOURCE_PATH = "transcript_path"
 
-# JSON indentation for pretty-printed archive files.
-_ARCHIVE_JSON_INDENT = 2
+# Key/value identifying the archive layout, so a future reader can tell a
+# header-plus-JSONL archive from the legacy single-envelope JSON one.
+_ARCHIVE_KEY_FORMAT = "archive_format"
+_ARCHIVE_FORMAT = "jsonl-v1"
+
+# Text encoding for both reading the transcript and writing the archive.
+_ARCHIVE_ENCODING = "utf-8"
+
+# A transcript is captured live and may be truncated mid-character or hold a
+# stray byte. Strict decoding raised UnicodeDecodeError - a ValueError, which
+# this handler's ``except OSError`` never caught, so the exception escaped and
+# the compaction hook failed. Replacing the offending byte keeps the archive.
+_ARCHIVE_DECODE_ERRORS = "replace"
+
+# Separator between the header line and the transcript body.
+_ARCHIVE_LINE_SEPARATOR = "\n"
 
 
 class TranscriptArchiverHandler(Handler):
@@ -108,26 +132,36 @@ class TranscriptArchiverHandler(Handler):
 
             # Generate timestamp filename
             timestamp = datetime.now().strftime(_ARCHIVE_TIMESTAMP_FORMAT)
-            archive_file = archive_dir / f"transcript_{timestamp}.json"
+            archive_file = archive_dir / f"transcript_{timestamp}{_ARCHIVE_EXTENSION}"
 
-            transcript_content = self._read_transcript(transcript_path)
-
-            # Plan 00201: redact BEFORE embedding — a secret pasted anywhere in
-            # the conversation must not survive into this on-disk archive.
+            # Plan 00201: redact BEFORE anything reaches disk — a secret pasted
+            # anywhere in the conversation must not survive into this archive.
             secret_terms = get_active_secret_terms()
-            if secret_terms:
-                transcript_content = redact_text(transcript_content, secret_terms)
 
-            # Build archive data
-            archive_data = {
-                _ARCHIVE_KEY_ARCHIVED_AT: datetime.now().isoformat(),
-                _ARCHIVE_KEY_SOURCE_PATH: transcript_path,
-                _ARCHIVE_KEY_TRANSCRIPT: transcript_content,
-            }
+            # The header carries the SOURCE PATH, which is itself a leak vector:
+            # a transcript lives at ~/.claude/projects/<slug-of-project-path>/,
+            # so a path-shaped secret term appears here in its slug spelling —
+            # exactly the case ``_slug_variant`` exists to catch. Redacting only
+            # the transcript body would have left it in the clear.
+            header = redact_structure(
+                {
+                    _ARCHIVE_KEY_ARCHIVED_AT: datetime.now().isoformat(),
+                    _ARCHIVE_KEY_SOURCE_PATH: transcript_path,
+                    _ARCHIVE_KEY_FORMAT: _ARCHIVE_FORMAT,
+                },
+                secret_terms,
+            )
 
-            # Write to JSON file with pretty formatting
-            with archive_file.open("w") as f:
-                json.dump(archive_data, f, indent=_ARCHIVE_JSON_INDENT)
+            # Plan 00232: stream line by line. The previous whole-file read
+            # produced a ~660 MB peak on a 72 MB transcript (one non-BMP char
+            # promotes the whole str to 4 bytes/char, then redaction and JSON
+            # escaping each hold another copy) — and it fired at PreCompact,
+            # when memory is already scarce. JSONL is line-oriented and this is
+            # a verbatim copy, so nothing needed the file in one piece.
+            with archive_file.open("w", encoding=_ARCHIVE_ENCODING) as archive_handle:
+                archive_handle.write(json.dumps(header))
+                archive_handle.write(_ARCHIVE_LINE_SEPARATOR)
+                self._stream_transcript(transcript_path, archive_handle, secret_terms)
 
             # Plan 00181: bound the archive directory so it cannot grow forever.
             # The file just written is newest, so it is always retained.
@@ -155,25 +189,45 @@ class TranscriptArchiverHandler(Handler):
         )
 
     @staticmethod
-    def _read_transcript(transcript_path: Any) -> str:
-        """Read the transcript file contents, returning empty string if absent.
+    def _stream_transcript(
+        transcript_path: Any,
+        destination: TextIO,
+        secret_terms: tuple[str, ...],
+    ) -> None:
+        """Copy the transcript into ``destination`` one line at a time.
+
+        Peak memory is the longest single LINE, not the file — which is the
+        whole point of this handler's Plan 00232 rewrite. Nothing is buffered
+        up: each line is read, redacted, and written before the next is read.
+
+        Redacting per line is EQUIVALENT to redacting the whole text, not
+        merely similar. ``redact_text`` applies independent per-term literal
+        substitutions with no cross-line state, and ``load_secret_terms``
+        strips every line it reads, so a term can never itself contain a
+        newline — meaning no match can straddle a line boundary.
+
+        A missing or invalid path writes no body at all, leaving an archive
+        that is just its header. That is deliberate: the header still records
+        what was attempted and when.
 
         Args:
             transcript_path: Path to the JSONL transcript file (from hook input)
-
-        Returns:
-            The raw transcript file contents, or an empty string when no valid
-            path is provided or the file does not exist.
+            destination: Open text handle for the archive being written
+            secret_terms: Secret terms to redact; empty disables redaction
         """
         if not isinstance(transcript_path, str) or not transcript_path:
-            return ""
+            return
 
         source = Path(transcript_path)
         if not source.is_file():
             logger.warning("Transcript path does not exist: %s", transcript_path)
-            return ""
+            return
 
-        return source.read_text()
+        with source.open(
+            "r", encoding=_ARCHIVE_ENCODING, errors=_ARCHIVE_DECODE_ERRORS
+        ) as source_handle:
+            for line in source_handle:
+                destination.write(redact_text(line, secret_terms) if secret_terms else line)
 
     def get_claude_md(self) -> str | None:
         return None

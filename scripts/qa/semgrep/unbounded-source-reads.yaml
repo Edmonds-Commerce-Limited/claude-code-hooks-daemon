@@ -1,0 +1,75 @@
+# Reads whose SOURCE is unbounded by construction (Plan 00232).
+#
+# Sibling of bounded-reads.yaml, and deliberately a separate class. That file
+# keys on a DECLARED bound contradicting a read — the author wrote `maxlen=20`
+# next to a read of the whole file. This file covers the case where no bound is
+# declared at all, so there is nothing to contradict and that rule is silent by
+# design rather than by oversight.
+#
+# The signal here is the SOURCE. A session transcript only ever appends, so its
+# size is unbounded by construction — a fact about the data, not a guess about
+# any particular file. Reading one whole is therefore always a latent defect,
+# however small the file happens to be today.
+#
+# Measured before the fix: a 72 MB transcript produced a ~660 MB RSS spike, at
+# PreCompact — the moment memory is already scarce.
+
+rules:
+  - id: unbounded-transcript-file-read
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A transcript file is read in full. Transcripts only ever append, so this
+      is unbounded by construction and grows without limit. It also costs far
+      more than the file size: one non-BMP character (an emoji) promotes the
+      whole Python str to 4 bytes per character. Stream it line by line
+      (`for line in handle:`), or seek to a bounded window as
+      TranscriptReader._parse_tail does.
+    # STRUCTURE IS LOad-BEARING: every branch below carries exactly ONE
+    # `pattern`. Collapsing the read spellings into a nested `pattern-either`
+    # inside a `patterns` block makes the rule match NOTHING — it still loads,
+    # still runs, and is silently blind. That was measured, not assumed: the
+    # first draft of this rule fired on zero of four planted defects. Verify
+    # any edit here against untracked probes before trusting it.
+    patterns:
+      - pattern-either:
+          # --- direct: the path expression is right there in the read ---
+          - patterns:
+              - pattern: Path($PATH).read_text(...)
+              - metavariable-regex:
+                  metavariable: $PATH
+                  regex: (?i).*transcript.*
+          - patterns:
+              - pattern: Path($PATH).read_bytes(...)
+              - metavariable-regex:
+                  metavariable: $PATH
+                  regex: (?i).*transcript.*
+          - patterns:
+              - pattern: open($PATH).read(...)
+              - metavariable-regex:
+                  metavariable: $PATH
+                  regex: (?i).*transcript.*
+
+          # --- deferred: bound to a name first, read on a later line ---
+          # This is the spelling the real defect used, so it matters most.
+          - patterns:
+              - pattern-inside: |
+                  $SOURCE = Path($PATH)
+                  ...
+              - pattern: $SOURCE.read_text(...)
+              - metavariable-regex:
+                  metavariable: $PATH
+                  regex: (?i).*transcript.*
+          - patterns:
+              - pattern-inside: |
+                  $SOURCE = Path($PATH)
+                  ...
+              - pattern: $SOURCE.read_bytes(...)
+              - metavariable-regex:
+                  metavariable: $PATH
+                  regex: (?i).*transcript.*
+    paths:
+      exclude:
+        # TranscriptReader owns the bounded read path (Plan 00177's load_tail);
+        # its own module is where the seek-based implementation lives.
+        - "**/transcript_reader.py"
