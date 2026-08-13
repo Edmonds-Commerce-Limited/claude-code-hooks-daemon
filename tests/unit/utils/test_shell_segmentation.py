@@ -30,6 +30,7 @@ import pytest
 
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted,
+    strip_quoted_heredoc_bodies,
     value_can_substitute,
 )
 
@@ -166,3 +167,50 @@ class TestValueCanSubstitute:
 
     def test_plain_bare_word_is_inert(self) -> None:
         assert value_can_substitute("COMMIT_MSG.txt") is False
+
+
+class TestStripQuotedHeredocBodies:
+    """A quoted-delimiter heredoc body is DATA, wherever it appears.
+
+    ``value_can_substitute`` already knew this, but only for the one shape
+    ``"$(cat <<'EOF' ... EOF)"`` — an argument VALUE. The same bash fact holds
+    for a heredoc fed straight to a command's stdin, and that shape was not
+    covered, so every caller that splits on newlines re-derived the false
+    positive this module's own docstring warns about.
+
+    Found by hitting it (Plan 00234, finding H-3): ``git commit -F - <<'EOF'``
+    whose message body merely MENTIONED a guarded script was denied, because
+    the body's lines were split into segments and judged as commands. The
+    leading word of the offending "command" was the English word ``prose``.
+    """
+
+    def test_quoted_body_is_blanked_so_its_lines_cannot_read_as_commands(self) -> None:
+        command = "git commit -F - <<'EOF'\nSubject\nprose mentioning run_all.sh\nEOF"
+        assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
+
+    def test_opener_and_closer_survive_so_the_command_still_parses(self) -> None:
+        command = "git commit -F - <<'EOF'\nbody\nEOF"
+        stripped = strip_quoted_heredoc_bodies(command)
+        assert stripped.startswith("git commit -F - <<'EOF'")
+        assert stripped.rstrip().endswith("EOF")
+
+    def test_double_quoted_delimiter_is_also_inert(self) -> None:
+        command = 'git commit -F - <<"EOF"\nprose mentioning run_all.sh\nEOF'
+        assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
+
+    def test_dash_form_delimiter_is_handled(self) -> None:
+        command = "git commit -F - <<-'EOF'\n\tprose mentioning run_all.sh\n\tEOF"
+        assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
+
+    def test_unquoted_delimiter_body_is_left_alone(self) -> None:
+        """`<<EOF` DOES expand, so its body can genuinely run something."""
+        command = "git commit -F - <<EOF\nvalue is $(./scripts/qa/run_all.sh)\nEOF"
+        assert "run_all.sh" in strip_quoted_heredoc_bodies(command)
+
+    def test_text_outside_the_heredoc_is_untouched(self) -> None:
+        command = "./scripts/qa/run_all.sh && git commit -F - <<'EOF'\nbody\nEOF"
+        assert "./scripts/qa/run_all.sh &&" in strip_quoted_heredoc_bodies(command)
+
+    def test_command_without_a_heredoc_is_returned_unchanged(self) -> None:
+        command = "git commit -m 'ordinary message'"
+        assert strip_quoted_heredoc_bodies(command) == command

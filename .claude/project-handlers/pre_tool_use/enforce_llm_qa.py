@@ -9,7 +9,10 @@ from typing import Any
 
 from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
 from claude_code_hooks_daemon.core.hook_result import Decision
-from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    split_unquoted,
+    strip_quoted_heredoc_bodies,
+)
 
 _BLOCKED_SCRIPT = "run_all.sh"
 _LLM_SCRIPT = "./scripts/qa/llm_qa.py all"
@@ -69,8 +72,18 @@ def _split_top_level(command: str) -> list[str]:
     through on an allowlisted leading word. The sibling scanner in
     ``pipe_blocker`` had the mirror-image bug. One implementation, one place to
     fix, no way for the two to disagree again.
+
+    A QUOTED heredoc body is blanked BEFORE splitting, because a newline is a
+    separator here: without it the body of ``git commit -F - <<'EOF'`` is cut
+    into pseudo-commands and each line judged on its leading word, so a message
+    merely MENTIONING the guarded script was denied (Plan 00234 finding H-3 —
+    found by hitting it while writing that very commit). The VCS allowlist below
+    was meant to prevent exactly that and could not reach this spelling. The
+    stripper is shared with ``pipe_blocker`` for the same one-implementation
+    reason as the splitter; an UNQUOTED ``<<EOF`` still expands and stays
+    scanned.
     """
-    return split_unquoted(command, _SEGMENT_SEPARATORS)
+    return split_unquoted(strip_quoted_heredoc_bodies(command), _SEGMENT_SEPARATORS)
 
 
 def _is_inspection_only(command: str) -> bool:

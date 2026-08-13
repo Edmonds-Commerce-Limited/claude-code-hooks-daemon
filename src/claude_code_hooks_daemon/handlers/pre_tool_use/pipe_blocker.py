@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.strategies.pipe_blocker.common import UNIVERSAL_WH
 from claude_code_hooks_daemon.strategies.pipe_blocker.registry import PipeBlockerStrategyRegistry
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted,
+    strip_quoted_heredoc_bodies,
     value_can_substitute,
 )
 
@@ -238,20 +239,6 @@ _MESSAGE_BODY_PATTERN = re.compile(
 # redaction placeholder, handing the caller a remediation they cannot run.
 _MESSAGE_TAKING_COMMANDS: tuple[str, ...] = ("git", "hg", "svn", "jj")
 
-# A heredoc whose DELIMITER IS QUOTED (`<<'EOF'` or `<<"EOF"`). Quoting the
-# delimiter disables every expansion, so bash passes the body through verbatim
-# and never parses it as shell syntax — a truncating pipe inside it is data.
-# The delimiter MUST be quoted here: a bare `<<EOF` still expands `$(...)` and
-# backticks, so its body can genuinely run a command and is left alone.
-# DOTALL so the body may span newlines; non-greedy so the FIRST matching
-# closing delimiter ends the body rather than the last one in the command.
-_QUOTED_HEREDOC_BODY_PATTERN = re.compile(
-    r"(?P<opener><<-?\s*(?P<quote>['\"])(?P<delim>\w+)(?P=quote))"
-    r"\n.*?\n"
-    r"(?P<closer>[ \t]*(?P=delim))",
-    re.DOTALL,
-)
-
 # Path separator, for reducing `/usr/bin/git` to `git` before that comparison.
 _PATH_SEPARATOR = "/"
 
@@ -372,34 +359,17 @@ class PipeBlockerHandler(Handler):
 
         return _MESSAGE_BODY_PATTERN.sub(_blank_if_inert, command)
 
-    @staticmethod
-    def _strip_quoted_heredoc_bodies(command: str) -> str:
-        """Blank the body of a heredoc whose DELIMITER IS QUOTED.
-
-        `<<'EOF'` and `<<"EOF"` disable every expansion, so bash hands the body
-        to the receiving command verbatim and never parses it as shell syntax.
-        A truncating pipe inside such a body — say a Python string literal in a
-        script being written to disk — is DATA.
-
-        This generalises a principle the handler already relies on: the
-        `-m "$(cat <<'EOF' ... EOF)"` branch of `_MESSAGE_BODY_PATTERN` is
-        exempt for exactly this reason, but only in that one shape, and only
-        for commands that take a message. A heredoc feeding an interpreter's
-        stdin is the same fact about bash and was not covered.
-
-        An UNQUOTED `<<EOF` is deliberately NOT blanked: bash expands `$(...)`
-        and backticks inside it, so its body can genuinely run a command.
-        """
-        return _QUOTED_HEREDOC_BODY_PATTERN.sub(
-            lambda match: f"{match.group('opener')}\n{_MESSAGE_BODY_PLACEHOLDER}\n"
-            f"{match.group('closer')}",
-            command,
-        )
-
     @classmethod
     def _strip_inert_spans(cls, command: str) -> str:
-        """Blank every span bash will hand over as data rather than execute."""
-        return cls._strip_quoted_heredoc_bodies(cls._strip_message_bodies(command))
+        """Blank every span bash will hand over as data rather than execute.
+
+        The heredoc half is delegated to ``shell_segmentation`` rather than kept
+        here. It is the same bash fact `enforce_llm_qa` needs before IT splits on
+        newlines, and that handler re-derived the false positive from scratch
+        because the rule lived in this file (Plan 00234 finding H-3). One
+        scanner, one set of rules — the reason that module exists at all.
+        """
+        return strip_quoted_heredoc_bodies(cls._strip_message_bodies(command))
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if command pipes a non-whitelisted operation to tail/head.

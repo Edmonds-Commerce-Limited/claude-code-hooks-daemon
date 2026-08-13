@@ -209,6 +209,50 @@ class TestEnforceLlmQaHandler:
         """An UNQUOTED `|` still separates -- the fix must not blind the guard."""
         assert handler.matches(bash_hook_input("echo hi | bash scripts/qa/run_all.sh")) is True
 
+    def test_does_not_match_git_commit_whose_QUOTED_HEREDOC_body_mentions_the_script(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """Plan 00234 finding H-3 -- found by hitting it, not by reading.
+
+        The VCS exemption exists precisely so a commit message mentioning the
+        script is not read as running it, and it already works for `-m` and for
+        `cd ... && git commit`. It did NOT work for `-F - <<'EOF'`: a newline is
+        a segment separator, so the message body was split into pseudo-commands
+        and judged line by line. The leading word of the offending "command" was
+        the English word `prose`.
+
+        A QUOTED delimiter disables every expansion, so the body is literal text
+        that cannot invoke anything -- the same fact `pipe_blocker` already
+        encoded, now shared via `strip_quoted_heredoc_bodies`.
+        """
+        command = (
+            "git commit -F - <<'EOF'\n"
+            "Plan 00234: record the audit finding\n"
+            "\n"
+            "enforce_llm_qa denies scripts/qa/run_all.sh while the docs\n"
+            "instruct the agent to run it.\n"
+            "EOF"
+        )
+        assert handler.matches(bash_hook_input(command)) is False
+
+    def test_still_matches_invocation_after_an_UNQUOTED_heredoc(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """An unquoted `<<EOF` DOES expand, so its body must stay scanned.
+
+        The exemption is about what bash treats as literal, not about heredocs
+        being prose-shaped. Blanking this body would be a real bypass.
+        """
+        command = "cat <<EOF\nvalue is $(bash scripts/qa/run_all.sh)\nEOF"
+        assert handler.matches(bash_hook_input(command)) is True
+
+    def test_still_matches_invocation_outside_a_quoted_heredoc(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """Blanking the body must not blank the command that carries it."""
+        command = "bash scripts/qa/run_all.sh && git commit -F - <<'EOF'\nmessage\nEOF"
+        assert handler.matches(bash_hook_input(command)) is True
+
     def test_single_quoted_trailing_backslash_cannot_hide_the_invocation(
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any
     ) -> None:

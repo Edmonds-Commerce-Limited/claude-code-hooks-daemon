@@ -63,6 +63,29 @@ _QUOTED_HEREDOC_PATTERN = re.compile(
     re.DOTALL,
 )
 
+# The same bash fact as above, for a heredoc fed straight to a command's stdin
+# rather than wrapped in an argument value: `git commit -F - <<'EOF' ... EOF`.
+# Quoting the delimiter disables every expansion, so bash hands the body over
+# verbatim and never parses it as shell syntax.
+#
+# The delimiter MUST be quoted. A bare `<<EOF` still expands `$(...)` and
+# backticks, so its body can genuinely run a command and is deliberately left
+# alone.
+#
+# DOTALL so the body may span newlines; non-greedy so the FIRST matching closing
+# delimiter ends the body rather than the last one in the command.
+_QUOTED_HEREDOC_BODY_PATTERN = re.compile(
+    r"(?P<opener><<-?\s*(?P<quote>['\"])(?P<delim>\w+)(?P=quote))"
+    r"\n.*?\n"
+    r"(?P<closer>[ \t]*(?P=delim))",
+    re.DOTALL,
+)
+
+# What a blanked body is replaced with: a single inert token that keeps the
+# heredoc's shape (opener, one body line, closer) so a caller splitting on
+# newlines still sees a well-formed command.
+_INERT_BODY_PLACEHOLDER = "HEREDOC_BODY"
+
 
 def value_can_substitute(value: str) -> bool:
     """Whether bash will EXECUTE something inside this quoted argument value.
@@ -92,6 +115,48 @@ def value_can_substitute(value: str) -> bool:
     if _QUOTED_HEREDOC_PATTERN.match(value):
         return False
     return _BACKTICK in value or any(opener in value for opener in _SUBSTITUTION_OPENERS)
+
+
+def strip_quoted_heredoc_bodies(command: str) -> str:
+    """Blank the body of every heredoc whose DELIMITER IS QUOTED.
+
+    ``<<'EOF'`` and ``<<"EOF"`` disable every expansion, so bash hands the body
+    to the receiving command verbatim and never parses it as shell syntax.
+    Anything in that body — a pipe, a script name, a command that reads as
+    dangerous — is DATA.
+
+    Call this BEFORE splitting a command into segments. Newlines are segment
+    separators, so a caller that splits first will chop the body into lines and
+    judge each one as a command; the "command" before a pipe then resolves to a
+    line of English prose. That is not hypothetical, it is the false positive
+    this module's docstring already records for ``value_can_substitute``, and it
+    recurred in ``enforce_llm_qa`` for the one heredoc shape that function does
+    not cover (Plan 00234 finding H-3): a ``git commit -F - <<'EOF'`` message
+    body that merely MENTIONED a guarded script was denied.
+
+    An UNQUOTED ``<<EOF`` is deliberately NOT blanked: bash expands ``$(...)``
+    and backticks inside it, so its body really can run something.
+
+    Args:
+        command: The raw Bash command string.
+
+    Returns:
+        ``command`` with each quoted-delimiter heredoc body replaced by a single
+        inert placeholder line. The opener and closing delimiter are preserved,
+        so the result still splits into well-formed segments.
+
+    Examples:
+        >>> strip_quoted_heredoc_bodies("git commit -F - <<'EOF'\\nrm -rf /\\nEOF")
+        "git commit -F - <<'EOF'\\nHEREDOC_BODY\\nEOF"
+        >>> strip_quoted_heredoc_bodies("echo hi")
+        'echo hi'
+    """
+    return _QUOTED_HEREDOC_BODY_PATTERN.sub(
+        lambda match: (
+            f"{match.group('opener')}\n{_INERT_BODY_PLACEHOLDER}\n{match.group('closer')}"
+        ),
+        command,
+    )
 
 
 def split_unquoted(text: str, separators: Sequence[str]) -> list[str]:
