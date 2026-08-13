@@ -14,11 +14,12 @@ Usage:
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, NamedTuple, TypeAlias
+from typing import Any, Final, NamedTuple, TypeAlias
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPTS_DIR = PROJECT_ROOT / "scripts" / "qa"
@@ -346,6 +347,60 @@ SUMMARIZERS: dict[str, Summarizer] = {
 # ── Core logic ─────────────────────────────────────────────────────
 
 
+# The leading `.<key>[]` of a jq hint — the array the operator is sent to.
+# `jq '.violations[] | {file, line}'` yields "violations".
+_HINT_DETAIL_ARRAY_PATTERN = re.compile(r"\.(?P<key>\w+)\[\]")
+
+# Prefix for the inconsistency line. Named so a test can assert the warning
+# fires without pinning the whole sentence, which is prose and may be reworded.
+_DETAIL_MISSING_WARNING: Final[str] = "⚠️  DETAIL MISSING:"
+
+# Summary keys that count BAD things. Detail is owed only when one of these is
+# non-zero; `passed` and `total_probes` say nothing about whether detail is due.
+_FAILURE_COUNT_KEYS: Final[tuple[str, ...]] = (
+    "total_violations",
+    "total_errors",
+    "total_issues",
+    "failed",
+    "failed_probes",
+)
+
+
+def detail_array_key(jq_hint: str) -> str | None:
+    """The report array a printed hint sends the operator to, or None.
+
+    Public because the guard in tests/unit/qa/test_llm_qa_count_implies_detail.py
+    asserts against THIS function rather than reimplementing the parse. A
+    second copy in the test would be free to drift from the one that runs —
+    which is precisely the producer/consumer split that produced the defect
+    Plan 00226 fixed and Plan 00229 generalised.
+    """
+    match = _HINT_DETAIL_ARRAY_PATTERN.search(jq_hint)
+    return match.group("key") if match else None
+
+
+def failure_count(summary: QaReport) -> int:
+    """How many bad things this report claims, across every count key it uses."""
+    return sum(int(summary.get(key, 0)) for key in _FAILURE_COUNT_KEYS)
+
+
+def _detail_is_missing(data: QaReport, jq_hint: str) -> bool:
+    """True when a report claims failures but its detail array is empty.
+
+    The failure this catches is silent by construction: the reader is given a
+    number, follows the printed hint, sees nothing, and cannot distinguish
+    "no detail exists" from "the detail was dropped". Plan 00226 lost a real
+    test failure to exactly that ambiguity, because the only recourse was a
+    re-run and the re-run did not reproduce it.
+    """
+    if failure_count(data.get("summary", {})) == 0:
+        return False
+    key = detail_array_key(jq_hint)
+    if key is None:
+        return True
+    return not data.get(key)
+
+
 def _is_passed(data: QaReport) -> bool:
     """Determine pass/fail from JSON data (handles both schemas)."""
     summary = data.get("summary", {})
@@ -405,6 +460,19 @@ def summarize_tool(name: str, exit_code: int | None = None) -> tuple[bool, str]:
 
     line1 = f"{icon} {name}: {metrics}{mismatch_note}"
     line2 = f"   {config.json_file} | {config.jq_hint}"
+
+    # A report that counts failures it cannot show is worse than one that
+    # counts none: the hint above becomes a promise it does not keep, and an
+    # empty result reads as "nothing to fix". Say so rather than let the
+    # reader draw that conclusion (Plan 00229).
+    if _detail_is_missing(data, config.jq_hint):
+        line3 = (
+            f"   {_DETAIL_MISSING_WARNING} the count above has no detail behind it, "
+            f"so the command on the previous line will print nothing. Do NOT read "
+            f"that as 'nothing to fix' — the detail was dropped, not absent."
+        )
+        return passed, f"{line1}\n{line2}\n{line3}\n"
+
     return passed, f"{line1}\n{line2}\n"
 
 

@@ -27,7 +27,7 @@ which is the failure mode Plan 00228 designed against.
 from __future__ import annotations
 
 import importlib.util
-import re
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -50,19 +50,14 @@ def _load_llm_qa() -> Any:
 
 llm_qa = _load_llm_qa()
 
-# The leading `.<key>[]` of a jq hint — the array the operator is sent to.
-# `jq '.violations[] | {file, line}'` -> "violations".
-_HINT_ARRAY_PATTERN = re.compile(r"\.(?P<key>\w+)\[\]")
-
-# Summary keys that count BAD things. A report is required to have detail only
-# when one of these is non-zero; `passed`/`total_probes` say nothing about it.
-_FAILURE_COUNT_KEYS: tuple[str, ...] = (
-    "total_violations",
-    "total_errors",
-    "total_issues",
-    "failed",
-    "failed_probes",
-)
+# Bound to the PRODUCTION helpers rather than reimplemented here. An earlier
+# draft of this file carried its own copy of the hint parse and the failure-key
+# list; that copy was free to drift from the code that actually runs, which is
+# the same producer/consumer split that produced the defect this plan
+# generalises. Asserting against a private reimplementation would have proved
+# only that the test agrees with itself.
+_detail_array_key = llm_qa.detail_array_key
+_failure_count = llm_qa.failure_count
 
 # Reports whose hint legitimately names no detail array. Each entry must state
 # why, because an exemption without a reason is indistinguishable from an
@@ -74,17 +69,6 @@ _FAILURE_COUNT_KEYS: tuple[str, ...] = (
 # being excused. Exempting the one report with a proven history of losing
 # detail would have preserved the exact blindness this guard exists to remove.
 _REPORTS_WITHOUT_DETAIL: dict[str, str] = {}
-
-
-def _detail_array_key(jq_hint: str) -> str | None:
-    """The array a hint sends the operator to, or None if it names none."""
-    match = _HINT_ARRAY_PATTERN.search(jq_hint)
-    return match.group("key") if match else None
-
-
-def _failure_count(summary: dict[str, Any]) -> int:
-    """Total of whichever failure-count keys this report's summary carries."""
-    return sum(int(summary.get(key, 0)) for key in _FAILURE_COUNT_KEYS)
 
 
 def _detail_is_reachable(report: dict[str, Any], jq_hint: str) -> bool:
@@ -155,6 +139,78 @@ class TestTheGuardHasTeeth:
         report: dict[str, Any] = {"summary": {"total_violations": 0}}
 
         assert _failure_count(report["summary"]) == 0
+
+
+def _summarize_synthetic_report(
+    tmp_path: Path, name: str, report: dict[str, Any], *, full: bool = False
+) -> Any:
+    """Render `report` through the REAL `summarize_tool`, from a temp QA dir.
+
+    Synthesised rather than read from `untracked/qa/`: a guard driven by a real
+    run only fires when QA is already red, which is exactly when nobody is in a
+    position to act on it. It would also be order-dependent, since the tools
+    write their JSON in registry order during the same run.
+    """
+    config = llm_qa.TOOL_REGISTRY[name]
+    (tmp_path / config.json_file).write_text(json.dumps(report))
+
+    original_output_dir = llm_qa.QA_OUTPUT_DIR
+    llm_qa.QA_OUTPUT_DIR = tmp_path
+    try:
+        passed, text = llm_qa.summarize_tool(name)
+    finally:
+        llm_qa.QA_OUTPUT_DIR = original_output_dir
+
+    return (passed, text) if full else text
+
+
+class TestTheArtifactReportsItsOwnInconsistency:
+    """The render-time half: structure alone cannot catch a dropped array.
+
+    The sibling tests guarantee WHERE detail lives — that every hint names a
+    real array and no summariser reads elsewhere. They cannot guarantee a tool
+    actually EMITTED any, because they never open a real report. A tool
+    reporting `total_violations: 3` beside `violations: []` satisfies every
+    structural rule and still tells the reader nothing.
+
+    Per-tool tests do not close that gap either: 6 of the 20 tool test files
+    mention `total_violations` at all, and 2 assert the array's length. So the
+    check lives at render time, where it covers every report including ones
+    nobody has written yet, and fires exactly when someone is reading.
+    """
+
+    def test_a_count_with_no_detail_is_called_out(self, tmp_path: Path) -> None:
+        report = {"summary": {"total_violations": 3, "passed": False}, "violations": []}
+
+        text = _summarize_synthetic_report(tmp_path, "magic_values", report)
+
+        assert llm_qa._DETAIL_MISSING_WARNING in text
+
+    def test_a_count_with_detail_is_not_called_out(self, tmp_path: Path) -> None:
+        report = {
+            "summary": {"total_violations": 1, "passed": False},
+            "violations": [{"file": "x.py", "line": 1, "rule": "r", "message": "m"}],
+        }
+
+        text = _summarize_synthetic_report(tmp_path, "magic_values", report)
+
+        assert llm_qa._DETAIL_MISSING_WARNING not in text
+
+    def test_a_clean_report_is_not_called_out(self, tmp_path: Path) -> None:
+        """Zero failures owes no detail — the common case must stay silent."""
+        report: dict[str, Any] = {"summary": {"total_violations": 0, "passed": True}}
+
+        text = _summarize_synthetic_report(tmp_path, "magic_values", report)
+
+        assert llm_qa._DETAIL_MISSING_WARNING not in text
+
+    def test_the_warning_does_not_claim_the_report_passed(self, tmp_path: Path) -> None:
+        """A dropped detail array must not quietly become a green line."""
+        report = {"summary": {"total_violations": 3, "passed": False}, "violations": []}
+
+        passed, _ = _summarize_synthetic_report(tmp_path, "magic_values", report, full=True)
+
+        assert passed is False
 
 
 @pytest.mark.parametrize("name", sorted(_in_scope_reports()))

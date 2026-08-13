@@ -134,6 +134,23 @@ cannot be under-selected the same way.
   `tests.json | jq '.tests[] | select(.outcome == "failed") | .name'` instead
   of sending the reader back to `.summary`. Full QA and daemon restart below
 
+### Phase 4: The render-time half
+
+- [x] ✅ **Task 4.1**: `_detail_is_missing()` in `llm_qa.py` — when a report
+  claims failures and the array its hint names is empty, `summarize_tool`
+  appends a warning line saying the count has no detail behind it and must not
+  be read as "nothing to fix". See Decision 2 for why this cannot be a test
+- [x] ✅ **Task 4.2**: `detail_array_key()` and `failure_count()` moved INTO
+  `llm_qa.py`, and the guard now binds to those instead of its own copies. The
+  first draft reimplemented the hint parse in the test file, which was free to
+  drift from the code that runs — the same producer/consumer split this plan
+  generalises, reproduced inside its own guard
+- [x] ✅ **Task 4.3**: Teeth proven by MUTATION, not assumed. These tests were
+  written after the production code, so passing on the first run proved
+  nothing. Stubbing `_detail_is_missing` to always return `False` makes the
+  warning vanish (`fires=True` → `fires=False`), so the assertions genuinely
+  depend on the implementation
+
 ## Technical Decisions
 
 ### Decision 1: Fix the `tests` hint, do not exempt it
@@ -165,11 +182,50 @@ sequencing Plan 00228 validated).
 
 **Date**: 2026-08-13
 
+### Decision 2: The count-implies-detail check belongs at RENDER time
+
+**Context**: after Phase 3 the guard was purely structural — it proved WHERE
+detail lives (every hint names a real array; no summariser reads elsewhere) but
+never opened a report, so a tool emitting `total_violations: 3` beside
+`violations: []` passed it clean. That is the plan's own title, unmet.
+
+**Per-tool tests do not cover the gap**: of the twenty tools, six test files
+mention `total_violations` at all and two assert the detail array's length. A
+new tool would inherit no coverage.
+
+**A test over real report files was considered and rejected.** `llm_qa` runs
+tools in registry order and each writes its JSON as it goes, so during a run
+the earlier reports are current and the later ones are stale from the previous
+run. An assertion over `untracked/qa/` would therefore be order-dependent, and
+would only ever fire when QA was already red — which is exactly when nobody is
+in a position to act on a flaky test.
+
+**Decision**: check at render time, in `summarize_tool`. It covers every
+report including ones nobody has written yet, needs no per-tool opt-in, and
+fires precisely when a human or agent is reading the artifact. It follows the
+`mismatch_note` precedent already in that function, which warns when the exit
+code disagrees with the JSON — the same species of "this report is not
+internally consistent" signal.
+
+The warning does not change pass/fail. A dropped detail array is a reporting
+defect, and the report has already failed on its own count; inventing a new
+failure mode would only obscure the real one.
+
+**Date**: 2026-08-13
+
 ## Success Criteria
 
-- [ ] A report claiming a non-zero count with unreachable detail FAILS a test
-- [ ] The guard is proven able to fail, against a synthesised bad report
-- [ ] The `tests` hint gap is closed or exempted with a stated reason
+- [x] A report claiming a non-zero count with unreachable detail is caught —
+  structurally by the guard (a hint naming no detail array, or a summariser
+  reading an array the hint does not name) and at render time by the warning
+  line for a count with an empty array
+- [x] The guard is proven able to fail, against synthesised bad reports: RED
+  first on the structural half (2 failed / 46 passed, both `tests`), and by
+  MUTATION on the render-time half, which was written after its production
+  code and so had to earn its teeth separately
+- [x] The `tests` hint gap is closed — pointed at
+  `.tests[] | select(.outcome == "failed") | .name`, with the exemption map
+  left empty rather than used to excuse it
 - [ ] All QA passing; daemon restart verified RUNNING
 
 ## Risks & Mitigations
