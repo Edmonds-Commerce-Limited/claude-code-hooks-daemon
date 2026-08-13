@@ -8,8 +8,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Core / Hook Coverage
 
-- [00227: plan_number_helper matches text, not commands](00227-plan-number-helper-matches-text-not-commands/PLAN.md) - Not Started (blocked four legitimate housekeeping commands including a plain `echo` of English prose; third instance of the Plan 00222/00225 defect class, and Plan 00138 explicitly cleared the offending rule as "already narrow")
-
 - [00170: Universal Hook Coverage + Hook-Support Enforcement](00170-universal-hook-coverage-and-enforcement/PLAN.md) - Dormant (fundamental: intercepting hook events is the daemon's raison d'être, yet only **10 of the 30** documented Claude Code hook events are wired — 20 are silently unwired, so a client project cannot even …)
 
 - [00172: Close the HandlersConfig ↔ wired-events coverage gap](00172-handlerconfig-wired-events-coverage-gap/PLAN.md) - Not Started (follow-up from the `status_line` config-drop fix audit: `HandlersConfig` declares only 11 of 31 wired events, so `_build_handler_config_mapping` would silently drop config for any of the 20 …)
@@ -159,6 +157,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00227: plan_number_helper matches text, not commands](Completed/00227-plan-number-helper-matches-text-not-commands/PLAN.md) - Complete (denied four legitimate housekeeping commands including a plain `echo` of English prose; shell literals are now blanked for the two rules that misread them, and a plan-dir reference naming ONE specific plan no longer arms the sort-and-truncate rule)
 
 - [00226: QA runner discards failing test identities](Completed/00226-qa-runner-discards-failing-test-identities/PLAN.md) - Complete (a red QA run reported how many tests failed and never which, so diagnosis needed a full re-run; the text-fallback parser now names them, and Decision 2 records that the count/detail split is structural across every check rather than a pytest quirk)
 
@@ -1160,11 +1160,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 227 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 183 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 184 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 31 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 32 + 183 + 6 = **221 folders**, spanning
+- **Folder-to-number reconciliation**: 31 + 184 + 6 = **221 folders**, spanning
   **218 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1174,10 +1174,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work). 218 + 9 = 227. ✅
-- **Last reconciled by**: the Plan 00227 opening — one new root folder and the
-  counter advanced by `mkplan.bash`, so Total and Active each rose by one while
-  Completed and Cancelled were untouched (32 root, 183 `Completed/`,
-  6 `Cancelled/`). Before that, the stale-plan sweep that archived Plan 00174 as
+- **Last reconciled by**: the Plan 00227 closure — recounted from the git index
+  after the archive move (31 root, 184 `Completed/`, 6 `Cancelled/`); the move
+  shifts one folder between the Active and Completed splits and leaves Total and
+  the folder total unchanged. Before that, the Plan 00227 opening — one new root
+  folder and the counter advanced by `mkplan.bash`, so Total and Active each
+  rose by one while Completed and Cancelled were untouched. Before that, the
+  stale-plan sweep that archived Plan 00174 as
   Superseded — one folder moved from the root into `Cancelled/`, so Active fell
   by one and Cancelled rose by one (31 root, 183 `Completed/`, 6 `Cancelled/`)
   while Total and the folder total were untouched. Four sibling plans (00163,

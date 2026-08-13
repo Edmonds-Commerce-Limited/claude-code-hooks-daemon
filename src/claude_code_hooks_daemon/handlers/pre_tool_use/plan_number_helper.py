@@ -7,7 +7,16 @@ Instead of letting Claude use commands like:
 Which are broken (wrong glob patterns, ignore Completed/, etc.), this handler
 detects these attempts and injects the correct next plan number into context.
 
-Non-blocking (advisory only) - provides context but doesn't prevent execution.
+TERMINAL: a matched command is DENIED, not merely annotated. The handler is
+tagged ``advisory`` because what it injects is guidance rather than a safety
+veto, but that tag describes the CONTENT of the response, never its force -- it
+must not be read as an inability to block, or the denials this handler issues
+become inexplicable to whoever hits one.
+
+Matching is deliberately scoped to what the shell will EXECUTE. Quoted literals
+are blanked first (see ``utils.quoted_spans.blank_shell_literal_spans``), so
+prose or a regex that merely NAMES the plan directory is not mistaken for a
+scan of it.
 """
 
 import re
@@ -24,6 +33,7 @@ from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import next_plan_number_for_target
+from claude_code_hooks_daemon.utils.quoted_spans import blank_shell_literal_spans
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -40,6 +50,11 @@ _COMMAND_SEPARATORS: Final[str] = r";&|\n\r"
 # exist. A single digit is not enough: `0*` is the generic "any plan folder"
 # glob that the discovery idiom uses.
 _SPECIFIC_PLAN_NUMBER_DIGITS: Final[int] = 2
+
+# The sort-and-truncate discovery idiom, named rather than inlined so the two
+# halves of the rule read as one intent: order the listing, keep the last line.
+_SORT_COMMAND: Final[str] = "sort"
+_TRUNCATE_TO_LAST_PATTERN: Final[str] = r"tail\s+(-n\s*)?-?\d+"
 
 
 class PlanNumberHelperHandler(Handler):
@@ -71,6 +86,31 @@ class PlanNumberHelperHandler(Handler):
         return bool(re.search(r"tail\s+(-n\s*)?-?\d+", command))
 
     @staticmethod
+    def _sweeps_the_plan_directory(command: str, plan_dir: str) -> bool:
+        """True when the command references the plan dir as a DIRECTORY TO LIST.
+
+        A reference that names one specific plan -- ``CLAUDE/Plan/00163-x`` --
+        is not a sweep, so a command operating inside a known plan folder does
+        not arm the sort-and-truncate rule. The discovery globs ``0*`` and
+        ``[0-9]*`` carry fewer than ``_SPECIFIC_PLAN_NUMBER_DIGITS`` literal
+        digits, so they are still treated as sweeps.
+
+        Args:
+            command: The command text, already stripped of quoted literals.
+            plan_dir: Configured plan directory, relative to the workspace.
+
+        Returns:
+            True when at least one reference to the plan dir is not a specific
+            plan folder.
+        """
+        if plan_dir not in command:
+            return False
+
+        specific_reference = rf"{re.escape(plan_dir)}/\d{{{_SPECIFIC_PLAN_NUMBER_DIGITS},}}"
+        without_specific_references = re.sub(specific_reference, "", command)
+        return plan_dir in without_specific_references
+
+    @staticmethod
     def _covers_archive_subdirectories(command: str, plan_dir: str) -> bool:
         """True when the command demonstrably reaches the plan dir's archives.
 
@@ -94,7 +134,14 @@ class PlanNumberHelperHandler(Handler):
            plausibly runs exactly that and reads the tail of the output, so it
            is left to the handler's normal detection.
         """
-        if re.search(rf"{re.escape(plan_dir)}/[A-Za-z][\w-]*(/|\s|$)", command):
+        # An optional `(` admits a regex ALTERNATION naming the archive dirs --
+        # `CLAUDE/Plan/(Completed/|Cancelled/)` -- which reaches them just as
+        # plainly as a literal path does. Without it the very command that
+        # enumerates both archives is denied with a reason claiming it "misses
+        # subdirectories like Completed/", which is untrue of that command.
+        # The trailing anchor is unchanged, so a letter-led FILE in the plan
+        # root (`CLAUDE/Plan/README.md`) still does not qualify.
+        if re.search(rf"{re.escape(plan_dir)}/\(?[A-Za-z][\w-]*(/|\s|$)", command):
             return True
 
         if not re.search(rf"find\s+{re.escape(plan_dir)}/?(\s|$)", command):
@@ -130,6 +177,20 @@ class PlanNumberHelperHandler(Handler):
         command = hook_input.get(HookInputField.TOOL_INPUT, {}).get("command", "")
         if not command:
             return False
+
+        # A copy with non-executing quoted literals blanked, used ONLY by the
+        # two rules that would otherwise read a literal as shell syntax: the
+        # echo/printf glob rule (a single-quoted grep regex `[0-9]` is not a
+        # glob) and the sort-and-truncate rule (an `echo` of English prose is
+        # not a directory scan).
+        #
+        # Deliberately NOT applied to every rule. This handler inspects quoted
+        # arguments on purpose elsewhere -- the numeric grep pattern in
+        # `ls CLAUDE/Plan | grep '[0-9]'`, and the `-name "00036-*"` that tells
+        # a targeted find from a sweep. Blanking those blinds rules that are
+        # working correctly, so the exemption is placed where a misread costs a
+        # false positive and withheld where a literal IS the signal.
+        executable_text = blank_shell_literal_spans(command)
 
         # Get the plan directory path (relative to workspace)
         plan_dir = self._track_plans_in_project
@@ -207,14 +268,30 @@ class PlanNumberHelperHandler(Handler):
         ]
 
         for pattern in glob_patterns:
-            if re.search(pattern, command):
+            if re.search(pattern, executable_text):
                 return True
 
-        # 4. Commands with sort and tail on plan directory output
-        # This catches complex pipelines like: ls ... | sort -V | tail -1
-        if plan_dir in command and "sort" in command and "tail" in command:
-            # Additional check: make sure it's actually trying to get latest
-            if re.search(r"tail\s+-\d+", command) or "tail -1" in command:
+        # 4. Sort-and-truncate over a listing OF THE PLAN DIRECTORY.
+        #
+        # The reduction must consume a listing of the directory itself. Mere
+        # co-occurrence is not enough: this rule once required only that the
+        # plan dir, `sort` and `tail` each appear somewhere in the string, which
+        # fires on text that is not a command at all and on a command scoped to
+        # ONE named plan. Both are legitimate:
+        #
+        #   git ls-files CLAUDE/Plan/00163-x/JOURNAL | sort | tail -1
+        #
+        # reads the newest journal day-file of a KNOWN plan -- the operation the
+        # plan-workflow guidance recommends -- and discovers no plan number.
+        #
+        # So a reference that names a specific plan (two or more literal digits
+        # after the plan dir) does not arm this rule. `CLAUDE/Plan/0*` and
+        # `CLAUDE/Plan/[0-9]*` carry at most one literal digit before their glob
+        # metacharacter, so the real discovery idiom still arms it.
+        if _SORT_COMMAND in executable_text and self._sweeps_the_plan_directory(
+            executable_text, plan_dir
+        ):
+            if re.search(_TRUNCATE_TO_LAST_PATTERN, executable_text):
                 return True
 
         # 5. ls on plan directory piped to grep with number patterns

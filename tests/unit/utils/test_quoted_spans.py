@@ -13,7 +13,10 @@ exempt span and scan a COPY, leaving the pattern lists untouched.
 
 from __future__ import annotations
 
-from claude_code_hooks_daemon.utils.quoted_spans import blank_quoted_spans
+from claude_code_hooks_daemon.utils.quoted_spans import (
+    blank_quoted_spans,
+    blank_shell_literal_spans,
+)
 
 
 class TestDoubleQuotesMarkAMention:
@@ -83,3 +86,70 @@ class TestBlankingPreservesLength:
     def test_blanked_text_is_the_same_length(self) -> None:
         text = 'The hook flagged my "out of scope" and it was right.'
         assert len(blank_quoted_spans(text)) == len(text)
+
+
+class TestShellLiteralsAreBlankedByExecutability:
+    """Shell quoting differs from prose quoting (Plan 00227).
+
+    A shell literal is exempt because the shell will not RUN it, which is a
+    different question from whether an author was quoting someone.
+    """
+
+    def test_single_quoted_spans_are_blanked(self) -> None:
+        """Nothing expands inside single quotes, so the span cannot be a command."""
+        command = "grep -cE '^CLAUDE/Plan/[0-9]' folders.txt"
+
+        result = blank_shell_literal_spans(command)
+
+        assert "[0-9]" not in result
+        assert "grep -cE" in result
+        assert "folders.txt" in result
+
+    def test_a_plain_double_quoted_span_is_blanked(self) -> None:
+        command = 'echo "mentions CLAUDE/Plan and sort and tail -1"'
+
+        result = blank_shell_literal_spans(command)
+
+        assert "CLAUDE/Plan" not in result
+        assert result.startswith("echo ")
+
+    def test_a_double_quoted_span_running_a_command_is_not_blanked(self) -> None:
+        """Bash expands `$(...)` inside double quotes, so the command still runs."""
+        command = 'echo "count: $(ls CLAUDE/Plan)"'
+
+        result = blank_shell_literal_spans(command)
+
+        assert "ls CLAUDE/Plan" in result
+
+    def test_literals_inside_a_substitution_are_still_blanked(self) -> None:
+        """The scanner must step INTO an executing span, not over it."""
+        command = "echo \"count: $(grep -cE '^CLAUDE/Plan/[0-9]' f)\""
+
+        result = blank_shell_literal_spans(command)
+
+        assert "grep -cE" in result
+        assert "[0-9]" not in result
+
+    def test_backticks_are_never_blanked(self) -> None:
+        """Backticks are command substitution in shell, not a quotation mark."""
+        command = "echo `ls CLAUDE/Plan`"
+
+        result = blank_shell_literal_spans(command)
+
+        assert "ls CLAUDE/Plan" in result
+
+    def test_an_unterminated_quote_leaves_the_remainder_intact(self) -> None:
+        """Fail open: a missed scan is worse than a missed exemption."""
+        command = "echo 'unterminated && ls CLAUDE/Plan"
+
+        result = blank_shell_literal_spans(command)
+
+        assert "ls CLAUDE/Plan" in result
+
+    def test_blanking_preserves_length(self) -> None:
+        command = "echo 'abc' && ls CLAUDE/Plan"
+
+        assert len(blank_shell_literal_spans(command)) == len(command)
+
+    def test_empty_command_is_handled(self) -> None:
+        assert blank_shell_literal_spans("") == ""
