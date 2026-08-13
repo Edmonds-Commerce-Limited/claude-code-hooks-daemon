@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.core.chain import HandlerVerdict
+from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.utils.retention import cap_log_file
 
@@ -115,6 +116,7 @@ def build_verdict_lines(
     tool_name: str,
     session_id: str,
     now: datetime | None = None,
+    record_status_events: bool = False,
 ) -> list[dict[str, Any]]:
     """Build the JSONL-ready dicts for one dispatch's decisions.
 
@@ -126,7 +128,24 @@ def build_verdict_lines(
 
     Returns an empty list when there is genuinely nothing to record (no
     matched handlers, no escape hatch) — the caller skips writing entirely.
+
+    Status events are dropped unless ``record_status_events`` is set, because
+    they are pure noise in a log whose purpose is "which handlers earn their
+    keep?" (Plan 00234). A status handler RENDERS; it has no verdict but
+    ``allow``, so its records carry no information — yet they arrive at the
+    status line's refresh rate. Measured on this project: 43,929 of 44,180
+    retained records were status renders (99.43%), filling the 10 MiB cap in
+    **65 minutes**. Excluding them stretches the same cap to roughly 8 days,
+    which is the difference between an instrument that can answer the question
+    and one that cannot.
+
+    The filter is on the EVENT, not on a ``status-*`` name prefix: what makes
+    these records worthless is the event they serve, and a name test would both
+    miss a renamed handler and catch an unrelated one.
     """
+    if event == EventType.STATUS_LINE.value and not record_status_events:
+        return []
+
     ts = (now or datetime.now(UTC)).isoformat()
     lines: list[dict[str, Any]] = [
         {
@@ -172,6 +191,7 @@ def append_verdicts(
     log_dir: Path,
     max_bytes: int,
     retain_bytes: int | None = None,
+    record_status_events: bool = False,
 ) -> Path | None:
     """Append this dispatch's verdict lines to ``<log_dir>/verdicts.jsonl``.
 
@@ -191,6 +211,8 @@ def append_verdicts(
         log_dir: Directory verdicts.jsonl is written into.
         max_bytes: Retention cap (Plan 00181 ``cap_log_file``).
         retain_bytes: Bytes to retain on trim (default: ``max_bytes``).
+        record_status_events: Include Status renders. Off by default — they
+            are 99% of the volume and carry no information (Plan 00234).
 
     Returns:
         The file written, or ``None`` when disabled or nothing to record.
@@ -204,6 +226,7 @@ def append_verdicts(
         event=event,
         tool_name=tool_name,
         session_id=session_id,
+        record_status_events=record_status_events,
     )
     if not lines:
         return None

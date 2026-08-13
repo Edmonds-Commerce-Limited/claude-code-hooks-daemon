@@ -279,6 +279,18 @@
       "reason": "Cache writer: log-and-continue on OSError writing cache file. Cache writing is best-effort \u2014 failure means the next session re-scans instead of using cache. Advisory handler must not crash session start. Already logged at debug level."
     },
     {
+      "file": "handlers/session_start/suggest_statusline.py",
+      "function": "_state_file",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00236: returns None when ProjectContext is not initialised (unit tests, or any non-daemon caller), so the suggestion-counter read/write is skipped. Identical explicitly-non-fatal contract to background_process_tracker._resolve_state_file \u2014 the advisory is the primary function and must never crash session start. Note the failure direction is deliberately fail-OPEN: an unresolvable state file makes the handler SUGGEST, never fall silent, because a permanently silent advisory is indistinguishable from a working one."
+    },
+    {
+      "file": "handlers/session_start/suggest_statusline.py",
+      "function": "_record_shown",
+      "rule": "log-and-continue",
+      "reason": "Plan 00236: log-and-continue on OSError persisting the showing counter. Same best-effort contract as gitignore_safety_checker._write_cache \u2014 a failed write means the suggestion may be shown once more than intended, which is strictly the safe direction for a noise-reduction counter, and must not crash session start. Already logged at debug level."
+    },
+    {
       "file": "handlers/session_start/version_check.py",
       "function": "_get_cached_result",
       "rule": "return-none-on-error",
@@ -442,9 +454,9 @@
     },
     {
       "file": "daemon/background_harvester.py",
-      "function": "read_tracked_pgids",
+      "function": "read_tracked_commands",
       "rule": "silent-continue",
-      "reason": "JSONL state-file parsing loop (Plan 00142): except json.JSONDecodeError: continue is the standard JSONL pattern \u2014 identical to transcript_reader.read_incremental and hedging_language_detector._parse_transcript. The best-effort background-process state file may contain a corrupt or partial final line; one bad line must not abort reading the remaining tracked pgids."
+      "reason": "JSONL state-file parsing loop (Plan 00142): except json.JSONDecodeError: continue is the standard JSONL pattern \u2014 identical to transcript_reader.read_incremental and hedging_language_detector._parse_transcript. The best-effort background-process state file may contain a corrupt or partial final line; one bad line must not abort reading the remaining tracked commands."
     },
     {
       "file": "handlers/post_tool_use/background_process_tracker.py",
@@ -720,7 +732,7 @@
       "file": "daemon/verdict_report.py",
       "function": "read_verdict_records",
       "rule": "silent-continue",
-      "reason": "Plan 00209 verdict log reporting: except json.JSONDecodeError: continue is the standard JSONL pattern -- identical shape to transcript_reader.read_incremental, background_harvester.read_tracked_pgids, and hedging_language_detector._parse_transcript. One corrupted append (e.g. a crash mid-write) must not hide every other decision recorded around it."
+      "reason": "Plan 00209 verdict log reporting: except json.JSONDecodeError: continue is the standard JSONL pattern -- identical shape to transcript_reader.read_incremental, background_harvester.read_tracked_commands, and hedging_language_detector._parse_transcript. One corrupted append (e.g. a crash mid-write) must not hide every other decision recorded around it."
     }
   ]
 }

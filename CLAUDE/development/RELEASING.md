@@ -349,7 +349,7 @@ Approved -> proceed. Issues found -> agent fixes docs, re-submit until approved.
 
 ## Step 8: QA Verification Gate (BLOCKING)
 
-Main Claude runs: `./scripts/qa/run_all.sh`
+Main Claude runs: `./scripts/qa/llm_qa.py all`
 
 Every check the script runs must pass. ANY failure = ABORT.
 
@@ -545,7 +545,7 @@ may not exist on the host.
 
 1. STOP testing immediately
 2. Fix bug with TDD
-3. Run full QA: `./scripts/qa/run_all.sh`
+3. Run full QA: `./scripts/qa/llm_qa.py all`
 4. Restart daemon
 5. **RESTART ALL tests from Step 12.1** (code changes can regress earlier tests)
 6. Repeat until zero failures
@@ -704,7 +704,7 @@ gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url \
 # 3. Create RELEASES/vX.Y.Z.md
 # 4. Move UNRELEASED/post-upgrade-tasks/NN-*.md into the versioned upgrade guide
 #    and populate its post-upgrade-tasks/README.md task index
-# 5. Run QA: ./scripts/qa/run_all.sh
+# 5. Run QA: ./scripts/qa/llm_qa.py all
 # 6. Commit and push
 # 7. Tag: git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z
 # 8. gh release create vX.Y.Z --title "vX.Y.Z - [Title]" --notes-file RELEASES/vX.Y.Z.md --latest

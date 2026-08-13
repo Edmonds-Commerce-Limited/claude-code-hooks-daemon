@@ -5,6 +5,7 @@ until acceptance tests are complete.
 """
 
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -94,11 +95,48 @@ class TestReleaseBlockerHandlerMatches:
         assert handler.matches(hook_input) is True
 
     @patch("subprocess.run")
-    def test_matches_returns_true_when_readme_modified(self, mock_run: MagicMock) -> None:
-        """Handler should match when README.md is modified."""
+    def test_does_NOT_match_when_only_readme_modified(self, mock_run: MagicMock) -> None:
+        """README.md is edited constantly for reasons that are not releases.
+
+        Plan 00234 finding H-1. This handler is `terminal=True` and DENIES the
+        Stop event, so treating an ordinary docs edit as "RELEASE IN PROGRESS"
+        traps the session until the file is committed or the handler is turned
+        off. A release always touches a version file; README alone never means
+        one is under way.
+        """
         handler = ReleaseBlockerHandler()
 
         mock_run.return_value = MagicMock(returncode=0, stdout="M  README.md\n")
+
+        hook_input = {}
+        assert handler.matches(hook_input) is False
+
+    @patch("subprocess.run")
+    def test_does_NOT_match_when_only_claude_md_modified(self, mock_run: MagicMock) -> None:
+        """CLAUDE.md is REGENERATED AND AUTO-COMMITTED by the daemon itself.
+
+        Every daemon restart can leave it dirty, so keeping it in the trigger
+        set means the daemon could trap the session by its own routine action.
+        """
+        handler = ReleaseBlockerHandler()
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="M  CLAUDE.md\n")
+
+        hook_input = {}
+        assert handler.matches(hook_input) is False
+
+    @patch("subprocess.run")
+    def test_still_matches_when_a_version_file_accompanies_the_readme(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Narrowing the trigger must not blind the guard.
+
+        A real release edits README.md AND a version file. The version file is
+        what proves it, and it must still fire.
+        """
+        handler = ReleaseBlockerHandler()
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="M  README.md\nM  pyproject.toml\n")
 
         hook_input = {}
         assert handler.matches(hook_input) is True
@@ -177,16 +215,37 @@ class TestReleaseBlockerHandlerHandle:
         assert "RELEASE IN PROGRESS" in result.reason
         assert "acceptance tests" in result.reason
         assert "RELEASING.md Step 8" in result.reason
-        assert "89 EXECUTABLE" in result.reason
         assert "handlers.stop.release_blocker" in result.reason
         assert "enabled: false" in result.reason
 
-    def test_handle_references_example_context(self) -> None:
-        """Handler message should reference example-context.md."""
+    def test_handle_does_not_assert_a_hardcoded_test_count(self) -> None:
+        """A count copied into a block message drifts and then misleads.
+
+        This message asserted "89 EXECUTABLE acceptance tests". The suite is
+        described in RELEASING.md, which is the source of truth and moves
+        without this file noticing — the same drift CLAUDE.md already records
+        for the QA check count ("it drifted to '10' while the suite ran 13").
+        Point at the document instead of restating its contents.
+        """
         handler = ReleaseBlockerHandler()
-        hook_input = {}
 
-        result = handler.handle(hook_input)
+        result = handler.handle({})
 
-        assert "CLAUDE/Plan/00060" in result.reason
-        assert "example-context.md" in result.reason
+        assert "89" not in result.reason
+
+    def test_handle_references_a_path_that_exists(self) -> None:
+        """A block message must not send the reader to a moved file.
+
+        The plan folder it cited was archived into `Completed/`, so the path
+        in the message stopped resolving. A block is only as useful as the
+        next step it points at.
+        """
+        handler = ReleaseBlockerHandler()
+
+        result = handler.handle({})
+
+        cited = Path("/workspace/CLAUDE/Plan/Completed/00060-release-blocker-handler")
+        assert (
+            cited.is_dir()
+        ), "the cited plan folder must exist for this assertion to mean anything"
+        assert "CLAUDE/Plan/Completed/00060-release-blocker-handler" in result.reason

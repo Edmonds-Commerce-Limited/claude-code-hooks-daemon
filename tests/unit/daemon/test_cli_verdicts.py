@@ -37,6 +37,41 @@ def _write_verdicts(path, records):
             handle.write(json.dumps(record) + "\n")
 
 
+class TestBehaviouralHandlerNames:
+    """Status renderers must not become false "never-fired" entries.
+
+    Plan 00234/00236: Status events are no longer recorded to verdicts.jsonl
+    (they were 99.43% of the volume and always ``allow``). Left unhandled, that
+    would put all 14 status handlers into the report's "never-fired" list —
+    replacing one misleading signal with another, which is the failure mode
+    this whole audit exists to stop.
+
+    Fired-ness is a question about handlers that DECIDE. A renderer has no
+    verdict to record, so it does not belong in that roster at all.
+    """
+
+    def test_status_handlers_are_excluded(self):
+        handlers = {
+            "Status": [{"name": "status-git-branch"}, {"name": "status-model-context"}],
+            "PreToolUse": [{"name": "pipe-blocker"}],
+        }
+        assert cli._behavioural_handler_names(handlers) == ["pipe-blocker"]
+
+    def test_non_status_events_are_all_kept(self):
+        handlers = {
+            "PreToolUse": [{"name": "a"}, {"name": "b"}],
+            "Stop": [{"name": "c"}],
+        }
+        assert sorted(cli._behavioural_handler_names(handlers)) == ["a", "b", "c"]
+
+    def test_entries_without_a_name_are_skipped(self):
+        handlers = {"PreToolUse": [{"name": "a"}, {}, {"name": ""}]}
+        assert cli._behavioural_handler_names(handlers) == ["a"]
+
+    def test_empty_listing_is_empty(self):
+        assert cli._behavioural_handler_names({}) == []
+
+
 def test_no_log_file_reports_zero_records(tmp_path, capsys):
     rc = cli.cmd_verdicts(_args(tmp_path))
     out = capsys.readouterr().out

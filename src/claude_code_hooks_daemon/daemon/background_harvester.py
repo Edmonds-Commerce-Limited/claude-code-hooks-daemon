@@ -17,10 +17,27 @@ Budget model:
   even when nothing was tracked at spawn): ``%CPU >= max_cpu_percent`` sustained
   for at least ``min_cpu_runtime_seconds``. The min-runtime gate stops a
   momentary compile spike from being flagged.
-- **Wall-TTL breach** (applies ONLY to ``tracked_pgids`` — process groups the
+- **Wall-TTL breach** (applies ONLY to ``tracked_commands`` — the commands the
   agent registered as backgrounded): ``elapsed >= max_wall_seconds``. Scoping
-  this to tracked groups avoids nagging about legitimate long-lived processes
+  this to tracked work avoids nagging about legitimate long-lived processes
   (dev servers, system daemons) that were never registered.
+
+Why the tracked set is keyed by COMMAND TEXT and not by pgid (Plan 00236): the
+tracker is a PostToolUse handler running inside the daemon, in a different
+process tree from the command it observes. It never learns a pid, so the
+``pgid`` key the reader originally looked for was one no writer could ever
+supply — the wall-TTL branch was dead from the day it was written. What the
+tracker DOES hold is the command string, and a background Bash call reaches
+``ps`` as a wrapper shell that ``eval``s that string verbatim, so the recorded
+text appears in the process's ``args``. Correlating there costs nothing on the
+hook path: the harvester already samples ``ps``.
+
+The honest limit of that correlation: it resolves for ``run_in_background``
+calls, whose full command survives into ``args``. A shell-``&`` command whose
+parent has exited leaves only a child whose ``args`` are a fragment, so it
+matches nothing and gets no wall-TTL — the same coverage it had before, with
+the CPU ceiling (which applies to every process, tracked or not) still behind
+it.
 """
 
 from __future__ import annotations
@@ -108,31 +125,42 @@ def parse_ps_output(text: str) -> list[ProcessRecord]:
     return records
 
 
+def _is_tracked(args: str, tracked_commands: Iterable[str]) -> bool:
+    """Return True if ``args`` contains any registered backgrounded command.
+
+    Blank entries are skipped deliberately: ``"" in args`` is True for every
+    process, so one empty ``command`` field would silently put the whole
+    process table under the wall TTL.
+    """
+    return any(command and command in args for command in tracked_commands)
+
+
 def find_breaches(
     records: Iterable[ProcessRecord],
     *,
     max_wall_seconds: int,
     max_cpu_percent: float,
     min_cpu_runtime_seconds: int,
-    tracked_pgids: Iterable[int] = (),
+    tracked_commands: Iterable[str] = (),
     exclude_pgids: Iterable[int] = (),
 ) -> list[Breach]:
     """Return the processes that breached a budget (CPU runaway or tracked TTL).
 
     Args:
         records: Parsed process records.
-        max_wall_seconds: Wall-time TTL applied to tracked process groups.
+        max_wall_seconds: Wall-time TTL applied to tracked commands.
         max_cpu_percent: Sustained %CPU ceiling (e.g. 400 == 4 cores).
         min_cpu_runtime_seconds: Minimum elapsed time before a CPU breach counts
             (filters momentary spikes).
-        tracked_pgids: Process groups the agent registered as backgrounded; only
-            these are eligible for the wall-TTL breach.
+        tracked_commands: Commands the agent registered as backgrounded; only
+            processes whose ``args`` contain one are eligible for the wall-TTL
+            breach.
         exclude_pgids: Process groups to never flag (e.g. the harvester's own).
 
     Returns:
         A list of :class:`Breach`, one per breaching process, never killing.
     """
-    tracked = set(tracked_pgids)
+    tracked = list(tracked_commands)
     excluded = set(exclude_pgids)
     breaches: list[Breach] = []
     for record in records:
@@ -144,24 +172,24 @@ def find_breaches(
                 f"{record.pcpu:.0f}% CPU sustained for {record.etimes}s "
                 f"(ceiling {max_cpu_percent:.0f}%)"
             )
-        if record.pgid in tracked and record.etimes >= max_wall_seconds:
+        if record.etimes >= max_wall_seconds and _is_tracked(record.args, tracked):
             reasons.append(f"tracked process running {record.etimes}s (TTL {max_wall_seconds}s)")
         if reasons:
             breaches.append(Breach(record=record, reasons=tuple(reasons)))
     return breaches
 
 
-def read_tracked_pgids(state_file: Path) -> list[int]:
-    """Read process-group ids recorded in the tracker's JSONL state file.
+def read_tracked_commands(state_file: Path) -> list[str]:
+    """Read the backgrounded commands recorded in the tracker's JSONL state file.
 
-    Each line is a JSON object; lines carrying an integer ``pgid`` contribute it.
-    A missing file yields ``[]``. Malformed lines are skipped explicitly (not
-    blanket-suppressed) — the state file is best-effort and a corrupt line must
-    not abort the whole harvest.
+    Each line is a JSON object; lines carrying a non-blank string ``command``
+    contribute it. A missing file yields ``[]``. Malformed lines are skipped
+    explicitly (not blanket-suppressed) — the state file is best-effort and a
+    corrupt line must not abort the whole harvest.
     """
     if not state_file.exists():
         return []
-    pgids: list[int] = []
+    commands: list[str] = []
     for line in state_file.read_text().splitlines():
         stripped = line.strip()
         if not stripped:
@@ -170,10 +198,10 @@ def read_tracked_pgids(state_file: Path) -> list[int]:
             record = json.loads(stripped)
         except json.JSONDecodeError:
             continue
-        pgid = record.get("pgid") if isinstance(record, dict) else None
-        if isinstance(pgid, int):
-            pgids.append(pgid)
-    return pgids
+        command = record.get("command") if isinstance(record, dict) else None
+        if isinstance(command, str) and command.strip():
+            commands.append(command)
+    return commands
 
 
 def build_report(
@@ -182,7 +210,7 @@ def build_report(
     max_wall_seconds: int,
     max_cpu_percent: float,
     min_cpu_runtime_seconds: int,
-    tracked_pgids: Iterable[int] = (),
+    tracked_commands: Iterable[str] = (),
     exclude_pgids: Iterable[int] = (),
 ) -> dict[str, Any]:
     """Evaluate budgets and build a report dict for the ``harvest-background`` CLI.
@@ -197,7 +225,7 @@ def build_report(
         max_wall_seconds=max_wall_seconds,
         max_cpu_percent=max_cpu_percent,
         min_cpu_runtime_seconds=min_cpu_runtime_seconds,
-        tracked_pgids=tracked_pgids,
+        tracked_commands=tracked_commands,
         exclude_pgids=exclude_pgids,
     )
     serialised = [

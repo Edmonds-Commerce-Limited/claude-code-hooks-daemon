@@ -49,6 +49,7 @@ from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode
+from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
 from claude_code_hooks_daemon.daemon.metadata import (
@@ -2605,7 +2606,7 @@ def cmd_harvest_background(args: argparse.Namespace) -> int:
     """Surface runaway background processes (Plan 00142, Layer B) — never kills.
 
     Samples ``ps``, applies resource budgets (CPU ceiling for ALL processes so
-    reparented orphans are caught; wall-TTL for tracked process groups), and
+    reparented orphans are caught; wall-TTL for tracked commands), and
     prints each breach with a ready-to-run ``kill -- -<pgid>`` command for the
     AGENT to act on. The daemon performs no kill (owner steer, Decision 1).
 
@@ -2616,7 +2617,7 @@ def cmd_harvest_background(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.daemon.background_harvester import (
         build_report,
         parse_ps_output,
-        read_tracked_pgids,
+        read_tracked_commands,
         run_ps,
     )
 
@@ -2643,7 +2644,7 @@ def cmd_harvest_background(args: argparse.Namespace) -> int:
         return 2
 
     records = parse_ps_output(ps_text)
-    tracked = read_tracked_pgids(state_file)
+    tracked = read_tracked_commands(state_file)
     # Never flag the harvester's own process group.
     own_pgid = os.getpgrp()
 
@@ -2652,7 +2653,7 @@ def cmd_harvest_background(args: argparse.Namespace) -> int:
         max_wall_seconds=args.max_wall_seconds,
         max_cpu_percent=args.max_cpu_percent,
         min_cpu_runtime_seconds=args.min_cpu_runtime_seconds,
-        tracked_pgids=tracked,
+        tracked_commands=tracked,
         exclude_pgids=(own_pgid,),
     )
 
@@ -2688,8 +2689,33 @@ def _resolve_registered_handler_names(
         return None
 
     handlers = response.get("result", {}).get("handlers", {})
+    return _behavioural_handler_names(handlers)
+
+
+def _behavioural_handler_names(handlers: dict[str, Any]) -> list[str]:
+    """Registered handler names, excluding Status-event renderers.
+
+    "Never fired" is a question about handlers that DECIDE. Status handlers
+    render a line of text and can only ever return ``allow``, so their verdicts
+    are not recorded at all (Plan 00234) — which would otherwise land every one
+    of them in this report's never-fired roster and replace one misleading
+    signal with another.
+
+    The exclusion is unconditional, and stays correct even when
+    ``verdict_log.record_status_events`` is on: never-fired is computed as
+    registered-minus-fired, so dropping renderers from the registered side
+    simply keeps them out of a roster they were never meaningful in.
+
+    Args:
+        handlers: The daemon's handler listing, keyed by event name.
+
+    Returns:
+        Handler names from every non-Status event, in listing order.
+    """
     names: list[str] = []
-    for handler_list in handlers.values():
+    for event_name, handler_list in handlers.items():
+        if event_name == EventType.STATUS_LINE.value:
+            continue
         for handler in handler_list:
             name = handler.get("name")
             if name:

@@ -91,6 +91,30 @@ its value (see the plan's Non-Goals).
 
 Default cap: 10 MB (`daemon.verdict_log.max_bytes` in `.claude/hooks-daemon.yaml`).
 
+### Status renders are not recorded
+
+A status handler RENDERS — it can only ever return `allow`, so its records
+carry no information, and they arrive at the status line's refresh rate rather
+than at the rate decisions are made.
+
+Left in, they do not merely add noise, they consume the window. Measured on
+this daemon's own log (Plan 00234): **43,929 of 44,180 retained records were
+status renders — 99.43%**, filling the 10 MB cap in **65 minutes**. A log built
+to answer "which handlers earn their keep?" could see one hour of one session.
+Excluding them stretches the same cap to roughly **8 days**.
+
+The filter is on the EVENT, not on a `status-*` name prefix: what makes these
+records worthless is the event they serve, and a name test would both miss a
+renamed handler and catch an unrelated one.
+
+Status handlers are also omitted from the report's never-fired roster. Without
+that, excluding their records would have turned 14 renderers into false "never
+fired" entries — trading one misleading signal for another. Fired-ness is a
+question about handlers that DECIDE.
+
+Set `record_status_events: true` to opt back in when debugging the status line
+itself, and expect the retained window to shrink to about an hour again.
+
 ## Configuration
 
 ```yaml
@@ -98,6 +122,7 @@ daemon:
   verdict_log:
     enabled: true # default — metadata only, never tool payloads or file contents
     max_bytes: 10485760 # 10 MB rolling-sample cap
+    record_status_events: false # default — status renders are 99% noise (see above)
 ```
 
 Default-on, unlike `payload_capture` (which records raw payloads and ships
@@ -116,13 +141,25 @@ privacy reason to ship it dormant.
 Reports:
 
 - Total recorded decisions (in the retained window)
+
 - Override count and rate
+
 - Per-handler fire counts, with each handler's own verdict mix
+
 - Overall verdict mix across all handlers (allow/deny/ask/override)
+
 - **Never-fired handlers** — only available when the daemon is running (the
   full registered-handler set is queried over the socket, the same way
   `hooks-daemon handlers` does); reports "unavailable" rather than a
-  misleadingly empty list when it cannot be determined.
+  misleadingly empty list when it cannot be determined. Status handlers are
+  excluded (see above).
+
+  **"Never fired" is NOT evidence a handler is pointless.** A guard on a rare,
+  catastrophic operation is SUPPOSED to sit silent — rarity is what success
+  looks like for it, and this list only ever covers the retained window. Read
+  it as "not exercised in this window", and establish that a handler *cannot*
+  fire from its code before concluding anything. The report says so in its own
+  output for the same reason.
 
 ## See also
 

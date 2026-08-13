@@ -35,7 +35,7 @@ Standard process for any code modification that isn't a new feature or bug fix.
 ./scripts/qa/run_autofix.sh
 
 # 3. Run full QA suite
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 
 # 4. Verify daemon loads (MANDATORY)
 ./bin/hooks-daemon restart
@@ -88,7 +88,7 @@ pytest tests/unit/path/to/test_module.py --cov=src/path/to/module.py --cov-repor
 ### Step 4: Run Full QA Suite
 
 ```bash
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 ```
 
 **Expected output**: one `✅ PASSED` line per check, then the overall verdict.
@@ -175,7 +175,7 @@ A general code change is DONE when ALL of the following are verified:
 
 ### 4. Full QA
 
-- [ ] Run: `./scripts/qa/run_all.sh`
+- [ ] Run: `./scripts/qa/llm_qa.py all`
 - [ ] Expected: "ALL CHECKS PASSED"
 
 ### 5. Client-Mode Verification (if paths/interpreters/wrappers/assets changed)
@@ -310,7 +310,7 @@ If you need to run checks individually:
 ./scripts/qa/run_magic_value_check.sh
 
 # Run all checks
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 ```
 
 ## Git Best Practices

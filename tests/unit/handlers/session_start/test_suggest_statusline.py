@@ -140,6 +140,86 @@ class TestSuggestStatusLineHandler:
         assert len(tests) > 0
 
 
+class TestSuggestionDecay:
+    """A suggestion that repeats forever stops being a suggestion (Plan 00234).
+
+    This was the only "decide once" advisory in the SessionStart cohort with no
+    backoff of any kind. A project that looked at the status line and chose not
+    to use it got the same pitch at the top of every new session, for ever —
+    and silence is the only way a user can express "no thanks", because there
+    is nothing to configure when you have declined.
+
+    So the pitch is finite: after ``_MAX_SUGGESTIONS`` unheeded showings it
+    goes quiet. Acting on it silences it immediately via the existing
+    ``statusLine``-configured check.
+    """
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> SuggestStatusLineHandler:
+        h = SuggestStatusLineHandler()
+        state = tmp_path / "statusline_suggestion_state.json"
+        h._state_file_override = state
+        return h
+
+    def _show(self, handler: SuggestStatusLineHandler) -> bool:
+        """One session: does it suggest, and record the showing if so."""
+        with (
+            patch(_IS_RESUME_SESSION, return_value=False),
+            patch.object(handler, "_is_statusline_configured", return_value=False),
+        ):
+            if not handler.matches({}):
+                return False
+            handler.handle({})
+            return True
+
+    def test_suggests_on_the_first_session(self, handler: SuggestStatusLineHandler) -> None:
+        assert self._show(handler) is True
+
+    def test_stops_after_the_maximum_number_of_showings(
+        self, handler: SuggestStatusLineHandler
+    ) -> None:
+        from claude_code_hooks_daemon.handlers.session_start.suggest_statusline import (
+            _MAX_SUGGESTIONS,
+        )
+
+        shown = [self._show(handler) for _ in range(_MAX_SUGGESTIONS + 3)]
+
+        assert shown[:_MAX_SUGGESTIONS] == [True] * _MAX_SUGGESTIONS
+        assert not any(shown[_MAX_SUGGESTIONS:])
+
+    def test_count_survives_a_new_handler_instance(self, tmp_path: Path) -> None:
+        """The daemon restarts; the user's disinterest does not reset with it.
+
+        In-memory state would make the cap meaningless — a restart every few
+        hours would re-open the pitch indefinitely.
+        """
+        from claude_code_hooks_daemon.handlers.session_start.suggest_statusline import (
+            _MAX_SUGGESTIONS,
+        )
+
+        state = tmp_path / "statusline_suggestion_state.json"
+        for _ in range(_MAX_SUGGESTIONS):
+            handler = SuggestStatusLineHandler()
+            handler._state_file_override = state
+            assert self._show(handler) is True
+
+        fresh = SuggestStatusLineHandler()
+        fresh._state_file_override = state
+        assert self._show(fresh) is False
+
+    def test_unreadable_state_file_still_suggests(self, handler: SuggestStatusLineHandler) -> None:
+        """Fail OPEN: a broken counter must not silently disable the advisory.
+
+        The counter exists to reduce noise, not to gate correctness, so a
+        corrupt file degrades to "suggest" rather than "stay silent for ever"
+        — a silent handler is indistinguishable from a working one.
+        """
+        state = handler._state_file_override
+        state.write_text("{ not json")
+
+        assert self._show(handler) is True
+
+
 class TestIsStatusLineConfigured:
     """Tests for _is_statusline_configured private method."""
 

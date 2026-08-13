@@ -16,7 +16,7 @@ from claude_code_hooks_daemon.daemon.background_harvester import (
     build_report,
     find_breaches,
     parse_ps_output,
-    read_tracked_pgids,
+    read_tracked_commands,
 )
 
 # The literal incident process: ugrep -rl … / at 1116% CPU for 6918s.
@@ -60,7 +60,7 @@ class TestFindBreaches:
             max_wall_seconds=600,
             max_cpu_percent=400,
             min_cpu_runtime_seconds=60,
-            tracked_pgids=(),
+            tracked_commands=(),
         )
         pids = {b.record.pid for b in breaches}
         # The 1116% CPU ugrep is caught even with NO tracked pgids (orphan case).
@@ -72,7 +72,7 @@ class TestFindBreaches:
             max_wall_seconds=600,
             max_cpu_percent=400,
             min_cpu_runtime_seconds=60,
-            tracked_pgids=(),
+            tracked_commands=(),
         )
         pids = {b.record.pid for b in breaches}
         # init (pid 1) runs forever but 0% CPU and is not tracked → no breach.
@@ -80,7 +80,7 @@ class TestFindBreaches:
         # the 0% bash parent is not a CPU breach and not tracked → no breach.
         assert 295967 not in pids
 
-    def test_wall_ttl_only_applies_to_tracked_pgids(self):
+    def test_wall_ttl_only_applies_to_tracked_commands(self):
         text = (
             "PID PGID ELAPSED %CPU COMMAND\n"
             "500 500 9999 0.1 node dev-server\n"  # long-lived, low CPU
@@ -93,7 +93,7 @@ class TestFindBreaches:
                 max_wall_seconds=600,
                 max_cpu_percent=400,
                 min_cpu_runtime_seconds=60,
-                tracked_pgids=(),
+                tracked_commands=(),
             )
             == []
         )
@@ -103,10 +103,49 @@ class TestFindBreaches:
             max_wall_seconds=600,
             max_cpu_percent=400,
             min_cpu_runtime_seconds=60,
-            tracked_pgids=(500,),
+            tracked_commands=("node dev-server",),
         )
         assert len(breaches) == 1
         assert any("TTL" in r or "ttl" in r.lower() for r in breaches[0].reasons)
+
+    def test_blank_tracked_command_does_not_track_everything(self):
+        """A blank entry must not make the whole process table "tracked".
+
+        ``"" in args`` is True for every process, so a single empty ``command``
+        field would turn the narrow wall TTL into a nag about ``init``.
+        """
+        records = parse_ps_output("PID PGID ELAPSED %CPU COMMAND\n1 1 999999 0.0 /sbin/init\n")
+
+        assert (
+            find_breaches(
+                records,
+                max_wall_seconds=600,
+                max_cpu_percent=400,
+                min_cpu_runtime_seconds=60,
+                tracked_commands=("", "   "),
+            )
+            == []
+        )
+
+    def test_tracked_command_matches_as_a_substring_of_args(self):
+        """Correlation is by the command text surviving into ``ps`` args.
+
+        A background Bash call reaches ``ps`` as a wrapper shell that ``eval``s
+        the recorded command, so the match is a substring one — not equality.
+        """
+        text = (
+            "PID PGID ELAPSED %CPU COMMAND\n"
+            "800 800 4000 0.1 /bin/bash -c eval 'npm run build' < /dev/null\n"
+        )
+        breaches = find_breaches(
+            parse_ps_output(text),
+            max_wall_seconds=600,
+            max_cpu_percent=400,
+            min_cpu_runtime_seconds=60,
+            tracked_commands=("npm run build",),
+        )
+
+        assert [b.record.pid for b in breaches] == [800]
 
     def test_cpu_breach_requires_min_runtime(self):
         text = "PID PGID ELAPSED %CPU COMMAND\n700 700 5 900 some-burst\n"
@@ -118,7 +157,7 @@ class TestFindBreaches:
                 max_wall_seconds=600,
                 max_cpu_percent=400,
                 min_cpu_runtime_seconds=60,
-                tracked_pgids=(),
+                tracked_commands=(),
             )
             == []
         )
@@ -130,7 +169,7 @@ class TestFindBreaches:
             max_wall_seconds=600,
             max_cpu_percent=400,
             min_cpu_runtime_seconds=60,
-            tracked_pgids=(),
+            tracked_commands=(),
             exclude_pgids=(295967,),
         )
         assert breaches == []
@@ -141,7 +180,7 @@ class TestFindBreaches:
             max_wall_seconds=600,
             max_cpu_percent=400,
             min_cpu_runtime_seconds=60,
-            tracked_pgids=(),
+            tracked_commands=(),
         )
         breach = next(b for b in breaches if b.record.pid == 295971)
         assert isinstance(breach, Breach)
@@ -149,22 +188,45 @@ class TestFindBreaches:
         assert breach.reasons  # non-empty explanation
 
 
-class TestReadTrackedPgids:
-    def test_missing_file_returns_empty(self, tmp_path):
-        assert read_tracked_pgids(tmp_path / "nope.jsonl") == []
+class TestReadTrackedCommands:
+    """The predecessor of this class read a ``pgid`` key (Plan 00236).
 
-    def test_reads_pgids_skipping_malformed_lines(self, tmp_path):
+    It passed for as long as it existed, on records it invented itself — while
+    the real writer emitted no ``pgid`` at all and the feature was dead. The
+    fixtures below therefore mirror the PRODUCTION record shape, and the seam
+    itself is pinned by
+    ``tests/integration/test_background_tracker_harvester_roundtrip.py``, which
+    runs the real writer against the real reader.
+    """
+
+    def test_missing_file_returns_empty(self, tmp_path):
+        assert read_tracked_commands(tmp_path / "nope.jsonl") == []
+
+    def test_reads_commands_skipping_malformed_lines(self, tmp_path):
         f = tmp_path / "bg.jsonl"
         f.write_text(
-            json.dumps({"pgid": 100, "command": "a &"})
+            json.dumps({"command": "sleep 600 &", "session_id": "s", "run_in_background": False})
             + "\n"
             + "not json\n"
-            + json.dumps({"command": "no pgid here"})
+            + json.dumps({"session_id": "s", "run_in_background": True})
             + "\n"
-            + json.dumps({"pgid": 200, "command": "b &"})
+            + json.dumps({"command": "npm run dev", "session_id": "s", "run_in_background": True})
             + "\n"
         )
-        assert read_tracked_pgids(f) == [100, 200]
+        assert read_tracked_commands(f) == ["sleep 600 &", "npm run dev"]
+
+    def test_blank_commands_are_dropped(self, tmp_path):
+        """A blank command would match every process in ``ps`` — never track it."""
+        f = tmp_path / "bg.jsonl"
+        f.write_text(
+            json.dumps({"command": "", "session_id": "s"})
+            + "\n"
+            + json.dumps({"command": "   ", "session_id": "s"})
+            + "\n"
+            + json.dumps({"command": 42, "session_id": "s"})
+            + "\n"
+        )
+        assert read_tracked_commands(f) == []
 
 
 class TestBuildReport:
@@ -178,7 +240,7 @@ class TestBuildReport:
             max_wall_seconds=600,
             max_cpu_percent=400,
             min_cpu_runtime_seconds=60,
-            tracked_pgids=(),
+            tracked_commands=(),
         )
         assert report["has_breaches"] is True
         assert "kill -- -295967" in report["text"]
@@ -191,7 +253,7 @@ class TestBuildReport:
             max_wall_seconds=600,
             max_cpu_percent=400,
             min_cpu_runtime_seconds=60,
-            tracked_pgids=(),
+            tracked_commands=(),
         )
         assert report["has_breaches"] is False
         assert "NO RUNAWAY" in report["text"].upper()
@@ -202,7 +264,7 @@ class TestBuildReport:
             max_wall_seconds=600,
             max_cpu_percent=400,
             min_cpu_runtime_seconds=60,
-            tracked_pgids=(),
+            tracked_commands=(),
         )
         assert report["has_breaches"] is True
         # breaches must round-trip through JSON
@@ -216,6 +278,6 @@ class TestBuildReport:
             max_wall_seconds=600,
             max_cpu_percent=400,
             min_cpu_runtime_seconds=60,
-            tracked_pgids=(),
+            tracked_commands=(),
         )
         assert "killed" not in report["text"].lower()

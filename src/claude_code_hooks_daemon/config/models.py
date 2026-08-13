@@ -812,9 +812,19 @@ class VerdictLogConfig(BaseModel):
     verdicts` report is explicit that its statistics describe the retained
     window, not lifetime totals.
 
+    Status events are excluded (Plan 00234). A status handler RENDERS and can
+    only ever return ``allow``, so its records carry no information — yet they
+    arrive at the status line's refresh rate. Measured on this project's own
+    log, 43,929 of 44,180 retained records were status renders (99.43%),
+    filling the 10 MiB cap in **65 minutes**: the log built to answer "which
+    handlers earn their keep?" could see one hour of one session. Excluding
+    them stretches the same cap to roughly 8 days.
+
     Attributes:
         enabled: Master toggle. Default True (metadata-only, no payloads).
         max_bytes: Retention cap in bytes before the oldest half is trimmed.
+        record_status_events: Opt back in to Status renders, for debugging the
+            status line itself. Default False.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -826,6 +836,10 @@ class VerdictLogConfig(BaseModel):
     max_bytes: Annotated[int, Field(gt=0)] = Field(
         default=10 * 1024 * 1024,
         description="Retention cap in bytes for verdicts.jsonl (rolling sample, oldest half trimmed on breach)",
+    )
+    record_status_events: bool = Field(
+        default=False,
+        description="Record Status (status-line) renders too. Off by default: they are ~99% of all records, always 'allow', and drown the retained window (Plan 00234)",
     )
 
 

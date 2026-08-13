@@ -783,6 +783,7 @@ class DaemonController:
                 session_id=event.hook_input.session_id or "default",
                 log_dir=log_dir,
                 max_bytes=self._verdict_log_config.max_bytes,
+                record_status_events=self._verdict_log_config.record_status_events,
             )
         except RuntimeError as e:
             logger.warning("Skipping verdict log (no project context): %s", e)

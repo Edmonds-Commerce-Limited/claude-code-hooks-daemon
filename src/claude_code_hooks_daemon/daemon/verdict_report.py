@@ -27,7 +27,14 @@ _WINDOW_CAVEAT = (
     "NOTE: these figures describe the RETAINED WINDOW of verdicts.jsonl "
     "(a bounded rolling sample, capped like every other daemon JSONL log) — "
     "they are NOT lifetime totals. A handler that fired long ago and was "
-    "since trimmed from the log will not appear here."
+    "since trimmed from the log will not appear here.\n"
+    "Status-line renders are not recorded and status handlers are omitted "
+    "from the roster below: a renderer can only ever return 'allow', so its "
+    "records carry no information while arriving at the refresh rate.\n"
+    "'Never fired' is NOT evidence a handler is pointless. A guard on a rare, "
+    "catastrophic operation is SUPPOSED to sit silent — rarity is what success "
+    "looks like for it. Read this list as 'not exercised in this window', and "
+    "establish 'cannot fire' from the code before concluding anything."
 )
 
 

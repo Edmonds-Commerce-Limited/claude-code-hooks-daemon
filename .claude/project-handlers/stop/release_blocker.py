@@ -36,12 +36,22 @@ class ReleaseBlockerHandler(Handler):
     allowing session end if git commands error or timeout.
     """
 
-    # Release files that indicate release in progress
+    # Files whose modification genuinely means a release is under way.
+    #
+    # Deliberately NARROW (Plan 00234 finding H-1). `README.md` and `CLAUDE.md`
+    # were once in this set and had to come out: this handler is terminal and
+    # DENIES the Stop event, so an ordinary docs edit left uncommitted trapped
+    # the session until the file was committed or the handler disabled.
+    # `CLAUDE.md` was the worse of the two — the daemon REGENERATES and
+    # auto-commits it, so the daemon could trap the session by its own routine
+    # action.
+    #
+    # What remains is the set a release cannot avoid touching. A real release
+    # edits README.md too, but always alongside a version file, so narrowing
+    # costs no coverage — pinned by a test.
     RELEASE_FILES: ClassVar[set[str]] = {
         "pyproject.toml",
         "src/claude_code_hooks_daemon/version.py",
-        "README.md",
-        "CLAUDE.md",
         "CHANGELOG.md",
     }
 
@@ -115,12 +125,15 @@ class ReleaseBlockerHandler(Handler):
         """
         reason = (
             "🚫 RELEASE IN PROGRESS: Cannot end session until acceptance tests complete\n\n"
-            "Modified release files detected (pyproject.toml, version.py, README.md, "
+            "Modified release files detected (pyproject.toml, version.py, "
             "CHANGELOG.md, or RELEASES/*.md).\n\n"
-            "Per RELEASING.md Step 8 (BLOCKING GATE): You must execute all 89 EXECUTABLE "
-            "acceptance tests before ending this session.\n\n"
-            "See CLAUDE/Plan/00060-release-blocker-handler/example-context.md "
-            "for examples of AI acceptance test avoidance behavior.\n\n"
+            "Per RELEASING.md Step 8 (BLOCKING GATE): you must execute the full "
+            "acceptance playbook before ending this session. RELEASING.md is the "
+            "source of truth for what that covers — generate the current set with "
+            "`./bin/hooks-daemon generate-playbook` rather than trusting a count "
+            "quoted here, which would drift.\n\n"
+            "See CLAUDE/Plan/Completed/00060-release-blocker-handler/example-context.md "
+            "for examples of AI acceptance test avoidance behaviour.\n\n"
             "To disable: handlers.stop.release_blocker (set enabled: false)"
         )
         return HookResult(decision=Decision.DENY, reason=reason)

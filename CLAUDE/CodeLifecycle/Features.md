@@ -192,7 +192,7 @@ pytest tests/integration/test_dogfooding_hook_scripts.py -v
 Run ALL quality checks before committing:
 
 ```bash
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 ```
 
 **Expected output**: one `✅` line per check, then a summary line whose two
@@ -295,7 +295,7 @@ A feature is DONE when ALL of the following are verified:
 ### 5. Full QA Suite
 
 - [ ] EVERY check the runner runs passes, with ZERO failures
-- [ ] Run: `./scripts/qa/run_all.sh` (or `./scripts/qa/llm_qa.py all`)
+- [ ] Run: `./scripts/qa/llm_qa.py all` (the same suite as `run_all.sh`, LLM-optimised)
 - [ ] Expected output: "ALL CHECKS PASSED" / an `N/N PASSED` line
 
 ### 5b. Client-Mode Verification (if paths/interpreters/wrappers/assets changed)

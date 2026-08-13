@@ -129,7 +129,13 @@ _RECURSIVE_SCAN_FLAG = re.compile(r"(?<![\w-])-(?:-recursive\b|(?!-)[A-Za-z]*[rR
 
 # Shell segment terminators — a Bash grep/rg invocation's positional
 # arguments stop at the first one of these (or end of string).
-_SEGMENT_TERMINATOR = re.compile(r"&&|\|\||[;|]")
+#
+# A NEWLINE belongs here for the same reason ``;`` does: bash treats both as
+# top-level command separators. Omitting it (Plan 00234/00236) meant every
+# subsequent LINE of a multi-line script was counted as another positional
+# argument to the grep, so the single-file exemption survived only in
+# one-liners.
+_SEGMENT_TERMINATOR = re.compile(r"&&|\|\||[;|\n]")
 
 # --- LSP operation mapping ---
 
@@ -218,16 +224,26 @@ class LspEnforcementHandler(Handler):
         return self._is_symbol_like(pattern)
 
     def _is_single_file_bash_grep(self, command: str) -> bool:
-        """True when a Bash grep/rg command's target is exactly one named file.
+        """True when EVERY grep/rg invocation in the command names one file.
+
+        The exemption describes the whole command, so one narrow grep must not
+        buy cover for a project-wide one later in the same call — with only the
+        first invocation inspected, ``grep -n x a.py`` followed by
+        ``grep -rn x src/`` was exempt on the strength of its first line.
+        """
+        matches = list(_BASH_GREP_EXTRACT.finditer(command))
+        if not matches:
+            return False
+        return all(self._invocation_targets_one_file(command, match) for match in matches)
+
+    def _invocation_targets_one_file(self, command: str, match: re.Match[str]) -> bool:
+        """True when a single grep/rg invocation's target is exactly one named file.
 
         False (i.e. "still enforce") whenever the scan could plausibly touch
         more than one file: a recursive flag, a directory-looking target
         (trailing ``/``, ``.``/``..``), a glob, more than one positional
         argument, or NO target at all (defaults to the whole cwd/stdin).
         """
-        match = _BASH_GREP_EXTRACT.search(command)
-        if not match:
-            return False
         invocation = command[match.start() : match.end()]
         if _RECURSIVE_SCAN_FLAG.search(invocation):
             return False

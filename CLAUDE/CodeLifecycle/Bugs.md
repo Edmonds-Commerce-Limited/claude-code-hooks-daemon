@@ -153,7 +153,7 @@ pytest tests/ -v
 ### Run Full QA
 
 ```bash
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 
 # Expected: ALL CHECKS PASSED
 ```
@@ -248,7 +248,7 @@ A bug fix is DONE when ALL of the following are verified:
 
 ### 5. Full QA
 
-- [ ] Run: `./scripts/qa/run_all.sh`
+- [ ] Run: `./scripts/qa/llm_qa.py all`
 - [ ] Expected: "ALL CHECKS PASSED"
 
 ### 5b. Client-Mode Verification (if paths/interpreters/wrappers/assets changed)
@@ -282,7 +282,7 @@ If bug is found during acceptance testing:
 1. Stop acceptance testing immediately
 2. Create failing test for bug (unit/integration)
 3. Fix bug using TDD
-4. Run FULL QA: ./scripts/qa/run_all.sh
+4. Run FULL QA: ./scripts/qa/llm_qa.py all
 5. Restart daemon successfully
 6. RESTART acceptance testing FROM TEST 1.1
 7. Continue until ALL tests pass with ZERO code changes

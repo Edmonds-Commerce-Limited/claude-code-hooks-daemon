@@ -525,6 +525,44 @@ class TestLspEnforcementSingleFileScoping:
         }
         assert handler.matches(hook_input) is True
 
+    def test_newline_ends_the_target_list(self, handler: Any) -> None:
+        """A NEWLINE separates commands just as ``;`` does (Plan 00234/00236).
+
+        The terminator set listed ``&&``, ``||``, ``;`` and ``|`` but not
+        ``\\n``, so in a multi-line script every following line was swallowed
+        as extra positional arguments to the grep. The target count then
+        exceeded one and a single-file grep lost its exemption — the exemption
+        held only for one-liners, which is not how scripts are written.
+        """
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'grep -n "hook_input" src/main.py\necho done'},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_newline_before_the_grep_is_also_fine(self, handler: Any) -> None:
+        """The grep need not be the first line of the script."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'cd /workspace\ngrep -n "hook_input" src/main.py\n'},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_a_later_project_wide_grep_still_fires(self, handler: Any) -> None:
+        """The exemption must describe the WHOLE command, not just its first grep.
+
+        Only the first grep invocation was inspected, so a single-file grep on
+        line one bought an exemption for a recursive grep on line two. Every
+        grep in the command has to be single-file for the exemption to hold.
+        """
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": 'grep -n "hook_input" src/main.py\ngrep -rn "hook_input" src/'
+            },
+        }
+        assert handler.matches(hook_input) is True
+
 
 class TestLspEnforcementBlockCount:
     """Test _get_block_count exception handling."""

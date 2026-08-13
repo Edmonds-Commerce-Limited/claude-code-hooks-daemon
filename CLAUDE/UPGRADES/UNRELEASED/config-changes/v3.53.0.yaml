@@ -291,6 +291,34 @@ config_changes:
         trimmed will not appear. Tune retention with
         daemon.verdict_log.max_bytes, or turn it off entirely with
         daemon.verdict_log.enabled: false. See docs/guides/VERDICT_LOG.md.
+
+    - key: daemon.verdict_log.record_status_events
+      recommended: false
+      dormant: true
+      description: >-
+        NEW sub-key (Plan 00234/00236), default FALSE: Status (status-line)
+        renders are NOT written to verdicts.jsonl. A status handler RENDERS
+        and can only ever return allow, so its records carry no information
+        -- yet they arrive at the status line's refresh rate. Measured on
+        this daemon's own log, 43,929 of 44,180 retained records were status
+        renders (99.43%), filling the 10 MiB cap in 65 MINUTES: a log built
+        to answer "which handlers earn their keep?" could see one hour of one
+        session. Excluding them stretches the same cap to roughly 8 days.
+        The filter is on the EVENT, not on a status-* name prefix, because
+        what makes these records worthless is the event they serve -- a name
+        test would both miss a renamed handler and catch an unrelated one.
+        The `hooks-daemon verdicts` report was changed in step: status
+        handlers are omitted from the never-fired roster (otherwise excluding
+        their records would have turned 14 renderers into false "never fired"
+        entries -- trading one misleading signal for another), and the
+        report's caveat now also states the anti-inference rule, that "never
+        fired" is NOT evidence a handler is pointless, since a guard on a
+        rare catastrophic operation is SUPPOSED to sit silent.
+      migration_note: >-
+        No action needed. If you were relying on verdicts.jsonl to debug the
+        STATUS LINE itself, set daemon.verdict_log.record_status_events: true
+        to opt back in -- and expect the retained window to shrink to about
+        an hour again while it is on.
   renamed: []
   removed: []
   changed: []

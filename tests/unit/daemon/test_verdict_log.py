@@ -185,6 +185,73 @@ class TestBuildVerdictLines:
         assert any(not line["overridden"] for line in lines)
 
 
+class TestStatusEventsAreNotRecorded:
+    """Status renders drown the log, and carry no information (Plan 00234).
+
+    Measured on this project's own log: 43,929 of 44,180 retained records
+    (99.43%) were status-line renders, every one of them ``allow`` — a renderer
+    has no other verdict it can return. Thirteen handlers at ~3,383 renders an
+    hour filled the 10 MiB cap in **65 minutes**, so the log built to answer
+    "which handlers earn their keep?" could only see one hour of one session.
+
+    Excluding them leaves ~251 records/hour, stretching the same cap to roughly
+    8 days. This is the DBF fix for the whole audit: without it, no removal can
+    be verified against real firing data.
+    """
+
+    def _status_decisions(self) -> list[HandlerVerdict]:
+        return [
+            HandlerVerdict(handler="status-git-branch", decision=Decision.ALLOW, terminal=False),
+            HandlerVerdict(handler="status-model-context", decision=Decision.ALLOW, terminal=False),
+        ]
+
+    def test_status_events_produce_no_lines_by_default(self) -> None:
+        lines = build_verdict_lines(
+            decisions=self._status_decisions(),
+            hook_input={},
+            event="Status",
+            tool_name="",
+            session_id="sess-1",
+        )
+        assert lines == []
+
+    def test_status_events_are_recorded_when_explicitly_enabled(self) -> None:
+        """The data is not forbidden, just off by default — debugging needs it."""
+        lines = build_verdict_lines(
+            decisions=self._status_decisions(),
+            hook_input={},
+            event="Status",
+            tool_name="",
+            session_id="sess-1",
+            record_status_events=True,
+        )
+        assert len(lines) == 2
+
+    def test_every_other_event_is_unaffected(self) -> None:
+        """The filter is on the EVENT, so a handler named `status-*` elsewhere stays."""
+        lines = build_verdict_lines(
+            decisions=[
+                HandlerVerdict(handler="status-thing", decision=Decision.ALLOW, terminal=False)
+            ],
+            hook_input={},
+            event="PreToolUse",
+            tool_name="Bash",
+            session_id="sess-1",
+        )
+        assert len(lines) == 1
+
+    def test_escape_hatch_in_a_status_event_is_still_dropped(self) -> None:
+        """No synthetic override line either — a Status event records nothing."""
+        lines = build_verdict_lines(
+            decisions=[],
+            hook_input={"tool_input": {"command": 'MUST_STASH_BECAUSE="x"; git stash'}},
+            event="Status",
+            tool_name="",
+            session_id="sess-1",
+        )
+        assert lines == []
+
+
 class TestAppendVerdicts:
     """append_verdicts writes JSONL lines to disk, fail-open, bounded by retention."""
 

@@ -71,10 +71,14 @@ def test_ps_failure_returns_two(tmp_path, monkeypatch, capsys):
     assert "ps" in err.lower()
 
 
-def test_tracked_pgid_over_ttl_is_surfaced(tmp_path, monkeypatch, capsys):
-    # A low-CPU but long-lived process is only flagged when its pgid is tracked.
+def test_tracked_command_over_ttl_is_surfaced(tmp_path, monkeypatch, capsys):
+    # A low-CPU but long-lived process is only flagged when it was tracked.
+    # The state record is the PRODUCTION shape the tracker writes (Plan 00236):
+    # no pgid — the daemon never learns one — so correlation is by command text.
     state = tmp_path / "bg.jsonl"
-    state.write_text(json.dumps({"pgid": 500, "command": "node server &"}) + "\n")
+    state.write_text(
+        json.dumps({"command": "node server", "session_id": "s", "run_in_background": True}) + "\n"
+    )
     monkeypatch.setattr(
         background_harvester,
         "run_ps",
@@ -84,3 +88,26 @@ def test_tracked_pgid_over_ttl_is_surfaced(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rc == 1
     assert "kill -- -500" in out
+
+
+def test_untracked_long_lived_process_is_not_surfaced(tmp_path, monkeypatch, capsys):
+    """The scoping that keeps the wall TTL bearable, asserted through the CLI.
+
+    Without it the harvester would nag about every dev server and system
+    daemon on the box, which is why the TTL was scoped to tracked work in the
+    first place.
+    """
+    state = tmp_path / "bg.jsonl"
+    state.write_text(
+        json.dumps({"command": "npm run dev", "session_id": "s", "run_in_background": True}) + "\n"
+    )
+    monkeypatch.setattr(
+        background_harvester,
+        "run_ps",
+        lambda: "PID PGID ELAPSED %CPU COMMAND\n500 500 9999 0.2 node server\n",
+    )
+
+    rc = cli.cmd_harvest_background(_args(tmp_path, state_file=str(state)))
+
+    assert rc == 0
+    assert "NO RUNAWAYS" in capsys.readouterr().out
