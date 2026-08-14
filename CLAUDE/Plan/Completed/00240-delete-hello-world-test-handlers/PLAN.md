@@ -1,6 +1,6 @@
 # Plan 00240: delete hello world test handlers
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-08-14
 **Owner**: joseph
 **Priority**: Low
@@ -127,8 +127,14 @@ separate decision.
   `docs/guides/CONFIGURATION.md` and `docs/guides/HANDLER_REFERENCE.md`; the
   `GETTING_STARTED.md` "enable the canary to check hooks work" section is
   replaced by one that sends a command a real handler blocks
-- [ ] ⬜ **Task 3.4**: Full QA; daemon restart RUNNING; client-mode
-  verification that a config still carrying the removed key starts cleanly
+- [x] ✅ **Task 3.4**: QA 21/21 (12,097 tests, coverage 95.0%); daemon restarts
+  RUNNING. Client mode verified the thing that actually matters: a config
+  carrying BOTH the retired `daemon.enable_hello_world_handlers` key AND a
+  leftover `hello_world_pre_tool_use:` block was injected into a real installed
+  client, and the daemon started clean with no degraded mode and no unknown-key
+  finding, with `destructive_git` still denying. That is the retired registry
+  doing its job — the failure it prevents is silent and hits every unedited
+  client config on upgrade
 
 ## Success Criteria
 
@@ -143,3 +149,5 @@ separate decision.
 
 - Supersedes the "keep them for opt-in debugging" non-goal of
   [Plan 00162](../Completed/00162-wire-hello-world-handler-flag/PLAN.md)
+- Phase 1 inventory at `99affdf8`; Plan 00162 closed at `1ec5616f`
+- Removal at `44ce74e9` — 58 files, net -1,296 lines

@@ -20,8 +20,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00209: field feedback — daemon self-observability](00209-field-feedback-daemon-self-observability/PLAN.md) - Not Started (the daemon makes hundreds of decisions per session and persists none, so "which handlers earn their keep" and "what is the per-handler false-positive rate" are unanswerable. Adds a verdict log plus a reporting command; also fixes `pipe_blocker` quoting a heredoc of prose back as a shell command.)
 
-- [00240: delete hello world test handlers](00240-delete-hello-world-test-handlers/PLAN.md) - Not Started (removes the ten `hello_world` canaries and the `enable_hello_world_handlers` key that gated them; already dormant since v3.40.0, and `run_smoke_test.sh` proves hook dispatch against real handlers, so this is dead-code removal rather than a behaviour change)
-
 ### Status Line / Agent View
 
 - [00175: statusline refreshInterval first-class default + startup validation](00175-statusline-refresh-interval-first-class/PLAN.md) - Dormant, part-shipped (root-caused the Ctrl+Z notice lag to `statusLine.refreshInterval: 10` — Claude Code re-runs the status command only on events (Ctrl+Z is not one) plus this optional timer whose minimum is 1s, so an …)
@@ -157,6 +155,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00240: delete hello world test handlers](Completed/00240-delete-hello-world-test-handlers/PLAN.md) - Complete at `44ce74e9` (the ten `hello_world` canaries and the `enable_hello_world_handlers` key that gated them, net -1,296 lines; dormant since v3.40.0 so nothing changes for anyone, and ten retired-registry entries keep an unedited client config out of degraded mode — verified in a real client install)
 
 - [00162: Wire hello_world Handler Flag](Completed/00162-wire-hello-world-handler-flag/PLAN.md) - Complete at `ca03facb`, shipped in v3.40.0 (the dead `daemon.enable_hello_world_handlers` flag now gates the TEST handlers; default off, so the canary injection has been absent since v3.40.0 — closed as Plan 00240 Task 1.1, having sat In Progress with only the bookkeeping outstanding)
 
@@ -1186,11 +1186,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 240 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 197 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 31 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 198 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 30 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 31 + 197 + 6 = **234 folders**, spanning
+- **Folder-to-number reconciliation**: 30 + 198 + 6 = **234 folders**, spanning
   **231 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1200,11 +1200,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work). 231 + 9 = 240. ✅
-- **Last reconciled by**: the Plan 00162 closure — a plan whose work shipped in
-  v3.40.0 and was never archived, so its folder moved from the root into
-  `Completed/` with Active falling by one and Completed rising by one, Total and
-  Cancelled untouched. Recounted from disk (31 root, 197 `Completed/`, 6
-  `Cancelled/`). Before that, the Plan 00239 closure — same shape, recounted at
+- **Last reconciled by**: the Plan 00240 closure — its folder moved from the
+  root into `Completed/`, so Active fell by one and Completed rose by one while
+  Total and Cancelled were untouched. Recounted from disk (30 root, 198
+  `Completed/`, 6 `Cancelled/`). Before that, the Plan 00162 closure — a plan
+  whose work shipped in v3.40.0 and was never archived, same shape, recounted at
+  31 root, 197 `Completed/`, 6 `Cancelled/`. Before that, the Plan 00239 closure — same shape, recounted at
   32 root, 196 `Completed/`, 6 `Cancelled/`. Before that, the Plan 00239 + 00240 creations —
   two new folders in the plan root, so Total and Active each rose by two while
   Completed and Cancelled were untouched. Before that, the Plan 00234 closure — the audit's own folder moved
