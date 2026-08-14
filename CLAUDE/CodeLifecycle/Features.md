@@ -213,20 +213,29 @@ Before releasing, add acceptance tests to your handler via the `get_acceptance_t
 
 Override `get_acceptance_tests()` in your handler to return test definitions:
 
+Five fields are REQUIRED — `title`, `command`, `description`,
+`expected_decision`, `expected_message_patterns`. There is no `test_id` and no
+`hook_input`: the payload a tester (or a harness) sends is derived from
+`command`, so make `command` a literal shell command wherever the test can be
+expressed as one. Reserve English prose ("Use the Write tool to ...") for tests
+that genuinely cannot be, because prose is not machine-executable.
+
 ```python
-def get_acceptance_tests(self) -> list[AcceptanceTest]:
+def get_acceptance_tests(self) -> list[Any]:
+    from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
     return [
         AcceptanceTest(
-            test_id="positive-case",
-            description="Blocks dangerous command",
-            hook_input={...},
-            expected_decision="deny",
-        ),
-        AcceptanceTest(
-            test_id="negative-case",
-            description="Allows safe command",
-            hook_input={...},
-            expected_decision="allow",
+            title="sudo pip install",
+            command='echo "sudo pip install requests"',
+            description="Blocks sudo pip install (system-wide corruption risk)",
+            expected_decision=Decision.DENY,
+            expected_message_patterns=[
+                r"sudo pip install",
+                r"virtual environment",
+            ],
+            safety_notes="Uses echo - safe to test",
+            test_type=TestType.BLOCKING,
         ),
     ]
 ```
