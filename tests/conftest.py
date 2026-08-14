@@ -3,6 +3,7 @@
 This module provides test fixtures and utilities used across all test files.
 """
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -164,6 +165,103 @@ def isolate_daemon_path_overrides(monkeypatch):
     """
     for var in _DAEMON_PATH_OVERRIDE_VARS:
         monkeypatch.delenv(var, raising=False)
+
+
+#: Tracked files at the repository root that NO test may write. A test that
+#: rewrites one of these is editing the developer's working tree from inside
+#: the suite: it can be committed by accident, it makes an unrelated later run
+#: look dirty, and — because the damage is a plausible-looking regeneration
+#: rather than a crash — nothing about it reads as a failure.
+_TRACKED_FILES_NO_TEST_MAY_WRITE = ("CLAUDE.md", ".claude/HOOKS-DAEMON.md")
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _tracked_file_fingerprints() -> dict[str, tuple[int, int]]:
+    """Cheap (size, mtime_ns) per protected file. One stat each, per test."""
+    fingerprints: dict[str, tuple[int, int]] = {}
+    for relative in _TRACKED_FILES_NO_TEST_MAY_WRITE:
+        path = _REPO_ROOT / relative
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        fingerprints[relative] = (stat.st_size, stat.st_mtime_ns)
+    return fingerprints
+
+
+@pytest.fixture(scope="session")
+def _tracked_doc_snapshot() -> dict[str, bytes]:
+    """Byte snapshot of the protected files, taken ONCE for the session.
+
+    Restoring from this rather than from ``git checkout --`` matters: the
+    developer may have legitimate uncommitted edits in these files when the
+    suite runs, and a diagnostic fixture must not be the thing that throws
+    them away. It also keeps the suite from running a destructive git command
+    that this project blocks agents from using at all.
+    """
+    snapshot: dict[str, bytes] = {}
+    for relative in _TRACKED_FILES_NO_TEST_MAY_WRITE:
+        path = _REPO_ROOT / relative
+        try:
+            snapshot[relative] = path.read_bytes()
+        except OSError:
+            continue
+    return snapshot
+
+
+@pytest.fixture(autouse=True)
+def no_test_writes_tracked_generated_docs(_tracked_doc_snapshot: dict[str, bytes]):
+    """Fail the test that rewrites a tracked generated doc, and undo it.
+
+    ``DaemonController.initialise()`` runs ``ClaudeMdInjector`` as a SIDE
+    EFFECT, so any test that initialises a controller with the real repository
+    as ``workspace_root`` silently rewrites this repo's ``CLAUDE.md`` — and
+    with a handler set built from whatever that test happened to configure. A
+    test that omits ``pseudo_events_config`` therefore DELETES every
+    pseudo-event handler's guidance from the developer's tracked file, passes
+    green, and leaves a 42-line deletion staged for whoever commits next. The
+    injector even auto-commits.
+
+    That went unnoticed twice: the file still looks like a normal
+    regeneration, the daemon reports healthy, and the only surface that
+    objects is an unrelated coverage test on a LATER run — by which point the
+    cause looks like the daemon rather than the suite.
+
+    A stat per protected file per test is the cost of never diagnosing that
+    from scratch again. Tests that legitimately exercise the injector point it
+    at ``tmp_path``; nothing has a reason to write the real files.
+    """
+    before = _tracked_file_fingerprints()
+    yield
+    after = _tracked_file_fingerprints()
+
+    mutated = [name for name, fingerprint in after.items() if before.get(name) != fingerprint]
+    if not mutated:
+        return
+
+    # Put the file back exactly as the session found it, so a diagnostic never
+    # leaves the developer's tree damaged.
+    restored = []
+    for name in mutated:
+        original = _tracked_doc_snapshot.get(name)
+        if original is None:
+            continue
+        (_REPO_ROOT / name).write_bytes(original)
+        restored.append(name)
+
+    raise AssertionError(
+        "This test rewrote tracked generated doc(s): "
+        + ", ".join(mutated)
+        + ". Almost always this is DaemonController.initialise() being called "
+        "with workspace_root pointing at the real repository — initialise() "
+        "runs ClaudeMdInjector as a side effect and will rewrite CLAUDE.md "
+        "with whatever handler set the test configured, deleting the guidance "
+        "of every handler it did not wire up. Point workspace_root at "
+        "tmp_path, or patch ClaudeMdInjector.inject for the duration if the "
+        "test genuinely needs this project's own config. Restored to its "
+        "pre-suite content: " + (", ".join(restored) if restored else "nothing to restore") + "."
+    )
 
 
 @pytest.fixture(autouse=True)

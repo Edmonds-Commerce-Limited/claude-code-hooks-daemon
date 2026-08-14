@@ -248,25 +248,23 @@ nitpick item was REVERSED by a live chain trace, not implemented).
   `mkdir` — which `plan_number_helper` already discourages. No test covers it.
   Found by peer review of the Plan 00237 Phase 4 diff; recorded rather than
   dropped because Plan 00237 is closed
-- [ ] ⬜ **Task 4.11**: Establish how a daemon restart can drop pseudo-event
-  guidance from `CLAUDE.md`. Observed 2026-08-14: a restart deleted both
-  nitpick sections (42 lines) while both handlers were live and firing. Caught
-  by the Plan 00203 guard
-  (`test_claude_md_guidance_coverage.py::…::test_every_earning_handler_has_a_section_in_claude_md`),
-  which is the only surface that sees it — the daemon reports HEALTHY and
-  `.claude/HOOKS-DAEMON.md` still lists both. Instrumenting the injector against
-  the live config shows the pipeline is CORRECT as it stands (85 handlers in,
-  both nitpick sections through collect → build → replace → mdformat → the
-  content-loss guard). **Narrowed on a second occurrence: the trigger is a full
-  QA run, not a daemon restart.** Three restarts left the file untouched; the
-  deletion appeared during `llm_qa.py all` both times. So the suspect is a TEST
-  that initialises a controller against the REAL `/workspace` root with
-  `pseudo_events_config=None` — which would write the live `CLAUDE.md` with
-  every section EXCEPT the pseudo-event ones, exactly the observed damage. The
-  specific test is not yet identified (`test_cli_regenerate_docs` and
-  `test_cli_verdict_log_wiring` were checked and are clean — they use `tmp_path`
-  or stub `initialise`). Restored via `regenerate-docs`; details and the
-  diagnostic in Plan 00238's JOURNAL for 26-08-14
+- [x] ✅ **Task 4.11**: CLAUDE.md losing both nitpick guidance sections — found,
+  fixed, and guarded. It was never the daemon: three restarts left the file
+  untouched and both deletions landed across a `llm_qa.py all` run. The writer
+  is `test_stop_chain_terminal_shadowing.py::TestThisProjectHasNotFallenIntoTheTrap`,
+  whose fixture initialises a real controller against the REAL project root so
+  it can see this project's own handlers — and `initialise()` runs
+  `ClaudeMdInjector` as a side effect. With no `pseudo_events_config` passed,
+  it rewrote the tracked file from a handler set containing no pseudo-event
+  handlers: exactly 42 lines, both nitpick sections, nothing else, five tests
+  green. **DBF**: a `tests/conftest.py` autouse fixture now stats `CLAUDE.md`
+  and `.claude/HOOKS-DAEMON.md` around every test, fails the specific test that
+  moved either, names the likely cause, and restores from a session byte
+  snapshot (not `git checkout --`, which would discard a developer's genuine
+  uncommitted edits and is a command this repo forbids agents anyway).
+  Reproduction and the two-attempt anti-vacuity story in Plan 00238's JOURNAL
+  for 26-08-14; the injector diagnostic that ruled out the daemon is in
+  `diagnostics/claude_md_injector_handler_set.py`
 - [x] ✅ **Task 4.9**: Proposal handed to the human, who set the order:
   A+B+C+G as one "fix what's broken" pass, then D, then H — with E and F held
   until the verdict log from A had produced real firing data. That data arrived

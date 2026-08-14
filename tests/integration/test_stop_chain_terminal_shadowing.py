@@ -273,12 +273,20 @@ class TestThisProjectHasNotFallenIntoTheTrap:
         A guard whose fixture cannot produce the failure is not a guard.
         """
         from claude_code_hooks_daemon.config.models import Config
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 
         workspace = self._project_root()
         config = Config.load(workspace / ".claude" / "hooks-daemon.yaml")
 
         controller = DaemonController()
-        with _mock_git_subprocess():
+        # `initialise()` runs ClaudeMdInjector as a SIDE EFFECT, and this
+        # fixture deliberately points workspace_root at the REAL repository so
+        # it sees this project's own handlers. Left unpatched, the injector
+        # rewrites the tracked CLAUDE.md from the handler set assembled here —
+        # which omits pseudo_events_config, so it silently deleted both nitpick
+        # handlers' guidance on every QA run. The chain is what this test wants;
+        # the file write is not.
+        with _mock_git_subprocess(), patch.object(ClaudeMdInjector, "inject", lambda _self: None):
             controller.initialise(
                 handler_config=config.handlers.model_dump(),
                 workspace_root=workspace,
