@@ -10,8 +10,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00242: Terminal handlers are a flawed primitive](00242-terminal-handlers-are-a-flawed-primitive/PLAN.md) - Not Started (the chain ALREADY merges correctly — most-restrictive-wins plus accumulated context — and `terminal` overrides that merge, which is why a handler could silently disable its successors; make terminality a property of the DECISION, and return one merged response listing every violation at once)
 
-- [00241: v3.53.0 review findings — terminal-ALLOW shadowing and verdict-log retention](00241-v3530-review-findings-terminal-allow-and-verdict-log/PLAN.md) - Not Started (MUST-FIX carry-over from the v3.53.0 Step 10 gate, which the release ABORTED on; a terminal handler returning ALLOW ends the chain and silently disables every higher-priority-number handler, three instances fixed in the gate and two remain)
-
 - [00170: Universal Hook Coverage + Hook-Support Enforcement](00170-universal-hook-coverage-and-enforcement/PLAN.md) - Dormant (fundamental: intercepting hook events is the daemon's raison d'être, yet only **10 of the 30** documented Claude Code hook events are wired — 20 are silently unwired, so a client project cannot even …)
 
 - [00172: Close the HandlersConfig ↔ wired-events coverage gap](00172-handlerconfig-wired-events-coverage-gap/PLAN.md) - Not Started (follow-up from the `status_line` config-drop fix audit: `HandlersConfig` declares only 11 of 31 wired events, so `_build_handler_config_mapping` would silently drop config for any of the 20 …)
@@ -159,6 +157,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00241: v3.53.0 review findings — terminal-ALLOW shadowing and verdict-log retention](Completed/00241-v3530-review-findings-terminal-allow-and-verdict-log/PLAN.md) - Complete at `53cb6743` + `54757f46`, shipped in v3.53.0 (the release aborted at its own Step 10 gate: a terminal handler returning ALLOW ends the chain, disabling every handler behind it)
 
 - [00240: delete hello world test handlers](Completed/00240-delete-hello-world-test-handlers/PLAN.md) - Complete at `44ce74e9` (the ten `hello_world` canaries and the `enable_hello_world_handlers` key that gated them, net -1,296 lines; dormant since v3.40.0 so nothing changes for anyone, and ten retired-registry entries keep an unedited client config out of degraded mode — verified in a real client install)
 
@@ -1190,21 +1190,27 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 242 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 198 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 199 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 31 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 32 + 198 + 6 = **236 folders**, spanning
-  **231 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 31 + 199 + 6 = **236 folders**, spanning
+  **233 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **9** of the
-  240 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  242 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210 — abandoned drafts, numbers burned by transient
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
-  already covered the work). 231 + 9 = 240. ✅
-- **Last reconciled by**: the Plan 00240 closure — its folder moved from the
+  already covered the work). 233 + 9 = 242. ✅
+- **Last reconciled by**: the Plan 00241 closure — its folder moved from the
+  root into `Completed/`, so Active fell by one and Completed rose by one while
+  Total and Cancelled were untouched. Recounted from disk (31 root, 199
+  `Completed/`, 6 `Cancelled/`, 233 distinct numbers against a counter of 242).
+  Before that, the Plan 00241 + 00242 creations — two new folders in the plan
+  root, which is why the distinct-number and allocated figures above each rose
+  by two. Before that, the Plan 00240 closure — its folder moved from the
   root into `Completed/`, so Active fell by one and Completed rose by one while
   Total and Cancelled were untouched. Recounted from disk (30 root, 198
   `Completed/`, 6 `Cancelled/`). Before that, the Plan 00162 closure — a plan
