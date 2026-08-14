@@ -70,12 +70,27 @@ separate decision.
 
 - [ ] ⬜ **Task 1.1**: Close Plan 00162 — its wiring goal was delivered and
   shipped in v3.40.0; archive it with the README row and statistics recount
-- [ ] ⬜ **Task 1.2**: Enumerate every `hello_world` module, handler ID,
-  priority and config reference, plus every test that mentions them, split into
-  must-delete, must-amend, and must-replace
-- [ ] ⬜ **Task 1.3**: Identify anything that would BREAK — hardcoded handler
-  counts in docs or tests, handler-discovery suites (evasion, guidance
-  coverage, response validation), and the acceptance playbook generator
+- [x] ✅ **Task 1.2**: Surface enumerated. **10 handler modules** (one per event
+  type: notification, permission_request, post_tool_use, pre_compact,
+  pre_tool_use, session_end, session_start, stop, subagent_stop,
+  user_prompt_submit). **12 other `src/` files** reference them: `config/models.py`,
+  `config/schema.py`, `constants/config.py`, `constants/handlers.py`,
+  `constants/priority.py`, `core/hook_result.py`, `daemon/cli.py`,
+  `daemon/controller.py`, `daemon/docs_generator.py`, `daemon/init_config.py`,
+  `handlers/registry.py`, `utils/naming.py`. **16 test files**, of which two are
+  dedicated and get deleted (`test_hello_world.py`, `test_hello_world_config.py`)
+  and fourteen get amended
+- [x] ✅ **Task 1.3**: Two references are DOCUMENTATION, not dependencies, and
+  must be reworded rather than deleted — `core/hook_result.py:370` names
+  `hello_world_stop` in a docstring explaining unconditional advisory handlers,
+  and `utils/naming.py:32/61/80` uses `HelloWorldPreToolUseHandler` as the
+  worked example for all three naming conversions (with `tests/unit/utils/test_naming.py`
+  asserting against it). Both need a replacement example that still exists.
+  `.claude/HOOKS-DAEMON.md` counts are generated and already exclude TEST
+  handlers, so they need only a regenerate. The retired-handler registry is
+  `RETIRED_HANDLERS: dict[str, str]` at `constants/handlers.py:669`, mapping
+  handler id to a user-facing explanation, consumed by `config/validator.py` —
+  ten entries needed
 
 ### Phase 2: Remove
 
