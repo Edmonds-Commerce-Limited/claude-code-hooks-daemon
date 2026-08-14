@@ -68,7 +68,36 @@ _DEFAULT_FETCH_INTERVAL_SECONDS = 300
 # from a short per-cwd cache cuts that fork churn with at most TTL-bounded
 # staleness. The render is asynchronous, so this is a CPU/battery win, not a
 # latency win. TTL <= 0 disables the cache entirely.
-_DEFAULT_RENDER_TTL_SECONDS = 2.0
+#
+# THE VALUE MUST NOT SIT BETWEEN 1x AND 2x THE RENDER INTERVAL (Plan 00238).
+# A TTL in that band does not merely cache poorly, it RESONATES: a miss at
+# render k caches at t_k, the next render lands inside the window (hit), the
+# one after lands outside it (miss) — so the cache settles into an exact
+# alternating hit/miss steady state and throws away half its own value by
+# construction, not by chance.
+#
+# This was not hypothetical. At 2.0s against a measured ~1.04s render interval
+# the live miss rate was 57 of 115 renders (49.6%) over a 120s window, costing
+# ~5,760 git subprocess spawns/hour from this handler alone — the largest
+# single spawn source in the whole status-line chain.
+#
+# The value is therefore derived, not chosen: it is _RENDER_TTL_INTERVAL_MULTIPLE
+# times the TYPICAL render interval, so the steady state serves at least that
+# many renders per miss. Re-derive it, do not nudge it, if the render rate
+# changes.
+#
+# The basis is the MEDIAN interval, not the minimum, and that distinction is
+# not pedantry — a longer interval is the WORSE case for a fixed TTL (it covers
+# fewer renders), so sizing against the fastest observed rate flatters the
+# result. A first version of the paired guard made exactly that mistake and
+# would have passed the 2.0s value it was written to catch.
+_MEASURED_RENDER_INTERVAL_SECONDS = 1.043
+_RENDER_TTL_INTERVAL_MULTIPLE = 5
+_RENDER_TTL_ROUNDING_PLACES = 1
+_DEFAULT_RENDER_TTL_SECONDS = round(
+    _RENDER_TTL_INTERVAL_MULTIPLE * _MEASURED_RENDER_INTERVAL_SECONDS,
+    _RENDER_TTL_ROUNDING_PLACES,
+)
 
 _GIT_TERMINAL_PROMPT_ENV = "GIT_TERMINAL_PROMPT"
 _GIT_TERMINAL_PROMPT_DISABLED = "0"

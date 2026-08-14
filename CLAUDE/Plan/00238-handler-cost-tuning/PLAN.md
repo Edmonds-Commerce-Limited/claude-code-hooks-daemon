@@ -80,31 +80,43 @@ Two things the research found that this plan must respect:
 
 ### Phase 1: Establish the baseline before changing anything
 
-- [ ] ⬜ **Task 1.1**: Measure the CURRENT render interval on this machine
-  rather than inheriting ~1.15s from the research. The resonance argument is
-  entirely a function of that number, so a stale value invalidates every TTL
-  choice below
-- [ ] ⬜ **Task 1.2**: Capture a baseline count of git subprocess spawns and
-  status-line file reads over a fixed window, by a method that can be re-run
-  identically afterwards. A before/after with different methodology proves
-  nothing
+- [x] ✅ **Task 1.1**: Measured by polling the context-sidecar mtime (written
+  once per render): 86 renders in 90s — min 0.939s, **median 1.039s**, max
+  1.833s. Close to the research's ~1.15s but not equal, and the TTL derivation
+  depends on it
+- [x] ✅ **Task 1.2**: Baseline via a `git` shim on the DAEMON's PATH only,
+  counting real spawns rather than modelling them: **115 renders, 192 spawns,
+  57 misses = 49.6% — ~5,760 spawns/hour**. Note the instrument had to be
+  rebuilt: Plan 00236's Follow-up A stopped recording status events, so the
+  verdict log Plan 00234 measured with is no longer available (JOURNAL 04:20)
 
 ### Phase 2: The two resonance defects
 
-- [ ] ⬜ **Task 2.1**: `git_branch` — widen `_DEFAULT_RENDER_TTL_SECONDS` past
-  the resonance point. The staleness budget is already far looser elsewhere in
-  the same handler (the background fetch TTL is 300s), so a few seconds of icon
-  staleness is well inside what the design already accepts. Derive the value
-  from the measured render interval; do not pick a round number
+- [x] ✅ **Task 2.1**: `git_branch` — TTL is now `round(5 × 1.043, 1) = 5.2s`,
+  DERIVED in source from the measured interval with a test asserting the value
+  equals the arithmetic, so it cannot drift back to a round guess. Re-measured
+  with the identical method: **116 renders, 84 spawns, 26 misses = 22.4%,
+  ~2,520 spawns/hour — 57% fewer** (JOURNAL 04:20)
+- [ ] ⬜ **Task 2.1b**: Cut the calls per miss, not just the misses. Two of the
+  four look avoidable at ZERO staleness cost: `rev-parse --show-toplevel` (the
+  repo root for a cwd effectively never changes) and `branch --show-current`
+  (subsumed by `status --porcelain=v2 --branch`, which already emits
+  `# branch.head`). Roughly halves what remains on top of the 57%. Held back
+  from Task 2.1 deliberately — a porcelain-v2 parse change is a different risk
+  profile from editing one constant and deserves its own RED test
 - [ ] ⬜ **Task 2.2**: `supervisor_indicator` — bound the negative-path `/proc`
   walk. The 5s negative-cache TTL has the same resonance shape against a ~1.15s
   render interval. Prefer bounding the WALK itself (it reads `cmdline` for
   every numeric pid on the box) over only widening the TTL, since the TTL only
   changes how often the unbounded thing happens
-- [ ] ⬜ **Task 2.3**: DBF — a constant chosen relative to the render interval
-  can drift back into resonance the moment either number moves, and nothing
-  would report it. Add a guard that fails when a render-path TTL sits inside
-  the resonance band for the configured refresh interval
+- [x] ✅ **Task 2.3**: DBF — `tests/unit/handlers/status_line/test_render_ttl_resonance.py`
+  fails when a render-path TTL sits in the resonance band. **The first version
+  would have PASSED the 2.0s value it was written to catch**: it measured
+  against the FASTEST interval, but a longer interval is the worse case for a
+  fixed TTL. Caught only by running the anti-vacuity check (feed it the pre-fix
+  value, confirm rejection) instead of shipping a green test. Rebased on the
+  median, with the trap itself pinned as a test so a future "simplification"
+  back to the minimum fails and explains why (JOURNAL 04:20)
 
 ### Phase 3: The uncached-read family
 
