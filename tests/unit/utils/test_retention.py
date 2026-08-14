@@ -11,6 +11,7 @@ Both are best-effort housekeeping: a missing file/dir is a no-op, never a raise.
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 
 from claude_code_hooks_daemon.utils.retention import cap_log_file, prune_directory
@@ -78,6 +79,30 @@ class TestCapLogFile:
         f = _write(tmp_path / "log.jsonl", "a\nb\nc\n")  # 6 bytes
         assert cap_log_file(f, max_bytes=100, retain_bytes=2) is False
         assert f.read_text(encoding="utf-8") == "a\nb\nc\n"
+
+    def test_trim_preserves_the_log_file_mode(self, tmp_path: Path) -> None:
+        """A trim must not silently re-open the file's permissions (Plan 00239).
+
+        The trim writes a sibling temp file and ``replace()``s it over the log, so
+        the log inherits the TEMP file's mode — i.e. whatever the process umask
+        produced, not what the log had. The two logs this runs against
+        (``verdicts.jsonl`` and ``stop-events.jsonl``) are created owner-only on
+        purpose, so without an explicit mode copy the first trim would undo that.
+
+        The permissive umask here is the point: under the daemon's own 0o077 mask
+        the temp file would come out 0600 anyway and this test would pass without
+        testing anything.
+        """
+        f = _write(tmp_path / "log.jsonl", "".join(f"line{i:02d}\n" for i in range(20)))
+        f.chmod(0o600)
+
+        previous_umask = os.umask(0)
+        try:
+            assert cap_log_file(f, max_bytes=10) is True
+        finally:
+            os.umask(previous_umask)
+
+        assert stat.S_IMODE(f.stat().st_mode) == 0o600
 
 
 # ── prune_directory ──────────────────────────────────────────────────────────

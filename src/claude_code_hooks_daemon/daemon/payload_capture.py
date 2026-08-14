@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.secret_redaction import redact_structure
 
 # The ``_system`` envelope is the CLI's own control channel (logs, status,
@@ -99,8 +100,12 @@ def capture_payload(
 
     payload = redact_structure(hook_input, secret_terms) if secret_terms else hook_input
 
-    capture_dir.mkdir(parents=True, exist_ok=True)
+    # Plan 00239: owner-only. These files hold RAW hook payloads — including the
+    # bodies of every Write/Edit — so they are the most sensitive thing the daemon
+    # writes, and the explicit mode backs up the daemon umask rather than trusting
+    # it alone.
+    make_private_dir(capture_dir)
     target = capture_dir / f"{_safe_event_name(event)}.jsonl"
-    with target.open("a", encoding="utf-8") as handle:
+    with open_private_append(target) as handle:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
     return target

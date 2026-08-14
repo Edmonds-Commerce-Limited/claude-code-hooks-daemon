@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.core.transcript_reader import (
     TranscriptMessage,
     TranscriptReader,
 )
+from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.retention import cap_log_file
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
@@ -709,14 +710,16 @@ class AutoContinueStopHandler(Handler):
         try:
             untracked_dir: Path = ProjectContext.daemon_untracked_dir()
             log_path = untracked_dir / "stop-events.jsonl"
-            log_path.parent.mkdir(parents=True, exist_ok=True)
+            # Plan 00239: owner-only, explicit at the create site so it survives a
+            # regression of the daemon umask.
+            make_private_dir(log_path.parent)
             entry = {
                 "timestamp": datetime.now(tz=UTC).isoformat(),
                 "decision": decision.value,
                 "reason_prefix": reason[:80],
                 "stop_hook_active": bool(hook_input.get("stop_hook_active", False)),
             }
-            with log_path.open("a") as f:
+            with open_private_append(log_path) as f:
                 f.write(json.dumps(entry) + "\n")
             # Plan 00181: bound the append-only log (keep newest half on breach).
             cap_log_file(

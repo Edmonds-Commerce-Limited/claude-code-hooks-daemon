@@ -90,9 +90,10 @@ described.** Three further sites need work a umask cannot do:
   an entire checkout of TRACKED SOURCE lands world-writable. Reproduced: a
   daemon-created worktree has `README.md`, `pyproject.toml` and
   `.claude/settings.json` at `0666` and the worktree root at `0777`, against
-  `0644` in the main repo. This one needs a *permissive* `0o022` around the
-  subprocess — a source checkout should be `0644`/`0755`, and under a bare
-  `0o077` it would become `0600`/`0700`.
+  `0644` in the main repo. The umask fix already resolves the exposure (they
+  become `0600`/`0700`); whether they should instead be git's usual
+  `0644`/`0755` is a separate, non-security question — see Task 2.4, which is
+  deferred to Phase 3 deliberately.
 - `utils/settings_repair.py:105-106` writes a temp file and `replace()`s it over
   the **git-tracked** `.claude/settings.json`, so the tracked file inherits the
   temp file's mode. (Live check: `settings.json` is `0644` today, so this path
@@ -123,24 +124,35 @@ described.** Three further sites need work a umask cannot do:
 
 ### Phase 2: TDD the fix
 
-- [ ] ⬜ **Task 2.1**: RED — a test that exercises the real daemonize path (or
-  its helper), creates a file through the normal write path, and asserts
-  `st_mode & 0o007 == 0` and no group/other write bit. Must FAIL first
-- [ ] ⬜ **Task 2.2**: GREEN — `os.umask(0o077)` in place of `os.umask(0)`,
-  with a comment recording why the group-preserving `0o007` was rejected so it
-  is not "restored" later
-- [ ] ⬜ **Task 2.3**: Defence in depth — explicit modes on the sensitive
-  creates (`payload-capture/`, the verdict log, `stop-events.jsonl`) so the
-  posture survives a later "fix" to the umask line
-- [ ] ⬜ **Task 2.4**: `worktree_create` — set a permissive `0o022` around the
-  `git worktree add` subprocess. A source checkout must be `0644`/`0755`; today
-  it is `0666`/`0777` and under a bare `0o077` it would become `0600`/`0700`.
-  This is the one place the daemon needs a MORE permissive umask, and the one
-  place it currently has no control at all
-- [ ] ⬜ **Task 2.5**: `settings_repair.py` — `copymode()` the original before
-  `replace()`, so repairing a git-tracked file never rewrites its mode. Its
-  sibling `hook_command_migration.py:178` rewrites in place and is already
-  immune; the two differ for no reason
+- [x] ✅ **Task 2.1**: RED — `tests/unit/daemon/test_daemon_umask.py` pins the
+  daemonise CALL and `tests/unit/constants/test_permissions.py` pins what the
+  mask does to a real file and a real directory. Both failed first. The suite
+  already drove this line: six existing daemonise tests `patch("os.umask")` and
+  assert nothing about it, so the defect was executed by the tests and
+  unobserved by them
+- [x] ✅ **Task 2.2**: GREEN — `os.umask(FileMode.DAEMON_UMASK)` (`0o077`) in
+  `daemon/cli.py`, with the rejected `0o007` argument recorded at the constant
+  so it is not "restored" later
+- [x] ✅ **Task 2.3**: Defence in depth — `utils/private_io.py`
+  (`open_private_append`, `make_private_dir`) wired into `payload_capture.py`,
+  `verdict_log.py` and `auto_continue_stop.py`. `Path.mkdir(parents=True, mode=…)` applies the mode to the LEAF only, so the helper creates each missing
+  ancestor explicitly — otherwise a private leaf sits in a world-writable parent
+- [ ] ⬜ **Task 2.4**: `worktree_create` — DEFERRED to Phase 3, on evidence.
+  Two things changed: (a) the "spurious mode churn under `core.fileMode`"
+  argument is FALSE — measured, git tracks only the executable bit, so
+  `0644`→`0600` is invisible to it; and (b) both mechanisms for scoping a
+  looser umask to the subprocess are unsound, because handler dispatch runs in
+  a `ThreadPoolExecutor` (`server.py:1085`) — a `temporary_umask` context
+  manager is process-global and races concurrent dispatch, and `preexec_fn` is
+  documented as thread-unsafe. What remains is a usability question (a `0700`
+  worktree is unreadable to a host user when the daemon runs as root in a
+  container), to be decided against a restarted daemon rather than bundled into
+  the security fix
+- [x] ✅ **Task 2.5**: `shutil.copymode()` before `replace()` in
+  `settings_repair.py` AND in `retention.py` — the same tmp-then-replace shape
+  appears in both, and both silently rewrote the target's mode. The settings one
+  matters most: its target is git-TRACKED, so it was rewriting the permissions
+  of a committed file
 
 ### Phase 3: Verify, remediate, document
 

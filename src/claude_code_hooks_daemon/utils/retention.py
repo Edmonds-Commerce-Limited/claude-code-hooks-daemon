@@ -23,6 +23,7 @@ Defaults are NOT defined here -- callers pass explicit byte/count/age budgets
 from __future__ import annotations
 
 import logging
+import shutil
 from collections.abc import Collection
 from pathlib import Path
 
@@ -61,6 +62,11 @@ def cap_log_file(path: Path, *, max_bytes: int, retain_bytes: int | None = None)
         kept = tail[newline + 1 :] if newline != -1 else tail
         tmp = path.with_name(path.name + ".retain.tmp")
         tmp.write_bytes(kept)
+        # Plan 00239: the replace makes the log inherit the TEMP file's mode, i.e.
+        # whatever the umask produced — so without this the first trim silently
+        # re-opens the permissions of a log created owner-only on purpose
+        # (verdicts.jsonl, stop-events.jsonl). Copy the log's own mode across.
+        shutil.copymode(path, tmp)
         tmp.replace(path)
         return True
     except OSError as exc:

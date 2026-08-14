@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -57,6 +59,31 @@ class TestRepairSettingsRegistrations:
         on_disk = json.loads(settings_path.read_text())
         assert on_disk["permissions"] == {"allow": ["Bash(ls:*)"]}
         assert on_disk["customKey"] == 1
+
+    def test_repair_preserves_the_file_mode(self, tmp_path: Path) -> None:
+        """Repairing must not rewrite the file's permissions (Plan 00239).
+
+        The repair stages a temp file and ``replace()``s it over settings.json, so
+        the file inherits the TEMP file's mode rather than keeping its own. The
+        real target is git-TRACKED (``.claude/settings.json``), so a mode rewrite
+        here changes a file the user has committed — under the daemon's umask-0
+        that meant handing it 0666.
+
+        The permissive umask is deliberate: under a restrictive one the temp file
+        would come out tight anyway and this would pass without testing anything.
+        """
+        settings_path = tmp_path / "settings.json"
+        _write(settings_path, {"hooks": {}})
+        settings_path.chmod(0o644)
+
+        previous_umask = os.umask(0)
+        try:
+            result = repair_settings_registrations(settings_path)
+        finally:
+            os.umask(previous_umask)
+
+        assert result.repaired is True, "test needs a repair to actually happen"
+        assert stat.S_IMODE(settings_path.stat().st_mode) == 0o644
 
     def test_writes_one_shot_backup(self, tmp_path: Path) -> None:
         settings_path = tmp_path / "settings.json"

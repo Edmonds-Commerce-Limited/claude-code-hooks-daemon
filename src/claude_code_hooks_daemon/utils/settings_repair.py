@@ -103,6 +103,13 @@ def repair_settings_registrations(settings_path: Path) -> RepairResult:
         # it before its own replace); mirrors utils.retention's atomic-trim
         # pattern.
         tmp_path.write_text(json.dumps(new_settings, indent=2) + "\n", encoding="utf-8")
+        # Plan 00239: the replace makes settings.json inherit the TEMP file's mode
+        # — i.e. whatever the umask produced, not the mode the user's file had.
+        # This target is git-TRACKED, so that silently rewrites the permissions of
+        # a committed file; under the daemon's former umask(0) it handed it 0666.
+        # The sibling rewriter (hook_command_migration) writes in place and is
+        # immune by construction; this keeps the two equivalent.
+        shutil.copymode(settings_path, tmp_path)
         tmp_path.replace(settings_path)
     except OSError as exc:
         logger.warning("settings registration repair aborted for %s: %s", settings_path, exc)

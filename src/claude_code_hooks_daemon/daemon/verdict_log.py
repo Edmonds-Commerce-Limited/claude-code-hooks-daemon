@@ -53,6 +53,7 @@ from typing import Any
 from claude_code_hooks_daemon.core.chain import HandlerVerdict
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.retention import cap_log_file
 
 # Filename for the verdict log, resolved by the caller under the daemon's
@@ -231,9 +232,12 @@ def append_verdicts(
     if not lines:
         return None
 
-    log_dir.mkdir(parents=True, exist_ok=True)
+    # Plan 00239: owner-only. The verdict log records what every handler decided
+    # about every tool call, including the command strings — the explicit mode
+    # backs up the daemon umask rather than trusting it alone.
+    make_private_dir(log_dir)
     target = log_dir / VERDICT_LOG_FILENAME
-    with target.open("a", encoding="utf-8") as handle:
+    with open_private_append(target) as handle:
         for line in lines:
             handle.write(json.dumps(line, ensure_ascii=False) + "\n")
 

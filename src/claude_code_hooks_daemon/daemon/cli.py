@@ -49,6 +49,7 @@ from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode
+from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
@@ -576,7 +577,12 @@ def cmd_start(args: argparse.Namespace) -> int:
     # First child - decouple from parent environment
     os.chdir("/")
     os.setsid()
-    os.umask(0)
+    # Plan 00239: NOT the textbook umask(0). Clearing the mask is only safe for a
+    # daemon that passes an explicit mode to every create, and this one does so at
+    # exactly one of 98 sites — so umask(0) shipped a world-writable verdict log,
+    # payload-capture/ and PID file. See constants/permissions.py for why the mask
+    # is 0o077 rather than the group-preserving 0o007.
+    os.umask(FileMode.DAEMON_UMASK)
 
     # Second fork
     try:
