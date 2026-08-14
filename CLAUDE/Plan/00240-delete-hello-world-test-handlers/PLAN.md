@@ -68,8 +68,12 @@ separate decision.
 
 ### Phase 1: Close the predecessor and take inventory
 
-- [ ] ⬜ **Task 1.1**: Close Plan 00162 — its wiring goal was delivered and
-  shipped in v3.40.0; archive it with the README row and statistics recount
+- [x] ✅ **Task 1.1**: Plan 00162 closed and archived. The "shipped in v3.40.0"
+  claim was VERIFIED rather than taken from its notes — `git tag --contains`
+  on the wiring commit `ca03facb` returns v3.40.0 as the first tag. Its success
+  criteria were re-checked against the live daemon too (a real `SessionStart`
+  through the production forwarder injects zero occurrences of the canary
+  text), so the plan was closed on evidence rather than on its own say-so
 - [x] ✅ **Task 1.2**: Surface enumerated. **10 handler modules** (one per event
   type: notification, permission_request, post_tool_use, pre_compact,
   pre_tool_use, session_end, session_start, stop, subagent_stop,

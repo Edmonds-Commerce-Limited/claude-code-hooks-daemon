@@ -1,6 +1,6 @@
 # Plan 00162: wire hello world handler flag
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-14
 **Owner**: joseph
 **Priority**: Medium
@@ -89,16 +89,22 @@ actively debugging the hook system.
 
 ### Phase 3: Release
 
-- [ ] ⬜ **Task 3.1**: Ship in the next release (changes are unreleased); then
-  close the plan (git mv to Completed/, README move + stats).
+- [x] ✅ **Task 3.1**: Shipped. The wiring commit `ca03facb` is contained in
+  **v3.40.0** (`git tag --contains`), so the work has been released since then
+  and the plan was simply never closed — it sat In Progress with everything but
+  this bookkeeping done. Closed here as the first task of Plan 00240, which
+  removes the handlers this plan gated
 
 ## Success Criteria
 
-- [ ] `enable_hello_world_handlers: false` (default) ⇒ zero TEST handlers active;
+- [x] `enable_hello_world_handlers: false` (default) ⇒ zero TEST handlers active;
   `true` ⇒ all active. Covered by tests.
-- [ ] No `✅ <event> hook system active` context injected in a default-config
-  project; the idle-tick doubled-stop is gone.
-- [ ] QA green, daemon RUNNING, HOOKS-DAEMON.md regenerated.
+- [x] No `✅ <event> hook system active` context injected in a default-config
+  project; the idle-tick doubled-stop is gone. Re-verified against the LIVE
+  daemon: a real `SessionStart` through the production forwarder returns zero
+  occurrences of the canary text, and `.claude/HOOKS-DAEMON.md` lists no
+  `hello_world` handler.
+- [x] QA green, daemon RUNNING, HOOKS-DAEMON.md regenerated.
 
 ## Notes & Updates
 
