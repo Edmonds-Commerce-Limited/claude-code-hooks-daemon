@@ -234,20 +234,16 @@ nitpick item was REVERSED by a live chain trace, not implemented).
   `supervisor_indicator`'s negative-path `/proc` walk; mtime-gate
   `account_display`; change-detect `git_context_injector`; rate-limit
   `daemon_restart_verifier`
-- [ ] ⬜ **Task 4.10**: Close the residual counter-advance gap that Follow-up D
-  left behind — the realisation of the "Merge loses the counter-advance side
-  effect" risk in the table below. The removed `validate_plan_number` also
-  fired on Bash `mkdir CLAUDE/Plan/NNNNN-name` and recorded the allocation
-  immediately (`matches()` line 93, `handle()` line 217 of the pre-removal
-  file, commit `17131953^`); `plan_qa_edit` only inspects Write/Edit of
-  `PLAN.md`, so the number is now claimed later — when content lands, not when
-  the folder appears. Invisible to a single agent, but it widens the TOCTOU
-  window for concurrent ones: two agents can both see N free and collide, and
-  only the commit gate catches it. `mkplan.bash` is unaffected (it takes a lock
-  and has its own writer), so exposure is limited to an agent hand-rolling
-  `mkdir` — which `plan_number_helper` already discourages. No test covers it.
-  Found by peer review of the Plan 00237 Phase 4 diff; recorded rather than
-  dropped because Plan 00237 is closed
+- [x] ✅ **Task 4.10**: The counter-advance gap Follow-up D left behind — the
+  realisation of the "Merge loses the counter-advance side effect" risk in the
+  table below. Closed by ELIMINATION, not by re-adding the bookkeeping:
+  `mkdir <plan-dir>/NNNNN-name` is now DENIED by `plan_number_helper`, whose
+  reason names the `mkplan.bash` command to run instead. The scaffolder takes a
+  lock and allocates atomically, so the unsynchronised path is gone rather than
+  accounted for. Narrow by five conditions — direct numbered child of the plan
+  dir, not inside a heredoc body, folder absent, target inside the workspace,
+  scaffolder deployed — each ruling out a legitimate lookalike. 13 tests, live
+  daemon probe, truth-changes entry. See JOURNAL 26-08-14
 - [x] ✅ **Task 4.11**: CLAUDE.md losing both nitpick guidance sections — found,
   fixed, and guarded. It was never the daemon: three restarts left the file
   untouched and both deletions landed across a `llm_qa.py all` run. The writer

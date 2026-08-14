@@ -5,6 +5,7 @@ Instead, it provides the correct next plan number via context injection.
 """
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -740,3 +741,186 @@ class TestPlanNumberHelperHandler:
             assert handler_enabled.matches(
                 hook_input
             ), f"Should STILL match (latest-value discovery idiom): {command}"
+
+
+def _bash(command: str) -> dict[str, Any]:
+    """Hook input for a Bash tool call."""
+    return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+
+class TestHandRolledPlanFolderCreation:
+    """``mkdir`` of a NEW plan folder is denied and redirected to mkplan.bash.
+
+    Plan 00234 Task 4.10. ``validate_plan_number`` (removed in Plan 00237) was
+    the only thing that advanced ``hooksdaemon.latestPlanNumber`` when a plan
+    folder was hand-created with ``mkdir``; Plan 00237 ported the side effect to
+    the Write path of ``plan_qa_edit`` only. That left the number claimed at
+    PLAN.md-write time rather than at folder-creation time, widening the window
+    in which two concurrent agents both read the same "next" number.
+
+    The gap is closed by ELIMINATION rather than by re-adding the bookkeeping:
+    ``mkplan.bash`` takes a lock and allocates atomically, so redirecting to it
+    removes the unsynchronised path instead of accounting for it.
+    """
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> PlanNumberHelperHandler:
+        """Handler over a workspace whose plan dir HAS the scaffolder deployed."""
+        handler = PlanNumberHelperHandler()
+        handler._workspace_root = tmp_path
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / "mkplan.bash").write_text("#!/usr/bin/env bash\n")
+        return handler
+
+    def test_mkdir_of_new_plan_folder_matches(self, handler: PlanNumberHelperHandler) -> None:
+        """The hand-rolled creation path is what claims a number without recording it."""
+        assert handler.matches(_bash("mkdir -p CLAUDE/Plan/00250-some-feature"))
+
+    def test_deny_names_the_scaffolder_and_the_kebab_name(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """The block must be actionable: the exact command to run instead."""
+        result = handler.handle(_bash("mkdir -p CLAUDE/Plan/00250-some-feature"))
+
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "mkplan.bash" in result.reason
+        assert "some-feature" in result.reason
+
+    def test_absolute_path_matches(self, handler: PlanNumberHelperHandler) -> None:
+        """An absolute path inside the workspace is the same creation."""
+        target = handler._workspace_root / "CLAUDE" / "Plan" / "00250-some-feature"
+        assert handler.matches(_bash(f"mkdir -p {target}"))
+
+    def test_new_plan_folder_with_journal_subpath_matches(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """Creating the folder and its JOURNAL in one call still creates the folder."""
+        assert handler.matches(_bash("mkdir -p CLAUDE/Plan/00250-some-feature/JOURNAL"))
+
+    def test_journal_dir_inside_existing_plan_is_allowed(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """The common, legitimate case: adding JOURNAL/ to a plan that exists."""
+        (handler._workspace_root / "CLAUDE" / "Plan" / "00250-some-feature").mkdir()
+
+        assert not handler.matches(
+            _bash("mkdir -p CLAUDE/Plan/00250-some-feature/JOURNAL")
+        ), "A plan folder that already exists is not being created"
+
+    def test_recreating_an_existing_plan_folder_is_allowed(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """``mkdir -p`` of an existing folder is a no-op, not an allocation."""
+        (handler._workspace_root / "CLAUDE" / "Plan" / "00250-some-feature").mkdir()
+
+        assert not handler.matches(_bash("mkdir -p CLAUDE/Plan/00250-some-feature"))
+
+    def test_archive_directory_is_allowed(self, handler: PlanNumberHelperHandler) -> None:
+        """``Completed/`` is not a numbered plan folder."""
+        assert not handler.matches(_bash("mkdir -p CLAUDE/Plan/Completed"))
+
+    def test_path_outside_the_workspace_is_allowed(self, handler: PlanNumberHelperHandler) -> None:
+        """The counter is per-repo; a fixture tree elsewhere has none to protect.
+
+        Acceptance-test setup commands build plan-shaped trees under /tmp
+        (``plan_workflow`` ships exactly such a ``setup_commands`` entry). Those
+        are not this project's plan tree and must not be blocked.
+        """
+        assert not handler.matches(_bash("mkdir -p /tmp/acceptance-fixture/CLAUDE/Plan/099-test"))
+
+    def test_parent_traversal_escaping_the_workspace_is_allowed(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """``..`` must not be able to smuggle a foreign repo past the boundary.
+
+        ``workspace / "../sibling/CLAUDE/Plan/00250-x"`` still *begins* with the
+        workspace root, so a purely lexical containment test says "inside" for a
+        path that plainly is not. Left unfixed this denies a plan folder in a
+        sibling checkout and tells the agent to run THIS project's scaffolder
+        against it.
+        """
+        sibling = handler._workspace_root.parent / "sibling-repo" / "CLAUDE" / "Plan"
+        sibling.mkdir(parents=True)
+        (sibling / "mkplan.bash").write_text("#!/usr/bin/env bash\n")
+
+        assert not handler.matches(_bash("mkdir -p ../sibling-repo/CLAUDE/Plan/00250-some-feature"))
+
+    def test_no_match_when_scaffolder_is_absent(self, tmp_path: Path) -> None:
+        """Never deny the only available path.
+
+        With no ``mkplan.bash`` deployed, ``mkdir`` is how a plan folder gets
+        made. Denying it would leave the agent unable to create a plan at all,
+        and the deny message would name a script that is not there.
+        ``plan_workflow_asset_checker`` already advises deploying it.
+        """
+        handler = PlanNumberHelperHandler()
+        handler._workspace_root = tmp_path
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        (tmp_path / "CLAUDE" / "Plan").mkdir(parents=True)
+
+        assert not handler.matches(_bash("mkdir -p CLAUDE/Plan/00250-some-feature"))
+
+    def test_mkplan_invocation_is_allowed(self, handler: PlanNumberHelperHandler) -> None:
+        """The recommended path must not block itself."""
+        assert not handler.matches(_bash('CLAUDE/Plan/mkplan.bash "some-feature"'))
+
+    def test_quoted_heredoc_documenting_the_command_is_allowed(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """Writing the command into a document does not run it."""
+        command = (
+            "cat > notes.md <<'EOF'\n"
+            "Create the folder with mkdir -p CLAUDE/Plan/00250-some-feature\n"
+            "EOF"
+        )
+        assert not handler.matches(_bash(command))
+
+    def test_heredoc_elsewhere_does_not_exempt_a_real_creation(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """Only the heredoc BODY is unexecuted -- the rest of the command runs.
+
+        A whole-command heredoc exemption is an evasion: append a throwaway
+        heredoc and the creation sails through. Only the quoted body is blanked.
+        """
+        command = (
+            "cat > notes.md <<'EOF'\n"
+            "unrelated prose\n"
+            "EOF\n"
+            "mkdir -p CLAUDE/Plan/00250-some-feature"
+        )
+        assert handler.matches(_bash(command))
+
+    def test_disabled_when_planning_mode_off(self, tmp_path: Path) -> None:
+        """No plan directory configured means no plan-number policy to enforce."""
+        handler = PlanNumberHelperHandler()
+        handler._workspace_root = tmp_path
+        handler._track_plans_in_project = None
+
+        assert not handler.matches(_bash("mkdir -p CLAUDE/Plan/00250-some-feature"))
+
+    def test_unrelated_mkdir_is_allowed(self, handler: PlanNumberHelperHandler) -> None:
+        """A mkdir that never touches the plan directory is none of our business."""
+        assert not handler.matches(_bash("mkdir -p untracked/reports"))
+
+    def test_respellings_cannot_evade(self, handler: PlanNumberHelperHandler) -> None:
+        """The same creation, spelled differently, is still the same creation.
+
+        `PlanNumberHelperHandler` sits on the evasion suite's
+        not-unit-testable debt list (it needs ProjectContext wiring), so that
+        guard is blind to this rule. Covering the obvious respellings here
+        keeps the gap from being silent.
+        """
+        variants = [
+            "/bin/mkdir -p CLAUDE/Plan/00250-some-feature",
+            "mkdir    -p     CLAUDE/Plan/00250-some-feature",
+            "mkdir -pv CLAUDE/Plan/00250-some-feature",
+            "cd /workspace && mkdir -p CLAUDE/Plan/00250-some-feature",
+            "mkdir -p CLAUDE/Plan/00250-some-feature && echo created",
+        ]
+
+        for command in variants:
+            assert handler.matches(_bash(command)), f"Should still match: {command}"

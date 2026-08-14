@@ -55,6 +55,34 @@ truth_changes:
       accepts a journal entry. If you have been journalling solely to keep
       this check quiet while extracting, you no longer need to.
   - was: >
+      There are two supported ways to create a plan folder: run mkplan.bash, or
+      create the NNNNN-name directory yourself with mkdir and then write its
+      PLAN.md. Both end up in the same place, so the choice is a matter of
+      convenience.
+    now: >
+      Hand-creating the folder is BLOCKED. `mkdir <plan-dir>/NNNNN-name` is
+      denied by plan_number_helper whenever mkplan.bash is deployed, and the
+      block names the exact scaffolder command to run instead. Correct any doc
+      of yours that offers mkdir as an equivalent option. The two paths were
+      never equivalent: mkplan.bash takes a lock and allocates atomically from
+      hooksdaemon.latestPlanNumber, whereas mkdir claims a number the moment the
+      folder appears but nothing records the claim until PLAN.md is written --
+      so a second agent reading the counter in that window is handed the SAME
+      number, and the collision surfaces only at the commit gate, once both
+      folders exist. Until v3.53.0 the removed validate_plan_number handler hid
+      this by advancing the counter on the mkdir itself; when Plan 00237 merged
+      that handler away it ported the side effect to the PLAN.md write only, so
+      the window widened silently. Closing it by redirecting to the scaffolder
+      removes the unsynchronised path rather than adding bookkeeping to it. The
+      block is narrow and deliberately so: an archive directory
+      (<plan-dir>/Completed), a JOURNAL/ inside a plan that already exists, a
+      `-p` re-create of a folder already on disk, a mkdir inside the body of a
+      QUOTED-delimiter heredoc (content being written rather than run), and any
+      path outside the workspace are all still allowed -- the last of those is
+      what keeps plan-shaped test fixtures under /tmp working. If
+      mkplan.bash is NOT deployed the handler stays silent, because denying the
+      only available path would leave an agent unable to create a plan at all.
+  - was: >
       The daemon's own files live in .claude/hooks-daemon/. That directory is
       git-ignored by the installer, so excluding it -- which most projects get
       for free, since ruff and similar tools respect .gitignore -- keeps

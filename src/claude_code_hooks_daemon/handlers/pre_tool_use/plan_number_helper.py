@@ -19,8 +19,10 @@ prose or a regex that merely NAMES the plan directory is not mistaken for a
 scan of it.
 """
 
+import os.path
 import re
-from typing import TYPE_CHECKING, Any, Final
+from pathlib import Path
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -32,11 +34,13 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
-from claude_code_hooks_daemon.handlers.utils.plan_numbering import next_plan_number_for_target
+from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
+    PLAN_NUMBER_WIDTH,
+    next_plan_number_for_target,
+)
+from claude_code_hooks_daemon.install.plan_workflow import MKPLAN_SCRIPT_NAME
 from claude_code_hooks_daemon.utils.quoted_spans import blank_shell_literal_spans
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
 
 # Shell metacharacters that terminate one command and begin another. Used inside a
 # NEGATED regex character class so a pattern anchored on `echo`/`printf` cannot run
@@ -56,6 +60,14 @@ _SPECIFIC_PLAN_NUMBER_DIGITS: Final[int] = 2
 _SORT_COMMAND: Final[str] = "sort"
 _TRUNCATE_TO_LAST_PATTERN: Final[str] = r"tail\s+(-n\s*)?-?\d+"
 
+# The hand-rolled plan-folder creation path (Plan 00234 Task 4.10). `mkdir`
+# claims a number the moment the folder appears, but nothing records that claim
+# until PLAN.md is written -- so a concurrent agent reading the git counter in
+# between is handed the SAME number. `mkplan.bash` takes a lock and allocates
+# atomically, so the gap is closed by redirecting to it rather than by adding
+# bookkeeping to a path that was never synchronised.
+_MKDIR_COMMAND: Final[str] = "mkdir"
+
 
 class PlanNumberHelperHandler(Handler):
     """Detect bash commands attempting to discover plan numbers and provide correct answer."""
@@ -73,6 +85,87 @@ class PlanNumberHelperHandler(Handler):
         self._workspace_root: Path = ProjectContext.project_root()
         self._track_plans_in_project: str | None = None  # Path to plan folder or None
         self._plan_workflow_docs: str | None = None  # Path to workflow doc or None
+
+    def _new_plan_folder_in_mkdir(self, command: str) -> str | None:
+        """The plan folder a ``mkdir`` in ``command`` would CREATE, else ``None``.
+
+        Narrow on purpose -- five conditions must all hold, and each one rules
+        out a legitimate command that looks superficially the same:
+
+        * the path is a direct ``NNNNN-name`` child of the configured plan dir,
+          so ``mkdir -p CLAUDE/Plan/Completed`` (an archive directory) is not it;
+        * the ``mkdir`` is not inside a heredoc body, which is written rather
+          than executed;
+        * the folder does NOT already exist, so ``mkdir -p <plan>/JOURNAL`` --
+          adding a journal to a plan that exists -- is not it, and neither is a
+          ``-p`` re-create of a folder already on disk;
+        * the target resolves INSIDE the workspace, because the counter being
+          protected is per-repo and acceptance-test setup commands build
+          plan-shaped fixture trees under /tmp;
+        * ``mkplan.bash`` is deployed, because denying the only available
+          creation path would leave the agent unable to create a plan at all
+          and would name a script that is not there.
+        """
+        plan_dir = self._track_plans_in_project
+        if plan_dir is None or _MKDIR_COMMAND not in command:
+            return None
+
+        # Blank what the shell will not execute, and ONLY that: the body of a
+        # quoted-delimiter heredoc (content being written) and quoted literals.
+        # Scoping matters -- exempting the whole command because a heredoc
+        # appears anywhere in it is an evasion, since appending a throwaway
+        # heredoc would then wave the creation through.
+        scannable = blank_shell_literal_spans(strip_quoted_heredoc_bodies(command))
+
+        match = re.search(
+            rf"{_MKDIR_COMMAND}[^{_COMMAND_SEPARATORS}]*?"
+            rf"(\S*{re.escape(plan_dir)}/\d{{1,{PLAN_NUMBER_WIDTH}}}-[^\s/]+)",
+            scannable,
+        )
+        if match is None:
+            return None
+
+        candidate = match.group(1)
+        # An ABSOLUTE candidate replaces the base under pathlib's `/`, so this
+        # single expression resolves both the relative and absolute spellings.
+        # `normpath` is then required, not cosmetic: pathlib joins LEXICALLY and
+        # keeps `..` as a literal segment, so `workspace/../sibling/...` still
+        # tests as "inside the workspace" and a plan folder in a neighbouring
+        # checkout would be denied with THIS project's scaffolder named as the
+        # remedy. Purely lexical (no filesystem, no symlink resolution), which
+        # is what the containment question actually needs.
+        target = Path(os.path.normpath(self._workspace_root / candidate))
+        if not target.is_relative_to(self._workspace_root):
+            return None
+        if target.is_dir():
+            return None
+        if not (self._workspace_root / plan_dir / MKPLAN_SCRIPT_NAME).exists():
+            return None
+
+        return candidate
+
+    def _deny_hand_rolled_creation(self, plan_folder: str) -> HookResult:
+        """Redirect a hand-rolled plan-folder creation to the scaffolder."""
+        folder_name = plan_folder.rsplit("/", 1)[-1]
+        name_match = re.match(rf"\d{{1,{PLAN_NUMBER_WIDTH}}}-(.+)$", folder_name)
+        kebab_name = name_match.group(1) if name_match else folder_name
+
+        return HookResult.deny(
+            reason=(
+                f"🚫 BLOCKED: `{_MKDIR_COMMAND} {plan_folder}` hand-creates a plan folder.\n\n"
+                "The number is claimed the moment the folder appears, but nothing "
+                "records the claim until PLAN.md is written. A concurrent agent "
+                "reading the git counter in between is handed the SAME number, and "
+                "nothing catches the collision until the commit gate -- by which "
+                "point both folders exist.\n\n"
+                "💡 Use the scaffolder instead. It takes a lock, allocates atomically "
+                "from `hooksdaemon.latestPlanNumber`, creates the folder, scaffolds "
+                "PLAN.md and advances the counter:\n\n"
+                f'    {self._track_plans_in_project}/{MKPLAN_SCRIPT_NAME} "{kebab_name}"\n\n'
+                "It prints the new folder path on stdout. You still add the README "
+                "index row yourself."
+            )
+        )
 
     @staticmethod
     def _extracts_latest(command: str) -> bool:
@@ -222,6 +315,13 @@ class PlanNumberHelperHandler(Handler):
         ):
             return False
 
+        # 0. CREATION, not discovery. `mkdir CLAUDE/Plan/NNNNN-name` does not ask
+        # for a number, it CLAIMS one -- unsynchronised, and unrecorded until
+        # PLAN.md lands. Checked before the discovery rules because it is the
+        # most specific shape and the only one that changes the plan tree.
+        if self._new_plan_folder_in_mkdir(command) is not None:
+            return True
+
         # Pattern detection: Commands trying to discover plan numbers
         # These patterns indicate Claude is trying to find the latest plan
 
@@ -315,6 +415,14 @@ class PlanNumberHelperHandler(Handler):
         # Precondition: matches() ensures _track_plans_in_project is not None
         assert self._track_plans_in_project is not None, "Handler called without matches check"
 
+        # A hand-rolled creation needs the scaffolder, not a number: handing back
+        # "the next number is N" would answer a question that was not asked and
+        # leave the caller on the very path that loses the allocation.
+        command = hook_input.get(HookInputField.TOOL_INPUT, {}).get("command", "")
+        hand_rolled_folder = self._new_plan_folder_in_mkdir(command)
+        if hand_rolled_folder is not None:
+            return self._deny_hand_rolled_creation(hand_rolled_folder)
+
         # Get next plan number (git-anchored: per-repo counter, trusted when
         # present, bootstrapped from a filesystem scan when absent).
         try:
@@ -366,6 +474,14 @@ class PlanNumberHelperHandler(Handler):
             "```\n"
             'CLAUDE/Plan/mkplan.bash "descriptive-kebab-name"\n'
             "```\n\n"
+            "**Hand-creating the folder is BLOCKED.** `mkdir <plan-dir>/NNNNN-name` "
+            "is denied when the scaffolder is deployed: `mkdir` claims a number the "
+            "moment the folder appears, but nothing records the claim until PLAN.md "
+            "is written, so a concurrent agent reading the counter in between gets the "
+            "SAME number and the collision surfaces only at the commit gate. This is "
+            "narrow — `mkdir <plan-dir>/Completed`, a `JOURNAL/` inside a plan that "
+            "already exists, and a `-p` re-create of an existing folder are all "
+            "allowed, as is any path outside this workspace.\n\n"
             "(Use the project's configured plan directory if it is not `CLAUDE/Plan/`.) "
             "The script takes a lock, reads the same authoritative git counter "
             "(`hooksdaemon.latestPlanNumber`), assigns the next number atomically, creates the "
@@ -402,6 +518,39 @@ class PlanNumberHelperHandler(Handler):
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"plan number"],
                 safety_notes="Handler blocks broken command and provides correct plan number instead.",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="Block hand-creating a plan folder with mkdir",
+                command="mkdir -p CLAUDE/Plan/99999-acceptance-probe",
+                description=(
+                    "`mkdir` claims a plan number without recording it, so a "
+                    "concurrent agent reading the git counter is handed the same "
+                    "number. The block redirects to mkplan.bash, which takes a "
+                    "lock and allocates atomically (Plan 00234 Task 4.10)."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"BLOCKED", r"mkplan\.bash"],
+                safety_notes=(
+                    "Denied before execution, so no folder is created. The number "
+                    "is deliberately outside any real plan range."
+                ),
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="Allow mkdir of a plan archive directory",
+                command="mkdir -p CLAUDE/Plan/Completed",
+                description=(
+                    "The creation block is narrow: an archive directory is not a "
+                    "numbered plan folder and must not be denied."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Idempotent mkdir of a directory that already exists.",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
