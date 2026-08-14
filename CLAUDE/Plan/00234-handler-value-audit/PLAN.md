@@ -257,9 +257,16 @@ nitpick item was REVERSED by a live chain trace, not implemented).
   `.claude/HOOKS-DAEMON.md` still lists both. Instrumenting the injector against
   the live config shows the pipeline is CORRECT as it stands (85 handlers in,
   both nitpick sections through collect → build → replace → mdformat → the
-  content-loss guard), so the restart ran against a handler set that lacked
-  them and the mechanism is unknown. Restored via `regenerate-docs`; details and
-  the diagnostic in Plan 00238's JOURNAL for 26-08-14
+  content-loss guard). **Narrowed on a second occurrence: the trigger is a full
+  QA run, not a daemon restart.** Three restarts left the file untouched; the
+  deletion appeared during `llm_qa.py all` both times. So the suspect is a TEST
+  that initialises a controller against the REAL `/workspace` root with
+  `pseudo_events_config=None` — which would write the live `CLAUDE.md` with
+  every section EXCEPT the pseudo-event ones, exactly the observed damage. The
+  specific test is not yet identified (`test_cli_regenerate_docs` and
+  `test_cli_verdict_log_wiring` were checked and are clean — they use `tmp_path`
+  or stub `initialise`). Restored via `regenerate-docs`; details and the
+  diagnostic in Plan 00238's JOURNAL for 26-08-14
 - [x] ✅ **Task 4.9**: Proposal handed to the human, who set the order:
   A+B+C+G as one "fix what's broken" pass, then D, then H — with E and F held
   until the verdict log from A had produced real firing data. That data arrived

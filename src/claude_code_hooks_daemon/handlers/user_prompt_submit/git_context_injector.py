@@ -1,11 +1,29 @@
 """GitContextInjectorHandler - injects git status context into user prompts."""
 
 import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
+import time
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, Timeout
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    Timeout,
+)
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+# Ceiling on how long an unchanged status may stay un-injected (Plan 00238
+# Task 4.1). Change-detection alone has no floor under it: context can be
+# compacted away, and the agent would then have no git context at all until the
+# repository happened to change. Re-injecting on this interval bounds that.
+_MAX_SUPPRESSION_SECONDS = 900.0
+
+# The state is one small entry per session, and sessions share one daemon that
+# runs for days, so the map is capped rather than left to grow. Oldest-first
+# eviction: the sessions that stop prompting are the ones that are gone.
+_MAX_TRACKED_SESSIONS = 32
 
 
 class GitContextInjectorHandler(Handler):
@@ -28,6 +46,36 @@ class GitContextInjectorHandler(Handler):
                 HandlerTag.NON_TERMINAL,
             ],
         )
+        # session id -> (payload last injected for it, monotonic stamp).
+        # Per-instance: the daemon holds one handler, so this lives as long as
+        # the daemon and is not shared across projects.
+        self._last_injected: dict[str, tuple[str, float]] = {}
+
+    def _now(self) -> float:
+        """Return a monotonic timestamp (seam for deterministic tests)."""
+        return time.monotonic()
+
+    def _should_inject(self, session_id: str, payload: str) -> bool:
+        """Record ``payload`` for ``session_id`` and say whether to send it.
+
+        Injects when the payload differs from the one this session last
+        received, or when the last injection is older than
+        ``_MAX_SUPPRESSION_SECONDS``.
+        """
+        now = self._now()
+        previous = self._last_injected.get(session_id)
+        unchanged = previous is not None and previous[0] == payload
+        fresh = previous is not None and now - previous[1] < _MAX_SUPPRESSION_SECONDS
+        if unchanged and fresh:
+            return False
+
+        if session_id not in self._last_injected and len(self._last_injected) >= (
+            _MAX_TRACKED_SESSIONS
+        ):
+            oldest = min(self._last_injected, key=lambda key: self._last_injected[key][1])
+            del self._last_injected[oldest]
+        self._last_injected[session_id] = (payload, now)
+        return True
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:
         """Match all user prompt submissions.
@@ -40,14 +88,22 @@ class GitContextInjectorHandler(Handler):
         """
         return True
 
-    def handle(self, _hook_input: dict[str, Any]) -> HookResult:
-        """Inject git status as context.
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        """Inject git status as context, but only when it has something to say.
+
+        The duty — git state informs decisions — is why this handler exists.
+        Re-sending an unchanged payload on every prompt is not part of that
+        duty: the agent already has the identical text from the previous
+        prompt, so the second copy costs tokens and teaches nothing
+        (Plan 00238 Task 4.1).
 
         Args:
-            _hook_input: Hook input dictionary from Claude Code (unused)
+            hook_input: Hook input dictionary from Claude Code
 
         Returns:
-            HookResult with git status context or silent allow if git unavailable
+            HookResult with git status context, or a silent allow when git is
+            unavailable or the status is unchanged since this session's last
+            injection
         """
         try:
             project_root: str | None = str(ProjectContext.project_root())
@@ -76,6 +132,10 @@ class GitContextInjectorHandler(Handler):
             context += result.stdout
             context += "\n---\n"
             context += "Consider this context when making changes to the repository."
+
+            session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or "")
+            if not self._should_inject(session_id, context):
+                return HookResult(decision=Decision.ALLOW)
 
             return HookResult(decision=Decision.ALLOW, context=[context])
 

@@ -78,29 +78,23 @@ class DaemonRestartVerifierHandler(Handler):
         return False
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Suggest daemon restart verification before commit.
+        """Nudge toward daemon restart verification before a commit.
+
+        Deliberately a SINGLE short line, and nothing else. The commands, the
+        rationale and the 5-handler anecdote all live in ``get_claude_md()``,
+        which keeps them resident in CLAUDE.md for the whole session — so
+        attaching a second copy to every commit was paying for the same advice
+        twice and teaching nothing the first copy had not (Plan 00238 Task 4.2).
 
         Args:
             hook_input: Hook input data
 
         Returns:
-            HookResult with advisory message
+            HookResult with the one-line advisory nudge
         """
-        # Advisory message suggesting verification
-        guidance = (
-            "💡 RECOMMENDED: Verify daemon can restart before committing:\n\n"
-            "```bash\n"
-            f"{daemon_cli_command('restart')}\n"
-            f"{daemon_cli_command('status')}\n"
-            "```\n\n"
-            "This catches import errors and loading failures that unit tests miss.\n"
-            "The 5-handler import bug would have been caught by this check!"
-        )
-
         return HookResult(
             decision=Decision.ALLOW,
             context=["💡 RECOMMENDED: Verify daemon restart before committing"],
-            guidance=guidance,
         )
 
     def get_claude_md(self) -> str | None:

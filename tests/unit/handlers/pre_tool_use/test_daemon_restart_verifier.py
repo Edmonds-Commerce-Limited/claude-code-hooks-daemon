@@ -118,6 +118,46 @@ def test_handle_when_not_hooks_daemon_repo() -> None:
     assert result.decision == Decision.ALLOW
 
 
+class TestThePerCommitPayloadDoesNotRepeatTheResidentGuidance:
+    """Plan 00238 Task 4.2.
+
+    The same advice was reaching context by two routes on every single commit:
+    a one-line ``context`` nudge AND a multi-paragraph ``guidance`` block that
+    restated, almost verbatim, what ``get_claude_md()`` already keeps resident
+    in CLAUDE.md for the whole session — the same commands, the same rationale,
+    the same anecdote.
+
+    The right rate limit is not "say the long version less often". It is to say
+    the long version ONCE, where it already lives, and keep only the short
+    just-in-time nudge at the moment of the commit.
+    """
+
+    @staticmethod
+    def _handle_a_commit() -> object:
+        handler = DaemonRestartVerifierHandler()
+        return handler.handle(
+            {"tool_name": "Bash", "tool_input": {"command": "git commit -m 'test'"}}
+        )
+
+    def test_no_multi_paragraph_guidance_block_per_commit(self) -> None:
+        result = self._handle_a_commit()
+        assert getattr(result, "guidance", None) is None
+
+    def test_the_nudge_is_a_single_short_line(self) -> None:
+        result = self._handle_a_commit()
+        context = getattr(result, "context", [])
+        assert len(context) == 1
+        assert "\n" not in context[0]
+
+    def test_the_full_instructions_still_exist_in_the_resident_guidance(self) -> None:
+        """Anti-vacuity companion: deleting the per-commit block is only correct
+        because the information is still stated somewhere. If ``get_claude_md``
+        were ever emptied, the short nudge would point at nothing."""
+        guidance = DaemonRestartVerifierHandler().get_claude_md()
+        assert guidance is not None
+        assert "restart" in guidance
+
+
 def test_does_not_match_empty_command() -> None:
     """Test does not match when command is empty string."""
     handler = DaemonRestartVerifierHandler()

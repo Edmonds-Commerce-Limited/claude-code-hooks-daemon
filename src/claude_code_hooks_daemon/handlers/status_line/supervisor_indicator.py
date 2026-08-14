@@ -34,7 +34,7 @@ status file when it names a live supervisor pid, else (2) scan ``/proc`` for a
 live ``claude-supervise`` process, else (3) fall back to orange/none based on
 whether a status file is present at all.
 
-Two caches keep the per-render cost low, because ``handle`` runs on EVERY
+Three throttles keep the per-render cost low, because ``handle`` runs on EVERY
 status-line render:
 
 - POSITIVE cache: the resolved (pid, armed) identity is IMMUTABLE for the
@@ -45,14 +45,19 @@ status-line render:
   supervisor dies the cache is dropped and the next render re-resolves (picking
   up a replacement).
 - NEGATIVE cache: the common case is a project that never runs the supervisor,
-  where full resolution walks all of ``/proc`` reading every pid's cmdline and
-  finds nothing. That "no live supervisor" outcome (NOT_ACTIVE or
-  NOT_CONFIGURED) is throttled with a short TTL
+  where resolution finds nothing. That "no live supervisor" outcome (NOT_ACTIVE
+  or NOT_CONFIGURED) is throttled with a short TTL
   (``_NEGATIVE_CACHE_TTL_SECONDS``) so repeated renders reuse it instead of
-  re-walking ``/proc`` every time; a newly-started supervisor is still picked up
-  within a bounded delay of one TTL. Any positive resolution clears the negative
-  cache, and a positive cache going stale (supervisor died) also invalidates it
-  so the replacement scan is not suppressed.
+  re-resolving every time; a newly-started supervisor — which writes a status
+  file — is still picked up within one TTL. Any positive resolution clears the
+  negative cache, and a positive cache going stale (supervisor died) also
+  invalidates it so the replacement scan is not suppressed.
+- WALK throttle: the ``/proc`` scan is a separate, much harder throttle
+  (``_PROC_WALK_INTERVAL_SECONDS``), because it costs far more than the other
+  two paths and answers a much rarer question. It reads ``cmdline`` for EVERY
+  numeric pid, and it exists only for the case where the status file is
+  missing while the supervisor is alive. Tying it to the negative-cache TTL
+  priced the cheap, precise detector at the expensive fallback's rate.
 
 ANY unexpected failure fails safe to NO segment — this handler must never raise
 and never break the status line (mirrors the fail-silent pattern used by
@@ -92,12 +97,37 @@ _SUPERVISOR_ARM_FLAG = "--arm"
 _SUPERVISOR_WORKER_FLAG = "--worker"
 
 # TTL (seconds) for the negative cache: a "no live supervisor found" resolution
-# is reused for this long before the expensive /proc walk is repeated, so a
-# non-ccy project does not re-scan every process on every status-line render. A
-# newly-started supervisor is still detected within one TTL of appearing. Kept
-# short so the orange "supervisor down" alarm and the green "came back" flip stay
-# responsive; ``time.monotonic`` backs it so a wall-clock change cannot wedge it.
+# is reused for this long before it is re-derived, so a non-ccy project does not
+# repeat the resolution on every status-line render. Kept short so the orange
+# "supervisor down" alarm and the green "came back" flip stay responsive;
+# ``time.monotonic`` backs it so a wall-clock change cannot wedge it.
+#
+# At the measured ~1.04s render interval this serves ceil(5/1.04) = 5 renders
+# per miss, comfortably outside the resonance band that
+# ``test_render_ttl_resonance.py`` guards (Plan 00238 Task 2.1). This TTL is
+# NOT the cost problem — see the walk interval below for what is.
 _NEGATIVE_CACHE_TTL_SECONDS = 5.0
+
+# Interval (seconds) between /proc WALKS, throttled INDEPENDENTLY of the
+# negative cache above (Plan 00238 Task 2.2).
+#
+# The two detectors have very different costs and very different jobs, and
+# tying them to one TTL priced the cheap one at the expensive one's rate:
+#
+# - The status file is the fast, precise detector — two stats, and a supervisor
+#   that starts normally writes one. It stays at the negative-cache rate, so a
+#   newly-started supervisor is still picked up within ~5 seconds.
+# - The /proc walk is the slow, imprecise FALLBACK, existing only for the rare
+#   inconsistency where the status file goes missing while the supervisor is
+#   alive (observed live). It reads /proc/<pid>/cmdline for EVERY numeric pid:
+#   measured at ~20us per pid, so ~10ms on a 500-process desktop. Repeating
+#   that every 5s forever is ~360,000 /proc reads an hour for a project that
+#   will never run the supervisor, which is the common case.
+#
+# One minute bounds how long that rare inconsistency can mis-render a
+# decorative segment, and cuts the walk rate 12-fold. It is ~57 renders at the
+# measured interval, nowhere near the resonance band.
+_PROC_WALK_INTERVAL_SECONDS = 60.0
 
 # The top hat — the "Fat Controller" overseeing/directing the session. A single
 # glyph; state is carried by the ANSI BACKGROUND colour behind it (foreground
@@ -167,10 +197,15 @@ class SupervisorIndicatorHandler(Handler):
         self._cached_armed: bool | None = None
         # Negative cache: a "no live supervisor" resolution (NOT_ACTIVE or
         # NOT_CONFIGURED) is reused until this monotonic deadline, so a non-ccy
-        # project does not re-walk /proc on every render. Cleared on any positive
+        # project does not re-resolve on every render. Cleared on any positive
         # resolution and when a stale positive cache is dropped.
         self._negative_cache_state: _SupervisorState | None = None
         self._negative_cache_until: float | None = None
+        # Monotonic stamp of the last fruitless /proc walk, throttled separately
+        # and far harder than the negative cache above — it is the expensive,
+        # rarely-useful fallback. Cleared whenever a replacement scan must run
+        # immediately (a positive resolution, or a cached supervisor dying).
+        self._last_walk_at: float | None = None
 
     def get_default_enabled(self) -> bool:
         """On by default.
@@ -297,15 +332,17 @@ class SupervisorIndicatorHandler(Handler):
                     else _SupervisorState.ACTIVE_DRYRUN
                 )
             # Cached supervisor died — drop the caches and re-resolve below so a
-            # replacement supervisor (new pid) is picked up immediately (the
-            # negative cache must not suppress that replacement scan).
+            # replacement supervisor (new pid) is picked up immediately. Neither
+            # the negative cache NOR the walk throttle may suppress that
+            # replacement scan, which is why both are cleared here.
             self._cached_pid = None
             self._cached_armed = None
             self._negative_cache_state = None
             self._negative_cache_until = None
+            self._last_walk_at = None
 
         # Negative fast path: a recent "no live supervisor" outcome is reused
-        # within its TTL so non-ccy projects do not re-walk /proc every render.
+        # within its TTL so non-ccy projects do not re-resolve every render.
         now = self._now()
         if self._negative_cache_until is not None and now < self._negative_cache_until:
             assert self._negative_cache_state is not None
@@ -340,9 +377,13 @@ class SupervisorIndicatorHandler(Handler):
                     return self._activate(pid, _SUPERVISOR_ARM_FLAG in cmdline)
 
         # 2. No usable status-file pid -> discover the supervisor by process.
-        found = self._scan_for_supervisor()
-        if found is not None:
-            return self._activate(found[0], found[1])
+        #    Throttled independently of (and far harder than) the negative cache:
+        #    the walk is the expensive fallback, not the primary detector.
+        if self._may_walk(now):
+            self._last_walk_at = now
+            found = self._scan_for_supervisor()
+            if found is not None:
+                return self._activate(found[0], found[1])
 
         # 3. Nothing live. Orange alarm if a supervisor was configured (status
         #    file present) but is down; otherwise render nothing (never configured).
@@ -353,13 +394,28 @@ class SupervisorIndicatorHandler(Handler):
         self._negative_cache_until = now + _NEGATIVE_CACHE_TTL_SECONDS
         return state
 
+    def _may_walk(self, now: float) -> bool:
+        """Return True when the /proc walk is due.
+
+        The walk is the fallback for a supervisor whose status file has gone
+        missing. Throttling it separately means the cheap, precise status-file
+        probe keeps running at the negative-cache rate while the expensive scan
+        happens at most once per interval.
+        """
+        if self._last_walk_at is None:
+            return True
+        return now - self._last_walk_at >= _PROC_WALK_INTERVAL_SECONDS
+
     def _activate(self, pid: int, armed: bool) -> _SupervisorState:
         """Memoise a resolved supervisor identity and return its active state."""
         self._cached_pid = pid
         self._cached_armed = armed
-        # A positive resolution invalidates any pending negative throttle.
+        # A positive resolution invalidates any pending negative throttle, and
+        # the walk throttle with it: if this supervisor later dies, the
+        # replacement scan must not be blocked by a stamp from before it.
         self._negative_cache_state = None
         self._negative_cache_until = None
+        self._last_walk_at = None
         return _SupervisorState.ACTIVE_ARMED if armed else _SupervisorState.ACTIVE_DRYRUN
 
     def _scan_for_supervisor(self) -> tuple[int, bool] | None:

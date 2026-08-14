@@ -97,18 +97,29 @@ Two things the research found that this plan must respect:
   equals the arithmetic, so it cannot drift back to a round guess. Re-measured
   with the identical method: **116 renders, 84 spawns, 26 misses = 22.4%,
   ~2,520 spawns/hour — 57% fewer** (JOURNAL 04:20)
-- [ ] ⬜ **Task 2.1b**: Cut the calls per miss, not just the misses. Two of the
-  four look avoidable at ZERO staleness cost: `rev-parse --show-toplevel` (the
-  repo root for a cwd effectively never changes) and `branch --show-current`
-  (subsumed by `status --porcelain=v2 --branch`, which already emits
-  `# branch.head`). Roughly halves what remains on top of the 57%. Held back
-  from Task 2.1 deliberately — a porcelain-v2 parse change is a different risk
-  profile from editing one constant and deserves its own RED test
-- [ ] ⬜ **Task 2.2**: `supervisor_indicator` — bound the negative-path `/proc`
-  walk. The 5s negative-cache TTL has the same resonance shape against a ~1.15s
-  render interval. Prefer bounding the WALK itself (it reads `cmdline` for
-  every numeric pid on the box) over only widening the TTL, since the TTL only
-  changes how often the unbounded thing happens
+- [ ] ⬜ **Task 2.1b**: Cut the calls per miss, not just the misses. Four spawns
+  per miss: `rev-parse --show-toplevel`, `branch --show-current`, `status --porcelain=v2 --branch`, `stash list` (`_resolve_default_branch` is already
+  cached per repo). Two look avoidable at ZERO staleness cost — the repo root
+  for a cwd effectively never changes, and `# branch.head` is already in the
+  porcelain output. That would take ~2,520 spawns/hour to ~1,560. **Scoped but
+  deliberately not started here**: the 62 tests in `test_git_branch.py` mock
+  `subprocess.run` with ordered `side_effect` LISTS, so they pin the exact call
+  SEQUENCE — dropping two calls breaks most of them, and they need re-pointing
+  at behaviour (the rendered segment) rather than the sequence, exactly as
+  `test_account_display.py` did in Task 3.1. That is a bigger job than the
+  production change and should not be started without room to finish it
+- [x] ✅ **Task 2.2**: `supervisor_indicator` — the /proc walk is now throttled
+  SEPARATELY from the negative cache (`_PROC_WALK_INTERVAL_SECONDS = 60`), and
+  both clear points that must force a replacement scan clear it too. **The
+  premise above was wrong and the guard from Task 2.3 is what settled it**: at
+  the measured 1.043s interval a 5s TTL serves `ceil(5/1.043) = 5` renders per
+  miss, above the resonance bar of 3 — so the TTL was never the defect. The
+  cost is the WALK, measured at ~20µs per pid (17-pid container; ~10ms on a
+  500-process desktop), repeated every ~5s forever ⇒ **~360,000 `/proc` reads
+  an hour** on a project that will never run the supervisor. Splitting the two
+  keeps the cheap precise detector (the status file, which a normally-started
+  supervisor writes) at the 5s rate while the expensive fallback drops 12-fold;
+  only a supervisor that never wrote a status file now waits up to a minute
 - [x] ✅ **Task 2.3**: DBF — `tests/unit/handlers/status_line/test_render_ttl_resonance.py`
   fails when a render-path TTL sits in the resonance band. **The first version
   would have PASSED the 2.0s value it was written to catch**: it measured
@@ -145,20 +156,42 @@ Two things the research found that this plan must respect:
 
 ### Phase 4: The two FIX verdicts off the status line
 
-- [ ] ⬜ **Task 4.1**: `git_context_injector` — inject only on CHANGE. The duty
-  (git state informs decisions) is wanted; re-sending an unchanged ~460-token
-  payload on every prompt is not. Decide and record what "changed" means, since
-  a too-strict definition silently stops informing
-- [ ] ⬜ **Task 4.2**: `daemon_restart_verifier` — rate-limit per session. The
-  research found the same paragraph reaching context three ways on every
-  commit; establish which of the three is worth keeping before adding a limiter
-  to all three
+- [x] ✅ **Task 4.1**: `git_context_injector` injects only on CHANGE.
+  **"Changed" means: the rendered payload differs from the one THIS SESSION
+  last received.** Two guards stop that definition becoming too strict, and
+  both are pinned by test. It is keyed by `session_id`, because sessions share
+  one daemon (Plan 00127) and a global "last payload" would let whichever
+  session prompted first mute the others. And suppression expires after
+  `_MAX_SUPPRESSION_SECONDS` (900s), because a compaction can evict the earlier
+  injection — without a ceiling the agent would have no git context until the
+  repository happened to change, which is exactly the silent-stop failure this
+  task was warned about. Per-session state is capped at 32 entries,
+  oldest-evicted
+- [x] ✅ **Task 4.2**: `daemon_restart_verifier` — the three routes named, then
+  the redundant one deleted rather than throttled. (1) `get_claude_md()` keeps
+  the commands, rationale and 5-handler anecdote RESIDENT in CLAUDE.md for the
+  whole session; (2) a one-line `context` nudge fires per commit; (3) a
+  multi-paragraph `guidance` block restated (1) almost verbatim, per commit.
+  The right rate limit for (3) is not "say the long version less often" but
+  "say it once, where it already lives", so `handle()` now returns the single
+  line and nothing else. An anti-vacuity test asserts the full instructions
+  still exist in the resident guidance, since deleting the per-commit copy is
+  only correct while the first copy is there to point at
 
 ### Phase 5: Verification
 
-- [ ] ⬜ **Task 5.1**: Re-measure with Task 1.2's method and record before/after
-- [ ] ⬜ **Task 5.2**: Full QA — `./scripts/qa/llm_qa.py all`
-- [ ] ⬜ **Task 5.3**: Daemon restart verified RUNNING; status line unchanged
+- [x] ✅ **Task 5.1**: Re-measured where each change actually lands, rather than
+  re-running one instrument that cannot see three of the four. Git spawns:
+  **192 → 84 per ~116 renders (57% down)**, by Task 1.2's method — and unchanged
+  since, because nothing after Task 2.1 touches git (Task 2.1b, which would,
+  is deliberately still open). File reads: pinned by test at ONE per change
+  instead of one per render, across three handlers. The `/proc` walk: measured
+  at ~20µs per pid and now run 12× less often. Per-prompt tokens: an unchanged
+  ~460-token payload is no longer re-sent, and a duplicated per-commit
+  paragraph is gone
+- [x] ✅ **Task 5.2**: Full QA — 21/21 PASSED
+- [x] ✅ **Task 5.3**: Daemon restarts RUNNING; the rendered line verified
+  byte-identical for every segment this plan touched (Task 3.3)
 - [ ] ⬜ **Task 5.4**: Commit and push
 
 ## Dependencies
@@ -170,13 +203,15 @@ Two things the research found that this plan must respect:
 
 ## Success Criteria
 
-- [ ] Measured subprocess-spawn and file-read rates fall, verified by the SAME
-  method before and after
-- [ ] The rendered status line is byte-identical in the steady state
-- [ ] Every TTL changed is justified against the measured render interval, not
+- [x] Measured subprocess-spawn and file-read rates fall, verified by the SAME
+  method before and after (git spawns 57% down by Task 1.2's method; file reads
+  and the /proc walk measured at their own site — see Task 5.1)
+- [x] The rendered status line is byte-identical in the steady state
+- [x] Every TTL changed is justified against the measured render interval, not
   chosen as a round number
-- [ ] A guard exists that would catch a future TTL drifting back into resonance
-- [ ] Full QA passes; daemon restarts RUNNING
+- [x] A guard exists that would catch a future TTL drifting back into resonance
+  — and it caught a wrong premise in this very plan (Task 2.2)
+- [x] Full QA passes; daemon restarts RUNNING
 
 ## Delivery & Milestones
 

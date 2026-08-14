@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.handlers.status_line.supervisor_indicator import (
     _ICON,
     _MESSAGE_LEVEL_WARNING,
     _NEGATIVE_CACHE_TTL_SECONDS,
+    _PROC_WALK_INTERVAL_SECONDS,
     SupervisorIndicatorHandler,
     _SupervisorState,
 )
@@ -501,7 +502,9 @@ class TestSupervisorIndicatorNegativeCaching:
         assert _BG_ORANGE in first.context[0]
         assert _BG_ORANGE in second.context[0]
 
-    def test_negative_cache_expires_and_rescans_after_ttl(self, tmp_path: Path) -> None:
+    def test_negative_cache_expires_and_rescans_after_the_walk_interval(
+        self, tmp_path: Path
+    ) -> None:
         missing = tmp_path / "nope.json"
         handler = SupervisorIndicatorHandler()
         clock = {"t": 1000.0}
@@ -512,13 +515,18 @@ class TestSupervisorIndicatorNegativeCaching:
         ):
             handler.handle({})
             assert scan_mock.call_count == 1
-            clock["t"] = 1000.0 + _NEGATIVE_CACHE_TTL_SECONDS + 1.0
+            clock["t"] = 1000.0 + _PROC_WALK_INTERVAL_SECONDS + 1.0
             handler.handle({})
-            assert scan_mock.call_count == 2  # window elapsed -> re-walked
+            assert scan_mock.call_count == 2  # walk interval elapsed -> re-walked
 
-    def test_supervisor_appearing_after_ttl_is_detected_green(self, tmp_path: Path) -> None:
-        # First render: nothing live -> negative cached. After the TTL a live
-        # armed supervisor appears and must be picked up (green) on re-scan.
+    def test_supervisor_appearing_with_no_status_file_is_detected_after_the_walk_interval(
+        self, tmp_path: Path
+    ) -> None:
+        # A supervisor that never wrote a status file is only discoverable by
+        # the /proc walk, so it is picked up on the walk interval rather than
+        # the negative-cache TTL. A supervisor that starts normally DOES write
+        # one and is still detected within the shorter TTL — see
+        # TestSupervisorIndicatorWalkThrottle for that split.
         missing = tmp_path / "nope.json"
         handler = SupervisorIndicatorHandler()
         clock = {"t": 1000.0}
@@ -532,7 +540,7 @@ class TestSupervisorIndicatorNegativeCaching:
             first = handler.handle({})
             assert first.context == []
             scan_result["value"] = (4321, True)
-            clock["t"] = 1000.0 + _NEGATIVE_CACHE_TTL_SECONDS + 1.0
+            clock["t"] = 1000.0 + _PROC_WALK_INTERVAL_SECONDS + 1.0
             second = handler.handle({})
         assert _BG_GREEN in second.context[0]
         assert handler._cached_pid == 4321
@@ -554,6 +562,123 @@ class TestSupervisorIndicatorNegativeCaching:
             assert scan_mock.call_count == 1
         assert _BG_GREEN in second.context[0]
         assert handler._negative_cache_until is None
+
+
+class TestSupervisorIndicatorWalkThrottle:
+    """Plan 00238 Task 2.2 — the /proc walk is throttled SEPARATELY from, and
+    far harder than, the negative cache.
+
+    The two detectors cost wildly different amounts and answer different
+    questions. The status file is two stats and is what a normally-started
+    supervisor writes. The walk reads ``cmdline`` for every numeric pid
+    (~20us each, so ~10ms on a 500-process desktop) and exists only for the
+    rare case of a live supervisor whose status file has gone missing. One
+    shared TTL priced the cheap, precise detector at the expensive fallback's
+    rate: a full walk every ~5s, forever, on every project that will never run
+    the supervisor.
+    """
+
+    def test_the_walk_is_skipped_while_the_negative_cache_merely_expires(
+        self, tmp_path: Path
+    ) -> None:
+        """The behaviour the whole task is about: re-resolution keeps happening
+        at the negative-cache rate, but the expensive scan does not."""
+        missing = tmp_path / "nope.json"
+        handler = SupervisorIndicatorHandler()
+        clock = {"t": 1000.0}
+        with (
+            patch(_STATUS_PATH_PATCH, return_value=missing),
+            patch(_SCAN_PATCH, return_value=None) as scan_mock,
+            patch(_NOW_PATCH, side_effect=lambda: clock["t"]),
+        ):
+            handler.handle({})
+            assert scan_mock.call_count == 1
+
+            # Several negative-cache windows elapse, all inside one walk window.
+            elapsed = _NEGATIVE_CACHE_TTL_SECONDS + 1.0
+            while elapsed < _PROC_WALK_INTERVAL_SECONDS:
+                clock["t"] = 1000.0 + elapsed
+                assert handler.handle({}).context == []
+                elapsed += _NEGATIVE_CACHE_TTL_SECONDS + 1.0
+
+            assert scan_mock.call_count == 1
+
+    def test_a_supervisor_that_writes_a_status_file_is_still_found_within_the_short_ttl(
+        self, tmp_path: Path
+    ) -> None:
+        """Anti-regression for the trade this task makes.
+
+        Throttling the walk is only acceptable because the PRIMARY detector
+        still runs at the short rate. If that stopped being true, a normally
+        started supervisor would take a minute to show up and this would be a
+        latency bug rather than a cost fix.
+        """
+        status_path = tmp_path / "supervisor-status.json"
+        handler = SupervisorIndicatorHandler()
+        clock = {"t": 1000.0}
+        with (
+            patch(_STATUS_PATH_PATCH, return_value=status_path),
+            patch(_SCAN_PATCH, return_value=None),
+            patch(_KILL_PATCH, return_value=None),
+            patch(_CMDLINE_PATCH, return_value="python3 claude-supervise.py --arm"),
+            patch(_NOW_PATCH, side_effect=lambda: clock["t"]),
+        ):
+            assert handler.handle({}).context == []
+
+            _write_status(tmp_path, pid=4321)
+            clock["t"] = 1000.0 + _NEGATIVE_CACHE_TTL_SECONDS + 1.0
+            second = handler.handle({})
+
+        assert _BG_GREEN in second.context[0]
+        assert handler._cached_pid == 4321
+
+    def test_a_dead_cached_supervisor_forces_an_immediate_walk(self, tmp_path: Path) -> None:
+        """The walk throttle must not suppress the replacement scan.
+
+        A stamp left by a walk from before the supervisor was found would
+        otherwise block the scan that finds its replacement — the same trap the
+        negative cache already had to be cleared for.
+        """
+        missing = tmp_path / "nope.json"
+        handler = SupervisorIndicatorHandler()
+        clock = {"t": 1000.0}
+        alive = {"value": True}
+        scan_result: dict[str, tuple[int, bool] | None] = {"value": None}
+
+        def kill(_pid: int, _sig: int) -> None:
+            if not alive["value"]:
+                raise OSError(errno.ESRCH, "No such process")
+
+        with (
+            patch(_STATUS_PATH_PATCH, return_value=missing),
+            patch(_SCAN_PATCH, side_effect=lambda: scan_result["value"]) as scan_mock,
+            patch(_KILL_PATCH, side_effect=kill),
+            patch(_NOW_PATCH, side_effect=lambda: clock["t"]),
+        ):
+            handler.handle({})  # walk 1: nothing found, stamp recorded
+            scan_result["value"] = (4321, True)
+            clock["t"] = 1000.0 + _PROC_WALK_INTERVAL_SECONDS + 1.0
+            handler.handle({})  # walk 2: found -> memoised, stamp cleared
+            assert handler._cached_pid == 4321
+
+            # The supervisor dies one render later, well inside a walk window.
+            alive["value"] = False
+            scan_result["value"] = (9876, True)
+            clock["t"] += 1.0
+            third = handler.handle({})
+
+            assert scan_mock.call_count == 3
+        assert _BG_GREEN in third.context[0]
+        assert handler._cached_pid == 9876
+
+    def test_the_walk_interval_is_far_longer_than_the_negative_cache_ttl(self) -> None:
+        """Guard the split itself.
+
+        Collapsing these back to one value is the defect this task fixed, and
+        it would be invisible: the status line renders identically either way,
+        and only a measurement shows the difference.
+        """
+        assert _PROC_WALK_INTERVAL_SECONDS >= _NEGATIVE_CACHE_TTL_SECONDS * 10
 
 
 class TestSupervisorIndicatorHelpers:
