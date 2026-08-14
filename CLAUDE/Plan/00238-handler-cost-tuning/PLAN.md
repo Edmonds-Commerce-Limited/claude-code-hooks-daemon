@@ -192,7 +192,8 @@ Two things the research found that this plan must respect:
 - [x] ✅ **Task 5.2**: Full QA — 21/21 PASSED
 - [x] ✅ **Task 5.3**: Daemon restarts RUNNING; the rendered line verified
   byte-identical for every segment this plan touched (Task 3.3)
-- [ ] ⬜ **Task 5.4**: Commit and push
+- [x] ✅ **Task 5.4**: Committed and pushed — `416044a9` (Task 2.1 + 2.3),
+  `85ea6fee` (Phase 3), `3144c420` (Tasks 2.2, 4.1, 4.2)
 
 ## Dependencies
 
@@ -218,4 +219,12 @@ Two things the research found that this plan must respect:
 <!-- Curated milestones + delivery commit hashes only (git is the SSoT for
      "when"). The blow-by-blow activity log lives in JOURNAL/. -->
 
-- <!-- milestone or delivery commit hash -->
+- Resonance fixed and guarded — `416044a9` (git spawns 192 → 84 per ~116
+  renders; `test_render_ttl_resonance.py`)
+- Uncached-read family closed — `85ea6fee` (`MtimeCachedFile` extracted, four
+  handlers resolved, `test_no_ungated_render_reads.py` stops a fifth)
+- Remaining tuning — `3144c420` (`/proc` walk throttled separately;
+  `git_context_injector` change-detects; `daemon_restart_verifier` stops
+  repeating its resident guidance)
+- **Open**: Task 2.1b only (scoped; needs 62 call-sequence-pinned tests
+  re-pointed at behaviour before the production change can land)
