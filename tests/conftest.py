@@ -259,7 +259,13 @@ def no_test_writes_tracked_generated_docs(_tracked_doc_snapshot: dict[str, bytes
         "with whatever handler set the test configured, deleting the guidance "
         "of every handler it did not wire up. Point workspace_root at "
         "tmp_path, or patch ClaudeMdInjector.inject for the duration if the "
-        "test genuinely needs this project's own config. Restored to its "
+        "test genuinely needs this project's own config. "
+        "IF NO TEST TOUCHES THESE FILES, suspect an EXTERNAL edit: an editor or "
+        "agent that modified a protected file while the suite was running lands "
+        "inside some test's window and is attributed to it. This fixture cannot "
+        "tell the two apart — it sees only that the bytes changed — so the fix "
+        "there is to re-apply your edit and re-run, not to hunt a test. "
+        "Restored to its "
         "pre-suite content: " + (", ".join(restored) if restored else "nothing to restore") + "."
     )
 

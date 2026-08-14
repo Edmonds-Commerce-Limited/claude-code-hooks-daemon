@@ -324,9 +324,12 @@ Example:
 ```python
 def run_markdown_lint(self) -> ToolResult:
     """Run Markdown linting."""
+    # _run_command takes a LIST — it calls subprocess.run(..., shell=False),
+    # so a shell string raises FileNotFoundError and a `2>&1` is never
+    # interpreted. stderr is returned separately; redirect nothing.
     returncode, stdout, stderr = self._run_command(
-        "npm run lint:md 2>&1",
-        "Markdown lint"
+        ["npm", "run", "lint:md"],
+        "Markdown lint",
     )
     # Parse output...
     return ToolResult(...)

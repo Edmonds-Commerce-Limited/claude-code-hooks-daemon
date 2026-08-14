@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00243: make the acceptance playbook deterministically executable](00243-deterministic-acceptance-playbook-harness/PLAN.md) - Not Started (a prototype drove 169 of the playbook's tests through the production hook wrapper and matched 120; the other 49 failed on prose `command` strings, not on daemon behaviour)
+- [00243: make the acceptance playbook deterministically executable](00243-deterministic-acceptance-playbook-harness/PLAN.md) - In Progress (Phase 4's doc-snippet guard is delivered and found 8 real defects; the harness phases remain)
 
 ### Security / Presentation Audit
 

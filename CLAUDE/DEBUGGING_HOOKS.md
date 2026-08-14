@@ -199,11 +199,8 @@ def handle(self, hook_input: dict) -> HookResult:
         reason="Blocked because X"
     )
 
-    # Modify action
-    return HookResult(
-        decision="allow",
-        modified_input={"command": "improved command"}
-    )
+    # NOTE: there is no "modify the tool call" option. A handler allows,
+    # denies, or adds context — it never rewrites tool_input.
 
     # Advisory warning
     return HookResult(

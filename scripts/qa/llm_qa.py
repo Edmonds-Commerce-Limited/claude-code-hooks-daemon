@@ -150,6 +150,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="doc_truth.json",
         jq_hint="jq '.violations[] | {rule, file, line, message}'",
     ),
+    "doc_snippets": ToolConfig(
+        command=_python("check_doc_snippets.py", "--json"),
+        json_file="doc_snippets.json",
+        jq_hint="jq '.violations[] | {file, line, symbol, keyword}'",
+    ),
     "sensitive_content": ToolConfig(
         command=_python("check_sensitive_content.py", "--json"),
         json_file="sensitive_content.json",
@@ -302,6 +307,11 @@ def _summarize_doc_truth(data: QaReport) -> str:
     return f"{total} violations"
 
 
+def _summarize_doc_snippets(data: QaReport) -> str:
+    total = data.get("summary", {}).get("total_violations", 0)
+    return f"{total} violations"
+
+
 def _summarize_sensitive_content(data: QaReport) -> str:
     total = data.get("summary", {}).get("total_violations", 0)
     return f"{total} violations"
@@ -347,6 +357,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "smoke_test": _summarize_smoke_test,
     "repo_hygiene": _summarize_repo_hygiene,
     "doc_truth": _summarize_doc_truth,
+    "doc_snippets": _summarize_doc_snippets,
     "sensitive_content": _summarize_sensitive_content,
     "git_history": _summarize_git_history,
     "handler_reference": _summarize_handler_reference,

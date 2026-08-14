@@ -241,6 +241,16 @@ else
 fi
 echo ""
 
+echo "21. Running Doc-Snippet Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_doc_snippets.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Doc-snippet check FAILED"
+else
+    echo "✅ Doc-snippet check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"

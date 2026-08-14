@@ -206,8 +206,11 @@ for handler in sorted_handlers:
             continue
 
 # No terminal handler matched
-return HookResult("allow", context=accumulated_context)
+return HookResult(decision=Decision.ALLOW, context=accumulated_context)
 ```
+
+`HookResult` is a Pydantic model with keyword-only fields — a positional
+argument raises `TypeError`.
 
 **Key Features**:
 
@@ -218,21 +221,43 @@ return HookResult("allow", context=accumulated_context)
 
 ### 2. Handler Base Class (`core/handler.py`)
 
-```python
-class Handler:
-    def __init__(self, name: str, priority: int = 100, terminal: bool = True):
-        self.name = name
-        self.priority = priority
-        self.terminal = terminal
+`Handler` is an ABC with **four** abstract methods. A subclass implementing
+only `matches`/`handle` cannot be instantiated:
+`TypeError: Can't instantiate abstract class ... with abstract methods get_acceptance_tests, get_claude_md`.
 
+```python
+class Handler(ABC):
+    def __init__(
+        self,
+        handler_id: str | HandlerIDMeta | None = None,
+        *,                             # everything below is keyword-only
+        name: str | None = None,       # deprecated alias for handler_id
+        priority: int = 50,
+        terminal: bool = True,
+        tags: list[str] | None = None,
+        shares_options_with: str | None = None,
+        depends_on: list[str] | None = None,
+    ) -> None: ...
+
+    @abstractmethod
     def matches(self, hook_input: dict) -> bool:
         """Return True if this handler should execute."""
-        raise NotImplementedError
 
+    @abstractmethod
     def handle(self, hook_input: dict) -> HookResult:
         """Execute handler logic, return result."""
-        raise NotImplementedError
+
+    @abstractmethod
+    def get_claude_md(self) -> str | None:
+        """Resident guidance for CLAUDE.md, or None if exempt."""
+
+    @abstractmethod
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        """Acceptance tests rendered into the release playbook."""
 ```
+
+Either `handler_id` or `name` must be supplied — passing neither raises
+`ValueError`.
 
 **Handler Categories**:
 
@@ -261,16 +286,19 @@ class Handler:
 
 ### 3. Hook Result (`core/hook_result.py`)
 
+A `pydantic.BaseModel` with keyword-only fields. Note `context` is a **list**,
+and an unrecognised keyword is silently DISCARDED rather than rejected — so a
+typo here produces a handler that appears to work and does nothing.
+
 ```python
-class HookResult:
-    def __init__(
-        self,
-        decision: str = "allow",      # "allow", "deny", "ask"
-        reason: Optional[str] = None,  # Why blocked/asked
-        context: Optional[str] = None, # Additional context for agent
-        guidance: Optional[str] = None # Allow with feedback
-    ):
-        ...
+class HookResult(BaseModel):
+    decision: Decision              # Decision.ALLOW / DENY / ASK
+    reason: str | None = None       # Why blocked/asked
+    context: list[str] = []         # Additional context for agent
+    guidance: str | None = None     # Allow with feedback
+    handlers_matched: list[str] = []
+    worktree_path: str | None = None
+    rule: str | None = None
 ```
 
 **Decision Types**:
@@ -382,8 +410,11 @@ daemon:
 **Plugin Loading**:
 
 ```python
-# Load from Python module path
-handler_class = load_handler("npm_command_handler", ".claude/hooks/controller/handlers")
+# Load from Python module path. PluginLoader.load_handler is a staticmethod,
+# takes a Path (not a str), and returns a Handler INSTANCE (not a class).
+handler = PluginLoader.load_handler(
+    "npm_command_handler", Path(".claude/hooks/controller/handlers")
+)
 
 # Automatic case conversion
 # npm_command_handler → NpmCommandHandler

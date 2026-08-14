@@ -1,6 +1,6 @@
 # Plan 00243: Make the Acceptance Playbook Deterministically Executable
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-14
 **Owner**: joseph
 **Priority**: Medium
@@ -93,6 +93,11 @@ half of this plan.
 ### Phase 2: The harness
 
 - [ ] ⬜ **Task 2.1**: Promote the ad-hoc script to `tests/acceptance/`
+  - [ ] ⬜ `PROTOTYPE-playbook_exec.py` reads a playbook from
+    `untracked/playbook.md`, which is a generated artefact and is NOT kept in
+    the tree. Regenerate it first:
+    `./bin/hooks-daemon generate-playbook > untracked/playbook.md`. The real
+    harness should generate into a tmp path rather than depend on that file
   - [ ] ⬜ Drive the PRODUCTION wrapper as a subprocess, as
     `test_stop_hook_hard_block.py` does — never a direct socket call
   - [ ] ⬜ Skip cleanly when no daemon is running, matching the sibling file
@@ -114,16 +119,42 @@ half of this plan.
 - [ ] ⬜ **Task 3.3**: State the residual honestly — no silent narrowing. If a
   test is neither automated nor manually executed, that must be visible
 
-### Phase 4: The guard (DBF)
+### Phase 4: The guard (DBF) — DELIVERED
 
-- [ ] ⬜ **Task 4.1**: Add a QA check that extracts Python code blocks from
-  `CLAUDE/**/*.md` and validates constructor keyword arguments against the
-  real symbols
-  - [ ] ⬜ Start with the dataclasses that documentation actually teaches
-    (`AcceptanceTest`, `HookResult`, `Handler`) rather than attempting every
-    snippet — a check that cannot pass on day one gets disabled
-  - [ ] ⬜ Snippets that are deliberately partial need an opt-out marker
-- [ ] ⬜ **Task 4.2**: Run it across the existing docs and fix what it finds
+- [x] ✅ **Task 4.1**: `scripts/qa/check_doc_snippets.py`, wired into
+  `run_all.sh` (check 21) and `llm_qa.py`
+  - [x] ✅ Ground truth is INTROSPECTED from the package, not restated — a
+    renamed field changes what the check enforces on the same commit
+  - [x] ✅ Four rules, each mechanically decidable: `unknown-keyword`,
+    `positional-arg`, `unknown-import`, `missing-identifier`
+  - [x] ✅ An unparseable snippet is SKIPPED, not failed — a doc written with
+    `...` or `<placeholder>` cannot be judged, so no opt-out marker is needed
+- [x] ✅ **Task 4.2**: Ran it across the docs; 8 real defects found and fixed
+  - [x] ✅ Measured against those 8: the guard catches 5
+  - [x] ✅ The 3 it misses are recorded in the check's own docstring as
+    deliberately out of scope — a doc that re-declares a real class to
+    describe its shape, a method call needing type inference, and missing
+    required arguments generally (docs abbreviate, so that would fail on
+    nearly every example in the tree)
+
+### Phase 5: Remaining doc-snippet gap (optional, lower value)
+
+- [ ] ⬜ **Task 5.1**: Decide whether a doc re-declaring a real class
+  (`class HookResult:` under a heading naming `core/hook_result.py`) can be
+  distinguished from an illustration without guessing. If it cannot, leave it
+  — that is the correct answer, not a failure
+- [ ] ⬜ **Task 5.2**: `Handler` has FOUR abstract methods. Measured across
+  every scanned doc: **40 of 40** documented `Handler` subclass examples
+  define only a subset, so NONE of them can be instantiated —
+  `TypeError: Can't instantiate abstract class ... with abstract methods get_acceptance_tests, get_claude_md`. The canonical skeleton in `CLAUDE.md`
+  is already fixed and verified by executing it verbatim; the remaining 39 are
+  concentrated in `HANDLER_DEVELOPMENT.md` (13), `PROJECT_HANDLERS.md` (4),
+  `ARCHITECTURE.md` (4) and `development/QA.md` (4)
+  - [ ] ⬜ Decide per site: show all four, or state plainly that the example
+    is partial. Blanket-editing 40 examples to add two stubs is mostly noise
+  - [ ] ⬜ This is NOT catchable by `check_doc_snippets` — a partial example
+    is legitimate documentation, so flagging it would be the "missing
+    required arguments" false-positive trap in the check's own docstring
 
 ## Dependencies
 

@@ -471,20 +471,20 @@ Handlers should have unique priorities within their category.
 # ❌ WRONG - Duplicate priorities
 class HandlerA(Handler):
     def __init__(self):
-        super().__init__(priority=50)
+        super().__init__(handler_id=HandlerID.HANDLER_A, priority=50)
 
 class HandlerB(Handler):
     def __init__(self):
-        super().__init__(priority=50)  # Conflict!
+        super().__init__(handler_id=HandlerID.HANDLER_B, priority=50)  # Conflict!
 
 # ✅ RIGHT - Unique priorities
 class HandlerA(Handler):
     def __init__(self):
-        super().__init__(priority=50)
+        super().__init__(handler_id=HandlerID.HANDLER_A, priority=50)
 
 class HandlerB(Handler):
     def __init__(self):
-        super().__init__(priority=51)
+        super().__init__(handler_id=HandlerID.HANDLER_B, priority=51)
 ```
 
 **Priority Ranges:**

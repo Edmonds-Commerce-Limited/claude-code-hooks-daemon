@@ -293,7 +293,7 @@ Python imports modules from workspace source:
 ```python
 # These resolve to /workspace/src/claude_code_hooks_daemon/
 from claude_code_hooks_daemon.core import Handler
-from claude_code_hooks_daemon.daemon.server import DaemonServer
+from claude_code_hooks_daemon.daemon.server import HooksDaemon
 ```
 
 Not from pip package in venv site-packages.
