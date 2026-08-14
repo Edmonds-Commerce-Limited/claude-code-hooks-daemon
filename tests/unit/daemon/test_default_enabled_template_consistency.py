@@ -102,6 +102,53 @@ class TestDefaultEnabledTemplateConsistency:
         assert _template_disabled_config_keys() == _handler_opt_in_config_keys()
 
 
+class TestGeneratedTemplateHasNoDuplicateKeys:
+    """The generated config must survive a STRICT YAML loader.
+
+    PyYAML's ``safe_load`` silently tolerates duplicate mapping keys (last
+    wins), which is precisely why a duplicated handler entry sat in the
+    template unnoticed: every existing test parsed it with ``safe_load``, so
+    the defect was invisible to the tooling meant to catch it. A user running
+    ``yamllint``, ``yq`` or a strict schema validator against a config the
+    daemon itself generated would get an error.
+
+    Duplicate detection needs the NODE tree, not constructed objects — by the
+    time a mapping is built the duplicate has already been collapsed. So this
+    composes rather than loads, which also means nothing is ever constructed
+    from the document.
+    """
+
+    def test_generate_full_has_no_duplicate_keys(self) -> None:
+        import yaml
+
+        root = yaml.compose(ConfigTemplate.generate_full(), Loader=yaml.SafeLoader)
+
+        duplicates: list[str] = []
+
+        def _walk(node: yaml.Node) -> None:
+            if isinstance(node, yaml.MappingNode):
+                seen: set[str] = set()
+                for key_node, value_node in node.value:
+                    key = getattr(key_node, "value", None)
+                    if isinstance(key, str):
+                        if key in seen:
+                            duplicates.append(f"{key!r} at line {key_node.start_mark.line + 1}")
+                        seen.add(key)
+                    _walk(value_node)
+            elif isinstance(node, yaml.SequenceNode):
+                for item in node.value:
+                    _walk(item)
+
+        assert root is not None
+        _walk(root)
+
+        assert not duplicates, (
+            "The generated config contains duplicate YAML keys, which a "
+            "strict loader (yamllint, yq, a schema validator) rejects:\n  "
+            + "\n  ".join(duplicates)
+        )
+
+
 class TestOptOutSample:
     """A representative opt-out handler reports the on-by-default value."""
 

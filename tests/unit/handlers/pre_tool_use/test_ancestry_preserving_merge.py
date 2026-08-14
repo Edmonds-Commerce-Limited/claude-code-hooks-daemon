@@ -37,8 +37,16 @@ class TestInitialisation:
         # Plan 00207: "priority in the 10-20 safety band alongside destructive_git"
         assert 10 <= handler.priority <= 20
 
-    def test_terminal(self, handler: AncestryPreservingMergeHandler) -> None:
-        assert handler.terminal is True
+    def test_not_terminal(self, handler: AncestryPreservingMergeHandler) -> None:
+        """`mode: warn` returns ALLOW, and a terminal ALLOW ends the chain.
+
+        The chain breaks on ANY terminal match whatever it decided, so a
+        terminal handler here would silently disable every higher-numbered
+        handler for that command whenever warn mode allowed one through.
+        Denying is unaffected: core/chain.py keeps the most restrictive
+        decision seen, so a non-terminal deny still denies.
+        """
+        assert handler.terminal is False
 
     def test_default_mode_is_block(self, handler: AncestryPreservingMergeHandler) -> None:
         assert hasattr(handler, "_mode")

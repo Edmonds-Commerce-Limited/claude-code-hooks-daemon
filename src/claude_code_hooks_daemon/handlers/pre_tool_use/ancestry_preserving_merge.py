@@ -94,12 +94,18 @@ class AncestryPreservingMergeHandler(Handler):
         super().__init__(
             handler_id=HandlerID.ANCESTRY_PRESERVING_MERGE,
             priority=Priority.ANCESTRY_PRESERVING_MERGE,
+            # NOT terminal: `mode: warn` returns ALLOW, and the chain breaks
+            # on ANY terminal match whatever it decided, so a terminal ALLOW
+            # here would end dispatch at priority 19 and silently disable
+            # every higher-numbered handler for that command. A non-terminal
+            # deny still denies -- core/chain.py keeps the most restrictive
+            # decision seen (the Plan 00144 regression).
+            terminal=False,
             tags=[
                 HandlerTag.SAFETY,
                 HandlerTag.GIT,
                 HandlerTag.GITHUB,
                 HandlerTag.BLOCKING,
-                HandlerTag.TERMINAL,
             ],
         )
         self._mode = _MODE_BLOCK

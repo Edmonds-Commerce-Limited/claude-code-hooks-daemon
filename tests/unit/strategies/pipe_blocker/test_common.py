@@ -1,5 +1,9 @@
 """Tests for pipe_blocker common constants."""
 
+import re
+
+import pytest
+
 from claude_code_hooks_daemon.strategies.pipe_blocker.common import (
     UNIVERSAL_WHITELIST_PATTERNS,
 )
@@ -57,14 +61,22 @@ class TestUniversalWhitelistPatterns:
     def test_contains_ls(self) -> None:
         assert r"^ls\b" in UNIVERSAL_WHITELIST_PATTERNS
 
-    def test_contains_git_tag(self) -> None:
-        assert r"^git\s+tag\b" in UNIVERSAL_WHITELIST_PATTERNS
-
-    def test_contains_git_status(self) -> None:
-        assert r"^git\s+status\b" in UNIVERSAL_WHITELIST_PATTERNS
-
-    def test_contains_git_diff(self) -> None:
-        assert r"^git\s+diff\b" in UNIVERSAL_WHITELIST_PATTERNS
+    # The git entries are asserted BEHAVIOURALLY rather than as literal
+    # pattern strings. Asserting the literal `^git\s+tag\b` is what let the
+    # `git -C <path> tag` gap through: the string was present and correct, and
+    # still failed to match a spelling users type daily.
+    @pytest.mark.parametrize("subcommand", ["tag", "status", "diff", "log", "branch"])
+    @pytest.mark.parametrize(
+        "prefix",
+        ["git ", "git -C /workspace ", "git --no-pager ", "git -c core.pager=cat "],
+    )
+    def test_git_subcommand_matches_through_global_options(
+        self, subcommand: str, prefix: str
+    ) -> None:
+        command = f"{prefix}{subcommand} --oneline"
+        assert any(
+            re.match(pattern, command) for pattern in UNIVERSAL_WHITELIST_PATTERNS
+        ), f"{command!r} should be whitelisted but matched no pattern"
 
     def test_contains_date(self) -> None:
         assert r"^date\b" in UNIVERSAL_WHITELIST_PATTERNS

@@ -164,7 +164,16 @@ class CommentSizeHandler(Handler):
             return str(tool_input.get(_FIELD_OLD_STRING, ""))
         path = Path(file_path)
         if path.is_file():
-            return path.read_text(encoding="utf-8")
+            # errors="replace", never a bare decode. This reads a file the
+            # daemon did not write and has no encoding contract with:
+            # latin-1/CP1252 sources are ordinary in PHP and C# trees, both
+            # of which are in this handler's language registry. An unguarded
+            # decode raised UnicodeDecodeError straight out of handle(),
+            # which fail-open turned into user-visible exception text and
+            # strict_mode turned into a hard DENY of a legitimate write.
+            # A replacement char cannot change the outcome here either way:
+            # this content is only ever measured for LENGTH.
+            return path.read_text(encoding="utf-8", errors="replace")
         return None
 
     def _is_excluded(self, file_path: str) -> bool:

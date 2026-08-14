@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -55,6 +56,11 @@ from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.retention import cap_log_file
+
+# Serialises the append+trim critical section. Handler dispatch is threaded,
+# and the trim is a read-modify-replace, so concurrent writers would otherwise
+# overwrite each other's newest records and race on a shared temp name.
+_WRITE_LOCK = threading.Lock()
 
 # Filename for the verdict log, resolved by the caller under the daemon's
 # untracked logs/hooks dir.
@@ -211,7 +217,9 @@ def append_verdicts(
         session_id: Session identifier.
         log_dir: Directory verdicts.jsonl is written into.
         max_bytes: Retention cap (Plan 00181 ``cap_log_file``).
-        retain_bytes: Bytes to retain on trim (default: ``max_bytes``).
+        retain_bytes: Bytes to retain on trim (default: ``max_bytes // 2``,
+            so a trim does not leave the file poised to re-trim on the very
+            next append).
         record_status_events: Include Status renders. Off by default — they
             are 99% of the volume and carry no information (Plan 00234).
 
@@ -237,9 +245,30 @@ def append_verdicts(
     # backs up the daemon umask rather than trusting it alone.
     make_private_dir(log_dir)
     target = log_dir / VERDICT_LOG_FILENAME
-    with open_private_append(target) as handle:
-        for line in lines:
-            handle.write(json.dumps(line, ensure_ascii=False) + "\n")
 
-    cap_log_file(target, max_bytes=max_bytes, retain_bytes=retain_bytes)
+    # The append and the trim are ONE critical section. Handler dispatch runs
+    # in a ThreadPoolExecutor, and cap_log_file is a read-modify-replace: two
+    # threads trimming concurrently each replace the log with a snapshot taken
+    # before the other's appends, so the newest records — precisely the ones
+    # `hooks-daemon verdicts` reports on — are the ones lost. They also race
+    # on cap_log_file's fixed temp name. All writers are in-process, so a
+    # module lock is sufficient and costs nothing when uncontended.
+    # Retain HALF the cap by default, never the whole of it. Retaining
+    # max_bytes leaves the file just under the ceiling, so the very next
+    # append breaches it again and every subsequent append pays a full
+    # read-rewrite-rename — on the hook dispatch path, against a daemon whose
+    # dispatch is ~1.8 ms. Measured at a 2 MB cap: retaining the full cap
+    # trimmed on most appends (~10 ms each), while retaining half trimmed
+    # once and then returned in microseconds.
+    #
+    # Half is also what this log already PROMISES: VerdictLogConfig documents
+    # "the oldest half is trimmed", and the sibling stop-events writer in
+    # auto_continue_stop passes max // 2. Only this call site omitted it.
+    effective_retain = max_bytes // 2 if retain_bytes is None else retain_bytes
+
+    with _WRITE_LOCK:
+        with open_private_append(target) as handle:
+            for line in lines:
+                handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+        cap_log_file(target, max_bytes=max_bytes, retain_bytes=effective_retain)
     return target

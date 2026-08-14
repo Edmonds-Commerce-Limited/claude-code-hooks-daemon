@@ -145,8 +145,6 @@ class ConfigTemplate:
             "    comment_changelog: {enabled: true, priority: 31}  # Block changelog narrative in code comments (12 languages)\n"
             "    comment_size: {enabled: true, priority: 33}  # Cap comment length; only growing an over-limit comment is blocked\n"
             "    plan_number_helper: {enabled: true, priority: 30}  # Provide correct next plan number\n"
-            "    comment_changelog: {enabled: true, priority: 31}  # Block changelog narrative in a code comment\n"
-            "    comment_size: {enabled: true, priority: 33}      # Cap over-long comments (grow/shrink tiered)\n"
             "    markdown_organization:  # Plan tracking and markdown organization\n"
             "      enabled: true\n"
             "      priority: 35\n"

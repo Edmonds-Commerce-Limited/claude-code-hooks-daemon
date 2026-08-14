@@ -252,6 +252,108 @@ class TestStatusEventsAreNotRecorded:
         assert lines == []
 
 
+class TestConcurrentAppends:
+    """Handler dispatch is threaded, so the append+trim must be atomic.
+
+    The trim is a read-modify-replace. Without serialisation two threads each
+    replace the log with a snapshot taken before the other's appends, so the
+    NEWEST records are the ones destroyed — exactly the records the verdicts
+    report describes. Every other test in this file is single-threaded, which
+    is why this survived.
+    """
+
+    def test_concurrent_appends_do_not_destroy_each_others_records(self, tmp_path: Path) -> None:
+        import concurrent.futures
+
+        max_bytes = 64 * 1024
+        threads, per_thread = 8, 25
+
+        def _write(_: int) -> None:
+            for _i in range(per_thread):
+                append_verdicts(
+                    enabled=True,
+                    decisions=[HandlerVerdict(handler="h1", decision=Decision.DENY, terminal=True)],
+                    hook_input={},
+                    event="PreToolUse",
+                    tool_name="Bash",
+                    session_id="s",
+                    log_dir=tmp_path,
+                    max_bytes=max_bytes,
+                )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as pool:
+            list(pool.map(_write, range(threads)))
+
+        target = tmp_path / VERDICT_LOG_FILENAME
+        lines = [ln for ln in target.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+        # Nothing was trimmed at this size, so every write must be present.
+        assert len(lines) == threads * per_thread, (
+            f"Expected {threads * per_thread} records, found {len(lines)} — "
+            f"concurrent appends destroyed each other."
+        )
+        # And every surviving line must be intact JSON, not an interleaved
+        # fragment of two concurrent writes.
+        for line in lines:
+            json.loads(line)
+
+
+class TestAtCapSteadyState:
+    """Once the log is full, an append must not re-trim on every write.
+
+    Retaining the FULL cap leaves the file just under the ceiling, so the very
+    next append breaches it again and every subsequent append pays a full
+    read-rewrite-rename on the hook dispatch path. No existing test exercised
+    the at-cap steady state, which is why the omission survived — the log has
+    to be full before the cost appears at all.
+    """
+
+    @staticmethod
+    def _append_once(log_dir: Path, max_bytes: int) -> None:
+        append_verdicts(
+            enabled=True,
+            decisions=[HandlerVerdict(handler="h1", decision=Decision.DENY, terminal=True)],
+            hook_input={},
+            event="PreToolUse",
+            tool_name="Bash",
+            session_id="s",
+            log_dir=log_dir,
+            max_bytes=max_bytes,
+        )
+
+    def test_trim_leaves_headroom_so_the_next_append_does_not_retrim(self, tmp_path: Path) -> None:
+        max_bytes = 8192
+        target = tmp_path / VERDICT_LOG_FILENAME
+        tmp_path.mkdir(exist_ok=True)
+        target.write_text(("x" * 99 + "\n") * (max_bytes // 100 + 40), encoding="utf-8")
+
+        self._append_once(tmp_path, max_bytes)
+        size_after_trim = target.stat().st_size
+
+        assert size_after_trim <= max_bytes
+        # The point of the fix: real headroom below the cap, not a file poised
+        # on the ceiling. Half the cap is what VerdictLogConfig documents.
+        assert size_after_trim < max_bytes * 0.75, (
+            f"After a trim the log is {size_after_trim} bytes against a "
+            f"{max_bytes} cap, so the next append re-trims immediately."
+        )
+
+    def test_a_second_append_does_not_shrink_the_file_again(self, tmp_path: Path) -> None:
+        max_bytes = 8192
+        target = tmp_path / VERDICT_LOG_FILENAME
+        target.write_text(("x" * 99 + "\n") * (max_bytes // 100 + 40), encoding="utf-8")
+
+        self._append_once(tmp_path, max_bytes)
+        after_first = target.stat().st_size
+        self._append_once(tmp_path, max_bytes)
+        after_second = target.stat().st_size
+
+        assert after_second > after_first, (
+            "The second append re-trimmed instead of simply appending, so "
+            "every hook event now pays a full rewrite."
+        )
+
+
 class TestAppendVerdicts:
     """append_verdicts writes JSONL lines to disk, fail-open, bounded by retention."""
 

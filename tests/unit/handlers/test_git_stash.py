@@ -24,8 +24,14 @@ class TestGitStashHandler:
         assert handler.priority == 20
 
     def test_init_sets_correct_terminal_flag(self, handler):
-        """Handler should be terminal (default)."""
-        assert handler.terminal is True
+        """Handler must NOT be terminal: `mode: warn` returns ALLOW.
+
+        The chain breaks on ANY terminal match whatever it decided, so a
+        terminal ALLOW here would end dispatch at priority 19 and silently
+        disable every higher-numbered handler for that command. Denying is
+        unaffected -- core/chain.py keeps the most restrictive decision seen.
+        """
+        assert handler.terminal is False
 
     # matches() - Positive Cases: Block stash CREATION commands
     def test_matches_git_stash_plain(self, handler):

@@ -183,6 +183,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   00227)**, and now judges the command. `pipe_blocker` likewise judged the
   command rather than the pipe (Plan 00221).
 
+- **A terminal handler returning ALLOW silently disabled the rest of the
+  chain (Plan 00241).** The PreToolUse chain breaks on ANY terminal match
+  regardless of what it decided, so a BLOCKING handler that also has an
+  advisory path ended dispatch whenever it took that path. `comment_changelog`
+  (priority 31) and `comment_size` (33) both did: an ordinary English phrase
+  such as "no longer" in a comment, or merely SHRINKING an over-long one, was
+  enough to switch off `tdd_enforcement` and every other higher-numbered
+  handler for that write. `comment_changelog` ships enabled by default, so
+  this affected every install. Nothing reported it, because a shadowed
+  handler and one that never matched are indistinguishable from outside.
+  `ancestry_preserving_merge` and `git_stash` had the same shape in their
+  `warn` modes. All four are now non-terminal, which costs no enforcement:
+  the chain keeps the most restrictive decision seen, so a non-terminal deny
+  still denies. A guard now fails if a handler with a configurable advisory
+  mode is terminal — deliberately that narrow rule, because the broader "no
+  terminal handler may return allow" flagged 23 handlers whose defensive
+  allow is unreachable, and a guard that fires on 23 handlers gets disabled.
+
+- **`check-permissions` could not see the directory it was auditing.**
+  `rglob("*")` never yields its own root, so a world-writable `untracked/` —
+  the exact artefact `umask(0)` created, and the one that lets any local user
+  unlink and replace the socket, PID file and verdict log inside it however
+  tight those files' own modes are — was reported clean. The batch half of
+  the security fix therefore gave a false all-clear to precisely the installs
+  it exists to remediate. It now audits the root, and `--fix` tightens it.
+
+- **The verdict log lost records under concurrency and re-trimmed on every
+  write.** Dispatch runs in a thread pool and the trim is a
+  read-modify-replace, so concurrent writers each replaced the log with a
+  snapshot predating the other's appends — destroying the newest records,
+  which are the ones the report describes. The append and trim are now one
+  critical section. Separately, retention kept the FULL cap, leaving the file
+  poised on the ceiling so the next append re-trimmed: measured at a 2 MB cap,
+  most appends paid a ~10 ms rewrite. It now retains half, which is what
+  `VerdictLogConfig` already documented and what the sibling stop-events
+  writer already did.
+
+- **`hooks-daemon verdicts` reported live pseudo-event handlers as dead.**
+  Their verdicts are never recorded, yet they were counted in the registered
+  roster, so `registered - fired` listed them as never-fired permanently.
+  They are now excluded for the same reason Status renderers already are.
+
+- **`comment_size` crashed on a non-UTF-8 source file.** It decoded the
+  existing file unguarded, so a latin-1/CP1252 source — ordinary in PHP and
+  C# trees, both in its registry — raised `UnicodeDecodeError` out of
+  `handle()`, surfacing as exception text under fail-open and as a hard DENY
+  of a legitimate write under `strict_mode`.
+
+- **`pipe_blocker`: a git global option defeated the whitelist, and `|&`
+  bypassed the handler entirely.** `git -C <path> log` piped to `head` was
+  denied as "unrecognized" while the identical bare spelling was allowed; the
+  five git entries now use the shared `GIT_INVOCATION` grammar. And because
+  the pipe pattern matched only `|`, `<expensive> |& head` was allowed
+  outright. The shipped guidance also overstated the single-quote exemption:
+  it covers SUBSTITUTION, not an ordinary quoted argument.
+
+- **Every generated config contained duplicate YAML keys.** `comment_changelog`
+  and `comment_size` were emitted twice into the same mapping. PyYAML tolerates
+  that (last wins, identical values), which is exactly why it went unnoticed —
+  every test parsed the template with `safe_load`. A strict loader, `yamllint`
+  or `yq` rejects the file.
+
 - **A QA report may not withhold what it holds (Plan 00229); a red QA run
   now names which tests failed (Plan 00226).**
 

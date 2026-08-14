@@ -57,6 +57,25 @@ class TestBehaviouralHandlerNames:
         }
         assert cli._behavioural_handler_names(handlers) == ["pipe-blocker"]
 
+    def test_pseudo_event_handlers_are_excluded(self):
+        """Their verdicts are never recorded, so counting them guarantees never-fired.
+
+        `_record_verdicts` runs BEFORE the pseudo dispatch, and pseudo results
+        merge as HookResult, which carries no per-handler verdict — so no
+        pseudo verdict can reach the log. Keeping them on the registered side
+        of `registered - fired` therefore reported live handlers as dead
+        forever. Verified against the running daemon: both nitpick handlers
+        appeared in never_fired while firing normally.
+        """
+        handlers = {
+            "pseudo-events": [
+                {"name": "nitpick-dismissive-language"},
+                {"name": "nitpick-hedging-language"},
+            ],
+            "PreToolUse": [{"name": "pipe-blocker"}],
+        }
+        assert cli._behavioural_handler_names(handlers) == ["pipe-blocker"]
+
     def test_non_status_events_are_all_kept(self):
         handlers = {
             "PreToolUse": [{"name": "a"}, {"name": "b"}],

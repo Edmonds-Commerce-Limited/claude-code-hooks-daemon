@@ -40,7 +40,14 @@ class GitStashHandler(Handler):
         super().__init__(
             handler_id=HandlerID.GIT_STASH,
             priority=Priority.GIT_STASH,
-            tags=[HandlerTag.SAFETY, HandlerTag.GIT, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
+            # NOT terminal: `mode: warn` returns ALLOW, and the chain breaks
+            # on ANY terminal match whatever it decided, so a terminal ALLOW
+            # here would end dispatch at priority 19 and silently disable
+            # every higher-numbered handler for that command. A non-terminal
+            # deny still denies -- core/chain.py keeps the most restrictive
+            # decision seen (the Plan 00144 regression).
+            terminal=False,
+            tags=[HandlerTag.SAFETY, HandlerTag.GIT, HandlerTag.BLOCKING],
         )
         self._mode = "deny"
 

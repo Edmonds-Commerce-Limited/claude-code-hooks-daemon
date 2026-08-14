@@ -2768,9 +2768,22 @@ def _behavioural_handler_names(handlers: dict[str, Any]) -> list[str]:
     Returns:
         Handler names from every non-Status event, in listing order.
     """
+    from claude_code_hooks_daemon.daemon.controller import PSEUDO_EVENT_HANDLERS_KEY
+
     names: list[str] = []
     for event_name, handler_list in handlers.items():
         if event_name == EventType.STATUS_LINE.value:
+            continue
+        # Pseudo-event handlers are excluded for the SAME reason as Status
+        # renderers: their verdicts are never recorded, so counting them on
+        # the registered side of `registered - fired` guarantees they appear
+        # as never-fired forever. `_record_verdicts` runs BEFORE the pseudo
+        # dispatch, and the pseudo results merge as HookResult, which carries
+        # no per-handler verdict — so no pseudo verdict can reach the log at
+        # all. Without this they were reported as dead handlers while firing
+        # normally, which is the enumeration-surfaces-disagree class Plan
+        # 00237 closed, reappearing in the report rather than the registry.
+        if event_name == PSEUDO_EVENT_HANDLERS_KEY:
             continue
         for handler in handler_list:
             name = handler.get("name")

@@ -144,6 +144,42 @@ class TestEditGrowthTiering:
         assert result.context
 
 
+class TestNonUtf8ExistingFile:
+    """A file the daemon did not write has no encoding contract with it.
+
+    Every other fixture here writes UTF-8, which is exactly why an unguarded
+    decode of the EXISTING file survived: latin-1/CP1252 sources are ordinary
+    in PHP and C# trees, both in this handler's language registry, and one
+    raised UnicodeDecodeError straight out of handle(). Fail-open turned that
+    into user-visible exception text; strict_mode turned it into a hard DENY
+    of a legitimate write.
+    """
+
+    def test_latin1_existing_file_does_not_raise(
+        self, handler: CommentSizeHandler, tmp_path: Path
+    ) -> None:
+        target = tmp_path / "legacy.py"
+        target.write_bytes(("x = 1  # caf\xe9 " + ("y" * 90) + "\n").encode("latin-1"))
+
+        new_content = "x = 1  # " + ("y" * 120) + "\n"
+        result = handler.handle(_make_write_input(str(target), new_content))
+
+        # The point is that it decides rather than raising; growth past the
+        # limit still denies, so the guard is not a silent escape hatch.
+        assert result.decision == Decision.DENY
+
+    def test_latin1_existing_file_still_allows_a_shrink(
+        self, handler: CommentSizeHandler, tmp_path: Path
+    ) -> None:
+        target = tmp_path / "legacy.py"
+        target.write_bytes(("x = 1  # caf\xe9 " + ("y" * 120) + "\n").encode("latin-1"))
+
+        new_content = "x = 1  # " + ("y" * 60) + "\n"
+        result = handler.handle(_make_write_input(str(target), new_content))
+
+        assert result.decision != Decision.DENY
+
+
 class TestWriteOnExistingFileGrowth:
     def test_write_growing_an_existing_oversized_file_is_denied(
         self, handler: CommentSizeHandler, tmp_path: Path

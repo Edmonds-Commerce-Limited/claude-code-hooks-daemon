@@ -312,7 +312,12 @@ class PipeBlockerHandler(Handler):
         ]
 
         # Pipe detection patterns
-        self._pipe_pattern: re.Pattern[str] = re.compile(r"\|\s*(tail|head)\b", re.IGNORECASE)
+        # `|&` is bash's stdout+stderr pipe and is a real pipe in every sense
+        # this handler cares about, so it must be recognised too. Matching
+        # only `|` left `<expensive> |& head` allowed while the identical
+        # `| head` was denied -- a silent bypass of the whole handler, not a
+        # narrow gap: everything downstream keys off this pattern.
+        self._pipe_pattern: re.Pattern[str] = re.compile(r"\|&?\s*(tail|head)\b", re.IGNORECASE)
         self._tail_follow_pattern: re.Pattern[str] = re.compile(r"\btail\s+-[a-z]*f", re.IGNORECASE)
         self._head_bytes_pattern: re.Pattern[str] = re.compile(r"\bhead\s+-[a-z]*c", re.IGNORECASE)
 
@@ -960,8 +965,13 @@ class PipeBlockerHandler(Handler):
             "because `echo` is cheap — the output being thrown away is pytest's. "
             "Nesting and `<( )` behave the same. Whitelisted inner producers are "
             "still fine: `echo $(git log --format=%H | head -1)` is allowed. "
-            "Single-quoted text substitutes nothing, so it is never treated as a "
-            "pipe.\n\n"
+            "A `$( )` or backtick inside SINGLE quotes is literal text, so it is "
+            "not treated as a substitution. That exemption is about SUBSTITUTION "
+            "only — an ordinary single-quoted ARGUMENT containing `| head` is "
+            "still scanned and still blocked, because the shell can hand that "
+            "string to something that runs it. The exemptions that do cover a "
+            "whole value are a git `-m`/`-F` message and a quoted-delimiter "
+            "heredoc.\n\n"
             "**Only PIPES are restricted — reading a file directly is not.** "
             "`tail -n 40 <file>`, `head -n 40 <file>` and `grep pattern <file>` take "
             "the path as an ARGUMENT, so no pipe exists and this handler never sees "

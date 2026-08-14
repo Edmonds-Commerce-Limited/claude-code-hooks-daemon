@@ -8,6 +8,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Core / Hook Coverage
 
+- [00242: Terminal handlers are a flawed primitive](00242-terminal-handlers-are-a-flawed-primitive/PLAN.md) - Not Started (the chain ALREADY merges correctly — most-restrictive-wins plus accumulated context — and `terminal` overrides that merge, which is why a handler could silently disable its successors; make terminality a property of the DECISION, and return one merged response listing every violation at once)
+
 - [00241: v3.53.0 review findings — terminal-ALLOW shadowing and verdict-log retention](00241-v3530-review-findings-terminal-allow-and-verdict-log/PLAN.md) - Not Started (MUST-FIX carry-over from the v3.53.0 Step 10 gate, which the release ABORTED on; a terminal handler returning ALLOW ends the chain and silently disables every higher-priority-number handler, three instances fixed in the gate and two remain)
 
 - [00170: Universal Hook Coverage + Hook-Support Enforcement](00170-universal-hook-coverage-and-enforcement/PLAN.md) - Dormant (fundamental: intercepting hook events is the daemon's raison d'être, yet only **10 of the 30** documented Claude Code hook events are wired — 20 are silently unwired, so a client project cannot even …)
@@ -1187,12 +1189,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 241 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 242 (count = `hooksdaemon.latestPlanNumber` git counter)
 - **Completed**: 198 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 31 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 31 + 198 + 6 = **235 folders**, spanning
+- **Folder-to-number reconciliation**: 32 + 198 + 6 = **236 folders**, spanning
   **231 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

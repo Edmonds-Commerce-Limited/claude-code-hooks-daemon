@@ -3,7 +3,17 @@
 The UNIVERSAL_WHITELIST_PATTERNS defines commands that are always safe to pipe
 to tail/head because they are cheap filtering/output commands.
 These patterns are NEVER filtered by language settings.
+
+The git entries are built from the shared ``GIT_INVOCATION`` grammar rather
+than a bare ``^git\\s+``. Anchoring on the bare name meant a global option
+defeated the whitelist -- ``git -C <path> log`` piped to ``head`` was denied
+as "unrecognized" while the identical bare spelling was allowed. That is a
+false POSITIVE, not a bypass, which is why it survived unnoticed: it only
+ever cost someone a blocked command they were entitled to run. Reusing the
+grammar is the same DRY fix Plan 00202 applied to the evasion class.
 """
+
+from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
 
 # Commands whose output is always cheap/safe to pipe to tail/head.
 # These are filtering/processing commands that don't do expensive computation.
@@ -23,9 +33,9 @@ UNIVERSAL_WHITELIST_PATTERNS: tuple[str, ...] = (
     r"^echo\b",
     r"^printf\b",
     r"^ls\b",
-    r"^git\s+tag\b",
-    r"^git\s+status\b",
-    r"^git\s+diff\b",
+    rf"^{GIT_INVOCATION}tag\b",
+    rf"^{GIT_INVOCATION}status\b",
+    rf"^{GIT_INVOCATION}diff\b",
     # `git log` and `git branch` were advertised as whitelisted by the
     # handler's own CLAUDE.md guidance while absent here, so an agent piping
     # either was denied as "unrecognized" for doing what resident context
@@ -34,8 +44,8 @@ UNIVERSAL_WHITELIST_PATTERNS: tuple[str, ...] = (
     # write continuously (so a closed pipe raises SIGPIPE and they stop), and
     # for both, truncation is the POINT of the pipe rather than the
     # information loss this handler exists to prevent.
-    r"^git\s+log\b",
-    r"^git\s+branch\b",
+    rf"^{GIT_INVOCATION}log\b",
+    rf"^{GIT_INVOCATION}branch\b",
     r"^date\b",
     r"^hostname\b",
     r"^uname\b",
