@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Security / Presentation Audit
 
-- [00239: daemon umask world-writable runtime files](00239-daemon-umask-world-writable-runtime-files/PLAN.md) - In Progress (the daemon calls `os.umask(0)` at daemonize and never restores it, so 10 files and 4 dirs land world-writable including `payload-capture/`; the field report's preferred `0o077` would break the documented host+container shared daemon, so the value is `0o007`)
-
 ### Core / Hook Coverage
 
 - [00170: Universal Hook Coverage + Hook-Support Enforcement](00170-universal-hook-coverage-and-enforcement/PLAN.md) - Dormant (fundamental: intercepting hook events is the daemon's raison d'être, yet only **10 of the 30** documented Claude Code hook events are wired — 20 are silently unwired, so a client project cannot even …)
@@ -161,6 +159,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00239: daemon umask world-writable runtime files](Completed/00239-daemon-umask-world-writable-runtime-files/PLAN.md) - Complete at `d2d946f9` (`os.umask(0)` at daemonize made every create 0666/0777 — verdict log, `payload-capture/`, PID file; fixed to `0o077` plus explicit modes, after adversarial review refuted this plan's own `0o007` argument; ships `check-permissions --fix` because a umask retro-fixes nothing already on disk)
 
 - [00234: handler value audit](Completed/00234-handler-value-audit/PLAN.md) - Complete (all ~100 handlers carry a recorded verdict, keeps included, so the next audit starts from a baseline; seven follow-ups shipped as plans 00235-00238, and the two defects the review itself surfaced were fixed in place at `0a280b8c` and `a1109437`)
 
@@ -1186,11 +1186,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 240 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 195 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 33 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 196 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 33 + 195 + 6 = **234 folders**, spanning
+- **Folder-to-number reconciliation**: 32 + 196 + 6 = **234 folders**, spanning
   **231 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1200,10 +1200,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work). 231 + 9 = 240. ✅
-- **Last reconciled by**: the Plan 00239 + 00240 creations — two new folders in
-  the plan root, so Total and Active each rose by two while Completed and
-  Cancelled were untouched. Recounted from disk (33 root, 195 `Completed/`,
-  6 `Cancelled/`). Before that, the Plan 00234 closure — the audit's own folder moved
+- **Last reconciled by**: the Plan 00239 closure — its folder moved from the
+  root into `Completed/`, so Active fell by one and Completed rose by one while
+  Total and Cancelled were untouched. Recounted from disk (32 root, 196
+  `Completed/`, 6 `Cancelled/`). Before that, the Plan 00239 + 00240 creations —
+  two new folders in the plan root, so Total and Active each rose by two while
+  Completed and Cancelled were untouched. Before that, the Plan 00234 closure — the audit's own folder moved
   from the root into `Completed/`, so Active fell by one and Completed rose by
   one while Total and Cancelled were untouched. Recounted from disk (31 root,
   195 `Completed/`, 6 `Cancelled/`). Before that, the Plan 00238 closure, on the

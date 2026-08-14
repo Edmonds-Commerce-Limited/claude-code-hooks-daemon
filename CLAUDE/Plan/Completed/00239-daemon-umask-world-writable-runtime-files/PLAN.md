@@ -1,6 +1,6 @@
 # Plan 00239: daemon umask world writable runtime files
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-14
 **Owner**: joseph
 **Priority**: Medium
@@ -219,3 +219,8 @@ described.** Three further sites need work a umask cannot do:
 
 - Reported externally in `untracked/hooks-daemon-umask.md`; report retained in
   this plan folder rather than left in scratch
+- Phase 1 (baseline measured, fix re-argued) at `043067f7`; decision reversed to
+  `0o077` after adversarial review at `2d2fdd07`
+- Phase 2 (umask + explicit modes + copymode) at `dc37b678`
+- Task 3.4 (batch guard, `check-permissions`) at `c95834e7`
+- Phase 3 (verification, upgrade docs, Task 2.4 closed) at `d2d946f9`
