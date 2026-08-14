@@ -331,7 +331,7 @@ wheels = [
 
 [[package]]
 name = "claude-code-hooks-daemon"
-version = "3.52.0"
+version = "3.53.0"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema" },

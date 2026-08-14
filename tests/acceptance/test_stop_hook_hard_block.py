@@ -93,6 +93,14 @@ def test_stop_hook_exits_2_on_block(daemon_running: None, tmp_path: Path) -> Non
     false. The daemon's default Stop branch emits a block with the
     STOPPING BECAUSE: explainer. The wrapper must translate that to the
     exit-code-2 contract for v2.1.114 hard re-entry.
+
+    The payload ``cwd`` is an isolated directory, never the repo root, so the
+    block under test is the one this docstring names. This project's
+    ``release_blocker`` sits ahead of the terminal ``auto_continue_stop`` on
+    the Stop chain and matches on a modified release file, so a repo-rooted
+    ``cwd`` would hand the block to that handler instead whenever the tree is
+    dirty — which, during a release, it is by definition. The wrapper contract
+    asserted below holds either way, so the substitution would be silent.
     """
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text("", encoding="utf-8")
@@ -101,7 +109,7 @@ def test_stop_hook_exits_2_on_block(daemon_running: None, tmp_path: Path) -> Non
         "stop_hook_active": False,
         "transcript_path": str(transcript),
         "session_id": "phase9-block-probe",
-        "cwd": str(REPO_ROOT),
+        "cwd": str(tmp_path),
     }
 
     result = _invoke_hook(STOP_HOOK, hook_input)

@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.53.0] - 2026-08-14
 
 ### Added
 
@@ -66,6 +66,173 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   escape hatch for platforms that mandate squash-only or rebase-only
   merging. Does NOT cover a squash/rebase merge performed through the
   GitHub web UI — the daemon sees tool calls, not browser clicks.
+
+- **`git_message_backtick` — a backtick in a double-quoted git message is
+  EXECUTED (Plan 00219).** Bash performs command substitution inside double
+  quotes, so the backticked span is replaced by the command's stdout and the
+  commit still succeeds — the text is lost silently. Not hypothetical: a
+  commit in this repository's own history lost a phrase exactly this way.
+  Single-quoted messages, a backslash-escaped backtick, and passing the
+  message via `-F <file>` are never matched. Dollar-paren command
+  substitution is deliberately NOT matched either: unlike a backtick it has
+  a legitimate deliberate use in a message. The blocking choice was measured,
+  not assumed
+  — of 1,736 commit messages in this repo's history, all 120 containing
+  backticks are evidence of SAFE authoring, so the rule would have fired on
+  none of them.
+
+- **`standing_authorisations` — a project can record a standing request
+  (Plan 00223).** Several system-prompt instructions are conditional on the
+  user having asked ("do not call the Agent tool unless the user requested
+  it"), but a request made in conversation is gone by the next session while
+  the restriction is restated every time. This replays authorisations a
+  project has recorded in its own config. It is a filing cabinet, not a
+  countermand, and a test enforces that: no entry may contain
+  ignore/disregard/override/bypass, and every entry must name the config key
+  holding it so it can be audited and revoked. **Every entry ships
+  disabled** — the daemon must never assert consent that was not given.
+  Delivered on UserPromptSubmit rather than SessionStart on measurement: in a
+  37,475-record transcript spanning 18 compactions, SessionStart delivered
+  its full payload ONCE while UserPromptSubmit delivered 198 times.
+
+- **`daemon.verdict_log` and `hooks-daemon verdicts` (Plan 00209).** The
+  daemon made hundreds of decisions per session and persisted none, so
+  "which handlers earn their keep?" was answerable only by anecdote. Now
+  every matched handler's decision is appended to `verdicts.jsonl` as
+  metadata only — never payloads or file contents, which is why this ships
+  default-ON where `payload_capture` stays default-off. Bounded rolling
+  sample, not a lifetime counter.
+
+- **`hooks-daemon check-permissions [--fix]` (Plan 00239).** Reports (and
+  optionally tightens) group/other-writable daemon artefacts, exiting 1
+  while findings remain so it can gate CI. Exists because a umask governs
+  CREATES and retro-fixes nothing — see Fixed, below.
+
+- **`plan_workflow.scripts` — the planlib bash library (Plan 00213)**, for
+  projects whose plan folders contain operator-run orchestrator scripts.
+  Ships disabled with no default `root_marker`, because a wrong default
+  silently resolves to the wrong repository — the exact incident class the
+  library exists to prevent.
+
+- **`hooks-daemon-plan-dedupe-scout` agent.** Suggested, never enforced,
+  before filing a new plan. A deterministic check was built and measured
+  first, then rejected: duplicate plans share subject matter, not citations.
+
+### Changed
+
+- **The daemon's file-creation mask is now `0o077` (Plan 00239).** See Fixed.
+
+- **`daemon.verdict_log.record_status_events` defaults to FALSE (Plan
+  00234/00236).** A status handler renders and can only ever return allow, so
+  its records carry no information — yet they arrive at the status line's
+  refresh rate. Measured: 43,929 of 44,180 retained records were status
+  renders (99.43%), filling the 10 MiB cap in 65 MINUTES. Excluding them
+  stretches the same cap to roughly 8 days.
+
+- **`plan-doc-size` now names THREE remedies, and EXTRACT comes first.** The
+  guidance previously offered only RELOCATE and SPLIT, so an agent with
+  content that was durable and CURRENT rather than historical found neither
+  fitted and compressed prose instead — in one measured case deleting a
+  decision table outright purely to clear a threshold. Extracting into a
+  named supporting document took that plan from 19,045 to 9,520 bytes with
+  all 31 tasks intact, and the extracted material ended up FULLER.
+
+- **`plan-shrink-without-journal` accepts a new supporting document as
+  evidence of relocation**, not just a journal entry. It was reporting the
+  most correct possible action as a deletion.
+
+- **Every daemon-owned file committed into your repo now opens with a
+  DAEMON-OWNED banner**, so the file answers "is this mine?" at the moment
+  you open it. Expect a large comment-only diff.
+
+- **`Priority.HELLO_WORLD` is renamed `Priority.TEST_HANDLER`** (same value).
+  The constant is used throughout the test suite for purpose-built fixtures,
+  so it outlives the handlers it was named after.
+
+### Fixed
+
+- **SECURITY: the daemon created every runtime file world-writable (Plan
+  00239).** `os.umask(0)` in the daemonise path is the textbook Stevens step
+  and is safe ONLY for a daemon that passes an explicit mode to every create
+  — this one did so at exactly **1 of 98** create sites. So everything it
+  wrote landed `0666` (directories `0777`), readable *and writable* by every
+  local user: the verdict log with its command strings, `payload-capture/`
+  (the full body of every Write and Edit, when enabled), the stop-event log,
+  the per-session sidecars, the PID file. Now `0o077`, with explicit modes at
+  the three known-sensitive create sites so the guarantee survives a future
+  regression of the umask line. Two `tmp`-then-`replace` writers
+  (`settings_repair`, `retention`) also silently rewrote their target's mode
+  — the settings one on a **git-tracked** file — and now copy it across.
+  **A umask retro-fixes nothing**: files already on disk keep `0666` until
+  you run `hooks-daemon check-permissions --fix`. See the post-upgrade task.
+
+- **Four mechanisms that could not fire, now can (Plan 00236).** The
+  wall-TTL half of `harvest-background` was unreachable, so a backgrounded
+  process that ran long was never surfaced by elapsed time. `lsp_enforcement`
+  false-positived on multi-line commands. `suggest_statusline` had no way to
+  take "no" for an answer, so a project that had declined kept being asked.
+  And this repository's own `release_blocker` was narrowed to the files a
+  release cannot avoid touching: `README.md` and `CLAUDE.md` were in that set
+  and had to come out, because the handler is terminal and DENIES the Stop
+  event — so an ordinary uncommitted docs edit trapped the session, and
+  `CLAUDE.md` was the worse of the two, since the daemon REGENERATES and
+  auto-commits it and could therefore trap a session by its own routine
+  action. Each fix ships with a guard rather than just the repair.
+
+- **`plan_number_helper` matched text ABOUT commands, not commands (Plan
+  00227)**, and now judges the command. `pipe_blocker` likewise judged the
+  command rather than the pipe (Plan 00221).
+
+- **A QA report may not withhold what it holds (Plan 00229); a red QA run
+  now names which tests failed (Plan 00226).**
+
+- **The release's own acceptance gate could not pass during a release.** Two
+  live-socket probes for the `auto_continue_stop` tool-error recovery branch
+  sent the repository root as the event `cwd`, which made their result depend
+  on whether the working tree happened to be dirty. During a release it is
+  dirty by definition, so the terminal `release_blocker` — correctly sitting
+  ahead of `auto_continue_stop` on the Stop chain — answered instead, and the
+  probes asserted a premise the chain could never reach. They now send an
+  isolated `cwd`, so they exercise the handler they name. A third probe in
+  `test_stop_hook_hard_block.py` was passing for the same wrong reason: its
+  wrapper-contract assertion holds whichever handler blocks, so the
+  substitution was silent.
+
+- **`get_claude_md()` coverage is a gate, not a sub-agent sweep (Plan
+  00203).** The v3.52.0 release ran the sweep and reported six handlers as
+  wrong; applying a written criterion to all 107 found all six were correct,
+  while two the sweep never looked at were genuinely missing guidance.
+
+- **Handler cost tuning (Plan 00238): git spawns per ~115 status renders
+  down from 192 to 44 (77%).** The render TTL was resonant rather than weak,
+  and two of four calls per miss were asking git what it had just been told.
+
+### Removed
+
+- **The `transcript_archiver` handler (Plan 00233).** It copied the full
+  session transcript before every compaction and protected nothing:
+  compaction never deletes the original, the original already lives on the
+  same persistent storage, and nothing ever read an archive. Left running it
+  reached 422 MB of archives guarding 302 MB of originals in this repository
+  alone, because transcripts only append — each archive was a strict prefix
+  of the next.
+
+- **Twelve dead handlers (Plan 00237)**, each with a retired-registry entry
+  and an upgrade manifest row, verified in a real client install. Several
+  were registered *behind* a terminal handler and had never run in any
+  release; the shadowing guard built to find them then found that this
+  repository's own release blocker had never fired either.
+
+- **The ten `hello_world` canaries and `daemon.enable_hello_world_handlers`
+  (Plan 00240).** Dormant in every project since v3.40.0, so nothing changes
+  for anyone. Their job is done better by the QA smoke test, which probes the
+  live daemon through the production hook scripts with real payloads and
+  asserts the decisions.
+
+**Every removal above is backwards-compatible.** A config still naming any
+removed handler validates cleanly — the daemon carries a registry of retired
+names — so an unedited config will NOT be put into degraded mode. Verified
+in a real client install, not just in tests.
 
 ## [3.52.0] - 2026-08-12
 

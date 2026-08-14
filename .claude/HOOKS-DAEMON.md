@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-08-14 (v3.52.0) by `generate-docs`. Regenerate: `/workspace/bin/hooks-daemon generate-docs`
+> Generated on 2026-08-14 (v3.53.0) by `generate-docs`. Regenerate: `/workspace/bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 

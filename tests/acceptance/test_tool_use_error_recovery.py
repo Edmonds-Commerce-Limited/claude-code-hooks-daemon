@@ -72,8 +72,21 @@ def _discover_socket() -> Path | None:
     return None
 
 
-def _send_stop_event(sock_path: Path, transcript_path: Path, session_id: str) -> dict:
-    """Send a Stop event to the daemon via Unix socket and return the response."""
+def _send_stop_event(sock_path: Path, transcript_path: Path, session_id: str, cwd: Path) -> dict:
+    """Send a Stop event to the daemon via Unix socket and return the response.
+
+    ``cwd`` MUST be an isolated directory, never this repository's root. The
+    Stop chain is shared, and this project's ``release_blocker`` sits at
+    priority 8 — ahead of the terminal ``auto_continue_stop`` at 10 — matching
+    whenever git reports a modified release file. Pointing ``cwd`` at the repo
+    made this probe's result depend on whether the working tree happened to be
+    dirty: during a release it is dirty by definition, so the probe was
+    shadowed and asserted a premise the chain could never reach, failing the
+    very gate the release requires. An isolated ``cwd`` is not a git
+    repository, so ``release_blocker`` fails safe and the chain reaches the
+    handler actually under test. Handler precedence itself is covered by
+    ``tests/integration/test_stop_chain_terminal_shadowing.py``.
+    """
     payload = {
         "event": "Stop",
         "hook_input": {
@@ -81,7 +94,7 @@ def _send_stop_event(sock_path: Path, transcript_path: Path, session_id: str) ->
             "stop_hook_active": False,
             "transcript_path": str(transcript_path),
             "session_id": session_id,
-            "cwd": str(REPO_ROOT),
+            "cwd": str(cwd),
         },
     }
     request = json.dumps(payload).encode("utf-8") + b"\n"
@@ -179,7 +192,9 @@ def test_tool_use_error_recovery_branch_fires(daemon_socket: Path, tmp_path: Pat
     transcript_path = tmp_path / "transcript.jsonl"
     _write_transcript(transcript_path, is_error=True)
 
-    response = _send_stop_event(daemon_socket, transcript_path, session_id="phase7-positive")
+    response = _send_stop_event(
+        daemon_socket, transcript_path, session_id="phase7-positive", cwd=tmp_path
+    )
 
     assert response.get("decision") == "block", (
         f"Stop hook must block when the last tool_result is an error and "
@@ -210,7 +225,9 @@ def test_tool_use_error_recovery_branch_skipped_on_success(
     transcript_path = tmp_path / "transcript.jsonl"
     _write_transcript(transcript_path, is_error=False)
 
-    response = _send_stop_event(daemon_socket, transcript_path, session_id="phase7-negative")
+    response = _send_stop_event(
+        daemon_socket, transcript_path, session_id="phase7-negative", cwd=tmp_path
+    )
 
     assert response.get("decision") == "block", (
         f"Silent stop is still blocked by the default branch — what differs "
