@@ -24,7 +24,8 @@ session, and tagging/publishing needs explicit confirmation even then.**
 
 **Why**: a release is a decision about SCOPE, and scope is not visible from
 inside the repository. The human decides which work belongs in a bundle. An
-agent can see a clean tree, 20/20 QA and a bumped version — and none of that
+agent can see a clean tree, a fully green QA run and a bumped version — and
+none of that
 says whether the intended bundle is finished. There may be work not started,
 work in another session, or work not yet described to you. Releasing early
 strands the rest of the bundle behind a version boundary.
@@ -544,18 +545,29 @@ src/claude_code_hooks_daemon/
 
 ### Handler Skeleton
 
+`Handler` is an ABC with **four** abstract methods. Implementing only
+`matches`/`handle` gives a class that cannot be instantiated.
+
 ```python
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import AcceptanceTest, Decision, Handler, HookResult
 
 class MyHandler(Handler):
     def __init__(self) -> None:
-        super().__init__(name="my-handler", priority=50, terminal=True)
+        super().__init__(handler_id="my-handler", priority=50, terminal=True)
 
     def matches(self, hook_input: dict) -> bool:
         return "pattern" in hook_input.get("tool_input", {})
 
     def handle(self, hook_input: dict) -> HookResult:
-        return HookResult(decision="deny", reason="Blocked")
+        return HookResult(decision=Decision.DENY, reason="Blocked")
+
+    def get_claude_md(self) -> str | None:
+        """Resident guidance, or None if this handler needs none."""
+        return None
+
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        """Tests rendered into the release playbook."""
+        return []
 ```
 
 **See CLAUDE/HANDLER_DEVELOPMENT.md for complete guide**
