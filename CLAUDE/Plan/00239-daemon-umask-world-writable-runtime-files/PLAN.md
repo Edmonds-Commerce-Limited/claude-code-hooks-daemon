@@ -53,24 +53,52 @@ transcripts.
 
 ## Context & Background
 
-**The report recommends `os.umask(0o077)`; that value is wrong for this
-project.** `0o077` strips group access, and group access is load-bearing here:
+**The value is `0o077`, as the report recommends.** This plan first argued for
+the group-preserving `0o007` and that reasoning was refuted by adversarial
+review; the refutation is recorded here rather than quietly replaced, because
+the discarded argument is the one a future reader is most likely to re-derive.
 
-- The socket is explicitly `0o660` — group, not owner-only. That mode exists so
-  a second process can connect.
-- `CLAUDE.md` documents that a host and a container sharing a bind-mounted
-  `untracked/` **deliberately share one daemon**, resolving the same
-  `(hostname, project root)`. Those two contexts routinely run as different
-  UIDs (host user vs container root).
-- `.claude/init.sh` — the bash forwarder, running as whichever user launched
-  Claude Code — reads `PID_PATH` (line 575) and the `.socket-path` discovery
-  file (lines 478–482).
+The `0o007` case rested on three premises, and each fails on inspection:
 
-Under `0o077` those files become `0600` and the shared-daemon setup breaks for
-the non-owning UID. `0o007` is the group-preserving equivalent: files default to
-`0660`, directories to `0770`, both explicit-mode sites are unaffected
-(`0o600 & ~0o007 == 0o600`), and *other* access — the actual exposure the report
-is about — is gone entirely.
+- *"The socket's `0o660` proves group access is deliberate."* The comment
+  directly above it (`server.py:655`) reads "owner read/write, group read, world
+  none" — which describes `0o640`, not `0o660`. Comment and code disagree, so
+  the mode is a copied daemon idiom, not a reasoned design. There is no
+  `chown`/`chgrp` anywhere in `src/` or `scripts/`, and no `SO_PEERCRED` peer
+  check, so the "group" is merely whatever the daemon's primary group happens to
+  be.
+- *"A host and a container share one daemon at different UIDs."* Documented, but
+  already impossible: the start-lock at `server.py:727` is `os.open(..., 0o600)`
+  and is deliberately left on disk for reuse, so a second UID's `start` gets
+  EACCES today, umask or not. The daemon is also a descendant of every process
+  that reads its files (Claude Code → hook wrapper → `init.sh` → `cli start` →
+  fork), and nothing setuids.
+- *"`init.sh` reads `PID_PATH` and `.socket-path` as the launching user."* True,
+  and those are same-UID reads for the reason above.
+
+`0o007` is therefore never *safer* than `0o077` and is sometimes materially
+worse: where a host uses a shared primary group (`staff`, `users`, a service
+account) it leaves the verdict log, `stop-events.jsonl` and `payload-capture/`
+group-readable **and group-writable**. `0o077` is deployment-invariant. Both
+explicit-mode sites survive it: `0o600 & ~0o077 == 0o600`, and the socket's mode
+is a post-bind `chmod`, which no umask touches.
+
+**A umask alone is not sufficient, and the exposure is wider than the report
+described.** Three further sites need work a umask cannot do:
+
+- `worktree_create` runs `git worktree add` as a child of the umask-0 daemon, so
+  an entire checkout of TRACKED SOURCE lands world-writable. Reproduced: a
+  daemon-created worktree has `README.md`, `pyproject.toml` and
+  `.claude/settings.json` at `0666` and the worktree root at `0777`, against
+  `0644` in the main repo. This one needs a *permissive* `0o022` around the
+  subprocess — a source checkout should be `0644`/`0755`, and under a bare
+  `0o077` it would become `0600`/`0700`.
+- `utils/settings_repair.py:105-106` writes a temp file and `replace()`s it over
+  the **git-tracked** `.claude/settings.json`, so the tracked file inherits the
+  temp file's mode. (Live check: `settings.json` is `0644` today, so this path
+  has not been firing — the mechanism is real, the frequency is not evidenced.)
+- `utils/retention.py:62-64` uses the same tmp-then-replace on `verdicts.jsonl`
+  and `stop-events.jsonl`, so a manual `chmod` is undone at the next trim.
 
 ## Tasks
 
@@ -98,11 +126,21 @@ is about — is gone entirely.
 - [ ] ⬜ **Task 2.1**: RED — a test that exercises the real daemonize path (or
   its helper), creates a file through the normal write path, and asserts
   `st_mode & 0o007 == 0` and no group/other write bit. Must FAIL first
-- [ ] ⬜ **Task 2.2**: GREEN — `os.umask(0o007)` in place of `os.umask(0)`,
-  with a comment naming why `0o077` is wrong here
+- [ ] ⬜ **Task 2.2**: GREEN — `os.umask(0o077)` in place of `os.umask(0)`,
+  with a comment recording why the group-preserving `0o007` was rejected so it
+  is not "restored" later
 - [ ] ⬜ **Task 2.3**: Defence in depth — explicit modes on the sensitive
   creates (`payload-capture/`, the verdict log, `stop-events.jsonl`) so the
   posture survives a later "fix" to the umask line
+- [ ] ⬜ **Task 2.4**: `worktree_create` — set a permissive `0o022` around the
+  `git worktree add` subprocess. A source checkout must be `0644`/`0755`; today
+  it is `0666`/`0777` and under a bare `0o077` it would become `0600`/`0700`.
+  This is the one place the daemon needs a MORE permissive umask, and the one
+  place it currently has no control at all
+- [ ] ⬜ **Task 2.5**: `settings_repair.py` — `copymode()` the original before
+  `replace()`, so repairing a git-tracked file never rewrites its mode. Its
+  sibling `hook_command_migration.py:178` rewrites in place and is already
+  immune; the two differ for no reason
 
 ### Phase 3: Verify, remediate, document
 
@@ -114,7 +152,12 @@ is about — is gone entirely.
   `0o007` preserved it
 - [ ] ⬜ **Task 3.3**: Full QA; client-mode verification via
   `scripts/dummy-client-repo.sh` (this changes deployed runtime behaviour)
-- [ ] ⬜ **Task 3.4**: Post-upgrade task file for existing installs whose files
+- [ ] ⬜ **Task 3.4**: DBF — a write-time fix cannot see what is already on
+  disk, so add a BATCH guard: a check asserting no daemon-created artefact has
+  `mode & 0o077`, runnable against an existing install rather than only in a
+  unit test. Every currently-deployed daemon has world-writable files that no
+  umask change retro-fixes
+- [ ] ⬜ **Task 3.5**: Post-upgrade task file for existing installs whose files
   are already world-writable, plus a truth-changes entry if any documented
   statement about daemon file permissions changes
 
