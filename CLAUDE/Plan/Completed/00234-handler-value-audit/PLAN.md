@@ -1,6 +1,6 @@
 # Plan 00234: handler value audit
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-13
 **Owner**: joseph
 **Priority**: Medium
@@ -215,25 +215,28 @@ nitpick item was REVERSED by a live chain trace, not implemented).
 - [x] ✅ **Task 4.1**: Follow-up A (fix the instrument first — exclude
   `status-*` from verdict recording so the retained window is long enough to
   argue with) — delivered by
-  [Plan 00236](../Completed/00236-fix-what-is-broken-pass/PLAN.md) Tasks 1.1/1.2
+  [Plan 00236](../00236-fix-what-is-broken-pass/PLAN.md) Tasks 1.1/1.2
 - [x] ✅ **Task 4.2**: Follow-up B (repoint the `run_all.sh` instructions at
   `llm_qa.py all`; fix the stale check count) — Plan 00236 Tasks 2.1/2.2
 - [x] ✅ **Task 4.3**: Follow-up C (quoted-heredoc handling in
   `enforce_llm_qa`; narrow `release_blocker`) — Plan 00236 Tasks 3.1/3.2 and
-  [Plan 00235](../Completed/00235-quoted-heredoc-body-shared-strip/PLAN.md)
+  [Plan 00235](../00235-quoted-heredoc-body-shared-strip/PLAN.md)
 - [x] ✅ **Task 4.4**: Follow-up D (dead-code removals) — delivered by
-  [Plan 00237](../Completed/00237-remove-the-dead-handlers/PLAN.md) Phases 1–2
+  [Plan 00237](../00237-remove-the-dead-handlers/PLAN.md) Phases 1–2
 - [x] ✅ **Task 4.5**: Follow-up E (advisory removals) — Plan 00237 Phase 2,
   each decided against real verdict-log firing data, which Follow-up A is what
   made possible
 - [x] ✅ **Task 4.6**: Follow-up F (plan-family consolidation, relocating the
   counter-advance side effect FIRST) — Plan 00237 Phase 4
 - [x] ✅ **Task 4.7**: Follow-up G (broken-feature fixes) — Plan 00236 Phase 4
-- [ ] ⬜ **Task 4.8**: Follow-up H — cost tuning (lowest urgency): widen
-  `git_branch` render TTL past the resonance point; bound
-  `supervisor_indicator`'s negative-path `/proc` walk; mtime-gate
-  `account_display`; change-detect `git_context_injector`; rate-limit
-  `daemon_restart_verifier`
+- [x] ✅ **Task 4.8**: Follow-up H — cost tuning, delivered in full by
+  [Plan 00238](../00238-handler-cost-tuning/PLAN.md): `git_branch` TTL
+  moved past the resonance point AND two calls per render removed (192 → 44 git
+  spawns, 77% below baseline); `supervisor_indicator`'s `/proc` walk throttled
+  apart from the cheap negative cache it had been priced with;
+  `account_display` mtime-gated through an extracted `MtimeCachedFile` its three
+  siblings now share; `git_context_injector` injects only on change;
+  `daemon_restart_verifier` de-duplicated
 - [x] ✅ **Task 4.10**: The counter-advance gap Follow-up D left behind — the
   realisation of the "Merge loses the counter-advance side effect" risk in the
   table below. Closed by ELIMINATION, not by re-adding the bookkeeping:
@@ -290,7 +293,12 @@ document lean. In brief:
 - [x] Every removal proposal cites specific evidence, not a firing count
 - [x] No handler is proposed for removal on "never fired" evidence alone
 - [x] The instrument gap is identified and a fix proposed
-- [ ] Zero code changes in this plan (holds so far; verified at close)
+  **Zero code changes in this plan — did NOT hold, and is recorded rather than
+  reinterpreted.** The audit itself made none, and follow-ups D/E/F/G/H were each
+  executed as a separate plan to keep it that way. Tasks 4.10 and 4.11 broke it:
+  both are defects this plan's own review surfaced, each small enough that filing
+  a plan apiece would have cost more than the fix, so both were fixed in place. A
+  criterion quietly re-read to fit the outcome teaches nothing.
 
 ## Risks & Mitigations
 
@@ -307,3 +315,15 @@ document lean. In brief:
 - Judgement complete: `VERDICTS.md` (100 rows, including Cohort H) + this plan
 - Cohort H closed a coverage gap the cohort structure created, and it held the
   audit's highest-impact finding
+- Follow-ups delivered as separate plans, in the order the human set:
+  [00236](../00236-fix-what-is-broken-pass/PLAN.md) (A, B, C, G — A first,
+  since fixing the instrument is what made E and F arguable),
+  [00235](../00235-quoted-heredoc-body-shared-strip/PLAN.md) (part of C, opened
+  for a bug found while committing this plan's findings),
+  [00237](../00237-remove-the-dead-handlers/PLAN.md) (D, then E and F once A's
+  firing data released them),
+  [00238](../00238-handler-cost-tuning/PLAN.md) (H)
+- In-place defect fixes this plan's own review surfaced: `0a280b8c`
+  (Task 4.11 — a test was rewriting the tracked `CLAUDE.md`; guarded in
+  `tests/conftest.py`), `a1109437` (Task 4.10 — the counter-advance gap closed
+  by denying hand-rolled plan-folder creation)
