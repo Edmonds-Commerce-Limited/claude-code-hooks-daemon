@@ -562,7 +562,8 @@ class MyHandler(Handler):
 
 ### Priority Ranges
 
-- **0-9**: Test handlers (hello_world)
+- **0-9**: Test handlers (no built-in handlers ship here; reserved for
+  purpose-built test fixtures, which is what `Priority.TEST_HANDLER` names)
 - **10-20**: Safety (destructive git, sed blocker, auto-approve)
 - **25-35**: Code quality (ESLint, TDD, QA suppression)
 - **36-55**: Workflow (planning, npm, config checker)
