@@ -1137,6 +1137,8 @@ A `Write`/`Edit` whose content contains an over-limit comment is blocked or advi
 CLAUDE/Plan/mkplan.bash "descriptive-kebab-name"
 ```
 
+**Hand-creating the folder is BLOCKED.** `mkdir <plan-dir>/NNNNN-name` is denied when the scaffolder is deployed: `mkdir` claims a number the moment the folder appears, but nothing records the claim until PLAN.md is written, so a concurrent agent reading the counter in between gets the SAME number and the collision surfaces only at the commit gate. This is narrow — `mkdir <plan-dir>/Completed`, a `JOURNAL/` inside a plan that already exists, and a `-p` re-create of an existing folder are all allowed, as is any path outside this workspace.
+
 (Use the project's configured plan directory if it is not `CLAUDE/Plan/`.) The script takes a lock, reads the same authoritative git counter (`hooksdaemon.latestPlanNumber`), assigns the next number atomically, creates the `NNNNN-name/` folder, scaffolds `PLAN.md`, and advances the counter — so concurrent runs can never collide on a number. It prints the new folder path on stdout. You still add the README index row yourself (the script reminds you).
 
 **If you only need the *number* (not a folder)**, read the counter and add 1 — this is the fallback, not the primary path:
