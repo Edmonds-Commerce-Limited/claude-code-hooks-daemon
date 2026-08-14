@@ -76,14 +76,22 @@ is about — is gone entirely.
 
 ### Phase 1: Establish the baseline
 
-- [ ] ⬜ **Task 1.1**: Record the current mode of every artefact the daemon
-  creates under its untracked tree, from a fresh restart, as the before-state
-- [ ] ⬜ **Task 1.2**: Enumerate every runtime create site in
-  `src/claude_code_hooks_daemon/` (open, write_text, mkdir, os.open, makedirs,
-  tempfile, os.replace) and mark which pass an explicit mode
-- [ ] ⬜ **Task 1.3**: Confirm which artefacts are read cross-UID in the
-  documented shared-daemon setup, so the umask value is chosen on evidence
-  rather than on the report's default
+- [x] ✅ **Task 1.1**: Baseline measured — daemon `Umask: 0000`; 10 files at
+  `0666` and 4 directories at `0777`, listed in JOURNAL 26-08-14. The report's
+  headline artefact is NOT among them: `transcript_archiver` was removed in Plan
+  00233, so its 8.3 MB of archives cannot be reproduced and the
+  sensitive-content case rests on `payload-capture/` instead
+- [x] ✅ **Task 1.2**: 98 runtime create sites, 35 of them directories, and
+  **exactly one** passes an explicit mode (`server.py:727`, the lock at
+  `0o600`). This settles A-vs-B: the report's "explicit mode at every sensitive
+  create" is a permanent audit obligation across 97 sites, and the codebase has
+  already failed that discipline 97 times out of 98. The umask is the single
+  choke point
+- [x] ✅ **Task 1.3**: `0o007`, not the report's `0o077`. Group access is
+  load-bearing — socket `chmod(0o660)` after bind (`server.py:657`), a host and
+  container sharing ONE daemon at different UIDs (CLAUDE.md), and `init.sh`
+  reading `PID_PATH` (575) and `.socket-path` (478–482) as the launching user.
+  `0o007` strips *other* — the actual exposure — and keeps group
 
 ### Phase 2: TDD the fix
 
