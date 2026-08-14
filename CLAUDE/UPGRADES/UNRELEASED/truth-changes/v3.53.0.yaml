@@ -83,6 +83,37 @@ truth_changes:
       mkplan.bash is NOT deployed the handler stays silent, because denying the
       only available path would leave an agent unable to create a plan at all.
   - was: >
+      Runtime files the daemon writes under its untracked directory are ordinary
+      files with ordinary permissions, so the only thing you need to know about
+      that directory is that it is git-ignored and safe to delete.
+    now: >
+      Until v3.53.0 every one of those files was created WORLD-WRITABLE (0666,
+      directories 0777) and readable by every local user on the machine,
+      including the verdict log (what every handler decided about every tool
+      call, with the command strings), payload-capture/ (raw hook payloads,
+      i.e. the full body of every Write and Edit, when capture is enabled), the
+      stop-event log, the per-session sidecars, the PID file and the
+      .socket-path discovery file. The cause was the textbook daemonise step
+      os.umask(0), which clears the file-creation mask and is safe ONLY for a
+      daemon that passes an explicit mode to every create -- this one did so at
+      exactly 1 of 98 create sites. The daemon now applies umask 0o077, so new
+      artefacts are owner-only, and the three known-sensitive ones additionally
+      pass an explicit mode at the create site so the guarantee survives a
+      future regression of the umask line. The socket is unaffected: it was
+      always 0660 via an explicit post-bind chmod. Correct any doc of yours that
+      describes the untracked directory as unremarkable, and note the important
+      half: a umask governs CREATES and retro-fixes NOTHING, so every file your
+      daemon has already written keeps its 0666 until you change it. Run
+      `hooks-daemon check-permissions` to see them and `--fix` to tighten them;
+      it exits 1 while findings remain, so it can gate CI. One behaviour change
+      to expect: a second user account can no longer READ the daemon's runtime
+      files (most visibly a container running the daemon as root over a
+      bind-mounted project while you work on the host). That is the intended
+      fix, and it does not break daemon sharing -- cross-UID sharing was never
+      possible, because the socket is 0660 owned by the daemon's user and no
+      code anywhere sets a shared group, so a second UID was already refused at
+      connect().
+  - was: >
       The daemon's own files live in .claude/hooks-daemon/. That directory is
       git-ignored by the installer, so excluding it -- which most projects get
       for free, since ruff and similar tools respect .gitignore -- keeps

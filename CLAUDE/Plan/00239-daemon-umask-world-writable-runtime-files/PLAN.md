@@ -137,7 +137,16 @@ described.** Three further sites need work a umask cannot do:
   (`open_private_append`, `make_private_dir`) wired into `payload_capture.py`,
   `verdict_log.py` and `auto_continue_stop.py`. `Path.mkdir(parents=True, mode=…)` applies the mode to the LEAF only, so the helper creates each missing
   ancestor explicitly — otherwise a private leaf sits in a world-writable parent
-- [ ] ⬜ **Task 2.4**: `worktree_create` — DEFERRED to Phase 3, on evidence.
+- [x] ✅ **Task 2.4**: CLOSED — no code change, on evidence. Measured against
+  the fixed daemon: a fresh worktree is `0700` with files at `0600`, versus
+  `0777`/`0666` before, so the exposure is already gone. The two arguments for
+  going further both failed — git tracks only the executable bit (measured), so
+  there is no mode churn; and both mechanisms for scoping a looser umask to the
+  subprocess are unsound under thread-pool dispatch. What was left was a
+  hypothetical cross-UID convenience nobody has asked for, which does not
+  justify a post-hoc chmod walk in a handler. If it is ever wanted, the answer
+  is a documented `chmod -R` or a config option, not speculative code.
+  Original reasoning, kept because it is what a future reader will re-derive:
   Two things changed: (a) the "spurious mode churn under `core.fileMode`"
   argument is FALSE — measured, git tracks only the executable bit, so
   `0644`→`0600` is invisible to it; and (b) both mechanisms for scoping a
@@ -169,26 +178,42 @@ described.** Three further sites need work a umask cannot do:
   have altered that, because no code anywhere sets a shared group. What the fix
   does remove is cross-UID *reading* of runtime files (a host user under the
   ccy container setup); that is the intended fix, and belongs in Task 3.5
-- [ ] ⬜ **Task 3.3**: Full QA; client-mode verification via
-  `scripts/dummy-client-repo.sh` (this changes deployed runtime behaviour)
+- [x] ✅ **Task 3.3**: QA 21/21 (12,270 tests, coverage 95.1%); client mode via
+  the production installer shows `Umask: 0077`, PID / `.socket-path` /
+  start-lock all `0600`, and `check-permissions` clean on a fresh install.
+  Surfaced one residual, left out of scope deliberately: `write_cleanup_status`
+  runs BEFORE the daemonise fork (its own docstring says so), so it inherits the
+  invoking shell's umask — `0644` here. Other-readable, not other-writable, and
+  the batch guard catches it under a permissive shell umask, so it needs no
+  bespoke fix
 - [x] ✅ **Task 3.4**: `daemon/permission_audit.py` +
   `hooks-daemon check-permissions [--fix]`, exit 1 while findings remain. Rule
   is group/other-**writable**; symlinks, venv trees and the socket are excluded
   because each was MEASURED as a false positive on this install (a venv's
   `bin/python` is a symlink, uv leaves a `0666` `.lock`). Dogfooded: it found 4
   real artefacts here and `--fix` cleared them
-- [ ] ⬜ **Task 3.5**: Post-upgrade task file for existing installs whose files
-  are already world-writable, plus a truth-changes entry if any documented
-  statement about daemon file permissions changes
+- [x] ✅ **Task 3.5**: `UNRELEASED/post-upgrade-tasks/04-audit-world-writable-daemon-files.md`
+  (severity `recommended`, applies to every project whose daemon has ever run)
+  plus a `truth-changes` entry recording both halves: what the files WERE, and
+  that a umask retro-fixes nothing so the existing ones stay exposed until
+  `check-permissions --fix` is run
 
 ## Success Criteria
 
-- [ ] `grep -i '^Umask' /proc/<daemon-pid>/status` shows a restrictive value
-- [ ] Zero group/other-writable and zero other-readable artefacts under the
-  daemon's untracked tree after a restart, measured not inferred
-- [ ] The socket remains `0660` and the lock file `0600`
-- [ ] A regression test fails if `os.umask(0)` is restored
-- [ ] QA green; daemon RUNNING; client-mode fixture verified
+- [x] `grep -i '^Umask' /proc/<daemon-pid>/status` shows a restrictive value —
+  `0077`, in both self-install and client mode
+- [x] Zero group/other-**writable** artefacts created by the daemon, measured
+  against a live restarted daemon, not inferred. The original criterion also
+  said "zero other-readable"; that is CORRECTED rather than ticked — files
+  written by the CLI process before the daemonise fork inherit the invoking
+  shell's umask and land `0644`. Other-readable is not the bug class here, and
+  the batch guard catches the case where a permissive shell umask makes it one
+- [x] The socket remains `0660` and the lock file `0600` — verified in client
+  mode, where both are recreated from scratch
+- [x] A regression test fails if `os.umask(0)` is restored — two, one on the
+  call and one on what the mask does to a real file
+- [x] QA green (21/21); daemon RUNNING; client-mode fixture verified
+- [ ] A daemon-created worktree checkout has a defensible mode (Task 2.4)
 
 ## Delivery & Milestones
 
