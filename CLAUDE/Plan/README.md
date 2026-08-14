@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00238: handler cost tuning](00238-handler-cost-tuning/PLAN.md) - In Progress (Plan 00234's last follow-up: `git_branch`'s 2.0s render TTL sits inside the resonance band for a ~1.15s render interval, so it misses exactly 50% of the time by construction — ~6,200 git spawns/hour; plus the uncached-read family and two FIX verdicts off the status line)
-
 ### Security / Presentation Audit
 
 ### Core / Hook Coverage
@@ -161,6 +159,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00238: handler cost tuning](Completed/00238-handler-cost-tuning/PLAN.md) - Complete (git spawns 192 -> 44 per ~115 renders, 77% down: the render TTL was RESONANT rather than weak, and two of four calls per miss were asking git what it had just been told; plus one mtime gate replacing four uncached per-render reads, and a /proc walk throttled apart from the cheap detector it was priced with; delivery hashes in PLAN.md)
 
 - [00237: remove the dead handlers](Completed/00237-remove-the-dead-handlers/PLAN.md) - Complete at `17131953` (12 handlers gone — 10 REMOVE plus 2 folded into plan QA — each with a retired-registry entry and upgrade manifest row, verified in a real client install; the shadowing guard it built then found this repo's own release blocker had never fired)
 
@@ -1182,11 +1182,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 238 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 193 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 33 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 194 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 33 + 193 + 6 = **232 folders**, spanning
+- **Folder-to-number reconciliation**: 32 + 194 + 6 = **232 folders**, spanning
   **229 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

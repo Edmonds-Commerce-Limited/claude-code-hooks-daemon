@@ -310,6 +310,18 @@
     },
     {
       "file": "handlers/status_line/git_branch.py",
+      "function": "_resolve_repo_toplevel",
+      "rule": "log-and-continue",
+      "reason": "Git branch handler: log-and-continue on subprocess failure. Resolves the repo root for a cwd (memoised, Plan 00238 Task 2.1b). A cwd that is not a repository is the NORMAL negative answer, not an error, and a git timeout must render no branch segment rather than crash the status line. Already logged at debug level; only positive answers are cached, so a later `git init` is still picked up."
+    },
+    {
+      "file": "handlers/status_line/git_branch.py",
+      "function": "_run_status",
+      "rule": "log-and-continue",
+      "reason": "Git branch handler: log-and-continue on subprocess failure. Runs `git status --porcelain=v2 --branch` once to serve both the branch name and the icons (Plan 00238 Task 2.1b). A failure here is fail-open by the status line's contract, and the caller falls back to `git branch --show-current` so the branch name still renders without icons rather than the segment vanishing. Already logged at debug level."
+    },
+    {
+      "file": "handlers/status_line/git_branch.py",
       "function": "_get_default_branch",
       "rule": "log-and-continue",
       "reason": "Git branch handler: log-and-continue on subprocess failure. Status line handlers are fail-open by design \u2014 one failing element must not crash the entire status line. Already logged at debug level."

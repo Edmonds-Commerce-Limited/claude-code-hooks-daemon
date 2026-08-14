@@ -1,6 +1,6 @@
 # Plan 00238: Handler Cost Tuning
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-13
 **Owner**: joseph
 **Priority**: Low
@@ -97,17 +97,23 @@ Two things the research found that this plan must respect:
   equals the arithmetic, so it cannot drift back to a round guess. Re-measured
   with the identical method: **116 renders, 84 spawns, 26 misses = 22.4%,
   ~2,520 spawns/hour — 57% fewer** (JOURNAL 04:20)
-- [ ] ⬜ **Task 2.1b**: Cut the calls per miss, not just the misses. Four spawns
-  per miss: `rev-parse --show-toplevel`, `branch --show-current`, `status --porcelain=v2 --branch`, `stash list` (`_resolve_default_branch` is already
-  cached per repo). Two look avoidable at ZERO staleness cost — the repo root
-  for a cwd effectively never changes, and `# branch.head` is already in the
-  porcelain output. That would take ~2,520 spawns/hour to ~1,560. **Scoped but
-  deliberately not started here**: the 62 tests in `test_git_branch.py` mock
-  `subprocess.run` with ordered `side_effect` LISTS, so they pin the exact call
-  SEQUENCE — dropping two calls breaks most of them, and they need re-pointing
-  at behaviour (the rendered segment) rather than the sequence, exactly as
-  `test_account_display.py` did in Task 3.1. That is a bigger job than the
-  production change and should not be started without room to finish it
+- [x] ✅ **Task 2.1b**: Cut the calls per miss, not just the misses. Two of the
+  four were avoidable at ZERO staleness cost: `_resolve_repo_toplevel` memoises
+  per cwd (positive answers only, so a later `git init` is still seen), and
+  `_run_status` runs the status call ONCE to serve both the icons and the
+  branch name — `# branch.head` was already in that output, so
+  `branch --show-current` was asking git a question it had just answered.
+  `_parse_branch_head` maps `(detached)` to `""` so the no-branch path is
+  reached identically. **Measured with Task 1.2's instrument: 112 renders, 44
+  spawns — 22 `status`, 22 `stash list`, and nothing else.** Exactly 2 per
+  miss, ~1,320 spawns/hour, so **192 → 44 = 77% below the original baseline**.
+  One behaviour subtlety worth its own line: the branch name now comes out of
+  the status output, so a status timeout would have blanked the whole segment.
+  That is a display change, not a cost saving, so a fallback
+  `branch --show-current` runs ONLY on that failure path and the degraded
+  render is unchanged. **Correction to an earlier note here**: it was never 62
+  tests pinned to ordered `side_effect` lists — that was the file's total test
+  count. The real surface was 9 inline lists plus two helpers
 - [x] ✅ **Task 2.2**: `supervisor_indicator` — the /proc walk is now throttled
   SEPARATELY from the negative cache (`_PROC_WALK_INTERVAL_SECONDS = 60`), and
   both clear points that must force a replacement scan clear it too. **The

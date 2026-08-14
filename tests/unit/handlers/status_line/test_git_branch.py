@@ -1,4 +1,19 @@
-"""Tests for GitBranchHandler."""
+"""Tests for GitBranchHandler.
+
+Mocking note (Plan 00238 Task 2.1b): the handler makes ONE
+``git status --porcelain=v2 --branch`` call per render-cache miss and reads
+the branch name out of its ``# branch.head`` line, rather than spending a
+second fork on ``git branch --show-current``. The ordered ``side_effect``
+lists below therefore run:
+
+    rev-parse --show-toplevel  (first render for a cwd only — memoised after)
+    status --porcelain=v2 --branch
+    symbolic-ref               (default-branch resolution, cached per repo)
+    stash list
+
+``_porcelain()`` builds the status payload; pass the branch name you want the
+handler to render.
+"""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -6,6 +21,28 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from claude_code_hooks_daemon.handlers.status_line import GitBranchHandler
+
+#: Porcelain v2 prints this instead of a name when HEAD is detached, which the
+#: handler maps to "no branch" exactly as ``branch --show-current`` did.
+_DETACHED_HEAD = b"(detached)"
+
+
+def _porcelain(branch: str, entries: bytes = b"") -> bytes:
+    """Build ``git status --porcelain=v2 --branch`` stdout for ``branch``.
+
+    ``entries`` appends raw porcelain entry lines (``1 XY ...``, ``? path``,
+    ...) for tests that assert on the status icons.
+    """
+    head = branch.encode() if branch else _DETACHED_HEAD
+    return b"# branch.oid abc123\n# branch.head " + head + b"\n# branch.ab +0 -0\n" + entries
+
+
+def _status_mock(branch: str, entries: bytes = b"") -> MagicMock:
+    """A ``subprocess.run`` result for the status call."""
+    mock = MagicMock()
+    mock.returncode = 0
+    mock.stdout = _porcelain(branch, entries)
+    return mock
 
 
 class TestGitBranchHandler:
@@ -43,9 +80,6 @@ class TestGitBranchHandler:
         mock_result_toplevel = MagicMock()
         mock_result_toplevel.returncode = 0
 
-        mock_result_branch = MagicMock()
-        mock_result_branch.stdout = b"main\n"
-
         mock_result_symbolic_ref = MagicMock()
         mock_result_symbolic_ref.returncode = 0
         mock_result_symbolic_ref.stdout = b"refs/remotes/origin/main\n"
@@ -53,7 +87,7 @@ class TestGitBranchHandler:
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 mock_result_toplevel,
-                mock_result_branch,
+                _status_mock("main"),
                 mock_result_symbolic_ref,
             ]
             result = handler.handle(hook_input)
@@ -102,18 +136,22 @@ class TestGitBranchHandler:
         assert result.decision == "allow"
         assert len(result.context) == 0
 
-    def test_handle_empty_branch_name(self, handler: GitBranchHandler, tmp_path: Path) -> None:
-        """Test returns empty context when branch name is empty."""
+    def test_handle_detached_head_renders_nothing(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        """No branch name, no segment.
+
+        Porcelain v2 reports a detached HEAD as ``# branch.head (detached)``,
+        which the handler maps to the empty string — the same "no branch"
+        result ``git branch --show-current`` produced by returning nothing.
+        """
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
 
         mock_result_toplevel = MagicMock()
         mock_result_toplevel.returncode = 0
 
-        mock_result_branch = MagicMock()
-        mock_result_branch.stdout = b"\n"
-
         with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [mock_result_toplevel, mock_result_branch]
+            mock_run.side_effect = [mock_result_toplevel, _status_mock("")]
             result = handler.handle(hook_input)
 
         assert result.decision == "allow"
@@ -126,9 +164,6 @@ class TestGitBranchHandler:
         mock_result_toplevel = MagicMock()
         mock_result_toplevel.returncode = 0
 
-        mock_result_branch = MagicMock()
-        mock_result_branch.stdout = b"develop\n"
-
         mock_result_symbolic_ref = MagicMock()
         mock_result_symbolic_ref.returncode = 0
         mock_result_symbolic_ref.stdout = b"refs/remotes/origin/main\n"
@@ -136,7 +171,7 @@ class TestGitBranchHandler:
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 mock_result_toplevel,
-                mock_result_branch,
+                _status_mock("develop"),
                 mock_result_symbolic_ref,
             ]
             result = handler.handle(hook_input)
@@ -169,14 +204,11 @@ class TestGitBranchColorCoding:
         mock_toplevel = MagicMock()
         mock_toplevel.returncode = 0
 
-        mock_branch = MagicMock()
-        mock_branch.stdout = branch.encode() + b"\n"
-
         mock_symbolic_ref = MagicMock()
         mock_symbolic_ref.returncode = symbolic_ref_returncode
         mock_symbolic_ref.stdout = symbolic_ref_stdout
 
-        return [mock_toplevel, mock_branch, mock_symbolic_ref]
+        return [mock_toplevel, _status_mock(branch), mock_symbolic_ref]
 
     def test_default_branch_is_green(self, handler: GitBranchHandler, tmp_path: Path) -> None:
         """Branch matching origin/HEAD should be colored green."""
@@ -230,9 +262,6 @@ class TestGitBranchColorCoding:
         mock_toplevel = MagicMock()
         mock_toplevel.returncode = 0
 
-        mock_branch_result = MagicMock()
-        mock_branch_result.stdout = b"main\n"
-
         mock_symbolic_ref_fail = MagicMock()
         mock_symbolic_ref_fail.returncode = 128  # no remote HEAD
 
@@ -242,7 +271,7 @@ class TestGitBranchColorCoding:
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 mock_toplevel,
-                mock_branch_result,
+                _status_mock("main"),
                 mock_symbolic_ref_fail,
                 mock_show_ref_main,
             ]
@@ -257,9 +286,6 @@ class TestGitBranchColorCoding:
         mock_toplevel = MagicMock()
         mock_toplevel.returncode = 0
 
-        mock_branch_result = MagicMock()
-        mock_branch_result.stdout = b"master\n"
-
         mock_symbolic_ref_fail = MagicMock()
         mock_symbolic_ref_fail.returncode = 128
 
@@ -272,7 +298,7 @@ class TestGitBranchColorCoding:
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 mock_toplevel,
-                mock_branch_result,
+                _status_mock("master"),
                 mock_symbolic_ref_fail,
                 mock_show_ref_main_fail,
                 mock_show_ref_master,
@@ -291,9 +317,6 @@ class TestGitBranchColorCoding:
         mock_toplevel = MagicMock()
         mock_toplevel.returncode = 0
 
-        mock_branch_result = MagicMock()
-        mock_branch_result.stdout = b"feature/xyz\n"
-
         mock_symbolic_ref_fail = MagicMock()
         mock_symbolic_ref_fail.returncode = 128
 
@@ -306,7 +329,7 @@ class TestGitBranchColorCoding:
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 mock_toplevel,
-                mock_branch_result,
+                _status_mock("feature/xyz"),
                 mock_symbolic_ref_fail,
                 mock_show_ref_main_fail,
                 mock_show_ref_master_fail,
@@ -354,8 +377,10 @@ class TestGitBranchColorCoding:
     ) -> None:
         """Default branch detection runs only once per repo across multiple handle() calls.
 
-        Call sequence per handle(): rev-parse, branch --show-current, [symbolic-ref
-        on first call only], git status --porcelain=v2, git stash list.
+        Call sequence per handle(): [rev-parse on the first call only - the
+        repo root is memoised per cwd], git status --porcelain=v2 --branch,
+        [symbolic-ref on the first call only - the default branch is memoised
+        per repo], git stash list.
         """
         # Isolate default-branch caching from the render TTL cache (Plan 00155
         # T4): disable the render cache so the second handle() re-forks and this
@@ -364,41 +389,44 @@ class TestGitBranchColorCoding:
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
         toplevel_stdout = str(tmp_path).encode() + b"\n"
 
-        def make_mocks(branch_name: str, include_symbolic_ref: bool) -> list[MagicMock]:
-            mock_toplevel = MagicMock()
-            mock_toplevel.returncode = 0
-            mock_toplevel.stdout = toplevel_stdout
-            mock_branch = MagicMock()
-            mock_branch.stdout = branch_name.encode() + b"\n"
-            mocks = [mock_toplevel, mock_branch]
+        def make_mocks(
+            branch_name: str, include_symbolic_ref: bool, include_toplevel: bool = True
+        ) -> list[MagicMock]:
+            mocks: list[MagicMock] = []
+            if include_toplevel:
+                mock_toplevel = MagicMock()
+                mock_toplevel.returncode = 0
+                mock_toplevel.stdout = toplevel_stdout
+                mocks.append(mock_toplevel)
+            mocks.append(_status_mock(branch_name))
             if include_symbolic_ref:
                 mock_symbolic_ref = MagicMock()
                 mock_symbolic_ref.returncode = 0
                 mock_symbolic_ref.stdout = b"refs/remotes/origin/main\n"
                 mocks.append(mock_symbolic_ref)
-            mock_status = MagicMock()
-            mock_status.returncode = 0
-            mock_status.stdout = b""
             mock_stash = MagicMock()
             mock_stash.returncode = 0
             mock_stash.stdout = b""
-            mocks.extend([mock_status, mock_stash])
+            mocks.append(mock_stash)
             return mocks
 
-        # First call: 5 subprocess invocations
-        # (toplevel + branch + symbolic-ref + status + stash)
+        # First call: 4 invocations (toplevel + status + symbolic-ref + stash).
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = make_mocks("main", include_symbolic_ref=True)
             handler.handle(hook_input)
             first_call_count = mock_run.call_count
-        assert first_call_count == 5
+        assert first_call_count == 4
 
-        # Second call (same repo): 4 subprocess invocations (no symbolic-ref — cached)
+        # Second call, same cwd: 2 invocations (status + stash). Both the repo
+        # root and the default branch are memoised, and the branch name now
+        # comes out of the status output rather than its own fork.
         with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = make_mocks("feature/x", include_symbolic_ref=False)
+            mock_run.side_effect = make_mocks(
+                "feature/x", include_symbolic_ref=False, include_toplevel=False
+            )
             handler.handle(hook_input)
             second_call_count = mock_run.call_count
-        assert second_call_count == 4
+        assert second_call_count == 2
 
     def test_default_branch_cached_per_repo(
         self, handler: GitBranchHandler, tmp_path: Path
@@ -418,14 +446,12 @@ class TestGitBranchColorCoding:
             *, toplevel: Path, branch: str, symbolic_ref_default: str
         ) -> list[MagicMock]:
             mock_toplevel = MagicMock(returncode=0, stdout=str(toplevel).encode() + b"\n")
-            mock_branch = MagicMock(stdout=branch.encode() + b"\n")
             mock_symbolic_ref = MagicMock(
                 returncode=0,
                 stdout=f"refs/remotes/origin/{symbolic_ref_default}\n".encode(),
             )
-            mock_status = MagicMock(returncode=0, stdout=b"")
             mock_stash = MagicMock(returncode=0, stdout=b"")
-            return [mock_toplevel, mock_branch, mock_symbolic_ref, mock_status, mock_stash]
+            return [mock_toplevel, _status_mock(branch), mock_symbolic_ref, mock_stash]
 
         # Repo A: default master, currently on master -> green
         with patch("subprocess.run") as mock_run:
@@ -469,17 +495,18 @@ class TestGitStatusIcons:
         status_stdout: bytes = b"",
         stash_stdout: bytes = b"",
     ) -> list[MagicMock]:
-        """Build the standard 5-call mock chain.
+        """Build the standard 4-call mock chain.
 
-        toplevel, branch --show-current, symbolic-ref (origin/main),
-        git status --porcelain=v2 --branch, git stash list.
+        toplevel, git status --porcelain=v2 --branch, symbolic-ref
+        (origin/main), git stash list. The status output supplies the branch
+        name as well as the icon state, so pass ``status_stdout`` when the test
+        cares about icons and ``branch`` when it only cares about the name.
         """
         mock_toplevel = MagicMock(returncode=0)
-        mock_branch = MagicMock(stdout=branch.encode() + b"\n")
+        mock_status = MagicMock(returncode=0, stdout=status_stdout or _porcelain(branch))
         mock_symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
-        mock_status = MagicMock(returncode=0, stdout=status_stdout)
         mock_stash = MagicMock(returncode=0, stdout=stash_stdout)
-        return [mock_toplevel, mock_branch, mock_symbolic_ref, mock_status, mock_stash]
+        return [mock_toplevel, mock_status, mock_symbolic_ref, mock_stash]
 
     def test_ahead_shows_up_arrow(self, handler: GitBranchHandler, tmp_path: Path) -> None:
         """`# branch.ab +2 -0` should render ↑2 in green."""
@@ -634,20 +661,27 @@ class TestGitStatusIcons:
     def test_status_silent_fail_keeps_branch(
         self, handler: GitBranchHandler, tmp_path: Path
     ) -> None:
-        """If `git status` raises, branch is still shown without icons."""
+        """If `git status` raises, branch is still shown without icons.
+
+        The branch name normally comes OUT of the status output, so a failed
+        status would take the whole segment with it. The handler falls back to
+        `git branch --show-current` for exactly this case, which keeps the
+        degraded display identical to what it was when the two were always
+        separate calls.
+        """
         import subprocess
 
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
         mock_toplevel = MagicMock(returncode=0)
-        mock_branch = MagicMock(stdout=b"main\n")
+        mock_branch = MagicMock(returncode=0, stdout=b"main\n")
         mock_symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 mock_toplevel,
-                mock_branch,
-                mock_symbolic_ref,
                 subprocess.TimeoutExpired("git", 5),
-                # stash should not be called since status failed first
+                mock_branch,  # fallback branch query
+                mock_symbolic_ref,
+                # stash should not be called since there is no status to render
             ]
             result = handler.handle(hook_input)
         assert "main" in result.context[0]
@@ -766,9 +800,7 @@ class TestBackgroundFetch:
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
 
         mock_toplevel = MagicMock(returncode=0, stdout=b"/repo/toplevel\n")
-        mock_branch = MagicMock(stdout=b"main\n")
         mock_symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
-        mock_status = MagicMock(returncode=0, stdout=b"")
         mock_stash = MagicMock(returncode=0, stdout=b"")
 
         with (
@@ -777,9 +809,8 @@ class TestBackgroundFetch:
         ):
             mock_run.side_effect = [
                 mock_toplevel,
-                mock_branch,
+                _status_mock("main"),
                 mock_symbolic_ref,
-                mock_status,
                 mock_stash,
             ]
             handler.handle(hook_input)
@@ -880,17 +911,15 @@ class TestGitBranchRenderCache:
 
     @staticmethod
     def _clean_render_mocks() -> list[MagicMock]:
-        """Five mocks for one full clean render.
+        """Four mocks for one full clean render.
 
-        Order: rev-parse --show-toplevel, branch --show-current, symbolic-ref
-        (default-branch detection), status --porcelain=v2, stash list.
+        Order: rev-parse --show-toplevel, status --porcelain=v2 --branch,
+        symbolic-ref (default-branch detection), stash list.
         """
         toplevel = MagicMock(returncode=0, stdout=b"/repo\n")
-        branch = MagicMock(returncode=0, stdout=b"main\n")
         symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
-        status = MagicMock(returncode=0, stdout=b"")
         stash = MagicMock(returncode=0, stdout=b"")
-        return [toplevel, branch, symbolic_ref, status, stash]
+        return [toplevel, _status_mock("main"), symbolic_ref, stash]
 
     def test_second_render_within_ttl_served_from_cache(
         self, handler: GitBranchHandler, tmp_path: Path
@@ -906,7 +935,7 @@ class TestGitBranchRenderCache:
             forks_after_second = mock_run.call_count
 
         assert first.context == second.context
-        assert forks_after_first == 5  # full render: toplevel, branch, symbolic-ref, status, stash
+        assert forks_after_first == 4  # full render: toplevel, status, symbolic-ref, stash
         assert forks_after_second == forks_after_first  # second render added zero git forks
 
     def test_distinct_cwd_each_render(self, handler: GitBranchHandler, tmp_path: Path) -> None:
@@ -982,18 +1011,16 @@ class TestWorktreeIndicator:
 
     @staticmethod
     def _render_mocks(toplevel: Path) -> list[MagicMock]:
-        """Standard 5-call render chain with a REAL toplevel path.
+        """Standard 4-call render chain with a REAL toplevel path.
 
         The toplevel must be a real path so the filesystem worktree probe reads
-        ``<toplevel>/.git``. Order: rev-parse --show-toplevel, branch
-        --show-current, symbolic-ref, status --porcelain=v2, stash list.
+        ``<toplevel>/.git``. Order: rev-parse --show-toplevel,
+        status --porcelain=v2 --branch, symbolic-ref, stash list.
         """
         top = MagicMock(returncode=0, stdout=str(toplevel).encode() + b"\n")
-        branch = MagicMock(stdout=b"main\n")
         symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
-        status = MagicMock(returncode=0, stdout=b"")
         stash = MagicMock(returncode=0, stdout=b"")
-        return [top, branch, symbolic_ref, status, stash]
+        return [top, _status_mock("main"), symbolic_ref, stash]
 
     def test_linked_worktree_shows_tree_icon(
         self, handler: GitBranchHandler, tmp_path: Path
@@ -1047,13 +1074,17 @@ class TestWorktreeIndicator:
     def test_worktree_detection_adds_no_subprocess_call(
         self, handler: GitBranchHandler, tmp_path: Path
     ) -> None:
-        """Detection is filesystem-only: the render forks exactly 5 git processes."""
+        """Detection is filesystem-only: the render forks exactly 4 git processes.
+
+        Four, not five, since Plan 00238 Task 2.1b: the branch name comes out
+        of the status output instead of its own ``branch --show-current`` fork.
+        """
         (tmp_path / ".git").write_text("gitdir: /main/.git/worktrees/feature\n", encoding="utf-8")
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = self._render_mocks(tmp_path)
             handler.handle(hook_input)
-        assert mock_run.call_count == 5
+        assert mock_run.call_count == 4
 
     def test_is_linked_worktree_true_for_worktree_file(
         self, handler: GitBranchHandler, tmp_path: Path

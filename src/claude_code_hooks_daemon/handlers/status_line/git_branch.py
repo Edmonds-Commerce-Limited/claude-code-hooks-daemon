@@ -47,6 +47,11 @@ _GIT_FILE_GITDIR_PREFIX = "gitdir:"
 _WORKTREE_GITDIR_MARKER = "/worktrees/"
 
 _PORCELAIN_BRANCH_AB_PREFIX = "# branch.ab "
+# ``--branch`` emits the current branch here, so the status call already
+# carries the answer that a separate ``git branch --show-current`` would fetch.
+_PORCELAIN_BRANCH_HEAD_PREFIX = "# branch.head "
+# What porcelain v2 prints instead of a name when HEAD is detached.
+_PORCELAIN_DETACHED_HEAD = "(detached)"
 _PORCELAIN_UNTRACKED_PREFIX = "? "
 _PORCELAIN_ORDINARY_PREFIX = "1 "
 _PORCELAIN_RENAMED_PREFIX = "2 "
@@ -140,6 +145,11 @@ class GitBranchHandler(Handler):
         # unbounded-per-directory growth is an accepted, documented trade-off.
         self._render_ttl_seconds: float = _DEFAULT_RENDER_TTL_SECONDS
         self._render_cache: dict[str, tuple[float, list[str]]] = {}
+        # cwd -> repository root. A cwd's repo root is constant for the life of
+        # the process, so this is memoised rather than re-forked per cache miss
+        # (Plan 00238 Task 2.1b). Bounded by the number of distinct cwds a
+        # session renders from, which is one in practice.
+        self._toplevel_cache: dict[str, str] = {}
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run for status events."""
@@ -201,33 +211,29 @@ class GitBranchHandler(Handler):
         not a git repo or any git command fails.
         """
         try:
-            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-                ["git", "rev-parse", "--show-toplevel"],
-                cwd=cwd,
-                capture_output=True,
-                timeout=Timeout.GIT_STATUS_SHORT,
-                check=False,
-            )
-
-            if result.returncode != 0:
+            repo_toplevel = self._resolve_repo_toplevel(cwd)
+            if repo_toplevel is None:
                 return []
-
-            repo_toplevel = result.stdout.decode().strip()
 
             # Keep remote-tracking refs fresh so ahead/behind counts are
             # honest — TTL-gated, runs in a daemon thread, never blocks
             # this render (the NEXT render shows the updated counts).
             self._maybe_start_background_fetch(repo_toplevel, cwd)
 
-            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-                ["git", "branch", "--show-current"],
-                cwd=cwd,
-                capture_output=True,
-                timeout=Timeout.GIT_STATUS_SHORT,
-                check=True,
-            )
-
-            branch = result.stdout.decode().strip()
+            # ONE status call answers both questions: which branch, and what
+            # state it is in (Plan 00238 Task 2.1b).
+            status_stdout = self._run_status(cwd)
+            if status_stdout is None:
+                # Status failed (timeout, transient git error). The branch name
+                # is normally read out of that same output, so without this the
+                # whole segment would vanish for the render — a DISPLAY change,
+                # not a cost saving. Fall back to the dedicated branch query so
+                # the name still shows, just without icons, exactly as it did
+                # when the two were always separate calls.
+                branch = self._run_branch_name(cwd)
+                status_stdout = ""
+            else:
+                branch = self._parse_branch_head(status_stdout)
             if branch:
                 # A linked worktree recolours the branch pink and appends a tree
                 # icon, regardless of default-branch status. Resolve the default
@@ -243,7 +249,7 @@ class GitBranchHandler(Handler):
                     color = _COLOR_GREEN
                 else:
                     color = _COLOR_ORANGE
-                icons = self._format_git_status_icons(cwd)
+                icons = self._format_git_status_icons(cwd, status_stdout)
                 worktree_prefix = f"{_ICON_WORKTREE} " if is_worktree else ""
                 return [f"| ⎇ {worktree_prefix}{color}{branch}{_COLOR_RESET}{icons}"]
 
@@ -394,16 +400,71 @@ class GitBranchHandler(Handler):
 
         return None
 
-    def _format_git_status_icons(self, cwd: str) -> str:
-        """Render magicmonty-style status icons after the branch name.
+    def _resolve_repo_toplevel(self, cwd: str) -> str | None:
+        """Return the repository root for ``cwd``, memoised per cwd.
 
-        Parses ``git status --porcelain=v2 --branch`` for ahead/behind,
-        staged/unstaged change counts, untracked files, and conflicts, then
-        appends a stash count from ``git stash list``.
+        A directory's repository root does not move for the life of a daemon
+        process, so asking git for it on every cache miss spends a fork on a
+        constant (Plan 00238 Task 2.1b).
+
+        Only POSITIVE answers are cached. A cwd that is not a repository today
+        may be one after a ``git init``, and re-asking costs one fork per
+        render-TTL miss rather than one per render.
+        """
+        cached = self._toplevel_cache.get(cwd)
+        if cached is not None:
+            return cached
+
+        try:
+            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=cwd,
+                capture_output=True,
+                timeout=Timeout.GIT_STATUS_SHORT,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError) as e:
+            logger.debug("Failed to resolve repo toplevel: %s", e)
+        else:
+            if result.returncode == 0:
+                repo_toplevel = result.stdout.decode().strip()
+                if repo_toplevel:
+                    self._toplevel_cache[cwd] = repo_toplevel
+                    return repo_toplevel
+        return None
+
+    def _run_branch_name(self, cwd: str) -> str:
+        """Ask git directly for the current branch — the FALLBACK path only.
+
+        The happy path reads the name from the status output instead. This runs
+        solely when that call failed, so the branch segment degrades to "name,
+        no icons" rather than disappearing.
+        """
+        try:
+            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
+                ["git", "branch", "--show-current"],
+                cwd=cwd,
+                capture_output=True,
+                timeout=Timeout.GIT_STATUS_SHORT,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError) as e:
+            logger.debug("Failed to get git branch name: %s", e)
+            return ""
+        if result.returncode != 0:
+            return ""
+        return result.stdout.decode().strip()
+
+    def _run_status(self, cwd: str) -> str | None:
+        """Run ``git status --porcelain=v2 --branch`` once and return its stdout.
+
+        Split out so ONE invocation serves both the branch name and the status
+        icons: ``--branch`` already emits ``# branch.head``, so a separate
+        ``git branch --show-current`` spawn would ask git a question this
+        output has already answered (Plan 00238 Task 2.1b).
 
         Returns:
-            Leading-space-prefixed icon string (e.g. ' ↑2 ●1 ✚3'), or an
-            empty string on any subprocess failure / clean working tree.
+            Decoded stdout, or None when git fails (not a repo, timeout, ...).
         """
         try:
             result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
@@ -413,11 +474,27 @@ class GitBranchHandler(Handler):
                 timeout=Timeout.GIT_STATUS_SHORT,
                 check=False,
             )
-            if result.returncode != 0:
-                return ""
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError) as e:
+            logger.debug("Failed to run git status: %s", e)
+        else:
+            if result.returncode == 0:
+                return result.stdout.decode()
+        return None
 
+    def _format_git_status_icons(self, cwd: str, status_stdout: str) -> str:
+        """Render magicmonty-style status icons after the branch name.
+
+        Parses already-captured ``git status --porcelain=v2 --branch`` output
+        for ahead/behind, staged/unstaged change counts, untracked files, and
+        conflicts, then appends a stash count from ``git stash list``.
+
+        Returns:
+            Leading-space-prefixed icon string (e.g. ' ↑2 ●1 ✚3'), or an
+            empty string on any subprocess failure / clean working tree.
+        """
+        try:
             ahead, behind, staged, changed, untracked, conflicts = self._parse_porcelain(
-                result.stdout.decode()
+                status_stdout
             )
             stashed = self._get_stash_count(cwd)
             return self._render_icons(
@@ -435,6 +512,21 @@ class GitBranchHandler(Handler):
         except Exception as e:
             logger.error("Unexpected error in git status icons: %s", e, exc_info=True)
             return ""
+
+    @staticmethod
+    def _parse_branch_head(stdout: str) -> str:
+        """Return the branch name from a ``# branch.head`` line, or "".
+
+        Porcelain v2 reports a detached HEAD as ``(detached)``. That is mapped
+        to the empty string so this matches what ``git branch --show-current``
+        reports in the same situation, and the caller's "no branch, no segment"
+        path is reached identically.
+        """
+        for line in stdout.splitlines():
+            if line.startswith(_PORCELAIN_BRANCH_HEAD_PREFIX):
+                head = line[len(_PORCELAIN_BRANCH_HEAD_PREFIX) :].strip()
+                return "" if head == _PORCELAIN_DETACHED_HEAD else head
+        return ""
 
     @staticmethod
     def _parse_porcelain(stdout: str) -> tuple[int, int, int, int, int, int]:
