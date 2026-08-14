@@ -50,6 +50,24 @@ _SECTION_INTRO = (
 #
 # An HTML comment is used because it is invisible to a human reader and
 # survives `format_markdown_text` untouched, exactly as `_AUTO_COMMENT` does.
+# The auto-commit deliberately commits the WHOLE file — its purpose is to stop
+# an agent seeing a dirty CLAUDE.md after a restart and trying to revert it. But
+# it gates only on "is the file dirty?", so a developer's in-progress edits get
+# swept in too. Committing them is fine; CLAIMING they were a regeneration is
+# not — that is how a real change gets skipped in review. Two messages, chosen
+# by whether the diff reaches outside the generated block.
+_COMMIT_MESSAGE_GENERATED = "Auto: hooks daemon regenerated CLAUDE.md handler guidance"
+_COMMIT_MESSAGE_WITH_USER_EDITS = (
+    "Auto: hooks daemon committed CLAUDE.md\n\n"
+    "This commit CHANGES CONTENT OUTSIDE the generated <hooksdaemon> block, so\n"
+    "it is not just a guidance regeneration. That content is either an\n"
+    "uncommitted hand edit the daemon swept up (it commits the whole file so\n"
+    "the tree is clean after a restart) or a reflow by the markdown formatter.\n"
+    "Either way it warrants a look, which the regeneration message would not\n"
+    "have prompted."
+)
+_GIT_HEAD_REF = "HEAD"
+
 _HANDLER_MARKER_PREFIX = "<!-- handler: "
 _HANDLER_MARKER_SUFFIX = " -->"
 _HANDLER_MARKER_PATTERN = re.compile(
@@ -270,7 +288,7 @@ class ClaudeMdInjector:
             logger.debug("ClaudeMdInjector: auto-commit staging failed (rc=%d)", stage.returncode)
             return
 
-        # Commit with clear auto-generated message
+        # Commit with a message that reflects WHAT is actually in the commit.
         commit = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
             [
                 "git",
@@ -278,7 +296,7 @@ class ClaudeMdInjector:
                 "--only",
                 filename,
                 "-m",
-                "Auto: hooks daemon regenerated CLAUDE.md handler guidance",
+                ClaudeMdInjector._commit_message(cwd, filename, claude_md_path),
             ],
             cwd=cwd,
             capture_output=True,
@@ -289,6 +307,36 @@ class ClaudeMdInjector:
             return
 
         logger.info("ClaudeMdInjector: auto-committed CLAUDE.md changes")
+
+    @staticmethod
+    def _commit_message(cwd: Path, filename: str, claude_md_path: Path) -> str:
+        """Pick the message that is TRUE of what this commit contains.
+
+        Compares the content OUTSIDE the generated block against the committed
+        version. If it differs, the commit carries hand-written changes the
+        daemon did not author, and must not describe itself as a regeneration.
+
+        A file with no committed version yet (first commit, or a rename) has
+        nothing to compare against, so it keeps the plain message — there is no
+        prior user content that could be silently swept in.
+        """
+        show = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
+            ["git", "show", f"{_GIT_HEAD_REF}:./{filename}"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if show.returncode != 0:
+            return _COMMIT_MESSAGE_GENERATED
+
+        committed_user_content = ClaudeMdInjector._extract_user_content(show.stdout)
+        current_user_content = ClaudeMdInjector._extract_user_content(
+            claude_md_path.read_text(encoding="utf-8", errors="replace")
+        )
+        if committed_user_content == current_user_content:
+            return _COMMIT_MESSAGE_GENERATED
+        return _COMMIT_MESSAGE_WITH_USER_EDITS
 
     @staticmethod
     def _extract_user_content(content: str) -> str:

@@ -506,6 +506,106 @@ class TestClaudeMdInjectorAutoCommit:
         )
         assert "hooks daemon" in log.stdout.lower()
 
+    def test_commit_message_flags_edits_from_outside_the_generated_block(
+        self, tmp_path: Path
+    ) -> None:
+        """A hand edit swept into the auto-commit must not be labelled a regeneration.
+
+        The auto-commit deliberately commits the WHOLE file — its purpose is to
+        stop an agent seeing a dirty CLAUDE.md and trying to revert it. But it
+        gates only on "is the file dirty?", so a developer's in-progress edits
+        land under a message claiming the daemon regenerated handler guidance.
+        That is how a real change gets skipped in review, which is exactly what
+        happened to this repository's own commit b355fd75.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_git_repo(tmp_path)
+        handler = _StubHandler("h", "## H\n\nContent.")
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        # A hand edit OUTSIDE the generated block, left uncommitted.
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text(
+            claude_md.read_text(encoding="utf-8") + "\n\nHand-written prose.\n",
+            encoding="utf-8",
+        )
+
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        message = subprocess.run(
+            ["git", "log", "-1", "--pretty=%B"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout
+        assert "regenerated CLAUDE.md handler guidance" not in message, (
+            "commit swept up an edit from outside the generated block but still "
+            f"claims to be a regeneration: {message!r}"
+        )
+        assert "outside" in message.lower()
+
+    def test_commit_message_stays_plain_for_a_pure_regeneration(self, tmp_path: Path) -> None:
+        """Only the generated block changed — the original message is correct."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_git_repo(tmp_path)
+        ClaudeMdInjector(
+            workspace_root=tmp_path, handlers=[_StubHandler("h", "## H\n\nOne.")]
+        ).inject()
+        ClaudeMdInjector(
+            workspace_root=tmp_path, handlers=[_StubHandler("h", "## H\n\nTwo.")]
+        ).inject()
+
+        message = subprocess.run(
+            ["git", "log", "-1", "--pretty=%B"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout
+        assert "regenerated CLAUDE.md handler guidance" in message
+
+    def test_first_injection_into_an_existing_file_does_not_crash(self, tmp_path: Path) -> None:
+        """HEAD has no <hooksdaemon> block at all — the comparison must still work.
+
+        On a client's very first daemon start, the committed CLAUDE.md is
+        hand-written with no block, so `_extract_user_content` returns the whole
+        file for HEAD and only the outside-the-block part for the new content.
+        The markdown formatter may also reflow the human's prose. Whichever
+        message comes out, it must be one of the two real ones and the commit
+        must succeed.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import (
+            _COMMIT_MESSAGE_GENERATED,
+            _COMMIT_MESSAGE_WITH_USER_EDITS,
+            ClaudeMdInjector,
+        )
+
+        _init_git_repo(tmp_path)
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n\nHand-written, no block here.\n", encoding="utf-8")
+        subprocess.run(["git", "add", "CLAUDE.md"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "commit", "-m", "hand-written"], cwd=tmp_path, check=True)
+
+        ClaudeMdInjector(
+            workspace_root=tmp_path, handlers=[_StubHandler("h", "## H\n\nContent.")]
+        ).inject()
+
+        assert "Hand-written, no block here." in claude_md.read_text(encoding="utf-8")
+        message = subprocess.run(
+            ["git", "log", "-1", "--pretty=%B"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        assert message in (
+            _COMMIT_MESSAGE_GENERATED,
+            _COMMIT_MESSAGE_WITH_USER_EDITS.strip(),
+        ), f"unexpected auto-commit message: {message!r}"
+
     def test_no_commit_when_content_unchanged(self, tmp_path: Path) -> None:
         """No extra commit when CLAUDE.md content is identical (idempotent)."""
         from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
