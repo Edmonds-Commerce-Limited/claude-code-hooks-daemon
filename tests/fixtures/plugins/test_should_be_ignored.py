@@ -10,7 +10,7 @@ class TestShouldBeIgnored(Handler):
 
     def __init__(self, config=None):
         """Initialise."""
-        super().__init__(name="should-be-ignored", priority=Priority.HELLO_WORLD)
+        super().__init__(name="should-be-ignored", priority=Priority.TEST_HANDLER)
 
     def matches(self, hook_input: dict) -> bool:
         """Match."""

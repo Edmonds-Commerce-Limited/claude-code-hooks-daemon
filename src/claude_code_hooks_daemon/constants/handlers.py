@@ -49,56 +49,6 @@ class HandlerID:
         config_key="test_server",
         display_name="test-server",
     )
-    HELLO_WORLD_PRE_TOOL_USE = HandlerIDMeta(
-        class_name="HelloWorldPreToolUseHandler",
-        config_key="hello_world_pre_tool_use",
-        display_name="hello-world",
-    )
-    HELLO_WORLD_POST_TOOL_USE = HandlerIDMeta(
-        class_name="HelloWorldPostToolUseHandler",
-        config_key="hello_world_post_tool_use",
-        display_name="hello-world",
-    )
-    HELLO_WORLD_SESSION_START = HandlerIDMeta(
-        class_name="HelloWorldSessionStartHandler",
-        config_key="hello_world_session_start",
-        display_name="hello-world",
-    )
-    HELLO_WORLD_SESSION_END = HandlerIDMeta(
-        class_name="HelloWorldSessionEndHandler",
-        config_key="hello_world_session_end",
-        display_name="hello-world",
-    )
-    HELLO_WORLD_STOP = HandlerIDMeta(
-        class_name="HelloWorldStopHandler",
-        config_key="hello_world_stop",
-        display_name="hello-world",
-    )
-    HELLO_WORLD_SUBAGENT_STOP = HandlerIDMeta(
-        class_name="HelloWorldSubagentStopHandler",
-        config_key="hello_world_subagent_stop",
-        display_name="hello-world",
-    )
-    HELLO_WORLD_USER_PROMPT_SUBMIT = HandlerIDMeta(
-        class_name="HelloWorldUserPromptSubmitHandler",
-        config_key="hello_world_user_prompt_submit",
-        display_name="hello-world",
-    )
-    HELLO_WORLD_PRE_COMPACT = HandlerIDMeta(
-        class_name="HelloWorldPreCompactHandler",
-        config_key="hello_world_pre_compact",
-        display_name="hello-world",
-    )
-    HELLO_WORLD_NOTIFICATION = HandlerIDMeta(
-        class_name="HelloWorldNotificationHandler",
-        config_key="hello_world_notification",
-        display_name="hello-world",
-    )
-    HELLO_WORLD_PERMISSION_REQUEST = HandlerIDMeta(
-        class_name="HelloWorldPermissionRequestHandler",
-        config_key="hello_world_permission_request",
-        display_name="hello-world",
-    )
 
     # Safety handlers (Priority: 10-20)
     DAEMON_RESTART_VERIFIER = HandlerIDMeta(
@@ -572,17 +522,6 @@ class HandlerID:
 
 # Type-safe config key literal (for mypy/type checking)
 HandlerKey = Literal[
-    # Test handlers
-    "hello_world_pre_tool_use",
-    "hello_world_post_tool_use",
-    "hello_world_session_start",
-    "hello_world_session_end",
-    "hello_world_stop",
-    "hello_world_subagent_stop",
-    "hello_world_user_prompt_submit",
-    "hello_world_pre_compact",
-    "hello_world_notification",
-    "hello_world_permission_request",
     # Safety handlers
     "daemon_restart_verifier",
     "destructive_git",
@@ -667,6 +606,36 @@ HandlerKey = Literal[
 #
 # Maps config key -> why it went, so a puzzled reader gets an answer here.
 RETIRED_HANDLERS: dict[str, str] = {
+    # The hello_world canaries, one per event type (Plan 00240). They injected
+    # "✅ <event> hook system active" to prove the pipeline was alive. Dormant in
+    # every project since v3.40.0, when Plan 00162 wired the
+    # `enable_hello_world_handlers` flag that had been dead config and defaulted
+    # it off — so removing them changes no observable behaviour. Their job is
+    # done better by `scripts/qa/run_smoke_test.sh`, which probes the LIVE daemon
+    # through the production hook scripts with real payloads and asserts the
+    # decisions, rather than echoing that a handler ran.
+    **{
+        f"hello_world_{_event}": (
+            "removed in v3.53.0 — the hello_world canaries proved the hook "
+            "pipeline was alive, which the QA smoke test now does against the "
+            "live daemon with real payloads. Dormant since v3.40.0 (the "
+            "`enable_hello_world_handlers` flag defaults off), so nothing "
+            "changes for you. Safe to delete this key, and the "
+            "`daemon.enable_hello_world_handlers` key, from your config."
+        )
+        for _event in (
+            "pre_tool_use",
+            "post_tool_use",
+            "session_start",
+            "session_end",
+            "stop",
+            "subagent_stop",
+            "user_prompt_submit",
+            "pre_compact",
+            "notification",
+            "permission_request",
+        )
+    },
     # Retired BEFORE the registry existed (v2.9.0 / v2.11.0). Their config
     # keys were rejected as unknown for every release since — an unedited
     # v2.x config tipped the daemon into DEGRADED MODE with no way for the

@@ -10,7 +10,7 @@ class WrongName(Handler):
 
     def __init__(self, config=None):
         """Initialise."""
-        super().__init__(name="wrong", priority=Priority.HELLO_WORLD)
+        super().__init__(name="wrong", priority=Priority.TEST_HANDLER)
 
     def matches(self, hook_input: dict) -> bool:
         """Match."""

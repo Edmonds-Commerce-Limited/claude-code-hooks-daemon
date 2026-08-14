@@ -635,4 +635,39 @@ config_changes:
         longer mentioned at write time. It is caught at commit instead, by
         counter-sanity, which BLOCKS rather than advises -- so you find out
         later but the outcome is stricter, not laxer.
+    - key: daemon.enable_hello_world_handlers
+      recommended: true
+      description: >-
+        REMOVED (Plan 00240), together with the ten hello_world handlers it
+        gated -- one per event type, each injecting "✅ <event> hook system
+        active" to prove the pipeline was alive. The key existed for no other
+        purpose, so it goes with them.
+        Nothing changes in any project, because they have been DORMANT since
+        v3.40.0. Until then the flag was dead config -- defined but never
+        consumed -- so the canaries loaded unconditionally; Plan 00162 wired it
+        and defaulted it OFF, which is what stopped hello_world_stop injecting
+        context on every Stop event and driving the idle-tick doubled-stop.
+        The job they were built for is done better by the QA smoke test, which
+        probes the LIVE daemon through the production hook scripts with three
+        real payloads (a Stop, a Stop with a transcript, and a PreToolUse
+        carrying a destructive git command) and asserts the DECISIONS. That
+        exercises real handlers and their matching logic rather than echoing
+        that dispatch happened, so it proves strictly more than a canary ever
+        did -- and it runs in every QA pass rather than needing a flag flipped.
+        Priority.HELLO_WORLD is renamed Priority.TEST_HANDLER (same value, 5).
+        The constant was named after these handlers but is used throughout the
+        test suite for purpose-built fixtures, so it outlives them; only the
+        name was wrong.
+      migration_note: >-
+        NO ACTION REQUIRED. A leftover "enable_hello_world_handlers:" key, and
+        any leftover "hello_world_*:" handler blocks, validate cleanly -- the
+        daemon carries a registry of retired names, so an unedited config will
+        NOT put it into degraded mode. Delete them when convenient.
+        If you had deliberately set enable_hello_world_handlers: true to check
+        your hooks were wired up, use a real handler instead -- send a command
+        a handler is supposed to block and confirm it is denied:
+        echo '{"tool_name":"Bash","tool_input":{"command":"git reset --hard"}}'
+        | .claude/hooks/pre-tool-use. Nothing is executed; the hook only
+        inspects the command, and a deny proves dispatch, matching and the
+        block path all at once. See docs/guides/GETTING_STARTED.md.
   changed: []

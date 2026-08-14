@@ -63,7 +63,6 @@ The `daemon` section controls the background process itself.
 daemon:
   idle_timeout_seconds: 600    # Shut down after N seconds of inactivity (default: 600)
   log_level: INFO              # Logging verbosity: DEBUG, INFO, WARNING, ERROR
-  enable_hello_world_handlers: false  # Enable test handlers to verify hooks work
   strict_mode: false           # Fail-fast on all errors (useful for development)
 
   # Input validation (recommended)
@@ -79,7 +78,6 @@ daemon:
 | ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `idle_timeout_seconds`         | `600`   | Daemon shuts down after this many seconds without a hook call. It restarts automatically on the next call (lazy startup). |
 | `log_level`                    | `INFO`  | Controls how much detail appears in daemon logs. Use `DEBUG` when troubleshooting handler behaviour.                      |
-| `enable_hello_world_handlers`  | `false` | Activates simple test handlers that add context to every event. Useful for confirming hooks are connected.                |
 | `strict_mode`                  | `false` | When `true`, the daemon crashes on any unexpected error instead of continuing. Recommended for development/testing.       |
 | `self_install_mode`            | `false` | Used when the daemon runs from the project root instead of `.claude/hooks-daemon/`. Only needed for daemon development.   |
 | `input_validation.enabled`     | `true`  | Validates hook event data before processing. Catches malformed events early.                                              |
@@ -188,7 +186,7 @@ Priorities determine the order handlers execute within an event type. **Lower nu
 
 | Range | Category     | Purpose                        | Examples                                                           |
 | ----- | ------------ | ------------------------------ | ------------------------------------------------------------------ |
-| 0-9   | Test         | Test and debug handlers        | `hello_world` (5)                                                  |
+| 0-9   | Test         | Test and debug handlers        | reserved — no built-in handlers ship here                          |
 | 10-20 | Safety       | Prevent destructive operations | `destructive_git` (10), `sed_blocker` (10), `curl_pipe_shell` (15) |
 | 25-35 | Code Quality | Enforce development standards  | `lint_on_edit` (25), `qa_suppression` (30)                         |
 | 36-55 | Workflow     | Process and tool guidance      | `plan_workflow` (45), `npm_command` (50), `web_search_year` (55)   |

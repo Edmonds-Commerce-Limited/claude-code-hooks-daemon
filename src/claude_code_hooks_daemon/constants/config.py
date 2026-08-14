@@ -54,7 +54,6 @@ class ConfigKey:
     LOG_BUFFER_SIZE = "log_buffer_size"
     REQUEST_TIMEOUT_SECONDS = "request_timeout_seconds"
     SELF_INSTALL_MODE = "self_install_mode"
-    ENABLE_HELLO_WORLD_HANDLERS = "enable_hello_world_handlers"
     INPUT_VALIDATION = "input_validation"
 
     # Plugin config keys

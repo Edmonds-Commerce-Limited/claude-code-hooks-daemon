@@ -19,7 +19,7 @@ from claude_code_hooks_daemon.core.handler import Handler
 
 
 def discover_all_production_handlers() -> dict[str, list[str]]:
-    """Discover all production handler classes (excluding hello_world test handlers).
+    """Discover all production handler classes.
 
     Returns:
         Dict mapping event_type to list of handler class names (e.g., "DestructiveGitHandler")
@@ -51,8 +51,8 @@ def discover_all_production_handlers() -> dict[str, list[str]]:
             continue
 
         for _importer, modname, _ispkg in pkgutil.iter_modules(event_module.__path__):
-            # Skip private modules and test handlers
-            if modname.startswith("_") or modname == "hello_world":
+            # Skip private modules
+            if modname.startswith("_"):
                 continue
 
             try:
@@ -66,7 +66,6 @@ def discover_all_production_handlers() -> dict[str, list[str]]:
                         and issubclass(attr, Handler)
                         and attr is not Handler
                         and not attr.__name__.startswith("_")
-                        and "HelloWorld" not in attr.__name__
                         and "Base" not in attr.__name__
                     ):
                         handlers_by_event[event_dir].append(attr.__name__)
@@ -210,26 +209,6 @@ class TestDogfoodingConfiguration:
             "Daemon strict mode must be enabled for dogfooding (FAIL FAST on ALL errors). "
             "Set daemon.strict_mode: true"
         )
-
-    def test_hello_world_handlers_are_disabled(self):
-        """Test handlers (hello_world) must be disabled in production config."""
-        config = load_project_config()
-
-        # Check daemon-level setting
-        assert config.get("daemon", {}).get("enable_hello_world_handlers", True) is False, (
-            "Hello world test handlers must be disabled. "
-            "Set daemon.enable_hello_world_handlers: false"
-        )
-
-        # Check individual handler configs
-        handlers_config = config.get("handlers", {})
-        for event_type, event_handlers in handlers_config.items():
-            if isinstance(event_handlers, dict):
-                for handler_name, handler_cfg in event_handlers.items():
-                    if "hello_world" in handler_name.lower():
-                        assert (
-                            handler_cfg.get("enabled", True) is False
-                        ), f"Test handler {event_type}.{handler_name} must be disabled"
 
     def test_config_has_all_event_types(self):
         """Config must have sections for all supported event types."""

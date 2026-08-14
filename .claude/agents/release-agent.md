@@ -114,7 +114,7 @@ Update version string in these files:
 - **Test count badge** (line 4): Update test count from QA output (`pytest` result)
 - **Test count in body**: Search for "ships with N+ tests" or similar and update
 - **Handler count**: Count non-test handlers from `.claude/HOOKS-DAEMON.md` and update "N production handlers across M event types"
-- **Handler counts**: Run `grep '| [0-9]' .claude/HOOKS-DAEMON.md | grep -v hello_world | wc -l` for handler count and `grep -c '^###' .claude/HOOKS-DAEMON.md` for event type count
+- **Handler counts**: Run `grep '| [0-9]' .claude/HOOKS-DAEMON.md | wc -l` for handler count and `grep -c '^###' .claude/HOOKS-DAEMON.md` for event type count
 
 ### 4. Changelog Generation
 

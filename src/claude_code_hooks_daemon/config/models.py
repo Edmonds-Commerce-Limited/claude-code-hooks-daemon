@@ -879,10 +879,6 @@ class DaemonConfig(BaseModel):
         default=False,
         description="Self-install mode: daemon runs from project root instead of .claude/hooks-daemon/",
     )
-    enable_hello_world_handlers: bool = Field(
-        default=False,
-        description="Enable hello world test handlers",
-    )
     strict_mode: bool = Field(
         default=False,
         description="Strict mode: FAIL FAST on ALL errors - handler exceptions, validation errors, etc. (fail-closed vs fail-open)",

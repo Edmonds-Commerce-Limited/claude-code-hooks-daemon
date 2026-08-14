@@ -128,8 +128,8 @@ class TestHandlerRegistry:
         # Should include some known handlers
         handlers = registry.list_handlers()
         assert "DestructiveGitHandler" in handlers
-        # HelloWorld handlers are specific to event types
-        assert any("HelloWorld" in h for h in handlers)
+        # Handlers are discovered across multiple event-type directories
+        assert "GitContextInjectorHandler" in handlers
 
     def test_discover_invalid_package(self, registry: HandlerRegistry) -> None:
         """discover should handle invalid package gracefully."""
@@ -220,7 +220,7 @@ class TestRegisterAll:
     ) -> None:
         """register_all should skip disabled handlers."""
         # Disable a specific handler class
-        registry.disable("HelloWorldPreToolUseHandler")
+        registry.disable("DestructiveGitHandler")
 
         registry.register_all(router)
 
@@ -228,7 +228,7 @@ class TestRegisterAll:
         all_handlers = router.get_all_handlers()
         pre_tool_handlers = all_handlers.get("PreToolUse", [])
         handler_classes = [type(h).__name__ for h in pre_tool_handlers]
-        assert "HelloWorldPreToolUseHandler" not in handler_classes
+        assert "DestructiveGitHandler" not in handler_classes
 
     def test_register_all_with_config_disabled(
         self, registry: HandlerRegistry, router: EventRouter
@@ -391,53 +391,11 @@ class TestRegisterAll:
         count = registry.register_all(router, config=config)
         assert count >= 0
 
-    def test_register_all_excludes_test_handlers_by_default(
+    def test_register_all_registers_real_handlers_by_default(
         self, registry: HandlerRegistry, router: EventRouter
     ) -> None:
-        """Test (hello_world) handlers are gated OFF by default.
-
-        Regression for Plan 00162: the ``daemon.enable_hello_world_handlers``
-        flag (model default False) was never consumed, so the TEST-tagged
-        handlers loaded in every project. That made ``hello_world_stop`` inject
-        ``✅ Stop hook system active`` on every Stop, doubling idle turns. The
-        default (no flag passed) must now register ZERO test handlers.
-        """
+        """Real handlers register with no special config or flags required."""
         registry.register_all(router)
-
-        all_handlers = router.get_all_handlers()
-        offenders = [
-            type(handler).__name__
-            for handlers in all_handlers.values()
-            for handler in handlers
-            if "test" in handler.tags
-        ]
-        assert offenders == [], f"test handlers registered despite default-off flag: {offenders}"
-
-    def test_register_all_includes_test_handlers_when_flag_true(
-        self, registry: HandlerRegistry, router: EventRouter
-    ) -> None:
-        """enable_hello_world_handlers=True restores the test handlers.
-
-        The flag is the on-demand escape hatch for debugging the hook system.
-        """
-        registry.register_all(router, enable_hello_world_handlers=True)
-
-        all_handlers = router.get_all_handlers()
-        test_handler_names = [
-            type(handler).__name__
-            for handlers in all_handlers.values()
-            for handler in handlers
-            if "test" in handler.tags
-        ]
-        assert any(
-            "HelloWorld" in name for name in test_handler_names
-        ), f"no HelloWorld test handlers registered with flag on: {test_handler_names}"
-
-    def test_register_all_non_test_handlers_unaffected_by_flag(
-        self, registry: HandlerRegistry, router: EventRouter
-    ) -> None:
-        """The flag gates ONLY test handlers; real handlers register either way."""
-        registry.register_all(router)  # flag defaults off
 
         pre_handlers = router.get_chain(EventType.PRE_TOOL_USE)
         handler_names = [h.name for h in pre_handlers.handlers]

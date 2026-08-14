@@ -17,7 +17,9 @@ class TestClassNameToConfigKey:
 
     def test_multiword_handler_name(self) -> None:
         """Test multi-word handler name conversion."""
-        assert class_name_to_config_key("HelloWorldPreToolUseHandler") == "hello_world_pre_tool_use"
+        assert (
+            class_name_to_config_key("AskUserQuestionBlockerHandler") == "ask_user_question_blocker"
+        )
         assert class_name_to_config_key("AutoApproveReadsHandler") == "auto_approve_reads"
 
     def test_acronym_in_name(self) -> None:
@@ -84,7 +86,9 @@ class TestConfigKeyToDisplayName:
 
     def test_multiword_conversion(self) -> None:
         """Test multi-word config key conversion."""
-        assert config_key_to_display_name("hello_world_pre_tool_use") == "hello-world-pre-tool-use"
+        assert (
+            config_key_to_display_name("ask_user_question_blocker") == "ask-user-question-blocker"
+        )
         assert config_key_to_display_name("auto_approve_reads") == "auto-approve-reads"
 
     def test_single_word(self) -> None:
@@ -110,7 +114,9 @@ class TestDisplayNameToConfigKey:
 
     def test_multiword_conversion(self) -> None:
         """Test multi-word display name conversion."""
-        assert display_name_to_config_key("hello-world-pre-tool-use") == "hello_world_pre_tool_use"
+        assert (
+            display_name_to_config_key("ask-user-question-blocker") == "ask_user_question_blocker"
+        )
         assert display_name_to_config_key("auto-approve-reads") == "auto_approve_reads"
 
     def test_single_word(self) -> None:
@@ -136,7 +142,7 @@ class TestRoundTripConversions:
         result = display_name_to_config_key(display)
         assert result == original
 
-        original = "hello_world_pre_tool_use"
+        original = "ask_user_question_blocker"
         display = config_key_to_display_name(original)
         result = display_name_to_config_key(display)
         assert result == original
@@ -148,7 +154,7 @@ class TestRoundTripConversions:
         result = config_key_to_display_name(config)
         assert result == original
 
-        original = "hello-world-pre-tool-use"
+        original = "ask-user-question-blocker"
         config = display_name_to_config_key(original)
         result = config_key_to_display_name(config)
         assert result == original

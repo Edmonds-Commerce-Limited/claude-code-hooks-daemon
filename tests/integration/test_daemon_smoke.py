@@ -299,9 +299,8 @@ class TestDaemonSmoke:
 
         response = send_hook_event(socket_path, hook_input)
 
-        # A benign echo matches no real handler, and the hello_world canary is
-        # off by default now (Plan 00162), so the daemon returns a benign no-op
-        # response (no block, no error) rather than injected context.
+        # A benign echo matches no real handler, so the daemon returns a benign
+        # no-op response (no block, no error) rather than injected context.
         assert isinstance(response, dict), "Response should be a dictionary"
         assert "error" not in response, f"benign command must not error: {response}"
         assert response.get("decision") != "block", f"benign command must not block: {response}"

@@ -2339,7 +2339,6 @@ def cmd_generate_docs(args: argparse.Namespace) -> int:
             registry=registry,
             plugins=plugins,
             project_handlers=project_handlers_list,
-            enable_hello_world_handlers=config.daemon.enable_hello_world_handlers,
             pseudo_events=config.pseudo_events or None,
         )
 

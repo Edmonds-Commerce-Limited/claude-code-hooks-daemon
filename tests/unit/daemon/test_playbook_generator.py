@@ -854,7 +854,7 @@ def test_generate_markdown_combines_library_and_plugin_handlers() -> None:
                     config_key="mock_plugin",
                     display_name="mock-plugin",
                 ),
-                priority=Priority.HELLO_WORLD,  # Lower priority (5) than library handler (10)
+                priority=Priority.TEST_HANDLER,  # Lower priority (5) than library handler (10)
                 terminal=False,
             )
 
@@ -1340,7 +1340,7 @@ def test_generate_json_includes_plugin_handlers() -> None:
                     config_key="mock_plugin",
                     display_name="mock-plugin",
                 ),
-                priority=Priority.HELLO_WORLD,
+                priority=Priority.TEST_HANDLER,
                 terminal=False,
             )
 
@@ -1392,7 +1392,7 @@ def test_generate_json_includes_project_handlers() -> None:
                     config_key="mock_project",
                     display_name="mock-project",
                 ),
-                priority=Priority.HELLO_WORLD,
+                priority=Priority.TEST_HANDLER,
                 terminal=False,
             )
 

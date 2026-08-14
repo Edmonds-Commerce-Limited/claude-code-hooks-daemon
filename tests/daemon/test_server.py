@@ -48,7 +48,7 @@ class SimpleTestHandler(Handler):
 
     def __init__(self) -> None:
         """Initialise test handler."""
-        super().__init__(name="test_handler", priority=Priority.HELLO_WORLD, terminal=True)
+        super().__init__(name="test_handler", priority=Priority.TEST_HANDLER, terminal=True)
 
     def matches(self, hook_input: dict) -> bool:
         """Match all requests."""
@@ -82,7 +82,7 @@ class SlowTestHandler(Handler):
 
     def __init__(self, delay_ms: int = 100) -> None:
         """Initialise slow handler."""
-        super().__init__(name="slow_test_handler", priority=Priority.HELLO_WORLD, terminal=True)
+        super().__init__(name="slow_test_handler", priority=Priority.TEST_HANDLER, terminal=True)
         self.delay_ms = delay_ms
 
     def matches(self, hook_input: dict) -> bool:
@@ -765,7 +765,7 @@ class TestHooksDaemon:
 
             def __init__(self) -> None:
                 super().__init__(
-                    name="failing_handler", priority=Priority.HELLO_WORLD, terminal=True
+                    name="failing_handler", priority=Priority.TEST_HANDLER, terminal=True
                 )
 
             def matches(self, hook_input: dict) -> bool:

@@ -172,16 +172,6 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "VersionCheckHandler": "T4 fires once at session start with the full remedy",
     "CriticalThinkingAdvisoryHandler": "T4 the injected advisory IS the content",
     # -- Test handlers ---------------------------------------------------
-    "HelloWorldNotificationHandler": "test stub, blocks nothing",
-    "HelloWorldPermissionRequestHandler": "test stub, blocks nothing",
-    "HelloWorldPostToolUseHandler": "test stub, blocks nothing",
-    "HelloWorldPreCompactHandler": "test stub, blocks nothing",
-    "HelloWorldPreToolUseHandler": "test stub, blocks nothing",
-    "HelloWorldSessionEndHandler": "test stub, blocks nothing",
-    "HelloWorldSessionStartHandler": "test stub, blocks nothing",
-    "HelloWorldStopHandler": "test stub, blocks nothing",
-    "HelloWorldSubagentStopHandler": "test stub, blocks nothing",
-    "HelloWorldUserPromptSubmitHandler": "test stub, blocks nothing",
 }
 
 

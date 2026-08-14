@@ -26,7 +26,7 @@ class TestServerHandler(Handler):
     def __init__(self) -> None:
         # Test-only handler using test constants
         super().__init__(
-            handler_id=HandlerID.TEST_SERVER, priority=Priority.HELLO_WORLD, terminal=True
+            handler_id=HandlerID.TEST_SERVER, priority=Priority.TEST_HANDLER, terminal=True
         )
 
     def matches(self, hook_input: dict) -> bool:

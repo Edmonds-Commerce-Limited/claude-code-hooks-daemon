@@ -191,7 +191,7 @@ def test_example_config_includes_all_library_handlers(example_config: dict) -> N
     and verifies each one is present in the example config.
 
     Excluded handlers:
-    - Test handlers (hello_world_*, test_server)
+    - Test handlers (test_server)
     """
     # Get all handler constants from HandlerID class
     all_handlers = []
@@ -206,16 +206,6 @@ def test_example_config_includes_all_library_handlers(example_config: dict) -> N
     # Pseudo-event handlers (nitpick_*) are registered via pseudo_events config,
     # not the regular handlers section
     excluded_handlers = {
-        "hello_world_pre_tool_use",
-        "hello_world_post_tool_use",
-        "hello_world_session_start",
-        "hello_world_session_end",
-        "hello_world_stop",
-        "hello_world_subagent_stop",
-        "hello_world_user_prompt_submit",
-        "hello_world_pre_compact",
-        "hello_world_notification",
-        "hello_world_permission_request",
         "test_server",
         "dismissive_language_nitpick",
         "hedging_language_nitpick",
@@ -244,7 +234,7 @@ def test_example_config_includes_all_library_handlers(example_config: dict) -> N
 
 
 def test_example_config_no_test_handlers(example_config: dict) -> None:
-    """Example config should not include test handlers (hello_world, etc).
+    """Example config should not include test handlers (test_server, etc).
 
     Test handlers are for development/debugging only and should not
     be in the example config that users copy.
@@ -256,16 +246,6 @@ def test_example_config_no_test_handlers(example_config: dict) -> None:
             config_handlers.add(handler_name)
 
     test_handlers = [
-        "hello_world_pre_tool_use",
-        "hello_world_post_tool_use",
-        "hello_world_session_start",
-        "hello_world_session_end",
-        "hello_world_stop",
-        "hello_world_subagent_stop",
-        "hello_world_user_prompt_submit",
-        "hello_world_pre_compact",
-        "hello_world_notification",
-        "hello_world_permission_request",
         "test_server",
     ]
 

@@ -45,10 +45,7 @@ class ConfigTemplate:
             "# Daemon Settings\n"
             "daemon:\n"
             "  idle_timeout_seconds: 600  # Auto-shutdown after 10 minutes\n"
-            "  log_level: INFO            # DEBUG, INFO, WARNING, ERROR\n"
-            "  enable_hello_world_handlers: false  # Set true to confirm hooks working\n"
-            + enforcement_line
-            + "\n"
+            "  log_level: INFO            # DEBUG, INFO, WARNING, ERROR\n" + enforcement_line + "\n"
             "# Handler Configuration\n"
             "# Enable/disable handlers per event type\n"
             "# Priority: lower numbers run first (5-60 range)\n"
@@ -107,10 +104,7 @@ class ConfigTemplate:
             "# Daemon Settings\n"
             "daemon:\n"
             "  idle_timeout_seconds: 600  # Auto-shutdown after 10 minutes\n"
-            "  log_level: INFO            # DEBUG, INFO, WARNING, ERROR\n"
-            "  enable_hello_world_handlers: false  # Set true to confirm hooks working\n"
-            + enforcement_line
-            + "\n"
+            "  log_level: INFO            # DEBUG, INFO, WARNING, ERROR\n" + enforcement_line + "\n"
             "# Handler Configuration\n"
             "# Enable/disable handlers per event type\n"
             "# Priority: lower numbers run first (5-60 range)\n"

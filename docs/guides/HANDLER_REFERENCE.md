@@ -2289,7 +2289,7 @@ Priority determines execution order. Lower numbers run first.
 
 | Range | Category        | Examples                                            |
 | ----- | --------------- | --------------------------------------------------- |
-| 5     | Test            | hello_world (disabled by default)                   |
+| 5     | Test            | reserved — no built-in handlers ship here           |
 | 10-20 | Safety          | destructive_git, sed_blocker, pip_break_system      |
 | 25-35 | Code Quality    | qa_suppression, lint_on_edit, markdown_organization |
 | 36-55 | Workflow        | lsp_enforcement, gh_issue_comments, npm_command     |

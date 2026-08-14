@@ -376,9 +376,9 @@ class TestToJsonEventName:
         non-empty Stop/SubagentStop hookSpecificOutput.additionalContext as
         "continue the conversation" - confirmed via stop-events.jsonl showing
         stop_hook_active=true on every re-fire after an ALLOW-with-context
-        response. Because hello_world_stop unconditionally contributes context
-        on every Stop event, this created an infinite loop that never
-        terminated until the session was killed. Advisory context must only
+        response. Because a non-terminal advisory Stop handler unconditionally
+        contributed context on every Stop event, this created an infinite loop
+        that never terminated until the session was killed. Advisory context must only
         surface on the FIRST stop check (stop_hook_active falsy); any re-entry
         with a non-DENY decision must produce an empty response so Claude Code
         can actually stop.

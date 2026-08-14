@@ -313,15 +313,16 @@ class TestDaemonController:
     def test_process_request(self, workspace_root: Path) -> None:
         """Process request parses and routes event.
 
-        Uses the hello_world canary (enable_hello_world_handlers=True) to prove
-        handler output flows through routing. The canary is off by default now
-        (Plan 00162), so a benign 'ls' would otherwise route to no handler and
-        return a valid no-op response; enabling it keeps the strong
-        output-present assertion and exercises the flag through the controller.
+        Routes a command a REAL handler denies, so the assertion below is
+        genuinely output-present rather than a valid no-op. This used the
+        hello_world canary as its vehicle until Plan 00240 removed it; a real
+        blocking handler is a stronger vehicle anyway, because it exercises
+        matching and the deny path as well as routing. Nothing is executed —
+        the controller only inspects the command.
         """
         from claude_code_hooks_daemon.config.models import DaemonConfig
 
-        controller = DaemonController(config=DaemonConfig(enable_hello_world_handlers=True))
+        controller = DaemonController(config=DaemonConfig())
         # Pre-initialize controller
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
@@ -335,7 +336,7 @@ class TestDaemonController:
             "event": "PreToolUse",
             "hook_input": {
                 "tool_name": "Bash",
-                "tool_input": {"command": "ls"},
+                "tool_input": {"command": "git reset --hard"},
                 "transcript_path": "/tmp/transcript.jsonl",
             },
         }
@@ -343,7 +344,7 @@ class TestDaemonController:
         response = controller.process_request(request_data)
 
         assert isinstance(response, dict)
-        # Response should be a valid hook response dict (canary produced output)
+        # A real handler denied it, so the response must carry a decision.
         assert "result" in response or "hookSpecificOutput" in response or "decision" in response
 
     def test_process_request_invalid_data(

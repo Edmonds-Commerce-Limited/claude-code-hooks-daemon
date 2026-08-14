@@ -98,23 +98,35 @@ separate decision.
 
 ### Phase 2: Remove
 
-- [ ] ⬜ **Task 2.1**: Delete the handler modules and their exports
-- [ ] ⬜ **Task 2.2**: Delete the config key end to end — schema, model,
-  install template, constant, `register_all` parameter, controller call site,
-  `DocsGenerator` threading
-- [ ] ⬜ **Task 2.3**: Amend or replace every affected test; a test that needed
-  a trivial handler to exercise the framework gets a purpose-built fixture
-  rather than losing coverage
+- [x] ✅ **Task 2.1**: 10 modules `git rm`'d, exports and registry entries gone
+- [x] ✅ **Task 2.2**: Config key removed end to end — model, schema, constant,
+  install template, `register_all` parameter, controller call site,
+  `DocsGenerator` threading, and this repo's own `.claude/hooks-daemon.yaml`
+- [x] ✅ **Task 2.3**: Tests amended, coverage replaced rather than dropped.
+  The notable one: `test_controller.py::test_process_request` used the canary
+  purely to guarantee handler output; it now routes a command `destructive_git`
+  DENIES, which is a stronger vehicle because it exercises matching and the
+  deny path as well as routing. Only tests whose entire subject was the removed
+  feature were deleted. Also renamed `Priority.HELLO_WORLD` →
+  `Priority.TEST_HANDLER` (same value): it is used across the suite for
+  purpose-built fixtures, so it outlives the handlers — only the name was wrong
+  - The two dedicated files (`test_hello_world.py`,
+    `test_hello_world_config.py`) were deleted; 14 others amended
 
 ### Phase 3: Register the removal and verify
 
-- [ ] ⬜ **Task 3.1**: Retired-handler registry entries for each removed
-  handler ID, so an existing client daemon with them in config does not fail to
-  start
-- [ ] ⬜ **Task 3.2**: `UNRELEASED/config-changes/` entry recording the removed
-  key, and a post-upgrade task if a client config carrying it would warn
-- [ ] ⬜ **Task 3.3**: Regenerate `.claude/HOOKS-DAEMON.md`; update any
-  handler-count claim in `README.md` or docs
+- [x] ✅ **Task 3.1**: Ten `RETIRED_HANDLERS` entries, one per event type, so a
+  client config still carrying `hello_world_*:` blocks validates cleanly
+  instead of tipping the daemon into DEGRADED MODE
+- [x] ✅ **Task 3.2**: `UNRELEASED/config-changes/v3.53.0.yaml` records the
+  removed key with a migration note, including the replacement way to verify
+  hooks are wired (send a command a real handler denies)
+- [x] ✅ **Task 3.3**: `.claude/HOOKS-DAEMON.md` regenerated (85 handler rows,
+  13 event sections). Priority-range docs updated in `CLAUDE.md`,
+  `CONTRIBUTING.md`, `CLAUDE/HANDLER_DEVELOPMENT.md`,
+  `docs/guides/CONFIGURATION.md` and `docs/guides/HANDLER_REFERENCE.md`; the
+  `GETTING_STARTED.md` "enable the canary to check hooks work" section is
+  replaced by one that sends a command a real handler blocks
 - [ ] ⬜ **Task 3.4**: Full QA; daemon restart RUNNING; client-mode
   verification that a config still carrying the removed key starts cleanly
 

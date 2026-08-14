@@ -29,7 +29,7 @@ def class_name_to_config_key(class_name: str) -> str:
     Examples:
         DestructiveGitHandler -> destructive_git
         SedBlockerHandler -> sed_blocker
-        HelloWorldPreToolUseHandler -> hello_world_pre_tool_use
+        AskUserQuestionBlockerHandler -> ask_user_question_blocker
         TDDEnforcementHandler -> tdd_enforcement
 
     Args:
@@ -58,7 +58,7 @@ def config_key_to_display_name(config_key: str) -> str:
     Examples:
         destructive_git -> destructive-git
         sed_blocker -> sed-blocker
-        hello_world_pre_tool_use -> hello-world-pre-tool-use
+        ask_user_question_blocker -> ask-user-question-blocker
 
     Args:
         config_key: Config key in snake_case
@@ -77,7 +77,7 @@ def display_name_to_config_key(display_name: str) -> str:
     Examples:
         destructive-git -> destructive_git
         sed-blocker -> sed_blocker
-        hello-world-pre-tool-use -> hello_world_pre_tool_use
+        ask-user-question-blocker -> ask_user_question_blocker
 
     Args:
         display_name: Display name in kebab-case

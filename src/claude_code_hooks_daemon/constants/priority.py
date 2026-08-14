@@ -32,8 +32,11 @@ class Priority:
     # Default priority for handlers that don't specify one (matches Handler.__init__ default)
     DEFAULT = 50
 
-    # Test handlers (Priority: 5)
-    HELLO_WORLD = 5
+    # Test handlers (Priority: 5). Named for the ROLE, not for a handler: the
+    # hello_world canaries it was named after are gone, but the test suite uses
+    # this throughout for purpose-built handlers that must sort before every real
+    # one.
+    TEST_HANDLER = 5
 
     # Safety handlers (Priority: 10-20)
     DAEMON_RESTART_VERIFIER = 10

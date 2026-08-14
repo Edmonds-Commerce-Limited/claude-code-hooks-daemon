@@ -52,7 +52,7 @@ def test_register_all_with_none_event_config():
     config = {
         "pre_tool_use": None,
         "post_tool_use": None,
-        "session_start": {"hello_world": {"enabled": False}},
+        "session_start": {"version_check": {"enabled": False}},
     }
 
     # Should not raise AttributeError

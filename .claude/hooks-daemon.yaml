@@ -10,8 +10,6 @@ daemon:
 
   stale_file_days: 7  # Remove daemon runtime files older than this many days
 
-  enable_hello_world_handlers: false  # Disabled - using real handlers instead
-
   # Language filter for strategy-pattern handlers
   languages: []
 
@@ -38,11 +36,6 @@ daemon:
 handlers:
   # PreToolUse handlers (run before every tool call)
   pre_tool_use:
-    # TESTING HANDLERS (Priority 5)
-    hello_world_pre_tool_use:  # Test handler showing hook is working
-      enabled: false                     # Disabled - using real handlers
-      priority: 5
-
     # SAFETY HANDLERS (Priority 10-20)
     destructive_git:       # Blocks git reset --hard, git clean -f, etc
       enabled: true

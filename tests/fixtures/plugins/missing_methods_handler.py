@@ -13,7 +13,7 @@ class MissingMethodsHandler(Handler):
         Args:
             config: Optional configuration dictionary
         """
-        super().__init__(name="missing-methods", priority=Priority.HELLO_WORLD)
+        super().__init__(name="missing-methods", priority=Priority.TEST_HANDLER)
         self.config = config
 
     def get_claude_md(self) -> str | None:

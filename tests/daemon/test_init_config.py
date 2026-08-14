@@ -57,7 +57,7 @@ def _discover_all_handlers() -> dict[str, list[str]]:
             continue
 
         for _importer, modname, _ispkg in pkgutil.iter_modules(event_module.__path__):
-            if modname.startswith("_") or modname == "hello_world":
+            if modname.startswith("_"):
                 continue
 
             try:
@@ -71,7 +71,6 @@ def _discover_all_handlers() -> dict[str, list[str]]:
                         and issubclass(attr, Handler)
                         and attr is not Handler
                         and not attr.__name__.startswith("_")
-                        and "HelloWorld" not in attr.__name__
                     ):
                         config_key = _to_snake_case(attr.__name__)
                         handlers_by_event[event_dir].append(config_key)

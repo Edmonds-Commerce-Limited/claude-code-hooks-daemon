@@ -63,7 +63,6 @@ class ConfigSchema:
                         "type": "string",
                         "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
                     },
-                    "enable_hello_world_handlers": {"type": "boolean"},
                 },
             },
             # Finding #31: 'plugins' is an OBJECT (matching PluginsConfig in

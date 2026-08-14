@@ -31,9 +31,7 @@ class _DefaultHandler(Handler):
     """Handler that does NOT override get_default_enabled() — opt-out by default."""
 
     def __init__(self) -> None:
-        super().__init__(
-            handler_id=HandlerID.HELLO_WORLD_PRE_TOOL_USE, priority=Priority.HELLO_WORLD
-        )
+        super().__init__(handler_id=HandlerID.TEST_SERVER, priority=Priority.TEST_HANDLER)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return False
@@ -52,9 +50,7 @@ class _OptInHandler(Handler):
     """Handler that overrides get_default_enabled() -> False (off-by-default)."""
 
     def __init__(self) -> None:
-        super().__init__(
-            handler_id=HandlerID.HELLO_WORLD_SESSION_START, priority=Priority.HELLO_WORLD
-        )
+        super().__init__(handler_id=HandlerID.TEST_SERVER, priority=Priority.TEST_HANDLER)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return False

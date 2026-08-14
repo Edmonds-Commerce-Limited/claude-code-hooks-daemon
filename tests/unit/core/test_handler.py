@@ -602,7 +602,7 @@ class TestHandlerIntegration:
     def test_handler_priority_ordering(self):
         """Test that handlers can be ordered by priority."""
         handlers = [
-            ConcreteHandler(name="high", priority=Priority.HELLO_WORLD),
+            ConcreteHandler(name="high", priority=Priority.TEST_HANDLER),
             ConcreteHandler(name="low", priority=Priority.DESTRUCTIVE_GIT),
             ConcreteHandler(name="medium", priority=Priority.QA_SUPPRESSION),
         ]
@@ -610,7 +610,7 @@ class TestHandlerIntegration:
         # Sort by priority (lower numbers execute first)
         sorted_handlers = sorted(handlers, key=lambda h: h.priority)
 
-        # HELLO_WORLD=5, DESTRUCTIVE_GIT=10, QA_SUPPRESSION=30
+        # TEST_HANDLER=5, DESTRUCTIVE_GIT=10, QA_SUPPRESSION=30
         assert sorted_handlers[0].name == "high"  # Priority 5
         assert sorted_handlers[1].name == "low"  # Priority 10
         assert sorted_handlers[2].name == "medium"  # Priority 30

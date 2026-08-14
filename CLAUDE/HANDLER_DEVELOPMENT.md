@@ -400,14 +400,14 @@ new_string = tool_input.get("new_string")
 
 Choose priority based on handler type:
 
-| Priority Range | Type         | Examples                                           |
-| -------------- | ------------ | -------------------------------------------------- |
-| 0-9            | Test         | Hello world, architecture enforcement              |
-| 10-20          | Safety       | Destructive git, sed blocker, data loss prevention |
-| 25-35          | Code Quality | QA suppression blockers, ESLint disable            |
-| 36-55          | Workflow     | TDD enforcement, plan validation, web search       |
-| 56-60          | Advisory     | British English warnings, suggestions              |
-| 100+           | Logging      | Notification logger, session cleanup               |
+| Priority Range | Type         | Examples                                              |
+| -------------- | ------------ | ----------------------------------------------------- |
+| 0-9            | Test         | Purpose-built test fixtures (`Priority.TEST_HANDLER`) |
+| 10-20          | Safety       | Destructive git, sed blocker, data loss prevention    |
+| 25-35          | Code Quality | QA suppression blockers, ESLint disable               |
+| 36-55          | Workflow     | TDD enforcement, plan validation, web search          |
+| 56-60          | Advisory     | British English warnings, suggestions                 |
+| 100+           | Logging      | Notification logger, session cleanup                  |
 
 **Lower priority = runs first**
 
@@ -809,8 +809,7 @@ means `None`.
    overlap is not cover.
 
 Handlers that emit nothing an agent acts on — status-line renderers, loggers,
-lifecycle handlers, `hello_world` stubs — never reach the tests and are always
-`None`.
+lifecycle handlers — never reach the tests and are always `None`.
 
 **Whichever you decide, record it.** Add your handler to the classification
 table in `tests/integration/test_claude_md_guidance_coverage.py`. An exemption

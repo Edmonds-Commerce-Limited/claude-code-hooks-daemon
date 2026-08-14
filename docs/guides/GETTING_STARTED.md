@@ -129,22 +129,18 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}' \
 
 Expected: `{}` (empty JSON, meaning "allow").
 
-### Enable Hello World Handlers (Optional)
+### Confirm a Handler Actually Fires (Optional)
 
-To confirm hooks are connected end-to-end, you can temporarily enable the test handlers. Edit `.claude/hooks-daemon.yaml`:
-
-```yaml
-daemon:
-  enable_hello_world_handlers: true
-```
-
-Then restart the daemon:
+The check above proves the pipeline is connected, but an "allow" looks identical to a daemon that is doing nothing. To see a handler actually make a decision, send it something it is supposed to block:
 
 ```bash
-.claude/hooks-daemon/bin/hooks-daemon restart
+echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}' \
+  | .claude/hooks/pre-tool-use
 ```
 
-The hello world handlers add a small context message to every hook event. Disable them once you have confirmed things work.
+Expected: a JSON response denying the command, with a reason from the `destructive_git` handler. Nothing is executed — the hook only inspects the command.
+
+This is strictly better evidence than a "hook is alive" message: it exercises a real handler, its matching logic, and the deny path all at once.
 
 ---
 

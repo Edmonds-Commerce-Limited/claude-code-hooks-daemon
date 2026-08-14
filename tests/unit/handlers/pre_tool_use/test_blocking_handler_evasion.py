@@ -244,7 +244,6 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "CommentSizeHandler": "matches written content (comment spans)",
     "DaemonDocsGuardHandler": "matches a Read path",
     "ErrorHidingBlockerHandler": "matches written content",
-    "HelloWorldPreToolUseHandler": "test handler, blocks nothing",
     "LockFileEditBlockerHandler": "matches a file path",
     "PlanQaEditHandler": "matches a plan file path",
     "PlanTimeEstimatesHandler": "matches plan document content",

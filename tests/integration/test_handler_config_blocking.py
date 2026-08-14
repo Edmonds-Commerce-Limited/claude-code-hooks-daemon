@@ -443,7 +443,7 @@ class TestConfigPriorityOverride:
 
         class HighPriorityHandler(Handler):
             def __init__(self) -> None:
-                super().__init__(name="high", priority=Priority.HELLO_WORLD, terminal=False)
+                super().__init__(name="high", priority=Priority.TEST_HANDLER, terminal=False)
 
             def matches(self, hook_input: dict[str, Any]) -> bool:
                 return True

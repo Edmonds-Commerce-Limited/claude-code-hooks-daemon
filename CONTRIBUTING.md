@@ -201,7 +201,7 @@ backward compatibility with pre-Layer-2 tags. It is not the source of truth.)
 
 ### Priority Ranges
 
-- **5**: Test/debug handlers (hello_world)
+- **5**: Test/debug handlers (`Priority.TEST_HANDLER`; no built-in handlers ship here)
 - **10-20**: Safety handlers (destructive operations)
 - **25-35**: Code quality handlers (linting, TDD)
 - **36-55**: Workflow handlers (planning, npm)

@@ -33,7 +33,7 @@ def _discover_handler_modules() -> list[tuple[str, str]]:
             continue
 
         for py_file in sorted(event_dir.glob("*.py")):
-            if py_file.name.startswith("_") or py_file.name == "hello_world.py":
+            if py_file.name.startswith("_"):
                 continue
             # Skip non-handler utility files
             if py_file.name in (

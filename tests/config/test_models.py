@@ -540,7 +540,6 @@ class TestDaemonConfig:
         assert config.log_buffer_size == 1000
         assert config.request_timeout_seconds == 30
         assert config.self_install_mode is False
-        assert config.enable_hello_world_handlers is False
 
     def test_can_set_all_fields(self) -> None:
         """Can set all DaemonConfig fields."""
@@ -552,7 +551,6 @@ class TestDaemonConfig:
             log_buffer_size=500,
             request_timeout_seconds=60,
             self_install_mode=True,
-            enable_hello_world_handlers=True,
         )
         assert config.idle_timeout_seconds == 300
         assert config.log_level == LogLevel.DEBUG
@@ -561,7 +559,6 @@ class TestDaemonConfig:
         assert config.log_buffer_size == 500
         assert config.request_timeout_seconds == 60
         assert config.self_install_mode is True
-        assert config.enable_hello_world_handlers is True
 
     def test_idle_timeout_must_be_positive(self) -> None:
         """idle_timeout_seconds must be >= 1."""

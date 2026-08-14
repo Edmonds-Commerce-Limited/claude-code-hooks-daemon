@@ -367,8 +367,9 @@ class HookResult(BaseModel):
         LOOP-BREAKER (Sev-1 shipped in v3.31.0): Claude Code treats ANY
         non-empty additionalContext as "continue the conversation" -
         regardless of decision - and sets stop_hook_active=true on the next
-        Stop check. Unconditional advisory handlers (e.g. hello_world_stop)
-        contribute non-empty context on every single Stop event, so once one
+        Stop check. An unconditional advisory handler on Stop — one that
+        contributes context regardless of what happened — adds non-empty
+        context on every single Stop event, so once one
         ALLOW-with-context response goes out, nothing ever makes context
         empty again, and the daemon keeps re-triggering "continue" forever.
         DENY is unaffected (a real block is supposed to force attention no

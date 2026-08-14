@@ -59,7 +59,6 @@ class TestDaemonConfigKeys:
     def test_daemon_mode_keys(self) -> None:
         """Test daemon mode config keys."""
         assert ConfigKey.SELF_INSTALL_MODE == "self_install_mode"
-        assert ConfigKey.ENABLE_HELLO_WORLD_HANDLERS == "enable_hello_world_handlers"
         assert ConfigKey.INPUT_VALIDATION == "input_validation"
 
 
@@ -219,8 +218,7 @@ class TestConfigKeyGroups:
             ConfigKey.LOG_BUFFER_SIZE,
             ConfigKey.REQUEST_TIMEOUT_SECONDS,
             ConfigKey.SELF_INSTALL_MODE,
-            ConfigKey.ENABLE_HELLO_WORLD_HANDLERS,
             ConfigKey.INPUT_VALIDATION,
         ]
-        assert len(daemon_keys) == 9
+        assert len(daemon_keys) == 8
         assert all(isinstance(key, str) for key in daemon_keys)

@@ -26,7 +26,7 @@ class SimpleTestHandler(Handler):
 
     def __init__(self) -> None:
         """Initialise test handler."""
-        super().__init__(name="test_handler", priority=Priority.HELLO_WORLD, terminal=True)
+        super().__init__(name="test_handler", priority=Priority.TEST_HANDLER, terminal=True)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match all requests."""

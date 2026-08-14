@@ -13,7 +13,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.constants import ConfigKey
-from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
 from claude_code_hooks_daemon.pseudo_events.registry import (
     enabled_pseudo_event_handler_classes,
@@ -50,7 +49,6 @@ class DocsGenerator:
 
     __slots__ = (
         "_config",
-        "_enable_hello_world_handlers",
         "_plugins",
         "_project_handlers",
         "_pseudo_events",
@@ -63,7 +61,6 @@ class DocsGenerator:
         registry: HandlerRegistry,
         plugins: list[Any] | None = None,
         project_handlers: list[Any] | None = None,
-        enable_hello_world_handlers: bool = False,
         pseudo_events: dict[str, Any] | None = None,
     ) -> None:
         """Initialize docs generator.
@@ -73,10 +70,6 @@ class DocsGenerator:
             registry: Handler registry with discovered handlers
             plugins: Optional list of plugin handler instances
             project_handlers: Optional list of project handler instances
-            enable_hello_world_handlers: When False (default, matching
-                ``DaemonConfig.enable_hello_world_handlers``), ``HandlerTag.TEST``
-                handlers are reported as disabled so the generated doc reflects the
-                daemon's real active set (Plan 00162 — the flag gates them at load).
             pseudo_events: Optional ``pseudo_events:`` config section. Pseudo-event
                 handlers have no ``EVENT_TYPE_MAPPING`` entry and no ``handlers:``
                 block, so without this they are absent from the generated document
@@ -88,7 +81,6 @@ class DocsGenerator:
         self._registry = registry
         self._plugins = plugins or []
         self._project_handlers = project_handlers or []
-        self._enable_hello_world_handlers = enable_hello_world_handlers
         self._pseudo_events = pseudo_events or {}
 
     def generate_markdown(self, include_disabled: bool = False) -> str:
@@ -302,15 +294,6 @@ class DocsGenerator:
 
                 try:
                     instance = handler_class()
-
-                    # Test-handler gate (Plan 00162): hello_world handlers are
-                    # only active when daemon.enable_hello_world_handlers is true.
-                    # Report them as disabled otherwise so the doc matches the
-                    # daemon's real active set.
-                    if HandlerTag.TEST in instance.tags and not self._enable_hello_world_handlers:
-                        is_enabled = False
-                        if not include_disabled:
-                            continue
 
                     priority = handler_config.get(ConfigKey.PRIORITY, instance.priority)
                     behavior = self._detect_behavior(instance)
