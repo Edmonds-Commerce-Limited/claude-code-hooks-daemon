@@ -156,19 +156,27 @@ described.** Three further sites need work a umask cannot do:
 
 ### Phase 3: Verify, remediate, document
 
-- [ ] ⬜ **Task 3.1**: Restart the daemon; re-measure every artefact from
-  Task 1.1 and prove the before/after difference against the LIVE daemon, not
-  from the source
-- [ ] ⬜ **Task 3.2**: Confirm the daemon still functions for a second UID —
-  socket connect, PID read, `.socket-path` discovery — rather than assuming
-  `0o007` preserved it
+- [x] ✅ **Task 3.1**: Live daemon reports `Umask: 0077`. Recreated artefacts:
+  PID file and `.socket-path` now `0600` (were `0666`); socket unchanged at
+  `0660`. Forcing fresh creates of the sensitive set gave `verdicts.jsonl` and
+  `stop-events.jsonl` at `0600`, `thread-registry/` and `context-sidecar/` at
+  `0700`. Everything NOT recreated stayed `0666`/`0777`, which is the whole
+  argument for Task 3.4
+- [x] ✅ **Task 3.2**: Measured with a real second UID rather than assumed. It
+  is refused by the SOCKET (`0660 root:root`, an explicit post-bind chmod this
+  plan never touches) as well as the PID file — so cross-UID use was already
+  impossible before this change, and the group-preserving `0o007` would not
+  have altered that, because no code anywhere sets a shared group. What the fix
+  does remove is cross-UID *reading* of runtime files (a host user under the
+  ccy container setup); that is the intended fix, and belongs in Task 3.5
 - [ ] ⬜ **Task 3.3**: Full QA; client-mode verification via
   `scripts/dummy-client-repo.sh` (this changes deployed runtime behaviour)
-- [ ] ⬜ **Task 3.4**: DBF — a write-time fix cannot see what is already on
-  disk, so add a BATCH guard: a check asserting no daemon-created artefact has
-  `mode & 0o077`, runnable against an existing install rather than only in a
-  unit test. Every currently-deployed daemon has world-writable files that no
-  umask change retro-fixes
+- [x] ✅ **Task 3.4**: `daemon/permission_audit.py` +
+  `hooks-daemon check-permissions [--fix]`, exit 1 while findings remain. Rule
+  is group/other-**writable**; symlinks, venv trees and the socket are excluded
+  because each was MEASURED as a false positive on this install (a venv's
+  `bin/python` is a symlink, uv leaves a `0666` `.lock`). Dogfooded: it found 4
+  real artefacts here and `--fix` cleared them
 - [ ] ⬜ **Task 3.5**: Post-upgrade task file for existing installs whose files
   are already world-writable, plus a truth-changes entry if any documented
   statement about daemon file permissions changes

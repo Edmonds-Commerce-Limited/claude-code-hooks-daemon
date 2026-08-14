@@ -73,6 +73,10 @@ from claude_code_hooks_daemon.daemon.paths import (
     resolve_hostname,
     write_cleanup_status,
 )
+from claude_code_hooks_daemon.daemon.permission_audit import (
+    audit_untracked_permissions,
+    tighten_permissions,
+)
 from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
     _socket_liveness_sync,
@@ -1887,6 +1891,51 @@ def cmd_disk_usage(args: argparse.Namespace) -> int:
         "Reclaim venvs with `prune-venvs --stale --force` (legacy: `--legacy`) — "
         "the daemon never deletes venvs automatically."
     )
+    return 0
+
+
+def cmd_check_permissions(args: argparse.Namespace) -> int:
+    """Report (and optionally fix) group/other-writable daemon artefacts.
+
+    Plan 00239. The daemon formerly daemonised with ``umask(0)``, so everything
+    it created landed world-writable. Fixing the umask governs future creates and
+    retro-fixes nothing, so an already-deployed daemon keeps its exposed files
+    until this is run — which is why the fix needs a batch guard as well as a
+    write-time one.
+
+    Exits 1 while findings remain, so it is usable as a CI / upgrade gate.
+    ``--fix`` strips group and other bits (owner bits untouched, so directories
+    stay traversable).
+    """
+    project_root = Path(get_project_path(getattr(args, "project_root", None)))
+    untracked_dir = _daemon_untracked_dir(project_root)
+    # The socket is deliberately 0660 via an explicit post-bind chmod.
+    findings = audit_untracked_permissions(untracked_dir, exempt=[get_socket_path(project_root)])
+
+    if not findings:
+        print(f"No group/other-writable daemon artefacts under {untracked_dir}")
+        return 0
+
+    print(f"Group/other-writable daemon artefacts under {untracked_dir}:")
+    print()
+    for finding in findings:
+        print(f"  {finding.describe()}")
+    print()
+
+    if not getattr(args, "fix", False):
+        print(f"{len(findings)} finding(s). Re-run with --fix to strip group/other bits.")
+        print(
+            "These predate the umask fix: a umask governs creates, so existing "
+            "files keep the mode they were created with."
+        )
+        return 1
+
+    changed = tighten_permissions(findings)
+    print(f"Tightened {len(changed)} of {len(findings)} artefact(s) to owner-only.")
+    remaining = audit_untracked_permissions(untracked_dir, exempt=[get_socket_path(project_root)])
+    if remaining:
+        print(f"WARNING: {len(remaining)} artefact(s) could not be tightened.")
+        return 1
     return 0
 
 
@@ -4223,6 +4272,20 @@ def main() -> int:
         "--json", action="store_true", help="Emit JSON instead of a human-readable table"
     )
     parser_disk_usage.set_defaults(func=cmd_disk_usage)
+
+    # check-permissions command (Plan 00239) — the BATCH half of the umask fix.
+    # A umask governs creates only, so every already-deployed daemon keeps its
+    # world-writable artefacts until this is run against it.
+    parser_check_permissions = subparsers.add_parser(
+        "check-permissions",
+        help="Report (or --fix) group/other-writable daemon artefacts (Plan 00239)",
+    )
+    parser_check_permissions.add_argument(
+        "--fix",
+        action="store_true",
+        help="Strip group/other bits from every reported artefact",
+    )
+    parser_check_permissions.set_defaults(func=cmd_check_permissions)
 
     # prune-venvs command (Plan 00099)
     parser_prune_venvs = subparsers.add_parser(
