@@ -11,14 +11,48 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
 
 logger = logging.getLogger(__name__)
+
+_STATUS_FILENAME = "cleanup_status.json"
 
 # How long (seconds) to show the startup indicator after daemon start
 _DISPLAY_WINDOW_SECONDS = 30
 
 # Transition point between "starting" icon and "result" message
 _STARTUP_PHASE_SECONDS = 5
+
+_TIMESTAMP_FIELD = "timestamp"
+_COUNT_FIELD = "count"
+_MISSING_TIMESTAMP = 0.0
+_MISSING_COUNT = 0
+
+
+def _parse_status(content: str) -> dict[str, Any]:
+    """Parse the cleanup status document, rejecting anything but an object.
+
+    A valid-JSON-but-not-an-object document (``[1,2,3]``) used to parse fine and
+    then raise ``AttributeError`` on ``.get`` — which the caller's
+    ``OSError/JSONDecodeError/KeyError`` guard did not catch, so it escaped into
+    the render. Rejecting it here turns that into the fail-silent default.
+    """
+    parsed = json.loads(content)
+    if not isinstance(parsed, dict):
+        raise ValueError("cleanup status is not a JSON object")
+    result: dict[str, Any] = parsed
+    return result
+
+
+# ``cleanup_status.json`` is written ONCE per daemon start and read on every
+# render thereafter — and after the 30-second window it can never produce a
+# segment again. The gate keeps the stat() (a re-``start`` against a live
+# daemon rewrites the file, and that must still display) and drops the read +
+# parse (Plan 00238).
+_status_reader: MtimeCachedFile[dict[str, Any]] = MtimeCachedFile(
+    parse=_parse_status,
+    default={},
+)
 
 
 class StartupCleanupHandler(Handler):
@@ -47,13 +81,10 @@ class StartupCleanupHandler(Handler):
             HookResult with cleanup context, or empty if outside display window
         """
         try:
-            status_file = ProjectContext.daemon_untracked_dir() / "cleanup_status.json"
-            if not status_file.exists():
-                return HookResult(context=[])
-
-            data = json.loads(status_file.read_text())
-            timestamp: float = data.get("timestamp", 0.0)
-            count: int = data.get("count", 0)
+            status_file = ProjectContext.daemon_untracked_dir() / _STATUS_FILENAME
+            data = _status_reader.read(status_file)
+            timestamp: float = data.get(_TIMESTAMP_FIELD, _MISSING_TIMESTAMP)
+            count: int = data.get(_COUNT_FIELD, _MISSING_COUNT)
             elapsed = time.time() - timestamp
 
             if elapsed < _STARTUP_PHASE_SECONDS:
@@ -61,7 +92,9 @@ class StartupCleanupHandler(Handler):
             elif elapsed < _DISPLAY_WINDOW_SECONDS and count > 0:
                 return HookResult(context=[f"| 🧹 {count} stale"])
 
-        except (OSError, json.JSONDecodeError, KeyError) as e:
+        except (OSError, RuntimeError) as e:
+            # The read itself is fail-silent (see MtimeCachedFile); what can
+            # still raise here is resolving the daemon's untracked dir.
             logger.debug("Failed to read cleanup status: %s", e)
 
         return HookResult(context=[])

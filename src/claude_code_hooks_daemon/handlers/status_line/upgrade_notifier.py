@@ -18,10 +18,34 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Handler, HookResult, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
+from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
 
 logger = logging.getLogger(__name__)
 
 _CACHE_FILENAME = "version_check_cache.json"
+_IS_OUTDATED_FIELD = "is_outdated"
+_CURRENT_VERSION_FIELD = "current_version"
+_LATEST_VERSION_FIELD = "latest_version"
+
+
+def _parse_cache(content: str) -> dict[str, Any]:
+    """Parse the version-check cache, rejecting anything but a JSON object."""
+    parsed = json.loads(content)
+    if not isinstance(parsed, dict):
+        raise ValueError("version cache is not a JSON object")
+    result: dict[str, Any] = parsed
+    return result
+
+
+# The SessionStart version_check handler rewrites this at most daily, but the
+# status line re-renders ~3,100 times an hour — so the read + JSON parse was
+# being paid thousands of times for a value that had not moved. One stat()
+# replaces it, and a fresh check still shows up on the render after it lands
+# (Plan 00238).
+_cache_reader: MtimeCachedFile[dict[str, Any]] = MtimeCachedFile(
+    parse=_parse_cache,
+    default={},
+)
 
 
 class UpgradeNotifierHandler(Handler):
@@ -64,22 +88,18 @@ class UpgradeNotifierHandler(Handler):
     def _detect_upgrade_segment(self) -> str | None:
         """Return the upgrade-arrow segment text, or None if nothing to show."""
         cache_file = ProjectContext.daemon_untracked_dir() / _CACHE_FILENAME
-        if not cache_file.exists():
-            return None
+        # Missing, unreadable and unparseable all arrive here as an empty dict
+        # (MtimeCachedFile is fail-silent by contract), which falls through to
+        # "nothing to show" on the very next line.
+        cache_data = _cache_reader.read(cache_file)
 
-        try:
-            cache_data = json.loads(cache_file.read_text())
-        except (OSError, ValueError) as e:
-            logger.debug("Failed to read version cache file %s: %s", cache_file, e)
-            return None
-
-        if not isinstance(cache_data, dict) or not cache_data.get("is_outdated"):
+        if not cache_data.get(_IS_OUTDATED_FIELD):
             return None
 
         from claude_code_hooks_daemon.version import __version__
 
-        cached_version = cache_data.get("current_version", "")
-        latest = cache_data.get("latest_version", "")
+        cached_version = cache_data.get(_CURRENT_VERSION_FIELD, "")
+        latest = cache_data.get(_LATEST_VERSION_FIELD, "")
 
         # Defense-in-depth: ignore stale cache from before an upgrade.
         if cached_version and cached_version != __version__:

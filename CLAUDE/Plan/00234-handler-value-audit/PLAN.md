@@ -234,6 +234,32 @@ nitpick item was REVERSED by a live chain trace, not implemented).
   `supervisor_indicator`'s negative-path `/proc` walk; mtime-gate
   `account_display`; change-detect `git_context_injector`; rate-limit
   `daemon_restart_verifier`
+- [ ] ⬜ **Task 4.10**: Close the residual counter-advance gap that Follow-up D
+  left behind — the realisation of the "Merge loses the counter-advance side
+  effect" risk in the table below. The removed `validate_plan_number` also
+  fired on Bash `mkdir CLAUDE/Plan/NNNNN-name` and recorded the allocation
+  immediately (`matches()` line 93, `handle()` line 217 of the pre-removal
+  file, commit `17131953^`); `plan_qa_edit` only inspects Write/Edit of
+  `PLAN.md`, so the number is now claimed later — when content lands, not when
+  the folder appears. Invisible to a single agent, but it widens the TOCTOU
+  window for concurrent ones: two agents can both see N free and collide, and
+  only the commit gate catches it. `mkplan.bash` is unaffected (it takes a lock
+  and has its own writer), so exposure is limited to an agent hand-rolling
+  `mkdir` — which `plan_number_helper` already discourages. No test covers it.
+  Found by peer review of the Plan 00237 Phase 4 diff; recorded rather than
+  dropped because Plan 00237 is closed
+- [ ] ⬜ **Task 4.11**: Establish how a daemon restart can drop pseudo-event
+  guidance from `CLAUDE.md`. Observed 2026-08-14: a restart deleted both
+  nitpick sections (42 lines) while both handlers were live and firing. Caught
+  by the Plan 00203 guard
+  (`test_claude_md_guidance_coverage.py::…::test_every_earning_handler_has_a_section_in_claude_md`),
+  which is the only surface that sees it — the daemon reports HEALTHY and
+  `.claude/HOOKS-DAEMON.md` still lists both. Instrumenting the injector against
+  the live config shows the pipeline is CORRECT as it stands (85 handlers in,
+  both nitpick sections through collect → build → replace → mdformat → the
+  content-loss guard), so the restart ran against a handler set that lacked
+  them and the mechanism is unknown. Restored via `regenerate-docs`; details and
+  the diagnostic in Plan 00238's JOURNAL for 26-08-14
 - [x] ✅ **Task 4.9**: Proposal handed to the human, who set the order:
   A+B+C+G as one "fix what's broken" pass, then D, then H — with E and F held
   until the verdict log from A had produced real firing data. That data arrived

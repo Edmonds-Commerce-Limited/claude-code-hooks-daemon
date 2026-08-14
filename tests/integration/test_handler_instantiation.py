@@ -41,6 +41,7 @@ def _discover_handler_modules() -> list[tuple[str, str]]:
                 "api_usage_base.py",
                 "context_tiers.py",
                 "thread_registry.py",
+                "mtime_cache.py",
             ):
                 continue
 

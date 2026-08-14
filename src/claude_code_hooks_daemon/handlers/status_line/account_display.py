@@ -10,6 +10,26 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
+
+_CONF_RELATIVE_PATH = (".claude", ".last-launch.conf")
+_TOKEN_PATTERN = re.compile(r'LAST_TOKEN="([^"]*)"')
+
+
+def _extract_username(content: str) -> str | None:
+    match = _TOKEN_PATTERN.search(content)
+    return match.group(1) if match else None
+
+
+# Module-level so the cache survives across renders — a per-handler-instance
+# cache would work too (one instance per daemon), but keeping it here matches
+# settings_reader.py and makes the lifetime obvious. The account username
+# changes effectively never, so this reduces a read + regex on EVERY render
+# (~3,100/hour) to a single stat() (Plan 00238).
+_username_reader: MtimeCachedFile[str | None] = MtimeCachedFile(
+    parse=_extract_username,
+    default=None,
+)
 
 
 class AccountDisplayHandler(Handler):
@@ -37,16 +57,13 @@ class AccountDisplayHandler(Handler):
             HookResult with username in context list, or empty list if unavailable
         """
         try:
-            conf_path = Path.home() / ".claude" / ".last-launch.conf"
-            if not conf_path.exists():
+            username = _username_reader.read(Path.home().joinpath(*_CONF_RELATIVE_PATH))
+            # `is None`, not falsiness: an EMPTY token renders "👤  |" and always
+            # has. Tuning must not change what the line displays (Plan 00238
+            # Non-Goals), and `if not username` would have silently dropped it.
+            if username is None:
                 return HookResult(context=[])
 
-            content = conf_path.read_text()
-            match = re.search(r'LAST_TOKEN="([^"]*)"', content)
-            if not match:
-                return HookResult(context=[])
-
-            username = match.group(1)
             return HookResult(context=[f"👤 {username} |"])
 
         except Exception:

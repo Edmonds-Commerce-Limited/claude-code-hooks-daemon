@@ -303,12 +303,6 @@
       "reason": "Daemon stats handler: log-and-continue on individual stat collection failures. Status line handlers are fail-open \u2014 one stat failing must not crash the entire status line. Already logged."
     },
     {
-      "file": "handlers/status_line/upgrade_notifier.py",
-      "function": "_detect_upgrade_segment",
-      "rule": "return-none-on-error",
-      "reason": "Upgrade notifier reads a best-effort version-check cache file: an OSError/ValueError on read (missing/malformed JSON) means no reliable upgrade signal, so returning None (render nothing) is the correct fallback, not error hiding. Status line handlers are fail-open by design; the outer handle() also wraps this call so any other exception fails safe too."
-    },
-    {
       "file": "handlers/status_line/git_branch.py",
       "function": "_render_git_context",
       "rule": "log-and-continue",

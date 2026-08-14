@@ -120,15 +120,28 @@ Two things the research found that this plan must respect:
 
 ### Phase 3: The uncached-read family
 
-- [ ] ⬜ **Task 3.1**: mtime-gate `account_display`, reusing the existing
-  pattern in `settings_reader.py` rather than inventing a second one
-- [ ] ⬜ **Task 3.2**: Apply the same gate to the three siblings the research
-  named — `upgrade_notifier`, `startup_cleanup`, `multithread_indicator` — or
-  record per handler why it does not apply. Follow-up H named only
-  `account_display`; fixing one of four is the shape DBF exists to prevent
-- [ ] ⬜ **Task 3.3**: Verify the rendered output is byte-identical before and
-  after for every handler touched. A caching change that alters the line has
-  changed behaviour, not cost
+- [x] ✅ **Task 3.1**: `account_display` is gated. The pattern was EXTRACTED
+  from `settings_reader.py` into `mtime_cache.py` rather than copied, and
+  `settings_reader` became its first caller — four copies of a gate is four
+  places to fix one bug. Its old tests mocked `Path.exists`/`read_text`, so
+  they pinned a call shape and broke on a change that altered no output; they
+  now drive a real file under a fake home and pin the OUTPUT instead
+- [x] ✅ **Task 3.2**: All four siblings resolved. `upgrade_notifier` and
+  `startup_cleanup` gated (the latter also stops a valid-JSON-but-not-an-object
+  document raising `AttributeError` straight through a guard that only caught
+  `OSError/JSONDecodeError/KeyError`). `multithread_indicator` — **the gate
+  cannot apply**: it writes its own heartbeat into the registry immediately
+  before reading it, so the directory mtime has always just moved and every
+  render would miss; its read is bounded by live-session count, not render
+  rate. DBF: `test_no_ungated_render_reads.py` now fails for ANY status-line
+  module reading a file directly, so a fifth instance cannot appear silently.
+  Its allowlist carries the three justified readers with reasons, and a
+  companion test fails if an entry stops reading (a stale licence)
+- [x] ✅ **Task 3.3**: Rendered output verified against the live daemon before
+  and after the restart. The `👤` segment this plan changed is byte-identical;
+  `🧹` and `📦` render nothing in both captures, with their positive paths
+  pinned by unit test. Only `daemon_stats` differs, and only because the
+  restart reset its own uptime counter
 
 ### Phase 4: The two FIX verdicts off the status line
 
