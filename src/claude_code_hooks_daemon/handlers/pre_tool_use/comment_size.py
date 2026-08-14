@@ -113,11 +113,19 @@ class CommentSizeHandler(Handler):
         super().__init__(
             handler_id=HandlerID.COMMENT_SIZE,
             priority=Priority.COMMENT_SIZE,
+            # NOT terminal -- same reasoning as comment_changelog. The
+            # shrink and same-size tiers deliberately return ALLOW, and the
+            # chain breaks on ANY terminal match whatever it decided, so a
+            # terminal ALLOW at priority 33 ended dispatch and disabled
+            # every higher-numbered handler for that write. Shrinking an
+            # over-long comment is meant to be silent, not to switch off
+            # tdd_enforcement. A non-terminal deny still denies: chain.py
+            # keeps the most restrictive decision seen.
+            terminal=False,
             tags=[
                 HandlerTag.MULTI_LANGUAGE,
                 HandlerTag.CONTENT_QUALITY,
                 HandlerTag.BLOCKING,
-                HandlerTag.TERMINAL,
             ],
         )
         self._registry = CommentStrategyRegistry.create_default()

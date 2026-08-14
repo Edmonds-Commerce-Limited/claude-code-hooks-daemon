@@ -167,11 +167,27 @@ class CommentChangelogHandler(Handler):
         super().__init__(
             handler_id=HandlerID.COMMENT_CHANGELOG,
             priority=Priority.COMMENT_CHANGELOG,
+            # NOT terminal, and that is load-bearing. This handler has an
+            # ADVISORY path: softer signals (retrospective phrasing, two
+            # versioned entries) return ALLOW with context rather than a
+            # deny. The chain breaks on ANY terminal match regardless of
+            # decision, so a terminal advisory ALLOW here ended dispatch at
+            # priority 31 and silently disabled every higher-numbered
+            # handler -- tdd_enforcement (35) among them -- for that write.
+            # An ordinary English phrase like "no longer" in a comment was
+            # enough to switch TDD enforcement off, and nothing reported it,
+            # because a shadowed handler and one that did not match look
+            # identical from outside.
+            #
+            # Denying is not weakened by this: core/chain.py keeps the most
+            # restrictive decision seen, so a later advisory ALLOW cannot
+            # wash out a non-terminal deny (the Plan 00144 regression).
+            # plan_qa_edit already ships blocking and non-terminal.
+            terminal=False,
             tags=[
                 HandlerTag.MULTI_LANGUAGE,
                 HandlerTag.CONTENT_QUALITY,
                 HandlerTag.BLOCKING,
-                HandlerTag.TERMINAL,
             ],
         )
         self._registry = CommentStrategyRegistry.create_default()

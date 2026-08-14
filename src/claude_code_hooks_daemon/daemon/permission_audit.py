@@ -33,6 +33,7 @@ import logging
 import stat
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
+from itertools import chain
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,14 @@ def audit_untracked_permissions(
     exempted = {path.resolve() for path in exempt}
     findings: list[PermissionFinding] = []
 
-    for path in untracked_dir.rglob("*"):
+    # The ROOT is audited too, not just its contents. `rglob` never yields the
+    # directory it is called on, and the root is the single most impactful
+    # entry: `umask(0)` created it 0777, and a world-writable directory lets
+    # any local user unlink and replace the socket, PID file, verdict log and
+    # payload captures inside it however tight those files' own modes are.
+    # Omitting it made this command print a clean bill of health for exactly
+    # the installs it was written to remediate.
+    for path in chain([untracked_dir], untracked_dir.rglob("*")):
         # A symlink's own mode is always 0777 and says nothing about its target,
         # so lstat'ing one only ever produces a false positive.
         if path.is_symlink():

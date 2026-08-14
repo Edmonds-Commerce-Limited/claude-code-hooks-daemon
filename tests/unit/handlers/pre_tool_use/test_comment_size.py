@@ -51,6 +51,17 @@ class TestCommentSizeHandlerInit:
         assert HandlerTag.MULTI_LANGUAGE in handler.tags
         assert HandlerTag.CONTENT_QUALITY in handler.tags
         assert HandlerTag.BLOCKING in handler.tags
+        assert HandlerTag.TERMINAL not in handler.tags
+
+    def test_is_not_terminal(self) -> None:
+        """The shrink and same-size tiers ALLOW, and must not end the chain.
+
+        The chain breaks on ANY terminal match whatever it decided. While
+        this handler was terminal, shrinking an over-long comment -- an
+        outcome meant to be silent -- ended dispatch at priority 33 and
+        disabled every higher-numbered handler for that write.
+        """
+        assert CommentSizeHandler().terminal is False
 
 
 class TestMatchesGating:

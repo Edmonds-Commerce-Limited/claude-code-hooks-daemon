@@ -58,7 +58,24 @@ class TestCommentChangelogHandlerInit:
         assert HandlerTag.MULTI_LANGUAGE in handler.tags
         assert HandlerTag.CONTENT_QUALITY in handler.tags
         assert HandlerTag.BLOCKING in handler.tags
-        assert HandlerTag.TERMINAL in handler.tags
+        assert HandlerTag.TERMINAL not in handler.tags
+
+    def test_is_not_terminal(self) -> None:
+        """A terminal ALLOW here would silently disable the rest of the chain.
+
+        This handler has an advisory path: softer signals return ALLOW with
+        context rather than a deny. The chain breaks on ANY terminal match
+        whatever it decided, so while this was terminal an ordinary English
+        phrase such as "no longer" in a comment ended dispatch at priority 31
+        and switched off every higher-numbered handler for that write --
+        tdd_enforcement (35) included. Nothing reported it, because a
+        shadowed handler and one that never matched look identical.
+
+        Denying is unaffected: core/chain.py keeps the most restrictive
+        decision seen, so a non-terminal deny survives a later advisory ALLOW.
+        """
+        handler = CommentChangelogHandler()
+        assert handler.terminal is False
 
 
 class TestMatchesGating:

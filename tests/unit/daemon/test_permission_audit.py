@@ -67,6 +67,37 @@ class TestAuditUntrackedPermissions:
 
         assert [f.path for f in findings] == [target]
 
+    def test_world_writable_root_itself_is_flagged(self, tmp_path: Path) -> None:
+        """The audited directory is itself audited, not just its contents.
+
+        ``rglob`` never yields the directory it is called on, so the root was
+        invisible. That is the worst possible blind spot for this command:
+        ``umask(0)`` created ``untracked/`` at 0777, and a world-writable
+        directory lets any local user unlink and replace the socket, PID file
+        and verdict log inside it however tight those files' own modes are.
+        The audit therefore reported a clean tree for precisely the installs
+        it exists to remediate.
+        """
+        root = tmp_path / "untracked"
+        root.mkdir()
+        _make(root / "verdicts.jsonl", 0o600)
+        root.chmod(0o777)
+
+        findings = audit_untracked_permissions(root)
+
+        assert [f.path for f in findings] == [root]
+
+    def test_tighten_fixes_a_world_writable_root(self, tmp_path: Path) -> None:
+        """--fix must tighten the root, not just the entries beneath it."""
+        root = tmp_path / "untracked"
+        root.mkdir()
+        root.chmod(0o777)
+
+        tighten_permissions(audit_untracked_permissions(root))
+
+        assert stat.S_IMODE(root.stat().st_mode) == 0o700
+        assert audit_untracked_permissions(root) == []
+
     def test_owner_only_artefacts_are_clean(self, tmp_path: Path) -> None:
         _make(tmp_path / "verdicts.jsonl", 0o600)
         (tmp_path / "thread-registry").mkdir()
