@@ -72,6 +72,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Memory / Documentation Policy
 
+- [00244: Generated tracked docs must be path-agnostic](00244-path-agnostic-generated-docs/PLAN.md) - In Progress (client bug report: `get_claude_md()` writes the developer's absolute project path into the tracked `CLAUDE.md` block and `.claude/HOOKS-DAEMON.md`; self-install masks it because the root is `/workspace`)
+
 - [00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes](00132-progressive-disclosure-md-write-reminder/PLAN.md) - Not Started (awaiting sign-off)
 
   - Complements 00131's *block* with a *positive nudge*: a PostToolUse advisory that, after a project-doc `.md` write, re-hints the progressive-disclosure rules and asks "is this in the right place / is it the single source of truth?"
@@ -1191,9 +1193,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 243 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 244 (count = `hooksdaemon.latestPlanNumber` git counter)
 - **Completed**: 199 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 33 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 - **Folder-to-number reconciliation**: 32 + 199 + 6 = **237 folders**, spanning
