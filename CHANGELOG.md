@@ -5,6 +5,81 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.53.1] - 2026-08-16
+
+### Fixed
+
+- **Generated tracked docs no longer name the rendering machine (Plan 00244).**
+  `get_claude_md()` handler bodies and the docs generator built their example
+  commands from the runtime path builder, whose ABSOLUTE output the injector
+  writes verbatim into the tracked `<hooksdaemon>` block of `CLAUDE.md` (and
+  the header of `.claude/HOOKS-DAEMON.md`) and auto-commits. On a client
+  install that published the developer's home directory into a committed —
+  sometimes public — file, named a directory that exists on no other clone,
+  and rewrote itself per machine whenever two developers (or a host and a
+  container view of one bind-mounted repo) regenerated it. A new
+  `daemon_cli_command_for_docs()` builder emits a project-root-relative
+  command instead (`.claude/hooks-daemon/bin/hooks-daemon status` in a
+  client install, `bin/hooks-daemon status` in self-install), routed through
+  11 tracked-doc call sites. Runtime output — block reasons, advisory
+  context — is deliberately untouched and stays absolute, per Plan 00192.
+  Reported from a client install against v3.51.0.
+- **`absolute_path` and `root_recursion_guard` no longer hard-code
+  `/workspace` (Plan 00244).** Both handlers had this repository's own
+  self-install root baked into their worked examples — `absolute_path`'s
+  block-message example and resident guidance, and `root_recursion_guard`'s
+  "DO THIS INSTEAD" remedy — so every client install was told to prepend or
+  scope to a directory that does not exist on their machine.
+  `absolute_path` now resolves the real project root for its example (and
+  omits the example rather than guessing if the root can't be resolved);
+  `root_recursion_guard` now also offers a plain `rg -l "x" .` alongside the
+  `$CLAUDE_PROJECT_DIR` form.
+- **Installer deployed hook wrappers at a umask-dependent mode.**
+  `set_hook_permissions` and `ensure_echd_capture_executable` in
+  `scripts/install/hooks_deploy.sh` used `chmod +x`, and a `+x` with no
+  "who" clause is masked by the caller's umask — the same installer produced
+  `0755` under the common umask `022` but `0744` under `077` (hardened
+  images, many containers). Every Python deploy path already applied an
+  explicit `Path.chmod(0o755)`, which ignores umask entirely, so bash was
+  the outlier. At `0744` the owner can still execute, so this only bites
+  when the installing user differs from the user running Claude Code — a
+  root install run by a different user, or a host/container pair sharing a
+  bind-mounted project — where the hook wrappers become silently
+  non-executable and hooks stop firing. The existing permissions test
+  asserted `0755` but inherited the test runner's own umask, so it only
+  caught the bug where the umask was already restrictive; it now pins a
+  deliberately hostile umask `077` so it fails on any machine.
+- **Daemon auto-commit no longer describes a hand edit as a regeneration.**
+  `ClaudeMdInjector._auto_commit_if_dirty` gates on "is `CLAUDE.md` dirty?",
+  never on whether the change sits inside the generated `<hooksdaemon>`
+  block, so any uncommitted edit anywhere in the file — including genuine
+  hand-written documentation — was swept into the same commit and labelled
+  `Auto: hooks daemon regenerated CLAUDE.md handler guidance`. The sweep-up
+  itself is deliberate and unchanged (it stops an agent seeing a dirty
+  `CLAUDE.md` after a restart and trying to revert or stash it); only the
+  commit message was wrong. It now reports whether the commit changes
+  content outside the generated block, without asserting that such content
+  is necessarily hand-written (a client's first injection legitimately
+  reformats human prose via the markdown formatter, so the daemon is
+  sometimes the author there too).
+
+### Added
+
+- **`scripts/qa/check_doc_snippets.py` — a QA check guarding Python code
+  examples in tracked docs against the live package (Plan 00243).** Ground
+  truth is introspected from the package at check time, never restated, so
+  a renamed field changes what the check enforces in the same commit that
+  renames it. Four mechanically-decidable rules: unknown keyword argument,
+  positional argument to a keyword-only signature, unknown import, missing
+  identifier; an unparseable snippet is skipped rather than failed. Found
+  and fixed 8 real defects across `CLAUDE/ARCHITECTURE.md`,
+  `CLAUDE/SELF_INSTALL.md`, `CLAUDE/development/QA.md`,
+  `docs/QA-RUNNER-SETUP.md`, `CLAUDE/DEBUGGING_HOOKS.md`, and the handler
+  skeleton in `CLAUDE.md` itself — including a documented
+  `HookResult(modified_input=...)` example that Pydantic silently discards
+  rather than raising on, producing a handler that looks like it works and
+  does nothing.
+
 ## [3.53.0] - 2026-08-14
 
 ### Added
