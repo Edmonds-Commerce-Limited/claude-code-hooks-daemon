@@ -60,6 +60,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess  # nosec B404 - runs the daemon's own CLI to read its registry
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -84,6 +85,39 @@ RULE_REF_UNKNOWN: Final[str] = "handler-ref-unknown"
 RULE_CLAIM_MISMATCH: Final[str] = "handler-claim-mismatch"
 RULE_COUNT_UNVERIFIABLE: Final[str] = "handler-count-unverifiable"
 RULE_QA_COUNT: Final[str] = "qa-check-count-hardcoded"
+RULE_CLI_SUBCOMMAND_UNKNOWN: Final[str] = "cli-subcommand-unknown"
+
+# Fence info strings that assert "this block is runnable shell". A command
+# inside one is a command; the same words in prose are a mention. The tag is
+# the discriminator, NOT the fence: `CLAUDE/AgentTeam.md` keeps agent-prompt
+# templates — English prose — inside UNTAGGED ``` fences, and one of them reads
+# "Run the daemon CLI as ./bin/hooks-daemon from inside that worktree", which a
+# fence-only rule reads as a subcommand named `from` at seven sites.
+_SHELL_FENCE_TAGS: Final[frozenset[str]] = frozenset({"bash", "sh", "shell", "console", "zsh"})
+
+_FENCE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*```(?P<tag>[A-Za-z0-9_+-]*)")
+
+# A path-form wrapper invocation: `bin/hooks-daemon <subcommand>`. Requiring the
+# `bin/` segment is what separates the WRAPPER from the SKILL: `/hooks-daemon
+# upgrade` is a valid slash-command that 38 release notes use correctly, and
+# must never be flagged. Only the wrapper reaches argparse.
+_CLI_INVOCATION_RE: Final[re.Pattern[str]] = re.compile(
+    r"bin/hooks-daemon\s+(?P<sub>[a-z][a-z0-9-]*)"
+)
+
+# Directories whose markdown is not this project's documentation.
+_UNSCANNED_DIR_NAMES: Final[frozenset[str]] = frozenset(
+    {".git", "node_modules", "untracked", "__pycache__", ".venv", "vendor"}
+)
+
+_MARKDOWN_GLOB: Final[str] = "*.md"
+
+# Asking the live parser rather than restating it. `--help` renders the
+# subcommand registry as argparse's usage brace group.
+_HELP_ARGS: Final[tuple[str, ...]] = ("-m", "claude_code_hooks_daemon.daemon.cli", "--help")
+_HELP_TIMEOUT_SECONDS: Final[int] = 60
+_USAGE_CHOICES_RE: Final[re.Pattern[str]] = re.compile(r"\{(?P<choices>[a-z][a-z0-9,-]+)\}")
+_CHOICE_SEPARATOR: Final[str] = ","
 
 # A generated table row: | priority | handler | BEHAVIOR | description |
 _GENERATED_ROW_RE: Final[re.Pattern[str]] = re.compile(
@@ -139,6 +173,12 @@ _REMEDIATION_QA_COUNT: Final[str] = (
     "Do not hardcode the size of the QA suite — there is no generated ground "
     "truth for it, so the number drifts silently. Say 'all checks in the QA "
     "suite' instead."
+)
+
+_REMEDIATION_CLI_UNKNOWN: Final[str] = (
+    "Use a subcommand the CLI actually has, or the skill form. Upgrading is "
+    "'/hooks-daemon upgrade' (the skill) — NOT a wrapper subcommand; the "
+    "wrapper exits 2 on it."
 )
 
 
@@ -302,6 +342,85 @@ def _check_counts(rel_file: str, line_no: int, line: str) -> list[Violation]:
     return violations
 
 
+def live_cli_subcommands() -> frozenset[str]:
+    """Return the daemon CLI's subcommand registry, read from the live parser.
+
+    The parser is built inline inside ``cli.main()`` with nothing importable to
+    introspect, so the registry is obtained by asking the CLI to render itself
+    and reading argparse's usage brace group. That is the live parser speaking
+    — a restated tuple here would be exactly the drift this module exists to
+    catch.
+
+    Raises:
+        FileNotFoundError: when the registry cannot be read. FAIL FAST: a guard
+            that silently fell back to "no known subcommands" would pass every
+            document while checking nothing, which is the failure mode this
+            whole check was written against.
+    """
+    result = subprocess.run(  # nosec B603 - fixed argv, no shell, no user input
+        [sys.executable, *_HELP_ARGS],
+        capture_output=True,
+        text=True,
+        timeout=_HELP_TIMEOUT_SECONDS,
+        check=False,
+    )
+    match = _USAGE_CHOICES_RE.search(result.stdout)
+    if match is None:
+        raise FileNotFoundError(
+            "could not read the daemon CLI subcommand registry from "
+            f"`{sys.executable} {' '.join(_HELP_ARGS)}` (rc={result.returncode}). "
+            f"stderr: {result.stderr[:300]}"
+        )
+    return frozenset(match.group("choices").split(_CHOICE_SEPARATOR))
+
+
+def _iter_markdown(root: Path) -> list[Path]:
+    """Every documentation markdown file under ``root``, noise directories aside."""
+    return sorted(
+        path
+        for path in root.rglob(_MARKDOWN_GLOB)
+        if not _UNSCANNED_DIR_NAMES.intersection(path.parts)
+    )
+
+
+def _check_cli_invocations(root: Path, subcommands: frozenset[str]) -> list[Violation]:
+    """Flag wrapper invocations naming a subcommand the CLI does not have.
+
+    Only shell-tagged fences are scanned — see ``_SHELL_FENCE_TAGS`` for why the
+    tag, and not the fence, is the discriminator.
+    """
+    violations: list[Violation] = []
+    for path in _iter_markdown(root):
+        rel_file = path.relative_to(root).as_posix()
+        fence_tag: str | None = None
+        for line_no, line in enumerate(
+            path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+        ):
+            fence = _FENCE_RE.match(line)
+            if fence is not None:
+                fence_tag = None if fence_tag is not None else fence.group("tag").lower()
+                continue
+            if fence_tag not in _SHELL_FENCE_TAGS:
+                continue
+            for found in _CLI_INVOCATION_RE.finditer(line):
+                subcommand = found.group("sub")
+                if subcommand in subcommands:
+                    continue
+                violations.append(
+                    Violation(
+                        rule=RULE_CLI_SUBCOMMAND_UNKNOWN,
+                        file=rel_file,
+                        line=line_no,
+                        message=(
+                            f"`hooks-daemon {subcommand}` is not a CLI subcommand; "
+                            "the wrapper rejects it with exit 2"
+                        ),
+                        remediation=_REMEDIATION_CLI_UNKNOWN,
+                    )
+                )
+    return violations
+
+
 def scan(root: Path) -> list[Violation]:
     """Check every configured doc against the generated registry."""
     truth = parse_generated_truth(root.joinpath(*_GENERATED_DOC_PARTS))
@@ -314,6 +433,12 @@ def scan(root: Path) -> list[Violation]:
         for line_no, line in enumerate(doc_path.read_text(encoding="utf-8").splitlines(), 1):
             violations.extend(_check_bullet(rel_file, line_no, line, truth))
             violations.extend(_check_counts(rel_file, line_no, line))
+
+    # Applied to EVERY tracked document, not just `_CHECKED_DOCS`. A handler
+    # behaviour claim was true when it was written and archived notes should not
+    # be re-litigated; a command either runs or it does not, whenever it was
+    # written, and a reader will paste it either way.
+    violations.extend(_check_cli_invocations(root, live_cli_subcommands()))
     return violations
 
 
@@ -349,6 +474,7 @@ def main(argv: list[str] | None = None) -> int:
                     RULE_CLAIM_MISMATCH,
                     RULE_COUNT_UNVERIFIABLE,
                     RULE_QA_COUNT,
+                    RULE_CLI_SUBCOMMAND_UNKNOWN,
                 )
             },
         },

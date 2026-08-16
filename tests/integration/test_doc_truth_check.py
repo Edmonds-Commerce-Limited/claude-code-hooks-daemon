@@ -174,6 +174,78 @@ def test_accurate_prose_passes(tmp_path: Path) -> None:
     assert report["violations"] == []
 
 
+def test_flags_a_cli_subcommand_that_does_not_exist(tmp_path: Path) -> None:
+    """``RELEASES/v3.53.0.md`` told every upgrading user to run a command that exits 2.
+
+    ``.claude/hooks-daemon/bin/hooks-daemon upgrade`` is not a subcommand — the
+    argparse registry rejects it. Upgrading IS reachable, via the *skill*
+    (``/hooks-daemon upgrade``), which is why the error survived review: the
+    words are right and only the form is wrong. An agent had expanded the slash
+    command into a wrapper path, which is a habitual and therefore recurring
+    mistake — exactly what a guard is for.
+    """
+    root = _make_docs(
+        tmp_path,
+        "## Upgrade\n\n```bash\n.claude/hooks-daemon/bin/hooks-daemon upgrade\n```\n",
+    )
+
+    exit_code, report = _run_checker(root)
+
+    assert exit_code == 1, "an invocation that argparse rejects must fail"
+    assert "cli-subcommand-unknown" in _rules(report)
+
+
+def test_does_not_flag_the_binary_named_in_prose(tmp_path: Path) -> None:
+    """NEGATIVE CONTROL — drawn from a real false positive, not an invented one.
+
+    ``CLAUDE/AgentTeam.md`` contains "Run the daemon CLI as ./bin/hooks-daemon
+    from inside that worktree". A naive scan reads ``from`` as a subcommand and
+    flags seven sites of correct English.
+
+    Fences alone do not save it: that prose lives INSIDE an untagged ``` fence
+    holding an agent-prompt template. The language tag is what discriminates —
+    a ```bash fence asserts its contents are runnable shell; an untagged one
+    asserts nothing. This is the same trap as a lexical guard that fires on a
+    comment describing the pattern it forbids.
+    """
+    root = _make_docs(
+        tmp_path,
+        "## Worktrees\n\n"
+        "```\n"
+        "- Run the daemon CLI as ./bin/hooks-daemon from inside that worktree — it\n"
+        "  resolves that worktree's own venv, so you never name an interpreter\n"
+        "```\n"
+        "\nRun `./bin/hooks-daemon from` the project root is prose too.\n",
+    )
+
+    exit_code, report = _run_checker(root)
+
+    assert exit_code == 0, f"prose about the binary was flagged: {report['violations']}"
+
+
+def test_accepts_real_subcommands_in_a_shell_fence(tmp_path: Path) -> None:
+    """NEGATIVE CONTROL — the rule must discriminate, not merely fire.
+
+    Every one of these is in the live registry, so a guard that flagged any
+    would be unusable against a repository whose docs invoke the CLI hundreds
+    of times.
+    """
+    root = _make_docs(
+        tmp_path,
+        "## Commands\n\n"
+        "```bash\n"
+        "./bin/hooks-daemon status\n"
+        "bin/hooks-daemon restart\n"
+        ".claude/hooks-daemon/bin/hooks-daemon plan-qa --sweep\n"
+        "bin/hooks-daemon --help\n"
+        "```\n",
+    )
+
+    exit_code, report = _run_checker(root)
+
+    assert exit_code == 0, f"valid subcommands were flagged: {report['violations']}"
+
+
 def test_real_repository_docs_are_truthful() -> None:
     """The gate itself: this repository's prose must match generated truth."""
     exit_code, report = _run_checker(REPO_ROOT)
