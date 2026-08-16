@@ -72,8 +72,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Memory / Documentation Policy
 
-- [00244: Generated tracked docs must be path-agnostic](00244-path-agnostic-generated-docs/PLAN.md) - In Progress (client bug report: `get_claude_md()` writes the developer's absolute project path into the tracked `CLAUDE.md` block and `.claude/HOOKS-DAEMON.md`; self-install masks it because the root is `/workspace`)
-
 - [00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes](00132-progressive-disclosure-md-write-reminder/PLAN.md) - Not Started (awaiting sign-off)
 
   - Complements 00131's *block* with a *positive nudge*: a PostToolUse advisory that, after a project-doc `.md` write, re-hints the progressive-disclosure rules and asks "is this in the right place / is it the single source of truth?"
@@ -161,6 +159,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00244: Generated tracked docs must be path-agnostic](Completed/00244-path-agnostic-generated-docs/PLAN.md) - Complete at `6d7f8192` (client bug report: every daemon-CLI example in the tracked `CLAUDE.md` block named the rendering machine's absolute root, publishing a home directory and churning per machine; a second class hard-coded `/workspace`, true on no client machine at all — verified fixed in a real client install)
 
 - [00241: v3.53.0 review findings — terminal-ALLOW shadowing and verdict-log retention](Completed/00241-v3530-review-findings-terminal-allow-and-verdict-log/PLAN.md) - Complete at `53cb6743` + `54757f46`, shipped in v3.53.0 (the release aborted at its own Step 10 gate: a terminal handler returning ALLOW ends the chain, disabling every handler behind it)
 
@@ -1194,21 +1194,26 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 244 (count = `hooksdaemon.latestPlanNumber` git counter)
-- **Completed**: 199 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 33 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 200 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 32 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
-- **Folder-to-number reconciliation**: 32 + 199 + 6 = **237 folders**, spanning
-  **234 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 32 + 200 + 6 = **238 folders**, spanning
+  **235 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **9** of the
-  243 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  244 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210 — abandoned drafts, numbers burned by transient
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
-  already covered the work). 234 + 9 = 243. ✅
-- **Last reconciled by**: the Plan 00243 creation — one new folder in the plan
+  already covered the work). 235 + 9 = 244. ✅
+- **Last reconciled by**: the Plan 00244 creation AND closure in one sitting —
+  the folder was created in the plan root and archived into `Completed/` before
+  the next reconciliation, so Total rose by one, Completed rose by one, and
+  Active returned to where it started. Recounted from disk (32 root, 200
+  `Completed/`, 6 `Cancelled/`, 235 distinct numbers against a counter of 244).
+  Before that, the Plan 00243 creation — one new folder in the plan
   root, so Total and Active each rose by one while Completed and Cancelled were
   untouched. Recounted from disk (32 root, 199 `Completed/`, 6 `Cancelled/`,
   234 distinct numbers against a counter of 243). Before that, the Plan 00241

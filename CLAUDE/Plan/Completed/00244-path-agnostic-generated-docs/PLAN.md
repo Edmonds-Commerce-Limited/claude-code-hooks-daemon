@@ -1,6 +1,6 @@
 # Plan 00244: path agnostic generated docs
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-16
 **Owner**: joseph
 **Priority**: Medium
@@ -29,7 +29,8 @@ reverted here. The defect is that one builder serves two audiences with opposite
 requirements, and only the ephemeral one was considered.
 
 Reported against v3.51.0 from a client install (`LongTermSupport/fedora-desktop`,
-public repo). Source report: `untracked/hooks-daemon-home-path.md`.
+public repo). Origin report, with the two corrections the fix made to its
+conclusions: [REPORT-client-home-path.md](REPORT-client-home-path.md).
 
 ## Goals
 
@@ -105,13 +106,33 @@ definition of a path-agnostic wrapper path rather than two.
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Full QA suite green.
-- [ ] ⬜ **Task 4.2**: Daemon restart verified RUNNING; regenerate this repo's
-  `CLAUDE.md` and `.claude/HOOKS-DAEMON.md` and confirm the leaks are gone.
-- [ ] ⬜ **Task 4.3**: Client-mode verification via `scripts/dummy-client-repo.sh`
-  — the fixture's own root must not appear in its generated docs.
-- [ ] ⬜ **Task 4.4**: Record the truth-change and file the report's fate
-  (`untracked/` reports never linger).
+- [x] ✅ **Task 4.1**: QA — **21/22 checks pass**. The one failing check is
+  `tests`, carrying exactly 5 failures in
+  `tests/integration/test_hooks_deploy_permissions.py` (expects `0o755`, gets
+  `0o744`). Verified **pre-existing and unrelated** by running that file in a
+  clean worktree at HEAD before any of this work: identical 5 failures. Cause is
+  this container's `umask 0077` stripping the group/other bits `chmod +x` would
+  grant; nothing in this plan touches permissions. Whether the deploy should
+  force `0o755` regardless of umask is a separate decision about the permissions
+  subsystem — raised with the human, not folded in here.
+- [x] ✅ **Task 4.2**: Daemon restart verified RUNNING; regenerated this repo's
+  `CLAUDE.md` and `.claude/HOOKS-DAEMON.md`. Leaks inside the generated block:
+  **0** (was 13 wrapper paths + 3 hard-coded `/workspace` mentions); the
+  `HOOKS-DAEMON.md` header now reads `bin/hooks-daemon generate-docs`. The 8
+  remaining `/workspace` mentions in `CLAUDE.md` are outside the generated
+  block — hand-authored self-install repo docs, correct as they stand.
+- [x] ✅ **Task 4.3**: Client-mode verification via `scripts/dummy-client-repo.sh`
+  (production installer, not synthesised state). The fixture's generated
+  `CLAUDE.md` contains **0** occurrences of its own root and **0** of
+  `/workspace`, and renders
+  `.claude/hooks-daemon/bin/hooks-daemon status`. Dogfood daemon still RUNNING;
+  fixture destroyed.
+- [x] ✅ **Task 4.4**: Truth-change staged at
+  `CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.53.1.yaml` (two entries — the
+  tracked-docs form change, and the `/workspace` hard-codes). No
+  config-changes entry: this adds no config option and flips no default. The
+  origin report is now tracked at `REPORT-client-home-path.md` in this folder
+  rather than left in `untracked/`.
 
 ## Technical Decisions
 
@@ -145,12 +166,14 @@ for. Confirmed with the human before overriding the report's stated preference.
 
 ## Success Criteria
 
-- [ ] Rendering the generated docs under a client-mode root yields no occurrence
+- [x] Rendering the generated docs under a client-mode root yields no occurrence
   of that root — enforced by a test, not by inspection.
-- [ ] Runtime block reasons and advisories still emit absolute paths.
-- [ ] Full QA suite passes.
-- [ ] Daemon restarts RUNNING and regenerates this repo's tracked docs clean.
-- [ ] `scripts/dummy-client-repo.sh` fixture confirms the fix in client mode.
+- [x] Runtime block reasons and advisories still emit absolute paths — pinned by
+  `TestTheTwoBuildersStayDistinct` and by the guard's own fixture check.
+- [x] QA passes, except one pre-existing failing check proven unrelated by a
+  clean-tree run (Task 4.1). No check regressed.
+- [x] Daemon restarts RUNNING and regenerates this repo's tracked docs clean.
+- [x] `scripts/dummy-client-repo.sh` fixture confirms the fix in client mode.
 
 ## Risks & Mitigations
 
@@ -166,4 +189,10 @@ for. Confirmed with the human before overriding the report's stated preference.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00244-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Plan opened from client bug report `untracked/hooks-daemon-home-path.md`
+- Plan opened from the client bug report, now tracked here as
+  `REPORT-client-home-path.md` — commit `8f58cb29`
+- Fix, guard and the second defect class delivered at commit `6d7f8192`
+- Verified end to end: dogfood regeneration clean (0 leaks in the generated
+  block, was 16), and a real client install provisioned by the production
+  installer renders `.claude/hooks-daemon/bin/hooks-daemon status` with 0
+  occurrences of its own root

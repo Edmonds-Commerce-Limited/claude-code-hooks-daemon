@@ -1,0 +1,50 @@
+version: "3.53.1"
+truth_changes:
+  - was: >
+      The daemon-CLI commands quoted in the generated <hooksdaemon> section of
+      your CLAUDE.md are absolute paths, so you can copy one out of that section
+      and run it from any working directory. The same is true of the
+      "Regenerate:" line at the top of .claude/HOOKS-DAEMON.md.
+    now: >
+      Those commands are now PROJECT-ROOT-RELATIVE:
+      `.claude/hooks-daemon/bin/hooks-daemon status` in a client install, or
+      `bin/hooks-daemon status` in self-install mode. Run them from the project
+      root, which the daemon's docs already name as the working directory for
+      every daemon command. Correct any doc of yours that quotes the absolute
+      form, and expect one-time churn on the next daemon restart: the
+      <hooksdaemon> block is regenerated and auto-committed, so the absolute
+      paths your repository already has committed will be rewritten in a single
+      diff.
+      The reason is that the block is a TRACKED file. It is committed, shared
+      between clones, and in the case this was reported from, public on GitHub.
+      An absolute path there did three things: it published the author's home
+      directory (the reporting project's own pre-commit secret scanner rejects
+      the `/home/` pattern, so the daemon's output failed its security gate), it
+      named a directory that exists on nobody else's machine, and it rewrote
+      itself per machine so two developers -- or a host and a container view of
+      one bind-mounted repo -- produced conflicting diffs of the same 13 lines.
+      Nothing about RUNTIME output changed. Block reasons and advisory context
+      are still absolute and still copy-paste runnable from any cwd, which is
+      what Plan 00192 made them for. The two destinations have opposite
+      requirements, and only the tracked one moved.
+  - was: >
+      When absolute_path blocks a relative path, the worked example it gives you
+      names the directory to prepend. When root_recursion_guard blocks a
+      filesystem-wide scan, its "DO THIS INSTEAD" example names a project-scoped
+      path you can run.
+    now: >
+      Both were true only inside the daemon's own repository. Each handler had
+      `/workspace` -- the daemon's self-install root -- hard-coded into its
+      message, so on every client install absolute_path told you to prepend a
+      directory that does not exist on your machine, and root_recursion_guard's
+      remedy pointed at that same non-existent path. This is a different defect
+      from the tracked-docs one above and is worse in kind: an absolute path is
+      at least true on the machine that wrote it, whereas `/workspace` is true
+      on no client machine at all.
+      absolute_path now resolves your real project root for the block example
+      (and omits the example rather than guessing if the root cannot be
+      resolved), and its resident guidance describes the root instead of naming
+      one. root_recursion_guard now offers `rg -l "x" .` alongside the
+      `"$CLAUDE_PROJECT_DIR"` form it already had. If your notes repeat either
+      handler's advice with `/workspace` in it, that text was never right for
+      your project -- replace it with your own root or with the relative form.
