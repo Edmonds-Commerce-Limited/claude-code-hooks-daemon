@@ -24,9 +24,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOKS_DEPLOY_SH = REPO_ROOT / "scripts" / "install" / "hooks_deploy.sh"
 
 
-def _run_bash(script: str) -> subprocess.CompletedProcess[str]:
+#: A deliberately restrictive umask, applied so the deployed mode is asserted
+#: against a HOSTILE environment rather than against whatever the developer or
+#: CI runner happens to have. Under `chmod +x` this mask is what turned 0755
+#: into 0744; under an explicit mode it must have no effect at all.
+_HOSTILE_UMASK = "077"
+
+
+def _run_bash(script: str, umask: str | None = None) -> subprocess.CompletedProcess[str]:
+    umask_line = f"umask {umask}" if umask else ""
     wrapper = f"""
 set -euo pipefail
+{umask_line}
 source "{HOOKS_DEPLOY_SH}"
 {script}
 """
@@ -59,6 +68,32 @@ class TestSetHookPermissionsRestoresExecBit:
         mode = wrapper.stat().st_mode & 0o777
         assert mode == 0o755, f"expected 0o755, got {oct(mode)}"
 
+    def test_mode_is_0755_even_under_a_restrictive_umask(self, tmp_path: Path) -> None:
+        """The deployed mode belongs to the installer, not to the caller.
+
+        Without this, the suite only caught the umask bug on machines that
+        happened to have a restrictive umask -- so it passed on the common
+        022 desktop and failed in hardened images and many containers, which
+        reads as a broken test rather than a broken installer.
+
+        The consequence is real once the installing user is not the user
+        running Claude Code (root installs, user runs; a host/container pair
+        over a bind mount): at 0744 the wrappers are silently non-executable
+        and hooks stop firing with no error.
+        """
+        project_root = tmp_path / "project"
+        hooks_dir = project_root / ".claude" / "hooks"
+        wrapper = _seed_non_executable_wrapper(hooks_dir, "pre-tool-use")
+
+        result = _run_bash(f'set_hook_permissions "{project_root}"', umask=_HOSTILE_UMASK)
+
+        assert result.returncode == 0, f"stderr={result.stderr!r}"
+        mode = wrapper.stat().st_mode & 0o777
+        assert mode == 0o755, (
+            f"expected 0o755 under umask {_HOSTILE_UMASK}, got {oct(mode)} — "
+            f"the chmod is being masked by the caller's umask"
+        )
+
 
 class TestSetHookPermissionsFailsLoudly:
     """A genuine chmod failure must NOT be silenced.
@@ -79,13 +114,27 @@ class TestSetHookPermissionsFailsLoudly:
         body_end = rest.index("\n}\n")
         body = rest[: body_end + 2]
 
-        assert "chmod +x" in body, "precondition: function still uses chmod +x"
-        assert (
-            "2>/dev/null || true" not in body
-        ), "set_hook_permissions must not silence chmod failures — see issue #29"
-        assert (
-            'chmod +x "$hook_file" 2>/dev/null' not in body
-        ), "chmod stderr must not be redirected to /dev/null"
+        chmod_lines = [line for line in body.splitlines() if "chmod " in line]
+        assert chmod_lines, "precondition: function still calls chmod"
+
+        # Assert on the PROPERTY, not on one spelling of the call. This block
+        # previously pinned the literal `chmod +x`, so it failed the moment the
+        # call was corrected to an explicit mode -- a guard that breaks when
+        # unrelated wording changes trains people to loosen it.
+        for line in chmod_lines:
+            assert (
+                "2>/dev/null" not in line
+            ), f"chmod stderr must not be redirected to /dev/null: {line.strip()}"
+            assert (
+                "|| true" not in line
+            ), f"chmod failures must not be swallowed -- see issue #29: {line.strip()}"
+
+        # Deliberately NOT asserting the absence of a `chmod +x` spelling here.
+        # That was tried and immediately fired on the source COMMENT explaining
+        # why the spelling was wrong -- a lexical guard cannot tell code from
+        # the prose describing it. The umask property is covered behaviourally
+        # by test_mode_is_0755_even_under_a_restrictive_umask, which cannot be
+        # fooled that way.
 
 
 class TestDeployAllHooksSetsPermsInSelfInstall:

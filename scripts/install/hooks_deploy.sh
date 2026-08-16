@@ -66,6 +66,22 @@ _DAEMON_HOOK_BASENAMES=(
 # _ECHD_CAPTURE_REL_PARTS in pipe_blocker.py.
 _ECHD_CAPTURE_REL_PATH="scripts/echd-capture"
 
+# Mode for every executable this script deploys. Stated EXPLICITLY, never as
+# `chmod +x`: a `+x` with no "who" clause is masked by the caller's umask, so
+# the same installer produced 0755 under the common umask 022 and 0744 under
+# umask 077 (hardened images, many containers). The owner can still execute at
+# 0744, so hooks keep firing for whoever ran the installer and the drift is
+# invisible — until the installing user is not the user running Claude Code
+# (root installs, user runs; or a host/container pair over a bind mount), at
+# which point the wrappers are silently non-executable. That is precisely the
+# silent failure the chmod loop below refuses to allow.
+#
+# 0755 is not a new decision here: it is the mode the Python deploy paths
+# already apply with an explicit Path.chmod() (bin_wrapper._WRAPPER_MODE,
+# plan_workflow._MKPLAN_MODE, ccy_supervisor._SUPERVISOR_MODE), which ignores
+# umask. This makes bash agree with them instead of varying by environment.
+_DEPLOYED_EXECUTABLE_MODE="755"
+
 #
 # list_deployed_hook_paths() - Emit paths of installer-owned hook entrypoints
 #
@@ -260,7 +276,7 @@ set_hook_permissions() {
     # leaves wrappers non-executable, which the daemon cannot detect and
     # the user only notices when hooks silently stop firing.
     for hook_file in $hook_files; do
-        if chmod +x "$hook_file"; then
+        if chmod "$_DEPLOYED_EXECUTABLE_MODE" "$hook_file"; then
             chmod_count=$((chmod_count + 1))
         else
             chmod_failed=$((chmod_failed + 1))
@@ -325,7 +341,7 @@ ensure_echd_capture_executable() {
         return 0
     fi
 
-    if ! chmod +x "$helper"; then
+    if ! chmod "$_DEPLOYED_EXECUTABLE_MODE" "$helper"; then
         print_error "Failed to set executable on echd-capture helper: $helper"
         return 1
     fi
