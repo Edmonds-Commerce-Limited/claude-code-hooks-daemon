@@ -751,9 +751,9 @@ Bash commands that change directory into `.claude/hooks-daemon/` (or `cd` into a
 **Run daemon CLI from the project root instead** — it always works regardless of cwd:
 
 ```
-/workspace/bin/hooks-daemon status
-/workspace/bin/hooks-daemon restart
-/workspace/bin/hooks-daemon logs
+bin/hooks-daemon status
+bin/hooks-daemon restart
+bin/hooks-daemon logs
 ```
 
 If you need to inspect daemon source for debugging, use `Read` from the project root with the absolute path — never `cd` in. Do NOT edit anything inside `.claude/hooks-daemon/`; changes will be overwritten on the next upgrade.
@@ -764,10 +764,10 @@ If you need to inspect daemon source for debugging, use `Read` from the project 
 
 The `Read`, `Write`, and `Edit` tools require absolute paths. Relative paths are blocked.
 
-- **Correct**: `/workspace/src/main.py`, `/workspace/tests/test_utils.py`
 - **Blocked**: `src/main.py`, `./config.yaml`, `../other/file.txt`
+- **Correct**: each of those prefixed with the project's absolute root
 
-The working directory is `/workspace`. Prepend `/workspace/` to any relative path before calling these tools.
+Prepend the absolute path of the project root — the working directory Claude Code reports for this session — to any relative path before calling these tools. The block message names the exact path to use, so there is nothing to guess.
 
 <!-- handler: error-hiding-blocker -->
 
@@ -845,7 +845,7 @@ A recursive scanner whose path argument resolves to a catastrophic root location
 - `grep -r`/`-R`/`-rl`, `ugrep -r`, `rgrep`, `find`, `fd`/`fdfind`, `rg`
 - pointed at `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`
 
-**Allowed**: the same scanners scoped to the project — `rg -l "x" /workspace`, `grep -rl "x" "$CLAUDE_PROJECT_DIR"`, `grep -rl x src/`, `find . -name y`. Non-recursive `grep x /etc/hosts` is not affected.
+**Allowed**: the same scanners scoped to the project — `rg -l "x" .`, `grep -rl "x" "$CLAUDE_PROJECT_DIR"`, `grep -rl x src/`, `find . -name y`. Non-recursive `grep x /etc/hosts` is not affected.
 
 **Note**: `... | head` does NOT bound a `-l`/`-rl` scan — a producer that matches nothing never writes, so it never receives SIGPIPE and runs to completion across the whole disk.
 
@@ -1066,7 +1066,7 @@ Before making a `git commit` in the hooks daemon repository, this handler advise
 **Why**: Unit tests alone don't catch import errors. A handler that fails to import silently disables protection without any test-time error. Daemon restart is the definitive check.
 
 **Run before committing** (in this repo only):
-`/workspace/bin/hooks-daemon restart` then verify status shows RUNNING.
+`bin/hooks-daemon restart` then verify status shows RUNNING.
 
 <!-- handler: qa-suppression-blocker -->
 
@@ -1272,7 +1272,7 @@ commit with a TODO list of what the commit must also contain.
   of the two you just did
 
 Check the staged tree any time without committing:
-`/workspace/bin/hooks-daemon plan-qa --check-staged`.
+`bin/hooks-daemon plan-qa --check-staged`.
 Commits inside nested/vendor repos or foreign worktrees are exempt.
 
 <!-- handler: plan-qa-edit -->
@@ -1348,7 +1348,7 @@ with history in git rather than in the file body.
 
 Grandfathered plans in `plan_workflow.qa.legacy_plan_allowlist`
 only ever advise. Lint any file on demand:
-`/workspace/bin/hooks-daemon plan-qa --lint <file>`.
+`bin/hooks-daemon plan-qa --lint <file>`.
 
 <!-- handler: block-plan-time-estimates -->
 
@@ -1520,45 +1520,6 @@ handlers:
       enabled: false
 ```
 
-<!-- handler: background-process-tracker -->
-
-## background_process_tracker — backgrounded processes are tracked
-
-A PostToolUse advisory that fires when a Bash call backgrounds a process (`run_in_background: true`, or a `&`/`nohup`/`setsid`/`disown` command). It records the command to `background-processes.jsonl` and injects rate-limited guidance.
-
-**The daemon never kills.** It surfaces runaways; you decide.
-
-When you background a long-lived process:
-
-- Create a non-durable recurring **watchdog cron** (CronCreate, durable:false) whose prompt runs `/workspace/bin/hooks-daemon harvest-background` and acts on any runaway — this covers the idle/compaction window a tool-call hook cannot. Do NOT wait for the cron; keep working.
-- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).
-- Reap a runaway by its **process group**: `kill -- -<pgid>` (not just the pid).
-- Keep a wanted long task: note `KEEP_RUNNING_BECAUSE="reason"`.
-- Delete the watchdog cron (CronDelete) when no backgrounded work remains.
-
-Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
-
-<!-- handler: markdown-table-formatter -->
-
-## markdown_table_formatter — markdown tables are auto-aligned
-
-After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-formatted via `mdformat + mdformat-gfm` so that table pipes are aligned and column widths are consistent. The handler is non-terminal and advisory — it never blocks, it just rewrites the file on disk.
-
-**What changes:**
-
-- Table pipes are aligned vertically and delimiter rows widened to match cell widths.
-- Ordered lists keep consecutive numbering (`1.` `2.` `3.`).
-- `---` thematic breaks are preserved (mdformat's 70-underscore default is post-processed back).
-- Asterisks in table cells are escaped (`*` → `\*`) as required by GFM.
-
-**Exempt:** anything under a plan's `JOURNAL/` directory is NEVER reformatted — day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`, Plan 00163) and any other file in there. A journal is an append-only, byte-stable log; rewriting it would trip the `journal-append-only` check. The exemption is by LOCATION as well as by filename, so a mis-named day-file is still safe.
-
-**Ad-hoc formatting of existing files:**
-
-```
-/workspace/bin/hooks-daemon format-markdown <path>
-```
-
 <!-- handler: git-hooks-executable-fixer -->
 
 ## git_hooks_executable_fixer — auto-fixes non-executable git hooks
@@ -1627,20 +1588,44 @@ restricts which languages are checked, and `command_overrides` replaces a
 language's `default`/`extended` command (set `extended: null` to run only the
 syntax check).
 
-<!-- handler: project-handler-load-checker -->
+<!-- handler: background-process-tracker -->
 
-## project_handler_load_checker — project protection degraded alert
+## background_process_tracker — backgrounded processes are tracked
 
-At session start this handler reports any **project handlers** (`.claude/project-handlers/`) that FAILED to load in the running daemon. A skipped handler is a silently-disabled protection — the alert exists so you never assume a guardrail is active when it is not.
+A PostToolUse advisory that fires when a Bash call backgrounds a process (`run_in_background: true`, or a `&`/`nohup`/`setsid`/`disown` command). It records the command to `background-processes.jsonl` and injects rate-limited guidance.
 
-### When you see `🚨 PROJECT PROTECTION DEGRADED 🚨`
+**The daemon never kills.** It surfaces runaways; you decide.
 
-1. **Do not assume normal guardrails are in force.** The listed handlers are OFF for this session.
-2. **Diagnose** each failure: `/workspace/bin/hooks-daemon validate-project-handlers` names the file, the missing method, and the daemon version that introduced it.
-3. **Fix** the handler(s) — usually adding a required method stub (e.g. `get_claude_md`) that a daemon upgrade made mandatory.
-4. **Restart the daemon** (`/workspace/bin/hooks-daemon restart`). The alert reflects the *running* daemon, so it clears only after a restart reloads the fixed handlers — fixing the file alone is not enough.
+When you background a long-lived process:
 
-The handler is silent when every project handler loads, so seeing this alert always means real action is required.
+- Create a non-durable recurring **watchdog cron** (CronCreate, durable:false) whose prompt runs `bin/hooks-daemon harvest-background` and acts on any runaway — this covers the idle/compaction window a tool-call hook cannot. Do NOT wait for the cron; keep working.
+- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).
+- Reap a runaway by its **process group**: `kill -- -<pgid>` (not just the pid).
+- Keep a wanted long task: note `KEEP_RUNNING_BECAUSE="reason"`.
+- Delete the watchdog cron (CronDelete) when no backgrounded work remains.
+
+Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
+
+<!-- handler: markdown-table-formatter -->
+
+## markdown_table_formatter — markdown tables are auto-aligned
+
+After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-formatted via `mdformat + mdformat-gfm` so that table pipes are aligned and column widths are consistent. The handler is non-terminal and advisory — it never blocks, it just rewrites the file on disk.
+
+**What changes:**
+
+- Table pipes are aligned vertically and delimiter rows widened to match cell widths.
+- Ordered lists keep consecutive numbering (`1.` `2.` `3.`).
+- `---` thematic breaks are preserved (mdformat's 70-underscore default is post-processed back).
+- Asterisks in table cells are escaped (`*` → `\*`) as required by GFM.
+
+**Exempt:** anything under a plan's `JOURNAL/` directory is NEVER reformatted — day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`, Plan 00163) and any other file in there. A journal is an append-only, byte-stable log; rewriting it would trip the `journal-append-only` check. The exemption is by LOCATION as well as by filename, so a mis-named day-file is still safe.
+
+**Ad-hoc formatting of existing files:**
+
+```
+bin/hooks-daemon format-markdown <path>
+```
 
 <!-- handler: ccy-supervisor-integrity -->
 
@@ -1656,25 +1641,6 @@ At session start this handler checks a ccy project (`.claude/ccy/`) whose superv
 It also detects a **stale running supervisor** (Plan 00164): when a daemon upgrade has put a NEWER `claude-supervise.py` on disk than the live process (compared by source fingerprint, not just version), it advises restarting ccy so the wrapper re-execs the updated supervisor. Nothing is broken meanwhile — the old supervisor keeps working until the session is relaunched.
 
 When you see this alert, fix the listed item(s) and commit the ccy files so the supervisor works for everyone.
-
-<!-- handler: hook-registration-checker -->
-
-## hook_registration_checker — hooks configuration policy
-
-On every new session this handler audits hook configuration across `.claude/settings.json` and `.claude/settings.local.json`. When it reports issues, fix them — do not ignore the warning.
-
-### Policy
-
-1. **All hooks live in `settings.json`.** That file is tracked in version control, visible to teammates, and is the single source of truth for the daemon.
-2. **`settings.local.json` must contain ZERO `hooks` entries.** It exists for per-developer `permissions` and IDE state only. A `hooks` block there is either (a) invisible to the rest of the team, or (b) duplicated with `settings.json` — in which case the hook fires twice per event.
-3. **Hook commands must invoke the daemon wrapper.** Every registered command must end with `/.claude/hooks/{event}`. Anything else (inline Python, custom shell scripts, bespoke paths) is a legacy setup that bypasses the daemon entirely.
-
-### Remediation
-
-- **Hooks in `settings.local.json`**: move each `hooks` entry to `settings.json`, then delete the `hooks` key from `settings.local.json`. Confirm no duplicates remain.
-- **Legacy-style commands**: replace them with a project-level handler. Run `/workspace/bin/hooks-daemon init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
-- **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
-- **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry and remove the duplicate in `settings.local.json`.
 
 <!-- handler: git-upstream-checker -->
 
@@ -1694,19 +1660,24 @@ On each new session the daemon runs an **additive** `git fetch --all` (never `--
 
 It is silent when up to date with no gone branches, not in a git repo, on a detached HEAD, or without an upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
 
-<!-- handler: plan-workflow-asset-checker -->
+<!-- handler: hook-registration-checker -->
 
-## plan_workflow_asset_checker — plan tooling provisioning alert
+## hook_registration_checker — hooks configuration policy
 
-At session start, when the plan workflow is enabled but the daemon-owned `mkplan.bash` is missing from the plan directory, this advisory fires (it never blocks). A missing `mkplan.bash` means `CLAUDE.md` and `plan_number_helper` reference a scaffolder that does not exist and journalling is inert.
+On every new session this handler audits hook configuration across `.claude/settings.json` and `.claude/settings.local.json`. When it reports issues, fix them — do not ignore the warning.
 
-**Fix**: (re)deploy the assets on demand —
+### Policy
 
-```
-/workspace/bin/hooks-daemon deploy-plan-workflow
-```
+1. **All hooks live in `settings.json`.** That file is tracked in version control, visible to teammates, and is the single source of truth for the daemon.
+2. **`settings.local.json` must contain ZERO `hooks` entries.** It exists for per-developer `permissions` and IDE state only. A `hooks` block there is either (a) invisible to the rest of the team, or (b) duplicated with `settings.json` — in which case the hook fires twice per event.
+3. **Hook commands must invoke the daemon wrapper.** Every registered command must end with `/.claude/hooks/{event}`. Anything else (inline Python, custom shell scripts, bespoke paths) is a legacy setup that bypasses the daemon entirely.
 
-The deploy is idempotent (fills gaps only, never overwrites client-owned files). Silent when `mkplan.bash` is present or the workflow is disabled.
+### Remediation
+
+- **Hooks in `settings.local.json`**: move each `hooks` entry to `settings.json`, then delete the `hooks` key from `settings.local.json`. Confirm no duplicates remain.
+- **Legacy-style commands**: replace them with a project-level handler. Run `bin/hooks-daemon init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
+- **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
+- **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry and remove the duplicate in `settings.local.json`.
 
 <!-- handler: plan-qa-sweep -->
 
@@ -1735,13 +1706,42 @@ its exact remediation) as part of your plan housekeeping, then
 re-check with:
 
 ```
-/workspace/bin/hooks-daemon plan-qa --sweep
+bin/hooks-daemon plan-qa --sweep
 ```
 
 The CLI exits 1 while findings remain (CI-able). Single-file lint:
 `plan-qa --lint <PLAN.md>`; staged-commit check: `plan-qa --check-staged`.
 Policy lives under `plan_workflow.qa` in `.claude/hooks-daemon.yaml`
 (archive dir names, staleness window, legacy/collision allowlists).
+
+<!-- handler: project-handler-load-checker -->
+
+## project_handler_load_checker — project protection degraded alert
+
+At session start this handler reports any **project handlers** (`.claude/project-handlers/`) that FAILED to load in the running daemon. A skipped handler is a silently-disabled protection — the alert exists so you never assume a guardrail is active when it is not.
+
+### When you see `🚨 PROJECT PROTECTION DEGRADED 🚨`
+
+1. **Do not assume normal guardrails are in force.** The listed handlers are OFF for this session.
+2. **Diagnose** each failure: `bin/hooks-daemon validate-project-handlers` names the file, the missing method, and the daemon version that introduced it.
+3. **Fix** the handler(s) — usually adding a required method stub (e.g. `get_claude_md`) that a daemon upgrade made mandatory.
+4. **Restart the daemon** (`bin/hooks-daemon restart`). The alert reflects the *running* daemon, so it clears only after a restart reloads the fixed handlers — fixing the file alone is not enough.
+
+The handler is silent when every project handler loads, so seeing this alert always means real action is required.
+
+<!-- handler: plan-workflow-asset-checker -->
+
+## plan_workflow_asset_checker — plan tooling provisioning alert
+
+At session start, when the plan workflow is enabled but the daemon-owned `mkplan.bash` is missing from the plan directory, this advisory fires (it never blocks). A missing `mkplan.bash` means `CLAUDE.md` and `plan_number_helper` reference a scaffolder that does not exist and journalling is inert.
+
+**Fix**: (re)deploy the assets on demand —
+
+```
+bin/hooks-daemon deploy-plan-workflow
+```
+
+The deploy is idempotent (fills gaps only, never overwrites client-owned files). Silent when `mkplan.bash` is present or the workflow is disabled.
 
 <!-- handler: standing-authorisations -->
 
