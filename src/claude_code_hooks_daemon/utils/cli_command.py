@@ -20,6 +20,35 @@ The daemon knows its own layout, so it emits an ABSOLUTE path to a deployed
 wrapper instead of asking the reader to supply an interpreter. This mirrors the
 pattern already proven by ``pipe_blocker``, which prints the resolved absolute
 path to ``echd-capture`` rather than a bare command name.
+
+Two builders, deliberately (Plan 00244)
+---------------------------------------
+
+:func:`daemon_cli_command` and :func:`daemon_cli_command_for_docs` look nearly
+identical and are NOT interchangeable. They serve audiences with opposite
+requirements, so collapsing them into one reintroduces a shipped bug — which
+direction depends on which one survives.
+
+===============  ==========================  ==============================
+Destination      Audience                    Correct form
+===============  ==========================  ==============================
+Block reasons,   the live agent, on THIS     **absolute** — runnable from
+advisory context machine; never written      any cwd (Plan 00192)
+Generated docs   every reader of every       **path-agnostic** — the file is
+(``CLAUDE.md``,  clone, on every machine     tracked, committed and shared
+``HOOKS-DAEMON``)                            (Plan 00244)
+===============  ==========================  ==============================
+
+``ClaudeMdInjector`` writes each handler's ``get_claude_md()`` verbatim into the
+tracked ``<hooksdaemon>`` block and auto-commits it. An absolute path there
+publishes the author's home directory, is wrong in every other clone, and
+rewrites itself per machine so the file conflicts on merge.
+
+Self-install mode hides this: the project root is ``/workspace``, so our own
+committed artifacts render an absolute path that happens to be identical for
+everyone. ``tests/integration/test_generated_docs_are_path_agnostic.py`` renders
+in CLIENT mode for exactly that reason, and is the guard that keeps both forms
+honest.
 """
 
 from __future__ import annotations
@@ -41,6 +70,10 @@ BIN_DIR_NAME: Final[str] = "bin"
 #: installs the daemon lives here; in self-install mode the daemon root IS the
 #: project root.
 _CLIENT_DAEMON_SEGMENTS: Final[tuple[str, ...]] = (".claude", "hooks-daemon")
+
+#: Path segments from a SELF-INSTALL project root to the daemon clone: none, by
+#: definition — the daemon root and the project root are the same directory.
+_SELF_INSTALL_DAEMON_SEGMENTS: Final[tuple[str, ...]] = ()
 
 #: Separator used when joining the wrapper path with its arguments.
 _ARG_SEPARATOR: Final[str] = " "
@@ -65,6 +98,15 @@ def daemon_bin_path() -> Path:
     return daemon_root() / BIN_DIR_NAME / WRAPPER_NAME
 
 
+def _relative_wrapper_path(daemon_segments: tuple[str, ...]) -> str:
+    """Join daemon-root segments with the wrapper's own location.
+
+    Sole definition of what a project-root-relative wrapper path looks like, so
+    the uninitialised fallback and the documentation builder cannot drift apart.
+    """
+    return "/".join((*daemon_segments, BIN_DIR_NAME, WRAPPER_NAME))
+
+
 def _fallback_relative_path() -> str:
     """Wrapper path relative to the project root.
 
@@ -77,7 +119,21 @@ def _fallback_relative_path() -> str:
     root — the documented working directory for every daemon command — and is
     strictly better than emitting a variable that is never set.
     """
-    return "/".join((*_CLIENT_DAEMON_SEGMENTS, BIN_DIR_NAME, WRAPPER_NAME))
+    return _relative_wrapper_path(_CLIENT_DAEMON_SEGMENTS)
+
+
+def _docs_daemon_segments() -> tuple[str, ...]:
+    """Daemon-root segments relative to the project root, for documentation.
+
+    Client form is the degraded default when :class:`ProjectContext` is not
+    initialised: it is what the overwhelming majority of readers have, and a
+    path-builder must never take its caller down over cosmetics.
+    """
+    try:
+        self_install = ProjectContext.self_install_mode()
+    except RuntimeError:
+        return _CLIENT_DAEMON_SEGMENTS
+    return _SELF_INSTALL_DAEMON_SEGMENTS if self_install else _CLIENT_DAEMON_SEGMENTS
 
 
 def daemon_path(*segments: str) -> str:
@@ -123,4 +179,29 @@ def daemon_cli_command(*args: str) -> str:
         # ProjectContext not initialised — see _fallback_relative_path().
         wrapper = _fallback_relative_path()
     parts: tuple[str, ...] = (wrapper, *args)
+    return _ARG_SEPARATOR.join(parts)
+
+
+def daemon_cli_command_for_docs(*args: str) -> str:
+    """Return a daemon-CLI invocation safe to write into a TRACKED file.
+
+    Use this — never :func:`daemon_cli_command` — for anything that ends up in
+    generated documentation: every ``get_claude_md()`` body, and the docs
+    generator. Those strings are committed and read by every clone, so a path
+    resolved against the generating machine leaks the author's home directory,
+    names a directory no other clone has, and rewrites itself per machine.
+
+    The result stays copy-paste runnable from the project root, which is the
+    documented working directory for every daemon command, and never contains a
+    shell variable (Plan 00192's contract holds for both builders).
+
+    Args:
+        *args: Subcommand and flags, e.g. ``("plan-qa", "--sweep")``.
+
+    Returns:
+        A project-root-relative command string, such as
+        ``.claude/hooks-daemon/bin/hooks-daemon plan-qa --sweep`` in a client
+        install, or ``bin/hooks-daemon plan-qa --sweep`` in self-install mode.
+    """
+    parts: tuple[str, ...] = (_relative_wrapper_path(_docs_daemon_segments()), *args)
     return _ARG_SEPARATOR.join(parts)

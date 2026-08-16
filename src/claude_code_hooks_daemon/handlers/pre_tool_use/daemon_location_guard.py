@@ -6,7 +6,10 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
-from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.cli_command import (
+    daemon_cli_command,
+    daemon_cli_command_for_docs,
+)
 
 # Match a `cd` whose TARGET is the .claude/hooks-daemon/ directory (or a path
 # inside it). The target is a single token that contains no whitespace or
@@ -106,9 +109,9 @@ class DaemonLocationGuardHandler(Handler):
             "**Run daemon CLI from the project root instead** — it always works regardless "
             "of cwd:\n\n"
             "```\n"
-            f"{daemon_cli_command('status')}\n"
-            f"{daemon_cli_command('restart')}\n"
-            f"{daemon_cli_command('logs')}\n"
+            f"{daemon_cli_command_for_docs('status')}\n"
+            f"{daemon_cli_command_for_docs('restart')}\n"
+            f"{daemon_cli_command_for_docs('logs')}\n"
             "```\n\n"
             "If you need to inspect daemon source for debugging, use `Read` from the project "
             "root with the absolute path — never `cd` in. Do NOT edit anything inside "

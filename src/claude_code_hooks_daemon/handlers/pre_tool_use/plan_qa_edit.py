@@ -36,7 +36,7 @@ from claude_code_hooks_daemon.plan_qa.remedy import remedy_sentence
 from claude_code_hooks_daemon.plan_qa.report import format_advisory, format_block_reason
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
 from claude_code_hooks_daemon.plan_qa.types import Finding, Level, Stage
-from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +292,7 @@ class PlanQaEditHandler(Handler):
             "\n"
             "Grandfathered plans in `plan_workflow.qa.legacy_plan_allowlist`\n"
             "only ever advise. Lint any file on demand:\n"
-            f"`{daemon_cli_command('plan-qa', '--lint', '<file>')}`."
+            f"`{daemon_cli_command_for_docs('plan-qa', '--lint', '<file>')}`."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

@@ -187,14 +187,44 @@ class TestAbsolutePathHandler:
         assert "absolute" in result.reason.lower()
         assert "required" in result.reason.lower()
 
-    def test_handle_provides_example_absolute_path(self, handler):
-        """handle() reason should provide example with /workspace/."""
+    def test_handle_provides_example_rooted_at_this_machines_project(self, handler, monkeypatch):
+        """The worked example names the REAL project root, not a hardcoded one.
+
+        This assertion used to pin ``/workspace/`` — this repository's own
+        self-install root — so it passed while every client install was told to
+        prepend a directory that does not exist there (Plan 00244).
+        """
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        client_root = Path("/home/testuser/Projects/example-app")
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: client_root), raising=False
+        )
+
         hook_input = {
             "tool_name": "Write",
             "tool_input": {"file_path": "test.py", "content": "test"},
         }
         result = handler.handle(hook_input)
-        assert "/workspace/" in result.reason
+        assert f"{client_root}/test.py" in result.reason
+
+    def test_handle_omits_the_example_rather_than_guessing_a_root(self, handler, monkeypatch):
+        """An omitted example beats a wrong one, and a block reason must not raise."""
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", False, raising=False)
+        monkeypatch.setattr(pc.ProjectContext, "_instance", None, raising=False)
+
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "test.py", "content": "test"},
+        }
+        result = handler.handle(hook_input)
+        assert "Example:" not in result.reason
+        assert "absolute" in result.reason.lower()
 
     # handle() Tests - Read Tool
     def test_handle_read_returns_deny_decision(self, handler):

@@ -157,7 +157,7 @@ class RootRecursionGuardHandler(Handler):
                 "scan that matches nothing never writes, so it never gets SIGPIPE and runs "
                 "to completion across the whole disk.\n\n"
                 "DO THIS INSTEAD — scope the search to the project:\n"
-                '  rg -l "pattern" /workspace\n'
+                '  rg -l "pattern" .\n'
                 '  grep -rl "pattern" "$CLAUDE_PROJECT_DIR"\n'
                 "Prefer rg (respects .gitignore, far cheaper) over grep -r.\n\n"
                 "ESCAPE HATCH (if you truly must scan from a root):\n"
@@ -175,7 +175,7 @@ class RootRecursionGuardHandler(Handler):
             "- `grep -r`/`-R`/`-rl`, `ugrep -r`, `rgrep`, `find`, `fd`/`fdfind`, `rg`\n"
             "- pointed at `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`\n\n"
             "**Allowed**: the same scanners scoped to the project — "
-            '`rg -l "x" /workspace`, `grep -rl "x" "$CLAUDE_PROJECT_DIR"`, '
+            '`rg -l "x" .`, `grep -rl "x" "$CLAUDE_PROJECT_DIR"`, '
             "`grep -rl x src/`, `find . -name y`. Non-recursive `grep x /etc/hosts` "
             "is not affected.\n\n"
             "**Note**: `... | head` does NOT bound a `-l`/`-rl` scan — a producer that "

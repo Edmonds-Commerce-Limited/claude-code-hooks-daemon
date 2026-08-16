@@ -29,7 +29,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
-from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
 # Extensions treated as markdown (lowercase match).
@@ -142,7 +142,7 @@ class MarkdownTableFormatterHandler(Handler):
             "**Ad-hoc formatting of existing files:**\n"
             "\n"
             "```\n"
-            f"{daemon_cli_command('format-markdown', '<path>')}\n"
+            f"{daemon_cli_command_for_docs('format-markdown', '<path>')}\n"
             "```\n"
         )
 

@@ -10,6 +10,29 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+
+def _absolute_example(file_path: str) -> str:
+    """Worked example for the RUNTIME block reason, on THIS machine.
+
+    Absolute on purpose (Plan 00192): a block reason is ephemeral and read by
+    an agent on this machine, so the example must be usable exactly as printed.
+    This is the opposite of what ``get_claude_md`` needs — that string is
+    written into a tracked file read by every clone (Plan 00244).
+
+    The example used to be hard-coded to ``/workspace``, this repository's own
+    self-install root, so every client install was told to prepend a directory
+    that does not exist there.
+
+    Returns an empty string when :class:`ProjectContext` is not initialised: a
+    block reason must never raise, and an omitted example is better than a
+    wrong one.
+    """
+    try:
+        return f"  Example: {ProjectContext.project_root() / file_path}\n"
+    except RuntimeError:
+        return ""
 
 
 class AbsolutePathHandler(Handler):
@@ -59,8 +82,8 @@ class AbsolutePathHandler(Handler):
                 "  - Prevents accidental operations on wrong files\n"
                 "  - Makes file operations explicit and traceable\n\n"
                 "REQUIRED ACTION:\n"
-                f"  Use absolute path starting with /\n"
-                f"  Example: /workspace/{file_path}\n\n"
+                "  Use absolute path starting with /\n"
+                f"{_absolute_example(file_path)}\n"
                 "Note: Claude Code's Read tool documentation states:\n"
                 "'The file_path parameter must be an absolute path, not a relative path'"
             ),
@@ -71,10 +94,12 @@ class AbsolutePathHandler(Handler):
             "## absolute_path — always use absolute paths\n\n"
             "The `Read`, `Write`, and `Edit` tools require absolute paths. "
             "Relative paths are blocked.\n\n"
-            "- **Correct**: `/workspace/src/main.py`, `/workspace/tests/test_utils.py`\n"
-            "- **Blocked**: `src/main.py`, `./config.yaml`, `../other/file.txt`\n\n"
-            "The working directory is `/workspace`. "
-            "Prepend `/workspace/` to any relative path before calling these tools."
+            "- **Blocked**: `src/main.py`, `./config.yaml`, `../other/file.txt`\n"
+            "- **Correct**: each of those prefixed with the project's absolute root\n\n"
+            "Prepend the absolute path of the project root — the working directory "
+            "Claude Code reports for this session — to any relative path before "
+            "calling these tools. The block message names the exact path to use, so "
+            "there is nothing to guess."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

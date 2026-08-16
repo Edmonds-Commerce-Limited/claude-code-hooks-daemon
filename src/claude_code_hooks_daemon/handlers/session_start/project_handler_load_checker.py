@@ -20,25 +20,35 @@ the remediation the alert asks for. Advisory only — it never blocks.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
-from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.cli_command import (
+    daemon_cli_command,
+    daemon_cli_command_for_docs,
+)
+
+#: Subcommands named once, rendered twice (Plan 00244). The runtime alert and
+#: the resident CLAUDE.md guidance quote the same commands but need different
+#: path forms, so the SUBCOMMAND is the single source of truth and the builder
+#: choice belongs to the destination.
+_RESTART_SUBCOMMAND: Final[str] = "restart"
+_VALIDATE_SUBCOMMAND: Final[str] = "validate-project-handlers"
 
 
 def _restart_cmd() -> str:
-    """Restart command surfaced in the alert and the CLAUDE.md guidance.
+    """Restart command surfaced in the RUNTIME alert — absolute.
 
     Computed on demand (Plan 00192): the wrapper path depends on the install
     mode, which ``ProjectContext`` only knows after daemon startup.
     """
-    return daemon_cli_command("restart")
+    return daemon_cli_command(_RESTART_SUBCOMMAND)
 
 
 def _validate_cmd() -> str:
-    """Diagnostic command for the degraded-protection alert."""
-    return daemon_cli_command("validate-project-handlers")
+    """Diagnostic command for the RUNTIME degraded-protection alert — absolute."""
+    return daemon_cli_command(_VALIDATE_SUBCOMMAND)
 
 
 class ProjectHandlerLoadCheckerHandler(Handler):
@@ -143,11 +153,13 @@ class ProjectHandlerLoadCheckerHandler(Handler):
             "\n"
             "1. **Do not assume normal guardrails are in force.** The listed "
             "handlers are OFF for this session.\n"
-            f"2. **Diagnose** each failure: `{_validate_cmd()}` names the file, "
+            f"2. **Diagnose** each failure: "
+            f"`{daemon_cli_command_for_docs(_VALIDATE_SUBCOMMAND)}` names the file, "
             "the missing method, and the daemon version that introduced it.\n"
             "3. **Fix** the handler(s) — usually adding a required method stub "
             "(e.g. `get_claude_md`) that a daemon upgrade made mandatory.\n"
-            f"4. **Restart the daemon** (`{_restart_cmd()}`). The alert reflects "
+            f"4. **Restart the daemon** "
+            f"(`{daemon_cli_command_for_docs(_RESTART_SUBCOMMAND)}`). The alert reflects "
             "the *running* daemon, so it clears only after a restart reloads the "
             "fixed handlers — fixing the file alone is not enough.\n"
             "\n"

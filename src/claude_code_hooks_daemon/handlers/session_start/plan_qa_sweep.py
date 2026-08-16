@@ -22,7 +22,10 @@ from claude_code_hooks_daemon.plan_qa.context import sweep_context
 from claude_code_hooks_daemon.plan_qa.report import format_advisory
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
 from claude_code_hooks_daemon.plan_qa.types import Stage
-from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.cli_command import (
+    daemon_cli_command,
+    daemon_cli_command_for_docs,
+)
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -126,7 +129,7 @@ class PlanQaSweepHandler(Handler):
             "re-check with:\n"
             "\n"
             "```\n"
-            f"{daemon_cli_command('plan-qa', '--sweep')}\n"
+            f"{daemon_cli_command_for_docs('plan-qa', '--sweep')}\n"
             "```\n"
             "\n"
             "The CLI exits 1 while findings remain (CI-able). Single-file lint:\n"

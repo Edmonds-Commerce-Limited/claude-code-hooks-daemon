@@ -16,7 +16,7 @@ trigger; they are only named as also-missing once ``mkplan.bash`` is gone.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
@@ -28,19 +28,28 @@ from claude_code_hooks_daemon.install.plan_workflow import (
     MKPLAN_SCRIPT_NAME,
     PLAN_JOURNALLING_DOC_NAME,
 )
-from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.cli_command import (
+    daemon_cli_command,
+    daemon_cli_command_for_docs,
+)
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
 
+#: Named once, rendered twice (Plan 00244). The runtime advisory and the
+#: resident CLAUDE.md guidance quote the same command but need different path
+#: forms, so the SUBCOMMAND is the single source of truth and the builder choice
+#: belongs to the destination.
+_DEPLOY_SUBCOMMAND: Final[str] = "deploy-plan-workflow"
+
 
 def _deploy_cli_hint() -> str:
-    """Deploy directive naming the deployed wrapper (Plan 00192).
+    """Deploy directive for the RUNTIME advisory — absolute (Plan 00192).
 
     Computed on demand: the wrapper path depends on the install mode, which
     ``ProjectContext`` only knows after daemon startup.
     """
-    return daemon_cli_command("deploy-plan-workflow")
+    return daemon_cli_command(_DEPLOY_SUBCOMMAND)
 
 
 class PlanWorkflowAssetCheckerHandler(Handler):
@@ -138,7 +147,7 @@ class PlanWorkflowAssetCheckerHandler(Handler):
             "**Fix**: (re)deploy the assets on demand —\n"
             "\n"
             "```\n"
-            f"{_deploy_cli_hint()}\n"
+            f"{daemon_cli_command_for_docs(_DEPLOY_SUBCOMMAND)}\n"
             "```\n"
             "\n"
             "The deploy is idempotent (fills gaps only, never overwrites "

@@ -16,7 +16,7 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
-from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.hook_command_migration import (
     MigrationResult,
     migrate_settings_to_bash_invocation,
@@ -263,7 +263,7 @@ class HookRegistrationCheckerHandler(Handler):
             "`settings.local.json`. Confirm no duplicates remain.\n"
             "- **Legacy-style commands**: replace them with a project-level "
             "handler. Run "
-            f"`{daemon_cli_command('init-project-handlers')}` "
+            f"`{daemon_cli_command_for_docs('init-project-handlers')}` "
             "to scaffold `.claude/project-handlers/`, port the logic into "
             "a handler class, then restore the daemon wrapper in "
             "`settings.json`. The daemon will auto-discover the new handler "

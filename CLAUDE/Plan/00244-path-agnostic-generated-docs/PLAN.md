@@ -72,30 +72,36 @@ definition of a path-agnostic wrapper path rather than two.
 
 ### Phase 1: Guard first (DBF)
 
-- [ ] ⬜ **Task 1.1**: Write the failing client-mode regression test — render the
-  generated docs with `ProjectContext` pinned to a temp client root, assert the
+- [x] ✅ **Task 1.1**: Write the failing client-mode regression test — render the
+  generated docs with `ProjectContext` pinned to a client root, assert the
   output contains no occurrence of that root.
-  - [ ] ⬜ Cover the `CLAUDE.md` `<hooksdaemon>` block (injector).
-  - [ ] ⬜ Cover `.claude/HOOKS-DAEMON.md` (docs generator).
-  - [ ] ⬜ Assert it fails today for the right reason, not by accident.
-- [ ] ⬜ **Task 1.2**: Write failing unit tests for the doc-variant builder
+  - [x] ✅ Cover the `CLAUDE.md` `<hooksdaemon>` block (injector).
+  - [x] ✅ Cover `.claude/HOOKS-DAEMON.md` (docs generator).
+  - [x] ✅ Assert it fails today for the right reason, not by accident — 13 RED
+    failures, matching the call-site map exactly.
+- [x] ✅ **Task 1.2**: Write failing unit tests for the doc-variant builder
   (both install modes, no `$`, no leading `/`, arguments appended in order).
 
 ### Phase 2: The builder
 
-- [ ] ⬜ **Task 2.1**: Add the path-agnostic doc variant to `utils/cli_command.py`
+- [x] ✅ **Task 2.1**: Add the path-agnostic doc variant to `utils/cli_command.py`
   alongside the runtime builders, sharing the existing named constants.
-- [ ] ⬜ **Task 2.2**: Document in the module docstring WHY two builders exist —
+- [x] ✅ **Task 2.2**: Document in the module docstring WHY two builders exist —
   the two audiences and their opposite requirements — so the next reader does not
   "unify" them back into one.
 
 ### Phase 3: Switch the tracked-doc call sites
 
-- [ ] ⬜ **Task 3.1**: Switch every `get_claude_md()` body that embeds a path
-  builder to the doc variant.
-- [ ] ⬜ **Task 3.2**: Switch the docs generator's header line.
-- [ ] ⬜ **Task 3.3**: Leave every runtime call site (block reasons, advisory
+- [x] ✅ **Task 3.1**: Switch every `get_claude_md()` body that embeds a path
+  builder to the doc variant (10 handlers, 11 call sites).
+- [x] ✅ **Task 3.2**: Switch the docs generator's header line.
+- [x] ✅ **Task 3.3**: Leave every runtime call site (block reasons, advisory
   context) on the absolute builder, and confirm each deliberately.
+- [x] ✅ **Task 3.4**: Fix the SECOND defect class the report did not identify —
+  guidance that hard-codes the literal `/workspace`. Not merely
+  machine-specific: on a client install that directory does not exist at all.
+  `absolute_path` (guidance AND its runtime block reason) and
+  `root_recursion_guard` (both surfaces).
 
 ### Phase 4: Verify
 

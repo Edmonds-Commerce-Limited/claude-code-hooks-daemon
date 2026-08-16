@@ -21,7 +21,7 @@ from claude_code_hooks_daemon.pseudo_events.registry import (
 # Section key for handlers driven by a pseudo-event. Prefixed so the rendered
 # heading reads "Pseudo Nitpick" rather than colliding with a real event type.
 PSEUDO_EVENT_SECTION_PREFIX = "pseudo_"
-from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
@@ -116,7 +116,7 @@ class DocsGenerator:
         return (
             "# Hooks Daemon - Active Configuration\n\n"
             f"> Generated on {today} (v{__version__}) by `generate-docs`. "
-            f"Regenerate: `{daemon_cli_command('generate-docs')}`"
+            f"Regenerate: `{daemon_cli_command_for_docs('generate-docs')}`"
         )
 
     def _render_plan_mode_section(self) -> str | None:

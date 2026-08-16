@@ -31,7 +31,10 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.cli_command import (
+    daemon_cli_command,
+    daemon_cli_command_for_docs,
+)
 
 # State file under the daemon untracked dir (never /tmp — B108).
 _STATE_FILENAME: Final[str] = "background-processes.jsonl"
@@ -289,7 +292,7 @@ class BackgroundProcessTrackerHandler(Handler):
             "When you background a long-lived process:\n\n"
             "- Create a non-durable recurring **watchdog cron** (CronCreate, "
             "durable:false) whose prompt runs "
-            f"`{daemon_cli_command('harvest-background')}` and "
+            f"`{daemon_cli_command_for_docs('harvest-background')}` and "
             "acts on any runaway — this covers the idle/compaction window a tool-call "
             "hook cannot. Do NOT wait for the cron; keep working.\n"
             "- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).\n"

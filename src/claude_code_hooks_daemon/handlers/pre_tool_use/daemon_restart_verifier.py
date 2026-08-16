@@ -28,7 +28,7 @@ from claude_code_hooks_daemon.core import (
     TestType,
 )
 from claude_code_hooks_daemon.daemon.validation import is_hooks_daemon_repo
-from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 
 
 class DaemonRestartVerifierHandler(Handler):
@@ -107,7 +107,7 @@ class DaemonRestartVerifierHandler(Handler):
             "import silently disables protection without any test-time error. Daemon restart "
             "is the definitive check.\n\n"
             "**Run before committing** (in this repo only):\n"
-            f"`{daemon_cli_command('restart')}` then verify status shows RUNNING."
+            f"`{daemon_cli_command_for_docs('restart')}` then verify status shows RUNNING."
         )
 
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
