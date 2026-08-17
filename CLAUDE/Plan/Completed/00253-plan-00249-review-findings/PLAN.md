@@ -1,6 +1,6 @@
 # Plan 00253: Plan 00249 review findings
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-17
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -155,11 +155,20 @@ it lives beside the plan instead of inside it.
 
 ### Phase 5: Verify
 
-- [ ] ⬜ **Task 5.1**: Full QA green, daemon restart RUNNING
-- [ ] ⬜ **Task 5.2**: Re-run the two blocking reproductions and confirm both now
-  behave correctly, rather than trusting the unit tests alone
-- [ ] ⬜ **Task 5.3**: Client-mode verification — `delete-branch` is a CLI command
-  whose repo resolution differs in a client install
+- [x] ✅ **Task 5.1**: Full QA green (23/23, 12,531 tests, 95.1% coverage), daemon
+  restart RUNNING with zero errors. The restart regenerated no `CLAUDE.md` change,
+  which is the check that the Phase 1.5 guidance edit shipped with its source
+  rather than as a generated artifact.
+- [x] ✅ **Task 5.2**: Re-run the two blocking reproductions and confirm both now
+  behave correctly, rather than trusting the unit tests alone. Both re-run against
+  real git: the dry run and the real run now agree for A, and a forced partial
+  batch names the deleted branch and discloses the bundle for B.
+- [x] ✅ **Task 5.3**: Client-mode verification — `delete-branch` is a CLI command
+  whose repo resolution differs in a client install. Both changed predicate
+  branches (`merged-not-in-head`, `merged-unpushed`) driven end to end through a
+  real client install's wrapper. The `PARTIALLY REFUSED` rendering is not
+  naturally reachable post-fix — by design, since it now means our predicate
+  disagreed with git — so its coverage stays with the argv-forcing unit test.
 
 ## Dependencies
 
@@ -247,13 +256,13 @@ the constraint is on machine callers only.
 
 ## Success Criteria
 
-- [ ] Classifier and real git agree for a merged branch with no upstream while
+- [x] Classifier and real git agree for a merged branch with no upstream while
   HEAD is elsewhere, verified by executing both
-- [ ] A partial batch names what was deleted and prints the surviving bundle path
-- [ ] Removing the bundle timeout from the call site fails the suite
-- [ ] The non-ASCII path count is correct
-- [ ] Every finding is fixed, or declined in writing with its reason
-- [ ] QA green, daemon restart RUNNING, client-mode verified
+- [x] A partial batch names what was deleted and prints the surviving bundle path
+- [x] Removing the bundle timeout from the call site fails the suite
+- [x] The non-ASCII path count is correct
+- [x] Every finding is fixed, or declined in writing with its reason
+- [x] QA green, daemon restart RUNNING, client-mode verified
 
 ## Risks & Mitigations
 
@@ -268,4 +277,15 @@ the constraint is on machine callers only.
 
 <!-- Curated milestones + delivery commit hashes. Blow-by-blow log lives in JOURNAL/. -->
 
-- Filed at the commit that adds this plan.
+- Filed at `e893dd05` — all six findings re-verified by execution before any fix.
+- Both blocking findings fixed at `1201ddff` (Phase 1 + 2).
+- The two vacuous tests made load-bearing and both notes fixed at `9af88673`.
+- `6a294054` pins the dynamic-upstream case a probe of my own nearly mis-filed as
+  a seventh finding — the upstream is resolved at classification time, not cached.
+- `5acd76ba` settles the loop policy: keep continue-and-report, change the SIGNAL.
+  A refusal inside the loop now carries a diagnosis naming its two possible causes
+  and forbidding a force.
+- `a494dbf3` + `c2a62f84` pin that the diagnosis cannot leak onto a refusal git was
+  never asked about.
+- Verified at `c2a62f84`: QA 23/23 (12,531 tests, 95.1%), daemon restart RUNNING,
+  and both changed predicate branches driven through a real client install.
