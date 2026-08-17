@@ -85,12 +85,14 @@ a sweep.
 
 ### Phase 1: Make the bounded home actually bound
 
-- [ ] ⬜ **Task 1.1**: Write failing tests for a read-only git runner that sets
+- [x] ✅ **Task 1.1**: Write failing tests for a git runner that sets
   `GIT_OPTIONAL_LOCKS=0` and always carries a timeout
-- [ ] ⬜ **Task 1.2**: Implement it in `utils/git_repo.py`, preserving the
-  existing `None`-on-failure convention
-- [ ] ⬜ **Task 1.3**: Prove the lock is no longer taken — a test that asserts
-  `.git/index` is not rewritten by a read-only call through the runner
+- [x] ✅ **Task 1.2**: Implement `run_git` in `utils/git_repo.py`, preserving the
+  existing `None`-on-failure convention; route `_git_output` and `write_config`
+  through it so no spawn remains outside the one bounded home
+- [x] ✅ **Task 1.3**: Prove the lock is no longer taken — assert `.git/index` is
+  not rewritten by a read through the runner, plus a control test proving the
+  scenario would otherwise rewrite it (without which the assertion is vacuous)
 
 ### Phase 2: Fix the three lock-taking paths
 
@@ -147,6 +149,26 @@ real writer, where it belongs.
 
 **Date**: 2026-08-17
 
+### Decision 2: one runner for ALL git calls, with no read/write classification
+
+**Context**: The first design had `run_git` accept only read-only verbs, so a
+write could never be handed a "read-only" runner. Classifying by verb is
+unsound anyway — `config --get` reads while `config k v` writes, `branch --show-current` reads while `branch -d` deletes — so the classification would
+have to inspect sub-verbs and flags.
+
+The premise behind needing it at all was that `GIT_OPTIONAL_LOCKS=0` might be
+unsafe on a write. Tested rather than assumed, in a throwaway repo with the
+variable exported: `add`, `commit`, `commit --only` and `config --local` all
+succeeded, two commits were recorded and the worktree ended clean. Git declines
+only OPTIONAL locks; a lock a command genuinely requires is still taken.
+
+**Decision**: one `run_git` for every invocation, no classification. This
+deletes the misclassification risk instead of mitigating it, and makes the Phase
+3 guard trivially checkable — "no `subprocess.run(["git", …])` outside this
+module" needs no verb knowledge at all.
+
+**Date**: 2026-08-17
+
 ## Success Criteria
 
 - [ ] A daemon start with a clean CLAUDE.md rewrites `.git/index` zero times
@@ -161,7 +183,7 @@ real writer, where it belongs.
 | Risk                                                   | Impact | Probability | Mitigation                                                                     |
 | ------------------------------------------------------ | ------ | ----------- | ------------------------------------------------------------------------------ |
 | `GIT_OPTIONAL_LOCKS=0` changes output of some git verb | Medium | Low         | It only declines the index refresh; assert byte-identical output per migration |
-| A write verb is misclassified as read-only             | High   | Low         | Classify by explicit named tuple of verbs, never by heuristic                  |
+| ~~A write verb is misclassified as read-only~~         | —      | —           | VOID — Decision 2 removed classification after verifying writes are unaffected |
 | The migration is broad enough to regress a caller      | Medium | Medium      | One caller per commit, tests per caller, daemon restart between                |
 | The guard's allowlist becomes a dumping ground         | Medium | Medium      | Each entry carries its reason inline; the check prints them                    |
 
