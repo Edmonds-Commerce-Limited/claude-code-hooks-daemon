@@ -1462,71 +1462,6 @@ Writing ephemeral or session-specific content to `CLAUDE.md` or `README.md` is b
 
 Content inside markdown code blocks is exempt from validation.
 
-<!-- handler: recovery-cron-advisor -->
-
-## recovery_cron_advisor — failsafe recovery cron lifecycle advisory
-
-An advisory PostToolUse handler that fires across a plan's lifecycle and
-injects guidance telling the agent to manage a non-durable hourly failsafe
-recovery cron.
-
-### What it does
-
-Three lifecycle phases are detected from Write/Edit to `CLAUDE/Plan/<digits>-<name>/PLAN.md`
-(never from files inside `Completed/`) and from `mkplan.bash` Bash invocations:
-
-| Phase          | Trigger                                               | Guidance injected                                                                                                                                                                                                                                         |
-| -------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Creation**   | New PLAN.md written, or `mkplan.bash` invoked         | Create a non-durable hourly cron now (CronCreate, durable:false); record the ID in the plan's `JOURNAL/` day-file (NOT in PLAN.md); do NOT wait for the cron.                                                                                             |
-| **Progress**   | Edit to PLAN.md touching task-status icons (⬜/🔄/✅) | Confirm the recovery cron is still running (CronList); recreate if missing; keep working.                                                                                                                                                                 |
-| **Completion** | `**Status**: Complete[d]` written/edited              | Plan complete — **warns first**: deleting now leaves the still-live session with no recovery coverage. Keep the cron if any further work may happen (it is non-durable and dies on session exit); `CronDelete` only when certain the session is finished. |
-
-Progress reminders are rate-limited per plan: the handler advises on the first
-progress edit and then once every few progress edits for that plan, so it does
-not spam context on every edit. Completion always advises (bypasses the interval).
-
-### CRITICAL: recovery cron is NOT a heartbeat
-
-The recovery cron is a **failsafe safety net**, not a pacing mechanism:
-
-- The agent **must never** wait for the cron between units of work.
-- Work proceeds at **full speed** until an external factor (Claude API error,
-  rate limit, 5-hour usage limit, network failure) actually stalls it.
-- The cron fires only while the REPL is idle; it cannot interrupt active work.
-- Treating the cron as a heartbeat is an **own goal** — it would convert a
-  safety net into an artificial hourly throttle.
-
-### Canonical recovery-cron prompt
-
-Use this verbatim as the CronCreate prompt:
-
-```
-**FAILSAFE RECOVERY CHECK (automated hourly safety net — NOT a heartbeat).**
-If your most recent work on the active plan/task was interrupted by an
-*external* factor (Claude API error/overload, rate limit, 5-hour usage limit,
-network failure) and is now resumable, resume it immediately and carry it to
-completion. If you are blocked **only** on human input, do nothing and keep
-waiting. If work is already proceeding normally, this is a **no-op** — do not
-interrupt, restart, or duplicate anything in flight. Never treat this as a
-heartbeat or pacing signal: between checks, continue at full speed until an
-external factor actually stops you — waiting for the cron is an own goal. Do
-NOT delete this cron merely because a tick finds nothing to resume: it is
-non-durable and ends automatically when the session exits, and a still-live
-session stays exposed to the next rate limit without it. Remove it (CronDelete)
-only once the session is genuinely finished with no further work.
-```
-
-### Configuration
-
-This handler is **on by default** (opt-out). Disable with:
-
-```yaml
-handlers:
-  post_tool_use:
-    recovery_cron_advisor:
-      enabled: false
-```
-
 <!-- handler: git-hooks-executable-fixer -->
 
 ## git_hooks_executable_fixer — auto-fixes non-executable git hooks
@@ -1595,24 +1530,6 @@ restricts which languages are checked, and `command_overrides` replaces a
 language's `default`/`extended` command (set `extended: null` to run only the
 syntax check).
 
-<!-- handler: background-process-tracker -->
-
-## background_process_tracker — backgrounded processes are tracked
-
-A PostToolUse advisory that fires when a Bash call backgrounds a process (`run_in_background: true`, or a `&`/`nohup`/`setsid`/`disown` command). It records the command to `background-processes.jsonl` and injects rate-limited guidance.
-
-**The daemon never kills.** It surfaces runaways; you decide.
-
-When you background a long-lived process:
-
-- Create a non-durable recurring **watchdog cron** (CronCreate, durable:false) whose prompt runs `bin/hooks-daemon harvest-background` and acts on any runaway — this covers the idle/compaction window a tool-call hook cannot. Do NOT wait for the cron; keep working.
-- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).
-- Reap a runaway by its **process group**: `kill -- -<pgid>` (not just the pid).
-- Keep a wanted long task: note `KEEP_RUNNING_BECAUSE="reason"`.
-- Delete the watchdog cron (CronDelete) when no backgrounded work remains.
-
-Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
-
 <!-- handler: markdown-table-formatter -->
 
 ## markdown_table_formatter — markdown tables are auto-aligned
@@ -1633,6 +1550,95 @@ After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-
 ```
 bin/hooks-daemon format-markdown <path>
 ```
+
+<!-- handler: recovery-cron-advisor -->
+
+## recovery_cron_advisor — failsafe recovery cron lifecycle advisory
+
+An advisory PostToolUse handler that fires across a plan's lifecycle and
+injects guidance telling the agent to manage a non-durable hourly failsafe
+recovery cron.
+
+**There must be EXACTLY ONE recovery cron per session — never one per
+plan.** The canonical prompt is plan-agnostic ('the active plan/task'), so a
+single cron covers every plan in the session and a second only double-fires
+on the same session. Always `CronList` before creating: reuse what is
+running, delete extras, create only when none exists.
+
+### What it does
+
+Three lifecycle phases are detected from Write/Edit to `CLAUDE/Plan/<digits>-<name>/PLAN.md`
+(never from files inside `Completed/`) and from `mkplan.bash` Bash invocations:
+
+| Phase          | Trigger                                               | Guidance injected                                                                                                                                                                                                                                         |
+| -------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Creation**   | New PLAN.md written, or `mkplan.bash` invoked         | `CronList` FIRST: reuse the recovery cron already running (record THAT id in the plan's `JOURNAL/`, create nothing) and `CronDelete` any extras; create one (CronCreate, durable:false) ONLY if none is listed. Do NOT wait for the cron.                 |
+| **Progress**   | Edit to PLAN.md touching task-status icons (⬜/🔄/✅) | `CronList`: exactly one → nothing to do; more than one → `CronDelete` the extras; none → create one. Keep working.                                                                                                                                        |
+| **Completion** | `**Status**: Complete[d]` written/edited              | Plan complete — **warns first**: deleting now leaves the still-live session with no recovery coverage. Keep the cron if any further work may happen (it is non-durable and dies on session exit); `CronDelete` only when certain the session is finished. |
+
+Progress reminders are rate-limited per plan: the handler advises on the first
+progress edit and then once every few progress edits for that plan, so it does
+not spam context on every edit. Completion always advises (bypasses the interval).
+
+### CRITICAL: recovery cron is NOT a heartbeat
+
+The recovery cron is a **failsafe safety net**, not a pacing mechanism:
+
+- The agent **must never** wait for the cron between units of work.
+- Work proceeds at **full speed** until an external factor (Claude API error,
+  rate limit, 5-hour usage limit, network failure) actually stalls it.
+- The cron fires only while the REPL is idle; it cannot interrupt active work.
+- Treating the cron as a heartbeat is an **own goal** — it would convert a
+  safety net into an artificial hourly throttle.
+
+### Canonical recovery-cron prompt
+
+Use this verbatim as the CronCreate prompt:
+
+```
+**FAILSAFE RECOVERY CHECK (automated hourly safety net — NOT a heartbeat).**
+If your most recent work on the active plan/task was interrupted by an
+*external* factor (Claude API error/overload, rate limit, 5-hour usage limit,
+network failure) and is now resumable, resume it immediately and carry it to
+completion. If you are blocked **only** on human input, do nothing and keep
+waiting. If work is already proceeding normally, this is a **no-op** — do not
+interrupt, restart, or duplicate anything in flight. Never treat this as a
+heartbeat or pacing signal: between checks, continue at full speed until an
+external factor actually stops you — waiting for the cron is an own goal. Do
+NOT delete this cron merely because a tick finds nothing to resume: it is
+non-durable and ends automatically when the session exits, and a still-live
+session stays exposed to the next rate limit without it. Remove it (CronDelete)
+only once the session is genuinely finished with no further work.
+```
+
+### Configuration
+
+This handler is **on by default** (opt-out). Disable with:
+
+```yaml
+handlers:
+  post_tool_use:
+    recovery_cron_advisor:
+      enabled: false
+```
+
+<!-- handler: background-process-tracker -->
+
+## background_process_tracker — backgrounded processes are tracked
+
+A PostToolUse advisory that fires when a Bash call backgrounds a process (`run_in_background: true`, or a `&`/`nohup`/`setsid`/`disown` command). It records the command to `background-processes.jsonl` and injects rate-limited guidance.
+
+**The daemon never kills.** It surfaces runaways; you decide.
+
+When you background a long-lived process:
+
+- Ensure **EXACTLY ONE** non-durable recurring **watchdog cron** exists — one covers the whole session, since its prompt harvests ALL tracked background processes. `CronList` FIRST: reuse the one already running (`CronDelete` any extras), and only if none is listed create it (CronCreate, durable:false) with a prompt that runs `bin/hooks-daemon harvest-background` and acts on any runaway — this covers the idle/compaction window a tool-call hook cannot. Do NOT wait for the cron; keep working.
+- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).
+- Reap a runaway by its **process group**: `kill -- -<pgid>` (not just the pid).
+- Keep a wanted long task: note `KEEP_RUNNING_BECAUSE="reason"`.
+- Delete the watchdog cron (CronDelete) when no backgrounded work remains.
+
+Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
 
 <!-- handler: git-upstream-checker -->
 
