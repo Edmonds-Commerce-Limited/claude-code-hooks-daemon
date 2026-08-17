@@ -696,6 +696,222 @@ class TestClaudeMdInjectorAutoCommit:
         assert _OPEN_TAG in content
 
 
+def _index_identity(repo: Path) -> tuple[int, int]:
+    """Inode + mtime of `.git/index` — changes iff git rewrote the index."""
+    stat = (repo / ".git" / "index").stat()
+    return (stat.st_ino, stat.st_mtime_ns)
+
+
+def _make_index_stale(repo: Path) -> None:
+    """Touch tracked files so git WANTS to refresh the index on the next read.
+
+    Without this the index is already current, git skips the refresh of its own
+    accord, and "the index was not rewritten" would be true of any
+    implementation — the assertion would pass vacuously.
+    """
+    for tracked in repo.glob("*.md"):
+        tracked.touch()
+
+
+class TestAutoCommitDoesNotFightTheAgentForTheIndexLock:
+    """Plan 00246: reported from dogfooding as stale `.git/index.lock`.
+
+    The auto-commit runs synchronously on the daemon STARTUP path, and a restart
+    is mandated after every handler change — precisely when an agent is also
+    running git in the same working tree. Every lock the daemon takes there is a
+    lock the agent can collide with, so the ones it does not need must go.
+    """
+
+    def test_a_clean_claude_md_costs_no_lock_at_all(self, tmp_path: Path) -> None:
+        """The overwhelmingly common case: nothing to commit, so lock nothing.
+
+        `git status` refreshes the index and writes it back unless told not to,
+        so before this the daemon took the lock on EVERY start just to learn
+        there was nothing to do.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_git_repo(tmp_path)
+        handler = _StubHandler("h", "## H\n\nContent.")
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        _make_index_stale(tmp_path)
+        before = _index_identity(tmp_path)
+
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        assert _index_identity(tmp_path) == before, (
+            "a daemon start with a clean CLAUDE.md rewrote .git/index, so it "
+            "took .git/index.lock and can collide with the agent's own git"
+        )
+
+    def test_the_control_shows_bare_git_status_would_rewrite_it(self, tmp_path: Path) -> None:
+        """Without this, the test above could pass for the wrong reason."""
+        _init_git_repo(tmp_path)
+        _make_index_stale(tmp_path)
+        before = _index_identity(tmp_path)
+
+        subprocess.run(
+            ["git", "status", "--porcelain", "CLAUDE.md"],
+            cwd=tmp_path,
+            capture_output=True,
+            check=True,
+        )
+
+        assert _index_identity(tmp_path) != before, (
+            "scenario does not provoke an index refresh, so the sibling test "
+            "would pass vacuously — fix the fixture, not the assertion"
+        )
+
+    def test_a_tracked_claude_md_is_not_staged_before_committing(self, tmp_path: Path) -> None:
+        """`commit --only` scopes to the path itself, so staging is a wasted lock."""
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.constants.timeout import Timeout
+        from claude_code_hooks_daemon.core import claude_md_injector as module
+
+        _init_git_repo(tmp_path)
+        calls: list[tuple[str, ...]] = []
+        real = module.run_git
+
+        def spy(
+            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
+        ) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            return real(cwd, *args, timeout=timeout)
+
+        handler = _StubHandler("h", "## H\n\nContent.")
+        with patch.object(module, "run_git", spy):
+            module.ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        assert any(args and args[0] == "commit" for args in calls), calls
+        assert not any(args and args[0] == "add" for args in calls), (
+            f"CLAUDE.md was already tracked, so staging it took a second index "
+            f"lock for nothing: {calls}"
+        )
+
+    def test_an_untracked_claude_md_is_still_committed(self, tmp_path: Path) -> None:
+        """The case that makes the staging call load-bearing — first install.
+
+        `git commit --only <path>` FAILS on a path git does not know
+        (`pathspec … did not match any file(s)`), so dropping the staging call
+        outright would silently stop committing a brand-new CLAUDE.md. No
+        pre-existing test covered this: the fixtures all commit one first.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        for key, value in (("user.email", "t@t"), ("user.name", "t")):
+            subprocess.run(
+                ["git", "config", "--local", key, value],
+                cwd=tmp_path,
+                capture_output=True,
+                check=True,
+            )
+        (tmp_path / "seed.txt").write_text("seed\n")
+        subprocess.run(["git", "add", "seed.txt"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "seed"], cwd=tmp_path, capture_output=True, check=True
+        )
+        assert not (tmp_path / "CLAUDE.md").exists(), "precondition: no CLAUDE.md yet"
+
+        handler = _StubHandler("h", "## H\n\nContent.")
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        tracked = subprocess.run(
+            ["git", "ls-files", "CLAUDE.md"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert tracked.stdout.strip() == "CLAUDE.md", (
+            "a brand-new CLAUDE.md was not committed — the staging call is "
+            "load-bearing for an untracked file"
+        )
+
+    def test_the_commit_is_bounded_generously_not_by_the_read_default(
+        self, tmp_path: Path
+    ) -> None:
+        """A commit needs a longer bound than a read, and both need one.
+
+        Every git call here goes through `run_git`, so a timeout applies by
+        construction. The commit overrides the read default deliberately: it may
+        run the repo's pre-commit hooks, and `subprocess` KILLS the child when a
+        timeout expires — killing git mid-commit is itself how `.git/index.lock`
+        gets orphaned, so too tight a bound would cause the reported symptom
+        rather than prevent it.
+        """
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.constants.timeout import Timeout
+        from claude_code_hooks_daemon.core import claude_md_injector as module
+
+        _init_git_repo(tmp_path)
+        timeouts: dict[str, float] = {}
+        real = module.run_git
+
+        def spy(
+            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
+        ) -> subprocess.CompletedProcess[str]:
+            if args:
+                timeouts[args[0]] = timeout
+            return real(cwd, *args, timeout=timeout)
+
+        handler = _StubHandler("h", "## H\n\nContent.")
+        with patch.object(module, "run_git", spy):
+            module.ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        assert timeouts.get("commit") == Timeout.GIT_COMMIT, timeouts
+        assert timeouts["status"] > 0, timeouts
+        assert Timeout.GIT_COMMIT > Timeout.GIT_CONTEXT, (
+            "the commit bound must exceed the read bound — a commit can run "
+            "pre-commit hooks, a status cannot"
+        )
+
+    def test_lock_contention_is_reported_at_warning_with_gits_reason(
+        self, tmp_path: Path, caplog: Any
+    ) -> None:
+        """A collision must not vanish into a debug log.
+
+        Contention was logged at `debug`, so the only visible symptom was a
+        stale lock file or a mystifying failure in an unrelated command.
+        """
+        import logging
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.constants.timeout import Timeout
+        from claude_code_hooks_daemon.core import claude_md_injector as module
+
+        _init_git_repo(tmp_path)
+        real = module.run_git
+        contention = (
+            "fatal: Unable to create '/repo/.git/index.lock': File exists.\n"
+            "Another git process seems to be running in this repository."
+        )
+
+        def fail_the_write(
+            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
+        ) -> subprocess.CompletedProcess[str]:
+            if args and args[0] in ("commit", "add"):
+                return subprocess.CompletedProcess(["git", *args], 128, "", contention)
+            return real(cwd, *args, timeout=timeout)
+
+        handler = _StubHandler("h", "## H\n\nContent.")
+        with (
+            caplog.at_level(logging.WARNING),
+            patch.object(module, "run_git", fail_the_write),
+        ):
+            module.ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert warnings, "lock contention produced no WARNING"
+        assert any("index.lock" in r.getMessage() for r in warnings), (
+            f"the WARNING did not carry git's own reason: "
+            f"{[r.getMessage() for r in warnings]}"
+        )
+
+
 class TestClaudeMdInjectorFormatting:
     """Plan 00134: the injector formats CLAUDE.md after writing the block.
 

@@ -61,9 +61,13 @@ surfaces as a stale lock file or a mystifying "Unable to create
 
 `_auto_commit_if_dirty` is the least careful git caller in the codebase:
 
-- **A redundant `git add`.** `git commit --only <file>` already scopes the commit
-  to that path irrespective of the index, so the preceding `git add` is a second
-  lock acquisition that buys nothing.
+- **A `git add` that is only sometimes needed.** `git commit --only <file>`
+  scopes the commit to that path irrespective of the index, so for a TRACKED
+  CLAUDE.md the preceding `git add` is a second lock acquisition for nothing.
+  It is NOT redundant when CLAUDE.md is untracked: tested, and
+  `commit --only` then fails with `pathspec … did not match any file(s) known to git`. So the fix is to stage only when the status output says untracked, not to
+  delete the call. (This plan asserted "buys nothing" before that was tested —
+  see Decision 3.)
 - **No `timeout=` on any of its four subprocess calls** (grep count: 0), while
   every other git caller in `src/` uses the `Timeout` constants. A wedged git
   stalls `DaemonController.__init__` indefinitely.
@@ -98,11 +102,14 @@ a sweep.
 
 - [ ] ⬜ **Task 2.1**: `git_context_injector` (per prompt) onto the runner
 - [ ] ⬜ **Task 2.2**: `git_branch` status call (per refresh) onto the runner
-- [ ] ⬜ **Task 2.3**: `claude_md_injector` read-only calls (`rev-parse`,
-  `status`, `show`) onto the runner
-- [ ] ⬜ **Task 2.4**: Drop the redundant `git add`; keep `commit --only`
-- [ ] ⬜ **Task 2.5**: Bound the `commit` with a `Timeout` constant and log
-  contention at WARNING with git's stderr
+- [x] ✅ **Task 2.3**: `claude_md_injector` — all four calls (`rev-parse`,
+  `status`, `show`, `commit`) onto the runner
+- [x] ✅ **Task 2.4**: Stage only when CLAUDE.md is untracked, so the tracked
+  case takes one lock instead of two — and pin the untracked case in a test
+- [x] ✅ **Task 2.5**: Bound the `commit` with `Timeout.GIT_COMMIT` (new, and
+  deliberately generous) and log contention at WARNING with git's stderr
+- [x] ✅ **Task 2.6**: Verify on the REAL repository — a daemon restart rewrites
+  `.git/index` zero times and leaves no lock behind
 
 ### Phase 3: The guard (DBF — this is the real deliverable)
 
@@ -166,6 +173,25 @@ only OPTIONAL locks; a lock a command genuinely requires is still taken.
 deletes the misclassification risk instead of mitigating it, and makes the Phase
 3 guard trivially checkable — "no `subprocess.run(["git", …])` outside this
 module" needs no verb knowledge at all.
+
+**Date**: 2026-08-17
+
+### Decision 3: the `git add` stays, gated on the file being untracked
+
+**Context**: This plan was filed asserting the `git add` before
+`git commit --only` "buys nothing". That was reasoning from the flag's
+documentation, not from a test.
+
+Tested: `git commit --only <path>` on an UNTRACKED path fails with
+`error: pathspec '<path>' did not match any file(s) known to git`. On a tracked
+modified path it succeeds. So the `git add` is load-bearing for exactly one case
+— a CLAUDE.md that does not yet exist in git, which is what a first install has.
+
+**Decision**: keep the call, gated on the porcelain status reporting the file as
+untracked. The tracked case (every subsequent daemon start) then takes one lock
+instead of two, and the untracked case keeps working. Deleting the call outright
+would have broken CLAUDE.md creation on first install — a regression that no
+existing test covered, since the fixtures all commit a CLAUDE.md first.
 
 **Date**: 2026-08-17
 

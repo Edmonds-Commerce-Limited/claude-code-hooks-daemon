@@ -12,10 +12,12 @@ Usage:
 
 import logging
 import re
-import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
+import subprocess  # nosec B404 - imported for the CompletedProcess type; git spawns live in utils.git_repo
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,14 @@ logger = logging.getLogger(__name__)
 # Section delimiters — must match exactly when reading/replacing
 _OPEN_TAG = "<hooksdaemon>"
 _CLOSE_TAG = "</hooksdaemon>"
+
+# Porcelain status code for a path git does not track yet. `git commit --only`
+# refuses such a path ("pathspec ... did not match any file(s) known to git"),
+# so it is the one case where the auto-commit must stage first.
+_UNTRACKED_STATUS_PREFIX = "??"
+
+# Substring git puts in stderr when another process holds the index lock.
+_INDEX_LOCK_MARKER = "index.lock"
 
 # Auto-generated comment inside the section
 _AUTO_COMMENT = (
@@ -310,64 +320,76 @@ class ClaudeMdInjector:
         and attempting to revert or stash it. Only commits CLAUDE.md —
         never touches other staged files. Advisory: logs errors but
         never raises.
+
+        Runs on the daemon STARTUP path, and a restart is mandated after every
+        handler change — so this executes precisely when an agent is likely to be
+        running git in the same working tree. Every git invocation therefore goes
+        through :func:`run_git`, which declines git's OPTIONAL index lock: before
+        that, merely asking whether CLAUDE.md was dirty rewrote the index and took
+        ``.git/index.lock`` on every single start (Plan 00246).
         """
-        # All subprocess calls use check=False — failures are handled via
-        # returncode checks, not exceptions. If git binary is missing entirely,
-        # the FileNotFoundError bubbles to inject() which already handles it.
         cwd = claude_md_path.parent
         filename = str(claude_md_path.name)
 
-        # Check if we are in a git repo
-        git_check = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-            ["git", "rev-parse", "--git-dir"],
-            cwd=cwd,
-            capture_output=True,
-            check=False,
-        )
-        if git_check.returncode != 0:
+        if run_git(cwd, "rev-parse", "--git-dir").returncode != 0:
             return  # Not a git repo — nothing to commit
 
-        # Check if CLAUDE.md has changes (staged or unstaged)
-        status = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-            ["git", "status", "--porcelain", filename],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if not status.stdout.strip():
+        # Check if CLAUDE.md has changes (staged or unstaged). Costs no lock.
+        status = run_git(cwd, "status", "--porcelain", filename)
+        status_line = status.stdout.strip()
+        if not status_line:
             return  # CLAUDE.md is clean — no commit needed
 
-        # Stage only CLAUDE.md (preserve any other staged files untouched)
-        stage = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-            ["git", "add", filename],
-            cwd=cwd,
-            capture_output=True,
-            check=False,
-        )
-        if stage.returncode != 0:
-            logger.debug("ClaudeMdInjector: auto-commit staging failed (rc=%d)", stage.returncode)
-            return
+        # Stage ONLY when git does not know the path yet. `commit --only <path>`
+        # scopes the commit to that path by itself, so for a tracked CLAUDE.md
+        # staging is a second index lock for nothing — but on an UNTRACKED path
+        # `--only` fails outright with `pathspec ... did not match any file(s)`,
+        # which is what a first install has.
+        if status_line.startswith(_UNTRACKED_STATUS_PREFIX):
+            stage = run_git(cwd, "add", filename)
+            if stage.returncode != 0:
+                ClaudeMdInjector._log_git_failure("staging", stage)
+                return
 
         # Commit with a message that reflects WHAT is actually in the commit.
-        commit = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-            [
-                "git",
-                "commit",
-                "--only",
-                filename,
-                "-m",
-                ClaudeMdInjector._commit_message(cwd, filename, claude_md_path),
-            ],
-            cwd=cwd,
-            capture_output=True,
-            check=False,
+        commit = run_git(
+            cwd,
+            "commit",
+            "--only",
+            filename,
+            "-m",
+            ClaudeMdInjector._commit_message(cwd, filename, claude_md_path),
+            timeout=Timeout.GIT_COMMIT,
         )
         if commit.returncode != 0:
-            logger.debug("ClaudeMdInjector: auto-commit failed (rc=%d)", commit.returncode)
+            ClaudeMdInjector._log_git_failure("commit", commit)
             return
 
         logger.info("ClaudeMdInjector: auto-committed CLAUDE.md changes")
+
+    @staticmethod
+    def _log_git_failure(step: str, result: subprocess.CompletedProcess[str]) -> None:
+        """Report a failed auto-commit step, loudly when the index lock is held.
+
+        Contention with the agent's own git is the one failure mode worth
+        interrupting for, because its visible symptom appears somewhere else
+        entirely — a stale lock file, or an unrelated git command refusing to
+        run. Anything else here is a genuinely advisory failure and stays at
+        ``debug``.
+        """
+        reason = result.stderr.strip()
+        if _INDEX_LOCK_MARKER in reason:
+            logger.warning(
+                "ClaudeMdInjector: auto-commit %s blocked — another git process holds "
+                "the index lock (rc=%d): %s",
+                step,
+                result.returncode,
+                reason,
+            )
+            return
+        logger.debug(
+            "ClaudeMdInjector: auto-commit %s failed (rc=%d): %s", step, result.returncode, reason
+        )
 
     @staticmethod
     def _commit_message(cwd: Path, filename: str, claude_md_path: Path) -> str:
@@ -381,13 +403,7 @@ class ClaudeMdInjector:
         nothing to compare against, so it keeps the plain message — there is no
         prior user content that could be silently swept in.
         """
-        show = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-            ["git", "show", f"{_GIT_HEAD_REF}:./{filename}"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        show = run_git(cwd, "show", f"{_GIT_HEAD_REF}:./{filename}")
         if show.returncode != 0:
             return _COMMIT_MESSAGE_GENERATED
 

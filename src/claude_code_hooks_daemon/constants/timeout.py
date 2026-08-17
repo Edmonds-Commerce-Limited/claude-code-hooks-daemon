@@ -73,6 +73,12 @@ class Timeout:
     GIT_FETCH_SESSION = 30  # 30 seconds (full fetch --all --prune on session start)
     GIT_PULL_SESSION = 30  # 30 seconds (git pull --ff-only in auto-pull mode)
     GIT_WORKTREE = 30  # 30 seconds (git worktree add/remove for WorktreeCreate/Remove)
+    # 30 seconds (CLAUDE.md auto-commit). Deliberately generous rather than
+    # tight: a commit runs the repo's pre-commit hooks, and subprocess kills the
+    # child when a timeout expires — killing git mid-commit is itself how
+    # .git/index.lock gets orphaned. Long enough for a hook-running commit to
+    # finish, short enough that a wedged git cannot hang daemon startup forever.
+    GIT_COMMIT = 30
     VALIDATION_CHECK = 5  # 5 seconds (installation validation subprocess)
     VERSION_CHECK = 5  # 5 seconds (git ls-remote for version check)
 
