@@ -385,3 +385,44 @@ class TestGuidance:
     ) -> None:
         tests = handler.get_acceptance_tests()
         assert isinstance(tests, list)
+
+
+class TestConcurrentWriteIsNotDiscarded:
+    """Reformatting must never cost content the handler did not write.
+
+    ``handle`` reads the file, runs mdformat, then writes the result back. Under
+    load a PostToolUse dispatch can lag well behind the edit that triggered it,
+    so by the time the write lands the file may already hold NEWER content. A
+    whole-file write from the stale snapshot silently reverts it.
+
+    This is not theoretical: CLAUDE.md in this repository was written
+    byte-identical to a snapshot taken three minutes earlier, dropping a line
+    added in between, by a writer that left no backup.
+
+    Skipping the write is the right response rather than reformatting the newer
+    content — that newer write triggers its own PostToolUse event and will be
+    formatted by it.
+    """
+
+    def test_write_landing_during_formatting_is_not_reverted(self, tmp_path: Path) -> None:
+        """A newer write must survive a slow reformat of the older content."""
+        path = tmp_path / "doc.md"
+        path.write_text(_UNALIGNED_TABLE, encoding="utf-8")
+        newer = "# Someone else got here first\n"
+
+        def _format_then_someone_else_writes(text: str) -> str:
+            path.write_text(newer, encoding="utf-8")
+            return _ALIGNED_TABLE
+
+        handler = MarkdownTableFormatterHandler()
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use."
+            "markdown_table_formatter.format_markdown_text",
+            side_effect=_format_then_someone_else_writes,
+        ):
+            result = handler.handle({"tool_name": "Write", "tool_input": {"file_path": str(path)}})
+
+        assert (
+            path.read_text(encoding="utf-8") == newer
+        ), "the formatter silently reverted a write it did not make"
+        assert result.decision == Decision.ALLOW

@@ -779,3 +779,90 @@ class TestClaudeMdInjectorFormatting:
         content = claude_md.read_text()
         assert "Important instruction text." in content
         assert "# My Project" in content
+
+
+class TestConcurrentEditIsNotDiscarded:
+    """The daemon must never silently discard an edit it did not make.
+
+    Observed in this repository: CLAUDE.md was written byte-identical to a
+    snapshot taken three minutes earlier, discarding a bullet added in between
+    — a line OUTSIDE the generated block, which a block update has no business
+    touching at all. The auto-commit then committed the clobbered state, so the
+    loss left no trace.
+
+    ``_is_user_content_preserved`` cannot catch this. It compares the
+    injector's own ``original`` snapshot against the ``updated`` value derived
+    from that same snapshot, so it validates the TRANSFORMATION while staying
+    blind to the file moving on underneath. The bug is the whole-file
+    read-modify-write, not the transformation.
+    """
+
+    def test_edit_landing_during_the_write_window_is_not_discarded(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """An edit outside the block, landing after the read, must survive."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n\nOriginal prose.\n")
+
+        # Simulate a writer landing between the injector's read and its write.
+        # `_format_fail_safe` is the real gap: it shells out to the markdown
+        # formatter, and under load that window is wide.
+        original_format = ClaudeMdInjector._format_fail_safe
+        raced = []
+
+        def _format_and_race_once(content: str) -> str:
+            if not raced:
+                raced.append(True)
+                claude_md.write_text(claude_md.read_text() + "\nCONCURRENT USER EDIT\n")
+            return str(original_format(content))
+
+        monkeypatch.setattr(
+            ClaudeMdInjector, "_format_fail_safe", staticmethod(_format_and_race_once)
+        )
+
+        handler = _StubHandler("h", "## H\n\nGuidance.")
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        final = claude_md.read_text()
+        assert (
+            "CONCURRENT USER EDIT" in final
+        ), "the daemon silently discarded an edit made outside the generated block"
+        assert _OPEN_TAG in final, "the generated block must still be injected"
+        assert "Original prose." in final, "pre-existing user content must survive too"
+
+    def test_declines_to_write_rather_than_discard_when_the_file_keeps_changing(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """If it cannot reconcile, it must leave the other writer's content alone.
+
+        A stale generated block is recoverable — the next restart rewrites it.
+        A discarded edit is not. So exhausting the retries must mean "write
+        nothing", never "write my snapshot anyway".
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n\nOriginal prose.\n")
+
+        original_format = ClaudeMdInjector._format_fail_safe
+        counter = []
+
+        def _format_and_race_always(content: str) -> str:
+            counter.append(True)
+            claude_md.write_text(f"# Project\n\nEDIT NUMBER {len(counter)}\n")
+            return str(original_format(content))
+
+        monkeypatch.setattr(
+            ClaudeMdInjector, "_format_fail_safe", staticmethod(_format_and_race_always)
+        )
+
+        handler = _StubHandler("h", "## H\n\nGuidance.")
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        final = claude_md.read_text()
+        assert (
+            f"EDIT NUMBER {len(counter)}" in final
+        ), "the last writer's content must survive untouched"
+        assert _OPEN_TAG not in final, "no block should be written from a stale snapshot"

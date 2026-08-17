@@ -133,6 +133,12 @@ class ClaudeMdInjector:
     # Backup filename — written before every modification to an existing CLAUDE.md
     _BACKUP_FILENAME = ".CLAUDE.md.pre-inject"
 
+    # How many times to recompute when CLAUDE.md changes underneath us mid-write.
+    # Bounded so a pathologically busy file cannot spin forever; on exhaustion we
+    # decline to write rather than discard, because a stale block is recoverable
+    # (the next restart fixes it) and a discarded user edit is not.
+    _MAX_RECONCILE_ATTEMPTS = 3
+
     def __init__(self, workspace_root: Path, handlers: list[Any]) -> None:
         """Initialise injector.
 
@@ -183,7 +189,49 @@ class ClaudeMdInjector:
             return
 
         if claude_md_path.exists():
-            original = claude_md_path.read_text(encoding="utf-8")
+            if not self._write_reconciling_concurrent_edits(claude_md_path, generated):
+                return
+        else:
+            # No existing file — create from scratch (no backup needed)
+            updated = generated + "\n"
+            claude_md_path.write_text(self._format_fail_safe(updated), encoding="utf-8")
+
+        logger.info(
+            "ClaudeMdInjector: updated %s with guidance from %d handler(s)",
+            claude_md_path,
+            len(sections),
+        )
+
+        ClaudeMdInjector._auto_commit_if_dirty(claude_md_path)
+
+    def _write_reconciling_concurrent_edits(self, claude_md_path: Path, generated: str) -> bool:
+        """Replace the generated block without discarding anything else.
+
+        The daemon owns the ``<hooksdaemon>`` block and nothing else, so a block
+        update must not cost a single byte outside it — including bytes that
+        arrive WHILE the update is being prepared. Preparing it is not
+        instantaneous: ``_format_fail_safe`` shells out to the markdown
+        formatter, and under load that window is wide.
+
+        A whole-file read-modify-write across that window silently discards
+        anything that landed in it. That is not theoretical — in this repository
+        CLAUDE.md was written byte-identical to a snapshot taken three minutes
+        earlier, dropping a line added in between, and ``_auto_commit_if_dirty``
+        then committed the result so the loss left no trace.
+
+        ``_is_user_content_preserved`` cannot see this: it compares ``original``
+        against an ``updated`` derived from that same ``original``, so it checks
+        the TRANSFORMATION and is blind to the file moving on. The fix is to
+        re-read immediately before writing and, if the content changed,
+        recompute against what is actually there now.
+
+        Returns:
+            True if the file was written, False if the write was declined. A
+            declined write leaves the file exactly as the other writer left it.
+        """
+        original = claude_md_path.read_text(encoding="utf-8")
+
+        for _ in range(self._MAX_RECONCILE_ATTEMPTS):
             updated = self._replace_or_append_section(original, generated)
 
             # SAFETY: verify user content is preserved before writing
@@ -198,7 +246,7 @@ class ClaudeMdInjector:
                     len(updated),
                     claude_md_path.parent / self._BACKUP_FILENAME,
                 )
-                return
+                return False
 
             # Write backup before modifying existing file
             backup_path = self._workspace_root / self._BACKUP_FILENAME
@@ -209,19 +257,32 @@ class ClaudeMdInjector:
             # pre-format text). Writing the formatter-canonical form here means
             # a later Write/Edit that triggers the PostToolUse
             # markdown_table_formatter produces no churn diff on our block.
-            claude_md_path.write_text(self._format_fail_safe(updated), encoding="utf-8")
-        else:
-            # No existing file — create from scratch (no backup needed)
-            updated = generated + "\n"
-            claude_md_path.write_text(self._format_fail_safe(updated), encoding="utf-8")
+            formatted = self._format_fail_safe(updated)
 
-        logger.info(
-            "ClaudeMdInjector: updated %s with guidance from %d handler(s)",
+            # Re-read immediately before the write. This is the whole point: if
+            # the file moved on, `formatted` is derived from a stale snapshot
+            # and writing it would discard whatever arrived.
+            current = claude_md_path.read_text(encoding="utf-8")
+            if current == original:
+                claude_md_path.write_text(formatted, encoding="utf-8")
+                return True
+
+            logger.warning(
+                "ClaudeMdInjector: %s changed while the update was being prepared; "
+                "recomputing against the current content so the concurrent edit is "
+                "not discarded",
+                claude_md_path,
+            )
+            original = current
+
+        logger.error(
+            "ClaudeMdInjector: %s kept changing while the update was being prepared "
+            "(%d attempts); declining to write. The generated block may be stale until "
+            "the next restart — that is recoverable, a discarded edit is not.",
             claude_md_path,
-            len(sections),
+            self._MAX_RECONCILE_ATTEMPTS,
         )
-
-        ClaudeMdInjector._auto_commit_if_dirty(claude_md_path)
+        return False
 
     @staticmethod
     def _format_fail_safe(content: str) -> str:

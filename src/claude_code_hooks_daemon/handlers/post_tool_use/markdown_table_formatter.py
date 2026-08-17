@@ -109,6 +109,32 @@ class MarkdownTableFormatterHandler(Handler):
         if formatted == before:
             return HookResult(decision=Decision.ALLOW)
 
+        # Re-read immediately before writing. `formatted` derives from the
+        # snapshot taken above, and a PostToolUse dispatch can lag well behind
+        # the edit that triggered it — so by now the file may hold NEWER
+        # content. Writing the stale snapshot back would silently revert a
+        # change this handler never made. Skipping costs nothing: that newer
+        # write raises its own PostToolUse event and gets formatted by it.
+        try:
+            if path.read_text(encoding="utf-8") != before:
+                return HookResult(
+                    decision=Decision.ALLOW,
+                    context=[
+                        f"{path.name} changed while it was being formatted — skipped "
+                        "the rewrite rather than revert the newer content",
+                    ],
+                )
+        except Exception as exc:
+            # FAIL SAFE, consistent with the read above: never crash the
+            # dispatch chain. Unable to confirm the file is unchanged means we
+            # must not write.
+            return HookResult(
+                decision=Decision.ALLOW,
+                context=[
+                    f"markdown_table_formatter could not re-read {path.name}: {exc}",
+                ],
+            )
+
         path.write_text(formatted, encoding="utf-8")
         return HookResult(
             decision=Decision.ALLOW,
