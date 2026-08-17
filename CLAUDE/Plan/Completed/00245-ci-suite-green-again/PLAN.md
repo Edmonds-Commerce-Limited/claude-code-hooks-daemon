@@ -1,6 +1,6 @@
 # Plan 00245: CI Suite Green Again
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-17
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -151,7 +151,7 @@ the failure, fix, repeat.
 
 ### Phase 4: Make CI's verdict load-bearing
 
-- [ ] 🔄 **Task 4.1**: Confirm a fully green run on all three interpreters
+- [x] ✅ **Task 4.1**: Confirm a fully green run on all three interpreters
   - [x] ✅ Every previously-failing file passes on real 3.11/3.12/3.13 locally
     under runner conditions (`CI=true`, no global git identity): 95–96 passed
   - [x] ✅ The 41 failures in the last two CI runs are accounted for exactly —
@@ -171,7 +171,7 @@ the failure, fix, repeat.
   - [x] ✅ Read the CI run for the fetch-depth commit: the four upgrade gates
     PASS, so `Tests + coverage` is green on all three interpreters for the first
     time. It uncovered one more previously-invisible failure (below)
-- [ ] 🔄 **Task 4.3**: One step's failure must not hide the next step's
+- [x] ✅ **Task 4.3**: One step's failure must not hide the next step's
   - [x] ✅ Found by the fetch-depth run: with `Tests + coverage` finally
     passing, the `Project handler tests` step RAN for the first time — a failing
     step aborts the job, so five later checks had never executed. It failed on
@@ -184,7 +184,11 @@ the failure, fix, repeat.
   - [x] ✅ Added `if: ${{ !cancelled() }}` to all seven independent checks, so
     one run names every category instead of the first one only. Two independent
     defects, and the first hid the second — that is the failure this closes
-  - [ ] ⬜ Confirm a fully green run on all three interpreters
+  - [x] ✅ Run 32033242091 (`4d1a553b1`) is green on all five jobs — `Daemon load`, `Shell`, `QA (Python 3.11)`, `QA (Python 3.12)`, `QA (Python 3.13)`. First fully green run after 25+ consecutive failures
+  - [x] ✅ `-rs` paid out on that same run: it named 11 acceptance tests that
+    have skipped on EVERY run for want of a daemon socket, three of the files
+    being ones `RELEASING.md` Step 12.0 declares BLOCKING. Filed as Plan 00250
+    rather than absorbed here — this plan's goal was a green CI and it is met
 - [x] ✅ **Task 4.2**: Record in LESSONS.md that a permanently-red CI is a
   blind guard, not a nuisance
   - [x] ✅ Plus the two generalisable lessons this phase produced: the ambient
@@ -194,7 +198,11 @@ the failure, fix, repeat.
 ## Dependencies
 
 - Related: Plan 00244's project-handler QA gate, whose CI half is inert until
-  this plan lands.
+  this plan lands. It is now live — and its first live run failed, on a test
+  asserting a hardcoded `/workspace` path (Task 4.3).
+- Spawned: Plan 00250, from this plan's own `-rs` instrumentation. Eleven
+  acceptance tests have skipped on every CI run for want of a daemon socket,
+  three of the files being ones `RELEASING.md` calls BLOCKING gates.
 
 ## Technical Decisions
 
@@ -213,10 +221,10 @@ extracted so this plan stays readable at a glance:
 
 ## Success Criteria
 
-- [ ] `QA (Python 3.11)`, `QA (Python 3.12)` and `QA (Python 3.13)` all pass
-- [ ] Zero tests skipped or deleted to achieve it
-- [ ] Each root cause has a guard that fails if it returns
-- [ ] Local `llm_qa.py all` still passes
+- [x] `QA (Python 3.11)`, `QA (Python 3.12)` and `QA (Python 3.13)` all pass — run 32033242091
+- [x] Zero tests skipped or deleted to achieve it — the flag added (`-rs`) makes skips MORE visible, and it immediately found 11 pre-existing ones
+- [x] Each root cause has a guard that fails if it returns
+- [x] Local `llm_qa.py all` still passes
 
 ## Risks & Mitigations
 
@@ -231,3 +239,9 @@ extracted so this plan stays readable at a glance:
 <!-- Curated milestones + delivery commit hashes. Blow-by-blow log lives in JOURNAL/. -->
 
 - Phase 1 delivered at the commit that also files this plan.
+- Phase 3 (all eight remaining clusters) and the `fetch-depth: 0` fix delivered
+  across the run-up to `4d1a553b1`.
+- Task 4.3 (`if: ${{ !cancelled() }}` on all seven independent checks, plus the
+  `/workspace`-hardcoded project-handler test) delivered at `4d1a553b1`.
+- **Green at run 32033242091 / `4d1a553b1`** — all five jobs, all three
+  interpreters, after 25+ consecutive red runs.
