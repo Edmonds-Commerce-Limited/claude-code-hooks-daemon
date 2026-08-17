@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
 from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
+from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
 
 # Placeholder for file path in lint commands
 _FILE_PLACEHOLDER = "{file}"
@@ -68,6 +69,10 @@ class LintOnEditHandler(Handler):
         self._languages: list[str] | None = None
         self._command_overrides: dict[str, dict[str, str | None]] | None = None
         self._languages_applied: bool = False
+        # Glob patterns exempted from linting entirely. Unions with the
+        # project-wide daemon.exclude_paths the registry injects (Plan 00251,
+        # the other half of the follow-up Plan 00150's Non-Goals deferred).
+        self._exclude_paths: list[str] | None = None
 
     def _apply_language_filter(self) -> None:
         """Apply language filter to registry on first use (lazy)."""
@@ -89,6 +94,17 @@ class LintOnEditHandler(Handler):
 
         file_path = get_file_path(hook_input)
         if not file_path:
+            return False
+
+        # A project may exempt a path from linting entirely (Plan 00251). Checked
+        # before the strategy lookup and before the exists() stat: an exclusion is
+        # the project declaring this path out of scope, which should not depend on
+        # a strategy existing for the extension.
+        if handler_excludes_path(
+            file_path,
+            handler_patterns=self._exclude_paths,
+            project_patterns=self._project_exclude_paths,
+        ):
             return False
 
         # Find strategy for this file's language

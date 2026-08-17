@@ -1453,3 +1453,46 @@ class TestTddEnforcementHandler:
             result = handler.handle(hook_input)
 
         assert result.decision == "allow", "Regression: mirror-structure tests must still be found"
+
+
+class TestExcludePathsEscape:
+    """A project must be able to exempt a directory from TDD enforcement.
+
+    Plan 00150 wired `exclude_paths` into the content-scanning blockers and
+    recorded in its Non-Goals: "Not wiring lint_on_edit / tdd_enforcement this
+    plan (follow-up if wanted)." This is that follow-up. Until it landed,
+    `tdd_enforcement` was the only blocking path-based handler with NO
+    configuration that could exempt a path — which is what a field report from a
+    client monorepo ran into: a custom PHPStan rule under `qaConfig/` is
+    classified production source, and its real test dir is not a location the
+    resolver searches, so the file could not be written at all.
+    """
+
+    @staticmethod
+    def _write(file_path: str) -> dict:
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": file_path, "content": "<?php\n\nclass Foo {}\n"},
+        }
+
+    def test_matches_an_unexcluded_source_file(self) -> None:
+        """Control: without exclusions the handler still fires (the premise)."""
+        handler = TddEnforcementHandler()
+        assert handler.matches(self._write("/proj/apps/app/qaConfig/PHPStan/Rules/Foo.php"))
+
+    def test_a_handler_exclude_pattern_stops_it_firing(self) -> None:
+        handler = TddEnforcementHandler()
+        handler._exclude_paths = ["**/qaConfig/**"]
+        assert not handler.matches(self._write("/proj/apps/app/qaConfig/PHPStan/Rules/Foo.php"))
+
+    def test_a_project_wide_exclude_pattern_stops_it_firing(self) -> None:
+        """`daemon.exclude_paths` must apply even with no per-handler option."""
+        handler = TddEnforcementHandler()
+        handler._project_exclude_paths = ["**/qaConfig/**"]
+        assert not handler.matches(self._write("/proj/apps/app/qaConfig/PHPStan/Rules/Foo.php"))
+
+    def test_an_exclusion_does_not_exempt_genuine_source(self) -> None:
+        """Excluding the QA-tooling dir must not disable enforcement elsewhere."""
+        handler = TddEnforcementHandler()
+        handler._exclude_paths = ["**/qaConfig/**"]
+        assert handler.matches(self._write("/proj/apps/app/src/Entity/Company.php"))

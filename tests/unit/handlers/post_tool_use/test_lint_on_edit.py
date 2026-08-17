@@ -642,3 +642,56 @@ class TestAcceptanceTests:
     def test_returns_at_least_one_test(self, handler: LintOnEditHandler) -> None:
         tests = handler.get_acceptance_tests()
         assert len(tests) >= 1
+
+
+class TestExcludePathsEscape:
+    """`lint_on_edit` is the other handler Plan 00150's Non-Goals deferred.
+
+    It DENIES on a lint failure, so a project with generated or vendored sources
+    it cannot control had no way to exempt them: unlike the content blockers it
+    consulted no `exclude_paths` at all, filtering only by LANGUAGE. Wired here
+    alongside `tdd_enforcement` so the deferral is closed in full rather than by
+    half (Plan 00251 Phase 2).
+    """
+
+    @staticmethod
+    def _real_file(tmp_path: Path, *parts: str) -> str:
+        """Create the file on disk and return its path.
+
+        `matches()` ends in `Path(file_path).exists()` because PostToolUse runs
+        AFTER the write, so a fictional path can never match and a test using one
+        would pass for the wrong reason. Establishing the premise rather than
+        assuming it is the point — the control tests below fail loudly if this
+        stops being true.
+        """
+        target = tmp_path.joinpath(*parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x = 1\n", encoding="utf-8")
+        return str(target)
+
+    @staticmethod
+    def _write(file_path: str) -> dict:
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": file_path, "content": "x = 1\n"},
+        }
+
+    def test_matches_an_unexcluded_source_file(self, tmp_path: Path) -> None:
+        """Control: the premise — without exclusions it still fires."""
+        handler = LintOnEditHandler()
+        assert handler.matches(self._write(self._real_file(tmp_path, "src", "thing.py")))
+
+    def test_a_handler_exclude_pattern_stops_it_firing(self, tmp_path: Path) -> None:
+        handler = LintOnEditHandler()
+        handler._exclude_paths = ["**/generated/**"]
+        assert not handler.matches(self._write(self._real_file(tmp_path, "generated", "thing.py")))
+
+    def test_a_project_wide_exclude_pattern_stops_it_firing(self, tmp_path: Path) -> None:
+        handler = LintOnEditHandler()
+        handler._project_exclude_paths = ["**/generated/**"]
+        assert not handler.matches(self._write(self._real_file(tmp_path, "generated", "thing.py")))
+
+    def test_an_exclusion_does_not_exempt_other_paths(self, tmp_path: Path) -> None:
+        handler = LintOnEditHandler()
+        handler._exclude_paths = ["**/generated/**"]
+        assert handler.matches(self._write(self._real_file(tmp_path, "src", "thing.py")))

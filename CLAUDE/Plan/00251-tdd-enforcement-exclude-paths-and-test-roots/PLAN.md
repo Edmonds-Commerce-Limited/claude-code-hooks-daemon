@@ -127,13 +127,23 @@ construction.
 
 ### Phase 2: Wire the two handlers Plan 00150 deferred (finding C)
 
-- [ ] ⬜ **Task 2.1**: RED — `tdd_enforcement` fires on an excluded path
-- [ ] ⬜ **Task 2.2**: GREEN — `matches()` short-circuits on an excluded path,
+- [x] ✅ **Task 2.1**: RED — `tdd_enforcement` fires on an excluded path
+- [x] ✅ **Task 2.2**: GREEN — `matches()` short-circuits on an excluded path,
   honouring both the per-handler `exclude_paths` and the project-wide
   `daemon.exclude_paths`
-- [ ] ⬜ **Task 2.3**: Same for `lint_on_edit`, the other half of the deferral
-- [ ] ⬜ **Task 2.4**: Verify finding A's symptom is resolved by this alone —
+  - [x] ✅ Checked BEFORE the strategy lookup: an exclusion is the project
+    stating a path is out of scope, which outranks any per-language judgement
+    and must not depend on a strategy existing for the extension
+- [x] ✅ **Task 2.3**: Same for `lint_on_edit`, the other half of the deferral
+- [x] ✅ **Task 2.4**: Verify finding A's symptom is resolved by this alone —
   the reporter's path, excluded by config, no longer denies
+  - [x] ✅ Executed against the reporter's exact path: unconfigured it still
+    matches (no default relaxed), and either `**/qaConfig/PHPStan/Rules/**` or
+    `**/qaConfig/**` exempts it while a real source file beside it still matches
+- [x] ✅ **Task 2.5**: Fix `config/models.py:904`, which enumerated four
+  handlers as honouring `daemon.exclude_paths` while six consumed it — the same
+  stale-count drift found in Phase 1, now pointing at `handler_excludes_path`
+  instead of a number that this phase would have made wrong again
 
 ### Phase 3: A declarable test root (finding B)
 

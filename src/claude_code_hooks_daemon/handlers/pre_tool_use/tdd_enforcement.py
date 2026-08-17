@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
+from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
 
 # Path mapping constants for the src->tests path-mapping helpers
 _TEST_DIR = "tests"
@@ -72,6 +73,10 @@ class TddEnforcementHandler(Handler):
         # Config option: test location styles to check (None = ALL styles)
         # Set via setattr after __init__ from handler options
         self._test_locations: list[str] | None = None
+        # Config option: glob patterns exempted from TDD enforcement entirely.
+        # Set via setattr after __init__ from handler options; unions with the
+        # project-wide daemon.exclude_paths the registry injects (Plan 00251).
+        self._exclude_paths: list[str] | None = None
 
     def _apply_language_filter(self) -> None:
         """Apply language filter to registry on first use (lazy).
@@ -117,6 +122,18 @@ class TddEnforcementHandler(Handler):
 
         file_path = get_file_path(hook_input)
         if not file_path:
+            return False
+
+        # A project may exempt a path from TDD enforcement entirely (Plan 00251,
+        # the follow-up Plan 00150's Non-Goals deferred). Checked BEFORE the
+        # strategy lookup: an exclusion is the project stating this path is out of
+        # scope, which is a stronger statement than any per-language judgement and
+        # must not depend on a strategy existing for the extension.
+        if handler_excludes_path(
+            file_path,
+            handler_patterns=self._exclude_paths,
+            project_patterns=self._project_exclude_paths,
+        ):
             return False
 
         # Find strategy for this file's language
