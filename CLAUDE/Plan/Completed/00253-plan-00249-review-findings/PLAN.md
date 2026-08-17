@@ -170,6 +170,14 @@ it lives beside the plan instead of inside it.
   naturally reachable post-fix — by design, since it now means our predicate
   disagreed with git — so its coverage stays with the argv-forcing unit test.
 
+> **Superseded in part by Plan 00254** (forward pointer only; nothing else in this
+> archived plan is edited). Task 5.3's last sentence is no longer true: 00254's
+> moved-tip guard produces `PARTIALLY REFUSED` naturally, so a mixed batch reaches
+> it without forcing any argv. The argv-forcing test is still NOT redundant — it
+> covers a refusal coming from GIT, which is a different path from a refusal coming
+> from our own tip check. Recorded here because a reader acting on the sentence
+> above might otherwise delete that test as superfluous.
+
 ## Dependencies
 
 - Follows: Plan 00249 (Complete) and Plan 00248 (Complete) — this is the review
