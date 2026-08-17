@@ -1,6 +1,6 @@
 # Plan 00254: delete-branch must re-check a tip it proved
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-17
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -95,8 +95,10 @@ Verified by execution, not inferred (full transcripts in `FINDINGS.md`):
 
 ### Phase 3: Verify
 
-- [ ] 🔄 **Task 3.1**: Full QA green, daemon restart RUNNING. Restart done: RUNNING,
-  zero errors, no regenerated `CLAUDE.md` drift.
+- [x] ✅ **Task 3.1**: Full QA green — 23/23, 12,541 tests, 95.1% coverage — and
+  daemon restart RUNNING with zero errors and no regenerated `CLAUDE.md` drift. An
+  earlier run failed on the plan-index size ceiling, which I had tripped with my own
+  verbose index rows; compacted them rather than raising the limit.
 - [x] ✅ **Task 3.2**: Both reproductions re-run through the real engine and both
   refuse, naming the two shas — `merged-not-in-head` and `merged-unpushed`. In each
   the branch survives and the peer's file is reachable from it.
@@ -227,8 +229,8 @@ The ambiguity is invisible until a tag exists, and no fixture had one.
 - [x] The refusal names both shas and does not reuse the disagreed-with-git wording
 - [x] The other-worktree refusal still fires
 - [x] A branch shadowed by a same-named tag is classified on its OWN content, and
-      the only copy of a file is not force-deleted (Phase 4)
-- [ ] QA green, daemon restart RUNNING
+  the only copy of a file is not force-deleted (Phase 4)
+- [x] QA green, daemon restart RUNNING
 
 ## Risks & Mitigations
 
@@ -242,4 +244,14 @@ The ambiguity is invisible until a tag exists, and no fixture had one.
 
 <!-- Curated milestones + delivery commit hashes. Blow-by-blow log lives in JOURNAL/. -->
 
-- Filed at the commit that adds this plan.
+- Filed at `f40e9984`; my own overstated Decision 1 corrected at `ad4054d0`.
+- The TOCTOU guard delivered at `d6bacf51` (Phases 1 + 2).
+- `c0a72755` — Phase 4, unplanned and the most serious defect here: a same-named
+  tag made the proof describe the wrong object, and the engine force-deleted a
+  branch holding the only copy of a file with `refused=False`.
+- `2558f5bd` records the adjacent `git_sync.py` hits rather than dropping them.
+- `a45dd3e5` tells agents about the new refusal in the resident guidance.
+- `abc84421` covers the peer-deletes-the-branch path and stops the diagnosis
+  claiming a deleted branch was "advanced".
+- Verified at `55dc8e1a`: QA 23/23 (12,541 tests, 95.1%), daemon restart RUNNING,
+  and the documented bundle-restore command re-checked end to end.
