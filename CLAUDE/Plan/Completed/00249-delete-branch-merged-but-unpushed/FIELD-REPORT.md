@@ -4,7 +4,7 @@
 **Version**: 3.53.1 (upstream commit `51846428`, "Release v3.53.1")
 **Severity**: medium — no data loss, but the command is unusable for a real and common branch shape,
 fails with a raw traceback, and leaves an orphaned 1.9 MB artefact behind.
-**Reproduced**: yes, in this repo (`example-org/client-a-accountsiq`).
+**Reproduced**: yes, in the reporting client repo (identifier withheld — it is not needed to act on this).
 
 ## Summary
 
