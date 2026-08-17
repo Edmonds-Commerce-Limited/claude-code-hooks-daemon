@@ -41,9 +41,7 @@ from claude_code_hooks_daemon.strategies.comments.registry import (
     CommentStrategyRegistry,
 )
 from claude_code_hooks_daemon.utils.path_exclusion import (
-    is_path_excluded,
-    merge_exclude_patterns,
-    resolve_project_root,
+    handler_excludes_path,
 )
 
 _MODE_BLOCK: Final[str] = "block"
@@ -177,12 +175,10 @@ class CommentSizeHandler(Handler):
         return None
 
     def _is_excluded(self, file_path: str) -> bool:
-        patterns = merge_exclude_patterns(
-            getattr(self, "_project_exclude_paths", None),
-            self._exclude_paths,
-        )
-        return bool(patterns) and is_path_excluded(
-            file_path, patterns, project_root=resolve_project_root()
+        return handler_excludes_path(
+            file_path,
+            handler_patterns=self._exclude_paths,
+            project_patterns=self._project_exclude_paths,
         )
 
     def _breaching_spans(self, content: str, strategy: CommentStrategy) -> list[CommentSpan]:

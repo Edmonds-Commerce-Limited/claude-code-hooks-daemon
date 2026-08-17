@@ -1,6 +1,6 @@
 # Plan 00251: tdd_enforcement needs an exclusion escape and a declarable test root
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-17
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -101,14 +101,29 @@ construction.
 
 ### Phase 1: Extract the duplicated exclusion helper
 
-- [ ] ⬜ **Task 1.1**: RED — a test that pins the shared helper's behaviour,
+- [x] ✅ **Task 1.1**: RED — a test that pins the shared helper's behaviour,
   including the `error_hiding_blocker` variant (defaults prepended) and the
   empty-patterns short-circuit
-- [ ] ⬜ **Task 1.2**: Extract one helper, and move all six handlers onto it
-  - [ ] ⬜ Confirm behaviour is unchanged for each — this is a refactor, so the
+  - [x] ✅ 7 tests on `handler_excludes_path`, including that the three sources
+    are ADDITIVE (no source may mask another) and that `[]` behaves as `None`
+- [x] ✅ **Task 1.2**: Extract one helper, and move all six handlers onto it
+  - [x] ✅ Confirm behaviour is unchanged for each — this is a refactor, so the
     existing tests for all six must pass untouched
-  - [ ] ⬜ Formalise the post-construction injection rather than reproducing
+    - [x] ✅ 424 passed across the six handlers' own test modules plus
+      `test_path_exclusion` and `test_handler`, none of them edited
+    - [x] ✅ Verified through the LIVE socket after restart, not only in unit
+      tests: `error_hiding_blocker` (the defaults variant) and
+      `security_antipattern` (a guarded variant) both still DENY
+  - [x] ✅ Formalise the post-construction injection rather than reproducing
     `getattr(self, ..., None)` in the shared code
+    - [x] ✅ Root cause was in `core/handler.py`: `__slots__` declared
+      `_project_exclude_paths`/`_project_languages` and the class annotated both
+      as `list[str] | None`, but `__init__` assigned NEITHER — so the slot
+      existed while unset and plain access raised `AttributeError` on any
+      handler built outside the registry. The annotation was the lie; assigning
+      both to `None` makes it true and retires the idiom at **14 sites across 9
+      modules**. RED first (two `AttributeError`s), and a third test pins that
+      the registry can still overwrite them
 
 ### Phase 2: Wire the two handlers Plan 00150 deferred (finding C)
 

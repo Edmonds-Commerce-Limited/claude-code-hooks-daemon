@@ -206,6 +206,44 @@ class TestHandlerInit:
 # Property Tests
 
 
+class TestProjectLevelInjectionSlotsAreInitialised:
+    """The two registry-injected slots must READ as None before injection.
+
+    `Handler.__slots__` declares `_project_exclude_paths` and
+    `_project_languages`, and the class annotates both as `list[str] | None` —
+    but `__init__` assigned neither, so with `__slots__` the slot existed while
+    UNSET. Any handler constructed outside the registry (i.e. every handler in a
+    unit test) therefore raised `AttributeError` on plain attribute access, and
+    fourteen call sites across nine handler modules paid for it with
+    `getattr(self, "_project_...", None)`.
+
+    The annotation was the thing that was wrong: it promised an attribute that is
+    always present. These tests make it true, so the defensive idiom can go
+    (Plan 00251 Phase 1).
+    """
+
+    def test_project_exclude_paths_reads_as_none_before_injection(self) -> None:
+        handler = ConcreteHandler(handler_id="bare")
+        assert handler._project_exclude_paths is None
+
+    def test_project_languages_reads_as_none_before_injection(self) -> None:
+        handler = ConcreteHandler(handler_id="bare")
+        assert handler._project_languages is None
+
+    def test_the_registry_can_still_overwrite_them(self) -> None:
+        """Initialising must not make the slots read-only or sticky.
+
+        `handlers/registry.py` assigns these after construction, and three
+        handler test modules do the same to simulate project config. Defaulting
+        to None must leave that assignment working exactly as before.
+        """
+        handler = ConcreteHandler(handler_id="bare")
+        handler._project_exclude_paths = ["**/vendored/**"]
+        handler._project_languages = ["python"]
+        assert handler._project_exclude_paths == ["**/vendored/**"]
+        assert handler._project_languages == ["python"]
+
+
 class TestHandlerProperties:
     """Test Handler properties."""
 

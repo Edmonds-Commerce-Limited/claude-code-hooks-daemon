@@ -29,8 +29,7 @@ from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
 from claude_code_hooks_daemon.utils.path_exclusion import (
-    is_path_excluded,
-    merge_exclude_patterns,
+    handler_excludes_path,
     resolve_project_root,
 )
 
@@ -150,12 +149,10 @@ class SensitiveContentHandler(Handler):
 
     def _is_excluded(self, file_path: str) -> bool:
         """Return True if file_path matches a client-configured exclude glob."""
-        patterns = merge_exclude_patterns(
-            getattr(self, "_project_exclude_paths", None),
-            self._exclude_paths,
-        )
-        return bool(patterns) and is_path_excluded(
-            file_path, patterns, project_root=resolve_project_root()
+        return handler_excludes_path(
+            file_path,
+            handler_patterns=self._exclude_paths,
+            project_patterns=self._project_exclude_paths,
         )
 
     def _find_public_pattern_match(self, content: str) -> dict[str, str] | None:

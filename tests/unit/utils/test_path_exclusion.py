@@ -1,9 +1,11 @@
 """Tests for the shared glob-based path-exclusion utility.
 
-The three content-scanning blocking handlers (security_antipattern,
-qa_suppression, error_hiding_blocker) use is_path_excluded() to let a client
-project exempt paths (test fixtures of deliberately-broken code, code that
-legitimately suppresses errors) via gitignore-style globs.
+Handlers use it to let a client project exempt paths (test fixtures of
+deliberately-broken code, code that legitimately suppresses errors) via
+gitignore-style globs. The set of handlers is deliberately NOT enumerated here:
+this docstring said "three" while six consumed it, and Plan 00251 makes it
+eight. `handler_excludes_path` is the single entry point they share, so grep for
+its callers rather than trusting a number in prose.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.utils.path_exclusion import (
+    handler_excludes_path,
     is_path_excluded,
     merge_exclude_patterns,
     resolve_project_root,
@@ -158,3 +161,62 @@ class TestResolveProjectRoot:
             pc.ProjectContext, "project_root", classmethod(lambda cls: Path("/proj")), raising=False
         )
         assert resolve_project_root() == "/proj"
+
+
+class TestHandlerExcludesPath:
+    """One definition of the handler-facing exclusion decision (Plan 00251).
+
+    `_is_excluded` was copy-pasted into six handlers — byte-identical in five of
+    them, with `error_hiding_blocker` differing only by prepending its own
+    defaults and dropping a short-circuit. Two more handlers are owed the same
+    behaviour (Plan 00150's Non-Goals deferred `tdd_enforcement` and
+    `lint_on_edit`), so this exists to be called eight times rather than pasted
+    eight times.
+    """
+
+    def test_a_handler_pattern_excludes(self) -> None:
+        assert handler_excludes_path(
+            "/proj/generated/x.py", handler_patterns=["**/generated/**"], project_patterns=None
+        )
+
+    def test_a_project_pattern_excludes(self) -> None:
+        """`daemon.exclude_paths` must apply even when the handler configures none."""
+        assert handler_excludes_path(
+            "/proj/vendored/x.py", handler_patterns=None, project_patterns=["**/vendored/**"]
+        )
+
+    def test_defaults_exclude(self) -> None:
+        """The `error_hiding_blocker` shape: built-in defaults, no user config."""
+        assert handler_excludes_path(
+            "/proj/node_modules/x.js",
+            handler_patterns=None,
+            project_patterns=None,
+            defaults=["**/node_modules/**"],
+        )
+
+    def test_the_three_sources_are_additive_not_overriding(self) -> None:
+        """None of the three sources may mask another — all must still match."""
+        kwargs = {
+            "handler_patterns": ["**/h/**"],
+            "project_patterns": ["**/p/**"],
+            "defaults": ["**/d/**"],
+        }
+        assert handler_excludes_path("/proj/h/x.py", **kwargs)
+        assert handler_excludes_path("/proj/p/x.py", **kwargs)
+        assert handler_excludes_path("/proj/d/x.py", **kwargs)
+
+    def test_no_patterns_anywhere_never_excludes(self) -> None:
+        assert not handler_excludes_path(
+            "/proj/src/x.py", handler_patterns=None, project_patterns=None
+        )
+
+    def test_a_non_matching_path_is_not_excluded(self) -> None:
+        assert not handler_excludes_path(
+            "/proj/src/x.py", handler_patterns=["**/generated/**"], project_patterns=None
+        )
+
+    def test_empty_lists_behave_as_none(self) -> None:
+        """A handler whose option is set to `[]` must not be treated as configured."""
+        assert not handler_excludes_path(
+            "/proj/src/x.py", handler_patterns=[], project_patterns=[], defaults=[]
+        )

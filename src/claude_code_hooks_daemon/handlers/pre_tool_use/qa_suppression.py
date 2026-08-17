@@ -26,9 +26,7 @@ from claude_code_hooks_daemon.strategies.qa_suppression.protocol import (
     QaSuppressionStrategy,
 )
 from claude_code_hooks_daemon.utils.path_exclusion import (
-    is_path_excluded,
-    merge_exclude_patterns,
-    resolve_project_root,
+    handler_excludes_path,
 )
 
 # Maximum number of issues to show in error message
@@ -145,12 +143,10 @@ class QaSuppressionHandler(Handler):
 
     def _is_excluded(self, file_path: str) -> bool:
         """Return True if file_path matches a client-configured exclude glob."""
-        patterns = merge_exclude_patterns(
-            getattr(self, "_project_exclude_paths", None),
-            self._exclude_paths,
-        )
-        return bool(patterns) and is_path_excluded(
-            file_path, patterns, project_root=resolve_project_root()
+        return handler_excludes_path(
+            file_path,
+            handler_patterns=self._exclude_paths,
+            project_patterns=self._project_exclude_paths,
         )
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:

@@ -113,6 +113,16 @@ class Handler(ABC):
         self.tags = tags if tags is not None else []
         self.shares_options_with = shares_options_with
         self.depends_on = depends_on if depends_on is not None else []
+        # Project-level values injected AFTER construction by handlers/registry.py.
+        # They are initialised here so the annotations above are true: `__slots__`
+        # creates the slot but leaves it UNSET until assigned, so plain attribute
+        # access raised AttributeError on any handler built outside the registry —
+        # which is every handler in a unit test. Fourteen call sites across nine
+        # modules worked around that with `getattr(self, "_project_...", None)`.
+        # Defaulting them makes the declared type honest and the workaround
+        # unnecessary; the registry still overwrites both (Plan 00251).
+        self._project_languages = None
+        self._project_exclude_paths = None
 
     def __repr__(self) -> str:
         """Return string representation."""

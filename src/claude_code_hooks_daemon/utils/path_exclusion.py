@@ -159,3 +159,44 @@ def is_path_excluded(
         if any(compiled.fullmatch(candidate) for candidate in candidates):
             return True
     return False
+
+
+def handler_excludes_path(
+    file_path: str,
+    *,
+    handler_patterns: Sequence[str] | None,
+    project_patterns: Sequence[str] | None,
+    defaults: Sequence[str] | None = None,
+) -> bool:
+    """Whether a handler should skip ``file_path`` given all three exclude sources.
+
+    This is the handler-facing decision, defined ONCE. It was previously copied
+    into six handlers as a private ``_is_excluded`` — byte-identical in five, with
+    ``error_hiding_blocker`` differing only by prepending its own defaults and
+    dropping the short-circuit. Two further handlers are owed the same behaviour
+    (Plan 00150's Non-Goals deferred ``tdd_enforcement`` and ``lint_on_edit``),
+    which is what turned "add a seventh copy" into "extract the one that exists"
+    (Plan 00251).
+
+    The three sources are ADDITIVE and none overrides another: built-in
+    ``defaults``, the project-wide ``daemon.exclude_paths``, and the handler's own
+    ``exclude_paths`` option.
+
+    Args:
+        file_path: Path of the file being written or edited.
+        handler_patterns: The handler's own ``exclude_paths`` option.
+        project_patterns: Project-wide ``daemon.exclude_paths``, injected by the
+            registry after construction.
+        defaults: The handler's built-in exclusions, if it has any.
+
+    Returns:
+        True when any source matches, so the handler should not act on this path.
+    """
+    patterns = merge_exclude_patterns(defaults, project_patterns, handler_patterns)
+    # Short-circuit on "nothing configured anywhere". `is_path_excluded` would
+    # also return False, but only after `resolve_project_root()` has imported
+    # ProjectContext — pointless work on the common path where no project
+    # configures exclusions.
+    if not patterns:
+        return False
+    return is_path_excluded(file_path, patterns, project_root=resolve_project_root())
