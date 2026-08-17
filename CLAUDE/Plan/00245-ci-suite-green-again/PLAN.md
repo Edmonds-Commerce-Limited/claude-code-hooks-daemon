@@ -168,7 +168,23 @@ the failure, fix, repeat.
   - [x] ✅ Added `-rs` to the CI pytest step so a skip is NAMED. CI reports 14
     skipped against 6 locally, and a skip that nobody can see is what let these
     four sit inert
-  - [ ] ⬜ Read the CI run for the fetch-depth commit and confirm green
+  - [x] ✅ Read the CI run for the fetch-depth commit: the four upgrade gates
+    PASS, so `Tests + coverage` is green on all three interpreters for the first
+    time. It uncovered one more previously-invisible failure (below)
+- [ ] 🔄 **Task 4.3**: One step's failure must not hide the next step's
+  - [x] ✅ Found by the fetch-depth run: with `Tests + coverage` finally
+    passing, the `Project handler tests` step RAN for the first time — a failing
+    step aborts the job, so five later checks had never executed. It failed on
+    a test asserting a hardcoded `/workspace` path, which cannot exist on a
+    runner (Plan 00244's defect class, in a test rather than a doc)
+  - [x] ✅ Fixed the test to derive its root from `__file__`, and proved the
+    derivation in a clone at a different absolute path (resolves inside the
+    clone, not `/workspace`) — locally it passed either way, so the proof had to
+    come from somewhere other than a local run
+  - [x] ✅ Added `if: ${{ !cancelled() }}` to all seven independent checks, so
+    one run names every category instead of the first one only. Two independent
+    defects, and the first hid the second — that is the failure this closes
+  - [ ] ⬜ Confirm a fully green run on all three interpreters
 - [x] ✅ **Task 4.2**: Record in LESSONS.md that a permanently-red CI is a
   blind guard, not a nuisance
   - [x] ✅ Plus the two generalisable lessons this phase produced: the ambient

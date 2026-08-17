@@ -24,6 +24,11 @@ from claude_code_hooks_daemon.core import Decision
 
 from .release_blocker import ReleaseBlockerHandler
 
+#: Repo-relative folder the block message points the reader at. Relative on
+#: purpose: it is joined to a root derived from ``__file__``, so the assertion
+#: holds in this container, on a CI runner, and in any clone.
+_CITED_PLAN_FOLDER = "CLAUDE/Plan/Completed/00060-release-blocker-handler"
+
 
 def _write_state(root: Path, **fields: Any) -> Path:
     """Write a release-state file under ``root`` and return its path."""
@@ -462,11 +467,19 @@ class TestReleaseBlockerHandlerHandle:
 
         result = handler.handle({})
 
-        cited = Path("/workspace/CLAUDE/Plan/Completed/00060-release-blocker-handler")
+        # Derive the repo root from this file, never a hardcoded absolute path.
+        # `/workspace` is true only inside this project's own container: on a CI
+        # runner the checkout is at `/home/runner/work/<repo>/<repo>`, so a
+        # literal `/workspace` made the guard assert on a directory that could
+        # not exist and failed for a reason unrelated to what it tests. Same
+        # defect class as Plan 00244.
+        repo_root = Path(__file__).resolve().parents[3]
+        cited = repo_root / _CITED_PLAN_FOLDER
         assert (
             cited.is_dir()
-        ), "the cited plan folder must exist for this assertion to mean anything"
-        assert "CLAUDE/Plan/Completed/00060-release-blocker-handler" in result.reason
+        ), f"the cited plan folder must exist for this assertion to mean anything: {cited}"
+        assert result.reason is not None
+        assert _CITED_PLAN_FOLDER in result.reason
 
     def test_handle_names_the_resume_point_from_the_state_file(self, tmp_path: Path) -> None:
         """RELEASING.md says to resume from ``last_completed_step``.

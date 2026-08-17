@@ -62,13 +62,26 @@ jobs:
       # self-install-mode entrypoint, not a CI one. These steps run the same
       # tools against the same pyproject configuration.
 
+      # Every check below carries `if: ${{ !cancelled() }}`, because a failing
+      # step otherwise ABORTS THE JOB and every later check is skipped —
+      # reported as neither pass nor fail. That is not hypothetical: the four
+      # upgrade gates above failed for one run, which silently skipped the
+      # project-handler step, which had a test asserting on a hardcoded
+      # `/workspace` path that cannot exist on a runner. Two independent
+      # defects, and the first hid the second. These checks do not depend on
+      # each other, so one run should name all of them — the same reasoning the
+      # daemon-load job already applies to import failures. `!cancelled()`
+      # rather than `always()`, so a superseded run still stops promptly.
       - name: Format (black)
+        if: ${{ !cancelled() }}
         run: black --check src/ tests/
 
       - name: Lint (ruff)
+        if: ${{ !cancelled() }}
         run: ruff check src/ tests/
 
       - name: Types (mypy)
+        if: ${{ !cancelled() }}
         run: mypy src/
 
       # 95% is the threshold CLAUDE.md and CONTRIBUTING.md both state, so CI
@@ -84,6 +97,7 @@ jobs:
       # them straight into failures. Without -rs the only way to notice the next
       # such skip is to compare totals between two runs by hand.
       - name: Tests + coverage
+        if: ${{ !cancelled() }}
         run: >
           pytest tests/
           -rs
@@ -104,6 +118,7 @@ jobs:
       # hyphen, so it is not an importable package) and must not be applied to
       # the main suite.
       - name: Project handler tests
+        if: ${{ !cancelled() }}
         run: pytest .claude/project-handlers --import-mode=importlib
 
       - name: Upload coverage
@@ -118,9 +133,11 @@ jobs:
         # and .pre-commit-config.yaml. Do NOT reintroduce `-c pyproject.toml`: that
         # used to pull in a skips list which silently exempted B108/B324/B602/B603/
         # B607/B404 in CI only, making CI the loosest of the three surfaces.
+        if: ${{ !cancelled() }}
         run: bandit -r src/ .claude/ccy/claude-supervise.py -s B101
 
       - name: Dependencies (deptry)
+        if: ${{ !cancelled() }}
         run: deptry src/
 
   shell:
