@@ -132,7 +132,7 @@ def _mock_git_subprocess() -> Any:
     """
     return patch(
         "subprocess.run",
-        return_value=Mock(returncode=0, stdout=b"/tmp/test\n"),
+        return_value=Mock(returncode=0, stdout="/tmp/test\n"),
     )
 
 

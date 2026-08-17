@@ -26,15 +26,16 @@ class TestProjectContextInitialization:
         config_path = claude_dir / "hooks-daemon.yaml"
         config_path.write_text("version: 1.0\n")
 
-        # Mock git commands for normal mode
+        # Mock git commands for normal mode (run_git runs in text mode, so
+        # stdout is str, not bytes).
         with patch("subprocess.run") as mock_run:
             # git rev-parse --show-toplevel
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),
+                MagicMock(returncode=0, stdout="/tmp/project\n"),
                 # git remote get-url origin
-                MagicMock(returncode=0, stdout=b"git@github.com:user/test-repo.git\n"),
+                MagicMock(returncode=0, stdout="git@github.com:user/test-repo.git\n"),
                 # git rev-parse --show-toplevel (again for git_toplevel)
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),
+                MagicMock(returncode=0, stdout="/tmp/project\n"),
             ]
 
             ProjectContext.initialize(config_path)
@@ -66,9 +67,9 @@ class TestProjectContextInitialization:
         # Mock git commands for self-install mode
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout=b"/tmp/daemon-project\n"),
-                MagicMock(returncode=0, stdout=b"https://github.com/org/daemon.git\n"),
-                MagicMock(returncode=0, stdout=b"/tmp/daemon-project\n"),
+                MagicMock(returncode=0, stdout="/tmp/daemon-project\n"),
+                MagicMock(returncode=0, stdout="https://github.com/org/daemon.git\n"),
+                MagicMock(returncode=0, stdout="/tmp/daemon-project\n"),
             ]
 
             ProjectContext.initialize(config_path)
@@ -124,7 +125,7 @@ class TestProjectContextInitialization:
 
         # Mock git command failure (not a git repo)
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=128, stdout=b"", stderr=b"not a git repo")
+            mock_run.return_value = MagicMock(returncode=128, stdout="", stderr="not a git repo")
 
             with pytest.raises(ValueError, match="FAIL FAST.*not a git repository"):
                 ProjectContext.initialize(config_path)
@@ -140,10 +141,8 @@ class TestProjectContextInitialization:
         # Mock: git repo exists but no remote
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),  # git rev-parse (in repo)
-                MagicMock(
-                    returncode=128, stdout=b"", stderr=b"no remote"
-                ),  # git remote (no origin)
+                MagicMock(returncode=0, stdout="/tmp/project\n"),  # git rev-parse (in repo)
+                MagicMock(returncode=128, stdout="", stderr="no remote"),  # git remote (no origin)
             ]
 
             with pytest.raises(ValueError, match="FAIL FAST.*not a git repository"):
@@ -159,9 +158,9 @@ class TestProjectContextInitialization:
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),
-                MagicMock(returncode=0, stdout=b"git@github.com:user/repo.git\n"),
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),
+                MagicMock(returncode=0, stdout="/tmp/project\n"),
+                MagicMock(returncode=0, stdout="git@github.com:user/repo.git\n"),
+                MagicMock(returncode=0, stdout="/tmp/project\n"),
             ]
             ProjectContext.initialize(config_path)
 
@@ -198,9 +197,9 @@ class TestProjectContextAccess:
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),
-                MagicMock(returncode=0, stdout=b"https://github.com/org/my-repo.git\n"),
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),
+                MagicMock(returncode=0, stdout="/tmp/project\n"),
+                MagicMock(returncode=0, stdout="https://github.com/org/my-repo.git\n"),
+                MagicMock(returncode=0, stdout="/tmp/project\n"),
             ]
             ProjectContext.initialize(config_path)
 
@@ -230,9 +229,9 @@ class TestGitRepoNameParsing:
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),
-                MagicMock(returncode=0, stdout=b"git@github.com:user/ssh-repo.git\n"),
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),
+                MagicMock(returncode=0, stdout="/tmp/project\n"),
+                MagicMock(returncode=0, stdout="git@github.com:user/ssh-repo.git\n"),
+                MagicMock(returncode=0, stdout="/tmp/project\n"),
             ]
             ProjectContext.initialize(config_path)
 
@@ -248,9 +247,9 @@ class TestGitRepoNameParsing:
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),
-                MagicMock(returncode=0, stdout=b"https://github.com/org/https-repo.git\n"),
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),
+                MagicMock(returncode=0, stdout="/tmp/project\n"),
+                MagicMock(returncode=0, stdout="https://github.com/org/https-repo.git\n"),
+                MagicMock(returncode=0, stdout="/tmp/project\n"),
             ]
             ProjectContext.initialize(config_path)
 
@@ -266,9 +265,9 @@ class TestGitRepoNameParsing:
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),
-                MagicMock(returncode=0, stdout=b"https://github.com/org/no-extension\n"),
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),
+                MagicMock(returncode=0, stdout="/tmp/project\n"),
+                MagicMock(returncode=0, stdout="https://github.com/org/no-extension\n"),
+                MagicMock(returncode=0, stdout="/tmp/project\n"),
             ]
             ProjectContext.initialize(config_path)
 
@@ -278,8 +277,8 @@ class TestGitRepoNameParsing:
         """_get_git_repo_name returns None for empty remote URL."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),  # git rev-parse
-                MagicMock(returncode=0, stdout=b"\n"),  # git remote (empty URL)
+                MagicMock(returncode=0, stdout="/tmp/project\n"),  # git rev-parse
+                MagicMock(returncode=0, stdout="\n"),  # git remote (empty URL)
             ]
 
             result = ProjectContext._get_git_repo_name(tmp_path)
@@ -287,7 +286,12 @@ class TestGitRepoNameParsing:
         assert result is None
 
     def test_get_git_repo_name_handles_timeout(self, tmp_path: Path) -> None:
-        """_get_git_repo_name returns None on timeout."""
+        """_get_git_repo_name returns None on timeout.
+
+        The timeout is caught inside run_git (Plan 00246), which reports it as
+        a non-zero returncode rather than raising — so this still exercises
+        the same outward behaviour: a git failure never propagates.
+        """
         import subprocess
 
         from claude_code_hooks_daemon.constants import Timeout
@@ -303,8 +307,8 @@ class TestGitRepoNameParsing:
         """_get_git_repo_name returns None for unparseable URL."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout=b"/tmp/project\n"),  # git rev-parse
-                MagicMock(returncode=0, stdout=b"/.git\n"),  # Malformed URL
+                MagicMock(returncode=0, stdout="/tmp/project\n"),  # git rev-parse
+                MagicMock(returncode=0, stdout="/.git\n"),  # Malformed URL
             ]
 
             result = ProjectContext._get_git_repo_name(tmp_path)
@@ -312,7 +316,7 @@ class TestGitRepoNameParsing:
         assert result is None
 
     def test_get_git_toplevel_handles_timeout(self, tmp_path: Path) -> None:
-        """_get_git_toplevel returns None on timeout."""
+        """_get_git_toplevel returns None on timeout (caught inside run_git)."""
         import subprocess
 
         from claude_code_hooks_daemon.constants import Timeout
@@ -325,7 +329,7 @@ class TestGitRepoNameParsing:
         assert result is None
 
     def test_get_git_toplevel_handles_unexpected_error(self, tmp_path: Path) -> None:
-        """_get_git_toplevel returns None on unexpected errors."""
+        """_get_git_toplevel returns None on unexpected errors (caught inside run_git)."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = OSError("Unexpected filesystem error")
 
@@ -349,9 +353,9 @@ class TestProjectContextContainerRuntime:
         with patch.dict("os.environ", env, clear=True):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=b"/tmp/project\n"),
-                    MagicMock(returncode=0, stdout=b"git@github.com:user/test-repo.git\n"),
-                    MagicMock(returncode=0, stdout=b"/tmp/project\n"),
+                    MagicMock(returncode=0, stdout="/tmp/project\n"),
+                    MagicMock(returncode=0, stdout="git@github.com:user/test-repo.git\n"),
+                    MagicMock(returncode=0, stdout="/tmp/project\n"),
                 ]
                 ProjectContext.initialize(config_path)
 

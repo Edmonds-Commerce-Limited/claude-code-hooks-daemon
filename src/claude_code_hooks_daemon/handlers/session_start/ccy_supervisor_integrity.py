@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import re
-import subprocess  # nosec B404 - git invoked with a fixed, trusted argument list only
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +21,7 @@ from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,11 @@ _CONFIG_REL_PARTS: tuple[str, str] = (".claude", "hooks-daemon.yaml")
 _WRAPPER_EXPORT_KEY = "CCY_CLAUDE_WRAPPER"
 _COMMENT_PREFIX = "#"
 _GIT_CHECK_IGNORE_TIMEOUT_SECONDS = 5
-# git check-ignore exits 0 when the path IS ignored, 1 when it is NOT.
+# git check-ignore exits 0 when the path IS ignored, 1 when it is NOT — both are
+# valid answers. Anything else (git unavailable, a fatal error) is a genuine
+# failure worth a debug log.
 _GIT_IGNORED_RETURNCODE = 0
+_GIT_NOT_IGNORED_RETURNCODE = 1
 
 # Stale-supervisor detection (Plan 00164 Phase 3). The running supervisor writes
 # its identity here; we compare it against the on-disk claude-supervise.py.
@@ -108,18 +111,15 @@ class CcySupervisorIntegrityHandler(Handler):
         """
         if not (project_root / ".git").exists():
             return False
-        try:
-            # SECURITY: fixed, trusted git argv; no shell; rel_path is a repo-relative
-            # constant path, never user input.
-            result = subprocess.run(  # nosec B603 B607 - fixed trusted git argv, no shell
-                ["git", "-C", str(project_root), "check-ignore", "-q", rel_path],
-                capture_output=True,
-                timeout=_GIT_CHECK_IGNORE_TIMEOUT_SECONDS,
-                check=False,
-            )
-        except (FileNotFoundError, subprocess.SubprocessError, OSError) as exc:
-            logger.debug("git check-ignore failed for %s: %s", rel_path, exc)
-            return False
+        result = run_git(
+            project_root,
+            "check-ignore",
+            "-q",
+            rel_path,
+            timeout=_GIT_CHECK_IGNORE_TIMEOUT_SECONDS,
+        )
+        if result.returncode not in (_GIT_IGNORED_RETURNCODE, _GIT_NOT_IGNORED_RETURNCODE):
+            logger.debug("git check-ignore failed for %s: %s", rel_path, result.stderr)
         return result.returncode == _GIT_IGNORED_RETURNCODE
 
     def _deploy_explicitly_disabled(self, project_root: Path) -> bool:

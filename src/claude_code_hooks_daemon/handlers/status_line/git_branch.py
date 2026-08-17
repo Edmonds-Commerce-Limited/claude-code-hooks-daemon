@@ -17,6 +17,7 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, Timeout
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 logger = logging.getLogger(__name__)
 
@@ -347,19 +348,14 @@ class GitBranchHandler(Handler):
         at debug level and simply leave the counts as stale as before.
         """
         try:
-            env = os.environ.copy()
-            env[_GIT_TERMINAL_PROMPT_ENV] = _GIT_TERMINAL_PROMPT_DISABLED
-            env.setdefault(_GIT_SSH_COMMAND_ENV, _GIT_SSH_BATCH_MODE)
-            subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-                ["git", "fetch", "--quiet"],
-                cwd=cwd,
-                env=env,
-                capture_output=True,
-                timeout=Timeout.GIT_FETCH_BACKGROUND,
-                check=False,
+            env: dict[str, str] = {_GIT_TERMINAL_PROMPT_ENV: _GIT_TERMINAL_PROMPT_DISABLED}
+            if _GIT_SSH_COMMAND_ENV not in os.environ:
+                env[_GIT_SSH_COMMAND_ENV] = _GIT_SSH_BATCH_MODE
+            result = run_git(
+                Path(cwd), "fetch", "--quiet", timeout=Timeout.GIT_FETCH_BACKGROUND, env=env
             )
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
-            logger.debug("Background git fetch failed for %s: %s", repo_toplevel, e)
+            if result.returncode != 0:
+                logger.debug("Background git fetch failed for %s: %s", repo_toplevel, result.stderr)
         finally:
             with self._fetch_lock:
                 self._fetch_inflight.discard(repo_toplevel)
@@ -372,32 +368,26 @@ class GitBranchHandler(Handler):
         2. Fall back to checking if 'main' or 'master' exist locally
         3. Return None if undetermined (branch will be shown grey)
         """
-        try:
-            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-                ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
-                cwd=cwd,
-                capture_output=True,
+        result = run_git(
+            Path(cwd), "symbolic-ref", "refs/remotes/origin/HEAD", timeout=Timeout.GIT_STATUS_SHORT
+        )
+        if result.returncode == 0:
+            return result.stdout.strip().split("/")[-1]
+
+        for candidate in ("main", "master"):
+            result = run_git(
+                Path(cwd),
+                "show-ref",
+                "--verify",
+                f"refs/heads/{candidate}",
                 timeout=Timeout.GIT_STATUS_SHORT,
-                check=False,
             )
             if result.returncode == 0:
-                return result.stdout.decode().strip().split("/")[-1]
+                return candidate
 
-            for candidate in ("main", "master"):
-                result = (
-                    subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-                        ["git", "show-ref", "--verify", f"refs/heads/{candidate}"],
-                        cwd=cwd,
-                        capture_output=True,
-                        timeout=Timeout.GIT_STATUS_SHORT,
-                        check=False,
-                    )
-                )
-                if result.returncode == 0:
-                    return candidate
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            logger.debug("Failed to detect default branch: %s", e)
-
+        logger.debug(
+            "Failed to detect default branch (rc=%d): %s", result.returncode, result.stderr
+        )
         return None
 
     def _resolve_repo_toplevel(self, cwd: str) -> str | None:
@@ -415,22 +405,19 @@ class GitBranchHandler(Handler):
         if cached is not None:
             return cached
 
-        try:
-            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-                ["git", "rev-parse", "--show-toplevel"],
-                cwd=cwd,
-                capture_output=True,
-                timeout=Timeout.GIT_STATUS_SHORT,
-                check=False,
+        result = run_git(
+            Path(cwd), "rev-parse", "--show-toplevel", timeout=Timeout.GIT_STATUS_SHORT
+        )
+        if result.returncode != 0:
+            logger.debug(
+                "Failed to resolve repo toplevel (rc=%d): %s", result.returncode, result.stderr
             )
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError) as e:
-            logger.debug("Failed to resolve repo toplevel: %s", e)
-        else:
-            if result.returncode == 0:
-                repo_toplevel = result.stdout.decode().strip()
-                if repo_toplevel:
-                    self._toplevel_cache[cwd] = repo_toplevel
-                    return repo_toplevel
+            return None
+
+        repo_toplevel = result.stdout.strip()
+        if repo_toplevel:
+            self._toplevel_cache[cwd] = repo_toplevel
+            return repo_toplevel
         return None
 
     def _run_branch_name(self, cwd: str) -> str:
@@ -440,20 +427,13 @@ class GitBranchHandler(Handler):
         solely when that call failed, so the branch segment degrades to "name,
         no icons" rather than disappearing.
         """
-        try:
-            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-                ["git", "branch", "--show-current"],
-                cwd=cwd,
-                capture_output=True,
-                timeout=Timeout.GIT_STATUS_SHORT,
-                check=False,
-            )
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError) as e:
-            logger.debug("Failed to get git branch name: %s", e)
-            return ""
+        result = run_git(Path(cwd), "branch", "--show-current", timeout=Timeout.GIT_STATUS_SHORT)
         if result.returncode != 0:
+            logger.debug(
+                "Failed to get git branch name (rc=%d): %s", result.returncode, result.stderr
+            )
             return ""
-        return result.stdout.decode().strip()
+        return result.stdout.strip()
 
     def _run_status(self, cwd: str) -> str | None:
         """Run ``git status --porcelain=v2 --branch`` once and return its stdout.
@@ -466,19 +446,17 @@ class GitBranchHandler(Handler):
         Returns:
             Decoded stdout, or None when git fails (not a repo, timeout, ...).
         """
-        try:
-            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-                ["git", "status", "--porcelain=v2", "--branch"],
-                cwd=cwd,
-                capture_output=True,
-                timeout=Timeout.GIT_STATUS_SHORT,
-                check=False,
-            )
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError) as e:
-            logger.debug("Failed to run git status: %s", e)
-        else:
-            if result.returncode == 0:
-                return result.stdout.decode()
+        # Read WITHOUT taking git's optional index lock. This is the most
+        # frequent of the daemon's git calls — once per status-line render, in
+        # the agent's own working tree — and a plain `git status` refreshes the
+        # index and writes it back, so drawing the status line would contend for
+        # `.git/index.lock` with the agent's own git commands (Plan 00246).
+        result = run_git(
+            Path(cwd), "status", "--porcelain=v2", "--branch", timeout=Timeout.GIT_STATUS_SHORT
+        )
+        if result.returncode == 0:
+            return result.stdout
+        logger.debug("Failed to run git status (rc=%d): %s", result.returncode, result.stderr)
         return None
 
     def _format_git_status_icons(self, cwd: str, status_stdout: str) -> str:
@@ -609,19 +587,10 @@ class GitBranchHandler(Handler):
 
         Returns 0 on any subprocess failure.
         """
-        try:
-            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-                ["git", "stash", "list"],
-                cwd=cwd,
-                capture_output=True,
-                timeout=Timeout.GIT_STATUS_SHORT,
-                check=False,
-            )
-            if result.returncode != 0:
-                return 0
-            return sum(1 for line in result.stdout.decode().splitlines() if line.strip())
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+        result = run_git(Path(cwd), "stash", "list", timeout=Timeout.GIT_STATUS_SHORT)
+        if result.returncode != 0:
             return 0
+        return sum(1 for line in result.stdout.splitlines() if line.strip())
 
     def get_claude_md(self) -> str | None:
         return None

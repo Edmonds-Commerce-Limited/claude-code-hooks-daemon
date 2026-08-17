@@ -15,7 +15,9 @@ lists below therefore run:
 handler to render.
 """
 
+import subprocess
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,21 +26,24 @@ from claude_code_hooks_daemon.handlers.status_line import GitBranchHandler
 
 #: Porcelain v2 prints this instead of a name when HEAD is detached, which the
 #: handler maps to "no branch" exactly as ``branch --show-current`` did.
-_DETACHED_HEAD = b"(detached)"
+_DETACHED_HEAD = "(detached)"
 
 
-def _porcelain(branch: str, entries: bytes = b"") -> bytes:
+def _porcelain(branch: str, entries: str = "") -> str:
     """Build ``git status --porcelain=v2 --branch`` stdout for ``branch``.
 
     ``entries`` appends raw porcelain entry lines (``1 XY ...``, ``? path``,
     ...) for tests that assert on the status icons.
+
+    Text, not bytes: the status call goes through ``run_git``, which runs git in
+    text mode so no caller has to remember to decode (Plan 00246).
     """
-    head = branch.encode() if branch else _DETACHED_HEAD
-    return b"# branch.oid abc123\n# branch.head " + head + b"\n# branch.ab +0 -0\n" + entries
+    head = branch if branch else _DETACHED_HEAD
+    return f"# branch.oid abc123\n# branch.head {head}\n# branch.ab +0 -0\n{entries}"
 
 
-def _status_mock(branch: str, entries: bytes = b"") -> MagicMock:
-    """A ``subprocess.run`` result for the status call."""
+def _status_mock(branch: str, entries: str = "") -> MagicMock:
+    """A ``run_git`` result for the status call."""
     mock = MagicMock()
     mock.returncode = 0
     mock.stdout = _porcelain(branch, entries)
@@ -82,7 +87,7 @@ class TestGitBranchHandler:
 
         mock_result_symbolic_ref = MagicMock()
         mock_result_symbolic_ref.returncode = 0
-        mock_result_symbolic_ref.stdout = b"refs/remotes/origin/main\n"
+        mock_result_symbolic_ref.stdout = "refs/remotes/origin/main\n"
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
@@ -166,7 +171,7 @@ class TestGitBranchHandler:
 
         mock_result_symbolic_ref = MagicMock()
         mock_result_symbolic_ref.returncode = 0
-        mock_result_symbolic_ref.stdout = b"refs/remotes/origin/main\n"
+        mock_result_symbolic_ref.stdout = "refs/remotes/origin/main\n"
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
@@ -199,7 +204,7 @@ class TestGitBranchColorCoding:
         self,
         branch: str,
         symbolic_ref_returncode: int = 0,
-        symbolic_ref_stdout: bytes = b"refs/remotes/origin/main\n",
+        symbolic_ref_stdout: str = "refs/remotes/origin/main\n",
     ) -> list[MagicMock]:
         mock_toplevel = MagicMock()
         mock_toplevel.returncode = 0
@@ -244,7 +249,7 @@ class TestGitBranchColorCoding:
         # Remote uses 'develop' as default branch
         side_effects = self._make_run_side_effects(
             "develop",
-            symbolic_ref_stdout=b"refs/remotes/origin/develop\n",
+            symbolic_ref_stdout="refs/remotes/origin/develop\n",
         )
 
         with patch("subprocess.run") as mock_run:
@@ -387,7 +392,7 @@ class TestGitBranchColorCoding:
         # test observes the per-repo default-branch memoisation on its own.
         handler._render_ttl_seconds = 0
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
-        toplevel_stdout = str(tmp_path).encode() + b"\n"
+        toplevel_stdout = str(tmp_path) + "\n"
 
         def make_mocks(
             branch_name: str, include_symbolic_ref: bool, include_toplevel: bool = True
@@ -402,11 +407,11 @@ class TestGitBranchColorCoding:
             if include_symbolic_ref:
                 mock_symbolic_ref = MagicMock()
                 mock_symbolic_ref.returncode = 0
-                mock_symbolic_ref.stdout = b"refs/remotes/origin/main\n"
+                mock_symbolic_ref.stdout = "refs/remotes/origin/main\n"
                 mocks.append(mock_symbolic_ref)
             mock_stash = MagicMock()
             mock_stash.returncode = 0
-            mock_stash.stdout = b""
+            mock_stash.stdout = ""
             mocks.append(mock_stash)
             return mocks
 
@@ -445,12 +450,12 @@ class TestGitBranchColorCoding:
         def make_mocks(
             *, toplevel: Path, branch: str, symbolic_ref_default: str
         ) -> list[MagicMock]:
-            mock_toplevel = MagicMock(returncode=0, stdout=str(toplevel).encode() + b"\n")
+            mock_toplevel = MagicMock(returncode=0, stdout=str(toplevel) + "\n")
             mock_symbolic_ref = MagicMock(
                 returncode=0,
-                stdout=f"refs/remotes/origin/{symbolic_ref_default}\n".encode(),
+                stdout=f"refs/remotes/origin/{symbolic_ref_default}\n",
             )
-            mock_stash = MagicMock(returncode=0, stdout=b"")
+            mock_stash = MagicMock(returncode=0, stdout="")
             return [mock_toplevel, _status_mock(branch), mock_symbolic_ref, mock_stash]
 
         # Repo A: default master, currently on master -> green
@@ -493,7 +498,7 @@ class TestGitStatusIcons:
         *,
         branch: str = "main",
         status_stdout: bytes = b"",
-        stash_stdout: bytes = b"",
+        stash_stdout: str = "",
     ) -> list[MagicMock]:
         """Build the standard 4-call mock chain.
 
@@ -501,10 +506,19 @@ class TestGitStatusIcons:
         (origin/main), git stash list. The status output supplies the branch
         name as well as the icon state, so pass ``status_stdout`` when the test
         cares about icons and ``branch`` when it only cares about the name.
+
+        ``status_stdout`` stays a bytes literal because that is what git really
+        emits; the status call goes through ``run_git``, which runs in text mode,
+        so the decode that ``run_git`` performs is reproduced here (Plan 00246).
+        Every call now goes through ``run_git`` (Plan 00246 sweep), which runs
+        git in text mode, so ``stash_stdout`` (and every other mocked
+        ``.stdout``) is plain ``str``.
         """
         mock_toplevel = MagicMock(returncode=0)
-        mock_status = MagicMock(returncode=0, stdout=status_stdout or _porcelain(branch))
-        mock_symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
+        mock_status = MagicMock(
+            returncode=0, stdout=status_stdout.decode() if status_stdout else _porcelain(branch)
+        )
+        mock_symbolic_ref = MagicMock(returncode=0, stdout="refs/remotes/origin/main\n")
         mock_stash = MagicMock(returncode=0, stdout=stash_stdout)
         return [mock_toplevel, mock_status, mock_symbolic_ref, mock_stash]
 
@@ -622,7 +636,7 @@ class TestGitStatusIcons:
     def test_stashed_shown(self, handler: GitBranchHandler, tmp_path: Path) -> None:
         """`git stash list` with 2 lines renders ⚑2 in cyan."""
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
-        stash_stdout = b"stash@{0}: WIP on main: abc Fix\n" b"stash@{1}: WIP on main: def Other\n"
+        stash_stdout = "stash@{0}: WIP on main: abc Fix\n" "stash@{1}: WIP on main: def Other\n"
         mocks = self._make_mocks(stash_stdout=stash_stdout)
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = mocks
@@ -673,8 +687,8 @@ class TestGitStatusIcons:
 
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
         mock_toplevel = MagicMock(returncode=0)
-        mock_branch = MagicMock(returncode=0, stdout=b"main\n")
-        mock_symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
+        mock_branch = MagicMock(returncode=0, stdout="main\n")
+        mock_symbolic_ref = MagicMock(returncode=0, stdout="refs/remotes/origin/main\n")
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 mock_toplevel,
@@ -701,7 +715,7 @@ class TestGitStatusIcons:
             b"1 .M N... 100644 100644 100644 c d src/bar.py\n"
             b"? new.py\n"
         )
-        stash_stdout = b"stash@{0}: WIP\n"
+        stash_stdout = "stash@{0}: WIP\n"
         mocks = self._make_mocks(status_stdout=status_stdout, stash_stdout=stash_stdout)
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = mocks
@@ -799,9 +813,9 @@ class TestBackgroundFetch:
         handler = GitBranchHandler()
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
 
-        mock_toplevel = MagicMock(returncode=0, stdout=b"/repo/toplevel\n")
-        mock_symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
-        mock_stash = MagicMock(returncode=0, stdout=b"")
+        mock_toplevel = MagicMock(returncode=0, stdout="/repo/toplevel\n")
+        mock_symbolic_ref = MagicMock(returncode=0, stdout="refs/remotes/origin/main\n")
+        mock_stash = MagicMock(returncode=0, stdout="")
 
         with (
             patch.object(handler, "_maybe_start_background_fetch") as mock_fetch,
@@ -829,8 +843,7 @@ class TestBackgroundFetch:
 
         mock_run.assert_called_once()
         args, kwargs = mock_run.call_args
-        assert args[0] == ["git", "fetch", "--quiet"]
-        assert kwargs["cwd"] == self._CWD
+        assert args[0] == ["git", "-C", self._CWD, "fetch", "--quiet"]
         assert kwargs["timeout"] == Timeout.GIT_FETCH_BACKGROUND
         assert kwargs["check"] is False
         env = kwargs["env"]
@@ -916,9 +929,9 @@ class TestGitBranchRenderCache:
         Order: rev-parse --show-toplevel, status --porcelain=v2 --branch,
         symbolic-ref (default-branch detection), stash list.
         """
-        toplevel = MagicMock(returncode=0, stdout=b"/repo\n")
-        symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
-        stash = MagicMock(returncode=0, stdout=b"")
+        toplevel = MagicMock(returncode=0, stdout="/repo\n")
+        symbolic_ref = MagicMock(returncode=0, stdout="refs/remotes/origin/main\n")
+        stash = MagicMock(returncode=0, stdout="")
         return [toplevel, _status_mock("main"), symbolic_ref, stash]
 
     def test_second_render_within_ttl_served_from_cache(
@@ -1017,9 +1030,9 @@ class TestWorktreeIndicator:
         ``<toplevel>/.git``. Order: rev-parse --show-toplevel,
         status --porcelain=v2 --branch, symbolic-ref, stash list.
         """
-        top = MagicMock(returncode=0, stdout=str(toplevel).encode() + b"\n")
-        symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
-        stash = MagicMock(returncode=0, stdout=b"")
+        top = MagicMock(returncode=0, stdout=str(toplevel) + "\n")
+        symbolic_ref = MagicMock(returncode=0, stdout="refs/remotes/origin/main\n")
+        stash = MagicMock(returncode=0, stdout="")
         return [top, _status_mock("main"), symbolic_ref, stash]
 
     def test_linked_worktree_shows_tree_icon(
@@ -1139,3 +1152,36 @@ class TestWorktreeIndicator:
         rendered = result.context[0]
         assert self._PINK not in rendered
         assert self._GREEN in rendered
+
+
+class TestTheStatusRefreshTakesNoIndexLock:
+    """Plan 00246: this is the MOST frequent lock-taker of the three.
+
+    `_run_status` fires on every status-line render, in the agent's own working
+    tree. `git status` refreshes the index and writes it back — taking
+    `.git/index.lock` — so drawing the status line was contending with whatever
+    git command the agent happened to be running.
+    """
+
+    def test_reading_the_status_does_not_rewrite_the_index(
+        self, tmp_git_repo: Path, git_index_watch: Any
+    ) -> None:
+        handler = GitBranchHandler()
+
+        with git_index_watch.expect_none(tmp_git_repo, "the status-line git status"):
+            output = handler._run_status(str(tmp_git_repo))
+
+        assert output is not None, "the status must still be read, not skipped"
+        assert "branch.head" in output, output
+
+    def test_the_control_shows_bare_git_status_rewrites_it(
+        self, tmp_git_repo: Path, git_index_watch: Any
+    ) -> None:
+        """Without this, the assertion above could pass vacuously."""
+        with git_index_watch.expect_one(tmp_git_repo, "bare git status --porcelain=v2"):
+            subprocess.run(
+                ["git", "status", "--porcelain=v2", "--branch"],
+                cwd=tmp_git_repo,
+                capture_output=True,
+                check=True,
+            )

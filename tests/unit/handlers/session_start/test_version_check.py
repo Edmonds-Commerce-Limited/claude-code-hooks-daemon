@@ -155,7 +155,7 @@ def test_cache_validity_malformed_cache(handler: VersionCheckHandler, tmp_path: 
 
 
 @patch("claude_code_hooks_daemon.handlers.session_start.version_check.__version__", "2.6.1")
-@patch("claude_code_hooks_daemon.handlers.session_start.version_check.subprocess.run")
+@patch("subprocess.run")
 def test_handle_returns_upgrade_notice_when_outdated(
     mock_run: MagicMock,
     handler: VersionCheckHandler,
@@ -181,7 +181,7 @@ def test_handle_returns_upgrade_notice_when_outdated(
 
 
 @patch("claude_code_hooks_daemon.handlers.session_start.version_check.__version__", "2.6.1")
-@patch("claude_code_hooks_daemon.handlers.session_start.version_check.subprocess.run")
+@patch("subprocess.run")
 def test_upgrade_notice_points_to_skill_not_manual_steps(
     mock_run: MagicMock,
     handler: VersionCheckHandler,
@@ -210,7 +210,7 @@ def test_upgrade_notice_points_to_skill_not_manual_steps(
 
 
 @patch("claude_code_hooks_daemon.handlers.session_start.version_check.__version__", "2.7.0")
-@patch("claude_code_hooks_daemon.handlers.session_start.version_check.subprocess.run")
+@patch("subprocess.run")
 def test_handle_returns_no_context_when_up_to_date(
     mock_run: MagicMock,
     handler: VersionCheckHandler,
@@ -232,7 +232,7 @@ def test_handle_returns_no_context_when_up_to_date(
     assert result.context == []
 
 
-@patch("claude_code_hooks_daemon.handlers.session_start.version_check.subprocess.run")
+@patch("subprocess.run")
 def test_handle_uses_cache_when_valid(
     mock_run: MagicMock,
     handler: VersionCheckHandler,
@@ -260,7 +260,7 @@ def test_handle_uses_cache_when_valid(
     assert result.context == []
 
 
-@patch("claude_code_hooks_daemon.handlers.session_start.version_check.subprocess.run")
+@patch("subprocess.run")
 def test_handle_writes_cache_after_check(
     mock_run: MagicMock,
     handler: VersionCheckHandler,
@@ -287,7 +287,7 @@ def test_handle_writes_cache_after_check(
     assert "is_outdated" in cache_data
 
 
-@patch("claude_code_hooks_daemon.handlers.session_start.version_check.subprocess.run")
+@patch("subprocess.run")
 def test_handle_fails_silently_on_git_error(
     mock_run: MagicMock,
     handler: VersionCheckHandler,
@@ -503,9 +503,7 @@ def test_handle_with_cached_outdated_result(
 
     with (
         patch.object(handler, "_get_cache_file", return_value=cache_file),
-        patch(
-            "claude_code_hooks_daemon.handlers.session_start.version_check.subprocess.run"
-        ) as mock_run,
+        patch("subprocess.run") as mock_run,
     ):
         mock_run.return_value = MagicMock(
             returncode=0,

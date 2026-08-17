@@ -360,3 +360,56 @@ green `pytest tests/unit/daemon/` as necessary-but-not-sufficient: a
 coverage-only, order-dependent failure is invisible to isolated runs — always
 clear the full `./scripts/qa/llm_qa.py all` gate (which runs under coverage)
 before declaring a paths.py change done.
+
+## `git status` is a WRITE — a daemon sharing a working tree must decline optional locks
+
+**Symptom:** stale `.git/index.lock` files, and git commands failing with
+"Unable to create '.git/index.lock': File exists" for no visible reason.
+
+**What happened (Plan 00246):** `git status` does not just read. It refreshes
+the index and writes it back, which acquires `.git/index.lock`. The daemon ran
+one on every user prompt (`git_context_injector`), one on every status-line
+render (`git_branch`), and three git calls on every daemon start (the CLAUDE.md
+auto-commit) — all in the working tree the agent is using. Every one of those was
+contending with the agent's own git for the same lock, and none of them needed
+to: `GIT_OPTIONAL_LOCKS=0` tells git to skip work requiring an OPTIONAL lock, and
+it appeared **zero times** in the codebase.
+
+Measured, not assumed: with the cached stat info made stale, a plain
+`git status --porcelain` rewrote `.git/index`; the same command with
+`GIT_OPTIONAL_LOCKS=0` did not. Output is byte-identical in both cases — git
+still does the comparison in memory, it just stops PERSISTING the result.
+
+**Apply:** any git the daemon runs against the project tree goes through
+`utils.git_repo.run_git`, which sets the variable and a timeout by construction.
+`tests/integration/test_git_spawns_are_bounded.py` fails on a new direct spawn.
+More generally: before calling a subprocess "read-only", check whether it writes
+— `stat` the artifact before and after rather than trusting the verb.
+
+## A timeout can cause the failure it is there to prevent
+
+**What happened (Plan 00246):** the CLAUDE.md auto-commit had no timeout on any
+of its four git calls, so the fix was obviously "add one". But `subprocess`
+KILLS the child when a timeout expires, and git killed part-way through writing
+the index is exactly how `.git/index.lock` gets orphaned. A tight bound on a
+commit — which may run the repo's pre-commit hooks — would have manufactured the
+very symptom being fixed, while looking like a fix.
+
+**Apply:** when adding a timeout to something that mutates state, pick the bound
+from how long the legitimate slow case takes, not from how long you would like to
+wait. Record the reasoning at the constant (`Timeout.GIT_COMMIT`), because the
+next person will read 30 seconds as excessive and tighten it.
+
+## A declared architecture that nothing enforces is a suggestion
+
+**What happened (Plan 00246):** `utils/git_repo.py` has stated since Plan 00113
+that "new git operations are added as methods on `GitRepo`, not by
+re-implementing `subprocess.run(["git", ...])` in each caller". Fifteen files did
+it anyway, across ~30 call sites. The cost only became visible when a one-line
+fix (one environment variable, one timeout) turned into a thirty-site sweep.
+
+**Apply:** if a module docstring states an invariant worth keeping, add the check
+that fails when it is broken — in the same commit, not later. A convention with
+no guard decays at exactly the rate people forget it, and the decay is invisible
+until something forces you to touch every site at once. See DBF (`CLAUDE.md`
+Core Standard 15).

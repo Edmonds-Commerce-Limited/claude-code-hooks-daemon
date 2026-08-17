@@ -65,7 +65,7 @@ def _init_controller(
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = Mock(
             returncode=0,
-            stdout=str(workspace_root).encode() + b"\n",
+            stdout=str(workspace_root) + "\n",
         )
         controller.initialise(workspace_root=workspace_root)
     if mode != DaemonMode.DEFAULT or custom_message is not None:

@@ -18,7 +18,6 @@ payload-defensive:
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
 import sys
 from pathlib import Path
 from typing import Any
@@ -27,6 +26,7 @@ from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 _WORKTREE_REMOVE_PRIORITY = 50
 
@@ -74,22 +74,19 @@ class WorktreeRemoveHandler(Handler):
     def _run_git(cwd: str, *args: str) -> None:
         """Run a git subcommand from ``cwd``, swallowing expected failures.
 
-        SECURITY: fixed argv, no shell, trusted ``git`` binary only. WorktreeRemove
-        is non-blocking, so a git error (not a repo, worktree already gone) must
-        not propagate — it is surfaced on stderr, never silently discarded.
+        WorktreeRemove is non-blocking, so a git error (not a repo, worktree
+        already gone) must not propagate — it is surfaced on stderr, never
+        silently discarded. :func:`run_git` never raises, so a failure is just a
+        non-zero ``returncode`` to report rather than an exception to catch.
         """
-        try:
-            subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary
-                ["git", "-C", cwd, *args],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=Timeout.GIT_WORKTREE,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
+        result = run_git(Path(cwd), *args, timeout=Timeout.GIT_WORKTREE)
+        if result.returncode != 0:
             # Expected when cwd is not a repo or the worktree is already gone.
             # Non-blocking event: report and continue, never crash the chain.
-            print(f"worktree_remove: git {' '.join(args)} failed: {exc}", file=sys.stderr)
+            print(
+                f"worktree_remove: git {' '.join(args)} failed: {result.stderr.strip()}",
+                file=sys.stderr,
+            )
 
     def get_claude_md(self) -> str | None:
         """No agent-facing guidance — silent housekeeping."""

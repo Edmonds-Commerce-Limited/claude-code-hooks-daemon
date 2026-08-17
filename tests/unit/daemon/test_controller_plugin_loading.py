@@ -78,9 +78,9 @@ class MyTestPlugin(Handler):
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=str(workspace_root).encode() + b"\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=str(workspace_root).encode() + b"\n"),
+                Mock(returncode=0, stdout=str(workspace_root) + "\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=str(workspace_root) + "\n"),
             ]
             controller.initialise(workspace_root=workspace_root, plugins_config=plugins_config)
 
@@ -156,9 +156,9 @@ class SystemPathsHandler(Handler):
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=str(workspace_root).encode() + b"\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=str(workspace_root).encode() + b"\n"),
+                Mock(returncode=0, stdout=str(workspace_root) + "\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=str(workspace_root) + "\n"),
             ]
             controller.initialise(workspace_root=workspace_root, plugins_config=plugins_config)
 
@@ -237,9 +237,9 @@ class CompletelyDifferentClassName(Handler):
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=str(workspace_root).encode() + b"\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=str(workspace_root).encode() + b"\n"),
+                Mock(returncode=0, stdout=str(workspace_root) + "\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=str(workspace_root) + "\n"),
             ]
             # Daemon MUST crash if configured handler can't be registered
             with pytest.raises(RuntimeError, match="Failed to load plugin handler"):

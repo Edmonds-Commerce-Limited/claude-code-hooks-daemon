@@ -26,11 +26,12 @@ the fail-silent convention.
 from __future__ import annotations
 
 import os
-import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
+import subprocess  # nosec B404 — CompletedProcess typing only; run_git owns the spawn
 from dataclasses import dataclass
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 # Non-interactive fetch/pull env (identical intent to the status-line git_branch
 # background fetch): never block on credentials, never open an interactive
@@ -100,24 +101,19 @@ def _run_git(
     timeout: float,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
-    """Run ``git -C <cwd> <args>``; return the completed process, or ``None``.
+    """Run ``git -C <cwd> <args>`` via the daemon's single spawn point.
 
-    ``None`` means git was unavailable (OSError/SubprocessError) or the call
-    timed out — the caller then treats it as "no answer" and fails silently.
-    A non-zero return code is NOT ``None``: it is a valid answer (e.g. "not a
-    repo", "no upstream", "non-fast-forward") the caller inspects.
+    Delegates to :func:`claude_code_hooks_daemon.utils.git_repo.run_git`, THE
+    place the daemon spawns git (Plan 00246) — declining the optional index
+    lock and enforcing a timeout hold by construction rather than per module.
+    ``run_git`` never raises: an absent git binary or a timeout comes back as a
+    non-zero ``returncode`` with the reason in ``stderr`` instead of ``None``,
+    so every caller here — already written to branch on ``returncode != 0`` —
+    treats it identically to "not a repo" / "no upstream" / "non-fast-forward".
+    The ``| None`` stays in the return type only so a test double can still
+    stand in for an undetermined answer.
     """
-    try:
-        return subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary
-            ["git", "-C", str(cwd), *args],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            env=env,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    return run_git(cwd, *args, timeout=timeout, env=env)
 
 
 def _noninteractive_env() -> dict[str, str]:

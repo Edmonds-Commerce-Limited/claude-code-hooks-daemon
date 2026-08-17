@@ -55,9 +55,9 @@ class TestDegradedModeInit:
             ),
         ):
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -77,9 +77,9 @@ class TestDegradedModeInit:
             ),
         ):
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -98,9 +98,9 @@ class TestDegradedModeInit:
             ),
         ):
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -138,9 +138,9 @@ class TestDegradedModeRequestHandling:
             ),
         ):
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -236,9 +236,9 @@ class TestDegradedModeHealthStatus:
             ),
         ):
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -259,9 +259,9 @@ class TestDegradedModeHealthStatus:
             ),
         ):
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -299,9 +299,9 @@ class TestConfigValidationIntegration:
             ),
         ):
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             # Should NOT raise - daemon should start even if validator crashes
             controller.initialise(workspace_root=workspace_root)
@@ -323,9 +323,9 @@ class TestConfigValidationIntegration:
             ) as mock_validate,
         ):
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 

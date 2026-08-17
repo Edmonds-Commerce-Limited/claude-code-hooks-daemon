@@ -1,7 +1,7 @@
 """GitContextInjectorHandler - injects git status context into user prompts."""
 
-import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
 import time
+from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import (
@@ -9,10 +9,10 @@ from claude_code_hooks_daemon.constants import (
     HandlerTag,
     HookInputField,
     Priority,
-    Timeout,
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 # Ceiling on how long an unchanged status may stay un-injected (Plan 00238
 # Task 4.1). Change-detection alone has no floor under it: context can be
@@ -112,16 +112,13 @@ class GitContextInjectorHandler(Handler):
             project_root = None
 
         try:
-            # Run git status with short timeout
+            # Read the status WITHOUT taking git's optional index lock. This runs
+            # on every prompt in the agent's own working tree, and a plain
+            # `git status` refreshes the index and writes it back — so gathering
+            # context would contend for `.git/index.lock` with whatever git
+            # command the agent is running at that moment (Plan 00246).
             # cwd from ProjectContext (authoritative project root), or cwd fallback
-            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-                ["git", "status"],
-                capture_output=True,
-                text=True,
-                timeout=Timeout.GIT_CONTEXT,
-                cwd=project_root,
-                check=False,
-            )
+            result = run_git(Path(project_root) if project_root else Path.cwd(), "status")
 
             # If git command failed (not a repo, git not installed, etc.), silent allow
             if result.returncode != 0:
@@ -139,8 +136,10 @@ class GitContextInjectorHandler(Handler):
 
             return HookResult(decision=Decision.ALLOW, context=[context])
 
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-            # Git not installed, timeout, or other errors - silent allow
+        except OSError:
+            # `run_git` reports an absent git or a timeout as a non-zero
+            # returncode rather than raising, so the only thing left that can
+            # raise here is resolving the fallback cwd — silent allow either way.
             return HookResult(decision=Decision.ALLOW)
 
     def get_claude_md(self) -> str | None:

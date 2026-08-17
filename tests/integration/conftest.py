@@ -33,12 +33,12 @@ def project_context(tmp_path: Path) -> Path:
 
     with patch("subprocess.run") as mock_run:
         mock_run.side_effect = [
-            MagicMock(returncode=0, stdout=str(project_root).encode() + b"\n"),
+            MagicMock(returncode=0, stdout=str(project_root) + "\n"),
             MagicMock(
                 returncode=0,
-                stdout=b"git@github.com:user/test-repo.git\n",
+                stdout="git@github.com:user/test-repo.git\n",
             ),
-            MagicMock(returncode=0, stdout=str(project_root).encode() + b"\n"),
+            MagicMock(returncode=0, stdout=str(project_root) + "\n"),
         ]
         ProjectContext.initialize(config_path)
 

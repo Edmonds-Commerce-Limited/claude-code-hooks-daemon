@@ -18,7 +18,6 @@ Usage:
 
 import logging
 import re
-import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
@@ -193,63 +192,43 @@ class ProjectContext:
         Returns:
             Repository name or None
         """
-        try:
-            # Check if in git repo
-            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-                ["git", "rev-parse", "--show-toplevel"],
-                cwd=project_root,
-                capture_output=True,
-                timeout=Timeout.GIT_CONTEXT,
-                check=False,
-            )
+        # Deferred import: avoids a circular import. This module is imported by
+        # claude_code_hooks_daemon.core's package init, and utils' package init
+        # imports utils.npm, which imports THIS module back — a module-level
+        # import here would try to bind ProjectContext before the class exists.
+        from claude_code_hooks_daemon.utils.git_repo import run_git
 
-            if result.returncode != 0:
-                logger.info("ProjectContext: Not a git repository")
-                return None
-
-            # Get remote origin URL
-            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-                ["git", "remote", "get-url", "origin"],
-                cwd=project_root,
-                capture_output=True,
-                timeout=Timeout.GIT_CONTEXT,
-                check=False,
-            )
-
-            if result.returncode != 0:
-                logger.warning("ProjectContext: No git remote 'origin' configured")
-                return None
-
-            remote_url = result.stdout.decode().strip()
-            if not remote_url:
-                logger.warning("ProjectContext: Empty git remote URL")
-                return None
-
-            # Parse repo name from URL
-            # SSH: git@github.com:user/repo.git -> repo
-            # HTTPS: https://github.com/user/repo.git -> repo
-            # Both formats: split by / and take last component
-            path_part = remote_url.split("/")[-1]
-
-            # Remove .git suffix
-            repo_name = re.sub(r"\.git$", "", path_part)
-
-            if not repo_name:
-                logger.warning(
-                    "ProjectContext: Failed to extract repo name from URL: %s", remote_url
-                )
-                return None
-
-            return repo_name
-
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            logger.warning("ProjectContext: Git command failed: %s", e)
+        # Check if in git repo
+        result = run_git(project_root, "rev-parse", "--show-toplevel", timeout=Timeout.GIT_CONTEXT)
+        if result.returncode != 0:
+            logger.info("ProjectContext: Not a git repository")
             return None
-        except Exception as e:
-            logger.error(
-                "ProjectContext: Unexpected error getting git repo name: %s", e, exc_info=True
-            )
+
+        # Get remote origin URL
+        result = run_git(project_root, "remote", "get-url", "origin", timeout=Timeout.GIT_CONTEXT)
+        if result.returncode != 0:
+            logger.warning("ProjectContext: No git remote 'origin' configured")
             return None
+
+        remote_url = result.stdout.strip()
+        if not remote_url:
+            logger.warning("ProjectContext: Empty git remote URL")
+            return None
+
+        # Parse repo name from URL
+        # SSH: git@github.com:user/repo.git -> repo
+        # HTTPS: https://github.com/user/repo.git -> repo
+        # Both formats: split by / and take last component
+        path_part = remote_url.split("/")[-1]
+
+        # Remove .git suffix
+        repo_name = re.sub(r"\.git$", "", path_part)
+
+        if not repo_name:
+            logger.warning("ProjectContext: Failed to extract repo name from URL: %s", remote_url)
+            return None
+
+        return repo_name
 
     @classmethod
     def _get_git_toplevel(cls, project_root: Path) -> Path | None:
@@ -263,29 +242,15 @@ class ProjectContext:
         Returns:
             Git toplevel path or None
         """
-        try:
-            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-                ["git", "rev-parse", "--show-toplevel"],
-                cwd=project_root,
-                capture_output=True,
-                timeout=Timeout.GIT_CONTEXT,
-                check=False,
-            )
+        # Deferred import: see the matching comment in _get_git_repo_name.
+        from claude_code_hooks_daemon.utils.git_repo import run_git
 
-            if result.returncode != 0:
-                return None
-
-            toplevel = result.stdout.decode().strip()
-            return Path(toplevel) if toplevel else None
-
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            logger.warning("ProjectContext: Git command failed: %s", e)
+        result = run_git(project_root, "rev-parse", "--show-toplevel", timeout=Timeout.GIT_CONTEXT)
+        if result.returncode != 0:
             return None
-        except Exception as e:
-            logger.error(
-                "ProjectContext: Unexpected error getting git toplevel: %s", e, exc_info=True
-            )
-            return None
+
+        toplevel = result.stdout.strip()
+        return Path(toplevel) if toplevel else None
 
     @classmethod
     def _ensure_initialized(cls) -> None:

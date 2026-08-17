@@ -6,10 +6,9 @@ Uses 1-day cache to avoid excessive git operations.
 
 import json
 import logging
-import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -20,10 +19,16 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Handler, HookResult, ProjectContext
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 from claude_code_hooks_daemon.version import __version__
 
 logger = logging.getLogger(__name__)
+
+#: Our own repo — ls-remote reads its tags to detect an available upgrade.
+_GITHUB_REPO_URL: Final[str] = (
+    "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git"
+)
 
 
 class VersionCheckHandler(Handler):
@@ -108,49 +113,39 @@ class VersionCheckHandler(Handler):
         Returns:
             Latest version string (e.g., "2.7.0") or None if failed
         """
-        try:
-            # SECURITY: This subprocess call is safe because:
-            # - Command is hardcoded: "git"
-            # - All arguments are hardcoded (no user input)
-            # - URL is trusted: our own GitHub repository
-            # - No shell=True (prevents command injection)
-            # - Timeout prevents hanging
-            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-                [
-                    "git",
-                    "ls-remote",
-                    "--tags",
-                    "--refs",
-                    "--sort=-v:refname",
-                    "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=Timeout.VERSION_CHECK,
-                check=False,
-            )
+        # SECURITY: fixed argv, no shell, trusted URL (our own repository). ``-C``
+        # needs an existing directory, but ls-remote talks only to the remote
+        # URL, so the cwd is immaterial — the process cwd always exists.
+        # run_git never raises: an absent git binary or a timeout comes back as
+        # a non-zero returncode with the reason in stderr, so there is nothing
+        # left to catch here.
+        result = run_git(
+            Path.cwd(),
+            "ls-remote",
+            "--tags",
+            "--refs",
+            "--sort=-v:refname",
+            _GITHUB_REPO_URL,
+            timeout=Timeout.VERSION_CHECK,
+        )
 
-            if result.returncode != 0:
-                logger.debug("git ls-remote failed: %s", result.stderr)
-                return None
-
-            # Parse output: "hash refs/tags/vX.Y.Z"
-            # Get first line (latest version)
-            for line in result.stdout.strip().split("\n"):
-                if not line:
-                    continue
-                parts = line.split()
-                if len(parts) >= 2:
-                    tag = parts[1].split("/")[-1]  # refs/tags/v2.7.0 -> v2.7.0
-                    if tag.startswith("v"):
-                        return tag[1:]  # v2.7.0 -> 2.7.0
-                    return tag
-
+        if result.returncode != 0:
+            logger.debug("git ls-remote failed: %s", result.stderr)
             return None
 
-        except (subprocess.TimeoutExpired, OSError, ValueError) as e:
-            logger.debug("Failed to fetch latest version: %s", e)
-            return None
+        # Parse output: "hash refs/tags/vX.Y.Z"
+        # Get first line (latest version)
+        for line in result.stdout.strip().split("\n"):
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) >= 2:
+                tag = parts[1].split("/")[-1]  # refs/tags/v2.7.0 -> v2.7.0
+                if tag.startswith("v"):
+                    return tag[1:]  # v2.7.0 -> 2.7.0
+                return tag
+
+        return None
 
     def matches(self, hook_input: dict[str, Any] | None) -> bool:
         """Check if handler should run.

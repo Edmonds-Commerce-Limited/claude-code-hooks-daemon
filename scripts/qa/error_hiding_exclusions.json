@@ -21,18 +21,6 @@
       "reason": "Returns early on ValueError for unknown event types. The caller continues normally \u2014 the footer injection is optional context enrichment, not a critical operation."
     },
     {
-      "file": "core/project_context.py",
-      "function": "_get_git_repo_name",
-      "rule": "return-none-on-error",
-      "reason": "Git helper methods are explicitly non-fatal. Callers check for None and handle missing git context gracefully. These are utility methods, not critical paths."
-    },
-    {
-      "file": "core/project_context.py",
-      "function": "_get_git_toplevel",
-      "rule": "return-none-on-error",
-      "reason": "Git helper methods are explicitly non-fatal. Callers check for None and handle missing git context gracefully. These are utility methods, not critical paths."
-    },
-    {
       "file": "core/pseudo_event.py",
       "function": "_fire",
       "rule": "return-none-on-error",
@@ -291,12 +279,6 @@
       "reason": "Version check: log-and-continue on cache write failure. Already logged. Version checking is advisory."
     },
     {
-      "file": "handlers/session_start/version_check.py",
-      "function": "_get_latest_version",
-      "rule": "return-none-on-error",
-      "reason": "Version check helper: returns None when version info unavailable (subprocess failure, parse error). Callers handle None gracefully. Version checking is advisory \u2014 failure should not break session start."
-    },
-    {
       "file": "handlers/status_line/daemon_stats.py",
       "function": "handle",
       "rule": "log-and-continue",
@@ -307,30 +289,6 @@
       "function": "_render_git_context",
       "rule": "log-and-continue",
       "reason": "Git branch handler: log-and-continue on subprocess failure. Status line handlers are fail-open by design \u2014 one failing element must not crash the entire status line. Already logged at debug level. (Plan 00155 T4 moved this fail-open render body out of handle() into _render_git_context() so handle() can wrap it with the render TTL cache.)"
-    },
-    {
-      "file": "handlers/status_line/git_branch.py",
-      "function": "_resolve_repo_toplevel",
-      "rule": "log-and-continue",
-      "reason": "Git branch handler: log-and-continue on subprocess failure. Resolves the repo root for a cwd (memoised, Plan 00238 Task 2.1b). A cwd that is not a repository is the NORMAL negative answer, not an error, and a git timeout must render no branch segment rather than crash the status line. Already logged at debug level; only positive answers are cached, so a later `git init` is still picked up."
-    },
-    {
-      "file": "handlers/status_line/git_branch.py",
-      "function": "_run_status",
-      "rule": "log-and-continue",
-      "reason": "Git branch handler: log-and-continue on subprocess failure. Runs `git status --porcelain=v2 --branch` once to serve both the branch name and the icons (Plan 00238 Task 2.1b). A failure here is fail-open by the status line's contract, and the caller falls back to `git branch --show-current` so the branch name still renders without icons rather than the segment vanishing. Already logged at debug level."
-    },
-    {
-      "file": "handlers/status_line/git_branch.py",
-      "function": "_get_default_branch",
-      "rule": "log-and-continue",
-      "reason": "Git branch handler: log-and-continue on subprocess failure. Status line handlers are fail-open by design \u2014 one failing element must not crash the entire status line. Already logged at debug level."
-    },
-    {
-      "file": "handlers/status_line/git_branch.py",
-      "function": "_run_background_fetch",
-      "rule": "log-and-continue",
-      "reason": "Background git fetch is best-effort by design: it only refreshes remote-tracking refs so ahead/behind icons are honest. Offline hosts, missing remotes, and slow networks are expected conditions \u2014 a failed fetch must leave the status line exactly as it was (counts as stale as before), never crash or retry-storm. Already logged at debug level; the finally block still clears the in-flight marker."
     },
     {
       "file": "handlers/status_line/startup_cleanup.py",
@@ -403,18 +361,6 @@
       "function": "save_results",
       "rule": "return-none-on-error",
       "reason": "save_results(): Returns None when JSON result file cannot be written. Prints error to stdout. QA result saving is an auxiliary function \u2014 failure does not affect QA pass/fail determination."
-    },
-    {
-      "file": "utils/git_repo.py",
-      "function": "_git_output",
-      "rule": "return-none-on-error",
-      "reason": "Bounded git subprocess wrapper for GitRepo: returns None when git is unavailable (OSError/SubprocessError) or the command exits non-zero (e.g. not a git repo, config key absent). Same explicitly-non-fatal contract as project_context._get_git_toplevel \u2014 'not a repo' / 'key absent' IS the answer, consumed as feature-detection by resolve_for/read_config."
-    },
-    {
-      "file": "utils/git_sync.py",
-      "function": "_run_git",
-      "rule": "return-none-on-error",
-      "reason": "Bounded git subprocess wrapper for the upstream-sync path (Plan 00178): returns None when git is unavailable (OSError/SubprocessError) or the call times out. Same explicitly-non-fatal contract as git_repo._git_output \u2014 the SessionStart handler treats 'no answer' as feature-detection (not a repo / offline) and stays silent, never crashing session start."
     },
     {
       "file": "utils/git_sync.py",

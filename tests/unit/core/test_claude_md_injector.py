@@ -830,9 +830,7 @@ class TestAutoCommitDoesNotFightTheAgentForTheIndexLock:
             "load-bearing for an untracked file"
         )
 
-    def test_the_commit_is_bounded_generously_not_by_the_read_default(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_commit_is_bounded_generously_not_by_the_read_default(self, tmp_path: Path) -> None:
         """A commit needs a longer bound than a read, and both need one.
 
         Every git call here goes through `run_git`, so a timeout applies by
@@ -907,8 +905,7 @@ class TestAutoCommitDoesNotFightTheAgentForTheIndexLock:
         warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
         assert warnings, "lock contention produced no WARNING"
         assert any("index.lock" in r.getMessage() for r in warnings), (
-            f"the WARNING did not carry git's own reason: "
-            f"{[r.getMessage() for r in warnings]}"
+            f"the WARNING did not carry git's own reason: " f"{[r.getMessage() for r in warnings]}"
         )
 
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -41,7 +42,10 @@ _GIT_UNAVAILABLE: Final[int] = 127
 
 
 def run_git(
-    cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
+    cwd: Path,
+    *args: str,
+    timeout: float = Timeout.GIT_CONTEXT,
+    env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run ``git -C <cwd> <args>`` without taking git's optional index lock.
 
@@ -58,13 +62,22 @@ def run_git(
     aborting daemon startup.
     """
     argv = ["git", "-C", str(cwd), *args]
+    # Callers ADD variables (e.g. a non-interactive fetch disabling credential
+    # prompts); they never replace the environment, because dropping PATH would
+    # mean git is not found at all.
+    #
+    # The declined lock is applied LAST, so it cannot be shadowed. That is not
+    # theoretical: a caller that passes a whole ``os.environ`` copy would
+    # otherwise reinstate an inherited ``GIT_OPTIONAL_LOCKS`` and silently undo
+    # the one property this runner exists to guarantee.
+    child_env = {**os.environ, **(env or {}), _OPTIONAL_LOCKS_VAR: _OPTIONAL_LOCKS_DECLINED}
     try:
         return subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary
             argv,
             capture_output=True,
             text=True,
             timeout=timeout,
-            env={**os.environ, _OPTIONAL_LOCKS_VAR: _OPTIONAL_LOCKS_DECLINED},
+            env=child_env,
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:

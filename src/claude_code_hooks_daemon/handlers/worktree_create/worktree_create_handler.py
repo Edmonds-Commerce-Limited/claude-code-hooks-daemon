@@ -16,7 +16,7 @@ opaque ``wf_<hash>``.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
+import subprocess  # nosec B404 — CalledProcessError typing only; run_git owns the spawn
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.worktree_naming import worktree_dir_name, worktree_path
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 # This handler is the only one on the WorktreeCreate event; priority is nominal.
 _WORKTREE_CREATE_PRIORITY = 50
@@ -71,17 +72,19 @@ class WorktreeCreateHandler(Handler):
     def _git_worktree_add(cwd: str, path: Path, branch: str) -> None:
         """Run ``git worktree add -b <branch> <path>`` from ``cwd``.
 
-        SECURITY: fixed argv, no shell, trusted ``git`` binary only. Fails LOUDLY
-        (raises) rather than returning an empty response — an unusable path would
-        re-introduce the original ``/<cwd>/{}`` breakage.
+        Fails LOUDLY (raises) rather than returning an empty response — an
+        unusable path would re-introduce the original ``/<cwd>/{}`` breakage.
+        :func:`run_git` never raises, so the ``returncode`` is checked
+        explicitly and translated into the same ``CalledProcessError`` a
+        ``check=True`` spawn would have raised.
         """
-        subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary
-            ["git", "-C", cwd, "worktree", "add", "-b", branch, str(path)],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=Timeout.GIT_WORKTREE,
+        result = run_git(
+            Path(cwd), "worktree", "add", "-b", branch, str(path), timeout=Timeout.GIT_WORKTREE
         )
+        if result.returncode != 0:
+            raise subprocess.CalledProcessError(
+                result.returncode, result.args, result.stdout, result.stderr
+            )
 
     def get_claude_md(self) -> str | None:
         """Guidance injected into the project CLAUDE.md."""

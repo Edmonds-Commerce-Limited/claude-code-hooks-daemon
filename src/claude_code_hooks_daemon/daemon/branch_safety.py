@@ -47,6 +47,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from claude_code_hooks_daemon.utils.git_repo import run_git
+
 # Human gate for an ``unproven`` deletion: given the classifications and the
 # stated reason, return whether a person consented. Injected rather than called
 # directly so the policy is testable without a terminal.
@@ -157,12 +159,12 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
     trusted system git. Branch names arrive as separate argv entries so a name
     containing shell metacharacters cannot be interpreted.
     """
-    return subprocess.run(  # nosec B603 B607 - trusted system tool, list form
-        ["git", "-C", str(repo), *args],
-        check=check,
-        capture_output=True,
-        text=True,
-    )
+    result = run_git(repo, *args)
+    if check and result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, result.stdout, result.stderr
+        )
+    return result
 
 
 def current_branch(repo: Path) -> str | None:

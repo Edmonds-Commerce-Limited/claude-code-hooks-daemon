@@ -333,3 +333,50 @@ class TestEveryGitCallIsBounded:
             result = run_git(repo, "status")
 
         assert result.returncode != 0
+
+
+class TestCallerSuppliedEnvironment:
+    """Some callers must ADD a variable — e.g. a fetch that must never prompt."""
+
+    def test_caller_variables_are_added_to_the_environment(self, tmp_path: Path) -> None:
+        repo = _git_init(tmp_path / "proj")
+        with mock.patch("subprocess.run") as runner:
+            runner.return_value = subprocess.CompletedProcess([], 0, "", "")
+            run_git(repo, "fetch", env={"GIT_TERMINAL_PROMPT": "0"})
+
+        passed = runner.call_args.kwargs["env"]
+        assert passed["GIT_TERMINAL_PROMPT"] == "0"
+
+    def test_caller_variables_do_not_replace_the_environment(self, tmp_path: Path) -> None:
+        """Replacing it would drop PATH, and git would not be found at all."""
+        repo = _git_init(tmp_path / "proj")
+        with mock.patch("subprocess.run") as runner:
+            runner.return_value = subprocess.CompletedProcess([], 0, "", "")
+            run_git(repo, "fetch", env={"GIT_TERMINAL_PROMPT": "0"})
+
+        passed = runner.call_args.kwargs["env"]
+        assert "PATH" in passed
+
+    def test_the_declined_index_lock_survives_a_caller_environment(self, tmp_path: Path) -> None:
+        """The whole point of the runner must not be overridable by accident."""
+        repo = _git_init(tmp_path / "proj")
+        with mock.patch("subprocess.run") as runner:
+            runner.return_value = subprocess.CompletedProcess([], 0, "", "")
+            run_git(repo, "fetch", env={"GIT_TERMINAL_PROMPT": "0"})
+
+        assert runner.call_args.kwargs["env"]["GIT_OPTIONAL_LOCKS"] == "0"
+
+    def test_a_caller_cannot_re_enable_the_optional_lock(self, tmp_path: Path) -> None:
+        """Not theoretical: a caller passing a whole `os.environ` copy would
+        otherwise reinstate an inherited value and silently undo the runner's
+        one guarantee. `git_sync._noninteractive_env` does exactly that copy.
+        """
+        repo = _git_init(tmp_path / "proj")
+        with mock.patch("subprocess.run") as runner:
+            runner.return_value = subprocess.CompletedProcess([], 0, "", "")
+            run_git(repo, "status", env={"GIT_OPTIONAL_LOCKS": "1"})
+
+        assert runner.call_args.kwargs["env"]["GIT_OPTIONAL_LOCKS"] == "0", (
+            "a caller overrode the declined index lock, so the runner no longer "
+            "guarantees the property it exists for"
+        )

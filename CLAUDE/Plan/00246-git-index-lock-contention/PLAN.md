@@ -100,8 +100,8 @@ a sweep.
 
 ### Phase 2: Fix the three lock-taking paths
 
-- [ ] ⬜ **Task 2.1**: `git_context_injector` (per prompt) onto the runner
-- [ ] ⬜ **Task 2.2**: `git_branch` status call (per refresh) onto the runner
+- [x] ✅ **Task 2.1**: `git_context_injector` (per prompt) onto the runner
+- [x] ✅ **Task 2.2**: `git_branch` status call (per refresh) onto the runner
 - [x] ✅ **Task 2.3**: `claude_md_injector` — all four calls (`rev-parse`,
   `status`, `show`, `commit`) onto the runner
 - [x] ✅ **Task 2.4**: Stage only when CLAUDE.md is untracked, so the tracked
@@ -113,13 +113,21 @@ a sweep.
 
 ### Phase 3: The guard (DBF — this is the real deliverable)
 
-- [ ] ⬜ **Task 3.1**: Write a failing check that finds direct
-  `subprocess.run(["git", ...])` outside the bounded home
-- [ ] ⬜ **Task 3.2**: Decide the allowlist shape for genuinely-special callers,
-  each carrying its reason inline
-- [ ] ⬜ **Task 3.3**: Wire the check into `run_all.sh` AND `llm_qa.py` — verdict
-  published under the key the consumers actually read (Plan 00244's lesson)
-- [ ] ⬜ **Task 3.4**: Migrate the remaining callers until the check is green
+- [x] ✅ **Task 3.1**: Write a failing check that finds direct
+  `subprocess.run(["git", ...])` outside the bounded home — landed as
+  `tests/integration/test_git_spawns_are_bounded.py`, which found 17 spawns
+  across 10 files
+- [x] ✅ **Task 3.2**: Allowlist shape — an `_EXEMPT` dict keyed by path, whose
+  value IS the reason, so an entry cannot be added without justifying itself
+- [x] ✅ **Task 3.3**: No wiring needed — see Decision 4 (a test is binding by
+  construction; a checker has to be wired into two runners and can publish its
+  verdict where nothing reads it)
+- [x] ✅ **Task 3.4**: Migrate the remaining callers until the check is green —
+  all 17 spawns across 10 files, so `_EXEMPT` holds only the runner itself
+- [x] ✅ **Task 3.5**: Clear the exclusions the migration made stale — removing
+  the now-dead `try/except` blocks left 9 entries in
+  `error_hiding_exclusions.json` matching no finding, and
+  `test_audit_error_hiding.py` named every one
 
 ### Phase 4: Verify
 
@@ -195,6 +203,52 @@ existing test covered, since the fixtures all commit a CLAUDE.md first.
 
 **Date**: 2026-08-17
 
+### Decision 4: the guard is a test, not a `scripts/qa/` checker
+
+**Context**: Every other repo-wide invariant here is a `scripts/qa/check_*.py`
+wired into `run_all.sh` and `llm_qa.py`, so that was the default shape.
+
+**Options Considered**:
+
+1. A QA checker script, matching the existing family.
+2. An integration test, matching `test_claude_md_guidance_coverage.py` and
+   `test_repo_hygiene_check.py`.
+
+**Decision**: Option 2. A checker is only as binding as its wiring: it must be
+registered in two runners, and Plan 00244 shipped one whose verdict was published
+under a key neither consumer read — 60 passed / 1 failed would have printed
+PASSED. A test is binding by construction, runs in the QA suite and in CI with no
+registration step, and cannot report a verdict nobody reads.
+
+It carries its own control tests, for the same reason: `assert violations == []`
+is exactly what a scanner that silently matches nothing also produces, so one
+test proves the scanner detects the shape and another proves it ignores non-git
+subprocesses.
+
+**Date**: 2026-08-17
+
+### Decision 5: declining the lock does not change what git reports
+
+**Context**: The highest-severity risk on this plan was that declining the index
+refresh might change `git status` OUTPUT. That would be worse than the bug: the
+auto-commit's dirty check and the status line's icons both parse that output, so
+a false "modified" would make the daemon commit CLAUDE.md on every single start.
+
+Measured on a throwaway repo across the three shapes the daemon parses:
+
+- stat-dirty but content-identical (exactly what the refresh exists to resolve):
+  both report clean
+- genuinely modified: both report ` M f.txt`
+- `--porcelain=v2 --branch` with an untracked file: byte-identical
+
+**Decision**: the risk is retired, not mitigated. Git still performs the
+comparison in memory; `GIT_OPTIONAL_LOCKS=0` only stops it PERSISTING the
+refreshed index. The cost is that the next command redoes the stat comparison,
+which is the trade being made deliberately: a little repeated work in the daemon
+in exchange for never taking a lock in the agent's tree.
+
+**Date**: 2026-08-17
+
 ## Success Criteria
 
 - [ ] A daemon start with a clean CLAUDE.md rewrites `.git/index` zero times
@@ -206,12 +260,12 @@ existing test covered, since the fixtures all commit a CLAUDE.md first.
 
 ## Risks & Mitigations
 
-| Risk                                                   | Impact | Probability | Mitigation                                                                     |
-| ------------------------------------------------------ | ------ | ----------- | ------------------------------------------------------------------------------ |
-| `GIT_OPTIONAL_LOCKS=0` changes output of some git verb | Medium | Low         | It only declines the index refresh; assert byte-identical output per migration |
-| ~~A write verb is misclassified as read-only~~         | —      | —           | VOID — Decision 2 removed classification after verifying writes are unaffected |
-| The migration is broad enough to regress a caller      | Medium | Medium      | One caller per commit, tests per caller, daemon restart between                |
-| The guard's allowlist becomes a dumping ground         | Medium | Medium      | Each entry carries its reason inline; the check prints them                    |
+| Risk                                              | Impact | Probability | Mitigation                                                                     |
+| ------------------------------------------------- | ------ | ----------- | ------------------------------------------------------------------------------ |
+| ~~`GIT_OPTIONAL_LOCKS=0` changes output~~         | —      | —           | RETIRED — measured byte-identical, see Decision 5                              |
+| ~~A write verb is misclassified as read-only~~    | —      | —           | VOID — Decision 2 removed classification after verifying writes are unaffected |
+| The migration is broad enough to regress a caller | Medium | Medium      | One caller per commit, tests per caller, daemon restart between                |
+| The guard's allowlist becomes a dumping ground    | Medium | Medium      | Each entry carries its reason inline; the check prints them                    |
 
 ## Delivery & Milestones
 

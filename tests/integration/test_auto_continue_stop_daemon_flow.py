@@ -134,9 +134,9 @@ def _mock_git_subprocess() -> Any:
     return patch(
         "subprocess.run",
         side_effect=[
-            Mock(returncode=0, stdout=b"/tmp/test\n"),  # git rev-parse --show-toplevel
-            Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),  # git remote get-url
-            Mock(returncode=0, stdout=b"/tmp/test\n"),  # git rev-parse (again for toplevel)
+            Mock(returncode=0, stdout="/tmp/test\n"),  # git rev-parse --show-toplevel
+            Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),  # git remote get-url
+            Mock(returncode=0, stdout="/tmp/test\n"),  # git rev-parse (again for toplevel)
         ],
     )
 

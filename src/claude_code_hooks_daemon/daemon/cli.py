@@ -88,6 +88,7 @@ from claude_code_hooks_daemon.daemon.validation import (
     is_inside_daemon_directory,
 )
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.hook_registration import (
     detect_duplicate_hooks,
     detect_legacy_hook_commands,
@@ -4082,20 +4083,9 @@ def _bug_report_git_hash(project_path: Path) -> str:
     Returns:
         Short git hash or 'unknown' if not available
     """
-    try:
-        # SECURITY: Only trusted system tool (git) with list args, no shell
-        result = subprocess.run(  # nosec B603, B607
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=Timeout.GIT_CONTEXT,
-            cwd=str(project_path),
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        # Git not available or not a git repo — non-critical for bug reports
-        return "unknown"
+    result = run_git(project_path, "rev-parse", "--short", "HEAD", timeout=Timeout.GIT_CONTEXT)
+    if result.returncode == 0:
+        return result.stdout.strip()
     return "unknown"
 
 

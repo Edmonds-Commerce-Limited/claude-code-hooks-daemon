@@ -194,6 +194,64 @@ class TestGitContextInjectorHandler:
         assert call_args[1].get("text") is True
 
 
+class TestTheStatusReadTakesNoIndexLock:
+    """Plan 00246: this runs on EVERY user prompt, in the agent's own tree.
+
+    `git status` refreshes the index and writes it back, taking
+    `.git/index.lock` — so gathering context for a prompt was contending with
+    whatever git command the agent was running at that moment. Of the three
+    daemon paths that did this, this one and the status line are the frequent
+    ones; the CLAUDE.md auto-commit merely holds the lock longest.
+    """
+
+    def _real_repo(self, tmp_path: Path) -> Path:
+        import subprocess
+
+        repo = tmp_path / "proj"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True, check=True)
+        for key, value in (("user.email", "t@t"), ("user.name", "t")):
+            subprocess.run(
+                ["git", "config", "--local", key, value],
+                cwd=repo,
+                capture_output=True,
+                check=True,
+            )
+        (repo / "f.txt").write_text("one\n")
+        subprocess.run(["git", "add", "f.txt"], cwd=repo, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True, check=True)
+        return repo
+
+    def test_injecting_context_does_not_rewrite_the_index(
+        self, tmp_path: Path, git_index_watch
+    ) -> None:
+        repo = self._real_repo(tmp_path)
+        handler = GitContextInjectorHandler()
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.user_prompt_submit."
+                "git_context_injector.ProjectContext.project_root",
+                return_value=repo,
+            ),
+            git_index_watch.expect_none(repo, "the per-prompt git context injection"),
+        ):
+            result = handler.handle({"prompt": "Test", "session_id": "lock-test"})
+
+        assert result.context, "the handler must still report the status it read"
+
+    def test_the_control_shows_bare_git_status_rewrites_it(
+        self, tmp_path: Path, git_index_watch
+    ) -> None:
+        """Without this, the assertion above could pass vacuously."""
+        import subprocess
+
+        repo = self._real_repo(tmp_path)
+
+        with git_index_watch.expect_one(repo, "bare git status"):
+            subprocess.run(["git", "status"], cwd=repo, capture_output=True, check=True)
+
+
 @_MOCK_PROJECT_ROOT
 class TestOnlyInjectsOnChange:
     """Plan 00238 Task 4.1 — the duty is wanted, the repetition is not.

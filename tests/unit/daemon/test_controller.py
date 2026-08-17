@@ -152,9 +152,9 @@ class TestDaemonController:
         # Mock git commands for ProjectContext initialization
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),  # git rev-parse --show-toplevel
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),  # git remote get-url
-                Mock(returncode=0, stdout=b"/tmp/test\n"),  # git rev-parse (again for toplevel)
+                Mock(returncode=0, stdout="/tmp/test\n"),  # git rev-parse --show-toplevel
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),  # git remote get-url
+                Mock(returncode=0, stdout="/tmp/test\n"),  # git rev-parse (again for toplevel)
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -164,9 +164,9 @@ class TestDaemonController:
         """Initialise only runs once."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
         assert controller.is_initialised is True
@@ -185,9 +185,9 @@ class TestDaemonController:
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(handler_config=handler_config, workspace_root=workspace_root)
 
@@ -203,9 +203,9 @@ class TestDaemonController:
         # Pre-initialize controller
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -255,9 +255,9 @@ class TestDaemonController:
         # Pre-initialize controller
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -285,9 +285,9 @@ class TestDaemonController:
         # Properly initialize controller
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -326,9 +326,9 @@ class TestDaemonController:
         # Pre-initialize controller
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -354,9 +354,9 @@ class TestDaemonController:
         # Pre-initialize controller
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -392,9 +392,9 @@ class TestDaemonController:
         """Get handlers returns handler details."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -434,9 +434,9 @@ class TestDaemonController:
         config_path = workspace_root / ".claude" / "hooks-daemon.yaml"
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=str(workspace_root).encode() + b"\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=str(workspace_root).encode() + b"\n"),
+                Mock(returncode=0, stdout=str(workspace_root) + "\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=str(workspace_root) + "\n"),
             ]
             ProjectContext.initialize(config_path)
 
@@ -485,9 +485,9 @@ class TestDaemonController:
         # Initialize controller
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=str(workspace_root).encode() + b"\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=str(workspace_root).encode() + b"\n"),
+                Mock(returncode=0, stdout=str(workspace_root) + "\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=str(workspace_root) + "\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -700,9 +700,9 @@ class TestControllerProcessEventErrors:
             ),
         ):
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -842,9 +842,9 @@ class TestIntegration:
         # Initialize
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -873,9 +873,9 @@ class TestIntegration:
         """Multiple requests accumulate stats."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -900,9 +900,9 @@ class TestIntegration:
         """Health check reflects request processing."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root)
 
@@ -960,9 +960,9 @@ class TestControllerVerdictLog:
         controller = DaemonController()
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
-                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
             ]
             controller.initialise(workspace_root=workspace_root, verdict_log=verdict_log)
         return controller

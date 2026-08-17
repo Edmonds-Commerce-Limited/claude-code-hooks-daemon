@@ -3,6 +3,8 @@
 This module provides test fixtures and utilities used across all test files.
 """
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -136,6 +138,96 @@ def hook_result_validator(response_validator):
             return self.response_validator.get_errors(event_name, response)
 
     return HookResultValidator(response_validator)
+
+
+class GitIndexWatch:
+    """Assert whether a block of code made git rewrite ``.git/index`` (Plan 00246).
+
+    Rewriting the index means the command took ``.git/index.lock``. The daemon
+    shares a working tree with the agent, so a lock it takes is a lock the agent
+    can collide with — and `git status` takes one unless told otherwise, which is
+    how a pure read ends up contending.
+
+    The trap this exists to close: if the index is already up to date, git skips
+    the refresh of its own accord and "was not rewritten" is true of ANY
+    implementation — the assertion passes while proving nothing. Both context
+    managers below make the cached stat info stale first, so a test cannot
+    silently become vacuous. Pair every ``expect_none`` with an ``expect_one``
+    control on bare git.
+    """
+
+    @staticmethod
+    def _identity(repo: Path) -> tuple[int, int]:
+        stat = (repo / ".git" / "index").stat()
+        return (stat.st_ino, stat.st_mtime_ns)
+
+    @staticmethod
+    def _make_stale(repo: Path) -> None:
+        """Touch tracked files so git WANTS to refresh the index on next read."""
+        for tracked in sorted(repo.iterdir()):
+            if tracked.is_file():
+                tracked.touch()
+
+    @contextmanager
+    def expect_none(self, repo: Path, what: str) -> Generator[None, None, None]:
+        """Assert the enclosed block did NOT make git rewrite the index."""
+        self._make_stale(repo)
+        before = self._identity(repo)
+        yield
+        assert self._identity(repo) == before, (
+            f"{what} rewrote .git/index, so it took .git/index.lock and can "
+            f"collide with the agent's own git commands in the same tree"
+        )
+
+    @contextmanager
+    def expect_one(self, repo: Path, what: str) -> Generator[None, None, None]:
+        """Assert the enclosed block DID rewrite the index — the control.
+
+        Proves the scenario genuinely provokes a refresh, without which a
+        sibling ``expect_none`` assertion would pass vacuously.
+        """
+        self._make_stale(repo)
+        before = self._identity(repo)
+        yield
+        assert self._identity(repo) != before, (
+            f"{what} did not provoke an index refresh, so any sibling "
+            f"'takes no lock' assertion passes vacuously — fix the fixture"
+        )
+
+
+@pytest.fixture
+def git_index_watch() -> GitIndexWatch:
+    """Watch whether code under test takes git's index lock. See GitIndexWatch."""
+    return GitIndexWatch()
+
+
+@pytest.fixture
+def tmp_git_repo(tmp_path: Path) -> Path:
+    """A throwaway git repo with an identity and one committed file.
+
+    Paired with :class:`GitIndexWatch`: proving that code does or does not take
+    the index lock needs a REAL repo with a real index, which a mocked
+    ``subprocess`` cannot provide.
+    """
+    import subprocess  # nosec B404 - runs the trusted system `git` only
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    commands = (
+        ["git", "init"],
+        ["git", "config", "--local", "user.email", "t@t"],
+        ["git", "config", "--local", "user.name", "t"],
+    )
+    for command in commands:
+        subprocess.run(command, cwd=repo, capture_output=True, check=True)  # nosec B603
+    (repo / "tracked.txt").write_text("one\n", encoding="utf-8")
+    subprocess.run(  # nosec B603
+        ["git", "add", "tracked.txt"], cwd=repo, capture_output=True, check=True
+    )
+    subprocess.run(  # nosec B603
+        ["git", "commit", "-m", "init"], cwd=repo, capture_output=True, check=True
+    )
+    return repo
 
 
 #: Runtime-path overrides that take precedence over every computed daemon path

@@ -5,12 +5,12 @@ the hooks-daemon repository. Used by both install.py and daemon/cli.py.
 """
 
 import logging
-import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
 import tomllib
 from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import ConfigKey, Timeout
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 logger = logging.getLogger(__name__)
 
@@ -51,24 +51,16 @@ def _detect_hooks_daemon_repo(directory: Path) -> bool:
 
     This is the uncached implementation; ``is_hooks_daemon_repo`` memoises it.
     """
-    try:
-        result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
-            ["git", "-C", str(directory), "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=Timeout.VALIDATION_CHECK,
-        )
-        if result.returncode != 0:
-            return False
-        remote_url = result.stdout.strip().lower()
-        # Match any of the known hooks-daemon repo URLs
-        hooks_daemon_patterns = [
-            "claude-code-hooks-daemon",
-            "claude_code_hooks_daemon",
-        ]
-        return any(pattern in remote_url for pattern in hooks_daemon_patterns)
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    result = run_git(directory, "remote", "get-url", "origin", timeout=Timeout.VALIDATION_CHECK)
+    if result.returncode != 0:
         return False
+    remote_url = result.stdout.strip().lower()
+    # Match any of the known hooks-daemon repo URLs
+    hooks_daemon_patterns = [
+        "claude-code-hooks-daemon",
+        "claude_code_hooks_daemon",
+    ]
+    return any(pattern in remote_url for pattern in hooks_daemon_patterns)
 
 
 def is_hooks_daemon_repo(directory: Path) -> bool:

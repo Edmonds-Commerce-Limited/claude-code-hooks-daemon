@@ -251,11 +251,10 @@ class TestGitIgnoredHelper:
         self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
     ) -> None:
         (tmp_path / ".git").mkdir()
-        with patch(
-            "claude_code_hooks_daemon.handlers.session_start."
-            "ccy_supervisor_integrity.subprocess.run",
-            side_effect=OSError("git not found"),
-        ):
+        # subprocess is a singleton module: patching the bare name intercepts the
+        # spawn inside utils.git_repo.run_git, which is what _git_ignored now
+        # delegates to (Plan 00246).
+        with patch("subprocess.run", side_effect=OSError("git not found")):
             assert handler._git_ignored(tmp_path, "x") is False
 
 
