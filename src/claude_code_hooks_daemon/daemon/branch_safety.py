@@ -48,7 +48,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
 
 # Human gate for an ``unproven`` deletion: given the classifications and the
 # stated reason, return whether a person consented. Injected rather than called
@@ -108,13 +108,6 @@ _NO_QUOTE_PATH: tuple[str, ...] = ("-c", "core.quotePath=false")
 #: Abbreviation width for shas quoted in a blocker. Full shas make the message
 #: unreadable; git's own default short form is this long.
 _SHA_DISPLAY_LEN = 7
-
-#: Branch refs are addressed FULLY, never by bare name. `git rev-parse <name>`
-#: resolves a same-named TAG ahead of the branch and only warns on stderr, so a
-#: bare name would make the moved-tip guard compare a tag against itself and never
-#: notice the branch moving — silently inert in exactly the case it exists for
-#: (found by executing it, Plan 00254).
-_HEADS_PREFIX = "refs/heads/"
 
 #: Appended when a branch moved between its proof and its delete. Deliberately
 #: NOT `_REFUSAL_DIAGNOSIS`: that one tells the reader our model of git's delete
@@ -348,24 +341,7 @@ def local_branches(repo: Path) -> set[str]:
     00254; ``worktree_branches`` below already read the full refname).
     """
     result = _git(repo, "for-each-ref", "--format=%(refname)", "refs/heads")
-    return {line.removeprefix(_HEADS_PREFIX) for line in result.stdout.splitlines() if line}
-
-
-def branch_ref(name: str) -> str:
-    """The fully-qualified ref for local branch ``name``.
-
-    Every git command that is asked about a branch must be asked with this, never
-    with the bare name. A bare refname is AMBIGUOUS and git resolves a same-named
-    tag ahead of the branch, so the proof engine would evaluate the tag and then
-    delete the branch. That is not theoretical: with a tag ``x`` patch-equivalent
-    to the protected ref and a branch ``x`` holding the only copy of a file, the
-    engine reported ``patch-equivalent``, force-deleted, and returned
-    ``refused=False`` — a silent loss of the only copy (Plan 00254, reproduced).
-
-    The one exception is ``<name>@{upstream}``, which git only accepts with the
-    SHORT name and which is branch-specific anyway, so it cannot be hijacked.
-    """
-    return f"{_HEADS_PREFIX}{name}"
+    return {strip_branch_ref(line) for line in result.stdout.splitlines() if line}
 
 
 def _safe_delete_reference(repo: Path, name: str) -> str:

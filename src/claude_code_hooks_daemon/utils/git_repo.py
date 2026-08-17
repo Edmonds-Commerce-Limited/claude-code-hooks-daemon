@@ -40,6 +40,42 @@ _OPTIONAL_LOCKS_DECLINED: Final[str] = "0"
 #: no special case for it.
 _GIT_UNAVAILABLE: Final[int] = 127
 
+#: Local branches live under this. Ask git about a branch with the FULL ref and
+#: read listings back with ``%(refname)``, never ``%(refname:short)`` — see
+#: :func:`branch_ref` and :func:`strip_branch_ref` for why a bare name is unsafe.
+#: Shared here rather than per-module so the two callers cannot drift apart.
+HEADS_PREFIX: Final[str] = "refs/heads/"
+
+
+def branch_ref(name: str) -> str:
+    """The fully-qualified ref for local branch ``name``.
+
+    Every git command that is asked about a branch must be asked with this, never
+    with the bare name. A bare refname is AMBIGUOUS and git resolves a same-named
+    tag ahead of the branch, so a caller can end up evaluating the tag while
+    acting on the branch. That is not theoretical: with a tag ``x``
+    patch-equivalent to a protected ref and a branch ``x`` holding the only copy
+    of a file, the branch-safety proof engine reported ``patch-equivalent`` and
+    force-deleted (Plan 00254, reproduced).
+
+    The one exception is ``<name>@{upstream}``, which git only accepts with the
+    SHORT name and which is branch-specific anyway, so it cannot be hijacked.
+    """
+    return f"{HEADS_PREFIX}{name}"
+
+
+def strip_branch_ref(refname: str) -> str:
+    """The bare branch name from a full ``refs/heads/...`` refname.
+
+    The read counterpart of :func:`branch_ref`: list branches with
+    ``--format=%(refname)`` and strip, never with ``%(refname:short)``. ``:short``
+    yields the shortest UNAMBIGUOUS name, so a branch sharing its name with a tag
+    comes back as ``heads/<name>`` — a string that is not a branch name and that
+    no git command accepts, which silently breaks every ``<name> in ...`` test and
+    every ``git branch -d <name>`` a caller offers a human (Plan 00254/00255).
+    """
+    return refname.removeprefix(HEADS_PREFIX)
+
 
 def run_git(
     cwd: Path,

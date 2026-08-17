@@ -351,13 +351,28 @@ class TestPullFfOnly:
         assert result.ok is False
 
 
-def _make_gone_branch(tmp_path: Path, *, unique_commit: bool) -> Path:
+def _make_gone_branch(
+    tmp_path: Path,
+    *,
+    unique_commit: bool,
+    shadow_tag: bool = False,
+    shadow_base_tag: bool = False,
+) -> Path:
     """Return a clone with a local branch ``feature`` whose upstream was deleted.
 
     ``origin/feature`` is pushed then deleted on the remote; the clone still
     holds the stale ``origin/feature`` ref (we never prune). When
     ``unique_commit`` is True the local ``feature`` carries a commit not on
     ``main`` (so it is NOT merged into the default branch).
+
+    ``shadow_tag`` additionally creates a TAG called ``feature``, which makes the
+    bare branch name AMBIGUOUS: git resolves the tag ahead of the branch. No
+    fixture here creates a tag, which is why the ``%(refname:short)`` bug was
+    invisible to this suite (Plan 00255).
+
+    ``shadow_base_tag`` shadows the DEFAULT branch name instead, pointing the tag
+    at ``feature``'s tip — so a merged-ness question asked with the bare base
+    name is answered about the tag.
     """
     remote, clone = _make_remote_and_clone(tmp_path)
     pusher = tmp_path / "feature_pusher"
@@ -377,6 +392,12 @@ def _make_gone_branch(tmp_path: Path, *, unique_commit: bool) -> Path:
     _run(clone, "fetch", "origin")
     _run(clone, "checkout", "feature")
     _run(clone, "checkout", "main")
+
+    if shadow_tag:
+        _run(clone, "tag", "feature", "main")
+    if shadow_base_tag:
+        # A tag named after the DEFAULT branch, pointing at feature's tip.
+        _run(clone, "tag", "main", "feature")
 
     # Delete feature on the remote. The clone keeps the stale origin/feature ref.
     _run(pusher, "push", "origin", "--delete", "feature")
@@ -429,6 +450,89 @@ class TestGoneBranches:
 
         monkeypatch.setattr(subprocess, "run", _raise)
         assert git_sync.gone_branches(clone) == []
+
+
+class TestASameNamedTagCannotDisguiseAGoneBranch:
+    """A tag shadowing a branch must not change the NAME the advisory reports.
+
+    ``%(refname:short)`` returns the shortest UNAMBIGUOUS name, so a branch
+    shadowed by a same-named tag comes back as ``heads/feature`` — a string that
+    is not a branch name and that no git command accepts (Plan 00255).
+    """
+
+    def test_the_reported_name_is_the_branch_name(self, tmp_path: Path) -> None:
+        clone = _make_gone_branch(tmp_path, unique_commit=False, shadow_tag=True)
+        gone = git_sync.gone_branches(clone)
+        assert [g.name for g in gone] == ["feature"]
+
+    def test_the_cleanup_command_the_advisory_offers_actually_works(self, tmp_path: Path) -> None:
+        """The advisory renders ``git branch -d <name>`` — so <name> must be usable.
+
+        This is the consequence that matters: with the shortest-unambiguous name
+        the offered command fails with "branch 'heads/feature' not found", and a
+        human following the guidance is simply stuck.
+        """
+        clone = _make_gone_branch(tmp_path, unique_commit=False, shadow_tag=True)
+        (gone,) = git_sync.gone_branches(clone)
+        assert gone.merged is True
+
+        deleted = subprocess.run(
+            ["git", "branch", "-d", gone.name],
+            cwd=clone,
+            capture_output=True,
+            text=True,
+            timeout=_TIMEOUT,
+        )
+        assert deleted.returncode == 0, deleted.stderr
+
+    def test_classification_still_agrees_with_itself(self, tmp_path: Path) -> None:
+        """Both listings read the same field, so merged/not-merged stays correct.
+
+        Guards the half-fix: correcting one listing and not the other would
+        desynchronise them and turn a cosmetic bug into a wrong verdict.
+        """
+        clone = _make_gone_branch(tmp_path, unique_commit=True, shadow_tag=True)
+        (gone,) = git_sync.gone_branches(clone)
+        assert gone.name == "feature"
+        assert gone.merged is False  # has a unique commit -> needs confirmation
+
+
+class TestASameNamedTagCannotFlipTheMergedVerdict:
+    """The merged/not-merged verdict must be measured against the BRANCH.
+
+    ``default_branch`` returns a bare name, and ``git branch --merged main``
+    answers about whatever ``main`` resolves to — a tag first. This is the same
+    ambiguity as the naming bug above but a materially worse consequence: the
+    advisory renders "safe to remove: `git branch -d <name>`" for a branch that
+    holds commits nobody else has (Plan 00255, reproduced).
+    """
+
+    def test_unmerged_work_is_not_reported_as_safe_to_remove(self, tmp_path: Path) -> None:
+        clone = _make_gone_branch(tmp_path, unique_commit=True, shadow_base_tag=True)
+        (gone,) = git_sync.gone_branches(clone)
+        assert gone.name == "feature"
+        assert gone.merged is False
+
+    def test_the_base_is_qualified_when_a_local_branch_of_that_name_exists(
+        self, tmp_path: Path
+    ) -> None:
+        _, clone = _make_remote_and_clone(tmp_path)
+        assert git_sync._merged_base_ref(clone, "main") == "refs/heads/main"
+
+    def test_the_base_falls_back_to_the_bare_name_when_it_has_no_local_branch(
+        self, tmp_path: Path
+    ) -> None:
+        """The fallback is the half of the fix that a blind qualification would lose.
+
+        ``default_branch`` can name a branch it read from ``origin/HEAD`` that was
+        never checked out here. ``refs/heads/<base>`` is then a malformed object
+        name (git exits 128) while the bare name still resolves, so qualifying
+        unconditionally would empty the merged set and report every gone branch as
+        unmerged. Asserted directly because no end-to-end test would fail if the
+        fallback were deleted.
+        """
+        _, clone = _make_remote_and_clone(tmp_path)
+        assert git_sync._merged_base_ref(clone, "no-such-branch") == "no-such-branch"
 
 
 class TestDefaultBranchDefensive:

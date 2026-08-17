@@ -1,0 +1,56 @@
+# Semgrep expression of the ambiguous-refname defect class (Plan 00255).
+#
+# `%(refname:short)` returns the shortest UNAMBIGUOUS name, not the branch name.
+# A branch that shares its name with a tag comes back as `heads/<name>` — a
+# string that is not a branch name and that no git command accepts. Every
+# `<name> in ...` test against it silently fails, and every `git branch -d
+# <name>` built from it fails as typed.
+#
+# This defect has RECURRED, which is why it earns a guard rather than a
+# docstring: Plan 00254 fixed it in daemon/branch_safety.py (where it caused
+# silent data loss — the proof engine evaluated a tag and deleted a branch), and
+# Plan 00255 then found two more copies in utils/git_sync.py plus a third site
+# where an ambiguous BASE flipped a merged/not-merged safety verdict.
+#
+# Scope, stated honestly: this catches the READ side (listings), which is the
+# mechanically-checkable half. It does NOT catch the WRITE side — passing a bare
+# name TO git — because those call sites pass a variable (`base`, `name`, `rev`)
+# whose provenance no syntactic rule can see. That half is covered by behaviour
+# tests that shadow a branch with a same-named tag; see
+# tests/unit/utils/test_git_sync.py and tests/unit/daemon/test_branch_safety.py.
+
+rules:
+  - id: short-refname-in-branch-listing
+    languages: [python]
+    severity: WARNING
+    message: >-
+      `%(refname:short)` yields the shortest UNAMBIGUOUS name, so a branch
+      shadowed by a same-named tag is returned as `heads/<name>` — breaking
+      every membership test and every `git branch -d <name>` built from it.
+      List with `--format=%(refname)` and strip via
+      claude_code_hooks_daemon.utils.git_repo.strip_branch_ref, and address a
+      branch with git_repo.branch_ref (the sole exception is `<name>@{upstream}`,
+      which git accepts only in its short form).
+    patterns:
+      # Bind any string that reaches git as an argument, or is bound to a name
+      # on its way there, then filter on the content. Matching the literal via a
+      # metavariable (rather than a raw pattern-regex over the file) is what
+      # keeps the rule off the docstrings that DESCRIBE this defect — a bare
+      # docstring is neither a call argument nor an assignment.
+      - pattern-either:
+          - pattern: $F(..., $STR, ...)
+          - pattern: $X = $STR
+      # Anchored at an opening quote (with any literal prefix) so $STR must BE a
+      # string literal. Without the anchor, `$X = $STR` also binds a whole
+      # multi-line call whose source text merely contains the substring, which
+      # double-reports every real hit and would fire on unrelated wrappers.
+      - metavariable-regex:
+          metavariable: $STR
+          regex: (?s)^[bBrRfFuU]{0,2}["'].*refname:short
+    paths:
+      exclude:
+        # A REF sweep, not a branch listing: it scans refs/heads + refs/tags +
+        # refs/remotes together for blocked terms, and a term is a SUBSTRING —
+        # the disambiguating prefix never removes it, so the scan cannot miss.
+        # The name is only ever printed for a human to read.
+        - "**/check_git_history.py"

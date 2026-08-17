@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00255: bare refnames outside branch_safety](00255-bare-refname-ambiguity-outside-branch-safety/PLAN.md) - Not Started (two advisory-only hits the Plan 00254 sweep found in `git_sync.py`, plus the DBF question of whether a QA check should reject bare-refname git calls)
-
 - [00252: guards for premises no write-time hook sees](00252-guards-for-premises-no-write-time-hook-sees/PLAN.md) - Not Started (two defects, one argument from Core Standard 15's corollary: the ambient-git-premise class Plan 00245 fixed seven times by hand without a guard, and the fact that no guard inspects STAGED CONTENT for secret-list terms, so a file arriving by `mv` reached a pushed commit)
 - [00250: CI must actually run the acceptance gates it calls blocking](00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Not Started (Plan 00245's `-rs` flag named 11 acceptance tests that have skipped on every CI run for want of a daemon socket, three of the files being ones `RELEASING.md` Step 12.0 declares BLOCKING)
 - [00243: make the acceptance playbook deterministically executable](00243-deterministic-acceptance-playbook-harness/PLAN.md) - In Progress (Phase 4's doc-snippet guard is delivered and found 8 real defects; the harness phases remain)
@@ -163,6 +161,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00255: bare refnames outside branch_safety](Completed/00255-bare-refname-ambiguity-outside-branch-safety/PLAN.md) - Complete at the commit that archives it (the filed cosmetic bug, plus a worse one the sweep found: an ambiguous base flipped the merged verdict; guard added for the checkable half)
 
 - [00254: delete-branch must re-check a tip it proved](Completed/00254-delete-branch-tip-recheck-before-delete/PLAN.md) - Complete at `55dc8e1a` + the commit that archives it (a moved tip, and a same-named tag that made the proof describe the wrong object)
 
@@ -1215,15 +1215,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 255 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 208 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 209 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 35 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 34 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 35 + 208 + 6 = **249 folders**, spanning
+- **Folder-to-number reconciliation**: 34 + 209 + 6 = **249 folders**, spanning
   **246 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1234,7 +1234,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work). 246 + 9 = 255. ✅
 
-- **Last reconciled by**: the Plan 00255 creation — one new folder in the plan
+- **Last reconciled by**: the Plan 00255 closure — the folder moved from the plan
+  root into `Completed/`, so Active fell by one and Completed rose by one while
+  Total, Cancelled and the folder count were untouched. Recounted from disk (34
+  root, 209 `Completed/`, 6 `Cancelled/`, 246 distinct numbers against a counter
+  of 255).
+
+- **Before that**: the Plan 00255 creation — one new folder in the plan
   root and the counter advanced by `mkplan.bash`, so Total and Active each rose
   by one while Completed and Cancelled were untouched. Recounted from disk (35
   root, 208 `Completed/`, 6 `Cancelled/`, 246 distinct numbers against a counter

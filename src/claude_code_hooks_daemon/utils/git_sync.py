@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git, strip_branch_ref
 
 # Non-interactive fetch/pull env (identical intent to the status-line git_branch
 # background fetch): never block on credentials, never open an interactive
@@ -433,11 +433,22 @@ def _stale_remote_tracking_refs(cwd: Path) -> set[str]:
 
 
 def _local_branch_upstreams(cwd: Path) -> dict[str, str]:
-    """Map each local branch to its configured upstream short name (if any)."""
+    """Map each local branch to its configured upstream short name (if any).
+
+    Reads the FULL ``%(refname)`` and strips it, never ``%(refname:short)`` — a
+    branch shadowed by a same-named tag shortens to ``heads/<name>``, and that is
+    the name :func:`gone_branches` hands the advisory to print and to offer as
+    ``git branch -d <name>``. That command fails ("branch 'heads/<name>' not
+    found"), so the human is left stuck (Plan 00255, reproduced).
+
+    The UPSTREAM stays short on purpose: it is compared against the short refs
+    ``git remote prune --dry-run`` prints, so both sides must speak the same
+    dialect.
+    """
     result = _run_git(
         cwd,
         "for-each-ref",
-        f"--format=%(refname:short){_REF_FIELD_SEP}%(upstream:short)",
+        f"--format=%(refname){_REF_FIELD_SEP}%(upstream:short)",
         "refs/heads",
         timeout=Timeout.GIT_CONTEXT,
     )
@@ -448,25 +459,53 @@ def _local_branch_upstreams(cwd: Path) -> dict[str, str]:
         if _REF_FIELD_SEP not in line:
             continue
         name, upstream = line.split(_REF_FIELD_SEP, 1)
-        name, upstream = name.strip(), upstream.strip()
+        name, upstream = strip_branch_ref(name.strip()), upstream.strip()
         if name and upstream:
             mapping[name] = upstream
     return mapping
 
 
+def _merged_base_ref(cwd: Path, base: str) -> str:
+    """The ref to measure merged-ness against, preferring the LOCAL branch.
+
+    :func:`default_branch` returns a bare name, and a bare name is ambiguous: with
+    a tag ``main`` pointing at a feature tip, ``git branch --merged main`` answers
+    about the TAG and reports branches holding unique commits as merged. The
+    advisory then offers ``git branch -d`` on work nobody else has — a wrong
+    safety verdict, not just a wrong label (Plan 00255, reproduced).
+
+    Falls back to the bare name when no local branch of that name exists:
+    ``default_branch`` can name one it read from ``origin/HEAD`` that was never
+    checked out here, and ``refs/heads/<base>`` is a malformed object name then.
+    Probed the same way ``default_branch`` probes its own fallback candidates.
+    """
+    qualified = branch_ref(base)
+    probe = _run_git(cwd, "show-ref", "--verify", "--quiet", qualified, timeout=Timeout.GIT_CONTEXT)
+    if probe is not None and probe.returncode == 0:
+        return qualified
+    return base
+
+
 def _merged_branch_names(cwd: Path, base: str) -> set[str]:
-    """Return local branch names fully merged into ``base``."""
+    """Return local branch names fully merged into ``base``.
+
+    Reads ``%(refname)`` for the same reason as :func:`_local_branch_upstreams`,
+    and — just as importantly — so the two listings keep speaking the same
+    dialect. They are compared against each other to classify merged vs
+    not-merged, so fixing only one would turn a cosmetic naming bug into a wrong
+    verdict about whether a branch is safe to delete.
+    """
     result = _run_git(
         cwd,
         "branch",
         "--merged",
-        base,
-        "--format=%(refname:short)",
+        _merged_base_ref(cwd, base),
+        "--format=%(refname)",
         timeout=Timeout.GIT_CONTEXT,
     )
     if result is None or result.returncode != 0:
         return set()
-    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    return {strip_branch_ref(line.strip()) for line in result.stdout.splitlines() if line.strip()}
 
 
 def gone_branches(cwd: Path) -> list[GoneBranch]:

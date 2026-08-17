@@ -568,3 +568,31 @@ Enumerate its checks by running it against the states you are not thinking about
 branch someone else has checked out, a name that is also a tag, a ref that moved
 underneath you. The checks you cannot enumerate are precisely the value you would be
 discarding, and they are usually why the tool is longer than your replacement.
+
+## Score a proposed guard against the defects it would have had to catch
+
+**What happened (Plan 00255):** DBF says a defect fixed by hand recurs, so after
+fixing the ambiguous-refname defect for a second time the obvious move was a QA
+check that rejects bare branch names in git argv. Before writing it, I scored it
+against the twelve call sites 00254 and 00255 had actually fixed. It would have
+caught **none of them**: every one passes a *variable* (`base`, `name`, `rev`), and
+no syntactic rule can tell whether a variable holds a branch name, `HEAD`, or
+`origin/main`. The only thing it would have flagged is hardcoded literals — which in
+this tree are the already-correct ones, like `show-ref --verify refs/heads/{x}`.
+
+So the proposed guard had a 0% true-positive rate against real history and a live
+false-positive rate. That is not a weak guard, it is a *negative* one: it costs
+attention on correct code, teaches people the checker is wrong, and gets disabled.
+
+What was checkable was the narrower READ side — `%(refname:short)` in a git format
+string, a literal, with a named replacement to point at. That rule flags both real
+pre-fix sites and does not fire on the docstrings that describe the defect.
+
+**Apply:** a guard proposal is a hypothesis, and you already have the labelled data
+to test it — the diff of the fix you just made. Before writing the checker, ask
+"which of the sites I just fixed would this have flagged, and which correct sites
+would it have flagged too?" If the answer is "none, and several", the defect class
+is real but you have picked an unenforceable projection of it; find the subset that
+is mechanically visible and guard that instead. Then say in the rule which half it
+covers — a guard that overstates its reach is worse than an absent one, because the
+next reader stops looking.
