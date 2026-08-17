@@ -682,9 +682,7 @@ class TestARefusalCarriesItsDiagnosis:
             "refusal diagnosis warns the reader about"
         )
 
-    def test_the_diagnosis_appears_only_where_git_was_actually_asked(
-        self, repo: Path
-    ) -> None:
+    def test_the_diagnosis_appears_only_where_git_was_actually_asked(self, repo: Path) -> None:
         """On a branch never attempted, "our model disagreed with git" is FALSE.
 
         The diagnosis is appended inside the delete loop, so it should be absent
@@ -702,10 +700,9 @@ class TestARefusalCarriesItsDiagnosis:
         assert precondition.refused is True
         for report in (unproven, precondition):
             assert report.blockers, "precondition: each case must produce a blocker"
-            assert not any("disagreed with git" in b for b in report.blockers), (
-                "the diagnosis must not appear where git was never asked: "
-                + repr(report.blockers)
-            )
+            assert not any(
+                "disagreed with git" in b for b in report.blockers
+            ), "the diagnosis must not appear where git was never asked: " + repr(report.blockers)
 
     def test_the_diagnosis_names_both_causes_and_forbids_forcing(self) -> None:
         """The text is the deliverable, so assert what it must carry."""
