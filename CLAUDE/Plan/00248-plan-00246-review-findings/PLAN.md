@@ -1,0 +1,172 @@
+# Plan 00248: Plan 00246 Review Findings
+
+**Status**: In Progress
+**Created**: 2026-08-17
+**Owner**: Claude (Opus 5)
+**Priority**: High
+**Recommended Executor**: Sonnet
+**Execution Strategy**: Single-Threaded
+
+## Overview
+
+A code review of Plan 00246 (the `run_git` migration — one bounded home for
+every git spawn) landed after that plan had shipped, and it found six real
+defects. Every one was verified against the code before this plan was filed;
+two were verified by execution.
+
+Two are regressions Plan 00246 itself introduced. That plan's whole point was
+that a property held per-call-site drifts, so centralising it makes it hold by
+construction. It is exactly the shape of change that quietly imposes the
+CENTRE's defaults on a call site that needed something else — which is what
+happened to `branch_safety`, whose runner was deliberately unbounded and now
+has five seconds for a `git bundle create`.
+
+None of this argues against the migration. Each finding is a small edit that
+turns a correct design into wrong behaviour on one specific real path: a large
+repository, a single invalid byte, a deleted working directory, a killed
+`git add`.
+
+## Goals
+
+- Fix F1–F4: the four behaviour defects, each with a test that fails first.
+- Close F5's three mechanically-closeable guard escapes, so the guard matches
+  what its own docstring already claims ("unambiguous shapes").
+- Fix F6: the fixture that can silently restore the vacuity it exists to
+  prevent.
+- Fix the two nits that are the same class of defect as Plan 00245's entire
+  Phase 3 — a test depending on the ambient environment.
+
+## Non-Goals
+
+- Revisiting the migration. The design is right; the review says so explicitly.
+- Chasing every escape shape in F5. `asyncio.create_subprocess_exec` and
+  `shutil.which("git")` are not idioms this codebase uses, and a guard that
+  guesses gets disabled (the doctrine `check_magic_values.py` established).
+- Any release. This is repair of shipped-to-main-but-unreleased code.
+
+## Verified findings
+
+Each was re-derived from the source before being accepted — the review is a
+peer's report, not an oracle.
+
+| ID  | Severity   | Where                                              | Defect                                                                    |
+| --- | ---------- | -------------------------------------------------- | ------------------------------------------------------------------------- |
+| F1  | MUST-FIX   | `daemon/branch_safety.py:155`                      | `_git` lost its unbounded budget; `delete-branch` now has 5s for a bundle |
+| F2  | MUST-FIX   | `utils/git_repo.py:74`                             | "Never raises" is false — `UnicodeDecodeError` escapes                    |
+| F3  | SHOULD-FIX | `handlers/session_start/version_check.py:123`      | `Path.cwd()` unguarded, and can raise `FileNotFoundError`                 |
+| F4  | SHOULD-FIX | `core/claude_md_injector.py:349`                   | the one kept lock-taking write got the 5s read budget                     |
+| F5  | SHOULD-FIX | `tests/integration/test_git_spawns_are_bounded.py` | three unambiguous spawn shapes escape the guard                           |
+| F6  | SHOULD-FIX | `tests/conftest.py::_make_stale`                   | non-recursive, so `expect_none` can pass vacuously one directory deep     |
+
+### F1 — evidence
+
+`git show 013b48e7~1` confirms the pre-migration `_git` passed **no** timeout.
+It now inherits `run_git`'s default `Timeout.GIT_CONTEXT = 5`, a hook-context
+budget, and caps `bundle create` (`:340`, `check=True`), `cherry` (`:200`) and
+two `rev-list --objects` walks (`:228`, `:244`). On a repo with a few thousand
+objects the bundle exceeds 5s, `run_git` returns 127, `_git` raises
+`CalledProcessError`, and `cmd_delete_branch` catches only `ValueError` — so
+the human-gated safety command dies with a traceback instead of refusing.
+
+### F2 — evidence (executed)
+
+`text=True` decodes with `errors="strict"`. Reproduced on a real repo holding
+one invalid byte: `subprocess.run` raises `UnicodeDecodeError`, which is
+`ValueError` — **not** `OSError`, **not** `SubprocessError`, so it is not
+caught. `errors="replace"` returns `'valid then �� invalid'` instead.
+This matters because two callers deleted their own except clauses citing the
+"never raises" docstring, and one path (`claude_md_injector` →
+`DaemonController.initialise`) would fail daemon startup.
+
+## Tasks
+
+### Phase 1: The two MUST-FIX behaviour defects
+
+- [ ] ⬜ **Task 1.1**: F2 — make `run_git`'s contract true
+  - [ ] ⬜ RED: a test that a non-UTF-8 stdout comes back as a
+    `CompletedProcess` rather than raising
+  - [ ] ⬜ GREEN: `errors="replace"` at the chokepoint
+- [ ] ⬜ **Task 1.2**: F1 — restore a generous budget for `branch_safety`
+  - [ ] ⬜ RED: a test asserting `_git` does not run on the default budget
+  - [ ] ⬜ GREEN: a named constant, with a larger per-call override for
+    `bundle create`
+  - [ ] ⬜ Make `cmd_delete_branch` report a timeout as a refusal, not a
+    traceback
+
+### Phase 2: The two SHOULD-FIX behaviour defects
+
+- [ ] ⬜ **Task 2.1**: F3 — remove the `Path.cwd()` hazard in `version_check`
+- [ ] ⬜ **Task 2.2**: F4 — give the kept `git add` the write budget, so
+  neither lock-taking call can be killed mid-index-write
+
+### Phase 3: Guard and fixture quality (the plan's actual deliverable)
+
+- [ ] ⬜ **Task 3.1**: F5 — close the three unambiguous escapes: `import subprocess as sp`, `from subprocess import run`, and `args=` as a keyword
+  - [ ] ⬜ One test per shape, each failing first
+- [ ] ⬜ **Task 3.2**: F6 — drive `_make_stale` from `git ls-files` so it is
+  recursive and actually tracked-file-based, per its own name
+- [ ] ⬜ **Task 3.3**: The ambient-environment nits, same class as Plan 00245
+  Phase 3: `tmp_git_repo` runs git with no timeout and honours an ambient
+  `commit.gpgsign`, which hangs unrelated tests on a signing developer's machine
+
+### Phase 4: Verify
+
+- [ ] ⬜ **Task 4.1**: Full QA green, daemon restart RUNNING
+- [ ] ⬜ **Task 4.2**: Record the durable lesson: centralising a property
+  imposes the centre's defaults on every call site that had its own
+
+## Dependencies
+
+- Follows: Plan 00246 (Complete) — these are findings against its delivery.
+- Related: Plan 00245's Phase 3, which is the same ambient-premise defect class
+  as Task 3.3.
+
+## Technical Decisions
+
+### Decision 1: fix in place rather than reopen Plan 00246
+
+**Context**: Plan 00246 is Complete, archived and pushed. The findings are
+against its delivered code.
+
+**Decision**: a new plan. Reopening a completed plan makes its record a moving
+target, and there is precedent here — Plan 00241 was "v3.53.0 review findings"
+for exactly this shape. The findings table above carries the evidence so the
+next reader does not have to re-derive it from a peer's report.
+
+**Date**: 2026-08-17
+
+### Decision 2: accept the review's findings, but re-derive every one
+
+**Context**: the findings arrived from a sub-agent review, and a peer's report
+is not an oracle — an earlier session in this same repository had an agent
+report confidently on a rule that was live, calling it stale.
+
+**Decision**: every finding was re-checked against the source before this plan
+was filed, and the two MUST-FIX ones were verified by execution (`git show` for
+F1's pre-migration state, a real invalid-byte repo for F2). The evidence sits in
+this document rather than in the report, because the report is scrollback.
+
+**Date**: 2026-08-17
+
+## Success Criteria
+
+- [ ] `delete-branch` completes on a repository whose bundle takes longer than
+  a hook-context budget
+- [ ] `run_git` cannot raise, for any output any git command can produce
+- [ ] The guard catches all three unambiguous escape shapes
+- [ ] `expect_none` cannot pass vacuously on a repo with subdirectories
+- [ ] QA green, daemon restart RUNNING
+
+## Risks & Mitigations
+
+| Risk                                                    | Impact | Probability | Mitigation                                                                      |
+| ------------------------------------------------------- | ------ | ----------- | ------------------------------------------------------------------------------- |
+| A generous timeout re-opens the hang Plan 00246 bounded | Medium | Low         | The lock is still declined; a bounded-but-generous budget is not unbounded      |
+| Widening the guard makes it flag legitimate code        | Medium | Low         | Only shapes whose argv is a literal starting `git` are matched, as before       |
+| `errors="replace"` masks a real encoding problem        | Low    | Low         | Callers log or parse line-wise; a mangled byte is visible, a dead daemon is not |
+
+## Delivery & Milestones
+
+<!-- Curated milestones + delivery commit hashes. Blow-by-blow log lives in JOURNAL/. -->
+
+- Filed at the commit that adds this plan.
