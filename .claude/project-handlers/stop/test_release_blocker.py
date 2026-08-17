@@ -1,21 +1,45 @@
 """Unit tests for ReleaseBlockerHandler (project-specific handler).
 
-Tests the Stop event handler that blocks session ending during releases
-until acceptance tests are complete.
+Tests the Stop event handler that blocks session ending while a release is in
+flight.
+
+The trigger is ``untracked/release-state.json``, NOT a dirty working tree.
+RELEASING.md is unambiguous that the state file is the authority:
+
+    No state file ⇒ no release is in progress. A dirty tree, a bumped
+    version, or a plan saying "finish the release" is NOT a substitute.
+
+The handler used to infer a release from modified version files, which is
+exactly the inference that sentence forbids. Because the handler is
+``terminal=True`` and DENIES, every false positive trapped the session until
+the file was committed or the handler was disabled.
 """
 
-import subprocess
+import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from typing import Any
+from unittest.mock import patch
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 
 from .release_blocker import ReleaseBlockerHandler
 
-# Explicit repository path for the fixtures. The handler must never depend
-# on the process working directory — see TestGitIsRunAgainstAnExplicitRepo.
-_REPO = "/workspace"
+
+def _write_state(root: Path, **fields: Any) -> Path:
+    """Write a release-state file under ``root`` and return its path."""
+    state: dict[str, Any] = {
+        "version": "9.9.9",
+        "authorised_by_human_at": "2026-01-01T00:00:00Z",
+        "publish_authorised": False,
+        "last_completed_step": 8,
+    }
+    state.update(fields)
+
+    directory = root.joinpath(*ReleaseBlockerHandler.RELEASE_STATE_PARTS[:-1])
+    directory.mkdir(parents=True, exist_ok=True)
+    target = root.joinpath(*ReleaseBlockerHandler.RELEASE_STATE_PARTS)
+    target.write_text(json.dumps(state), encoding="utf-8")
+    return target
 
 
 class TestReleaseBlockerHandlerInitialization:
@@ -29,8 +53,8 @@ class TestReleaseBlockerHandlerInitialization:
     def test_priority_is_below_the_terminal_auto_continue_stop(self) -> None:
         """The RELATION is the requirement; the number is an implementation detail.
 
-        This test previously asserted ``priority == 12`` with the rationale
-        "before AutoContinueStop at 15". Both halves were once true. When this
+        This test once asserted ``priority == 12`` with the rationale "before
+        AutoContinueStop at 15". Both halves were true when written. When this
         project's config moved AutoContinueStop to 10, the relation broke and
         this handler became unreachable — and the test kept passing, because it
         pinned the number rather than the property. A test that asserts a
@@ -62,210 +86,228 @@ class TestReleaseBlockerHandlerInitialization:
         assert handler.terminal is True
 
 
-class TestGitIsRunAgainstAnExplicitRepo:
-    """Regression: the handler must not depend on the process working directory.
+class TestTheStateFileIsTheAuthority:
+    """A dirty tree is not evidence of a release; the state file is."""
 
-    The daemon is a long-lived process whose cwd is `/`. A bare
-    `git status --short` therefore ran outside any repository, exited non-zero,
-    and was swallowed by the handler's fail-safe — so `matches()` returned
-    False for every release, forever, while looking exactly like "no release in
-    progress".
+    def test_a_dirty_tree_with_no_state_file_allows_the_stop(self, tmp_path: Path) -> None:
+        """The false positive that motivated this change.
 
-    That bug hid behind the priority bug (Plan 00237): fixing the ordering
-    alone would have produced a handler that was reachable and still never
-    fired, which is the more expensive failure of the two because the obvious
-    defect looks fixed.
+        Editing ``CHANGELOG.md`` or a published ``RELEASES/*.md`` to correct a
+        factual error is ordinary work. The old trigger read those edits as
+        "RELEASE IN PROGRESS" and, being terminal and DENY, trapped the session
+        until they were committed. RELEASING.md names this exact inference as
+        invalid.
+        """
+        (tmp_path / "CHANGELOG.md").write_text("dirty\n", encoding="utf-8")
+        (tmp_path / "pyproject.toml").write_text("dirty\n", encoding="utf-8")
 
-    The old version of this suite ASSERTED the bare invocation, so it defended
-    the bug rather than catching it — the reason these tests now pin `-C`.
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is False
+
+    def test_the_state_file_blocks_the_stop_even_with_a_clean_tree(self, tmp_path: Path) -> None:
+        """Coverage the old trigger never had.
+
+        After Step 13 commits and pushes, the tree is CLEAN while tagging and
+        publishing remain — the most irreversible part of the release. A
+        dirty-tree trigger goes blind at precisely that point; the state file
+        does not, because it survives until Step 15 verification succeeds.
+        """
+        _write_state(tmp_path, last_completed_step=13, publish_authorised=True)
+
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is True
+
+    def test_the_working_tree_is_never_inspected(self, tmp_path: Path) -> None:
+        """No subprocess, no git, no working-tree read.
+
+        Pinned because the previous implementation shelled out to
+        ``git status`` and its fail-safe swallowed every failure — so a broken
+        invocation looked identical to "no release in progress". Removing the
+        subprocess removes that whole failure mode; this test stops it coming
+        back.
+        """
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            with patch("subprocess.run") as mock_run:
+                handler.matches({})
+
+        assert mock_run.call_count == 0, "the handler must not shell out to inspect the tree"
+
+
+class TestStatePathResolutionNeverUsesProcessCwd:
+    """The daemon's working directory is ``/``; it is never the project.
+
+    The lesson is inherited from the git-scoping bug (Plan 00237): a path this
+    handler resolves implicitly resolves to the wrong place, and the fail-safe
+    then makes the mistake look like "nothing to report".
     """
 
-    @patch("subprocess.run")
-    def test_git_is_scoped_to_the_repo_from_the_event(self, mock_run: MagicMock) -> None:
-        handler = ReleaseBlockerHandler()
-        mock_run.return_value = MagicMock(returncode=0, stdout="M  pyproject.toml\n")
+    def test_the_project_root_is_preferred_over_the_event_cwd(self, tmp_path: Path) -> None:
+        """The state file belongs to the PROJECT, not to the session's cwd.
 
-        assert handler.matches({"cwd": "/somewhere/else"}) is True
+        A session can be cwd'd into a subdirectory or an agent worktree, whose
+        ``untracked/`` is not where ``/release`` wrote the state file.
+        """
+        _write_state(tmp_path)
+        elsewhere = tmp_path / "worktree"
+        elsewhere.mkdir()
 
-        command = mock_run.call_args.args[0]
-        assert command[:3] == ["git", "-C", "/somewhere/else"], (
-            f"git was invoked as {command}. Without an explicit -C it inherits the "
-            "daemon's working directory, which is not the project."
-        )
-
-    @patch("subprocess.run")
-    def test_a_git_failure_allows_the_stop(self, mock_run: MagicMock) -> None:
-        """Fail-safe preserved: never trap a session because git misbehaved."""
-        handler = ReleaseBlockerHandler()
-        mock_run.return_value = MagicMock(returncode=128, stdout="")
-
-        assert handler.matches({"cwd": _REPO}) is False
-
-    def test_no_resolvable_repo_allows_the_stop(self) -> None:
-        """Same fail-safe when neither the event nor the context yields a root."""
         handler = ReleaseBlockerHandler()
 
-        with patch.object(ReleaseBlockerHandler, "_repo_root", return_value=None):
+        with patch(
+            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+            return_value=tmp_path,
+        ):
+            assert handler.matches({"cwd": str(elsewhere)}) is True
+
+    def test_the_event_cwd_is_the_fallback_when_no_context_exists(self, tmp_path: Path) -> None:
+        """Without an initialised ProjectContext the event's cwd is all there is."""
+        _write_state(tmp_path)
+
+        handler = ReleaseBlockerHandler()
+
+        with patch(
+            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+            side_effect=RuntimeError("not initialised"),
+        ):
+            assert handler.matches({"cwd": str(tmp_path)}) is True
+
+    def test_no_resolvable_root_allows_the_stop(self) -> None:
+        """Fail-safe: never trap a session because the project could not be found."""
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=None):
             assert handler.matches({}) is False
 
 
+class TestPublishAuthorisationGate:
+    """Blocking the stop must not trap the session where it is REQUIRED to ask.
+
+    RELEASING.md gates Steps 14-15 (tag, publish) on an explicit human "yes,
+    publish", and requires the agent to ask "every time, even inside an
+    authorised ``/release`` run". A guard that denies the Stop while prep is
+    finished and authorisation is absent forbids the only correct next action.
+    """
+
+    def test_awaiting_publish_authorisation_allows_the_stop(self, tmp_path: Path) -> None:
+        """Prep complete, no publish authorisation ⇒ stopping to ask is correct."""
+        _write_state(
+            tmp_path,
+            last_completed_step=ReleaseBlockerHandler.PREP_COMPLETE_STEP,
+            publish_authorised=False,
+        )
+
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is False
+
+    def test_publish_authorised_still_blocks_until_the_file_is_deleted(
+        self, tmp_path: Path
+    ) -> None:
+        """With authorisation granted the remaining steps must be finished.
+
+        Abandoning a release here leaves the version bumped and nothing tagged,
+        which RELEASING.md calls its own broken state.
+        """
+        _write_state(
+            tmp_path,
+            last_completed_step=ReleaseBlockerHandler.PREP_COMPLETE_STEP,
+            publish_authorised=True,
+        )
+
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is True
+
+    def test_a_prep_step_blocks_the_stop(self, tmp_path: Path) -> None:
+        """Prep steps proceed on the state file's authority alone, so keep guarding."""
+        _write_state(
+            tmp_path,
+            last_completed_step=ReleaseBlockerHandler.PREP_COMPLETE_STEP - 1,
+            publish_authorised=False,
+        )
+
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is True
+
+    def test_a_missing_step_counter_is_treated_as_prep(self, tmp_path: Path) -> None:
+        """Unknown progress means the release is unfinished, so guard it.
+
+        This is the safe direction in both senses: the guard stays active, and
+        the session is not trapped, because prep can still be carried forward.
+        """
+        state_path = _write_state(tmp_path)
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        del state["last_completed_step"]
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is True
+
+
+class TestFailSafe:
+    """A guard that cannot read its evidence must never trap the session."""
+
+    def test_a_malformed_state_file_allows_the_stop(self, tmp_path: Path) -> None:
+        """Unparseable JSON is not evidence of a release."""
+        directory = tmp_path.joinpath(*ReleaseBlockerHandler.RELEASE_STATE_PARTS[:-1])
+        directory.mkdir(parents=True, exist_ok=True)
+        tmp_path.joinpath(*ReleaseBlockerHandler.RELEASE_STATE_PARTS).write_text(
+            "{not json", encoding="utf-8"
+        )
+
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is False
+
+    def test_a_non_object_state_file_allows_the_stop(self, tmp_path: Path) -> None:
+        """Valid JSON that is not an object cannot carry the documented fields."""
+        directory = tmp_path.joinpath(*ReleaseBlockerHandler.RELEASE_STATE_PARTS[:-1])
+        directory.mkdir(parents=True, exist_ok=True)
+        tmp_path.joinpath(*ReleaseBlockerHandler.RELEASE_STATE_PARTS).write_text(
+            "[1, 2, 3]", encoding="utf-8"
+        )
+
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is False
+
+    def test_an_unreadable_state_file_allows_the_stop(self, tmp_path: Path) -> None:
+        """An OS-level read failure is not evidence of a release either."""
+        _write_state(tmp_path)
+
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            with patch.object(Path, "read_text", side_effect=OSError("permission denied")):
+                assert handler.matches({}) is False
+
+
 class TestReleaseBlockerHandlerMatches:
-    """Test handler matching logic."""
+    """Loop prevention."""
 
     def test_matches_returns_false_when_stop_hook_active_snake_case(self) -> None:
         """Handler should not match when stop_hook_active=True (prevent infinite loops)."""
         handler = ReleaseBlockerHandler()
-        hook_input = {"stop_hook_active": True}
-        assert handler.matches(hook_input) is False
+        assert handler.matches({"stop_hook_active": True}) is False
 
     def test_matches_returns_false_when_stop_hook_active_camel_case(self) -> None:
         """Handler should not match when stopHookActive=True (prevent infinite loops)."""
         handler = ReleaseBlockerHandler()
-        hook_input = {"stopHookActive": True}
-        assert handler.matches(hook_input) is False
-
-    @patch("subprocess.run")
-    def test_matches_returns_false_when_no_release_files_modified(
-        self, mock_run: MagicMock
-    ) -> None:
-        """Handler should not match when no release files are modified."""
-        handler = ReleaseBlockerHandler()
-
-        # Mock git status output with no release files
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="M  some/random/file.py\nM  tests/test_something.py\n"
-        )
-
-        hook_input = {"cwd": _REPO}
-        assert handler.matches(hook_input) is False
-
-        # Verify git command was called
-        mock_run.assert_called_once_with(
-            ["git", "-C", _REPO, "status", "--short"],
-            capture_output=True,
-            text=True,
-            timeout=Timeout.GIT_CONTEXT,
-            check=False,
-        )
-
-    @patch("subprocess.run")
-    def test_matches_returns_true_when_pyproject_toml_modified(self, mock_run: MagicMock) -> None:
-        """Handler should match when pyproject.toml is modified."""
-        handler = ReleaseBlockerHandler()
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="M  pyproject.toml\n")
-
-        hook_input = {"cwd": _REPO}
-        assert handler.matches(hook_input) is True
-
-    @patch("subprocess.run")
-    def test_matches_returns_true_when_version_py_modified(self, mock_run: MagicMock) -> None:
-        """Handler should match when version.py is modified."""
-        handler = ReleaseBlockerHandler()
-
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="M  src/claude_code_hooks_daemon/version.py\n"
-        )
-
-        hook_input = {"cwd": _REPO}
-        assert handler.matches(hook_input) is True
-
-    @patch("subprocess.run")
-    def test_does_NOT_match_when_only_readme_modified(self, mock_run: MagicMock) -> None:
-        """README.md is edited constantly for reasons that are not releases.
-
-        Plan 00234 finding H-1. This handler is `terminal=True` and DENIES the
-        Stop event, so treating an ordinary docs edit as "RELEASE IN PROGRESS"
-        traps the session until the file is committed or the handler is turned
-        off. A release always touches a version file; README alone never means
-        one is under way.
-        """
-        handler = ReleaseBlockerHandler()
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="M  README.md\n")
-
-        hook_input = {"cwd": _REPO}
-        assert handler.matches(hook_input) is False
-
-    @patch("subprocess.run")
-    def test_does_NOT_match_when_only_claude_md_modified(self, mock_run: MagicMock) -> None:
-        """CLAUDE.md is REGENERATED AND AUTO-COMMITTED by the daemon itself.
-
-        Every daemon restart can leave it dirty, so keeping it in the trigger
-        set means the daemon could trap the session by its own routine action.
-        """
-        handler = ReleaseBlockerHandler()
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="M  CLAUDE.md\n")
-
-        hook_input = {"cwd": _REPO}
-        assert handler.matches(hook_input) is False
-
-    @patch("subprocess.run")
-    def test_still_matches_when_a_version_file_accompanies_the_readme(
-        self, mock_run: MagicMock
-    ) -> None:
-        """Narrowing the trigger must not blind the guard.
-
-        A real release edits README.md AND a version file. The version file is
-        what proves it, and it must still fire.
-        """
-        handler = ReleaseBlockerHandler()
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="M  README.md\nM  pyproject.toml\n")
-
-        hook_input = {"cwd": _REPO}
-        assert handler.matches(hook_input) is True
-
-    @patch("subprocess.run")
-    def test_matches_returns_true_when_changelog_modified(self, mock_run: MagicMock) -> None:
-        """Handler should match when CHANGELOG.md is modified."""
-        handler = ReleaseBlockerHandler()
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="M  CHANGELOG.md\n")
-
-        hook_input = {"cwd": _REPO}
-        assert handler.matches(hook_input) is True
-
-    @patch("subprocess.run")
-    def test_matches_returns_true_when_releases_file_added(self, mock_run: MagicMock) -> None:
-        """Handler should match when RELEASES/vX.Y.Z.md is added."""
-        handler = ReleaseBlockerHandler()
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="A  RELEASES/v2.13.0.md\n")
-
-        hook_input = {"cwd": _REPO}
-        assert handler.matches(hook_input) is True
-
-    @patch("subprocess.run")
-    def test_matches_returns_false_when_git_status_fails(self, mock_run: MagicMock) -> None:
-        """Handler should silently allow when git status fails."""
-        handler = ReleaseBlockerHandler()
-
-        mock_run.return_value = MagicMock(returncode=1, stdout="")
-
-        hook_input = {"cwd": _REPO}
-        assert handler.matches(hook_input) is False
-
-    @patch("subprocess.run")
-    def test_matches_returns_false_when_git_times_out(self, mock_run: MagicMock) -> None:
-        """Handler should silently allow when git command times out."""
-        handler = ReleaseBlockerHandler()
-
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["git"], timeout=Timeout.GIT_CONTEXT)
-
-        hook_input = {"cwd": _REPO}
-        assert handler.matches(hook_input) is False
-
-    @patch("subprocess.run")
-    def test_matches_returns_false_when_os_error(self, mock_run: MagicMock) -> None:
-        """Handler should silently allow when OS error occurs."""
-        handler = ReleaseBlockerHandler()
-
-        mock_run.side_effect = OSError("Git not found")
-
-        hook_input = {"cwd": _REPO}
-        assert handler.matches(hook_input) is False
+        assert handler.matches({"stopHookActive": True}) is False
 
 
 class TestReleaseBlockerHandlerHandle:
@@ -274,25 +316,37 @@ class TestReleaseBlockerHandlerHandle:
     def test_handle_returns_deny_decision(self) -> None:
         """Handler should return DENY decision to block session ending."""
         handler = ReleaseBlockerHandler()
-        hook_input = {"cwd": _REPO}
 
-        result = handler.handle(hook_input)
+        result = handler.handle({})
 
         assert result.decision == Decision.DENY
 
     def test_handle_returns_clear_reason_message(self) -> None:
         """Handler should return clear reason explaining why session is blocked."""
         handler = ReleaseBlockerHandler()
-        hook_input = {"cwd": _REPO}
 
-        result = handler.handle(hook_input)
+        result = handler.handle({})
 
-        # Check for key message components
         assert "RELEASE IN PROGRESS" in result.reason
         assert "acceptance tests" in result.reason
-        assert "RELEASING.md Step 8" in result.reason
         assert "handlers.stop.release_blocker" in result.reason
         assert "enabled: false" in result.reason
+
+    def test_handle_names_the_gate_rather_than_numbering_it(self) -> None:
+        """The message cited "RELEASING.md Step 8" for acceptance testing.
+
+        Step 8 is the QA Verification Gate; the Acceptance Testing Gate is Step
+        12. The citation was wrong, and it was wrong in the way this file
+        already warns about for the test count: a number copied out of a
+        document drifts when the document moves, and nothing notices. Gate
+        NAMES do not renumber.
+        """
+        handler = ReleaseBlockerHandler()
+
+        result = handler.handle({})
+
+        assert "Acceptance Testing Gate" in result.reason
+        assert "Step 8" not in result.reason
 
     def test_handle_does_not_assert_a_hardcoded_test_count(self) -> None:
         """A count copied into a block message drifts and then misleads.
@@ -312,9 +366,9 @@ class TestReleaseBlockerHandlerHandle:
     def test_handle_references_a_path_that_exists(self) -> None:
         """A block message must not send the reader to a moved file.
 
-        The plan folder it cited was archived into `Completed/`, so the path
-        in the message stopped resolving. A block is only as useful as the
-        next step it points at.
+        The plan folder it cited was archived into ``Completed/``, so the path
+        in the message stopped resolving. A block is only as useful as the next
+        step it points at.
         """
         handler = ReleaseBlockerHandler()
 
@@ -325,3 +379,21 @@ class TestReleaseBlockerHandlerHandle:
             cited.is_dir()
         ), "the cited plan folder must exist for this assertion to mean anything"
         assert "CLAUDE/Plan/Completed/00060-release-blocker-handler" in result.reason
+
+    def test_handle_names_the_resume_point_from_the_state_file(self, tmp_path: Path) -> None:
+        """RELEASING.md says to resume from ``last_completed_step``.
+
+        The block is where that instruction is actually needed, so the message
+        must carry the version and the step rather than describing the release
+        in the abstract.
+        """
+        _write_state(tmp_path, version="4.1.2", last_completed_step=9)
+
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            result = handler.handle({})
+
+        assert "4.1.2" in result.reason
+        assert "9" in result.reason
+        assert "untracked/release-state.json" in result.reason

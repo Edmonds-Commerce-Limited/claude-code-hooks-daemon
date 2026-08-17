@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-08-16 (v3.53.1) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-08-17 (v3.53.1) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
@@ -144,7 +144,7 @@
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
-| 8 | ReleaseBlockerHandler | BLOCKING | Blocks Stop event during releases until acceptance tests complete |
+| 8 | ReleaseBlockerHandler | BLOCKING | Blocks Stop event while a release is in flight |
 | 41 | EnforceLlmQaHandler | BLOCKING | Block run_all.sh and direct LLM agents to llm_qa.py |
 
 ### Pseudo Nitpick (2 handlers)

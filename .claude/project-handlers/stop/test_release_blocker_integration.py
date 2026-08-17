@@ -4,32 +4,42 @@ Tests that the handler integrates correctly with the daemon system and
 returns valid Stop event responses.
 """
 
-from unittest.mock import MagicMock, patch
+import json
+from pathlib import Path
+from unittest.mock import patch
 
 from .release_blocker import ReleaseBlockerHandler
 
-# The handler scopes git to an explicit repository rather than inheriting the
-# process working directory, so the event must carry one (Plan 00237).
-_REPO = "/workspace"
+
+def _write_state(root: Path) -> None:
+    """Write a minimal in-flight release state under ``root``."""
+    root.joinpath(*ReleaseBlockerHandler.RELEASE_STATE_PARTS[:-1]).mkdir(
+        parents=True, exist_ok=True
+    )
+    root.joinpath(*ReleaseBlockerHandler.RELEASE_STATE_PARTS).write_text(
+        json.dumps(
+            {
+                "version": "9.9.9",
+                "authorised_by_human_at": "2026-01-01T00:00:00Z",
+                "publish_authorised": False,
+                "last_completed_step": 8,
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 class TestReleaseBlockerIntegration:
     """Test ReleaseBlockerHandler integration with daemon system."""
 
-    @patch("subprocess.run")
-    def test_handler_returns_valid_stop_response_when_blocking(self, mock_run: MagicMock) -> None:
+    def test_handler_returns_valid_stop_response_when_blocking(self, tmp_path: Path) -> None:
         """Handler should return valid Stop event response format when blocking."""
+        _write_state(tmp_path)
         handler = ReleaseBlockerHandler()
 
-        # Mock release context (modified pyproject.toml)
-        mock_run.return_value = MagicMock(returncode=0, stdout="M  pyproject.toml\n")
-
-        # Verify handler matches (release context)
-        hook_input = {"cwd": _REPO}
-        assert handler.matches(hook_input) is True
-
-        # Execute handler
-        result = handler.handle(hook_input)
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is True
+            result = handler.handle({})
 
         # Verify response structure
         assert hasattr(result, "decision")
@@ -38,16 +48,16 @@ class TestReleaseBlockerIntegration:
         assert result.reason is not None
         assert isinstance(result.reason, str)
 
-    @patch("subprocess.run")
-    def test_handler_allows_when_no_release_context(self, mock_run: MagicMock) -> None:
-        """Handler should not match when no release files modified."""
+    def test_handler_allows_when_no_release_state_file(self, tmp_path: Path) -> None:
+        """Handler should not match when no release is in flight.
+
+        The project directory is deliberately left without a state file: that
+        absence IS the documented meaning of "no release in progress".
+        """
         handler = ReleaseBlockerHandler()
 
-        # Mock no release files modified
-        mock_run.return_value = MagicMock(returncode=0, stdout="M  tests/test_something.py\n")
-
-        hook_input = {"cwd": _REPO}
-        assert handler.matches(hook_input) is False
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is False
 
     def test_handler_has_required_attributes(self) -> None:
         """Handler should have all required attributes for daemon integration."""
