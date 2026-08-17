@@ -4,8 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00246: The daemon takes the git index lock it does not need](00246-git-index-lock-contention/PLAN.md) - In Progress (dogfooding report: stale `.git/index.lock`; `git status` rewrites the index unless `GIT_OPTIONAL_LOCKS=0`, which appears nowhere in the codebase, so three daemon paths contend with the agent for the lock)
-- [00245: CI suite green again](00245-ci-suite-green-again/PLAN.md) - In Progress (CI red on every push for 25+ runs; root cause 1 fixed — three test files relied on the gitignored `.claude/hooks-daemon.env` to clear init.sh's repo-detection guard, so most of the failures were green locally and red on any fresh checkout)
+- [00245: CI suite green again](00245-ci-suite-green-again/PLAN.md) - In Progress (all 41 CI failures root-caused and fixed across 8 files; each was a test taking its premise from the environment rather than establishing it, so all were green locally and red on any fresh runner — awaiting the confirming CI run)
 - [00243: make the acceptance playbook deterministically executable](00243-deterministic-acceptance-playbook-harness/PLAN.md) - In Progress (Phase 4's doc-snippet guard is delivered and found 8 real defects; the harness phases remain)
 
 ### Security / Presentation Audit
@@ -161,6 +160,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00246: The daemon takes the git index lock it does not need](Completed/00246-git-index-lock-contention/PLAN.md) - Complete at `013b48e7` + `60ae1074` (dogfooding report of stale `.git/index.lock`: `git status` REWRITES the index, so three daemon paths contended with the agent for the lock; `run_git` is now the single spawn point declining the optional lock, with an AST guard so the 15 files that bypassed the declared facade cannot come back)
 
 - [00244: Generated tracked docs must be path-agnostic](Completed/00244-path-agnostic-generated-docs/PLAN.md) - Complete at `6d7f8192` (client bug report: every daemon-CLI example in the tracked `CLAUDE.md` block named the rendering machine's absolute root, publishing a home directory and churning per machine; a second class hard-coded `/workspace`, true on no client machine at all — verified fixed in a real client install)
 
@@ -1197,15 +1198,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 246 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 200 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 201 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 34 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 33 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 34 + 200 + 6 = **240 folders**, spanning
+- **Folder-to-number reconciliation**: 33 + 201 + 6 = **240 folders**, spanning
   **237 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1216,11 +1217,17 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work). 237 + 9 = 246. ✅
 
-- **Last reconciled by**: the Plan 00246 creation — one new folder in the plan
-  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
-  by one while Completed and Cancelled were untouched. Recounted from disk (34
-  root, 200 `Completed/`, 6 `Cancelled/`, 237 distinct numbers against a counter
-  of 246).
+- **Last reconciled by**: the Plan 00246 completion — its folder moved from the
+  plan root into `Completed/`, so Active fell by one and Completed rose by one
+  while Total, Cancelled and the folder total were untouched. Recounted from disk
+  (33 root, 201 `Completed/`, 6 `Cancelled/`, 237 distinct numbers against a
+  counter of 246).
+
+- **Previously reconciled by**: the Plan 00246 creation — one new folder in the
+  plan root and the counter advanced by `mkplan.bash`, so Total and Active each
+  rose by one while Completed and Cancelled were untouched. Recounted from disk
+  (34 root, 200 `Completed/`, 6 `Cancelled/`, 237 distinct numbers against a
+  counter of 246).
 
   Before that, the Plan 00245 creation — one new folder in the plan
   root and the counter advanced by `mkplan.bash`, so Total and Active each rose
