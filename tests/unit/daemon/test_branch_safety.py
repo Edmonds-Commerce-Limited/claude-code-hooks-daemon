@@ -1394,3 +1394,35 @@ class TestASameNamedTagCannotHijackTheProof:
         ).stdout
         branch_tip = _git(repo, "rev-parse", "refs/heads/kept").strip()
         assert branch_tip in listing, f"the BRANCH tip must be bundled: {listing}"
+
+    def test_a_peer_that_deletes_the_branch_is_handled_too(
+        self, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other way a tip can stop matching: the branch is gone entirely.
+
+        `rev-parse` fails rather than returning a different sha, so this is a
+        distinct path through the guard and it had no test. It must refuse rather
+        than raise, and must not attempt a delete against a ref that no longer
+        exists. Nothing is lost here — a peer already removed it — but arriving as a
+        traceback would be wrong, and this is also why the diagnosis says "changed"
+        rather than "advanced" (Plan 00254).
+        """
+        _merged_branch(repo, "vanish")
+        real_bundle = branch_safety.write_recovery_bundle
+
+        def bundle_then_a_peer_deletes_it(*args: Any, **kwargs: Any) -> Any:
+            written = real_bundle(*args, **kwargs)
+            _git(repo, "update-ref", "-d", "refs/heads/vanish")
+            return written
+
+        monkeypatch.setattr(branch_safety, "write_recovery_bundle", bundle_then_a_peer_deletes_it)
+        report = delete_branches(repo, ["vanish"], bundle_path=tmp_path / "recovery.bundle")
+
+        assert report.refused is True
+        assert report.deleted == ()
+        blockers = "\n".join(report.blockers)
+        assert "no longer a branch" in blockers, blockers
+        assert "advanced" not in blockers, (
+            "the branch was deleted, not advanced — the diagnosis must not say "
+            f"otherwise: {blockers}"
+        )

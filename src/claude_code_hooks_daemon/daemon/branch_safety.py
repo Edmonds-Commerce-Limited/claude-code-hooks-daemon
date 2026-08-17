@@ -121,12 +121,15 @@ _HEADS_PREFIX = "refs/heads/"
 #: rule disagreed with git and sends them to inspect the predicate. This is an
 #: ordinary concurrent edit — the predicate was correct when it ran — so pointing
 #: at the predicate would aim them at the wrong thing entirely.
+#:
+#: Says "changed", not "advanced": a peer that DELETES the branch mid-run reaches
+#: this same path, and "advanced" would have been simply false there. Found by
+#: exercising that branch of the guard rather than by reading it.
 _MOVED_TIP_DIAGNOSIS = (
-    "Another process advanced this branch after it was proved safe, so the proof "
-    "no longer describes it and the recovery bundle — written before the delete "
-    "loop — does NOT contain the new commit(s). Nothing was deleted for this "
-    "branch. Re-run to reclassify against the current tip; do not force the "
-    "delete to get past it."
+    "Another process changed this branch after it was proved safe, so the proof no "
+    "longer describes it and the recovery bundle — written before the delete loop — "
+    "does NOT cover the change. Nothing was deleted for this branch. Re-run to "
+    "reclassify against the current tip; do not force the delete to get past it."
 )
 
 # Appended to every "git refused the delete" blocker. Once the predicate mirrors
