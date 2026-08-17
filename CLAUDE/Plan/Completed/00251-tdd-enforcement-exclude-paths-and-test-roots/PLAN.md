@@ -1,6 +1,6 @@
 # Plan 00251: tdd_enforcement needs an exclusion escape and a declarable test root
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-17
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -173,13 +173,27 @@ construction.
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Full QA green, daemon restart RUNNING
-- [ ] ⬜ **Task 4.2**: Client-mode verification — this changes handler matching
+- [x] ✅ **Task 4.1**: Full QA green, daemon restart RUNNING
+  - [x] ✅ 23/23 checks; 12,508 tests pass, 0 failed, coverage 95.1%
+- [x] ✅ **Task 4.2**: Client-mode verification — this changes handler matching
   driven by project config, so verify in `dummy-client-repo` as well as
   self-install
-- [ ] ⬜ **Task 4.3**: Document both options in
+  - [x] ✅ The unit tests `setattr` the option directly, so they cannot prove the
+    YAML → registry → handler path. Verified through the real fixture instead:
+    production installer, real `.claude/hooks-daemon.yaml`, live socket via the
+    deployed `pre-tool-use` wrapper. `{}` (allow) with the declared test present;
+    deny with it removed, listing the capital-`Tests` directory FIRST and naming
+    it under `REQUIRED ACTION`. The fixture also regenerated its own `CLAUDE.md`
+    with the new guidance, which is `get_claude_md()` shipping end to end
+  - [x] ✅ Fixture destroyed; dogfood daemon still RUNNING afterwards
+- [x] ✅ **Task 4.3**: Document both options in
   `docs/guides/HANDLER_REFERENCE.md`, and record a `config-changes` manifest
   entry so upgrading projects are told the option exists
+  - [x] ✅ Also fixed the stale handler count in that file's exclusion section
+    (it said "three" while six consumed the option) and renamed the section, since
+    two of the consumers are not content scanners
+  - [x] ✅ `config-changes` entry covers all three new options, each with a
+    `migration_note` that says which one to prefer and why
 
 ## Dependencies
 
@@ -273,13 +287,17 @@ always added, and added FIRST, because a declaration outranks every inference.
 
 ## Success Criteria
 
-- [ ] A project can exclude a directory from `tdd_enforcement` and from
+- [x] A project can exclude a directory from `tdd_enforcement` and from
   `lint_on_edit` via `.claude/hooks-daemon.yaml`
-- [ ] A project can declare a non-`src/` test root and keep enforcement ON
-- [ ] `_is_excluded` has exactly one definition
-- [ ] The reporter's exact layout is verified working, both ways
-- [ ] No change to default behaviour for any project that configures nothing
-- [ ] QA green, daemon restart RUNNING, client-mode verified
+- [x] A project can declare a non-`src/` test root and keep enforcement ON
+- [x] `_is_excluded` has exactly one definition — `handler_excludes_path`, now
+  with eight callers and zero copies
+- [x] The reporter's exact layout is verified working, both ways — excluded (gate
+  off) and declared (gate on, test found)
+- [x] No change to default behaviour for any project that configures nothing —
+  pinned by the unconfigured baseline test, which still denies
+- [x] QA green (23/23), daemon restart RUNNING, client-mode verified through the
+  live socket of a real installer-built client project
 
 ## Risks & Mitigations
 
@@ -294,4 +312,12 @@ always added, and added FIRST, because a declaration outranks every inference.
 
 <!-- Curated milestones + delivery commit hashes. Blow-by-blow log lives in JOURNAL/. -->
 
-- Filed at the commit that adds this plan.
+- Filed at `b69bf4bf`.
+- Phase 1 (extract `handler_excludes_path`; fix the `core/handler.py` annotation
+  that lied) delivered at `977e4067`.
+- Phase 2 (`tdd_enforcement` + `lint_on_edit` honour `exclude_paths`) delivered
+  at `e0940f9c`.
+- Phase 3 (`test_path_map`; `path_matches_globs` promoted) delivered at
+  `35b9d4e4`.
+- Phase 4 (QA 23/23, client-mode verification, docs, `config-changes`) closed at
+  the commit that archives this plan.
