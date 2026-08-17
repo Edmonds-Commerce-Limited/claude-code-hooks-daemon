@@ -156,7 +156,19 @@ the failure, fix, repeat.
     under runner conditions (`CI=true`, no global git identity): 95–96 passed
   - [x] ✅ The 41 failures in the last two CI runs are accounted for exactly —
     same 8 files, same counts, so nothing in the set is unexplained
-  - [ ] ⬜ Read the CI run for the pushed commit and confirm green
+  - [x] ✅ Read the CI run for the pushed commit: 41 failures became 4 (×3
+    interpreters = 12), a set that was NEVER passing — the four upgrade gates
+    had been silently skipped for want of `uv`, and Decision 3 un-skipped them
+  - [x] ✅ Root-caused and fixed: `fetch-depth: 0` on the qa job's checkout.
+    `tests/acceptance/conftest.py` clones the checkout and runs `git describe --tags` on it; the default shallow tagless checkout leaves the clone with no
+    reachable tag. `fetch-tags: true` would NOT fix it — a depth-1 clone has no
+    ancestors, so an earlier commit's tag is unreachable regardless
+  - [x] ✅ Proved locally rather than by pushing: cloned this repo `--depth 1 --no-tags` and ran the four gates against it (same 4 failures, same exit
+    128), then `fetch --unshallow --tags` and re-ran (4 passed)
+  - [x] ✅ Added `-rs` to the CI pytest step so a skip is NAMED. CI reports 14
+    skipped against 6 locally, and a skip that nobody can see is what let these
+    four sit inert
+  - [ ] ⬜ Read the CI run for the fetch-depth commit and confirm green
 - [x] ✅ **Task 4.2**: Record in LESSONS.md that a permanently-red CI is a
   blind guard, not a nuisance
   - [x] ✅ Plus the two generalisable lessons this phase produced: the ambient

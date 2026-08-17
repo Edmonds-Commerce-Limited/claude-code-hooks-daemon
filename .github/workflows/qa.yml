@@ -22,7 +22,17 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
+      # fetch-depth: 0 (full history AND tags) is required, not a nicety.
+      # tests/acceptance/conftest.py makes a local clone of this checkout and
+      # runs `git describe --tags --abbrev=0` on it to find the tag the upgrade
+      # gates target. The default shallow, tagless checkout gives that clone no
+      # reachable tag, so describe exits 128 and four upgrade gates die on all
+      # three interpreters. `fetch-tags: true` alone would NOT fix it: a
+      # depth-1 clone has no ancestors, so a tag on any earlier commit is
+      # unreachable from HEAD no matter how many tag refs are present.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -66,9 +76,17 @@ jobs:
       # the gap this workflow exists to close. Measured at 95.59% on a clean
       # checkout with no daemon running, so the margin is real but thin;
       # a drop below 95 is a genuine signal, not CI flake.
+      #
+      # -rs names every SKIPPED test and its reason in the log. A skip is a test
+      # that did not run, and this workflow exists because tests that quietly do
+      # not run are indistinguishable from tests that pass: four upgrade gates
+      # sat skipped here for want of `uv` on the runner, and adding uv turned
+      # them straight into failures. Without -rs the only way to notice the next
+      # such skip is to compare totals between two runs by hand.
       - name: Tests + coverage
         run: >
           pytest tests/
+          -rs
           --cov=src
           --cov-report=term-missing
           --cov-report=xml
