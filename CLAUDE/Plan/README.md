@@ -4,6 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00246: The daemon takes the git index lock it does not need](00246-git-index-lock-contention/PLAN.md) - In Progress (dogfooding report: stale `.git/index.lock`; `git status` rewrites the index unless `GIT_OPTIONAL_LOCKS=0`, which appears nowhere in the codebase, so three daemon paths contend with the agent for the lock)
 - [00245: CI suite green again](00245-ci-suite-green-again/PLAN.md) - In Progress (CI red on every push for 25+ runs; root cause 1 fixed — three test files relied on the gitignored `.claude/hooks-daemon.env` to clear init.sh's repo-detection guard, so most of the failures were green locally and red on any fresh checkout)
 - [00243: make the acceptance playbook deterministically executable](00243-deterministic-acceptance-playbook-harness/PLAN.md) - In Progress (Phase 4's doc-snippet guard is delivered and found 8 real defects; the harness phases remain)
 
@@ -1194,28 +1195,34 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 245 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 246 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 200 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 33 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 34 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 33 + 200 + 6 = **239 folders**, spanning
-  **236 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 34 + 200 + 6 = **240 folders**, spanning
+  **237 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **9** of the
-  245 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  246 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210 — abandoned drafts, numbers burned by transient
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
-  already covered the work). 236 + 9 = 245. ✅
+  already covered the work). 237 + 9 = 246. ✅
 
-- **Last reconciled by**: the Plan 00245 creation — one new folder in the plan
+- **Last reconciled by**: the Plan 00246 creation — one new folder in the plan
+  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
+  by one while Completed and Cancelled were untouched. Recounted from disk (34
+  root, 200 `Completed/`, 6 `Cancelled/`, 237 distinct numbers against a counter
+  of 246).
+
+  Before that, the Plan 00245 creation — one new folder in the plan
   root and the counter advanced by `mkplan.bash`, so Total and Active each rose
   by one while Completed and Cancelled were untouched. Recounted from disk (33
   root, 200 `Completed/`, 6 `Cancelled/`, 236 distinct numbers against a counter

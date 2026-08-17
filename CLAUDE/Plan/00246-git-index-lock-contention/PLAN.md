@@ -1,0 +1,172 @@
+# Plan 00246: The Daemon Takes The Git Index Lock It Does Not Need
+
+**Status**: In Progress
+**Created**: 2026-08-17
+**Owner**: Claude (Opus 5)
+**Priority**: High
+**Recommended Executor**: Opus
+**Execution Strategy**: Sub-Agent Orchestration
+
+## Overview
+
+Reported from dogfooding: the daemon's CLAUDE.md auto-commit is causing stale
+`.git/index.lock` problems. Investigation found the auto-commit is real but the
+smallest part — the daemon acquires the git index lock in the user's working tree
+on three separate paths, one of them per-prompt and one per-status-refresh, and
+**every one of those acquisitions is avoidable**.
+
+`git status` does not just read. It refreshes the index and writes it back, which
+takes `.git/index.lock`. Proven on a throwaway repo by comparing `.git/index`
+inode+mtime across a run: invoked as the daemon invokes it, the index is
+REWRITTEN; with `GIT_OPTIONAL_LOCKS=0` it is not. `GIT_OPTIONAL_LOCKS` appears
+**zero times** in `src/` or `scripts/`.
+
+So the daemon contends for the index lock with the agent working in the same
+tree, and nothing anywhere detects or reports that contention — the failure
+surfaces as a stale lock file or a mystifying "Unable to create
+'.git/index.lock'" from an unrelated command.
+
+## Goals
+
+- No read-only git invocation the daemon makes takes the index lock.
+- The one genuine writer (the CLAUDE.md auto-commit) holds the lock for the
+  shortest possible window, is bounded by a timeout, and reports contention
+  visibly instead of at `debug`.
+- Route git invocations through the single bounded home the project already
+  declared (`utils/git_repo.py`, Plan 00113), so the next call site cannot
+  reintroduce this — a guard, not 30 hand-fixes.
+
+## Non-Goals
+
+- Changing WHAT the auto-commit commits, or whether it commits at all. Its
+  purpose (stop an agent seeing a dirty CLAUDE.md and trying to revert it) is
+  sound and unchanged.
+- Clearing stale locks automatically. A daemon deleting another process's lock
+  file is how you corrupt an index; detection and a clear diagnostic is the
+  correct scope.
+- Reducing the NUMBER of git spawns — Plan 00238 already did that for the status
+  line (192 → 44 per 115 renders). This plan is about what each spawn LOCKS.
+
+## Context & Background
+
+### The three lock-taking paths
+
+| Path                                                      | Runs                 | Lock taken                  |
+| --------------------------------------------------------- | -------------------- | --------------------------- |
+| `handlers/user_prompt_submit/git_context_injector.py:118` | every user prompt    | `git status`                |
+| `handlers/status_line/git_branch.py:471`                  | every status refresh | `git status --porcelain=v2` |
+| `core/claude_md_injector.py:331,343,353`                  | every daemon start   | `status` + `add` + `commit` |
+
+### The auto-commit's own defects
+
+`_auto_commit_if_dirty` is the least careful git caller in the codebase:
+
+- **A redundant `git add`.** `git commit --only <file>` already scopes the commit
+  to that path irrespective of the index, so the preceding `git add` is a second
+  lock acquisition that buys nothing.
+- **No `timeout=` on any of its four subprocess calls** (grep count: 0), while
+  every other git caller in `src/` uses the `Timeout` constants. A wedged git
+  stalls `DaemonController.__init__` indefinitely.
+- **Failures logged at `debug`**, so contention is invisible.
+- It runs synchronously on the daemon STARTUP path — and restart is mandated
+  after every handler change, which is exactly when an agent is also running git
+  commands in the same tree.
+
+### Why this is ~30 sites wide instead of one line
+
+`utils/git_repo.py` already states the principle: *"new git operations are added
+as methods on `GitRepo`, not by re-implementing `subprocess.run(["git", ...])` in
+each caller"*. Fifteen files bypass it. Had that held, the env var and the
+timeout would each be a one-line change in one place. This is the DRY /
+single-source-of-truth standard failing in a way that turned a one-line fix into
+a sweep.
+
+## Tasks
+
+### Phase 1: Make the bounded home actually bound
+
+- [ ] ⬜ **Task 1.1**: Write failing tests for a read-only git runner that sets
+  `GIT_OPTIONAL_LOCKS=0` and always carries a timeout
+- [ ] ⬜ **Task 1.2**: Implement it in `utils/git_repo.py`, preserving the
+  existing `None`-on-failure convention
+- [ ] ⬜ **Task 1.3**: Prove the lock is no longer taken — a test that asserts
+  `.git/index` is not rewritten by a read-only call through the runner
+
+### Phase 2: Fix the three lock-taking paths
+
+- [ ] ⬜ **Task 2.1**: `git_context_injector` (per prompt) onto the runner
+- [ ] ⬜ **Task 2.2**: `git_branch` status call (per refresh) onto the runner
+- [ ] ⬜ **Task 2.3**: `claude_md_injector` read-only calls (`rev-parse`,
+  `status`, `show`) onto the runner
+- [ ] ⬜ **Task 2.4**: Drop the redundant `git add`; keep `commit --only`
+- [ ] ⬜ **Task 2.5**: Bound the `commit` with a `Timeout` constant and log
+  contention at WARNING with git's stderr
+
+### Phase 3: The guard (DBF — this is the real deliverable)
+
+- [ ] ⬜ **Task 3.1**: Write a failing check that finds direct
+  `subprocess.run(["git", ...])` outside the bounded home
+- [ ] ⬜ **Task 3.2**: Decide the allowlist shape for genuinely-special callers,
+  each carrying its reason inline
+- [ ] ⬜ **Task 3.3**: Wire the check into `run_all.sh` AND `llm_qa.py` — verdict
+  published under the key the consumers actually read (Plan 00244's lesson)
+- [ ] ⬜ **Task 3.4**: Migrate the remaining callers until the check is green
+
+### Phase 4: Verify
+
+- [ ] ⬜ **Task 4.1**: Daemon restart verification — RUNNING, no errors in log
+- [ ] ⬜ **Task 4.2**: Full QA suite green
+- [ ] ⬜ **Task 4.3**: Confirm by measurement that a daemon start and a prompt no
+  longer rewrite `.git/index`
+
+## Dependencies
+
+- Related: Plan 00113 (GitRepo facade, Complete) — this plan makes its stated
+  principle enforceable instead of aspirational.
+- Related: Plan 00238 (handler cost tuning, Complete) — reduced git spawn COUNT;
+  orthogonal to what each spawn locks.
+
+## Technical Decisions
+
+### Decision 1: set `GIT_OPTIONAL_LOCKS=0` rather than serialise access
+
+**Context**: The daemon and the agent both run git in one working tree.
+
+**Options Considered**:
+
+1. A daemon-side mutex around git calls — serialises the daemon against itself
+   but not against the agent, which is the actual collision. Solves nothing.
+2. Retry-with-backoff on lock contention — makes the symptom rarer while leaving
+   a pure read taking a write lock, and adds latency to a hook path.
+3. Stop taking the lock at all for reads.
+
+**Decision**: Option 3. A dirty-check has no business writing to the index; the
+refresh is an optimisation git performs on our behalf and `GIT_OPTIONAL_LOCKS=0`
+is the documented way to decline it. Contention then only exists around the one
+real writer, where it belongs.
+
+**Date**: 2026-08-17
+
+## Success Criteria
+
+- [ ] A daemon start with a clean CLAUDE.md rewrites `.git/index` zero times
+- [ ] A user prompt and a status refresh each rewrite `.git/index` zero times
+- [ ] The auto-commit's four subprocess calls all carry a timeout
+- [ ] Lock contention produces a WARNING naming git's stderr
+- [ ] A guard fails if a new direct git invocation bypasses the bounded home
+- [ ] `llm_qa.py all` green; daemon restarts RUNNING
+
+## Risks & Mitigations
+
+| Risk                                                   | Impact | Probability | Mitigation                                                                     |
+| ------------------------------------------------------ | ------ | ----------- | ------------------------------------------------------------------------------ |
+| `GIT_OPTIONAL_LOCKS=0` changes output of some git verb | Medium | Low         | It only declines the index refresh; assert byte-identical output per migration |
+| A write verb is misclassified as read-only             | High   | Low         | Classify by explicit named tuple of verbs, never by heuristic                  |
+| The migration is broad enough to regress a caller      | Medium | Medium      | One caller per commit, tests per caller, daemon restart between                |
+| The guard's allowlist becomes a dumping ground         | Medium | Medium      | Each entry carries its reason inline; the check prints them                    |
+
+## Delivery & Milestones
+
+<!-- Curated milestones + delivery commit hashes. Blow-by-blow log lives in JOURNAL/. -->
+
+- Filed at the commit that adds this plan.
