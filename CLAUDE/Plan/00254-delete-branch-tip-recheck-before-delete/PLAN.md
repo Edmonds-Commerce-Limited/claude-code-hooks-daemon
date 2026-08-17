@@ -95,10 +95,50 @@ Verified by execution, not inferred (full transcripts in `FINDINGS.md`):
 
 ### Phase 3: Verify
 
-- [ ] ⬜ **Task 3.1**: Full QA green, daemon restart RUNNING.
-- [ ] ⬜ **Task 3.2**: Re-run both reproductions and confirm each now refuses.
-- [ ] ⬜ **Task 3.3**: Confirm the other-worktree guard still fires — the guard
-  Decision 1 declines to trade away.
+- [ ] 🔄 **Task 3.1**: Full QA green, daemon restart RUNNING. Restart done: RUNNING,
+  zero errors, no regenerated `CLAUDE.md` drift.
+- [x] ✅ **Task 3.2**: Both reproductions re-run through the real engine and both
+  refuse, naming the two shas — `merged-not-in-head` and `merged-unpushed`. In each
+  the branch survives and the peer's file is reachable from it.
+- [x] ✅ **Task 3.3**: The other-worktree guard still fires: a branch held in a
+  linked worktree classifies as `checked-out-in-worktree`, is refused before any
+  delete, survives, and the peer worktree stays on its branch. This is the guard
+  Decision 1 declines to trade for atomicity.
+
+Client-mode verification is deliberately NOT a task here: this changes no path,
+interpreter, wrapper or deployed asset, and `delete-branch`'s repo resolution — the
+part that genuinely differs in a client install — is untouched since Plan 00253
+verified it there.
+
+### Phase 4: a bare refname is ambiguous, and the proof was reading the wrong object
+
+Unplanned, and the most serious defect in this plan. Found while checking my own
+new code: `git rev-parse <name>` resolves a same-named TAG ahead of the branch,
+warning only on stderr. See Decision 3 for why it had to land here rather than in a
+follow-up.
+
+- [x] ✅ **Task 4.1**: Fix the guard's own two reads to address `refs/heads/<name>`.
+  Without this the guard compares a tag against itself and never sees the branch
+  move — silently inert in exactly the case it exists for.
+- [x] ✅ **Task 4.2**: Fix `local_branches`, which used `%(refname:short)`. That
+  returns the shortest UNAMBIGUOUS name, so such a branch came back as
+  `heads/<name>` and `delete-branch` reported "does not resolve to a local branch"
+  about a branch that plainly exists — false, though fail-safe.
+- [x] ✅ **Task 4.3**: Fix the PROOF sites — ancestry, `cherry`, the blob and path
+  listings — and the recovery bundle. Reproduced first: with a tag patch-equivalent
+  to `main` and a branch of the same name holding the only copy of a file, the
+  engine proved the TAG, reported `patch-equivalent`, force-deleted the BRANCH and
+  returned `refused=False`. A bundle of the tag would also have been a recovery
+  route that recovers nothing.
+- [x] ✅ **Task 4.4**: RED proven by reverting only the proof-side qualification:
+  classification returns `patch-equivalent` and the only copy is destroyed. Three
+  tests pin it, including the end-to-end consequence.
+- [x] ✅ **Task 4.5**: `<name>@{upstream}` deliberately keeps the SHORT name — git
+  rejects `refs/heads/<name>@{upstream}` outright, and `@{upstream}` is
+  branch-specific so it cannot be hijacked. Verified both ways.
+- [x] ✅ **Task 4.6**: The test helper `_local_branches` had the same bug and was
+  failing the tag test while the code under test was correct. Fixed to read the way
+  production now reads.
 
 ## Dependencies
 
@@ -155,12 +195,39 @@ later has to reason about.
 
 **Date**: 2026-08-17
 
+### Decision 3: the ambiguity fix could not be deferred to a follow-up plan
+
+**Context**: the refname ambiguity is a separate defect from the TOCTOU this plan
+was filed for, and the instinct was to file it as Plan 00255 rather than grow this
+one.
+
+**Why it could not wait**: the three parts are coupled in a way that makes any
+partial ship worse than either whole. While `local_branches` read the ambiguous
+short name, a branch shadowed by a tag was refused as "not a local branch" — the
+wrong message, but FAIL-SAFE. Fixing only that message would have made the branch
+visible to a proof that still evaluated the tag, converting a false refusal into a
+silent force-delete of the only copy of a file. So shipping the readable-message
+fix alone would have INTRODUCED the data loss.
+
+**Decision**: fix all three together here — the guard's reads, `local_branches`,
+and the proof sites plus the bundle. Recorded because "one plan, one concern" is
+the right default and this is a real exception to it, not an oversight.
+
+A note on how it was found, since the method generalises: it came from asking what
+my own new line was assuming, not from a review. `rev-parse <name>` looks
+unremarkable, and the module had been using bare names throughout since Plan 00206.
+The ambiguity is invisible until a tag exists, and no fixture had one.
+
+**Date**: 2026-08-17
+
 ## Success Criteria
 
-- [ ] A commit arriving during the bundle write is never silently deleted
-- [ ] Both reproductions (`merged-not-in-head`, `merged-unpushed`) refuse
-- [ ] The refusal names both shas and does not reuse the disagreed-with-git wording
-- [ ] The other-worktree refusal still fires
+- [x] A commit arriving during the bundle write is never silently deleted
+- [x] Both reproductions (`merged-not-in-head`, `merged-unpushed`) refuse
+- [x] The refusal names both shas and does not reuse the disagreed-with-git wording
+- [x] The other-worktree refusal still fires
+- [x] A branch shadowed by a same-named tag is classified on its OWN content, and
+      the only copy of a file is not force-deleted (Phase 4)
 - [ ] QA green, daemon restart RUNNING
 
 ## Risks & Mitigations

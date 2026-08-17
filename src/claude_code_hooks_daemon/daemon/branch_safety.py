@@ -105,21 +105,16 @@ _HEAD_REF = "HEAD"
 # outputs are byte-identical with this set.
 _NO_QUOTE_PATH: tuple[str, ...] = ("-c", "core.quotePath=false")
 
-# Appended to every "git refused the delete" blocker. Once the predicate mirrors
-# git's rule on BOTH axes (Plan 00249 upstream, Plan 00253 HEAD), a refusal at
-# this point means our model of git's own rule disagreed with git — and there are
-# exactly two ways that happens. Reporting the FACT without the DIAGNOSIS makes
-# every occurrence a puzzle instead of a bug report, so the text names both causes
-# and how to tell them apart.
-#
-# The concurrent case is REPRODUCED, not theorised: advancing a branch with an
-# unmerged commit between `classify_branch` and the delete makes git refuse, and
-# git's refusal is then the ONLY thing protecting that commit — the bundle was
-# written before it existed, so its head predates the peer's work. That is why the
-# advice is to re-run rather than to force.
 #: Abbreviation width for shas quoted in a blocker. Full shas make the message
 #: unreadable; git's own default short form is this long.
 _SHA_DISPLAY_LEN = 7
+
+#: Branch refs are addressed FULLY, never by bare name. `git rev-parse <name>`
+#: resolves a same-named TAG ahead of the branch and only warns on stderr, so a
+#: bare name would make the moved-tip guard compare a tag against itself and never
+#: notice the branch moving — silently inert in exactly the case it exists for
+#: (found by executing it, Plan 00254).
+_HEADS_PREFIX = "refs/heads/"
 
 #: Appended when a branch moved between its proof and its delete. Deliberately
 #: NOT `_REFUSAL_DIAGNOSIS`: that one tells the reader our model of git's delete
@@ -134,12 +129,32 @@ _MOVED_TIP_DIAGNOSIS = (
     "delete to get past it."
 )
 
+# Appended to every "git refused the delete" blocker. Once the predicate mirrors
+# git's rule on BOTH axes (Plan 00249 upstream, Plan 00253 HEAD), a refusal at
+# this point means our model of git's own rule disagreed with git — and there are
+# exactly two ways that happens. Reporting the FACT without the DIAGNOSIS makes
+# every occurrence a puzzle instead of a bug report, so the text names both causes
+# and how to tell them apart.
+#
+# The concurrent case is REPRODUCED, not theorised: advancing a branch with an
+# unmerged commit between `classify_branch` and the delete makes git refuse, and
+# the bundle was written before that commit existed, so its head predates the
+# peer's work. That is why the advice is to re-run rather than to force.
+#
+# Plan 00254 narrowed which causes can still reach here. `tip_moved_since_proof`
+# now checks the BRANCH's own sha before git is asked, so a moved branch is
+# normally refused earlier with `_MOVED_TIP_DIAGNOSIS` instead — it can only reach
+# git's refusal by moving inside the residual window between that check and the
+# delete. A moved UPSTREAM is not covered by that check at all (it compares the
+# branch, not its remote-tracking ref), so it remains a live cause here.
 _REFUSAL_DIAGNOSIS = (
-    "This means our model of git's delete rule disagreed with git. Either the "
-    "branch or its upstream MOVED since it was classified (a concurrent agent in "
-    "this checkout — re-run; note the recovery bundle predates that change, so it "
-    "does NOT cover work added since), or this is a gap in the daemon's predicate "
-    "and is worth reporting upstream. Do not force the delete to get past it."
+    "This means our model of git's delete rule disagreed with git. Either its "
+    "UPSTREAM moved since this branch was classified — or the branch itself did, in "
+    "the moment between the tip re-check and this delete — which means a concurrent "
+    "agent in this checkout, so re-run; note the recovery bundle predates that "
+    "change, so it does NOT cover work added since. Otherwise this is a gap in the "
+    "daemon's predicate and is worth reporting upstream. Do not force the delete to "
+    "get past it."
 )
 
 
@@ -170,7 +185,7 @@ def tip_moved_since_proof(repo: Path, classification: BranchClassification) -> s
     """
     if not classification.tip:
         return None
-    current = _git(repo, "rev-parse", classification.name, check=False)
+    current = _git(repo, "rev-parse", branch_ref(classification.name), check=False)
     now = current.stdout.strip() if current.returncode == 0 else ""
     if now == classification.tip:
         return None
@@ -319,9 +334,35 @@ def current_branch(repo: Path) -> str | None:
 
 
 def local_branches(repo: Path) -> set[str]:
-    """Every local branch name in ``repo``."""
-    result = _git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads")
-    return {line for line in result.stdout.splitlines() if line}
+    """Every local branch name in ``repo``.
+
+    Uses the FULL refname and strips the prefix, never ``%(refname:short)``.
+    ``:short`` yields the shortest UNAMBIGUOUS name, so a branch that shares its
+    name with a tag comes back as ``heads/<name>`` — the caller then fails to find
+    ``<name>``, and ``delete-branch`` reports "does not resolve to a local branch"
+    about a branch that plainly exists. Fail-safe but false, and it made the
+    command unusable for such a branch (found by executing the ambiguity, Plan
+    00254; ``worktree_branches`` below already read the full refname).
+    """
+    result = _git(repo, "for-each-ref", "--format=%(refname)", "refs/heads")
+    return {line.removeprefix(_HEADS_PREFIX) for line in result.stdout.splitlines() if line}
+
+
+def branch_ref(name: str) -> str:
+    """The fully-qualified ref for local branch ``name``.
+
+    Every git command that is asked about a branch must be asked with this, never
+    with the bare name. A bare refname is AMBIGUOUS and git resolves a same-named
+    tag ahead of the branch, so the proof engine would evaluate the tag and then
+    delete the branch. That is not theoretical: with a tag ``x`` patch-equivalent
+    to the protected ref and a branch ``x`` holding the only copy of a file, the
+    engine reported ``patch-equivalent``, force-deleted, and returned
+    ``refused=False`` — a silent loss of the only copy (Plan 00254, reproduced).
+
+    The one exception is ``<name>@{upstream}``, which git only accepts with the
+    SHORT name and which is branch-specific anyway, so it cannot be hijacked.
+    """
+    return f"{_HEADS_PREFIX}{name}"
 
 
 def _safe_delete_reference(repo: Path, name: str) -> str:
@@ -371,7 +412,7 @@ def _tier_for_merged_branch(repo: Path, name: str) -> str:
     Plan 00249 existed to remove, on the other axis of git's single rule.
     """
     reference = _safe_delete_reference(repo, name)
-    accepted = _git(repo, "merge-base", "--is-ancestor", name, reference, check=False)
+    accepted = _git(repo, "merge-base", "--is-ancestor", branch_ref(name), reference, check=False)
     if accepted.returncode == 0:
         return TIER_MERGED
     # Name the ACTUAL reason git will refuse. "unpushed" is true only when an
@@ -397,7 +438,7 @@ def worktree_branches(repo: Path) -> set[str]:
 
 def _unique_commit_count(repo: Path, name: str, protected_ref: str) -> int:
     """Commits on ``name`` whose patch-id is not already upstream."""
-    result = _git(repo, "cherry", protected_ref, name, check=False)
+    result = _git(repo, "cherry", protected_ref, branch_ref(name), check=False)
     return sum(1 for line in result.stdout.splitlines() if line.startswith(_CHERRY_UNIQUE_MARKER))
 
 
@@ -493,9 +534,11 @@ def classify_branch(
     # Read AFTER the refusal checks (the branch is known to resolve here) and
     # BEFORE any proof is computed, so the recorded sha is the one every tier below
     # is actually reasoning about.
-    tip = _git(repo, "rev-parse", name).stdout.strip()
+    tip = _git(repo, "rev-parse", branch_ref(name)).stdout.strip()
 
-    ancestor = _git(repo, "merge-base", "--is-ancestor", name, protected_ref, check=False)
+    ancestor = _git(
+        repo, "merge-base", "--is-ancestor", branch_ref(name), protected_ref, check=False
+    )
     if ancestor.returncode == 0:
         # Ancestry to the protected ref settles SAFETY. It does not settle which
         # flag git will accept: `-d` measures against the branch's own upstream if
@@ -519,7 +562,7 @@ def classify_branch(
     # Commit-level uniqueness does not imply content loss: a stale branch is
     # usually byte-identical to the protected ref and merely arranged
     # differently. Compare blob shas, which ARE content identity in git.
-    branch_blobs = _blobs_in_tree(repo, name)
+    branch_blobs = _blobs_in_tree(repo, branch_ref(name))
     reachable = _reachable_object_shas(repo, protected_ref)
     content_unique_paths = tuple(
         sorted(path for path, sha in branch_blobs.items() if sha not in reachable)
@@ -534,7 +577,7 @@ def classify_branch(
         )
 
     unique_paths = tuple(
-        sorted(_paths_in_tree(repo, name) - _paths_in_history(repo, protected_ref))
+        sorted(_paths_in_tree(repo, branch_ref(name)) - _paths_in_history(repo, protected_ref))
     )
     return BranchClassification(
         name=name,
@@ -564,7 +607,14 @@ def write_recovery_bundle(repo: Path, names: Sequence[str], bundle_path: Path) -
     one.
     """
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
-    _git(repo, "bundle", "create", str(bundle_path), *names, timeout=Timeout.GIT_BUNDLE_CREATE)
+    _git(
+        repo,
+        "bundle",
+        "create",
+        str(bundle_path),
+        *(branch_ref(n) for n in names),
+        timeout=Timeout.GIT_BUNDLE_CREATE,
+    )
     return bundle_path
 
 

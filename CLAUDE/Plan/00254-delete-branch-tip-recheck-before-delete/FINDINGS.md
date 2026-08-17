@@ -139,3 +139,77 @@ reproduces a bug is not automatically the fixture that explains it. Here the
 peer's own suggested remedy reproduced its intended behaviour perfectly and was
 still the wrong change, because the harness only exercised the property it was
 built to exercise.
+
+## 6. Phase 4: a same-named tag makes the proof describe the wrong object
+
+Unplanned, found by questioning my own new `rev-parse <name>` rather than by review.
+A bare refname is ambiguous and git prefers `refs/tags/<name>`, warning only on
+stderr:
+
+```
+branch feat  -> d4151ad
+tag    feat  -> c785b8f
+rev-parse 'feat'            -> c785b8f  rc=0
+  stderr: ["warning: refname 'feat' is ambiguous."]
+rev-parse 'refs/heads/feat' -> d4151ad
+ambiguous form picked the TAG: True
+```
+
+### 6a. The proof approves deleting the only copy of a file
+
+Tag `doomed` at a commit patch-equivalent to `main` but not an ancestor of it;
+branch `doomed` holding a file that exists nowhere else:
+
+```
+branch doomed = 61739bc  (holds only-here.txt)
+tag    doomed = fd47019  (patch-equivalent to main, not an ancestor)
+
+tier='patch-equivalent'  argv=('branch', '--delete', '--force')
+refused=False deleted=('doomed',)
+branch refs left: ['refs/heads/main']
+only-here.txt still reachable anywhere: False
+```
+
+Exit 0, no blocker, the only copy destroyed.
+
+### 6b. The `merged` variant survives only because git re-checks
+
+Same hijack, but with the tag merged into `main`, so the tier is `merged` and the
+argv is the SAFE delete:
+
+```
+classification: tier='merged' refusal=None
+blocker: doomed: git refused the delete (proven merged) — error: The branch 'doomed' is not fully merged.
+branch still exists: True
+unique file still reachable: True
+```
+
+Git caught a bug in our proof. That is the third independent time in two plans that
+keeping git's own delete has paid off, and the one Decision 1 did not anticipate.
+
+### 6c. Why `local_branches` could not be fixed on its own
+
+Before the fix it used `%(refname:short)`, which returns the shortest UNAMBIGUOUS
+name, so a shadowed branch came back as `heads/<name>`:
+
+```
+tier=None refusal='not-a-local-branch' tip=''
+detail='does not resolve to a local branch'
+branch sha = 391df3b
+tag    sha = 2ef2773
+```
+
+Wrong message, but FAIL-SAFE — it refused. Fixing only that would have exposed the
+branch to a proof still reading the tag, converting a false refusal into 6a. The
+readable-message fix alone would have introduced the data loss, which is why all
+three layers landed together (Decision 3).
+
+### 6d. `@{upstream}` is the one deliberate exception
+
+```
+feat@{upstream}            rc=0 out='origin/feat'
+refs/heads/feat@{upstream} rc=128 fatal: no such branch: 'refs/heads/feat'
+```
+
+Git only accepts the short name there, and `@{upstream}` is branch-specific, so it
+cannot be hijacked. It keeps the bare name.

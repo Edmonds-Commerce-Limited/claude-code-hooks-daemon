@@ -89,8 +89,15 @@ def _commit(repo: Path, filename: str, content: str, message: str) -> None:
 
 
 def _local_branches(repo: Path) -> set[str]:
-    out = _git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads")
-    return {line for line in out.splitlines() if line}
+    """Branch names, read the same unambiguous way production reads them.
+
+    `%(refname:short)` gives the shortest UNAMBIGUOUS name, so a branch sharing its
+    name with a tag comes back as `heads/<name>` and every `"<name>" in ...` check
+    silently goes false. This helper had that bug too, and it failed the tag test
+    while the code under test was correct (Plan 00254).
+    """
+    out = _git(repo, "for-each-ref", "--format=%(refname)", "refs/heads")
+    return {line.removeprefix("refs/heads/") for line in out.splitlines() if line}
 
 
 @pytest.fixture
@@ -1276,3 +1283,114 @@ class TestABranchThatMovedAfterItsProofIsNotDeleted:
         assert "done" in _local_branches(repo), "the moved branch should stay"
         assert report.deleted == ("quiet",)
         assert report.refused is True
+
+    def test_a_same_named_tag_cannot_make_the_guard_look_the_other_way(
+        self, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A bare refname is ambiguous, and git resolves the TAG first.
+
+        `git rev-parse feat` returns the sha of a TAG called `feat` in preference to
+        the branch, warning only on stderr. Read the tip that way at both ends and
+        the guard compares a tag against itself: it never sees the branch move, and
+        is silently inert in exactly the case it exists for. Both reads therefore
+        address `refs/heads/<name>`.
+
+        Found by executing the ambiguity rather than by review — the first cut of
+        this guard had the bug (Plan 00254).
+        """
+        _merged_but_head_is_elsewhere(repo, "done")
+        # A tag of the same name, deliberately pointing somewhere else.
+        _git(repo, "tag", "done", "main")
+        assert (
+            "warning: refname 'done' is ambiguous."
+            in subprocess.run(  # nosec B603 B607
+                ["git", "-C", str(repo), "rev-parse", "done"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stderr
+        ), "precondition: the bare name must really be ambiguous to git"
+
+        report, _ = self._delete_while_a_peer_commits(repo, "done", tmp_path, monkeypatch)
+
+        assert "done" in _local_branches(
+            repo
+        ), "the guard must follow the BRANCH, not a same-named tag"
+        assert report.refused is True
+
+
+class TestASameNamedTagCannotHijackTheProof:
+    """A bare refname resolves the TAG first, so the proof can describe the wrong object.
+
+    This is the sharpest failure the module has had: with a tag whose commit is
+    patch-equivalent to the protected ref and a branch of the same name holding the
+    only copy of a file, the engine proved the TAG, reported ``patch-equivalent``,
+    force-deleted the BRANCH and returned ``refused=False``. Reproduced before it
+    was fixed (Plan 00254).
+
+    Note the interaction that made it reachable: while ``local_branches`` also read
+    the ambiguous short name, such a branch was refused as "not a local branch" —
+    wrong, but fail-safe. Fixing that message without fixing ref resolution would
+    have converted a false refusal into a silent deletion, so both had to land
+    together.
+    """
+
+    def _tag_hijacks(self, repo: Path, name: str) -> str:
+        """Build: branch ``name`` holds unique content, tag ``name`` does not.
+
+        The tag points at a commit whose patch is already in ``main`` but which is
+        NOT an ancestor of it — the shape that reaches ``patch-equivalent``.
+        """
+        base = _git(repo, "rev-parse", "HEAD").strip()
+        _commit(repo, "shared.txt", "shared\n", "A change on main")
+        _git(repo, "checkout", "--detach", base)
+        _commit(repo, "shared.txt", "shared\n", "The same change, off to one side")
+        side = _git(repo, "rev-parse", "HEAD").strip()
+        _git(repo, "checkout", "main")
+        _git(repo, "branch", name, base)
+        _git(repo, "checkout", name)
+        _commit(repo, "only-here.txt", "the only copy\n", "Irreplaceable work")
+        _git(repo, "checkout", "main")
+        _git(repo, "tag", name, side)
+        return side
+
+    def test_the_branch_is_classified_not_the_tag(self, repo: Path) -> None:
+        """The proof must describe the branch's own content."""
+        self._tag_hijacks(repo, "doomed")
+
+        classification = classify_branch(repo, "doomed")
+
+        assert classification.tier == TIER_UNPROVEN, (
+            "the branch holds a file that exists nowhere else, so no tier can be "
+            f"proved for it — got {classification.tier!r}, which describes the tag"
+        )
+        assert "only-here.txt" in classification.content_unique_paths
+
+    def test_the_only_copy_of_a_file_is_not_silently_destroyed(self, repo: Path) -> None:
+        """The end-to-end consequence, which is what actually matters."""
+        self._tag_hijacks(repo, "doomed")
+
+        report = delete_branches(repo, ["doomed"], bundle_path=None)
+
+        assert report.refused is True
+        assert report.deleted == ()
+        assert "doomed" in _local_branches(repo)
+        assert _git(repo, "cat-file", "-t", "refs/heads/doomed:only-here.txt").strip() == "blob"
+
+    def test_the_recovery_bundle_bundles_the_branch_not_the_tag(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """A bundle of the tag would be a recovery route that recovers nothing."""
+        self._tag_hijacks(repo, "kept")
+        bundle = tmp_path / "recovery.bundle"
+
+        write_recovery_bundle(repo, ["kept"], bundle)
+
+        listing = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+            ["git", "-C", str(repo), "bundle", "list-heads", str(bundle)],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        branch_tip = _git(repo, "rev-parse", "refs/heads/kept").strip()
+        assert branch_tip in listing, f"the BRANCH tip must be bundled: {listing}"
