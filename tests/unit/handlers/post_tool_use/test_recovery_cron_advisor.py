@@ -14,6 +14,7 @@ from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor impor
     _CREATION_GUIDANCE,
     _MAX_TRACKED_PLANS,
     _PROGRESS_ADVISE_INTERVAL,
+    _PROGRESS_GUIDANCE,
     LifecyclePhase,
     RecoveryCronAdvisorHandler,
     _detect_lifecycle_phase,
@@ -379,6 +380,89 @@ def _progress_edit(plan_folder_path: str) -> dict[str, Any]:
         new_string="- [x] ✅ Task done",
         old_string="- [ ] ⬜ Task not done",
     )
+
+
+class TestExactlyOneCronEverExists:
+    """The advisory must never produce a SECOND recovery cron.
+
+    Dogfooding report: a session that created two plans ended up with two
+    identical hourly crons on the same minute, both firing on the same session.
+    The creation guidance said "create a cron NOW" with no instruction to look
+    first, even though the module docstring (Decision D2) already claimed "the
+    agent uses CronList to avoid duplicate creates" — the claim was never
+    implemented in the text the agent actually reads.
+
+    One cron is sufficient by construction: the canonical prompt is
+    plan-agnostic ("your most recent work on the active plan/task"), so it
+    covers every plan in the session. A second one only doubles the wake-ups.
+    """
+
+    def test_creation_guidance_says_to_list_before_creating(self) -> None:
+        """CronList must be step one, not an afterthought in a later phase."""
+        assert "CronList" in _CREATION_GUIDANCE, (
+            "Creation guidance must tell the agent to CHECK for an existing cron "
+            "before creating one, or a second plan in the same session stacks a "
+            "duplicate."
+        )
+
+    def test_creation_guidance_makes_creation_conditional(self) -> None:
+        """The create step must be gated, not unconditional."""
+        lowered = _CREATION_GUIDANCE.lower()
+        assert "only if" in lowered or "if none" in lowered or "if no " in lowered, (
+            "Creation guidance must make CronCreate conditional on none existing. "
+            f"Guidance was:\n{_CREATION_GUIDANCE}"
+        )
+
+    def test_creation_guidance_says_reuse_an_existing_cron(self) -> None:
+        """An existing cron is the answer, not something to work around."""
+        lowered = _CREATION_GUIDANCE.lower()
+        assert "reuse" in lowered or "keep" in lowered, (
+            "Creation guidance must say to REUSE the cron already running "
+            "(recording its id for this plan) rather than create another."
+        )
+
+    def test_creation_guidance_states_the_one_cron_invariant(self) -> None:
+        """State the invariant, so it survives future edits to the wording."""
+        lowered = _CREATION_GUIDANCE.lower()
+        assert "exactly one" in lowered or "only one" in lowered, (
+            "Creation guidance must state the invariant — exactly ONE recovery "
+            "cron per session — so a later reword cannot quietly drop it."
+        )
+
+    def test_progress_guidance_says_to_remove_duplicates(self) -> None:
+        """Verifying the cron must also mean collapsing extras to one.
+
+        The progress phase is the only place that runs repeatedly, so it is
+        where an already-stacked session gets repaired. Without this it would
+        report "still running" and leave both crons in place.
+        """
+        lowered = _PROGRESS_GUIDANCE.lower()
+        assert "CronDelete" in _PROGRESS_GUIDANCE, (
+            "Progress guidance must tell the agent to CronDelete extras when "
+            f"more than one recovery cron is listed. Guidance was:\n{_PROGRESS_GUIDANCE}"
+        )
+        assert (
+            "more than one" in lowered or "duplicate" in lowered
+        ), "Progress guidance must name the duplicate case explicitly."
+
+    def test_claude_md_table_matches_the_guidance(self) -> None:
+        """Resident guidance must not contradict the injected advisory.
+
+        `get_claude_md()` renders the same lifecycle table into CLAUDE.md, where
+        an agent reads it every session. If it still says "create a cron now"
+        while the advisory says "check first", the resident copy wins by being
+        read earlier.
+        """
+        claude_md = RecoveryCronAdvisorHandler().get_claude_md()
+        assert claude_md is not None
+        assert "CronList" in claude_md, (
+            "The CLAUDE.md lifecycle table must carry the same check-first "
+            "instruction as the creation advisory."
+        )
+        lowered = claude_md.lower()
+        assert (
+            "exactly one" in lowered or "only one" in lowered
+        ), "The CLAUDE.md table must state the one-cron-per-session invariant."
 
 
 class TestHandleCreation:

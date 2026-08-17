@@ -211,6 +211,53 @@ class TestHandleAdvisory:
         assert "sleep 999" in record["command"]
 
 
+class TestWatchdogCronIsNeverStacked:
+    """One watchdog cron per session, not one per backgrounded process.
+
+    Same defect as `recovery_cron_advisor` (Plan 00247): the advisory said
+    "Create a non-durable recurring watchdog cron" unconditionally, and it fires
+    on EVERY backgrounded process. A session that launches several — a test run,
+    a CI waiter, a build — would accumulate one identical cron each, all running
+    the same `harvest-background` command on the same schedule.
+
+    One is sufficient: the cron's prompt harvests ALL tracked background
+    processes, not a particular one.
+    """
+
+    def _advisory(self) -> str:
+        handler = BackgroundProcessTrackerHandler()
+        result = handler.handle(_bash("sleep 600 &", run_in_background=True))
+        assert result.context, "backgrounded process must produce advisory context"
+        return " ".join(result.context)
+
+    def test_advisory_says_to_list_before_creating(self) -> None:
+        assert "CronList" in self._advisory(), (
+            "Watchdog advisory must tell the agent to check for an existing "
+            "watchdog cron first, or every backgrounded process stacks another."
+        )
+
+    def test_advisory_makes_creation_conditional(self) -> None:
+        lowered = self._advisory().lower()
+        assert (
+            "only if" in lowered or "if none" in lowered or "if no " in lowered
+        ), "The CronCreate step must be gated on none already existing."
+
+    def test_advisory_states_the_one_cron_invariant(self) -> None:
+        lowered = self._advisory().lower()
+        assert "exactly one" in lowered or "only one" in lowered, (
+            "The advisory must state that one watchdog cron covers the whole "
+            "session, so a reword cannot quietly restore per-process creates."
+        )
+
+    def test_claude_md_agrees_with_the_advisory(self) -> None:
+        claude_md = BackgroundProcessTrackerHandler().get_claude_md()
+        assert claude_md is not None
+        assert "CronList" in claude_md, (
+            "Resident guidance is read before any advisory fires, so it must "
+            "carry the same check-first instruction."
+        )
+
+
 class TestWriteStateRecord:
     def test_appends_and_bounds_file(self, tmp_path):
         state = tmp_path / "bg.jsonl"
