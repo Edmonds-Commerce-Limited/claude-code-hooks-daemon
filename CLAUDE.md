@@ -722,6 +722,8 @@ hooks-daemon delete-branch <name>              # deletes only if provably safe
 
 **A second, less obvious case where `-d` refuses**: it measures a branch against its OWN upstream when it has one, so a branch fully merged into `main` is still refused while it is ahead of `origin/<name>` — git says "not yet merged to `refs/remotes/origin/<name>`, even though it is merged to HEAD". Pushing the branch, or `delete-branch`, both resolve it; the latter reports this as the `merged-unpushed` tier and deletes it, because every one of those commits is already in `main`.
 
+**A third case, and the most ordinary of the three**: with NO upstream, git measures the branch against the checked-out `HEAD` instead — so a branch fully merged into `main` is refused whenever you are standing on some other branch, which is the normal way you notice a branch needs tidying. Git says "not fully merged" and suggests the force delete, which is blocked. `delete-branch` reports this as the `merged-not-in-head` tier and deletes it; checking out `main` first also resolves it.
+
 **Abandoning unmerged work is human-gated and you cannot complete it.** When no proof holds, the branch holds the only copy of real work, so `--allow-unproven --reason` is not enough: the command also requires a human to type a confirmation at an interactive terminal, which your non-interactive shell does not have. Those flags declare intent; consent is separate and cannot be self-granted. Report the named files to the user and ask them to run the command themselves — do not hunt for a way around it.
 
 **Safe alternatives**: `git stash` (recoverable), `git diff` / `git status` (inspect first), `git commit` (save changes permanently first).
