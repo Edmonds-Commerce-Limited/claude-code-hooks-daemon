@@ -193,6 +193,7 @@ extracted so this plan stays readable at a glance:
 | 4   | Construct the interpreter pair instead of reading the ambient one         |
 | 5   | Declare an accepted lint finding rather than defeat the code or the guard |
 | 6   | The ambient environment is the recurring defect, not the tests            |
+| 7   | `fetch-depth: 0`, not `fetch-tags: true`, and not a fixture change        |
 
 ## Success Criteria
 

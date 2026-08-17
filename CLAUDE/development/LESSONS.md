@@ -437,14 +437,14 @@ unverifiable, including ones added later by someone who assumed CI worked.
 was the same mistake — a test depending on something the ENVIRONMENT supplied
 rather than something it established:
 
-| Symptom                            | Ambient thing depended on                   |
-| ---------------------------------- | ------------------------------------------- |
+| Symptom                            | Ambient thing depended on                    |
+| ---------------------------------- | -------------------------------------------- |
 | venv never created                 | `CI` being unset (`ensure_venv` skips on it) |
-| fingerprints differed              | `sys.executable` being a venv of `/usr`     |
-| resolver disagreed with the test   | discovery picking the running interpreter   |
-| mode actions returned the fallback | `hasattr`-based protocol checks (pre-3.12)  |
-| `commit-tree` exited 128           | a global git `user.email`                   |
-| lint findings appeared             | the installed ruff's default rule set       |
+| fingerprints differed              | `sys.executable` being a venv of `/usr`      |
+| resolver disagreed with the test   | discovery picking the running interpreter    |
+| mode actions returned the fallback | `hasattr`-based protocol checks (pre-3.12)   |
+| `commit-tree` exited 128           | a global git `user.email`                    |
+| lint findings appeared             | the installed ruff's default rule set        |
 
 Every one passes on a developer machine and fails on a fresh runner. Two also
 passed for the WRONG REASON rather than failing: a gate test asserting "the skip
@@ -477,3 +477,27 @@ version, install that version locally before theorising. Also beware where you
 put it: a scratch venv under `untracked/venv-*` is inside the namespace
 `resolve_venv_python` globs, so it silently became the interpreter for every
 `$PY` in the session and made several runs report the wrong Python.
+
+## A skipped test is indistinguishable from a passing one
+
+**What happened (Plan 00245):** fixing 41 CI failures left 4, on all three
+interpreters. They looked like new regressions. They were not: four upgrade gates
+in `tests/acceptance/` skip themselves when `uv` is missing, and CI had no `uv`,
+so they had been skipping on every run since they were written. Installing `uv`
+for an unrelated reason un-skipped them, and only then did anyone learn they
+could not pass on a runner. Nothing had ever reported them as absent — a green
+job and a job whose gates never ran render identically. The only trace was a
+totals line (`14 skipped` in CI against `6` locally) that nobody diffs between
+runs, and which does not say WHICH.
+
+This is the DBF rule applied to test infrastructure: the defect was four dead
+tests, but the bug worth fixing is that a dead test looked exactly like a live
+one, so nothing would have reported the next one either.
+
+**Apply:** run CI's pytest with `-rs` so every skip is NAMED with its reason in
+the log. When you make a conditional dependency available (a tool, a service, a
+credential), expect previously-skipped tests to wake up — treat their first
+failures as long-standing, not as regressions from your change. And when writing
+a `skipif` for a missing tool, remember you are choosing silence: prefer
+installing the tool in CI to skipping — Plan 00245's Decision 3 settled that
+here, and it is what surfaced these four.

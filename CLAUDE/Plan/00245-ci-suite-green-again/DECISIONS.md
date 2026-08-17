@@ -185,3 +185,35 @@ committed while fixing it.
 
 **Date**: 2026-08-17
 
+### Decision 7: `fetch-depth: 0`, not `fetch-tags: true`, and not a test change
+
+**Context**: with `uv` installed (Decision 3), four upgrade gates stopped being
+skipped and started failing. `tests/acceptance/conftest.py` clones the checkout
+and runs `git describe --tags --abbrev=0` on the clone to find the tag the
+upgrade targets; `actions/checkout@v4` defaults to depth 1 with no tags, so the
+clone has no reachable tag and describe exits 128 under `check=True`.
+
+**Options considered**:
+
+1. `fetch-tags: true`, keeping depth 1 — the smaller, cheaper-looking change.
+   **It does not work.** `describe` needs a tag REACHABLE from HEAD, and a
+   depth-1 clone has no ancestor commits, so a tag on any earlier commit stays
+   invisible however many tag refs are fetched. It would only work in the rare
+   case that HEAD is itself tagged — i.e. it would appear to work on a release
+   commit and fail on every other push.
+2. Make the fixture tolerate a tagless repo (synthesise a tag, or skip). This
+   deletes the coverage: the gates exist to upgrade a real installed baseline to
+   a real published tag, and a synthesised tag tests the installer against a
+   version that was never released. Skipping is what hid them for months.
+3. `fetch-depth: 0` — full history and tags. The clone then behaves like any
+   developer checkout, which is the premise the fixture was written against.
+
+**Decision**: option 3. Same principle as Decision 6 — the test's premise is
+"this repository has its history", and the fix is to make that true on the
+runner rather than to weaken what the test asserts. Cost is one full fetch of a
+~1,900-commit repository, which is noise next to a six-minute suite.
+
+Verified by reproducing the runner locally (`git clone --depth 1 --no-tags`,
+four gates fail identically) and then applying the cure (`git fetch --unshallow --tags`, four pass), so neither the diagnosis nor the fix rests on a CI run.
+
+**Date**: 2026-08-17
