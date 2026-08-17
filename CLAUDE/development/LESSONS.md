@@ -65,6 +65,7 @@ dimensions can each be wrong while the gate stays green:
 | Scan roots    | Points at one tree, defect lives in more | `python_var_guidance` scoped to `src/`; 297 hits in `CLAUDE/` etc.                                                                              |
 | File suffixes | Misses a surface that also instructs     | `.py`/`.md` only, so `.sh` scripts printing commands went unseen                                                                                |
 | Pattern       | Matches one spelling of the defect       | `$PYTHON` only, missing `untracked/venv/bin/python` — 65 more <!-- python-var-guidance-exempt: names both banned spellings to contrast them --> |
+| Invocation    | No gate runs it, and a doc says one does | 66 project-handler tests, cited by `gate-scope.bash` as the reason those handlers need no type checking, run by nothing                         |
 
 **Why:** v3.50.0 shipped a release *specifically about* unrunnable guidance, with
 a gate to prevent it, and 371 instances of that same defect survived across all
@@ -84,6 +85,49 @@ Corollary: when a gate flags a case that is genuinely legitimate, prefer
 an output line showing a *command* from one reporting a resolved *value*, which
 removed five false positives without a single exemption. Exemptions must be
 inline and state their reason, so silencing a finding is visible in the diff.
+
+**The invocation dimension is the worst of the four, because the documentation
+argues against you finding it.** `scripts/qa/gate-scope.bash` excludes
+`.claude/project-handlers/` from the mypy gate for a real reason — mypy refuses
+a directory whose name contains a hyphen — and justified it in writing: "Those
+handlers are covered by their own tests and by `validate-project-handlers`."
+The tests existed. Nothing ran them: `pyproject.toml` sets
+`testpaths = ["tests"]`, so `run_tests.sh`, `llm_qa.py` and the CI workflow all
+missed them, and `validate-project-handlers` proves only that the modules
+IMPORT. Two terminal handlers that DENY were unverified by every gate, and the
+note explaining the exclusion was the very thing that discouraged anyone from
+checking.
+
+**Apply:** when a doc justifies an exclusion by citing coverage elsewhere, the
+citation must NAME THE GATE that enforces it. "Covered by its own tests" is not
+a claim about tests existing — it is a claim about a gate running them. If you
+cannot name the gate, you have found a gap, not a justification.
+
+## A verdict published under a key nobody reads is not a verdict
+
+A QA report is consumed by code, and both consumers in this repo resolve a
+report's status identically — `llm_qa.py`'s report resolution and the summary
+block at the end of `run_all.sh` both take `summary["passed_all"]` when it is
+present, and otherwise fall back to `summary["passed"]`.
+
+That fallback is a trap for any TEST RUNNER, because there `summary.passed` is a
+COUNT. A new check published its verdict as a top-level `passed` boolean — a key
+neither consumer looks at — so a run of "60 passed, 1 failed" resolved through
+the fallback to the truthy `60`, and both suites would have printed PASSED on a
+red suite. The check's exit code was correct throughout; only the line a human
+or an agent actually reads was wrong.
+
+**Why it survives review:** the report looks right in isolation, and the happy
+path agrees with the buggy path. Every green run prints PASSED either way, so
+the defect stays invisible until something fails — which is the one moment the
+report matters.
+
+**Apply:** a report's verdict must live under the key its CONSUMERS read, and
+the test must replay the consumers' own resolution rather than asserting the key
+the producer happens to write. `run_tests.sh` publishes `summary.passed_all` for
+exactly this reason; a new test-runner report follows it instead of inventing a
+key. Generalised: when a producer and a consumer disagree about a token, the
+count-only path is the one that goes quietly wrong.
 
 ## No silent fallback — surface errors loudly
 
