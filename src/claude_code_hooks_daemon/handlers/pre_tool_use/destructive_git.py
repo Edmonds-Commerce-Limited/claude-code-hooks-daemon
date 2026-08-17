@@ -252,6 +252,13 @@ class DestructiveGitHandler(Handler):
             'to HEAD". Pushing the branch, or `delete-branch`, both resolve it; the '
             "latter reports this as the `merged-unpushed` tier and deletes it, because "
             "every one of those commits is already in `main`.\n\n"
+            "**A third case, and the most ordinary of the three**: with NO upstream, git "
+            "measures the branch against the checked-out `HEAD` instead — so a branch "
+            "fully merged into `main` is refused whenever you are standing on some other "
+            "branch, which is the normal way you notice a branch needs tidying. Git says "
+            '"not fully merged" and suggests the force delete, which is blocked. '
+            "`delete-branch` reports this as the `merged-not-in-head` tier and deletes "
+            "it; checking out `main` first also resolves it.\n\n"
             "**Abandoning unmerged work is human-gated and you cannot complete it.** "
             "When no proof holds, the branch holds the only copy of real work, so "
             "`--allow-unproven --reason` is not enough: the command also requires a "

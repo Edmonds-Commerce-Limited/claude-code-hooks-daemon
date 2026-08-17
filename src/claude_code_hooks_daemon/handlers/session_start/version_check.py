@@ -30,14 +30,25 @@ _GITHUB_REPO_URL: Final[str] = (
     "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git"
 )
 
-#: ``run_git`` needs a cwd for ``-C``, but ``ls-remote`` talks only to the remote
-#: URL, so which directory it runs in is immaterial. The filesystem root is used
-#: rather than ``Path.cwd()`` because a process whose working directory has been
-#: DELETED makes ``Path.cwd()`` raise ``FileNotFoundError`` — a state this daemon
-#: can create for itself, since it makes and removes worktrees. That raise would
-#: escape a handler documented as unable to raise (Plan 00248 F3). The root
-#: always exists.
-_CWD_IMMATERIAL: Final[Path] = Path("/")
+#: ``run_git`` needs a cwd for ``-C``, and the filesystem root is used rather than
+#: ``Path.cwd()`` because a process whose working directory has been DELETED makes
+#: ``Path.cwd()`` raise ``FileNotFoundError`` — a state this daemon can create for
+#: itself, since it makes and removes worktrees. That raise would escape a handler
+#: documented as unable to raise (Plan 00248 F3). The root always exists.
+#:
+#: The cwd is NOT immaterial, which is what this comment used to claim (Plan 00253
+#: finding E). ``git -C <dir>`` selects which repo-local config applies, and
+#: ``ls-remote`` reads ``url.<base>.insteadOf``, ``http.proxy``, ``http.sslCAInfo``
+#: and ``credential.*`` from it — so running at the root deliberately BYPASSES any
+#: repo-local remote configuration. That is the intended trade here: the URL is a
+#: fixed, known-external one (this project's own GitHub repo), and a client's
+#: repo-local ``insteadOf`` almost always redirects ITS dependencies rather than
+#: this repo, so honouring it would be as likely to send the check to a mirror that
+#: has no such repository. Proxy and CA settings that genuinely need to apply are
+#: conventionally global or system, and those are still read. The cost of the trade
+#: is real but bounded: a project whose repo-local config is load-bearing for
+#: github.com gets no upgrade advisory rather than a wrong one.
+_REMOTE_ONLY_CWD: Final[Path] = Path("/")
 
 
 class VersionCheckHandler(Handler):
@@ -126,10 +137,10 @@ class VersionCheckHandler(Handler):
         # run_git never raises: an absent git binary or a timeout comes back as
         # a non-zero returncode with the reason in stderr, so there is nothing
         # left to catch here. That is only true while nothing else in this
-        # function can raise either — see _CWD_IMMATERIAL for why the cwd is not
-        # `Path.cwd()`.
+        # function can raise either — see _REMOTE_ONLY_CWD for why the cwd is not
+        # `Path.cwd()`, and for what running at the root deliberately bypasses.
         result = run_git(
-            _CWD_IMMATERIAL,
+            _REMOTE_ONLY_CWD,
             "ls-remote",
             "--tags",
             "--refs",

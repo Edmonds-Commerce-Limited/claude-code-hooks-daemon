@@ -103,6 +103,26 @@ def repo(tmp_path: Path) -> Path:
     return path
 
 
+@pytest.fixture
+def remote(tmp_path: Path) -> Path:
+    """A real bare repository to push to.
+
+    Module-level because two test classes had byte-identical copies of it
+    (Plan 00253). A real remote is not a convenience here: without
+    `remote.origin.url` git cannot resolve `<name>@{upstream}` at all, falls back
+    to comparing against HEAD, and the upstream fixtures silently stop reproducing
+    the bug they exist for.
+    """
+    bare = tmp_path / "remote.git"
+    subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        ["git", "init", "--quiet", "--bare", str(bare)],
+        check=True,
+        capture_output=True,
+        env={**_ENV, "HOME": str(tmp_path)},
+    )
+    return bare
+
+
 def _merged_branch(repo: Path, name: str) -> None:
     _git(repo, "checkout", "-b", name)
     _commit(repo, f"{name}.txt", f"{name}\n", f"Add {name}")
@@ -498,17 +518,6 @@ class TestMergedButAheadOfItsOwnUpstream:
     within it every commit is reachable from the protected ref by construction.
     """
 
-    @pytest.fixture
-    def remote(self, tmp_path: Path) -> Path:
-        bare = tmp_path / "remote.git"
-        subprocess.run(  # nosec B603 B607 - trusted system tool, list form
-            ["git", "init", "--quiet", "--bare", str(bare)],
-            check=True,
-            capture_output=True,
-            env={**_ENV, "HOME": str(tmp_path)},
-        )
-        return bare
-
     def test_the_fixture_reproduces_gits_refusal(self, repo: Path, remote: Path) -> None:
         """Precondition. Without this the rest could pass on the wrong shape.
 
@@ -595,6 +604,56 @@ class TestMergedButAheadOfItsOwnUpstream:
         _git(repo, "merge", "--ff-only", "level")
 
         assert classify_branch(repo, "level").tier == TIER_MERGED
+
+
+class TestNonAsciiPathsAreCountedCorrectly:
+    """Plan 00253 finding F: two git commands were speaking different languages.
+
+    `_paths_in_tree` reads `ls-tree` and `_paths_in_history` reads
+    `rev-list --objects`, and the two are set-differenced against each other.
+    `core.quotePath` defaults to ON, so `ls-tree` emitted `"caf\303\251.txt"`
+    where `rev-list` emitted the raw bytes — for ANY non-ASCII path the difference
+    could never be empty, and the "N path(s) are new" count in the message a human
+    reads before abandoning work was wrong.
+
+    Pre-existing, but it used to abort loudly (`UnicodeDecodeError` is a
+    `ValueError`, which the CLI catches) and had become a silent miscount.
+    """
+
+    def test_the_two_listings_agree_on_a_non_ascii_path(self, repo: Path) -> None:
+        """The set difference must be empty for a path present in both."""
+        _commit(repo, "café.txt", "accented\n", "Add an accented path")
+
+        in_tree = branch_safety._paths_in_tree(repo, "main")
+        in_history = branch_safety._paths_in_history(repo, "main")
+
+        assert "café.txt" in in_tree, f"ls-tree must not quote the path: {in_tree}"
+        assert in_tree - in_history == set(), (
+            "a path present in both listings must cancel out, or every "
+            "unique-path count involving it is wrong: "
+            f"tree={in_tree} history={in_history}"
+        )
+
+    def test_a_branch_adding_only_a_non_ascii_path_reports_exactly_one(self, repo: Path) -> None:
+        """End to end: the COUNT the human reads has to be right."""
+        _git(repo, "checkout", "-b", "accents")
+        _commit(repo, "naïve.txt", "unique\n", "Add a genuinely new accented path")
+        _git(repo, "checkout", "main")
+
+        classification = classify_branch(repo, "accents")
+
+        assert classification.unique_paths == ("naïve.txt",), classification.unique_paths
+
+    def test_blob_paths_are_unquoted_too(self, repo: Path) -> None:
+        """These paths are printed to a human, so they must be readable.
+
+        The blob SHA is what the safety proof rests on, so quoting could never
+        change the verdict — but a deny message listing `"caf\303\251.txt"` asks
+        someone to recognise a file they have never seen spelled that way.
+        """
+        _commit(repo, "café.txt", "accented\n", "Add an accented path")
+
+        assert "café.txt" in branch_safety._blobs_in_tree(repo, "main")
 
 
 class TestMergedWhileHeadIsElsewhere:
@@ -694,7 +753,7 @@ class TestMergedWhileHeadIsElsewhere:
         assert classification.tier == TIER_MERGED_NOT_IN_HEAD
         assert classification.is_safe is True
 
-    def test_an_upstream_takes_precedence_over_head(self, repo: Path, tmp_path: Path) -> None:
+    def test_an_upstream_takes_precedence_over_head(self, repo: Path, remote: Path) -> None:
         """When an upstream resolves, git ignores HEAD entirely.
 
         Executed against real git: a branch level with `origin/<name>` is deleted
@@ -702,14 +761,7 @@ class TestMergedWhileHeadIsElsewhere:
         this must stay plain `merged` — escalating it to a force delete would give
         up git's independent re-check for no reason.
         """
-        bare = tmp_path / "precedence.git"
-        subprocess.run(  # nosec B603 B607 - trusted system tool, list form
-            ["git", "init", "--quiet", "--bare", str(bare)],
-            check=True,
-            capture_output=True,
-            env={**_ENV, "HOME": str(tmp_path)},
-        )
-        _add_origin(repo, bare)
+        _add_origin(repo, remote)
         _git(repo, "checkout", "-b", "level")
         _commit(repo, "level.txt", "level\n", "Add level")
         _git(repo, "push", "--quiet", "--set-upstream", "origin", "level")
@@ -739,17 +791,6 @@ class TestAGitRefusalMidBatchIsReportedNotRaised:
     ``delete_argv_for_tier`` back to the safe delete for a merged-unpushed branch
     reproduces exactly the pre-fix argv, and git refuses it for its own reasons.
     """
-
-    @pytest.fixture
-    def remote(self, tmp_path: Path) -> Path:
-        bare = tmp_path / "remote.git"
-        subprocess.run(  # nosec B603 B607 - trusted system tool, list form
-            ["git", "init", "--quiet", "--bare", str(bare)],
-            check=True,
-            capture_output=True,
-            env={**_ENV, "HOME": str(tmp_path)},
-        )
-        return bare
 
     @staticmethod
     def _force_the_safe_delete() -> Any:
@@ -886,22 +927,58 @@ class TestBudgetsSuitTheWorkNotTheHookContext:
         )
         assert budget >= Timeout.GIT_BRANCH_SAFETY
 
-    def test_the_bundle_gets_a_larger_budget_than_the_reads(self) -> None:
+    def test_the_bundle_call_actually_receives_the_larger_budget(self, repo: Path) -> None:
         """The bundle is the heaviest call AND the one that must not be killed.
 
         It is written before any ref is removed, so it is the only copy of the
         work if the delete proceeds. A budget that kills it mid-pack leaves a
         truncated bundle where a recovery is supposed to be.
+
+        This SPIES ON THE CALL rather than comparing the two constants. The
+        original asserted only ``GIT_BUNDLE_CREATE > GIT_BRANCH_SAFETY``, which
+        held no matter what the call site passed — verified by execution:
+        downgrading the ``timeout=`` at the bundle call left 64 tests passing while
+        the docstring there called it the one call "that must not be killed
+        part-way" (Plan 00253 finding C). Same spy shape as
+        ``tests/unit/core/test_claude_md_injector.py``.
         """
-        assert Timeout.GIT_BUNDLE_CREATE > Timeout.GIT_BRANCH_SAFETY
+        _merged_branch(repo, "spent")
+        real = branch_safety.run_git
+        timeouts: dict[str, float] = {}
 
-    def test_a_timed_out_bundle_is_reported_as_a_refusal(self, repo: Path) -> None:
-        """A budget overrun must refuse, not traceback (Plan 00248 F1).
+        def spy(
+            cwd: Path, *args: str, timeout: float = Timeout.GIT_BRANCH_SAFETY
+        ) -> subprocess.CompletedProcess[str]:
+            if args:
+                timeouts[args[0]] = timeout
+            return real(cwd, *args, timeout=timeout)
 
-        ``run_git`` reports an expired timeout as returncode 127, which ``_git``
-        turns into ``CalledProcessError``. The CLI caught only ``ValueError``, so
-        the safety-critical command died with a stack trace instead of the
-        refusal its whole design is built around.
+        with patch.object(branch_safety, "run_git", spy):
+            write_recovery_bundle(repo, ["spent"], repo.parent / "budget.bundle")
+
+        assert "bundle" in timeouts, (
+            "precondition: the bundle call must reach run_git, or this test "
+            "proves nothing: " + repr(timeouts)
+        )
+        assert timeouts["bundle"] == Timeout.GIT_BUNDLE_CREATE, (
+            "the bundle PACKS objects and is the only copy of the work once the "
+            "delete proceeds, so it must not inherit the read budget: " + repr(timeouts)
+        )
+        assert (
+            Timeout.GIT_BUNDLE_CREATE > Timeout.GIT_BRANCH_SAFETY
+        ), "and that budget must actually be the larger of the two"
+
+    def test_a_timed_out_bundle_raises_for_the_cli_to_convert(self, repo: Path) -> None:
+        """A budget overrun must reach the CLI as an exception it can catch.
+
+        Renamed from "...is_reported_as_a_refusal", which described something this
+        test does not assert (Plan 00253 finding D): the refusal conversion lives at
+        the CLI boundary, and deleting that ``except`` clause left this test green.
+        What it does assert — and what the CLI's contract depends on — is that
+        ``run_git``'s returncode 127 arrives here as ``CalledProcessError`` rather
+        than as a silent success. The conversion itself is covered by
+        ``tests/unit/daemon/test_cli_delete_branch.py``'s
+        ``TestAGitFailureIsARefusalNotATraceback``.
         """
         _merged_branch(repo, "spent")
         timed_out = subprocess.CompletedProcess(["git"], 127, "", "timed out")

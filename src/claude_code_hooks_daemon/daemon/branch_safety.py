@@ -97,6 +97,14 @@ _LS_TREE_META_FIELDS = 3
 # refusal reason to report, and the two must not drift apart.
 _HEAD_REF = "HEAD"
 
+# `core.quotePath` defaults to ON, so `ls-tree` emits `"caf\303\251.txt"` while
+# `rev-list --objects` emits the raw bytes. The two are set-differenced against
+# each other, so for ANY non-ASCII path they could never match and the "N path(s)
+# are new" count was wrong (Plan 00253 finding F). Disabling it on the `ls-tree`
+# side makes both listings speak the same language. Verified by execution: the two
+# outputs are byte-identical with this set.
+_NO_QUOTE_PATH: tuple[str, ...] = ("-c", "core.quotePath=false")
+
 
 def delete_argv_for_tier(tier: str | None) -> tuple[str, ...]:
     """Git flags used to delete a branch proven at ``tier``.
@@ -314,8 +322,12 @@ def _unique_commit_count(repo: Path, name: str, protected_ref: str) -> int:
 
 
 def _paths_in_tree(repo: Path, ref: str) -> set[str]:
-    """Every path present in ``ref``'s tip tree."""
-    result = _git(repo, "ls-tree", "-r", "--name-only", ref, check=False)
+    """Every path present in ``ref``'s tip tree.
+
+    Emitted UNQUOTED so it is comparable with :func:`_paths_in_history`, which
+    reads ``rev-list --objects`` — see :data:`_NO_QUOTE_PATH`.
+    """
+    result = _git(repo, *_NO_QUOTE_PATH, "ls-tree", "-r", "--name-only", ref, check=False)
     return {line for line in result.stdout.splitlines() if line}
 
 
@@ -323,9 +335,12 @@ def _blobs_in_tree(repo: Path, ref: str) -> dict[str, str]:
     """Map every path in ``ref``'s tip tree to its blob sha.
 
     Blob sha IS content identity in git: two files with the same sha are
-    byte-identical no matter where they sit or how they got there.
+    byte-identical no matter where they sit or how they got there. The sha is what
+    the safety proof rests on, so quoting cannot affect the VERDICT — but these
+    paths are also printed to a human deciding whether to abandon work, so they
+    are emitted unquoted too (:data:`_NO_QUOTE_PATH`).
     """
-    result = _git(repo, "ls-tree", "-r", ref, check=False)
+    result = _git(repo, *_NO_QUOTE_PATH, "ls-tree", "-r", ref, check=False)
     blobs: dict[str, str] = {}
     for line in result.stdout.splitlines():
         meta, _, path = line.partition("\t")

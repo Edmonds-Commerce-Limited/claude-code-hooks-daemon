@@ -215,25 +215,43 @@ message defect, not a safety defect.
 
 ### Phase 3: Make the two vacuous tests load-bearing (findings C, D)
 
-- [ ] ⬜ **Task 3.1**: Replace the constant comparison with a spy on
+- [x] ✅ **Task 3.1**: Replace the constant comparison with a spy on
   `branch_safety.run_git` asserting the argv/timeout pair, as
-  `tests/unit/core/test_claude_md_injector.py:869-888` already does
-  - [ ] ⬜ Prove it: removing `timeout=Timeout.GIT_BUNDLE_CREATE` must now FAIL
-    (it currently leaves 64 tests passing)
-- [ ] ⬜ **Task 3.2**: Either rename the timed-out test to what it asserts, or move
+  `tests/unit/core/test_claude_md_injector.py` already does
+  - [x] ✅ Proved: the SAME mutation that previously left 64 tests passing now
+    fails exactly one test — the right one
+  - [x] ✅ Kept the constant comparison as a secondary assertion, so the test
+    covers both "the call passes the big budget" and "the big budget is bigger"
+- [x] ✅ **Task 3.2**: Either rename the timed-out test to what it asserts, or move
   the assertion to the CLI boundary where the refusal conversion lives
+  - [x] ✅ Renamed to `test_a_timed_out_bundle_raises_for_the_cli_to_convert`, and
+    its docstring now points at the CLI test class that covers the conversion
 
 ### Phase 4: The two notes (findings E, F)
 
-- [ ] ⬜ **Task 4.1**: Correct the `_CWD_IMMATERIAL` comment — the root
+- [x] ✅ **Task 4.1**: Correct the `_CWD_IMMATERIAL` comment — the root
   deliberately bypasses repo-local remote config — and decide explicitly whether
   to prefer the project root with `Path("/")` as fallback
-- [ ] ⬜ **Task 4.2**: Make the two path listings comparable (`-z` on both sides,
+  - [x] ✅ Renamed to `_REMOTE_ONLY_CWD`, since "immaterial" was the false claim
+  - [x] ✅ Decided to KEEP the root, and recorded the trade in the comment rather
+    than leaving it implicit: the URL is fixed and known-external, a client's
+    repo-local `insteadOf` almost always redirects ITS dependencies (so honouring
+    it is as likely to send the check to a mirror with no such repo), and proxy/CA
+    settings that must apply are conventionally global or system — which are still
+    read. The bounded cost is no advisory rather than a wrong one
+- [x] ✅ **Task 4.2**: Make the two path listings comparable (`-z` on both sides,
   or `-c core.quotePath=false`), with a non-ASCII-path test
-- [ ] ⬜ **Task 4.3**: Deduplicate the copied test setup the review flagged — the
-  12-line block at `test_claude_md_injector.py:852-864` duplicating `:803-815`,
-  and the byte-identical `remote` fixture at `test_branch_safety.py:485-493` and
-  `:597-605`
+  - [x] ✅ `-c core.quotePath=false` on both `ls-tree` calls; verified by execution
+    that the two outputs are then byte-identical
+  - [x] ✅ Three tests, and all three fail with the flag removed
+- [x] ✅ **Task 4.3**: Deduplicate the copied test setup the review flagged — the
+  12-line block in `test_claude_md_injector.py` and the byte-identical `remote`
+  fixture in two `test_branch_safety.py` classes
+  - [x] ✅ `_seed_repo_without_a_claude_md` extracted; it also pins `commit.gpgsign`
+    and `tag.gpgsign` off, which is the live sibling of the ambient-premise class
+    the review found in exactly these two files (Plan 00252 owns the guard)
+  - [x] ✅ `remote` promoted to a module-level fixture — including in the test I
+    had just written, which had quietly become a third copy
 
 ### Phase 5: Verify
 
