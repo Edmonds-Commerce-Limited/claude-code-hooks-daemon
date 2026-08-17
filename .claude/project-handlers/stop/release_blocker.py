@@ -40,6 +40,19 @@ The one place the guard must stand down is where RELEASING.md requires the
 agent to stop: with prep complete and `publish_authorised` still false, the
 only correct next action is to ask a human. Denying that Stop would forbid it.
 
+WHAT THIS TRADES AWAY. RELEASING.md also documents a "Manual Release (Bypass
+Skill)" sequence that writes no state file, and on that path this handler is
+inert. That is accepted deliberately: `CLAUDE.md` forbids manual releases
+outright, `/release` is required to write the state file as its FIRST action,
+and building the guard around the forbidden path is precisely what produced
+the false positives. A guard aimed at a path nobody may take costs real
+sessions and protects nothing.
+
+Resolving the project root before the event's `cwd` also closes a latent
+trapped-OPEN case: an agent running in `.claude/worktrees/<name>/` has a cwd
+whose `untracked/` is empty, so a cwd-first lookup would find no state file
+during a genuine release and wave the session through.
+
 Priority: 8 — BELOW this project's AutoContinueStop, which is terminal.
 
 That number is not arbitrary and must not be raised. AutoContinueStop is
@@ -199,12 +212,21 @@ class ReleaseBlockerHandler(Handler):
         An absent or non-integer step counter is treated as prep still running:
         the guard stays active, and that cannot trap the session because prep
         can be carried forward.
+
+        Only a real boolean counts as consent. ``bool()`` would not do here:
+        ``bool("false")`` is True, so a STRING in that field would be read as
+        authorisation granted, and the handler would go on denying the very Stop
+        the agent needs in order to ask a human. Anything that is not a boolean
+        is absence of consent — which is also the documented default.
         """
         step = state.get(self._FIELD_LAST_COMPLETED_STEP)
         if not isinstance(step, int):
             return False
 
-        authorised = bool(state.get(self._FIELD_PUBLISH_AUTHORISED, False))
+        authorised = state.get(self._FIELD_PUBLISH_AUTHORISED)
+        if not isinstance(authorised, bool):
+            authorised = False
+
         return step >= self.PREP_COMPLETE_STEP and not authorised
 
     def matches(self, hook_input: dict) -> bool:

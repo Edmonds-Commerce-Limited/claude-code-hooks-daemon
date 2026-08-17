@@ -239,6 +239,40 @@ class TestPublishAuthorisationGate:
         with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
             assert handler.matches({}) is True
 
+    def test_a_non_boolean_authorisation_is_not_authorisation(self, tmp_path: Path) -> None:
+        """A malformed field must never read as consent, and must never trap.
+
+        ``bool("false")`` is True, so a STRING in this field would be taken as
+        authorisation granted. The handler would then keep denying the Stop —
+        denying the very stop the agent needs in order to ask a human, with prep
+        already complete. Only a real boolean counts as consent; anything else
+        is absence of consent, which stands the handler down.
+        """
+        _write_state(
+            tmp_path,
+            last_completed_step=ReleaseBlockerHandler.PREP_COMPLETE_STEP,
+            publish_authorised="false",
+        )
+
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is False
+
+    def test_a_missing_authorisation_field_is_not_authorisation(self, tmp_path: Path) -> None:
+        """Absent means "not granted", which is the documented default."""
+        state_path = _write_state(
+            tmp_path, last_completed_step=ReleaseBlockerHandler.PREP_COMPLETE_STEP
+        )
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        del state["publish_authorised"]
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is False
+
     def test_a_missing_step_counter_is_treated_as_prep(self, tmp_path: Path) -> None:
         """Unknown progress means the release is unfinished, so guard it.
 
@@ -249,6 +283,60 @@ class TestPublishAuthorisationGate:
         state = json.loads(state_path.read_text(encoding="utf-8"))
         del state["last_completed_step"]
         state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is True
+
+
+class TestMalformedStateFallsToTheGuardActiveSide:
+    """Content that parses but does not conform keeps the guard ON.
+
+    That direction is safe only because two other properties hold, and both are
+    worth stating: prep can always be carried forward, so a DENY leaves the
+    agent something to do; and `stop_hook_active` short-circuits re-entry, so a
+    denied Stop costs one turn rather than trapping the session.
+
+    Unreadable or unparseable content is different — there the handler cannot
+    tell a release from a stray file, so it stands down. See TestFailSafe.
+    """
+
+    def test_an_empty_state_object_is_a_release_in_flight(self, tmp_path: Path) -> None:
+        """`{}` is valid JSON and its PRESENCE is the signal.
+
+        RELEASING.md: "State file present => a release IS authorised." The file
+        carries no version and no step, but the fact of it is what the document
+        makes load-bearing, so the guard holds.
+        """
+        directory = tmp_path.joinpath(*ReleaseBlockerHandler.RELEASE_STATE_PARTS[:-1])
+        directory.mkdir(parents=True, exist_ok=True)
+        tmp_path.joinpath(*ReleaseBlockerHandler.RELEASE_STATE_PARTS).write_text(
+            "{}", encoding="utf-8"
+        )
+
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is True
+
+    def test_a_string_step_counter_keeps_the_guard_on(self, tmp_path: Path) -> None:
+        """`"13"` is not an int, so it cannot be compared against the boundary."""
+        _write_state(tmp_path, last_completed_step="13", publish_authorised=False)
+
+        handler = ReleaseBlockerHandler()
+
+        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
+            assert handler.matches({}) is True
+
+    def test_a_float_step_counter_keeps_the_guard_on(self, tmp_path: Path) -> None:
+        """`13.0` reads as prep-complete to a human but is not an int.
+
+        Pinned so the behaviour is deliberate rather than incidental: a JSON
+        writer emitting a float here is malformed, and the guard-active side is
+        the side that cannot lose a release.
+        """
+        _write_state(tmp_path, last_completed_step=13.0, publish_authorised=False)
 
         handler = ReleaseBlockerHandler()
 
