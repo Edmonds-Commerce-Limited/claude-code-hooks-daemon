@@ -131,10 +131,14 @@ a sweep.
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Daemon restart verification — RUNNING, no errors in log
-- [ ] ⬜ **Task 4.2**: Full QA suite green
-- [ ] ⬜ **Task 4.3**: Confirm by measurement that a daemon start and a prompt no
-  longer rewrite `.git/index`
+- [x] ✅ **Task 4.1**: Daemon restart verification — RUNNING, no errors in log
+  (both `error` hits are a handler NAME and a logged command string)
+- [x] ✅ **Task 4.2**: Full QA suite green — 23/23, 12,419 tests, coverage 95.1%
+- [x] ✅ **Task 4.3**: Confirm by measurement that a daemon start, a status
+  render and a prompt no longer rewrite `.git/index` — driven through the
+  production hook wrappers, zero rewrites, no lock left behind
+- [ ] 🔄 **Task 4.4**: Act on the independent review of the change set (findings
+  get fixed or tracked, never dropped)
 
 ## Dependencies
 
