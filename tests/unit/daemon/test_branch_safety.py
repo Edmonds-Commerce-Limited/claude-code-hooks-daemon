@@ -606,6 +606,95 @@ class TestMergedButAheadOfItsOwnUpstream:
         assert classify_branch(repo, "level").tier == TIER_MERGED
 
 
+class TestARefusalCarriesItsDiagnosis:
+    """Plan 00253: once the predicate mirrors git, a refusal IS a bug report.
+
+    With both axes of git's rule covered (upstream, Plan 00249; HEAD, Plan 00253),
+    a `-d` refusal at delete time means our model disagreed with git. Two things
+    cause that: a concurrent change between classification and deletion, or a
+    residual gap in the predicate. Reporting the fact without the diagnosis makes
+    every occurrence a puzzle rather than something actionable.
+
+    The concurrent case is REPRODUCED here rather than reasoned about, and it
+    revealed why the advice must be "re-run", never "force": git's refusal is the
+    only thing protecting the peer's commit, because the recovery bundle was
+    written before that commit existed.
+    """
+
+    def test_a_concurrent_commit_makes_git_refuse_and_the_report_says_so(
+        self, repo: Path
+    ) -> None:
+        """A peer advances a branch between classification and its delete."""
+        for name in ("first", "victim"):
+            _merged_branch(repo, name)
+        real_argv = branch_safety.delete_argv_for_tier
+        advanced = {"done": False}
+
+        def advance_victim_once(tier: str | None) -> tuple[str, ...]:
+            # Called inside the loop immediately before each delete — exactly the
+            # window a parallel agent in this checkout occupies.
+            if not advanced["done"]:
+                advanced["done"] = True
+                _git(repo, "checkout", "victim")
+                _commit(repo, "peer.txt", "peer work\n", "A peer's unmerged commit")
+                _git(repo, "checkout", "main")
+            return real_argv(tier)
+
+        bundle = repo.parent / "concurrent.bundle"
+        with patch.object(branch_safety, "delete_argv_for_tier", advance_victim_once):
+            report = delete_branches(repo, ["first", "victim"], bundle_path=bundle)
+
+        assert report.deleted == ("first",), "the untouched branch must still go"
+        assert report.refused is True
+        assert "victim" in report.blockers[0]
+        assert "victim" in _local_branches(repo), (
+            "git's own re-check must have saved the peer's commit — this is the "
+            "case where deferring to `-d` is not redundant"
+        )
+
+    def test_the_bundle_predates_the_concurrent_commit(self, repo: Path) -> None:
+        """Why the advice is re-run, not force.
+
+        The bundle is written before the loop, so a commit that arrives DURING the
+        loop is not in it. Forcing past the refusal would therefore destroy work
+        that the recovery route does not cover — the one situation in this module
+        where the bundle is not a complete safety net.
+        """
+        _merged_branch(repo, "victim")
+        bundle = repo.parent / "stale.bundle"
+        write_recovery_bundle(repo, ["victim"], bundle)
+        bundled_tip = _git(repo, "rev-parse", "victim").strip()
+
+        _git(repo, "checkout", "victim")
+        _commit(repo, "peer.txt", "peer work\n", "A peer's unmerged commit")
+        _git(repo, "checkout", "main")
+        new_tip = _git(repo, "rev-parse", "victim").strip()
+
+        listing = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+            ["git", "bundle", "list-heads", str(bundle)],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+
+        assert new_tip != bundled_tip, "precondition: the peer moved the branch"
+        assert bundled_tip in listing
+        assert new_tip not in listing, (
+            "the bundle must NOT contain the later commit — this is the fact the "
+            "refusal diagnosis warns the reader about"
+        )
+
+    def test_the_diagnosis_names_both_causes_and_forbids_forcing(self) -> None:
+        """The text is the deliverable, so assert what it must carry."""
+        text = branch_safety._REFUSAL_DIAGNOSIS.lower()
+
+        assert "concurrent" in text, "cause 1: something moved mid-run"
+        assert "re-run" in text, "and how to distinguish it"
+        assert "gap" in text, "cause 2: a predicate gap worth reporting"
+        assert "bundle" in text, "and that the bundle may not cover the change"
+        assert "do not force" in text
+
+
 class TestNonAsciiPathsAreCountedCorrectly:
     """Plan 00253 finding F: two git commands were speaking different languages.
 

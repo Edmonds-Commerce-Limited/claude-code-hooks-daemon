@@ -33,110 +33,10 @@ only recovery route for the branch it did delete.
 | E   | NOTE       | `handlers/…/version_check.py:33-40` | Correct fix, false stated reason; narrow behaviour change           |
 | F   | NOTE       | `daemon/branch_safety.py:387-399`   | `ls-tree` quotes paths, `rev-list --objects` does not — miscount    |
 
-### A — reproduced: `tier=merged`, `is_safe=True`, and git refuses
-
-`_is_merged_into_its_upstream` returns `True` when no upstream resolves, on the
-stated grounds that "git then falls back to HEAD, which the caller's ancestry
-proof already covers". The caller's proof is against `protected_ref` (default
-`main`), **not** HEAD, so the fallback is not covered at all.
-
-Executed against real git — branch `done` merged into `main`, HEAD on `work`,
-`done` with no upstream:
-
-```
-done in main? : True        done in HEAD? : False      upstream: (rev-parse exit 128)
-CLASSIFIER  tier='merged' is_safe=True
-            detail='tip is an ancestor of the protected ref — nothing can be lost'
-            argv=('branch', '--delete')
-REAL GIT    exit=1  error: The branch 'done' is not fully merged.
-            branch still present: True
-```
-
-This is the exact dry-run/real-run contradiction Plan 00249 was opened to
-remove, reappearing on the HEAD axis rather than the upstream axis — both come
-from git's single `branch_merged()` rule. The trigger is an ordinary workflow:
-tidying a merged branch while standing on another one.
-
-It also dead-ends the agent: `-d` refuses, `delete-branch` refuses, and
-`git branch -D` is denied by `destructive_git` — so the guidance at
-`handlers/pre_tool_use/destructive_git.py:248` ("that specific gap is what
-`delete-branch` fills") now has a third refusal reason it does not fill.
-
-Pre-diff this state crashed, so the diff did improve it. The label and the dry
-run are still wrong.
-
-### B — reproduced end to end: three inaccuracies in one message
-
-`delete_branches` (`branch_safety.py:555-578`) deliberately allows
-`refused=True` with a non-empty `deleted`, and deliberately KEEPS the bundle when
-something was deleted. The CLI was not updated for that: `if report.refused:`
-prints a hard-coded "REFUSED — nothing was deleted." and returns 1 at `:3024`,
-before the bundle disclosure at `:3030-3033`.
-
-Executed through the real `cmd_delete_branch` (only the project-marker lookup
-stubbed) with one `merged-unpushed` branch that force-deletes plus one
-plain-`merged` branch that git refuses via F-A:
-
-```
-CLI exit=1
-stderr: REFUSED — nothing was deleted. Blockers:
-          - done: git refused the delete (proven merged) — …not fully merged.
-        …re-run with --allow-unproven and --reason…
-GROUND TRUTH
-  branches now       : ['done', 'main', 'work']      <- 'shipped' IS gone
-  bundle on disk     : True  829 bytes
-  bundle path shown  : False
-```
-
-So: a branch WAS deleted; the only recovery route for it is withheld; and the
-remediation offered is irrelevant because no tier was `unproven`.
-`--format json` is correct (`:2978-2979`), so only the human path lies.
-
-### C and D — two tests that cannot fail for the reason they name
-
-C: `test_the_bundle_gets_a_larger_budget_than_the_reads` asserts only
-`Timeout.GIT_BUNDLE_CREATE > Timeout.GIT_BRANCH_SAFETY`. It names neither
-`write_recovery_bundle` nor `run_git`, and that assertion is the ONLY mention of
-the constant anywhere under `tests/`. Verified by execution: downgrading the call
-site at `:417` to the read budget leaves **64 tests passing** — while the
-docstring at `:412-414` calls that call the one "that must not be killed
-part-way".
-
-D: `test_a_timed_out_bundle_is_reported_as_a_refusal` asserts
-`pytest.raises(subprocess.CalledProcessError)` — the raise, not a refusal. The
-refusal conversion lives at `cli.py:2957`; deleting that `except` clause leaves
-this test passing. It re-tests `_git`'s pre-existing raise-on-nonzero.
-
-### E — the fix is right, the comment is not
-
-`_CWD_IMMATERIAL = Path("/")` correctly stops `Path.cwd()` raising
-`FileNotFoundError` in a deleted working directory. But the comment asserts
-"which directory it runs in is immaterial", and that is false: `git -C <dir>`
-selects which repo-local config applies, and `ls-remote` reads
-`url.<base>.insteadOf`, `http.proxy`, `http.sslCAInfo` and `credential.*` from
-it. A project with a repo-local mirror or proxy silently loses it, and the
-upgrade advisory just goes quiet.
-
-### F — the mechanism is quoting, not decoding (correction to the report)
-
-The report attributed this to `errors="replace"` turning raw non-UTF-8 bytes into
-U+FFFD. Executed, the cause is narrower and broader at once — it is
-`core.quotePath`, and it bites for **any** non-ASCII path, valid UTF-8 included:
-
-```
-ls-tree           -> b'"caf\\303\\251.txt"'     (octal-escaped AND quoted)
-rev-list --objects -> b'…sha caf\xc3\xa9.txt'   (raw)
-the two path texts MATCH: False
-```
-
-So `_paths_in_tree` (`ls-tree`) and `_paths_in_history` (`rev-list --objects`)
-can never agree on a non-ASCII path, and the `"{len(unique_paths)} path(s) are new"` message at `:399` miscounts. Pre-existing, but pre-diff it aborted loudly
-(`UnicodeDecodeError` is a `ValueError`, caught at `cli.py:2954` → exit 2); it is
-now a silent miscount in the text a human reads before abandoning work.
-
-The report's own verification that `_reachable_object_shas` is byte-identical was
-re-confirmed as sound: the safety-critical content proof is unaffected. This is a
-message defect, not a safety defect.
+Per-finding evidence — the reproductions, the exact classifier and git output,
+and the correction to the report's finding-F mechanism — is in
+[FINDINGS.md](FINDINGS.md). It is durable detail rather than current truth, so
+it lives beside the plan instead of inside it.
 
 ## Goals
 
@@ -292,6 +192,56 @@ so one option is to treat a partial success as success.
 would hide that from any script. The defect is the message asserting "nothing was
 deleted" and suppressing the bundle path — fix the words and the disclosure, keep
 the status.
+
+**Date**: 2026-08-17
+
+### Decision 3: keep continue-and-report; change the SIGNAL, not the loop
+
+**Context**: a mid-loop git refusal currently continues through the remaining
+branches and reports what happened. The alternative is to abort on the first
+refusal. Put to the reviewer as the one thing this plan had not interrogated.
+
+**Decision**: keep continuing. The load-bearing reasons, each checked here rather
+than accepted:
+
+- **Stopping buys no atomicity.** A ref removed before the refusal stays removed
+  either way, so the choice is between two mixed states, not between a mixed one
+  and a clean one.
+- **Stopping makes the surviving set depend on argument ORDER.** Same repo, same
+  proofs, `delete-branch a b c` and `c b a` would leave different branches behind.
+  Continuing is order-independent.
+- **Continuing adds no unrecoverable exposure.** Verified by reading
+  `delete_branches`: the bundle is written for EVERY classified branch before any
+  ref is removed, so recovery coverage is uniform and does not depend on how far
+  the loop got.
+- **A refusal does not invalidate the remaining classifications.** A remaining
+  `-d` tier is predicted by the same predicate and git will independently refuse it
+  too (reported, nothing lost); a remaining `-D` tier rests on this project's own
+  patch-id/blob-sha proof, which git never consults, so git's opinion about branch
+  N carries no information about branch N+1.
+- **Aborting on a transient is the worse failure.** This project deliberately runs
+  parallel agents in one checkout, so a peer touching one branch would abort a
+  legitimate multi-branch cleanup.
+
+**What changed instead**: the blocker now carries a DIAGNOSIS, not just the fact.
+Once the predicate mirrors git on both axes, a refusal means our model disagreed
+with git, and there are exactly two causes — a concurrent change, or a predicate
+gap. Naming both and how to distinguish them turns each occurrence into a bug
+report: DBF applied to the guard's OUTPUT rather than its control flow.
+
+**Date**: 2026-08-17
+
+### Decision 4: exit code marks "not what you asked for", JSON carries the detail
+
+**Context**: on a partial batch the exit code alone cannot distinguish "nothing
+went" from "two of three went" — only `--format json` carries `deleted`.
+
+**Decision**: the exit stays non-zero (a batch that did not do what was asked must
+not exit 0), and the asymmetry is recorded rather than left implicit: **a scripted
+caller must parse `--format json` to act on a partial, and must not read the
+non-zero exit as "no change to the repository".** The text path now says
+`PARTIALLY REFUSED` and names what went, so a human reading stderr is not misled;
+the constraint is on machine callers only.
 
 **Date**: 2026-08-17
 

@@ -105,6 +105,26 @@ _HEAD_REF = "HEAD"
 # outputs are byte-identical with this set.
 _NO_QUOTE_PATH: tuple[str, ...] = ("-c", "core.quotePath=false")
 
+# Appended to every "git refused the delete" blocker. Once the predicate mirrors
+# git's rule on BOTH axes (Plan 00249 upstream, Plan 00253 HEAD), a refusal at
+# this point means our model of git's own rule disagreed with git — and there are
+# exactly two ways that happens. Reporting the FACT without the DIAGNOSIS makes
+# every occurrence a puzzle instead of a bug report, so the text names both causes
+# and how to tell them apart.
+#
+# The concurrent case is REPRODUCED, not theorised: advancing a branch with an
+# unmerged commit between `classify_branch` and the delete makes git refuse, and
+# git's refusal is then the ONLY thing protecting that commit — the bundle was
+# written before it existed, so its head predates the peer's work. That is why the
+# advice is to re-run rather than to force.
+_REFUSAL_DIAGNOSIS = (
+    "This means our model of git's delete rule disagreed with git. Either the "
+    "branch or its upstream MOVED since it was classified (a concurrent agent in "
+    "this checkout — re-run; note the recovery bundle predates that change, so it "
+    "does NOT cover work added since), or this is a gap in the daemon's predicate "
+    "and is worth reporting upstream. Do not force the delete to get past it."
+)
+
 
 def delete_argv_for_tier(tier: str | None) -> tuple[str, ...]:
     """Git flags used to delete a branch proven at ``tier``.
@@ -612,6 +632,7 @@ def delete_branches(
         failures.append(
             f"{classification.name}: git refused the delete "
             f"(proven {classification.tier}) — {result.stderr.strip() or 'no detail'}"
+            f"\n      {_REFUSAL_DIAGNOSIS}"
         )
 
     if failures:
