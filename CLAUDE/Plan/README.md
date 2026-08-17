@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00254: delete-branch must re-check a tip it proved](00254-delete-branch-tip-recheck-before-delete/PLAN.md) - In Progress (peer finding, re-verified: nothing re-reads a branch tip between the proof and the delete, so a commit arriving during the pre-loop bundle write is deleted silently on the four force tiers; the peer's compare-and-swap remedy was rejected by execution because it bypasses git's other-worktree refusal)
+- [00254: delete-branch must re-check a tip it proved](00254-delete-branch-tip-recheck-before-delete/PLAN.md) - In Progress (a commit arriving between the proof and the delete was deleted silently on the four force tiers)
 - [00252: guards for premises no write-time hook sees](00252-guards-for-premises-no-write-time-hook-sees/PLAN.md) - Not Started (two defects, one argument from Core Standard 15's corollary: the ambient-git-premise class Plan 00245 fixed seven times by hand without a guard, and the fact that no guard inspects STAGED CONTENT for secret-list terms, so a file arriving by `mv` reached a pushed commit)
 - [00250: CI must actually run the acceptance gates it calls blocking](00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Not Started (Plan 00245's `-rs` flag named 11 acceptance tests that have skipped on every CI run for want of a daemon socket, three of the files being ones `RELEASING.md` Step 12.0 declares BLOCKING)
 - [00243: make the acceptance playbook deterministically executable](00243-deterministic-acceptance-playbook-harness/PLAN.md) - In Progress (Phase 4's doc-snippet guard is delivered and found 8 real defects; the harness phases remain)
@@ -163,7 +163,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
-- [00253: Plan 00249 review findings](Completed/00253-plan-00249-review-findings/PLAN.md) - Complete at `c2a62f84` + the commit that archives it (peer review of the 00248+00249 diff; all six findings re-verified by execution before any fix, and one had its mechanism widened by that re-verification; the two blocking ones were a dry run promising a delete git refuses when HEAD is elsewhere, and a partial batch claiming "nothing was deleted" while hiding the bundle)
+- [00253: Plan 00249 review findings](Completed/00253-plan-00249-review-findings/PLAN.md) - Complete at `c2a62f84` + the commit that archives it (six peer-review findings, all re-verified by execution before any fix)
 
 - [00251: tdd_enforcement needs an exclusion escape and a declarable test root](Completed/00251-tdd-enforcement-exclude-paths-and-test-roots/PLAN.md) - Complete at `35b9d4e4` + the commit that archives it (field report, one finding of three misdiagnosed; `exclude_paths` on the two handlers Plan 00150 deferred, plus `test_path_map` so a project declares a test root instead of exempting it)
 
