@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     REFUSAL_WORKTREE,
     TIER_CONTENT_PRESERVED,
     TIER_MERGED,
+    TIER_MERGED_NOT_IN_HEAD,
     TIER_MERGED_UNPUSHED,
     TIER_PATCH_EQUIVALENT,
     TIER_UNPROVEN,
@@ -107,6 +108,22 @@ def _merged_branch(repo: Path, name: str) -> None:
     _commit(repo, f"{name}.txt", f"{name}\n", f"Add {name}")
     _git(repo, "checkout", "main")
     _git(repo, "merge", "--ff-only", name)
+
+
+def _merged_but_head_is_elsewhere(repo: Path, name: str) -> None:
+    """Merged into ``main``, no upstream, and HEAD left on ANOTHER branch.
+
+    The state every existing fixture in this module structurally cannot produce:
+    each returns to ``main`` before classifying, so ``HEAD`` always contains the
+    branch under test and git's HEAD fallback is never exercised. Leaving HEAD on
+    a branch that does NOT contain it is the whole point (Plan 00253).
+    """
+    _git(repo, "checkout", "-b", name)
+    _commit(repo, f"{name}.txt", f"{name}\n", f"Add {name}")
+    _git(repo, "checkout", "main")
+    _git(repo, "merge", "--no-ff", "-m", f"Merge {name}", name)
+    # A sibling branch rooted BEFORE the merge, so it cannot contain `name`.
+    _git(repo, "checkout", "-b", f"{name}-elsewhere", "HEAD~1")
 
 
 def _unproven_branch(repo: Path, name: str) -> None:
@@ -578,6 +595,136 @@ class TestMergedButAheadOfItsOwnUpstream:
         _git(repo, "merge", "--ff-only", "level")
 
         assert classify_branch(repo, "level").tier == TIER_MERGED
+
+
+class TestMergedWhileHeadIsElsewhere:
+    """Plan 00253: git's OTHER reference, and the axis Plan 00249 left open.
+
+    Git applies one rule with two references, and the choice is exclusive: an
+    upstream that resolves is used alone, and ``HEAD`` is the sole reference when
+    none does. Plan 00249 closed the upstream axis and returned "git will accept
+    it" for every upstream-less branch, on the grounds that git falls back to
+    ``HEAD`` and our ancestry proof already covers that.
+
+    It does not. Our proof is against ``protected_ref``, which is not ``HEAD``
+    whenever another branch is checked out — an ordinary workflow, since tidying a
+    merged branch usually happens from somewhere else. So ``--dry-run`` reported
+    "nothing can be lost" and the real run failed: the same contradiction, on the
+    other axis.
+
+    Every reference in these assertions was established by executing real git, not
+    read off the documentation.
+    """
+
+    def test_the_fixture_reproduces_gits_refusal(self, repo: Path) -> None:
+        """Precondition. Without it the rest asserts a shape that does not exist."""
+        _merged_but_head_is_elsewhere(repo, "done")
+
+        ancestry = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+            ["git", "-C", str(repo), "merge-base", "--is-ancestor", "done", "main"],
+            check=False,
+            capture_output=True,
+            env={**_ENV, "HOME": str(repo)},
+        )
+        refusal = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+            ["git", "-C", str(repo), "branch", "--delete", "done"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**_ENV, "HOME": str(repo)},
+        )
+
+        assert ancestry.returncode == 0, "fixture must be merged into the protected ref"
+        assert refusal.returncode != 0, (
+            "fixture no longer reproduces git's refusal, so every assertion "
+            "below is about a shape that does not exist: " + refusal.stderr
+        )
+        assert "not fully merged" in refusal.stderr
+
+    def test_it_is_not_classified_as_plain_merged(self, repo: Path) -> None:
+        """`merged` promises the SAFE delete will work. Here it will not."""
+        _merged_but_head_is_elsewhere(repo, "done")
+
+        assert classify_branch(repo, "done").tier == TIER_MERGED_NOT_IN_HEAD
+
+    def test_it_is_still_safe_to_delete(self, repo: Path) -> None:
+        """The ancestry proof is untouched, so the verdict must stay `safe`."""
+        _merged_but_head_is_elsewhere(repo, "done")
+
+        assert classify_branch(repo, "done").is_safe is True
+
+    def test_the_detail_blames_head_and_not_a_missing_push(self, repo: Path) -> None:
+        """A wrong explanation is the defect, not a rounding error.
+
+        Reusing `merged-unpushed` here would tell the user to push commits that
+        have nothing to do with the refusal — and there is no upstream to push to.
+        """
+        _merged_but_head_is_elsewhere(repo, "done")
+
+        detail = classify_branch(repo, "done").detail
+
+        assert "HEAD" in detail
+        assert "no upstream" in detail
+        assert "push" not in detail.lower()
+
+    def test_the_delete_actually_succeeds(self, repo: Path) -> None:
+        """The dry run and the real run must now agree."""
+        _merged_but_head_is_elsewhere(repo, "done")
+
+        report = delete_branches(repo, ["done"], bundle_path=None)
+
+        assert report.refused is False, report.blockers
+        assert report.deleted == ("done",)
+        assert "done" not in _local_branches(repo)
+
+    def test_a_detached_head_is_the_same_case(self, repo: Path) -> None:
+        """Verified against git: a detached HEAD refuses exactly as an attached one.
+
+        `HEAD` resolves to the detached commit, so one expression covers both — but
+        only a test proves the code did not special-case `symbolic-ref`.
+        """
+        _git(repo, "checkout", "-b", "done")
+        _commit(repo, "done.txt", "done\n", "Add done")
+        _git(repo, "checkout", "main")
+        _git(repo, "merge", "--no-ff", "-m", "Merge done", "done")
+        _git(repo, "checkout", "--detach", "HEAD~1")
+
+        classification = classify_branch(repo, "done")
+
+        assert classification.tier == TIER_MERGED_NOT_IN_HEAD
+        assert classification.is_safe is True
+
+    def test_an_upstream_takes_precedence_over_head(self, repo: Path, tmp_path: Path) -> None:
+        """When an upstream resolves, git ignores HEAD entirely.
+
+        Executed against real git: a branch level with `origin/<name>` is deleted
+        with only a "has been merged to" warning even while absent from HEAD. So
+        this must stay plain `merged` — escalating it to a force delete would give
+        up git's independent re-check for no reason.
+        """
+        bare = tmp_path / "precedence.git"
+        subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+            ["git", "init", "--quiet", "--bare", str(bare)],
+            check=True,
+            capture_output=True,
+            env={**_ENV, "HOME": str(tmp_path)},
+        )
+        _add_origin(repo, bare)
+        _git(repo, "checkout", "-b", "level")
+        _commit(repo, "level.txt", "level\n", "Add level")
+        _git(repo, "push", "--quiet", "--set-upstream", "origin", "level")
+        _git(repo, "checkout", "main")
+        _git(repo, "merge", "--no-ff", "-m", "Merge level", "level")
+        _git(repo, "checkout", "-b", "elsewhere", "HEAD~1")
+
+        assert classify_branch(repo, "level").tier == TIER_MERGED
+        assert delete_argv_for_tier(TIER_MERGED) == ("branch", "--delete")
+
+    def test_the_common_case_is_untouched(self, repo: Path) -> None:
+        """HEAD on the protected ref must still delegate to git's safe delete."""
+        _merged_branch(repo, "ordinary")
+
+        assert classify_branch(repo, "ordinary").tier == TIER_MERGED
 
 
 class TestAGitRefusalMidBatchIsReportedNotRaised:

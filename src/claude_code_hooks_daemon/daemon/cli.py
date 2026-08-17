@@ -3010,17 +3010,44 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
                 print(f"      ... and {remaining} more file(s) with unique content")
 
     if report.refused:
-        print("\nREFUSED — nothing was deleted. Blockers:", file=sys.stderr)
+        # `refused` does NOT imply nothing happened. Plan 00249 made a partial
+        # batch a real outcome — git can decline one branch after others are
+        # already gone — and deliberately KEEPS the bundle in that case because it
+        # is then the recovery route. This branch printed a hard-coded "nothing was
+        # deleted" and returned before the bundle disclosure below, so it could
+        # assert three untruths at once: that a deleted branch survived, that no
+        # bundle existed, and that `--allow-unproven` was the remedy when nothing
+        # was unproven (Plan 00253).
+        if report.deleted:
+            print(
+                f"\nPARTIALLY REFUSED — {len(report.deleted)} branch(es) were "
+                f"deleted before the refusal: {', '.join(report.deleted)}",
+                file=sys.stderr,
+            )
+        else:
+            print("\nREFUSED — nothing was deleted.", file=sys.stderr)
+        print("Blockers:", file=sys.stderr)
         for blocker in report.blockers:
             print(f"  - {blocker}", file=sys.stderr)
-        print(
-            "\nA branch whose content cannot be proven recoverable is not "
-            "deleted by default. Read the unique paths above, then re-run with "
-            "--allow-unproven and --reason. Those flags declare intent; "
-            "abandoning unmerged work also needs a human to consent at an "
-            "interactive terminal, so an agent cannot complete this alone.",
-            file=sys.stderr,
-        )
+        if report.bundle:
+            # The ONLY recovery route for whatever was deleted above. Printed to
+            # stderr so it travels with the refusal a human is reading.
+            print(f"\nRecovery bundle: {report.bundle}", file=sys.stderr)
+            print(
+                f"  restore with: git fetch {report.bundle} <branch>:<branch>",
+                file=sys.stderr,
+            )
+        if any(c.tier == TIER_UNPROVEN for c in report.classifications):
+            # Only advise the escape hatch when it actually applies. Offering it
+            # for a git refusal sends the reader to flags that cannot help.
+            print(
+                "\nA branch whose content cannot be proven recoverable is not "
+                "deleted by default. Read the unique paths above, then re-run with "
+                "--allow-unproven and --reason. Those flags declare intent; "
+                "abandoning unmerged work also needs a human to consent at an "
+                "interactive terminal, so an agent cannot complete this alone.",
+                file=sys.stderr,
+            )
         return 1
 
     if args.dry_run:

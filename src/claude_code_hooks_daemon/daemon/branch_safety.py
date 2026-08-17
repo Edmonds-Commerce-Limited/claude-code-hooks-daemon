@@ -65,6 +65,12 @@ TIER_UNPROVEN = "unproven"
 #: delete refuses it, so it needs a different flag and a different explanation
 #: (Plan 00249).
 TIER_MERGED_UNPUSHED = "merged-unpushed"
+#: Merged into the protected ref, has NO upstream, and is not an ancestor of
+#: ``HEAD`` — so git measures it against HEAD and refuses. Same ancestry proof as
+#: ``merged`` again; a THIRD name rather than a widened ``merged-unpushed``
+#: because no push is involved and saying otherwise would be the kind of
+#: inaccurate label this tier exists to remove (Plan 00253).
+TIER_MERGED_NOT_IN_HEAD = "merged-not-in-head"
 
 # Blocking preconditions. A refusal is absolute — no tier is computed, and
 # ``allow_unproven`` cannot override it.
@@ -86,6 +92,11 @@ _CHERRY_UNIQUE_MARKER = "+"
 # before the tab.
 _LS_TREE_META_FIELDS = 3
 
+# The reference git's safe delete falls back to when a branch has no upstream.
+# Named because `_tier_for_merged_branch` compares against it to decide WHICH
+# refusal reason to report, and the two must not drift apart.
+_HEAD_REF = "HEAD"
+
 
 def delete_argv_for_tier(tier: str | None) -> tuple[str, ...]:
     """Git flags used to delete a branch proven at ``tier``.
@@ -96,16 +107,18 @@ def delete_argv_for_tier(tier: str | None) -> tuple[str, ...]:
     simply refuses and the command fails loudly. Prefer the battle-tested check
     wherever it is capable of doing the job.
 
-    ``merged-unpushed`` is the case where it is NOT capable of doing the job, and
-    the distinction is worth stating precisely (Plan 00249). Git's ``-d`` does not
-    run our check: it enforces *merged into its upstream if it has one*, and
-    refuses a branch that is fully contained in the protected ref while sitting
-    ahead of its own remote-tracking ref — its warning says so, "even though it
-    is merged to HEAD". That is a statement about whether a PUSH happened, not
-    about whether anything can be lost. The ancestry proof for this tier is
-    identical to ``merged``: every commit is reachable from the protected ref, so
-    a commit ahead of the upstream and absent from the protected ref would have
-    failed that test and never arrived here.
+    ``merged-unpushed`` and ``merged-not-in-head`` are the two cases where it is
+    NOT capable of doing the job, and the distinction is worth stating precisely.
+    Git's ``-d`` does not run our check: it measures the branch against its
+    upstream when one RESOLVES, and against ``HEAD`` when none does. So it refuses
+    a branch fully contained in the protected ref that is either ahead of its own
+    remote-tracking ref — its warning says so, "even though it is merged to HEAD"
+    (Plan 00249) — or absent from the checked-out ``HEAD`` while having no
+    upstream at all (Plan 00253). Those are statements about whether a PUSH
+    happened and about where ``HEAD`` is standing; neither is about whether
+    anything can be lost. The ancestry proof for both tiers is identical to
+    ``merged``: every commit is reachable from the protected ref, so a commit
+    absent from it would have failed that test and never arrived here.
 
     The remaining tiers describe branches git will always call unmerged
     (a rewrite or a squash merge severs ancestry), so there the force flag is
@@ -131,6 +144,12 @@ _TIER_DETAIL = {
         "branch is ahead of its own upstream, so git's safe delete refuses it "
         "until those commits are pushed; deleting is still lossless because they "
         "are already in the protected ref"
+    ),
+    TIER_MERGED_NOT_IN_HEAD: (
+        "tip is an ancestor of the protected ref — nothing can be lost — but it "
+        "has no upstream and is not an ancestor of the checked-out HEAD, which is "
+        "what git's safe delete measures it against, so git refuses it; deleting "
+        "is still lossless because every commit is already in the protected ref"
     ),
     TIER_PATCH_EQUIVALENT: (
         "every commit is already upstream by patch-id — the shape a history " "rewrite produces"
@@ -160,6 +179,7 @@ class BranchClassification:
         return self.refusal is None and self.tier in (
             TIER_MERGED,
             TIER_MERGED_UNPUSHED,
+            TIER_MERGED_NOT_IN_HEAD,
             TIER_PATCH_EQUIVALENT,
             TIER_CONTENT_PRESERVED,
         )
@@ -216,19 +236,21 @@ def local_branches(repo: Path) -> set[str]:
     return {line for line in result.stdout.splitlines() if line}
 
 
-def _is_merged_into_its_upstream(repo: Path, name: str) -> bool:
-    """Whether ``git branch -d`` will accept ``name`` on ITS OWN terms.
+def _safe_delete_reference(repo: Path, name: str) -> str:
+    """The ref ``git branch -d`` will measure ``name`` against.
 
-    Git's safe delete measures a branch against its upstream when it has one, and
-    against ``HEAD`` when it does not — so a branch fully contained in the
-    protected ref is still refused while it is ahead of ``origin/<name>``. This
-    answers that question directly instead of discovering it from a failed
-    delete (Plan 00249).
+    Git applies ONE rule with two references, and which one it picks is not a
+    preference — it is exclusive. Established by executing real git rather than
+    read off the documentation (Plan 00253):
 
-    ``True`` when there is no upstream at all: git then falls back to ``HEAD``,
-    which the caller's ancestry proof already covers. So the common case keeps
-    delegating to git's battle-tested check rather than being escalated to a
-    force delete for a condition that does not apply to it.
+    - an upstream that RESOLVES is used on its own, and ``HEAD`` is then
+      irrelevant: a branch level with ``origin/<name>`` is deleted with only a
+      "has been merged to" warning even when it is absent from ``HEAD``;
+    - with no resolvable upstream, ``HEAD`` is the sole reference — including a
+      DETACHED ``HEAD``, which refuses exactly as an attached one does.
+
+    Returning the ref rather than a boolean keeps that choice in one place, so
+    the caller cannot accidentally answer a different question from git's.
     """
     upstream = _git(
         repo,
@@ -238,13 +260,36 @@ def _is_merged_into_its_upstream(repo: Path, name: str) -> bool:
         f"{name}@{{upstream}}",
         check=False,
     )
-    if upstream.returncode != 0:
-        return True
-    tracking = upstream.stdout.strip()
-    if not tracking:
-        return True
-    merged = _git(repo, "merge-base", "--is-ancestor", name, tracking, check=False)
-    return merged.returncode == 0
+    tracking = upstream.stdout.strip() if upstream.returncode == 0 else ""
+    # `HEAD` resolves on a detached HEAD too, so one expression covers both.
+    return tracking or "HEAD"
+
+
+def _tier_for_merged_branch(repo: Path, name: str) -> str:
+    """Which ``merged`` tier applies, given what git's safe delete will accept.
+
+    Ancestry to the protected ref has already settled SAFETY. This settles only
+    which FLAG git will accept, so the dry run can state what the real run will
+    do — the whole point of Plan 00249, extended in Plan 00253 to the reference
+    git actually uses.
+
+    The uncovered case that made this necessary: a branch merged into ``main``
+    with no upstream, while ``HEAD`` sits on another branch. The previous code
+    returned "git will accept it" for every upstream-less branch, reasoning that
+    git falls back to ``HEAD`` and the caller's ancestry proof covers that. It
+    does not — the caller's proof is against ``protected_ref``, which is not
+    ``HEAD`` whenever another branch is checked out. So ``--dry-run`` promised a
+    delete the real run could not perform, which is precisely the contradiction
+    Plan 00249 existed to remove, on the other axis of git's single rule.
+    """
+    reference = _safe_delete_reference(repo, name)
+    accepted = _git(repo, "merge-base", "--is-ancestor", name, reference, check=False)
+    if accepted.returncode == 0:
+        return TIER_MERGED
+    # Name the ACTUAL reason git will refuse. "unpushed" is true only when an
+    # upstream exists; claiming it for the HEAD case would put a wrong
+    # explanation in front of a user, which is the defect, not a rounding error.
+    return TIER_MERGED_UNPUSHED if reference != _HEAD_REF else TIER_MERGED_NOT_IN_HEAD
 
 
 def worktree_branches(repo: Path) -> set[str]:
@@ -353,11 +398,13 @@ def classify_branch(
     ancestor = _git(repo, "merge-base", "--is-ancestor", name, protected_ref, check=False)
     if ancestor.returncode == 0:
         # Ancestry to the protected ref settles SAFETY. It does not settle which
-        # flag git will accept: `-d` measures against the branch's own upstream,
-        # so a branch fully contained in the protected ref is still refused while
-        # it is ahead of `origin/<name>` (Plan 00249). Splitting the tier here
-        # keeps the dry run honest — it can say what the real run will do.
-        tier = TIER_MERGED if _is_merged_into_its_upstream(repo, name) else TIER_MERGED_UNPUSHED
+        # flag git will accept: `-d` measures against the branch's own upstream if
+        # one resolves and against HEAD otherwise, so a branch fully contained in
+        # the protected ref is still refused when it is ahead of `origin/<name>`
+        # (Plan 00249) or when HEAD is on another branch (Plan 00253). Splitting
+        # the tier here keeps the dry run honest — it can say what the real run
+        # will do, and say why.
+        tier = _tier_for_merged_branch(repo, name)
         return BranchClassification(name=name, tier=tier, detail=_TIER_DETAIL[tier])
 
     unique_commits = _unique_commit_count(repo, name, protected_ref)

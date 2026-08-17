@@ -167,31 +167,51 @@ message defect, not a safety defect.
 
 ### Phase 1: The dry run must not promise what git refuses (finding A)
 
-- [ ] ⬜ **Task 1.1**: RED — a branch merged into `main`, with no upstream, while
+- [x] ✅ **Task 1.1**: RED — a branch merged into `main`, with no upstream, while
   HEAD is on another branch: classifier says `merged`/safe, real git refuses
-  - [ ] ⬜ Every existing fixture returns to `main` before classifying
-    (`test_branch_safety.py:108,115,145,451,464`), which is why the whole axis is
-    uncovered — the new fixture must leave HEAD elsewhere
-- [ ] ⬜ **Task 1.2**: GREEN — mirror git's actual rule: the reference is
+  - [x] ✅ New `_merged_but_head_is_elsewhere` fixture, because every existing one
+    returns to `main` before classifying — which is why the whole axis was
+    uncovered
+  - [x] ✅ RED proved by reverting ONLY the defect (`tracking or HEAD` →
+    `tracking or name`, which restores "no upstream ⇒ git will accept"):
+    4 failed / 4 passed, then 57 passed with the fix
+- [x] ✅ **Task 1.2**: GREEN — mirror git's actual rule: the reference is
   `<name>@{upstream}` when it resolves, else HEAD (the detached commit when
   detached); require ancestry into that reference
-- [ ] ⬜ **Task 1.3**: Fix the tier detail. `merged-unpushed`'s text ("until those
+  - [x] ✅ Git's rule established by EXECUTION before any test asserted it: an
+    upstream that resolves is used exclusively (a branch level with
+    `origin/<name>` deletes while absent from HEAD), and a detached HEAD refuses
+    exactly as an attached one does
+  - [x] ✅ Extracted as `_safe_delete_reference` returning the REF, not a boolean,
+    so the choice lives in one place
+- [x] ✅ **Task 1.3**: Fix the tier detail. `merged-unpushed`'s text ("until those
   commits are pushed") is false for the HEAD case, so widen it or add a tier
-- [ ] ⬜ **Task 1.4**: Correct the `_is_merged_into_its_upstream` docstring, whose
+  - [x] ✅ Added `TIER_MERGED_NOT_IN_HEAD` rather than widening: no push is
+    involved, and a tier whose name misdescribes the refusal is the defect this
+    tier exists to remove
+- [x] ✅ **Task 1.4**: Correct the `_is_merged_into_its_upstream` docstring, whose
   stated justification is the defect
-- [ ] ⬜ **Task 1.5**: Re-check the `destructive_git` guidance at `:248` once the
+  - [x] ✅ Renamed to `_tier_for_merged_branch`; the old name described the wrong
+    question
+- [x] ✅ **Task 1.5**: Re-check the `destructive_git` guidance at `:248` once the
   gap is actually filled, so the resident text stays true
 
 ### Phase 2: A partial batch must report what happened (finding B)
 
-- [ ] ⬜ **Task 2.1**: RED — a partial report (some deleted, one refused, bundle
+- [x] ✅ **Task 2.1**: RED — a partial report (some deleted, one refused, bundle
   written) currently prints "nothing was deleted" and withholds the bundle path
-- [ ] ⬜ **Task 2.2**: GREEN — branch on `report.deleted`: name what went, print
+  - [x] ✅ RED proved by restoring HEAD's `cli.py` wholesale: 4 failed / 3 passed,
+    then 7 passed with the fix
+  - [x] ✅ `test_a_genuine_partial_batch_produces_this_shape` builds the shape with
+    REAL git, so the other six tests are not resting on an invented report
+- [x] ✅ **Task 2.2**: GREEN — branch on `report.deleted`: name what went, print
   the bundle path whenever one survives, and offer `--allow-unproven` only when a
   tier is actually `unproven`
-- [ ] ⬜ **Task 2.3**: Keep the exit code non-zero — a refusal happened, and the
+- [x] ✅ **Task 2.3**: Keep the exit code non-zero — a refusal happened, and the
   bug is the message, not the status
-- [ ] ⬜ **Task 2.4**: Confirm `--format json` still agrees with the text path
+- [x] ✅ **Task 2.4**: Confirm `--format json` still agrees with the text path
+  - [x] ✅ The JSON path was already correct and is untouched; it reports
+    `refused`, `deleted` and `bundle` as independent fields
 
 ### Phase 3: Make the two vacuous tests load-bearing (findings C, D)
 
