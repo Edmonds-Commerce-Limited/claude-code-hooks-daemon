@@ -108,11 +108,12 @@ the failure, fix, repeat.
 
 ### Phase 2: Guard the root cause
 
-- [ ] ⬜ **Task 2.1**: Pin `init.sh`'s repo-detection contract in a test
-  - [ ] ⬜ Passes with `HOOKS_DAEMON_ROOT_DIR == PROJECT_PATH` and no `.env`
-  - [ ] ⬜ Emits `hooks_daemon_repo_detected` with neither present
-- [ ] ⬜ **Task 2.2**: Guard against a new test sourcing the real `init.sh`
-  without establishing the premise
+- [x] ✅ **Task 2.1**: Pin `init.sh`'s repo-detection contract in a test
+  - [x] ✅ Passes with `HOOKS_DAEMON_ROOT_DIR == PROJECT_PATH` and no `.env`
+  - [x] ✅ Emits `hooks_daemon_repo_detected` with neither present
+  - [x] ✅ Control: an unrelated remote is never refused
+- [x] ✅ **Task 2.2**: Decide the guard for a NEW test sourcing the real
+  `init.sh` without the premise — see Decision 2 (no scanner; CI is the guard)
 
 ### Phase 3: Remaining clusters
 
@@ -153,6 +154,46 @@ the failure, fix, repeat.
 test depending on ambient untracked state. Setting `HOOKS_DAEMON_ROOT_DIR` is
 exactly what the untracked `.env` does in a real self-install session, so the
 tests now assert against the same conditions a real session has.
+
+**Date**: 2026-08-17
+
+### Decision 2: no source scanner for Task 2.2 — CI is the guard
+
+**Context**: Task 2.2 asked for a guard catching a NEW test that sources the
+real `init.sh` without establishing the premise. Enumerating the landscape
+first: 30 test files mention `init.sh`, but only five actually run it. Two of
+those five (`test_socket_timeout_daemon_alive.py`,
+`test_emit_hook_error_jqless.py`) copy it into a sandbox and write their own
+`.env`, so they were correctly absent from the CI failure set.
+
+**Options Considered**:
+
+1. **A source scanner** over test files that touch the real `init.sh`. Rejected:
+   the discriminator is not "mentions `init.sh`" (a false-positive machine — most
+   of the 30 only name it in a docstring or a path list) but "hands the REAL path
+   to a subprocess that executes it, rather than a copy". Separating those needs
+   dataflow analysis, which is disproportionate. A weaker text rule ("must
+   mention `HOOKS_DAEMON_ROOT_DIR` somewhere") is satisfied by a bare mention and
+   so proves nothing.
+2. **Require an import of a shared premise helper**, making the check crisp. Rejected:
+   it forces an abstraction at three sites, and `CLAUDE.md`'s own ratio is "three
+   similar lines of code is better than a wrong abstraction… six identical blocks
+   means you need a proper pattern".
+3. **An autouse `conftest.py` fixture** exporting `HOOKS_DAEMON_ROOT_DIR` for the
+   whole session. Rejected as actively harmful: it would make the tests pass for a
+   reason invisible at the test site — relocating the ambient dependency rather
+   than removing it, which is the very defect this plan exists to fix. It also
+   would not reach tests that build their environment from scratch, which is what
+   `_build_clean_env` does.
+4. **CI is the guard.** A fresh checkout with no untracked `.env` is exactly what
+   the runner provides, and it already caught this — 25 consecutive times.
+
+**Decision**: Option 4, plus the contract test from Task 2.1. The blind guard
+here was never a missing scanner: CI detected the defect on every single push and
+no decision depended on the result. Adding a third partial guard while the second
+stays unread would be treating the symptom. Phase 4 is therefore the real
+remedy, and Task 2.1 pins the contract so the two ways through the guard cannot
+be silently narrowed to the untracked one.
 
 **Date**: 2026-08-17
 
