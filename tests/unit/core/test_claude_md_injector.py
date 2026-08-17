@@ -830,6 +830,63 @@ class TestAutoCommitDoesNotFightTheAgentForTheIndexLock:
             "load-bearing for an untracked file"
         )
 
+    def test_the_staging_call_is_bounded_like_the_commit_not_like_a_read(
+        self, tmp_path: Path
+    ) -> None:
+        """Plan 00248 F4: both lock-taking writes need the same generous budget.
+
+        The criterion is not "every call carries a timeout" — the migration met
+        that — but "no call that takes the index lock carries a budget that can
+        kill git mid-write". `git add` writes the same index as the commit, and
+        `GIT_COMMIT` is 30s precisely because `subprocess` KILLS the child on
+        expiry and a killed git is how `.git/index.lock` gets orphaned.
+
+        Staging only runs for an UNTRACKED CLAUDE.md, which is a first install —
+        so the tracked-file fixtures cannot see this call at all.
+        """
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.constants.timeout import Timeout
+        from claude_code_hooks_daemon.core import claude_md_injector as module
+
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+        for key, value in (("user.email", "t@t"), ("user.name", "t")):
+            subprocess.run(
+                ["git", "config", "--local", key, value],
+                cwd=tmp_path,
+                capture_output=True,
+                check=True,
+            )
+        (tmp_path / "seed.txt").write_text("seed\n")
+        subprocess.run(["git", "add", "seed.txt"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "seed"], cwd=tmp_path, capture_output=True, check=True
+        )
+
+        timeouts: dict[str, float] = {}
+        real = module.run_git
+
+        def spy(
+            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
+        ) -> subprocess.CompletedProcess[str]:
+            if args:
+                timeouts[args[0]] = timeout
+            return real(cwd, *args, timeout=timeout)
+
+        handler = _StubHandler("h", "## H\n\nContent.")
+        with patch.object(module, "run_git", spy):
+            module.ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        assert "add" in timeouts, (
+            "precondition: an untracked CLAUDE.md must reach the staging call, "
+            "or this test proves nothing: " + repr(timeouts)
+        )
+        assert timeouts["add"] == Timeout.GIT_COMMIT, (
+            "`git add` takes the same REQUIRED index lock as the commit, so a "
+            "budget that can kill it mid-write orphans .git/index.lock — the "
+            "very failure this area exists to avoid: " + repr(timeouts)
+        )
+
     def test_the_commit_is_bounded_generously_not_by_the_read_default(self, tmp_path: Path) -> None:
         """A commit needs a longer bound than a read, and both need one.
 
@@ -866,6 +923,10 @@ class TestAutoCommitDoesNotFightTheAgentForTheIndexLock:
             "the commit bound must exceed the read bound — a commit can run "
             "pre-commit hooks, a status cannot"
         )
+        # `add` cannot be asserted here: this fixture's CLAUDE.md is already
+        # tracked, which is precisely when staging is skipped. See
+        # `test_the_staging_call_is_bounded_like_the_commit_not_like_a_read`.
+        assert "add" not in timeouts, timeouts
 
     def test_lock_contention_is_reported_at_warning_with_gits_reason(
         self, tmp_path: Path, caplog: Any

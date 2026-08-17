@@ -2954,6 +2954,21 @@ def cmd_delete_branch(args: argparse.Namespace) -> int:
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
+    except subprocess.CalledProcessError as e:
+        # A git failure the engine could not classify — most importantly an
+        # expired budget, which `run_git` reports as returncode 127 and `_git`
+        # re-raises as this. Reported as a refusal because that is what it is:
+        # nothing was deleted, and this command's entire design is that it
+        # refuses when it cannot prove the work is recoverable. Letting the
+        # traceback out instead would tell a human nothing and, worse, look like
+        # the tool broke rather than declined (Plan 00248 F1).
+        print(
+            f"ERROR: git failed ({' '.join(str(part) for part in e.cmd)}) "
+            f"with exit {e.returncode}; nothing was deleted. "
+            f"{e.stderr.strip() if e.stderr else ''}".strip(),
+            file=sys.stderr,
+        )
+        return 2
 
     if args.format == "json":
         print(

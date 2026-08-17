@@ -25,9 +25,13 @@ from __future__ import annotations
 import subprocess  # nosec B404 - trusted system tool (git) for repo fixtures
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.daemon import branch_safety
 from claude_code_hooks_daemon.daemon.branch_safety import (
     REFUSAL_CURRENT_BRANCH,
     REFUSAL_NOT_A_BRANCH,
@@ -35,6 +39,7 @@ from claude_code_hooks_daemon.daemon.branch_safety import (
     REFUSAL_WORKTREE,
     TIER_CONTENT_PRESERVED,
     TIER_MERGED,
+    TIER_MERGED_UNPUSHED,
     TIER_PATCH_EQUIVALENT,
     TIER_UNPROVEN,
     BranchClassification,
@@ -108,6 +113,37 @@ def _unproven_branch(repo: Path, name: str) -> None:
     _git(repo, "checkout", "-b", name)
     _commit(repo, f"{name}-only.txt", f"{name}\n", f"Unique work on {name}")
     _git(repo, "checkout", "main")
+
+
+def _add_origin(repo: Path, remote: Path) -> None:
+    """Register ``remote`` as ``origin``, idempotently."""
+    if "origin" not in _git(repo, "remote").split():
+        _git(repo, "remote", "add", "origin", str(remote))
+
+
+def _merged_but_ahead_of_its_upstream(repo: Path, remote: Path, name: str) -> None:
+    """Build the field-reported shape: in ``main``, ahead of ``origin/<name>``.
+
+    A real remote and a real push, because the condition under test is one git
+    evaluates against ``refs/remotes/origin/<name>`` — there is no way to
+    synthesise that honestly. The branch is pushed (so it HAS an upstream), then
+    given one further commit that is not pushed, then merged into ``main``
+    locally. Every commit is therefore reachable from ``main`` while the
+    remote-tracking ref sits one behind.
+    """
+    _add_origin(repo, remote)
+    _git(repo, "checkout", "-b", name)
+    _commit(repo, f"{name}.txt", f"{name}\n", f"Add {name}")
+    # A real `push -u` through a real named remote. Hand-writing
+    # `branch.<name>.remote` and the remote-tracking ref is NOT equivalent:
+    # without `remote.origin.url` git cannot resolve `<name>@{upstream}` at all,
+    # falls back to comparing against HEAD, and allows the delete — so the
+    # fixture silently stops reproducing the bug. `test_the_fixture_reproduces_
+    # gits_refusal` caught exactly that.
+    _git(repo, "push", "--quiet", "--set-upstream", "origin", name)
+    _commit(repo, f"{name}.txt", f"{name}\nsecond, unpushed\n", "Second commit, never pushed")
+    _git(repo, "checkout", "main")
+    _git(repo, "merge", "--no-ff", "-m", f"Merge {name}", name)
 
 
 class TestBlockingPreconditions:
@@ -425,3 +461,307 @@ class TestRecoveryBundle:
         ).stdout
         assert "one" in listing
         assert "two" in listing
+
+
+class TestMergedButAheadOfItsOwnUpstream:
+    """Plan 00249: git's ``-d`` enforces a DIFFERENT predicate from ours.
+
+    We prove *the tip is an ancestor of the protected ref* — a statement about
+    recoverability. ``git branch -d`` enforces *merged into its upstream if it has
+    one* — a statement about whether a push happened. Git's own refusal says so
+    outright: "not yet merged to 'refs/remotes/origin/<name>', even though it is
+    merged to HEAD".
+
+    The consequence was the worst kind: ``--dry-run`` reported "nothing can be
+    lost" and the real run then failed, so the two halves of the tool
+    contradicted each other in front of a user.
+
+    Nothing here is at risk. A commit ahead of the upstream AND absent from the
+    protected ref would fail the ancestry test and never reach this tier, so
+    within it every commit is reachable from the protected ref by construction.
+    """
+
+    @pytest.fixture
+    def remote(self, tmp_path: Path) -> Path:
+        bare = tmp_path / "remote.git"
+        subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+            ["git", "init", "--quiet", "--bare", str(bare)],
+            check=True,
+            capture_output=True,
+            env={**_ENV, "HOME": str(tmp_path)},
+        )
+        return bare
+
+    def test_the_fixture_reproduces_gits_refusal(self, repo: Path, remote: Path) -> None:
+        """Precondition. Without this the rest could pass on the wrong shape.
+
+        Asserts BOTH halves of the contradiction on a real repository: our
+        ancestry proof holds, and git's safe delete refuses anyway.
+        """
+        _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
+
+        ancestry = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+            ["git", "-C", str(repo), "merge-base", "--is-ancestor", "shipped", "main"],
+            check=False,
+            capture_output=True,
+            env={**_ENV, "HOME": str(repo)},
+        )
+        refusal = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+            ["git", "-C", str(repo), "branch", "--delete", "shipped"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**_ENV, "HOME": str(repo)},
+        )
+
+        assert ancestry.returncode == 0, "fixture must be merged into the protected ref"
+        assert refusal.returncode != 0, (
+            "fixture no longer reproduces git's refusal, so every assertion "
+            "below is about a shape that does not exist: " + refusal.stderr
+        )
+        assert "not yet merged to" in refusal.stderr
+
+    def test_it_is_not_classified_as_plain_merged(self, repo: Path, remote: Path) -> None:
+        """`merged` promises the SAFE delete will work. Here it will not."""
+        _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
+
+        classification = classify_branch(repo, "shipped")
+
+        assert classification.tier == TIER_MERGED_UNPUSHED
+
+    def test_it_is_still_safe_to_delete(self, repo: Path, remote: Path) -> None:
+        """The ancestry proof is unchanged, so the verdict must stay `safe`."""
+        _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
+
+        assert classify_branch(repo, "shipped").is_safe is True
+
+    def test_the_detail_names_the_condition_and_the_remedy(self, repo: Path, remote: Path) -> None:
+        """A dry run has to say what the real run will do, and why."""
+        _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
+
+        detail = classify_branch(repo, "shipped").detail
+
+        assert "upstream" in detail
+        assert "push" in detail.lower()
+
+    def test_the_delete_actually_succeeds(self, repo: Path, remote: Path) -> None:
+        """The bug the report opened with: the real run must not fail."""
+        _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
+
+        report = delete_branches(repo, ["shipped"], bundle_path=None)
+
+        assert report.refused is False, report.blockers
+        assert report.deleted == ("shipped",)
+        assert "shipped" not in _local_branches(repo)
+
+    def test_a_branch_with_no_upstream_is_still_plain_merged(self, repo: Path) -> None:
+        """The common case must not change: no upstream, no extra condition.
+
+        Git's rule falls back to HEAD when a branch has no upstream, which our
+        ancestry proof already covers — so this must keep delegating to the safe
+        delete rather than quietly escalating every branch to a force delete.
+        """
+        _merged_branch(repo, "ordinary")
+
+        assert classify_branch(repo, "ordinary").tier == TIER_MERGED
+        assert delete_argv_for_tier(TIER_MERGED) == ("branch", "--delete")
+
+    def test_a_branch_level_with_its_upstream_is_still_plain_merged(
+        self, repo: Path, remote: Path
+    ) -> None:
+        """Having an upstream is not the condition — being AHEAD of it is."""
+        _add_origin(repo, remote)
+        _git(repo, "checkout", "-b", "level")
+        _commit(repo, "level.txt", "level\n", "Add level")
+        _git(repo, "push", "--quiet", "--set-upstream", "origin", "level")
+        _git(repo, "checkout", "main")
+        _git(repo, "merge", "--ff-only", "level")
+
+        assert classify_branch(repo, "level").tier == TIER_MERGED
+
+
+class TestAGitRefusalMidBatchIsReportedNotRaised:
+    """Plan 00249: git can refuse on grounds this engine does not model.
+
+    The engine cannot enumerate every condition a future git might enforce, so
+    the requirement is not "never be refused" — it is "when refused, say so
+    accurately". Previously the refusal raised out of the loop, past a CLI that
+    caught only ``ValueError``, and reached the user as a stack trace.
+
+    The refusal here is provoked with REAL git rather than a mock: patching
+    ``delete_argv_for_tier`` back to the safe delete for a merged-unpushed branch
+    reproduces exactly the pre-fix argv, and git refuses it for its own reasons.
+    """
+
+    @pytest.fixture
+    def remote(self, tmp_path: Path) -> Path:
+        bare = tmp_path / "remote.git"
+        subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+            ["git", "init", "--quiet", "--bare", str(bare)],
+            check=True,
+            capture_output=True,
+            env={**_ENV, "HOME": str(tmp_path)},
+        )
+        return bare
+
+    @staticmethod
+    def _force_the_safe_delete() -> Any:
+        """Make the engine use the argv git will refuse, as it did before."""
+        return patch.object(
+            branch_safety, "delete_argv_for_tier", lambda _tier: ("branch", "--delete")
+        )
+
+    def test_the_refusal_is_reported_with_gits_own_words(self, repo: Path, remote: Path) -> None:
+        _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
+
+        with self._force_the_safe_delete():
+            report = delete_branches(repo, ["shipped"], bundle_path=None)
+
+        assert report.refused is True
+        assert report.deleted == ()
+        assert "shipped" in _local_branches(repo), "a refused delete must change nothing"
+        assert any("not yet merged to" in blocker for blocker in report.blockers), report.blockers
+
+    def test_the_blocker_names_the_tier_that_was_proven(self, repo: Path, remote: Path) -> None:
+        """Without the tier the message says only that git said no."""
+        _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
+
+        with self._force_the_safe_delete():
+            report = delete_branches(repo, ["shipped"], bundle_path=None)
+
+        assert any(TIER_MERGED_UNPUSHED in blocker for blocker in report.blockers), report.blockers
+
+    def test_a_partial_batch_reports_exactly_what_went(self, repo: Path, remote: Path) -> None:
+        """The docstring used to promise all-or-nothing; a ref cannot be un-deleted.
+
+        So the requirement is an honest report: whatever was removed is listed,
+        the rest is a blocker, and ``refused`` is set.
+        """
+        _merged_branch(repo, "ordinary")
+        _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
+
+        with self._force_the_safe_delete():
+            report = delete_branches(repo, ["ordinary", "shipped"], bundle_path=None)
+
+        assert report.deleted == ("ordinary",)
+        assert report.refused is True
+        assert "ordinary" not in _local_branches(repo)
+        assert "shipped" in _local_branches(repo)
+
+    def test_a_bundle_is_removed_when_nothing_was_deleted(self, repo: Path, remote: Path) -> None:
+        """An orphaned bundle reads as evidence a branch is gone.
+
+        The field report found a real 1.9 MB one left behind by the crash.
+        """
+        _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
+        bundle_path = repo.parent / "recovery.bundle"
+
+        with self._force_the_safe_delete():
+            report = delete_branches(repo, ["shipped"], bundle_path=bundle_path)
+
+        assert report.refused is True
+        assert not bundle_path.exists(), "a run that deleted nothing must leave no bundle"
+        assert report.bundle is None, "the report must not name a bundle that is gone"
+
+    def test_a_bundle_that_cannot_be_removed_is_reported_not_swallowed(
+        self, repo: Path, remote: Path
+    ) -> None:
+        """A failed tidy-up must reach the person running the command.
+
+        Logging it and continuing would hide it in a log nobody opens — and the
+        stale file is exactly the thing the field report says a later reader
+        misinterprets. This module reports outcomes through ``blockers``, so that
+        is where it goes.
+        """
+        _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
+        bundle_path = repo.parent / "recovery.bundle"
+
+        with self._force_the_safe_delete():
+            with patch.object(Path, "unlink", side_effect=OSError("read-only file system")):
+                report = delete_branches(repo, ["shipped"], bundle_path=bundle_path)
+
+        assert report.refused is True
+        assert any(
+            "read-only file system" in blocker for blocker in report.blockers
+        ), report.blockers
+        assert any(
+            "NOT evidence of a deletion" in blocker for blocker in report.blockers
+        ), report.blockers
+        assert report.bundle == bundle_path, "the bundle is still there, so still report it"
+
+    def test_a_bundle_is_KEPT_when_something_was_deleted(self, repo: Path, remote: Path) -> None:
+        """A partial deletion is exactly when the recovery route matters."""
+        _merged_branch(repo, "ordinary")
+        _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
+        bundle_path = repo.parent / "recovery.bundle"
+
+        with self._force_the_safe_delete():
+            report = delete_branches(repo, ["ordinary", "shipped"], bundle_path=bundle_path)
+
+        assert report.deleted == ("ordinary",)
+        assert bundle_path.exists(), "the deleted branch's only recovery route was removed"
+        assert report.bundle == bundle_path
+
+
+class TestBudgetsSuitTheWorkNotTheHookContext:
+    """Plan 00248 F1: this module must not run on a hook-context budget.
+
+    Its runner passed NO timeout before the Plan 00246 migration, deliberately:
+    ``bundle create`` packs objects, ``cherry`` computes a patch-id per commit,
+    and ``rev-list --objects`` walks every tree and blob in a ref. Migrating it
+    to the central runner silently imposed the CENTRE's default —
+    ``GIT_CONTEXT``, five seconds, a budget named for gathering context during a
+    hook — on all of them.
+
+    The consequence is not a slow command but a broken one: past the budget
+    ``run_git`` returns 127, ``_git`` raises ``CalledProcessError``, and the
+    human-gated delete refuses nothing and explains nothing, it traces back. No
+    existing test could see it, because every fixture repo here is tiny.
+
+    These assert the BUDGET rather than provoking a real timeout: manufacturing a
+    repository big enough to exceed five seconds would add minutes to the suite
+    to prove something a constant states exactly.
+    """
+
+    def test_the_module_runner_does_not_use_the_hook_context_budget(self) -> None:
+        from unittest.mock import patch
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.branch_safety.run_git",
+            return_value=subprocess.CompletedProcess([], 0, "", ""),
+        ) as spawn:
+            branch_safety._git(Path("/nonexistent"), "for-each-ref", check=False)
+
+        budget = spawn.call_args.kwargs["timeout"]
+        assert budget != Timeout.GIT_CONTEXT, (
+            "branch_safety inherited the 5s hook-context budget for operations "
+            "that pack objects and walk every blob in a ref — see Plan 00248 F1"
+        )
+        assert budget >= Timeout.GIT_BRANCH_SAFETY
+
+    def test_the_bundle_gets_a_larger_budget_than_the_reads(self) -> None:
+        """The bundle is the heaviest call AND the one that must not be killed.
+
+        It is written before any ref is removed, so it is the only copy of the
+        work if the delete proceeds. A budget that kills it mid-pack leaves a
+        truncated bundle where a recovery is supposed to be.
+        """
+        assert Timeout.GIT_BUNDLE_CREATE > Timeout.GIT_BRANCH_SAFETY
+
+    def test_a_timed_out_bundle_is_reported_as_a_refusal(self, repo: Path) -> None:
+        """A budget overrun must refuse, not traceback (Plan 00248 F1).
+
+        ``run_git`` reports an expired timeout as returncode 127, which ``_git``
+        turns into ``CalledProcessError``. The CLI caught only ``ValueError``, so
+        the safety-critical command died with a stack trace instead of the
+        refusal its whole design is built around.
+        """
+        _merged_branch(repo, "spent")
+        timed_out = subprocess.CompletedProcess(["git"], 127, "", "timed out")
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.branch_safety.run_git",
+            return_value=timed_out,
+        ):
+            with pytest.raises(subprocess.CalledProcessError):
+                write_recovery_bundle(repo, ["spent"], repo.parent / "x.bundle")

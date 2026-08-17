@@ -47,6 +47,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
 # Human gate for an ``unproven`` deletion: given the classifications and the
@@ -59,6 +60,11 @@ TIER_MERGED = "merged"
 TIER_PATCH_EQUIVALENT = "patch-equivalent"
 TIER_CONTENT_PRESERVED = "content-preserved"
 TIER_UNPROVEN = "unproven"
+#: Merged into the protected ref, but AHEAD of its own remote-tracking ref.
+#: Same ancestry proof as ``merged``; a separate tier only because git's safe
+#: delete refuses it, so it needs a different flag and a different explanation
+#: (Plan 00249).
+TIER_MERGED_UNPUSHED = "merged-unpushed"
 
 # Blocking preconditions. A refusal is absolute — no tier is computed, and
 # ``allow_unproven`` cannot override it.
@@ -90,6 +96,17 @@ def delete_argv_for_tier(tier: str | None) -> tuple[str, ...]:
     simply refuses and the command fails loudly. Prefer the battle-tested check
     wherever it is capable of doing the job.
 
+    ``merged-unpushed`` is the case where it is NOT capable of doing the job, and
+    the distinction is worth stating precisely (Plan 00249). Git's ``-d`` does not
+    run our check: it enforces *merged into its upstream if it has one*, and
+    refuses a branch that is fully contained in the protected ref while sitting
+    ahead of its own remote-tracking ref — its warning says so, "even though it
+    is merged to HEAD". That is a statement about whether a PUSH happened, not
+    about whether anything can be lost. The ancestry proof for this tier is
+    identical to ``merged``: every commit is reachable from the protected ref, so
+    a commit ahead of the upstream and absent from the protected ref would have
+    failed that test and never arrived here.
+
     The remaining tiers describe branches git will always call unmerged
     (a rewrite or a squash merge severs ancestry), so there the force flag is
     unavoidable — and it is exactly there that our extra proof has to earn its
@@ -109,6 +126,12 @@ _REFUSAL_DETAIL = {
 
 _TIER_DETAIL = {
     TIER_MERGED: "tip is an ancestor of the protected ref — nothing can be lost",
+    TIER_MERGED_UNPUSHED: (
+        "tip is an ancestor of the protected ref — nothing can be lost — but the "
+        "branch is ahead of its own upstream, so git's safe delete refuses it "
+        "until those commits are pushed; deleting is still lossless because they "
+        "are already in the protected ref"
+    ),
     TIER_PATCH_EQUIVALENT: (
         "every commit is already upstream by patch-id — the shape a history " "rewrite produces"
     ),
@@ -136,6 +159,7 @@ class BranchClassification:
         """True only when a proof tier was reached and nothing refused it."""
         return self.refusal is None and self.tier in (
             TIER_MERGED,
+            TIER_MERGED_UNPUSHED,
             TIER_PATCH_EQUIVALENT,
             TIER_CONTENT_PRESERVED,
         )
@@ -152,14 +176,26 @@ class DeletionReport:
     blockers: tuple[str, ...] = field(default_factory=tuple)
 
 
-def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    """Run git in ``repo``.
+def _git(
+    repo: Path,
+    *args: str,
+    check: bool = True,
+    timeout: float = Timeout.GIT_BRANCH_SAFETY,
+) -> subprocess.CompletedProcess[str]:
+    """Run git in ``repo`` on a budget sized for object walks.
 
     SECURITY: fixed argv list, never a shell string, and the binary is the
     trusted system git. Branch names arrive as separate argv entries so a name
     containing shell metacharacters cannot be interpreted.
+
+    The budget is NOT ``run_git``'s default. Everything here walks objects —
+    ``cherry`` computes a patch-id per commit, ``rev-list --objects`` and
+    ``ls-tree -r`` enumerate every tree and blob in a ref — so the cost scales
+    with the repository, and a five-second hook-context budget turns a large repo
+    into a ``CalledProcessError`` (Plan 00248 F1). ``timeout`` is overridable per
+    call so the bundle, which packs rather than reads, can have more still.
     """
-    result = run_git(repo, *args)
+    result = run_git(repo, *args, timeout=timeout)
     if check and result.returncode != 0:
         raise subprocess.CalledProcessError(
             result.returncode, result.args, result.stdout, result.stderr
@@ -178,6 +214,37 @@ def local_branches(repo: Path) -> set[str]:
     """Every local branch name in ``repo``."""
     result = _git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads")
     return {line for line in result.stdout.splitlines() if line}
+
+
+def _is_merged_into_its_upstream(repo: Path, name: str) -> bool:
+    """Whether ``git branch -d`` will accept ``name`` on ITS OWN terms.
+
+    Git's safe delete measures a branch against its upstream when it has one, and
+    against ``HEAD`` when it does not — so a branch fully contained in the
+    protected ref is still refused while it is ahead of ``origin/<name>``. This
+    answers that question directly instead of discovering it from a failed
+    delete (Plan 00249).
+
+    ``True`` when there is no upstream at all: git then falls back to ``HEAD``,
+    which the caller's ancestry proof already covers. So the common case keeps
+    delegating to git's battle-tested check rather than being escalated to a
+    force delete for a condition that does not apply to it.
+    """
+    upstream = _git(
+        repo,
+        "rev-parse",
+        "--abbrev-ref",
+        "--symbolic-full-name",
+        f"{name}@{{upstream}}",
+        check=False,
+    )
+    if upstream.returncode != 0:
+        return True
+    tracking = upstream.stdout.strip()
+    if not tracking:
+        return True
+    merged = _git(repo, "merge-base", "--is-ancestor", name, tracking, check=False)
+    return merged.returncode == 0
 
 
 def worktree_branches(repo: Path) -> set[str]:
@@ -285,7 +352,13 @@ def classify_branch(
 
     ancestor = _git(repo, "merge-base", "--is-ancestor", name, protected_ref, check=False)
     if ancestor.returncode == 0:
-        return BranchClassification(name=name, tier=TIER_MERGED, detail=_TIER_DETAIL[TIER_MERGED])
+        # Ancestry to the protected ref settles SAFETY. It does not settle which
+        # flag git will accept: `-d` measures against the branch's own upstream,
+        # so a branch fully contained in the protected ref is still refused while
+        # it is ahead of `origin/<name>` (Plan 00249). Splitting the tier here
+        # keeps the dry run honest — it can say what the real run will do.
+        tier = TIER_MERGED if _is_merged_into_its_upstream(repo, name) else TIER_MERGED_UNPUSHED
+        return BranchClassification(name=name, tier=tier, detail=_TIER_DETAIL[tier])
 
     unique_commits = _unique_commit_count(repo, name, protected_ref)
     if unique_commits == 0:
@@ -335,10 +408,36 @@ def write_recovery_bundle(repo: Path, names: Sequence[str], bundle_path: Path) -
 
     Written BEFORE any ref is removed, so a failure here aborts the deletion
     rather than leaving branches gone and no way back.
+
+    Gets the largest budget of anything here: it PACKS objects rather than
+    reading them, and a bundle killed part-way is a lost recovery, not a slow
+    one.
     """
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
-    _git(repo, "bundle", "create", str(bundle_path), *names)
+    _git(repo, "bundle", "create", str(bundle_path), *names, timeout=Timeout.GIT_BUNDLE_CREATE)
     return bundle_path
+
+
+def _discard_unused_bundle(bundle: Path) -> str | None:
+    """Remove a recovery bundle for a run that deleted nothing.
+
+    Returns ``None`` when it is gone, or a message describing why it could not be
+    removed. The failure is RETURNED rather than logged: this module reports
+    outcomes through ``DeletionReport.blockers``, so surfacing it there puts it in
+    front of the person running the command instead of in a log they have no
+    reason to open. Raising instead would be worse — it runs on a path that is
+    already reporting a refusal, and a failure to tidy up a scratch file must not
+    bury the refusal the user actually needs to read.
+    """
+    try:
+        bundle.unlink()
+    except OSError as exc:
+        return (
+            f"could not remove the unused recovery bundle at {bundle}: {exc} — "
+            f"nothing was deleted, so this bundle is NOT evidence of a deletion "
+            f"and is safe to remove by hand"
+        )
+    return None
 
 
 def delete_branches(
@@ -353,10 +452,20 @@ def delete_branches(
     dry_run: bool = False,
     confirm: ConfirmCallback | None = None,
 ) -> DeletionReport:
-    """Classify every branch, then delete all of them or none.
+    """Classify every branch, then delete the batch.
 
-    All-or-nothing is deliberate: a partial deletion leaves the caller unsure
-    which half happened, and the batch is normally one logical cleanup.
+    Nothing is deleted until EVERY branch has been classified and every blocker
+    resolved, so a batch containing one unsafe branch removes none of the others.
+    That is the all-or-nothing property worth having, and it is the one this
+    function can actually guarantee.
+
+    What it cannot guarantee is atomicity across the deletes themselves: git may
+    refuse an individual branch on grounds this engine does not model, and a ref
+    already removed cannot be un-removed by unwinding. When that happens the
+    report says so — ``refused`` is set, ``deleted`` lists exactly the branches
+    that went, and ``blockers`` carries git's own words for each that did not
+    (Plan 00249). A docstring promising more than the code delivers is worse than
+    an honest one, and the recovery bundle exists precisely for this case.
 
     Args:
         allow_unproven: permit ``unproven`` branches. Never overrides a blocking
@@ -421,12 +530,55 @@ def delete_branches(
     if bundle_path is not None:
         bundle = write_recovery_bundle(repo, [c.name for c in classifications], bundle_path)
 
+    deleted: list[str] = []
+    failures: list[str] = []
     for classification in classifications:
-        # Defer to git's own check whenever it is capable of making it.
-        _git(repo, *delete_argv_for_tier(classification.tier), classification.name)
+        # Defer to git's own check whenever it is capable of making it — and
+        # ACCEPT a refusal rather than raising on it (Plan 00249). git's `-d`
+        # refuses on conditions this engine does not model, and a refusal from
+        # the tool whose whole job is to refuse clearly must not arrive as a
+        # traceback. `check=False` keeps git's own words available to say why.
+        result = _git(
+            repo,
+            *delete_argv_for_tier(classification.tier),
+            classification.name,
+            check=False,
+        )
+        if result.returncode == 0:
+            deleted.append(classification.name)
+            continue
+        failures.append(
+            f"{classification.name}: git refused the delete "
+            f"(proven {classification.tier}) — {result.stderr.strip() or 'no detail'}"
+        )
+
+    if failures:
+        # Report what ACTUALLY happened. The all-or-nothing intent is enforced by
+        # classifying everything before touching anything, but git can still
+        # refuse a single branch mid-loop, and claiming a clean batch then would
+        # be a lie about the repository's state.
+        #
+        # A bundle for a run that deleted NOTHING is worse than no bundle: the
+        # field report found a 1.9 MB one left behind by this crash, and anyone
+        # finding it later would reasonably read it as evidence the branch was
+        # gone. Where something WAS deleted the bundle is the recovery route, so
+        # it stays.
+        if bundle is not None and not deleted:
+            problem = _discard_unused_bundle(bundle)
+            if problem is None:
+                bundle = None
+            else:
+                failures.append(problem)
+        return DeletionReport(
+            classifications=classifications,
+            deleted=tuple(deleted),
+            bundle=bundle,
+            refused=True,
+            blockers=tuple(failures),
+        )
 
     return DeletionReport(
         classifications=classifications,
-        deleted=tuple(c.name for c in classifications),
+        deleted=tuple(deleted),
         bundle=bundle,
     )

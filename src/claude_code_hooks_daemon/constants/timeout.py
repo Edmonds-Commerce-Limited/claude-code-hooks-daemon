@@ -79,6 +79,20 @@ class Timeout:
     # .git/index.lock gets orphaned. Long enough for a hook-running commit to
     # finish, short enough that a wedged git cannot hang daemon startup forever.
     GIT_COMMIT = 30
+    # 120 seconds (branch-safety proof engine: `cherry`, `rev-list --objects`,
+    # `ls-tree -r`). These are OBJECT WALKS, not context reads — a patch-id per
+    # commit, or every tree and blob reachable from a ref — so their cost scales
+    # with repository size, not with anything a hook budget models. Before Plan
+    # 00246 centralised git spawning they ran UNBOUNDED; inheriting GIT_CONTEXT's
+    # five seconds broke `delete-branch` on any large repo (Plan 00248 F1).
+    # Bounded rather than unbounded, so a wedged git still cannot hang the CLI
+    # forever, but generous enough that repository size alone never trips it.
+    GIT_BRANCH_SAFETY = 120
+    # 300 seconds (`git bundle create` for the recovery bundle). The heaviest
+    # call in the proof engine — it PACKS the objects — and the one that must
+    # never be killed part-way: it is written before any ref is removed, so a
+    # truncated bundle is a lost recovery rather than a slow one.
+    GIT_BUNDLE_CREATE = 300
     VALIDATION_CHECK = 5  # 5 seconds (installation validation subprocess)
     VERSION_CHECK = 5  # 5 seconds (git ls-remote for version check)
 

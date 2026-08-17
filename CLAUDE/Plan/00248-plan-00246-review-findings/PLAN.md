@@ -82,38 +82,69 @@ This matters because two callers deleted their own except clauses citing the
 
 ### Phase 1: The two MUST-FIX behaviour defects
 
-- [ ] ⬜ **Task 1.1**: F2 — make `run_git`'s contract true
-  - [ ] ⬜ RED: a test that a non-UTF-8 stdout comes back as a
-    `CompletedProcess` rather than raising
-  - [ ] ⬜ GREEN: `errors="replace"` at the chokepoint
-- [ ] ⬜ **Task 1.2**: F1 — restore a generous budget for `branch_safety`
-  - [ ] ⬜ RED: a test asserting `_git` does not run on the default budget
-  - [ ] ⬜ GREEN: a named constant, with a larger per-call override for
-    `bundle create`
-  - [ ] ⬜ Make `cmd_delete_branch` report a timeout as a refusal, not a
-    traceback
+- [x] ✅ **Task 1.1**: F2 — make `run_git`'s contract true
+  - [x] ✅ RED: a real repo holding `\xff\xfe`, committed and read back with
+    `git show` — reproduced the escape verbatim through the production runner
+  - [x] ✅ GREEN: `errors="replace"` at the chokepoint, one keyword for every
+    caller
+- [x] ✅ **Task 1.2**: F1 — restore a generous budget for `branch_safety`
+  - [x] ✅ RED: asserts the budget is not `GIT_CONTEXT`, rather than provoking a
+    real timeout — a repo big enough to exceed 5s would add minutes to the suite
+    to prove what a constant states exactly
+  - [x] ✅ GREEN: `Timeout.GIT_BRANCH_SAFETY` (120s) for the object walks, with
+    `GIT_BUNDLE_CREATE` (300s) overridden per call for the pack
+  - [x] ✅ `cmd_delete_branch` reports a git failure as a refusal quoting git's
+    own stderr; two tests pin that the branch survives it
 
 ### Phase 2: The two SHOULD-FIX behaviour defects
 
-- [ ] ⬜ **Task 2.1**: F3 — remove the `Path.cwd()` hazard in `version_check`
-- [ ] ⬜ **Task 2.2**: F4 — give the kept `git add` the write budget, so
-  neither lock-taking call can be killed mid-index-write
+- [x] ✅ **Task 2.1**: F3 — removed the `Path.cwd()` hazard in `version_check`
+  - [x] ✅ `_CWD_IMMATERIAL` (the filesystem root) rather than catching the
+    raise: `ls-remote` never reads the cwd, so the fix is to stop asking a
+    question whose answer can fail
+  - [x] ✅ Plus an argv assertion — the process-wide `subprocess.run` patch in
+    that file means every test there would pass if the handler stopped calling
+    git altogether
+- [x] ✅ **Task 2.2**: F4 — gave the kept `git add` the write budget, so neither
+  lock-taking call can be killed mid-index-write
+  - [x] ✅ Needed a test of its own: staging runs only for an UNTRACKED
+    CLAUDE.md, so the existing budget test never saw the call
 
 ### Phase 3: Guard and fixture quality (the plan's actual deliverable)
 
-- [ ] ⬜ **Task 3.1**: F5 — close the three unambiguous escapes: `import subprocess as sp`, `from subprocess import run`, and `args=` as a keyword
-  - [ ] ⬜ One test per shape, each failing first
-- [ ] ⬜ **Task 3.2**: F6 — drive `_make_stale` from `git ls-files` so it is
-  recursive and actually tracked-file-based, per its own name
-- [ ] ⬜ **Task 3.3**: The ambient-environment nits, same class as Plan 00245
-  Phase 3: `tmp_git_repo` runs git with no timeout and honours an ambient
-  `commit.gpgsign`, which hangs unrelated tests on a signing developer's machine
+- [x] ✅ **Task 3.1**: F5 — closed the unambiguous escapes
+  - [x] ✅ Four shapes, each RED first: `import subprocess as sp`,
+    `from subprocess import run`, `from subprocess import run as launch`, and
+    `args=` passed as a keyword
+  - [x] ✅ Import bindings are resolved PER MODULE from that module's own
+    imports, so a project-local `run(["git", ...])` is still not flagged — two
+    negative tests pin that, because inferring from the name alone is the
+    guessing this guard's docstring rules out
+- [x] ✅ **Task 3.2**: F6 — `_make_stale` now drives from `git ls-files`
+  - [x] ✅ A new test file treats the fixture as the SUBJECT: a throwaway repo
+    whose only tracked file sits two directories down, where the old root-only
+    scan touched nothing at all
+  - [x] ✅ Both helpers fail loudly on a vacuous repo (no tracked files, no
+    index) instead of raising a bare `FileNotFoundError` or passing silently
+- [x] ✅ **Task 3.3**: The ambient-environment nits — `tmp_git_repo` now bounds
+  every git call and disables `commit.gpgsign`/`tag.gpgsign` locally, so a
+  developer who signs commits globally does not get a hung suite in a file that
+  has nothing to do with signing
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Full QA green, daemon restart RUNNING
-- [ ] ⬜ **Task 4.2**: Record the durable lesson: centralising a property
+- [x] ✅ **Task 4.1**: Full QA green, daemon restart RUNNING
+  - [x] ✅ `12466 passed, 0 failed, 6 skipped | coverage: 95.1%`; every other
+    check 0 violations. `error_hiding` is clean because `_discard_unused_bundle`
+    RETURNS its failure into `DeletionReport.blockers` rather than logging and
+    continuing — the checker was right, and reporting through the channel the
+    module already has is better than an exclusion
+  - [x] ✅ Daemon RUNNING (PID 1757054) on the new code
+- [x] ✅ **Task 4.2**: Record the durable lesson: centralising a property
   imposes the centre's defaults on every call site that had its own
+  - [x] ✅ In LESSONS.md, with the reviewable-diff corollary: the properties a
+    call site can no longer choose (timeout, encoding, `check=`, env, cwd) are
+    part of the change even though they appear nowhere in it
 
 ## Dependencies
 

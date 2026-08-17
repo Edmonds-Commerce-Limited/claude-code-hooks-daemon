@@ -245,6 +245,13 @@ class DestructiveGitHandler(Handler):
             "`git branch -d` anyway, so git re-checks the work independently. A recovery "
             "bundle is written first unless you pass `--no-bundle`. If it refuses, it "
             "names the files whose CONTENT exists nowhere else.\n\n"
+            "**A second, less obvious case where `-d` refuses**: it measures a branch "
+            "against its OWN upstream when it has one, so a branch fully merged into "
+            "`main` is still refused while it is ahead of `origin/<name>` — git says "
+            '"not yet merged to `refs/remotes/origin/<name>`, even though it is merged '
+            'to HEAD". Pushing the branch, or `delete-branch`, both resolve it; the '
+            "latter reports this as the `merged-unpushed` tier and deletes it, because "
+            "every one of those commits is already in `main`.\n\n"
             "**Abandoning unmerged work is human-gated and you cannot complete it.** "
             "When no proof holds, the branch holds the only copy of real work, so "
             "`--allow-unproven --reason` is not enough: the command also requires a "

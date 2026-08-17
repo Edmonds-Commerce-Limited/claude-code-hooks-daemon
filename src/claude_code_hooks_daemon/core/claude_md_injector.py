@@ -346,7 +346,14 @@ class ClaudeMdInjector:
         # `--only` fails outright with `pathspec ... did not match any file(s)`,
         # which is what a first install has.
         if status_line.startswith(_UNTRACKED_STATUS_PREFIX):
-            stage = run_git(cwd, "add", filename)
+            # GIT_COMMIT, not the default: `add` takes the same REQUIRED index
+            # lock and writes the same index as the commit below, and the reason
+            # that constant is 30s is that subprocess KILLS the child on expiry —
+            # killing git mid-index-write is itself how `.git/index.lock` gets
+            # orphaned, which is the failure this whole area exists to avoid.
+            # These are the only two lock-taking writes left here, so they must
+            # share a budget that cannot cause it (Plan 00248 F4).
+            stage = run_git(cwd, "add", filename, timeout=Timeout.GIT_COMMIT)
             if stage.returncode != 0:
                 ClaudeMdInjector._log_git_failure("staging", stage)
                 return

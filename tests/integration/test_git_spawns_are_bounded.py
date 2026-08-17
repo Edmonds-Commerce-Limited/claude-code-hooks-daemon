@@ -17,10 +17,24 @@ its verdict under a key no consumer reads — the failure mode Plan 00244 hit wi
 a freshly-added checker.
 
 **What it can and cannot see**: it matches the mechanically-checkable shape — a
-`subprocess` call whose argv is a list literal beginning with `"git"`. An argv
-built up in a variable escapes it. That is the same deliberate subset
-`check_magic_values.py` targets, and the same trade-off: a check that fires only
-on unambiguous shapes stays enabled, and one that guesses gets disabled.
+`subprocess` spawner call whose argv is a list literal beginning with `"git"`,
+reached through any of the ordinary import idioms (`subprocess.run`,
+`sp.run` via an alias, or a `from subprocess import run` name), with argv passed
+positionally or as `args=`. An argv built up in a variable escapes it, as does a
+first element that is not a literal `"git"` (`shutil.which("git")`,
+`"/usr/bin/git"`). That is the same deliberate subset `check_magic_values.py`
+targets, and the same trade-off: a check that fires only on unambiguous shapes
+stays enabled, and one that guesses gets disabled.
+
+The import-idiom coverage was added by Plan 00248 after a review demonstrated the
+escapes by execution. It is worth being precise about why those three counted and
+the others did not: an alias import is not an evasion, it is how Python code is
+written, and `sp.run(["git", ...])` is exactly as unambiguous as the spelled-out
+form. `shutil.which("git")` genuinely is ambiguous to a reader of the AST alone.
+
+**Scope**: `src/` only. `scripts/qa/` also spawns git directly and untimed; none
+of those calls touches the index today (`log`, `for-each-ref`), but the guard
+would not notice if one started to.
 """
 
 from __future__ import annotations
@@ -37,6 +51,13 @@ _SPAWNING_CALLS: Final[frozenset[str]] = frozenset(
 )
 
 _GIT: Final[str] = "git"
+
+#: `subprocess.run`'s own name for its argv parameter, so a caller may pass argv
+#: as a keyword and still be making an entirely ordinary call.
+_ARGV_KEYWORD: Final[str] = "args"
+
+#: The module whose spawners this guard is about.
+_SUBPROCESS: Final[str] = "subprocess"
 
 #: Files permitted to spawn git directly, each with the reason it is exempt.
 #: A new entry is a deliberate decision that must carry its justification —
@@ -60,16 +81,30 @@ class _Spawn(NamedTuple):
         return f"{self.relative_path}:{self.line} — {self.argv_head}"
 
 
+def _argv_node(call: ast.Call) -> ast.expr | None:
+    """The expression holding this call's argv, positional or `args=`."""
+    if call.args:
+        return call.args[0]
+    for keyword in call.keywords:
+        if keyword.arg == _ARGV_KEYWORD:
+            return keyword.value
+    return None
+
+
 def _argv_starts_with_git(call: ast.Call) -> str | None:
     """Return a readable argv head when this call's argv literal starts with git.
 
     Only a list/tuple literal is inspected. `["git", "status"]` is unambiguous;
     a name referring to a list built elsewhere is not, and guessing is what makes
     a checker untrustworthy.
+
+    Positional AND `args=`: the keyword is the parameter's documented name, so
+    `subprocess.run(args=["git", ...])` is exactly as clear as the positional
+    form — reading only `call.args` let it through (Plan 00248 F5).
     """
-    if not call.args:
+    argv = _argv_node(call)
+    if argv is None:
         return None
-    argv = call.args[0]
     if not isinstance(argv, (ast.List, ast.Tuple)) or not argv.elts:
         return None
     first = argv.elts[0]
@@ -83,15 +118,49 @@ def _argv_starts_with_git(call: ast.Call) -> str | None:
     return " ".join(words)
 
 
-def _is_subprocess_spawn(call: ast.Call) -> bool:
-    """True for `subprocess.<spawner>(...)` calls."""
+class _SubprocessBindings(NamedTuple):
+    """The local names in one module that reach a `subprocess` spawner.
+
+    Resolved per module rather than assumed, because the first version of this
+    guard hard-coded the name `subprocess` and so missed every ordinary
+    alternative: `import subprocess as sp`, `from subprocess import run`, and
+    `from subprocess import run as launch` (Plan 00248 F5). Names are collected
+    from the module's own imports, so nothing is inferred from spelling alone —
+    a project-local `run` from elsewhere is still not a subprocess spawn.
+    """
+
+    #: Names bound to the `subprocess` MODULE — `subprocess`, `sp`, …
+    modules: frozenset[str]
+    #: Names bound directly to a spawner — `run`, `launch`, …
+    spawners: frozenset[str]
+
+
+def _subprocess_bindings(tree: ast.Module) -> _SubprocessBindings:
+    """Every local name in `tree` that leads to a `subprocess` spawner."""
+    modules: set[str] = set()
+    spawners: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == _SUBPROCESS:
+                    modules.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module == _SUBPROCESS:
+            for alias in node.names:
+                if alias.name in _SPAWNING_CALLS:
+                    spawners.add(alias.asname or alias.name)
+    return _SubprocessBindings(frozenset(modules), frozenset(spawners))
+
+
+def _is_subprocess_spawn(call: ast.Call, bindings: _SubprocessBindings) -> bool:
+    """True for a call that reaches a `subprocess` spawner in this module."""
     func = call.func
-    return (
-        isinstance(func, ast.Attribute)
-        and func.attr in _SPAWNING_CALLS
-        and isinstance(func.value, ast.Name)
-        and func.value.id == "subprocess"
-    )
+    if isinstance(func, ast.Attribute):
+        return (
+            func.attr in _SPAWNING_CALLS
+            and isinstance(func.value, ast.Name)
+            and func.value.id in bindings.modules
+        )
+    return isinstance(func, ast.Name) and func.id in bindings.spawners
 
 
 def _direct_git_spawns(source_root: Path) -> list[_Spawn]:
@@ -102,8 +171,9 @@ def _direct_git_spawns(source_root: Path) -> list[_Spawn]:
         if relative in _EXEMPT:
             continue
         tree = ast.parse(module.read_text(encoding="utf-8"), filename=str(module))
+        bindings = _subprocess_bindings(tree)
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not _is_subprocess_spawn(node):
+            if not isinstance(node, ast.Call) or not _is_subprocess_spawn(node, bindings):
                 continue
             argv_head = _argv_starts_with_git(node)
             if argv_head is not None:
@@ -156,3 +226,58 @@ class TestEveryGitSpawnGoesThroughTheBoundedRunner:
         )
 
         assert _direct_git_spawns(tmp_path) == []
+
+
+class TestOrdinaryImportIdiomsDoNotEscape:
+    """Plan 00248 F5: three shapes walked straight past the first scanner.
+
+    None of them is an attempt to bypass anything — they are the ordinary ways
+    Python code imports and calls `subprocess`, and a future author would reach
+    for any of them without a thought. Each is also UNAMBIGUOUS, which is the
+    line this scanner's docstring draws: argv assembled in a variable is left
+    alone because reading it would mean guessing, but `sp.run(["git", ...])` is
+    exactly as clear as `subprocess.run(["git", ...])`.
+
+    The escapes were found by execution, not by reading: each shape below was
+    written to a scratch file and run through the real scanner.
+    """
+
+    def _scan_source(self, tmp_path: Path, source: str) -> list[str]:
+        (tmp_path / "offender.py").write_text(source, encoding="utf-8")
+        return [spawn.argv_head for spawn in _direct_git_spawns(tmp_path)]
+
+    def test_an_aliased_module_import_is_caught(self, tmp_path: Path) -> None:
+        source = 'import subprocess as sp\nsp.run(["git", "status"], check=False)\n'
+
+        assert self._scan_source(tmp_path, source) == ["git status"]
+
+    def test_a_from_import_of_the_spawner_is_caught(self, tmp_path: Path) -> None:
+        source = 'from subprocess import run\nrun(["git", "status"], check=False)\n'
+
+        assert self._scan_source(tmp_path, source) == ["git status"]
+
+    def test_an_aliased_from_import_is_caught(self, tmp_path: Path) -> None:
+        source = 'from subprocess import run as launch\nlaunch(["git", "status"])\n'
+
+        assert self._scan_source(tmp_path, source) == ["git status"]
+
+    def test_argv_passed_as_a_keyword_is_caught(self, tmp_path: Path) -> None:
+        """`args=` is the parameter's real name, so this is a documented call."""
+        source = 'import subprocess\nsubprocess.run(args=["git", "status"], check=False)\n'
+
+        assert self._scan_source(tmp_path, source) == ["git status"]
+
+    def test_a_bare_run_from_elsewhere_is_not_flagged(self, tmp_path: Path) -> None:
+        """Only names bound to `subprocess` count — no guessing by name alone.
+
+        A project-local `run(["git", ...])` helper that already goes through the
+        bounded runner would otherwise be flagged for the shape of its argv.
+        """
+        source = 'from mylib import run\nrun(["git", "status"])\n'
+
+        assert self._scan_source(tmp_path, source) == []
+
+    def test_a_non_git_call_through_an_alias_is_not_flagged(self, tmp_path: Path) -> None:
+        source = 'import subprocess as sp\nsp.run(["ruff", "check"])\n'
+
+        assert self._scan_source(tmp_path, source) == []

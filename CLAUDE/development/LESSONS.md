@@ -501,3 +501,33 @@ failures as long-standing, not as regressions from your change. And when writing
 a `skipif` for a missing tool, remember you are choosing silence: prefer
 installing the tool in CI to skipping — Plan 00245's Decision 3 settled that
 here, and it is what surfaced these four.
+
+**It paid out immediately.** The first green run after `-rs` landed named 11 more
+silent skips nobody knew about: every socket-dependent acceptance test
+(`test_absolute_path_socket_deny.py`, `test_stop_hook_hard_block.py`,
+`test_tool_use_error_recovery.py`) skips in CI for want of a running daemon —
+including files `RELEASING.md` Step 12.0 declares BLOCKING, one of which it says
+explicitly "a skip there is itself an abort condition". Two rounds of this lesson
+in one plan, from the same one-flag change.
+
+## Centralising a property imposes the centre's defaults on every call site
+
+**What happened (Plan 00248):** Plan 00246 did the right thing and routed ~30
+scattered `subprocess.run(["git", ...])` calls through one `run_git` chokepoint,
+which is how the timeout and environment fixes became one-line changes. But every
+one of those call sites inherited `run_git`'s default budget — five seconds, sized
+for the hook context it was written for. `branch_safety.py` does nothing of the
+kind: `git cherry` computes a patch-id per commit, `rev-list --objects` and
+`ls-tree -r` enumerate every tree and blob in a ref. On a large repository the
+centralisation therefore introduced a `CalledProcessError` into a command that had
+previously run unbounded and worked. The consolidation was still correct; the
+regression was the default riding along with it.
+
+**Apply:** when you move N call sites behind one helper, the diff to review is not
+only the code you deleted — it is the set of implicit properties each site used to
+choose for itself and now cannot. Timeouts, encodings, `check=`, environment,
+retries and cwd all behave this way. For each, ask which site had the most extreme
+legitimate requirement, and either size the default for that site or keep the knob
+per-call (`_git(..., timeout=Timeout.GIT_BUNDLE_CREATE)`). A chokepoint that is
+right for the average caller is wrong for the tails, and the tails are where the
+expensive work lives.

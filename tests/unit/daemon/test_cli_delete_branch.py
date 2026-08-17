@@ -164,6 +164,62 @@ class TestAgentsCannotAbandonWork:
         assert TIER_UNPROVEN in capsys.readouterr().out
 
 
+class TestAGitFailureIsARefusalNotATraceback:
+    """Plan 00248 F1: an expired budget must read as a refusal.
+
+    ``run_git`` reports a timeout as returncode 127 and ``branch_safety._git``
+    re-raises that as ``CalledProcessError``. This command caught only
+    ``ValueError``, so any git failure it had not classified escaped as a stack
+    trace — from the one command in the daemon whose entire purpose is to refuse
+    clearly when it cannot prove a deletion is safe.
+    """
+
+    def test_a_git_failure_exits_nonzero_with_a_message(
+        self,
+        repo_with_abandoned_branch: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO())
+
+        def explode(*_args: Any, **_kwargs: Any) -> None:
+            raise subprocess.CalledProcessError(
+                127, ["git", "bundle", "create"], "", "timed out after 300s"
+            )
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.daemon.branch_safety.delete_branches", explode
+        )
+
+        exit_code = cmd_delete_branch(_args(repo_with_abandoned_branch))
+
+        assert exit_code == 2
+        stderr = capsys.readouterr().err
+        assert "nothing was deleted" in stderr
+        assert "timed out" in stderr
+
+    def test_the_branch_survives_a_git_failure(
+        self,
+        repo_with_abandoned_branch: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The report must match reality: nothing deleted means nothing deleted."""
+        monkeypatch.setattr("sys.stdin", io.StringIO())
+
+        def explode(*_args: Any, **_kwargs: Any) -> None:
+            raise subprocess.CalledProcessError(127, ["git", "cherry"], "", "timed out")
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.daemon.branch_safety.delete_branches", explode
+        )
+
+        cmd_delete_branch(_args(repo_with_abandoned_branch))
+        capsys.readouterr()
+
+        assert "doomed" in _git(repo_with_abandoned_branch, "branch", "--list")
+
+
 class TestTheConfirmationPrompt:
     """What a human at a terminal is actually shown and asked."""
 

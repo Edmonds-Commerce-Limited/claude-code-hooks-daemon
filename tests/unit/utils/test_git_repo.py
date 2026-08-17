@@ -285,6 +285,32 @@ class TestReadOnlyGitDoesNotTakeTheIndexLock:
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() != ""
 
+    def test_output_that_is_not_valid_utf8_is_reported_not_raised(self, tmp_path: Path) -> None:
+        """The "never raises" contract has to hold for BYTES too (Plan 00248 F2).
+
+        ``text=True`` decodes with ``errors="strict"``, so one invalid byte in
+        git's stdout raises ``UnicodeDecodeError`` — which is a ``ValueError``,
+        so neither ``OSError`` nor ``SubprocessError`` catches it and it escapes
+        this runner entirely.
+
+        That is not a theoretical shape. ``claude_md_injector`` reads a committed
+        CLAUDE.md with ``git show`` on the daemon-startup path, whose caller
+        (``DaemonController.initialise``) has no try/except and a comment
+        asserting this cannot raise. One mis-encoded byte anywhere in that file
+        would stop the daemon from starting.
+        """
+        repo = _git_init(tmp_path / "proj")
+        undecodable = repo / "bad.txt"
+        undecodable.write_bytes(b"before \xff\xfe after\n")
+        run_git(repo, "add", "bad.txt")
+        run_git(repo, "commit", "-m", "commit a file git cannot decode as UTF-8")
+
+        result = run_git(repo, "show", "HEAD:./bad.txt")
+
+        assert result.returncode == 0, result.stderr
+        assert "before" in result.stdout
+        assert "after" in result.stdout
+
     def test_the_existing_read_helpers_route_through_it(self, tmp_path: Path) -> None:
         """`resolve_for` / `read_config` must stop locking too.
 

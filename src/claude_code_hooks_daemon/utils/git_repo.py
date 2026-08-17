@@ -60,6 +60,14 @@ def run_git(
     feature-detection convention :func:`_git_output` documents — 'not a repo' IS
     the answer — and it keeps a wedged git from stalling hook dispatch or
     aborting daemon startup.
+
+    That promise covers OUTPUT as well as failure, which is why decoding is
+    lossy: ``text=True`` alone decodes with ``errors="strict"``, so a single byte
+    of non-UTF-8 in git's stdout raises ``UnicodeDecodeError``. That is a
+    ``ValueError`` — neither ``OSError`` nor ``SubprocessError`` — so it would
+    escape the handler below and break the contract callers were told to rely on
+    (two of them deleted their own except clauses citing it). A mangled
+    character is visible in a log; a daemon that will not start is not.
     """
     argv = ["git", "-C", str(cwd), *args]
     # Callers ADD variables (e.g. a non-interactive fetch disabling credential
@@ -76,6 +84,7 @@ def run_git(
             argv,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout,
             env=child_env,
             check=False,

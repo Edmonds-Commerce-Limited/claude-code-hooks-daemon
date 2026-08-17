@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.response_schemas import (
     get_response_schema,
@@ -158,15 +159,54 @@ class GitIndexWatch:
 
     @staticmethod
     def _identity(repo: Path) -> tuple[int, int]:
-        stat = (repo / ".git" / "index").stat()
+        """Inode + mtime of ``.git/index``, which changes iff git rewrote it.
+
+        A repo with no index yet has nothing to watch, and a bare
+        ``FileNotFoundError`` from a fixture helper reads as a bug in the test
+        rather than a mis-set-up repo — so say which is which.
+        """
+        index = repo / ".git" / "index"
+        if not index.exists():
+            raise AssertionError(
+                f"{repo} has no .git/index, so there is no index rewrite to "
+                f"observe. Commit something first — an empty repo makes every "
+                f"assertion here vacuous."
+            )
+        stat = index.stat()
         return (stat.st_ino, stat.st_mtime_ns)
 
     @staticmethod
     def _make_stale(repo: Path) -> None:
-        """Touch tracked files so git WANTS to refresh the index on next read."""
-        for tracked in sorted(repo.iterdir()):
-            if tracked.is_file():
-                tracked.touch()
+        """Touch every TRACKED file so git wants to refresh the index next read.
+
+        Driven by ``git ls-files`` rather than by listing the directory (Plan
+        00248 F6). The first version iterated ``repo.iterdir()`` non-recursively
+        and touched whatever files it found without checking they were tracked —
+        so for any repo whose tracked files live in subdirectories it touched
+        NOTHING, git had no refresh to skip, and ``expect_none`` passed while
+        proving nothing. That is precisely the vacuity this class exists to
+        prevent, reintroduced one directory deep, and it would have surfaced the
+        first time someone used the fixture with a realistic tree.
+        """
+        import subprocess  # nosec B404 - runs the trusted system `git` only
+
+        listing = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+            ["git", "-C", str(repo), "ls-files", "-z"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=Timeout.GIT_CONTEXT,
+        ).stdout
+        tracked = [name for name in listing.split("\0") if name]
+        if not tracked:
+            raise AssertionError(
+                f"{repo} has no tracked files, so the index cannot be made "
+                f"stale and any 'was not rewritten' assertion is vacuous."
+            )
+        for name in tracked:
+            path = repo / name
+            if path.is_file():
+                path.touch()
 
     @contextmanager
     def expect_none(self, repo: Path, what: str) -> Generator[None, None, None]:
@@ -208,6 +248,15 @@ def tmp_git_repo(tmp_path: Path) -> Path:
     Paired with :class:`GitIndexWatch`: proving that code does or does not take
     the index lock needs a REAL repo with a real index, which a mocked
     ``subprocess`` cannot provide.
+
+    Every git call is BOUNDED and every ambient influence is neutralised (Plan
+    00248). The local identity is set, but identity is not the only thing git
+    reads from the environment: a developer with ``commit.gpgsign=true`` globally
+    would have this fixture block on a signing prompt, and an unbounded
+    ``check=True`` commit turns that into a hung suite in a file that has nothing
+    to do with signing. This is the same defect class as Plan 00245's CI
+    failures — a test taking its premise from the environment instead of stating
+    it — so the premise is stated here.
     """
     import subprocess  # nosec B404 - runs the trusted system `git` only
 
@@ -217,15 +266,27 @@ def tmp_git_repo(tmp_path: Path) -> Path:
         ["git", "init"],
         ["git", "config", "--local", "user.email", "t@t"],
         ["git", "config", "--local", "user.name", "t"],
+        ["git", "config", "--local", "commit.gpgsign", "false"],
+        ["git", "config", "--local", "tag.gpgsign", "false"],
     )
     for command in commands:
-        subprocess.run(command, cwd=repo, capture_output=True, check=True)  # nosec B603
+        subprocess.run(  # nosec B603
+            command, cwd=repo, capture_output=True, check=True, timeout=Timeout.GIT_CONTEXT
+        )
     (repo / "tracked.txt").write_text("one\n", encoding="utf-8")
     subprocess.run(  # nosec B603
-        ["git", "add", "tracked.txt"], cwd=repo, capture_output=True, check=True
+        ["git", "add", "tracked.txt"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_CONTEXT,
     )
     subprocess.run(  # nosec B603
-        ["git", "commit", "-m", "init"], cwd=repo, capture_output=True, check=True
+        ["git", "commit", "-m", "init"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_COMMIT,
     )
     return repo
 

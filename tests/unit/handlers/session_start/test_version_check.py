@@ -422,6 +422,46 @@ def test_get_latest_version_returns_none_on_timeout(handler: VersionCheckHandler
         assert version is None
 
 
+def test_get_latest_version_survives_a_deleted_working_directory(
+    handler: VersionCheckHandler,
+) -> None:
+    """Plan 00248 F3: a deleted cwd must not take out the SessionStart chain.
+
+    ``Path.cwd()`` raises ``FileNotFoundError`` when the process working
+    directory has been removed — a state this daemon can create for itself, since
+    it makes and removes worktrees. This function's comment says it cannot raise
+    and two callers rely on that, so the cwd it passes must be one that always
+    exists rather than one that merely usually does.
+    """
+    with patch("pathlib.Path.cwd", side_effect=FileNotFoundError("cwd is gone")):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="abc123\trefs/tags/v9.9.9\n",
+                stderr="",
+            )
+
+            assert handler._get_latest_version() == "9.9.9"
+
+
+def test_get_latest_version_asks_git_for_the_remote_tags(handler: VersionCheckHandler) -> None:
+    """The mock is process-wide, so pin WHAT was run, not just that something was.
+
+    Patching ``subprocess.run`` (rather than a module-qualified target) means
+    every one of these tests would pass if this handler stopped calling git
+    altogether. One argv assertion is enough to keep that honest.
+    """
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        handler._get_latest_version()
+
+    argv = mock_run.call_args.args[0]
+    assert argv[0] == "git"
+    assert "ls-remote" in argv
+    assert "--tags" in argv
+
+
 def test_get_cache_file_fallback_on_runtime_error(handler: VersionCheckHandler) -> None:
     """_get_cache_file falls back when ProjectContext raises RuntimeError."""
     with patch(

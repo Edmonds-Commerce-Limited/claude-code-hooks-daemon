@@ -100,19 +100,37 @@ the target, and both a **history rewrite** and a **squash merge** sever
 ancestry while leaving the content upstream. After either, `-d` refuses every
 affected branch even though nothing would be lost. `delete-branch` fills that
 gap, refusing by default and deleting only what it can prove is recoverable,
-across four tiers evaluated cheapest-first:
+across these tiers, evaluated cheapest-first:
 
 | Tier                | Proof                                                                                 |
 | ------------------- | ------------------------------------------------------------------------------------- |
 | `merged`            | Tip is an ancestor of the protected ref (what `git branch -d` proves)                 |
+| `merged-unpushed`   | The same ancestry proof, but the branch is ahead of its OWN upstream                  |
 | `patch-equivalent`  | Every commit is already upstream by patch-id -- the shape a history rewrite produces  |
 | `content-preserved` | Every file version is byte-identical to a blob still reachable from the protected ref |
 | `unproven`          | Everything else -- refused, naming the files whose content exists nowhere else        |
 
+`merged-unpushed` exists because `git branch -d` enforces a **different
+predicate** from the `merged` proof: *merged into its upstream if it has one*,
+falling back to `HEAD` only when it has none. So a branch fully contained in
+`main` is still refused while it sits ahead of `origin/<name>` -- git's own
+warning says "not yet merged to `refs/remotes/origin/<name>`, even though it is
+merged to HEAD". Nothing is at risk: a commit ahead of the upstream and absent
+from the protected ref would fail the ancestry test and never reach this tier.
+The tier is separate rather than folded into `merged` so that a reader can see
+which proof licensed the force flag.
+
 Blocking preconditions -- the current branch, a branch checked out in any
 worktree, a protected branch name -- refuse absolutely and `--allow-unproven`
-cannot override them. Deletion is all-or-nothing across the batch and writes a
-recovery bundle first unless `--no-bundle` is passed. The proof is blob
+cannot override them.
+
+Nothing is deleted until every branch has been classified and every blocker
+resolved, so one unsafe branch in a batch removes none of the others. Git can
+still refuse an individual branch on grounds this engine does not model; the run
+then reports `refused` with git's own words, lists exactly what was deleted, and
+keeps the recovery bundle. A run that deleted nothing removes its bundle, so an
+orphaned bundle cannot be mistaken for evidence of a deletion. A bundle is
+written first unless `--no-bundle` is passed. The proof is blob
 identity, never path presence: a path existing upstream says nothing about the
 content at that path.
 

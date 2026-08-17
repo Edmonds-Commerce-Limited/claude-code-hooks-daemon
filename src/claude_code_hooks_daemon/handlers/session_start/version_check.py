@@ -30,6 +30,15 @@ _GITHUB_REPO_URL: Final[str] = (
     "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git"
 )
 
+#: ``run_git`` needs a cwd for ``-C``, but ``ls-remote`` talks only to the remote
+#: URL, so which directory it runs in is immaterial. The filesystem root is used
+#: rather than ``Path.cwd()`` because a process whose working directory has been
+#: DELETED makes ``Path.cwd()`` raise ``FileNotFoundError`` — a state this daemon
+#: can create for itself, since it makes and removes worktrees. That raise would
+#: escape a handler documented as unable to raise (Plan 00248 F3). The root
+#: always exists.
+_CWD_IMMATERIAL: Final[Path] = Path("/")
+
 
 class VersionCheckHandler(Handler):
     """Check daemon version against latest GitHub release on new sessions.
@@ -113,14 +122,14 @@ class VersionCheckHandler(Handler):
         Returns:
             Latest version string (e.g., "2.7.0") or None if failed
         """
-        # SECURITY: fixed argv, no shell, trusted URL (our own repository). ``-C``
-        # needs an existing directory, but ls-remote talks only to the remote
-        # URL, so the cwd is immaterial — the process cwd always exists.
+        # SECURITY: fixed argv, no shell, trusted URL (our own repository).
         # run_git never raises: an absent git binary or a timeout comes back as
         # a non-zero returncode with the reason in stderr, so there is nothing
-        # left to catch here.
+        # left to catch here. That is only true while nothing else in this
+        # function can raise either — see _CWD_IMMATERIAL for why the cwd is not
+        # `Path.cwd()`.
         result = run_git(
-            Path.cwd(),
+            _CWD_IMMATERIAL,
             "ls-remote",
             "--tags",
             "--refs",
