@@ -778,6 +778,43 @@ class TestMergedWhileHeadIsElsewhere:
 
         assert classify_branch(repo, "ordinary").tier == TIER_MERGED
 
+    def test_an_upstream_that_tracks_head_is_resolved_at_classification_time(
+        self, repo: Path
+    ) -> None:
+        """`branch.<name>.merge = HEAD` means "whatever HEAD points at NOW".
+
+        Found while probing this fix and worth pinning, because it briefly looked
+        like a residual disagreement: resolving the upstream BEFORE moving HEAD
+        gives one answer and resolving it after gives another. Git evaluates it at
+        delete time, so this code must evaluate it at classification time — which it
+        does, since `_safe_delete_reference` asks git rather than caching. Once both
+        are read at the same moment they agree, and git refuses exactly when the
+        predicate is False.
+        """
+        _git(repo, "config", "--local", "branch.tracks-head.remote", ".")
+        _git(repo, "checkout", "-b", "tracks-head")
+        _commit(repo, "tracks-head.txt", "x\n", "Add tracks-head")
+        _git(repo, "checkout", "main")
+        _git(repo, "merge", "--no-ff", "-m", "Merge tracks-head", "tracks-head")
+        _git(repo, "config", "--local", "branch.tracks-head.merge", "HEAD")
+        _git(repo, "checkout", "-b", "elsewhere", "HEAD~1")
+
+        classification = classify_branch(repo, "tracks-head")
+        refusal = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+            ["git", "-C", str(repo), "branch", "--delete", "tracks-head"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**_ENV, "HOME": str(repo)},
+        )
+
+        assert refusal.returncode != 0, "git must refuse the safe delete here"
+        assert classification.tier != TIER_MERGED, (
+            "so the classifier must NOT promise the safe delete will work: "
+            f"{classification.tier}"
+        )
+        assert classification.is_safe is True, "the ancestry proof is unaffected"
+
 
 class TestAGitRefusalMidBatchIsReportedNotRaised:
     """Plan 00249: git can refuse on grounds this engine does not model.
