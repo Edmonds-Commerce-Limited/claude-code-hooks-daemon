@@ -33,21 +33,24 @@ from pathlib import Path
 from typing import Any
 
 # Path to hook scripts (relative to repo root)
-_HOOKS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "hooks"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_HOOKS_DIR = _REPO_ROOT / ".claude" / "hooks"
 
 
 def _build_clean_env(
-    project_path: str,
     ci_env: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Build a clean environment with no daemon available.
 
-    Uses a fake project path so the daemon cannot start (no venv, no socket).
+    The fake project path is NOT needed here: the generated forwarder script
+    re-sets every path variable immediately after sourcing `init.sh`, so those
+    are the values the daemon lookup actually uses. This function only has to
+    get `init.sh` through its source-time checks.
+
     By default, NO CI environment variables are included — this simulates a
     developer machine or dev container where passthrough must NOT activate.
 
     Args:
-        project_path: Path to the fake project root.
         ci_env: Optional dict of CI environment variables to add (e.g.
                 {"CI": "true"} or {"GITHUB_ACTIONS": "true"}). If None,
                 no CI variables are set — non-CI environment.
@@ -56,8 +59,19 @@ def _build_clean_env(
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": os.environ.get("HOME", "/root"),
         "HOSTNAME": os.environ.get("HOSTNAME", "test-host"),
-        # Override HOOKS_DAEMON_ROOT_DIR to point at the fake project
-        "HOOKS_DAEMON_ROOT_DIR": f"{project_path}/.claude/hooks-daemon",
+        # At SOURCE time this must equal the real repo root, and only then is
+        # it overridden to the fake project (the generated script re-sets it
+        # immediately after `source`, which is what carries the test's intent).
+        #
+        # `init.sh` refuses to run inside the hooks-daemon repo unless
+        # self-install is evident, accepting either
+        # `HOOKS_DAEMON_ROOT_DIR == PROJECT_PATH` or the presence of
+        # `.claude/hooks-daemon.env` — and that `.env` is GITIGNORED. So on a
+        # self-installed developer tree the guard passed by accident, while on a
+        # fresh checkout every test here died with `hooks_daemon_repo_detected`.
+        # Setting it explicitly is not a workaround: it is precisely what the
+        # untracked `.env` sets in a real self-install session.
+        "HOOKS_DAEMON_ROOT_DIR": str(_REPO_ROOT),
     }
     if ci_env:
         env.update(ci_env)
@@ -145,7 +159,7 @@ def _run_hook_via_forwarder(
     assert hook_path.exists(), f"Hook script not found: {hook_path}"
 
     init_sh = _HOOKS_DIR.parent / "init.sh"
-    env = _build_clean_env(str(project_path), ci_env=extra_env)
+    env = _build_clean_env(ci_env=extra_env)
 
     # Build a minimal test forwarder that:
     # 1. Sets PROJECT_PATH to fake project (before sourcing init.sh)

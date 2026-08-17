@@ -31,9 +31,28 @@ _INIT_SH = _REPO_ROOT / ".claude" / "init.sh"
 _SOURCE_TIMEOUT_SECONDS = 30
 
 
+def _self_install_premise() -> dict[str, str]:
+    """The environment `init.sh` needs to run inside this repo at all.
+
+    `init.sh` refuses to run inside the hooks-daemon repo unless self-install is
+    evident, and it accepts either `HOOKS_DAEMON_ROOT_DIR == PROJECT_PATH` or
+    the presence of `.claude/hooks-daemon.env`. That `.env` is GITIGNORED, so a
+    test that sources the real `init.sh` without setting this passed only on a
+    developer tree that happened to be self-installed, and died with
+    `hooks_daemon_repo_detected` on a fresh checkout — which is why every test
+    in this file failed in CI while passing locally.
+
+    Setting it is not a workaround: this is exactly what the untracked `.env`
+    exports in a real self-install session. `_sandbox_project` below establishes
+    the same premise the other way, by writing its own `.env`.
+    """
+    return {"HOOKS_DAEMON_ROOT_DIR": str(_REPO_ROOT)}
+
+
 def _source_and_run(snippet: str, extra_env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """Source the real init.sh, then run a snippet; return the completed proc."""
     env = os.environ.copy()
+    env.update(_self_install_premise())
     env.update(extra_env)
     script = f'source "{_INIT_SH}" >/dev/null 2>&1\n{snippet}'
     return subprocess.run(
@@ -66,6 +85,7 @@ def test_hostname_suffix_sanitization(hostname: str, expected: str) -> None:
 def test_hostname_suffix_fallback_is_sanitized() -> None:
     """With no HOSTNAME the suffix still starts with '-' and has no spaces/upper."""
     env = {k: v for k, v in os.environ.items() if k != "HOSTNAME"}
+    env.update(_self_install_premise())
     proc = subprocess.run(
         ["bash", "-c", f'source "{_INIT_SH}" >/dev/null 2>&1\n_get_hostname_suffix'],
         capture_output=True,

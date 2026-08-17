@@ -125,6 +125,17 @@ def _run_wrapper(
 ) -> subprocess.CompletedProcess[bytes]:
     """Invoke a deployed wrapper against a fake live daemon socket."""
     env = os.environ.copy()
+    # ESTABLISH THE PREMISE the wrapper needs, rather than inheriting it.
+    #
+    # `init.sh` refuses to run inside the hooks-daemon repo unless self-install
+    # is evident, and it accepts either `HOOKS_DAEMON_ROOT_DIR == PROJECT_PATH`
+    # or the presence of `.claude/hooks-daemon.env`. That `.env` is GITIGNORED,
+    # so on a developer's self-installed tree the guard passed by accident and
+    # on a fresh checkout it did not: every test here failed in CI with
+    # `hooks_daemon_repo_detected` while passing locally. Setting the variable
+    # explicitly is not a workaround — it is exactly what the untracked `.env`
+    # sets in a real self-install session.
+    env["HOOKS_DAEMON_ROOT_DIR"] = str(_REPO_ROOT)
     env["CLAUDE_HOOKS_SOCKET_PATH"] = str(sock_path)
     env["CLAUDE_HOOKS_PID_PATH"] = str(pid_path)
     if strip_jq:
