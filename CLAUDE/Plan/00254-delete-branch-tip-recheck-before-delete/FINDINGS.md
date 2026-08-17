@@ -213,3 +213,30 @@ refs/heads/feat@{upstream} rc=128 fatal: no such branch: 'refs/heads/feat'
 
 Git only accepts the short name there, and `@{upstream}` is branch-specific, so it
 cannot be hijacked. It keeps the bare name.
+
+## 7. Adjacent and deliberately NOT fixed here: the same pattern in `git_sync.py`
+
+Swept the rest of `src/` for the Phase 4 pattern once it was understood. Two real
+hits, both advisory-only, recorded here with severity so they are not lost and so
+the next person does not have to re-derive the sweep.
+
+| Site                                     | What breaks with a tag-shadowed branch                                                                    | Severity |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------- | -------- |
+| `utils/git_sync.py:440` (`_local_branch_upstreams`) | Keys become `heads/<name>`, so the gone-branch advisory names a branch that does not exist under that name | Low      |
+| `utils/git_sync.py:464` (`_merged_branch_names`)    | Same, and the `git branch -d <name>` the advisory suggests would fail as typed                             | Low      |
+
+No data loss in either: this is the SessionStart upstream advisory, which only
+prints guidance. Both sides of the merged/not-merged comparison read the short name,
+so they agree with each other and the classification stays correct — it is the NAME
+shown to the human that is wrong, and the copy-pasteable command that follows it.
+
+**Checked and NOT a hit**: `_tree_of` (`git_sync.py:156`) is only ever called with
+`HEAD` and an `origin/...` upstream ref. Neither is a bare local-branch name, so the
+rewritten-upstream tree comparison is not exposed. I had assumed it was before
+reading the call sites, and it is not.
+
+**Remediation** (for the follow-up): read `%(refname)` and strip `refs/heads/`, the
+same change made to `local_branches` and to the test helper. The wider DBF question
+— whether a QA check should reject bare-refname git invocations across the codebase
+— belongs with it, since a rule that only lives in one module's docstring is one
+refactor away from being forgotten.
