@@ -675,6 +675,7 @@ daemon:
 - **@CLAUDE/PlanWorkflow.md** - Planning workflow and standards
 - **CLAUDE/Plan/** - Implementation plans directory
 - **CLAUDE/development/LESSONS.md** - Durable engineering & process lessons
+- **CLAUDE/development/DOC-CONVENTIONS.md** - Markdown conventions: the ```` ```claude-code ```` fence for Claude Code chat invocations, and what the doc-truth checker enforces
 - **docs/guides/VERDICT_LOG.md** - Handler decision audit log: schema, retention, `hooks-daemon verdicts` reporting
 - **examples/project-handlers/** - Example project handlers with tests
 - **RELEASES/** - Version release notes
