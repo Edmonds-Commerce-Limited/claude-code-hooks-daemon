@@ -16,10 +16,12 @@ inspect the filesystem side-effects. Real uv is used — no mocking.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -28,19 +30,39 @@ VENV_SH = REPO_ROOT / "scripts" / "install" / "venv.sh"
 FP_SH = REPO_ROOT / "scripts" / "install" / "python_fingerprint.sh"
 
 
+#: ``ensure_venv`` skips the bootstrap entirely when either of these says so
+#: (venv.sh: ``HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1`` or ``CI=true``). GitHub
+#: Actions exports ``CI=true`` for every step, so inheriting the ambient
+#: environment made this whole file vacuous on the runner: the four creation
+#: tests failed ("ensure_venv did not create venv") while the gate test below
+#: passed for the wrong reason — the skip it asserts was already happening
+#: before it set anything. Each test therefore states which side of the gate it
+#: is exercising, rather than depending on ambient state (Plan 00245).
+_GATE_VARS: Final[tuple[str, ...]] = ("CI", "HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP")
+
+
 def _run_bash(script: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    """Run a bash snippet that sources venv.sh + python_fingerprint.sh."""
+    """Run a bash snippet that sources venv.sh + python_fingerprint.sh.
+
+    Runs with the bootstrap-gate variables REMOVED, so a test that wants the
+    gate closed sets it inline (see :class:`TestEnsureVenvCIGate`) and every
+    other test genuinely exercises venv creation. Only those two names are
+    dropped — the rest of the environment is inherited, because ``uv`` needs
+    ``PATH`` and ``HOME`` to run at all.
+    """
     wrapper = f"""
 set -euo pipefail
 source "{VENV_SH}"
 source "{FP_SH}"
 {script}
 """
+    env = {k: v for k, v in os.environ.items() if k not in _GATE_VARS}
     return subprocess.run(
         ["bash", "-c", wrapper],
         capture_output=True,
         text=True,
         cwd=str(cwd) if cwd else None,
+        env=env,
     )
 
 
@@ -216,7 +238,15 @@ class TestEnsureVenvDowngradeSafety:
 
 
 class TestEnsureVenvCIGate:
-    """CI environments + HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 must skip the bootstrap."""
+    """CI environments + HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 must skip the bootstrap.
+
+    Both halves of the gate are set INLINE on the ensure_venv call, because
+    :func:`_run_bash` strips them from the inherited environment. That is what
+    makes these assertions mean something on a CI runner, where ``CI=true`` is
+    ambient: without the strip, the skip asserted here happens whether or not
+    the variable under test is set, and the ``CI=true`` half had no coverage at
+    all (Plan 00245).
+    """
 
     def test_skips_when_skip_env_var_set(self, tmp_path: Path) -> None:
         daemon_dir = tmp_path / "project"
@@ -231,6 +261,41 @@ class TestEnsureVenvCIGate:
         assert not (daemon_dir / "untracked").exists() or not any(
             (daemon_dir / "untracked").glob("venv-*")
         ), "HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 must skip bootstrap"
+
+    def test_skips_when_ci_is_true(self, tmp_path: Path) -> None:
+        """``CI=true`` alone must skip — the half that shipped unmeasured.
+
+        This is the gate that silently voided four tests on the runner for 25
+        consecutive pushes. It is asserted here so that narrowing or removing it
+        fails a test instead of quietly re-enabling venv builds inside CI.
+        """
+        daemon_dir = tmp_path / "project"
+        daemon_dir.mkdir()
+        _minimal_daemon_dir(daemon_dir)
+
+        result = _run_bash(f'CI=true ensure_venv "{daemon_dir}" "v99.0.0" "{sys.executable}"')
+        assert result.returncode == 0, f"ensure_venv failed: {result.stderr}"
+        assert not (daemon_dir / "untracked").exists() or not any(
+            (daemon_dir / "untracked").glob("venv-*")
+        ), "CI=true must skip bootstrap"
+
+    @pytest.mark.slow
+    def test_a_value_other_than_true_does_not_skip(self, tmp_path: Path) -> None:
+        """Control: the gate tests for ``CI=true`` exactly, not for truthiness.
+
+        Without this, the two skip assertions above are equally satisfied by a
+        gate that skips unconditionally — which is precisely the failure mode
+        that made them vacuous in the first place.
+        """
+        daemon_dir = tmp_path / "project"
+        daemon_dir.mkdir()
+        _minimal_daemon_dir(daemon_dir)
+
+        result = _run_bash(f'CI=1 ensure_venv "{daemon_dir}" "v99.0.0" "{sys.executable}"')
+        assert result.returncode == 0, f"ensure_venv failed: {result.stderr}"
+        assert any(
+            (daemon_dir / "untracked").glob("venv-*")
+        ), f"CI=1 is not CI=true and must NOT skip the bootstrap; stderr: {result.stderr}"
 
 
 class TestEnsureVenvSlugIsolation:

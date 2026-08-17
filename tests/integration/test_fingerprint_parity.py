@@ -108,30 +108,99 @@ class TestBashPythonParity:
         fp = _bash_fingerprint(sys.executable)
         assert re.match(r"^py\d{2,3}-[0-9a-f]{8}$", fp), f"Bad format: {fp}"
 
-    def test_system_python_matches_venv_python_same_base_prefix(self) -> None:
-        """System python3 and the venv it created share one base_prefix, thus one fingerprint.
+    def test_a_venv_fingerprints_identically_to_the_interpreter_that_created_it(
+        self, tmp_path: Path
+    ) -> None:
+        """The crucial property: a base interpreter and a venv built FROM it agree.
 
-        This is the crucial property: bash-side runs during install using the
-        system python BEFORE the venv exists; Python-side runs AFTER the venv
-        is active. Both must agree.
+        bash-side runs during install using the base python BEFORE the venv
+        exists; Python-side runs AFTER the venv is active. A divergence would
+        put the installed venv at a different path than the one the daemon
+        activates, bricking startup.
+
+        The pair is CONSTRUCTED here rather than assumed from the ambient
+        interpreter. The previous version compared ``/usr/bin/python3`` against
+        whatever ``sys.executable`` happened to be, guarded by
+        ``sysconfig.get_config_var("prefix") != get_config_var("base_prefix")``
+        — and ``get_config_var("base_prefix")`` is always ``None``, so the guard
+        was always true and never guarded anything. It passed locally only
+        because the dogfood venv's base genuinely is ``/usr``; on a CI runner
+        ``sys.executable`` is a hostedtoolcache python that no more descends
+        from ``/usr/bin/python3`` than any other unrelated interpreter, so the
+        fingerprints differed CORRECTLY and the test failed for a real property
+        it was never testing (Plan 00245).
+        """
+        venv_dir = tmp_path / "constructed-venv"
+        # --without-pip: only an interpreter to fingerprint is needed, and it
+        # keeps this off the network so the parity property is verified even
+        # where an install would not be possible.
+        creation = subprocess.run(
+            [sys.executable, "-m", "venv", "--without-pip", str(venv_dir)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert creation.returncode == 0, f"could not create venv: {creation.stderr}"
+
+        venv_python = venv_dir / "bin" / "python"
+        assert venv_python.exists(), f"venv has no interpreter at {venv_python}"
+
+        # Non-vacuity: the second interpreter must really BE a venv of the
+        # first, or this compares an interpreter with itself and would pass
+        # against any implementation. This is the check the broken guard above
+        # was reaching for — `sys.prefix != sys.base_prefix` is the canonical
+        # in-a-venv test.
+        prefixes = subprocess.run(
+            [str(venv_python), "-c", "import sys; print(sys.prefix); print(sys.base_prefix)"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        assert prefixes[0] != prefixes[1], (
+            f"constructed interpreter is not a venv (prefix == base_prefix == {prefixes[0]}); "
+            "the parity assertion below would be vacuous"
+        )
+
+        base_fp = _bash_fingerprint(sys.executable)
+        venv_fp = _bash_fingerprint(str(venv_python))
+        assert base_fp == venv_fp, (
+            f"A venv must fingerprint identically to the interpreter that created it!\n"
+            f"  base ({sys.executable}): {base_fp}\n"
+            f"  venv ({venv_python}): {venv_fp}"
+        )
+
+    def test_unrelated_interpreters_do_not_share_a_fingerprint(self) -> None:
+        """The converse: two interpreters with different bases must NOT collide.
+
+        This is what the fingerprint is FOR — two interpreters sharing only a
+        major.minor version must key to separate venvs. It is also the exact
+        shape a CI runner has (a hostedtoolcache python alongside the distro's
+        ``/usr/bin/python3``), so the situation that used to fail this file is
+        now asserted as correct behaviour rather than merely tolerated.
         """
         system_python = "/usr/bin/python3"
         if not Path(system_python).exists():
             pytest.skip(f"{system_python} unavailable in this environment")
 
-        system_fp = _bash_fingerprint(system_python)
-        venv_fp = _bash_fingerprint(sys.executable)
+        base_prefix_of = "import sys; print(sys.base_prefix)"
+        system_base = subprocess.run(
+            [system_python, "-c", base_prefix_of], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        running_base = subprocess.run(
+            [sys.executable, "-c", base_prefix_of], capture_output=True, text=True, check=True
+        ).stdout.strip()
 
-        # When the running interpreter is a venv created from system_python,
-        # both should produce the same fingerprint.
-        import sysconfig
-
-        if sysconfig.get_config_var("prefix") != sysconfig.get_config_var("base_prefix"):
-            assert system_fp == venv_fp, (
-                f"System/venv fingerprint mismatch!\n"
-                f"  system ({system_python}): {system_fp}\n"
-                f"  venv   ({sys.executable}): {venv_fp}"
+        if system_base == running_base:
+            pytest.skip(
+                f"{system_python} and {sys.executable} share base_prefix {system_base!r} — "
+                "no unrelated pair available here, which the sibling test already covers"
             )
+
+        assert _bash_fingerprint(system_python) != _bash_fingerprint(sys.executable), (
+            f"Interpreters with different bases must key to DIFFERENT venvs!\n"
+            f"  {system_python} (base {system_base})\n"
+            f"  {sys.executable} (base {running_base})"
+        )
 
 
 class TestBashPythonSlugParity:

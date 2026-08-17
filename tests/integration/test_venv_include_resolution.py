@@ -21,17 +21,34 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VENV_INCLUDE = REPO_ROOT / "scripts" / "venv-include.bash"
 PATHS_SSOT = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py"
 CANONICAL_LIB = REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh"
 PYTHON_DISCOVERY_LIB = REPO_ROOT / "scripts" / "lib" / "python_discovery.sh"
+FINGERPRINT_HELPER = REPO_ROOT / "scripts" / "install" / "python_fingerprint.sh"
 
 
 def _run(project_root: Path, env_overrides: dict[str, str] | None = None) -> str:
-    """Source venv-include.bash from a fake project root and print VENV_DIR."""
+    """Source venv-include.bash from a fake project root and print VENV_DIR.
+
+    ``HOOKS_DAEMON_PYTHON`` is pinned to the running interpreter (the
+    resolver's own first-precedence override, resolve_venv.sh step 1). The
+    fingerprint assertions below compare the resolver's answer against
+    ``python_venv_fingerprint()`` computed IN THIS PROCESS, so both sides have
+    to be talking about the same interpreter. Left unset, the resolver runs
+    glob-and-sort discovery and picks the newest ``python3.X`` on the box —
+    which on a CI runner with Python 3.11 from the tool cache and 3.12 in
+    ``/usr`` is a DIFFERENT interpreter, and the comparison then fails on a
+    fingerprint that was correct for the interpreter it described (Plan 00245).
+
+    Callers can still override it: ``env_overrides`` is applied afterwards.
+    """
     fake_script = project_root / "scripts" / "venv-include.bash"
     env = os.environ.copy()
+    env["HOOKS_DAEMON_PYTHON"] = sys.executable
     if env_overrides:
         env.update(env_overrides)
     if not env_overrides or "HOOKS_DAEMON_VENV_PATH" not in env_overrides:
@@ -120,6 +137,43 @@ class TestFingerprintKeyed:
 
         result = _run(project)
         assert result == str(expected)
+
+    def test_the_resolved_key_follows_the_pinned_interpreter(self, tmp_path: Path) -> None:
+        """The keyed path is a function of the interpreter, not of discovery.
+
+        Guard for the premise ``_run`` sets. The two assertions above compare
+        the resolver against a fingerprint computed in THIS process, so they
+        only mean something while the resolver is looking at this process's
+        interpreter. Drop the ``HOOKS_DAEMON_PYTHON`` pin and they keep passing
+        on any box with a single Python while failing on any box with two — the
+        precise way this file was broken in CI and green locally for 25 pushes.
+
+        Here the resolver is pointed at a NAMED interpreter and its answer must
+        match the fingerprint that interpreter yields, so the pin cannot be
+        removed without a local failure.
+        """
+        pinned = Path("/usr/bin/python3")
+        if not pinned.exists():
+            pytest.skip(f"{pinned} unavailable in this environment")
+
+        project = _setup_fake_project(tmp_path)
+        fingerprint = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'source "{FINGERPRINT_HELPER}" && '
+                f'python_venv_fingerprint "{pinned}" "{project}"',
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        result = _run(project, env_overrides={"HOOKS_DAEMON_PYTHON": str(pinned)})
+        assert result == str(project / "untracked" / f"venv-{fingerprint}"), (
+            f"resolver ignored HOOKS_DAEMON_PYTHON={pinned}: "
+            f"expected key venv-{fingerprint}, got {result}"
+        )
 
 
 class TestLegacyFallback:

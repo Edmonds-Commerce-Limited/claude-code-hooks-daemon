@@ -117,9 +117,17 @@ the failure, fix, repeat.
 
 ### Phase 3: Remaining clusters
 
-- [ ] ⬜ **Task 3.1**: Push Phase 1 and read the next CI failure set
-- [ ] ⬜ **Task 3.2**: `test_ensure_venv` / `test_venv_include_resolution` /
+- [x] ✅ **Task 3.1**: Push Phase 1 and read the next CI failure set
+- [x] ✅ **Task 3.2**: `test_ensure_venv` / `test_venv_include_resolution` /
   `test_fingerprint_parity` — venv creation in the runner
+  - [x] ✅ `test_ensure_venv` (4): `ensure_venv` skips when `CI=true`; harness
+    now strips the gate vars, and both halves of the gate gained coverage
+  - [x] ✅ `test_fingerprint_parity` (1): the venv-detection guard read
+    `sysconfig.get_config_var("base_prefix")`, which is always `None` — the
+    pair is now CONSTRUCTED instead of assumed
+  - [x] ✅ `test_venv_include_resolution` (1): resolver discovered its own
+    interpreter; `HOOKS_DAEMON_PYTHON` now pins it, with a guard test
+  - [x] ✅ CI installs `uv` so the real bootstrap runs on all three interpreters
 - [ ] ⬜ **Task 3.3**: `test_server_modes` / `test_server_validation` /
   `test_paths_stale_cleanup`
 - [ ] ⬜ **Task 3.4**: `test_git_sync_rewrite_detection` — git fixture assumptions
@@ -194,6 +202,63 @@ no decision depended on the result. Adding a third partial guard while the secon
 stays unread would be treating the symptom. Phase 4 is therefore the real
 remedy, and Task 2.1 pins the contract so the two ways through the guard cannot
 be silently narrowed to the untracked one.
+
+**Date**: 2026-08-17
+
+### Decision 3: install `uv` in CI rather than skip the bootstrap tests
+
+**Context**: `ensure_venv` skips its whole body when `CI=true`, which GitHub
+Actions always exports. That made four `test_ensure_venv` tests fail on the
+runner and — worse — made the file's own gate test pass for the wrong reason: the
+skip it asserts was already happening before it set anything. Fixing the premise
+means the tests really build venvs, and `create_venv_at_path` needs `uv`, which
+the runner does not have.
+
+**Options Considered**:
+
+1. `skipif(os.environ.get("CI"))` on the four tests. A green tick that removes
+   the coverage — the same bodge Decision 1 rejected, and it would leave the
+   gate's `CI=true` half unmeasured on every interpreter.
+2. Assert the skip in CI and the creation locally, branching per environment. The
+   test then verifies whichever behaviour the environment happens to select, so
+   neither is verified everywhere and a regression hides in the branch not taken.
+3. Strip the gate vars in the harness and install `uv` in CI, so each test states
+   which side of the gate it exercises.
+
+**Decision**: Option 3. This is the bootstrap path behind two field incidents
+(the v3.9.x `ModuleNotFoundError` class and the v3.10.0 stdout-capture SEV-1), so
+leaving it unexercised on all three interpreters is precisely the blindness this
+plan exists to remove. Measured cost: ~15s for the file including four real venv
+builds. Accepted trade-off: those builds now do network I/O on the runner, so a
+PyPI outage can redden CI — which is a truthful red (the bootstrap genuinely
+cannot run) rather than a false green.
+
+**Date**: 2026-08-17
+
+### Decision 4: construct the interpreter pair instead of reading the ambient one
+
+**Context**: two failures in this cluster shared a shape — a test asserting a
+property about a PAIR of interpreters while taking one of them from whatever the
+environment provided. `test_fingerprint_parity` compared `/usr/bin/python3`
+against `sys.executable` under a guard reading
+`sysconfig.get_config_var("base_prefix")`, which is always `None`, so the guard
+was permanently true; it passed locally only because the dogfood venv's base
+genuinely is `/usr`. `test_venv_include_resolution` compared an in-process
+fingerprint against a resolver that ran its own glob-and-sort discovery.
+
+**Decision**: build the pair the assertion is about. The parity test now creates
+a venv from the running interpreter and compares the two, so it verifies the
+stated property on any box; the resolver test pins `HOOKS_DAEMON_PYTHON` (the
+resolver's documented first precedence) so both sides describe one interpreter.
+The runner's own shape — two unrelated interpreters sharing a major.minor — is
+now asserted as correct behaviour in its own test rather than being the thing
+that broke the file.
+
+Each fix carries a non-vacuity check, because both original tests would have
+passed against a broken implementation: the parity test asserts the constructed
+interpreter really is a venv (`sys.prefix != sys.base_prefix`, the check the
+broken guard was reaching for), and the resolver test asserts the answer tracks a
+NAMED interpreter, so removing the pin fails locally instead of only in CI.
 
 **Date**: 2026-08-17
 

@@ -35,6 +35,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # tests/integration/test_ensure_venv.py drives the REAL bootstrap
+      # (`ensure_venv` -> `create_venv_at_path` -> `uv sync`), which is the code
+      # path behind two field incidents (the v3.9.x ModuleNotFoundError class and
+      # the v3.10.0 stdout-capture SEV-1). Without uv on the runner those tests
+      # cannot build anything, so CI would have to skip them — and a skipped
+      # bootstrap test on all three interpreters is exactly the blindness this
+      # workflow exists to remove. The whole file measures ~15s including four
+      # real venv builds, so it is not worth trading that coverage for.
+      - name: Install uv (needed by the venv-bootstrap integration tests)
+        run: pip install uv
+
       # The tools are invoked directly rather than through scripts/qa/run_all.sh.
       # That script resolves its interpreter via the daemon's fingerprint-keyed
       # venv resolver, which only exists on an installed daemon — it is a
