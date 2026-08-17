@@ -29,6 +29,26 @@ def _git_init(repo_root: Path) -> Path:
     return repo_root
 
 
+def _give_identity(repo: Path) -> None:
+    """Set a local commit identity, so this repo can commit on its own terms.
+
+    A fresh repo inherits nothing: on a developer machine a global
+    ``user.email``/``user.name`` silently supplies one, and on a CI runner there
+    is none, so ``git commit`` fails and ``HEAD`` never exists. Any test here
+    that commits MUST call this — it is the premise, not a convenience (Plan
+    00245 Task 3.4 fixed exactly this class, and Plan 00251 hit it again in a
+    test that hand-rolled its own commit instead of reusing the helper that
+    established it).
+    """
+    for key, value in (("user.email", "t@t"), ("user.name", "t")):
+        subprocess.run(
+            ["git", "-C", str(repo), "config", "--local", key, value],
+            capture_output=True,
+            check=True,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+
+
 class TestResolveFor:
     def test_resolves_repo_for_path_inside(self, tmp_path: Path) -> None:
         repo = _git_init(tmp_path / "proj")
@@ -122,13 +142,7 @@ class TestWriteConfig:
         """A --local config value lives in .git/config, so it is identical
         regardless of the checked-out branch (the core stability property)."""
         root = _git_init(tmp_path / "proj")
-        for k, v in (("user.email", "t@t"), ("user.name", "t")):
-            subprocess.run(
-                ["git", "-C", str(root), "config", k, v],
-                capture_output=True,
-                check=True,
-                timeout=Timeout.GIT_CONTEXT,
-            )
+        _give_identity(root)
         (root / "f.txt").write_text("x")
         subprocess.run(
             ["git", "-C", str(root), "add", "f.txt"],
@@ -161,13 +175,7 @@ class TestGitRepoValueSemantics:
 
 def _commit_a_file(repo: Path) -> Path:
     """Give `repo` an identity and one committed file. Returns the file."""
-    for key, value in (("user.email", "t@t"), ("user.name", "t")):
-        subprocess.run(
-            ["git", "-C", str(repo), "config", "--local", key, value],
-            capture_output=True,
-            check=True,
-            timeout=Timeout.GIT_CONTEXT,
-        )
+    _give_identity(repo)
     tracked = repo / "tracked.txt"
     tracked.write_text("one\n", encoding="utf-8")
     subprocess.run(
@@ -300,10 +308,17 @@ class TestReadOnlyGitDoesNotTakeTheIndexLock:
         would stop the daemon from starting.
         """
         repo = _git_init(tmp_path / "proj")
+        _give_identity(repo)
         undecodable = repo / "bad.txt"
         undecodable.write_bytes(b"before \xff\xfe after\n")
         run_git(repo, "add", "bad.txt")
-        run_git(repo, "commit", "-m", "commit a file git cannot decode as UTF-8")
+        committed = run_git(repo, "commit", "-m", "commit a file git cannot decode as UTF-8")
+
+        # Assert the SETUP worked before asserting the behaviour. Without this the
+        # test fails at the `git show` below with "invalid object name 'HEAD'",
+        # which describes the fixture rather than the thing under test — the
+        # actual CI failure this test shipped with.
+        assert committed.returncode == 0, committed.stderr
 
         result = run_git(repo, "show", "HEAD:./bad.txt")
 
