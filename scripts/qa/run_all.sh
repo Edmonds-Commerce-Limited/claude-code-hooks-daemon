@@ -251,6 +251,21 @@ else
 fi
 echo ""
 
+# Runs the project handlers' own tests. gate-scope.bash excuses
+# .claude/project-handlers/ from the mypy gate on the grounds that those
+# handlers are "covered by their own tests" — but testpaths is ["tests"], so
+# until this check existed nothing ran them. Both handlers are terminal and
+# both DENY, so a regression there changes what a session may do.
+echo "22. Running Project Handler Tests..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_project_handler_tests.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Project handler tests FAILED"
+else
+    echo "✅ Project handler tests PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -280,6 +295,12 @@ results = {
     "Handler Reference": "untracked/qa/handler_reference.json",
     "British English": "untracked/qa/british_english.json",
     "Semgrep": "untracked/qa/semgrep.json",
+    # Doc Snippets ran as a numbered check but was absent from this table, so
+    # its verdict never appeared in the summary a reader actually reads. The
+    # exit code still caught a failure; the summary silently under-reported the
+    # suite's size.
+    "Doc Snippets": "untracked/qa/doc_snippets.json",
+    "Project Handlers": "untracked/qa/project_handlers.json",
 }
 
 all_passed = True

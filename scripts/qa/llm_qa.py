@@ -175,6 +175,16 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="british_english.json",
         jq_hint="jq '.violations[] | {file, line, american, british}'",
     ),
+    # Runs the project handlers' own tests, which `run_tests.sh` cannot reach:
+    # `testpaths` is ["tests"], so the 61 tests co-located with
+    # `.claude/project-handlers/` went unexecuted by every gate while
+    # gate-scope.bash cited them as the reason those handlers need no type
+    # checking. Both are terminal and both DENY.
+    "project_handlers": ToolConfig(
+        command=_python("check_project_handler_tests.py", "--json"),
+        json_file="project_handlers.json",
+        jq_hint="jq '.tests[] | {name, outcome}'",
+    ),
     # smoke_test MUST stay last: it probes the live daemon, so it belongs
     # after every static check has had its say. Pinned by
     # test_smoke_test_is_last_in_registry -- three tools were appended below
@@ -340,6 +350,27 @@ def _summarize_semgrep(data: QaReport) -> str:
     return f"{total} violations"
 
 
+def _summarize_project_handlers(data: QaReport) -> str:
+    """Report the project-handler suite, distinguishing clean from absent.
+
+    A runner that collected nothing yields "0 failed", which reads as success.
+    Saying so explicitly keeps the summary line honest, since that is the line
+    an agent acts on.
+    """
+    summary = data.get("summary", {})
+    total = summary.get("total", 0)
+    if total == 0:
+        return "0 tests collected - the suite did NOT run"
+
+    failed = summary.get("failed", 0)
+    line = f"{summary.get('passed', 0)} passed, {failed} failed"
+    if not failed:
+        return line
+
+    names = [entry.get("name", "?") for entry in data.get("tests", [])]
+    return line + " | " + ", ".join(names[:_MAX_NAMED_FAILURES])
+
+
 SUMMARIZERS: dict[str, Summarizer] = {
     "magic_values": _summarize_magic_values,
     "format": _summarize_format,
@@ -363,6 +394,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "handler_reference": _summarize_handler_reference,
     "british_english": _summarize_british_english,
     "semgrep": _summarize_semgrep,
+    "project_handlers": _summarize_project_handlers,
 }
 
 

@@ -63,6 +63,20 @@ jobs:
           --cov-report=xml
           --cov-fail-under=95
 
+      # The project handlers sit outside pyproject's `testpaths`, so `pytest
+      # tests/` above cannot reach them and CI was as blind to them as the local
+      # suite was. Both are terminal handlers that DENY — release_blocker denies
+      # the Stop event, enforce_llm_qa denies a Bash command — and
+      # scripts/qa/gate-scope.bash excuses them from mypy on the grounds that
+      # their own tests cover them, so those tests have to actually run.
+      #
+      # Kept as its own step rather than folded into the coverage run:
+      # --import-mode=importlib is required here (the directory name contains a
+      # hyphen, so it is not an importable package) and must not be applied to
+      # the main suite.
+      - name: Project handler tests
+        run: pytest .claude/project-handlers --import-mode=importlib
+
       - name: Upload coverage
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4

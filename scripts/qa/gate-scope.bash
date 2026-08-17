@@ -53,8 +53,14 @@ qa_format_paths() {
 #                     dropped — the co-located tests import their handlers
 #                     relatively and stop resolving without it. The directory
 #                     name is client-facing and documented, so renaming is not
-#                     an option either. Those handlers are covered by their own
-#                     tests and by "hooks-daemon validate-project-handlers".
+#                     an option either. Their BEHAVIOUR is covered instead by
+#                     the co-located tests, which
+#                     scripts/qa/check_project_handler_tests.py runs as its own
+#                     QA gate, and their LOAD-time integrity by
+#                     "hooks-daemon validate-project-handlers".
+#                     That gate exists because this note used to claim the test
+#                     coverage while nothing enforced it: pyproject's testpaths
+#                     is ["tests"], so no suite ever ran them.
 #
 # Both gaps are recorded here rather than left as an unexplained short list.
 qa_type_paths() {
