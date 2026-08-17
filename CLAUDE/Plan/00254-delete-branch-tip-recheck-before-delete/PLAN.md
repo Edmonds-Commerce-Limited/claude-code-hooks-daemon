@@ -54,8 +54,14 @@ Verified by execution, not inferred (full transcripts in `FINDINGS.md`):
   which is what makes this a latent defect across four tiers rather than a Plan
   00253 regression.
 - `git update-ref -d <ref> <expected-sha>` IS a true compare-and-swap.
-- But the force delete **refuses a branch checked out in another worktree**, and
-  `update-ref -d` deletes it and leaves that worktree with a dangling `HEAD`.
+- The force delete **refuses a branch checked out in another worktree**;
+  `update-ref -d` with a matching sha deletes it and leaves that worktree with a
+  dangling `HEAD`. This needs stating precisely, because a first pass overstated
+  it: `classify_branch` ALREADY refuses that case itself (`REFUSAL_WORKTREE`), so
+  in the ordinary path the switch would lose nothing. What it would lose is the
+  RACING case — a peer that checks out the branch after classification, which
+  moves no tip and so is invisible to any tip re-check, while git's delete-time
+  check still refuses it. Verified through the real engine.
 - The force delete also removes `branch.<name>.remote` / `.merge`; `update-ref -d`
   leaves them behind, and those entries are exactly what decides the tier for a
   later branch of the same name.
@@ -110,17 +116,27 @@ because git checks nothing there anyway.
 
 1. **Tip re-read, unchanged argv.** One `rev-parse` per branch. Narrows the window
    from a whole bundle pack to a single git invocation. Not airtight.
-2. **Compare-and-swap via `update-ref -d`.** Airtight. But executing it showed the
-   premise "those tiers give up nothing" is false: the force delete refuses a
-   branch checked out in another worktree, and `update-ref -d` deletes it, leaving
-   that worktree's `HEAD` dangling. It also leaves `branch.<name>.*` config behind.
+2. **Compare-and-swap via `update-ref -d`.** Airtight against a moved tip. But
+   executing it showed the premise "those tiers give up nothing" is false, though
+   not for the reason a first pass claimed. `classify_branch` already refuses a
+   branch checked out in a linked worktree, so the ordinary case is covered before
+   the delete is reached. The loss is confined to the racing case, which is the
+   whole subject of this plan: a peer that checks out the branch AFTER
+   classification does not move the tip, so no tip re-check can see it, while
+   git's delete-time check still refuses — and `update-ref -d` with the matching
+   sha would delete the ref and leave the peer's worktree with a dangling `HEAD`.
+   It also leaves `branch.<name>.*` config behind.
 
-**Decision**: Option 1. In this project agents routinely run with
-`isolation: "worktree"`, so a branch checked out in a peer's worktree is ordinary,
-while the race needs a commit inside one specific window. Option 2 trades a
-deterministic guard that fires often for a probabilistic one, and corrupts a peer's
-worktree when it fires. This is the second instance of Plan 00253's Decision 1:
-the battle-tested tool checks things we did not think to check.
+**Decision**: Option 1. The two options are not "atomic versus not" but "which
+delete-time checks do we keep". Option 2 closes the moved-tip window and opens a
+checked-out-by-a-peer one, and in a project where agents routinely run with
+`isolation: "worktree"` that second window is not the cheaper one to open. Keeping
+git's delete means every delete-time check it makes survives the race, including
+the ones nobody here enumerated.
+
+This is the second instance of Plan 00253's Decision 1, and the pair is worth
+reading together: there the argument was to trust git's predicate over ours, here
+it is to trust git's delete over a proposed replacement for it.
 
 **Date**: 2026-08-17
 

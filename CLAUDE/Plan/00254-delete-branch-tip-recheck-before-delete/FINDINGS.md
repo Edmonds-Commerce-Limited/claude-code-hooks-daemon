@@ -89,8 +89,32 @@ worktree HEAD now: 'HEAD'
 ```
 
 The force delete refuses. `update-ref -d` deletes and leaves the peer's worktree
-with a dangling `HEAD`. Agents in this project routinely use
-`isolation: "worktree"`, so this guard fires far more often than the race does.
+with a dangling `HEAD`.
+
+**This needs stating more precisely than a first pass did.** `classify_branch`
+already refuses a branch checked out in a linked worktree — `REFUSAL_WORKTREE`,
+`branch_safety.py:427` — so in the ordinary path the switch would lose nothing;
+the daemon never reaches the delete. The loss is confined to the RACING case,
+which is this plan's whole subject: a peer that checks out the branch AFTER
+classification moves no tip, so no tip re-check can see it, while git's
+delete-time check still refuses. Through the real engine, with the checkout
+interposed during the bundle write:
+
+```
+--- force-delete (as shipped)
+    classified tier      : merged-not-in-head  (tip unchanged: True)
+    refused True | deleted ()
+    'done' still a branch: True
+    peer worktree HEAD   : 'done'
+```
+
+A note on what that run does NOT show. The same probe tried to emulate the CAS at
+the delete site by swapping `delete_argv_for_tier`, and that emulation is invalid:
+`delete_branches` appends the branch name to the argv, so it issued
+`update-ref -d refs/heads/done <sha> done`, which git rejects as malformed. Its
+"refused" result is an argv error, not the behaviour under test, and is not
+evidence of anything. The CAS behaviour is established by the direct-git run
+above, where the worktree-checked-out branch was deleted with rc=0.
 
 **Config cleanup:**
 
