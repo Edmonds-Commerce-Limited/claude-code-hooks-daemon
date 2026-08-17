@@ -5,8 +5,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Active Plans
 
 - [00250: CI must actually run the acceptance gates it calls blocking](00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Not Started (Plan 00245's `-rs` flag named 11 acceptance tests that have skipped on every CI run for want of a daemon socket, three of the files being ones `RELEASING.md` Step 12.0 declares BLOCKING)
-- [00249: delete-branch crashes on a branch merged into main but ahead of its own upstream](00249-delete-branch-merged-but-unpushed/PLAN.md) - In Progress (field report from a client repo: `git branch -d` enforces "merged into its UPSTREAM", which is a different predicate from the daemon's "ancestor of the protected ref", so `--dry-run` says "nothing can be lost" and the real run then fails)
-- [00248: Plan 00246 review findings](00248-plan-00246-review-findings/PLAN.md) - In Progress (six verified defects in the shipped `run_git` migration, two of them regressions it introduced: `branch_safety`'s deliberately-unbounded runner inherited a 5s hook budget for `git bundle create`, and `run_git`'s "never raises" contract is false because `UnicodeDecodeError` is neither `OSError` nor `SubprocessError`)
 - [00243: make the acceptance playbook deterministically executable](00243-deterministic-acceptance-playbook-harness/PLAN.md) - In Progress (Phase 4's doc-snippet guard is delivered and found 8 real defects; the harness phases remain)
 
 ### Security / Presentation Audit
@@ -162,6 +160,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00249: delete-branch crashes on a branch merged into main but ahead of its own upstream](Completed/00249-delete-branch-merged-but-unpushed/PLAN.md) - Complete at `a74b0489` (field report: `git branch -d` measures a branch against its own UPSTREAM, a different predicate from the daemon's ancestry proof, so the dry run and the real run disagreed; fixed with a distinct `merged-unpushed` tier rather than by widening `merged` to force-delete)
+
+- [00248: Plan 00246 review findings](Completed/00248-plan-00246-review-findings/PLAN.md) - Complete at `a74b0489` (six verified defects in the shipped `run_git` migration, two of them regressions it introduced — the centralisation imposed a 5s hook budget on `branch_safety`'s object walks, and `run_git`'s "never raises" contract was false)
 
 - [00245: CI suite green again](Completed/00245-ci-suite-green-again/PLAN.md) - Complete at run 32033242091 / `4d1a553b1` (green on all three interpreters after 25+ red runs; four defects each hidden behind the one before it, plus the instrumentation that made them visible; spawned Plan 00250)
 
@@ -1204,15 +1206,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 250 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 203 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 205 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 35 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 33 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 35 + 203 + 6 = **244 folders**, spanning
+- **Folder-to-number reconciliation**: 33 + 205 + 6 = **244 folders**, spanning
   **241 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1223,9 +1225,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
   already covered the work). 241 + 9 = 250. ✅
 
-- **Last reconciled by**: the Plan 00245 closure — the folder moved from the plan
-  root into `Completed/`, so Active fell by one and Completed rose by one while
-  Total and the folder count were untouched. Recounted from disk (35 root, 203
+- **Last reconciled by**: the Plan 00248 and 00249 closures — two folders moved
+  from the plan root into `Completed/`, so Active fell by two and Completed rose
+  by two while Total and the folder count were untouched. Recounted from disk (33
+  root, 205 `Completed/`, 6 `Cancelled/`, 241 distinct numbers against a counter
+  of 250).
+
+- **Before that**: the Plan 00245 closure — the folder moved from the plan root
+  into `Completed/`, so Active fell by one and Completed rose by one while Total
+  and the folder count were untouched. Recounted from disk (35 root, 203
   `Completed/`, 6 `Cancelled/`, 241 distinct numbers against a counter of 250).
 
 - **Before that**: the Plan 00250 creation — one new folder in the plan root and

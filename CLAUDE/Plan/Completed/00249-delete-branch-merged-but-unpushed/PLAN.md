@@ -1,6 +1,6 @@
 # Plan 00249: delete-branch crashes on a branch merged into main but ahead of its own upstream
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-17
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -101,7 +101,9 @@ this tier in the first place.
 
 ### Phase 4: Verify
 
-- [ ] 🔄 **Task 4.1**: Full QA green, daemon restart RUNNING
+- [x] ✅ **Task 4.1**: Full QA green, daemon restart RUNNING
+  - [x] ✅ `12466 passed, 0 failed, 6 skipped | coverage: 95.1%`, every other
+    check 0 violations; daemon RUNNING (PID 1757054) on the new code
 - [x] ✅ **Task 4.2**: Verified against the reporter's scenario end to end, and
   moved the field report into this folder rather than leaving it in `untracked/`
   - [x] ✅ Built the shape in a throwaway repo and ran the production wrapper:
@@ -149,12 +151,14 @@ than to a paraphrase of it that a future git could invalidate silently.
 
 ## Success Criteria
 
-- [ ] `--dry-run` and the real run agree on a branch of this shape
-- [ ] The reporter's branch shape deletes cleanly, or refuses with a message
-  naming git's condition and the remedy
-- [ ] No traceback reaches a user from a git refusal
-- [ ] No bundle is left behind by a run that deleted nothing
-- [ ] QA green, daemon restart RUNNING
+- [x] `--dry-run` and the real run agree on a branch of this shape
+- [x] The reporter's branch shape deletes cleanly, or refuses with a message
+  naming git's condition and the remedy — verified through the production
+  wrapper: the dry run names `merged-unpushed` and the condition, the real run
+  deletes it
+- [x] No traceback reaches a user from a git refusal
+- [x] No bundle is left behind by a run that deleted nothing
+- [x] QA green (12466 passed, 95.1% coverage), daemon restart RUNNING
 
 ## Risks & Mitigations
 
@@ -169,3 +173,6 @@ than to a paraphrase of it that a future git could invalidate silently.
 <!-- Curated milestones + delivery commit hashes. Blow-by-blow log lives in JOURNAL/. -->
 
 - Filed at the commit that adds this plan.
+- Delivered at `a74b0489`, jointly with Plan 00248 — both touch
+  `branch_safety.py`'s `_git` runner, so splitting by file would have left a
+  commit whose own tests fail.

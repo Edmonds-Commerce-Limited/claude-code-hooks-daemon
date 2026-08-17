@@ -1,6 +1,6 @@
 # Plan 00248: Plan 00246 Review Findings
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-17
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -181,12 +181,15 @@ this document rather than in the report, because the report is scrollback.
 
 ## Success Criteria
 
-- [ ] `delete-branch` completes on a repository whose bundle takes longer than
-  a hook-context budget
-- [ ] `run_git` cannot raise, for any output any git command can produce
-- [ ] The guard catches all three unambiguous escape shapes
-- [ ] `expect_none` cannot pass vacuously on a repo with subdirectories
-- [ ] QA green, daemon restart RUNNING
+- [x] `delete-branch` completes on a repository whose bundle takes longer than
+  a hook-context budget — `GIT_BUNDLE_CREATE` (300s) for the pack,
+  `GIT_BRANCH_SAFETY` (120s) for the object walks
+- [x] `run_git` cannot raise, for any output any git command can produce
+- [x] The guard catches all three unambiguous escape shapes — four, in the end:
+  `import subprocess as sp`, `from subprocess import run`, the aliased form, and
+  `args=` as a keyword
+- [x] `expect_none` cannot pass vacuously on a repo with subdirectories
+- [x] QA green (12466 passed, 95.1% coverage), daemon restart RUNNING
 
 ## Risks & Mitigations
 
@@ -201,3 +204,6 @@ this document rather than in the report, because the report is scrollback.
 <!-- Curated milestones + delivery commit hashes. Blow-by-blow log lives in JOURNAL/. -->
 
 - Filed at the commit that adds this plan.
+- All six findings plus both nits delivered at `a74b0489`, jointly with Plan
+  00249 — the two are entangled in `branch_safety.py`, where this plan's timeout
+  fix and that plan's new tier touch the same `_git` runner.
