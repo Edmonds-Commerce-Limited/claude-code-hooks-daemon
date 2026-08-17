@@ -22,6 +22,7 @@ enumerated in the client-facing document.
 from __future__ import annotations
 
 import importlib
+import re
 from pathlib import Path
 from typing import Final
 
@@ -174,6 +175,46 @@ class TestBoundaryIsDocumentedWhereAClientReadsIt:
             f"Plan 00217 defect: the client cannot tell whose file it is, and "
             f"cannot exclude what they have not been told about."
         )
+
+    def test_the_documented_ignore_list_matches_the_declared_exceptions(self) -> None:
+        """The rules the doc tells a client to ignore are the ones the code declares.
+
+        The check above pins the file LIST; this pins the RULE list, which was
+        unguarded and drifted: the snippet kept telling clients to ignore
+        ``DTZ005``/``DTZ006`` for the supervisor after the asset had been
+        changed to satisfy both, so every client carried two exclusions for
+        findings that could no longer occur (Plan 00245).
+
+        Read out of the ``per-file-ignores`` snippet rather than by searching
+        the whole document, so a rule code merely MENTIONED in the surrounding
+        prose — the paragraph explaining why the DTZ codes were dropped does
+        exactly that — cannot be mistaken for one the client is told to ignore.
+        """
+        text = (_REPO_ROOT / CLIENT_BOUNDARY_DOC).read_text(encoding="utf-8")
+
+        for asset in CLIENT_OWNED_ASSETS:
+            declared = sorted(code for code, _why in asset.accepted_default_rules)
+            match = re.search(
+                rf'^"{re.escape(asset.deployed_to)}"\s*=\s*\[(?P<codes>[^\]]*)\]',
+                text,
+                re.MULTILINE,
+            )
+            documented = (
+                sorted(
+                    code.strip().strip('"')
+                    for code in match.group("codes").split(",")
+                    if code.strip()
+                )
+                if match
+                else []
+            )
+            assert documented == declared, (
+                f"{CLIENT_BOUNDARY_DOC} tells clients to ignore {documented} for "
+                f"{asset.deployed_to}, but the manifest declares {declared}. A client "
+                f"following the document would carry an exclusion the code does not "
+                f"claim, or miss one it does. Update the per-file-ignores snippet in "
+                f"{CLIENT_BOUNDARY_DOC} and accepted_default_rules together."
+            )
 
 
 class TestEveryDeployedAssetDeclaresItsOwnership:

@@ -689,8 +689,9 @@ undocumented.
 #### Excluding Them From Your Quality Gates
 
 Every file above is checked upstream against its language's **default** rule set
-(`ruff check --isolated` for Python, `shellcheck -x` for shell) and ships clean.
-If your project selects **stricter** rules than the defaults, they may report
+(`ruff check --isolated` for Python, `shellcheck -x` for shell) and ships clean,
+apart from a small number of **declared exceptions** listed below. If your
+project selects **stricter** rules than the defaults, it may report further
 findings you cannot act on: you cannot fix them (the next upgrade overwrites the
 file) and you cannot suppress them inline (the daemon's own `qa_suppression`
 handler denies an agent writing a suppression directive). Exclude them instead.
@@ -700,8 +701,20 @@ Ruff:
 ```toml
 # ruff.toml / pyproject.toml — daemon-owned, refreshed on upgrade; do not lint
 [lint.per-file-ignores]
-".claude/ccy/claude-supervise.py" = ["BLE001", "DTZ005", "DTZ006"]
+".claude/ccy/claude-supervise.py" = ["BLE001"]
 ```
+
+`BLE001` is the one declared exception: the supervisor's per-tick
+`except Exception` is a deliberate safety net — a single tick's failure must not
+kill the worker, so it logs the full traceback and replies with a NOOP. Its
+reason is recorded next to the asset in
+`src/claude_code_hooks_daemon/install/client_owned_assets.py`, and a test fails
+if this list and that one disagree, so the snippet cannot drift from the code.
+
+A default rule set is a **moving target** — ruff 0.16 promoted `DTZ` and `BLE`
+into its defaults, which is why `DTZ005`/`DTZ006` once appeared here. Those two
+had behaviour-preserving fixes and were fixed in the asset instead, so they are
+no longer needed in your config; drop them if you are carrying them.
 
 Or, to exclude the daemon-owned files wholesale rather than rule-by-rule:
 

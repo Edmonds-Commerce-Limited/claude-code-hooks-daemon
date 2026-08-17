@@ -19,12 +19,20 @@ whether the shipped artifact is clean under the tool's own defaults.
 The contract this pins down, stated the same way in ``CLAUDE/LLM-INSTALL.md``:
 
 * Upstream GUARANTEES every deployed asset is clean under its language's
-  default rule set. A finding here is an upstream bug, and this test is how it
-  gets caught before a client sees it.
-* Upstream CANNOT guarantee cleanliness under rules a client *chooses* — the
-  reported `BLE001`/`DTZ005`/`DTZ006` require `BLE` and `DTZ` to be selected,
-  which is neither ruff's default nor predictable from here. That case is
-  served by the documented exclusion, not by this test.
+  default rule set, apart from exceptions the asset DECLARES in
+  `accepted_default_rules` with a reason. An undeclared finding here is an
+  upstream bug, and this test is how it gets caught before a client sees it.
+* Upstream CANNOT guarantee cleanliness under rules a client *chooses*, which
+  is unpredictable from here. That case is served by the documented exclusion,
+  not by this test.
+
+A default rule set is a MOVING TARGET, and that is the reason declared
+exceptions exist at all. ruff 0.16 promoted `DTZ` and `BLE` into its defaults,
+so `.claude/ccy/claude-supervise.py` began failing this guard with no change to
+the asset: the two `DTZ` findings had behaviour-preserving fixes and were fixed,
+while `BLE001` flags a documented safety net whose whole purpose is to catch the
+unexpected. Without a way to declare that one, the only options were to defeat
+the safety net or to stop checking the file.
 
 Deliberately NOT asserted: formatting (`black --check`). Line length and quote
 style are project preferences, not findings a client can mistake for a defect.
@@ -32,6 +40,8 @@ style are project preferences, not findings a client can mistake for a defect.
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
 import subprocess  # nosec B404 - runs trusted linters with fixed argument lists
 import sys
@@ -93,8 +103,20 @@ def _assets_for(language: AssetLanguage) -> list[tuple[ClientOwnedAsset, Path]]:
     ]
 
 
+#: Variables that make a linter emit ANSI colour even when its output is a
+#: pipe. ``FORCE_COLOR`` OVERRIDES ``NO_COLOR``, so setting the latter is not
+#: enough — these have to be removed. Both are commonly exported by terminal
+#: multiplexers and container images (this project's own dev container sets
+#: ``FORCE_COLOR=1``), which would otherwise leave escape codes wrapped around
+#: every path and rule code and make the output unparseable on some machines
+#: and fine on others (Plan 00245).
+_COLOUR_FORCING_VARS: Final[tuple[str, ...]] = ("FORCE_COLOR", "CLICOLOR_FORCE")
+
+
 def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
     """Run a linter from the repository root and return its completed process."""
+    env = {k: v for k, v in os.environ.items() if k not in _COLOUR_FORCING_VARS}
+    env["NO_COLOR"] = "1"
     # SECURITY: fixed argv built from a repo-internal manifest; no shell, no user input.
     return subprocess.run(  # nosec B603 - fixed trusted argv, no shell
         argv,
@@ -103,7 +125,61 @@ def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
         text=True,
         timeout=_LINT_TIMEOUT_SECONDS,
         check=False,
+        env=env,
     )
+
+
+#: A concise-format ruff line is ``path:line:col: CODE message``. Anchored on
+#: the ``line:col:`` shape so a Windows drive letter or a colon in a message
+#: cannot be mistaken for the separator.
+_CONCISE_FINDING: Final[re.Pattern[str]] = re.compile(
+    r"^(?P<path>.+?):\d+:\d+: (?P<code>[A-Z]+\d+)"
+)
+
+
+def _ruff_version() -> str:
+    """Report the ruff actually being used, for failure messages.
+
+    A default rule set is a property of the INSTALLED ruff, not of this repo, so
+    the same tree passes here and fails on a machine with a newer one. Naming
+    the version turns 'cannot reproduce it locally' into one line of output.
+    """
+    result = _run([sys.executable, "-m", _RUFF_MODULE, "--version"])
+    return result.stdout.strip() or "unknown"
+
+
+def _rule_codes(output: str) -> set[str]:
+    """Every distinct rule code appearing in concise-format ruff output."""
+    return {
+        match.group("code")
+        for line in output.splitlines()
+        if (match := _CONCISE_FINDING.match(line.strip()))
+    }
+
+
+def _findings_not_accepted(output: str, assets: list[tuple[ClientOwnedAsset, Path]]) -> list[str]:
+    """Return the finding lines no asset declares as correct-as-written.
+
+    Matching is per FILE as well as per rule: one asset accepting ``BLE001``
+    must not silence the same code in a different asset that never justified it.
+    """
+    accepted: dict[str, set[str]] = {}
+    for asset, path in assets:
+        accepted.setdefault(str(path), set()).update(
+            code for code, _why in asset.accepted_default_rules
+        )
+
+    unexpected: list[str] = []
+    for raw in output.splitlines():
+        line = raw.strip()
+        match = _CONCISE_FINDING.match(line)
+        if match is None:
+            continue
+        resolved = str((_REPO_ROOT / match.group("path")).resolve())
+        if match.group("code") in accepted.get(resolved, set()):
+            continue
+        unexpected.append(line)
+    return unexpected
 
 
 def _remediation(paths: list[Path], output: str) -> str:
@@ -137,13 +213,69 @@ class TestPythonAssetsAreCleanUnderRuffDefaults:
         )
 
     def test_python_assets_are_clean(self) -> None:
-        """Every deployed Python asset passes ruff's defaults."""
-        paths = [path for _asset, path in _assets_for(AssetLanguage.PYTHON)]
+        """Every deployed Python asset passes ruff's defaults.
+
+        Findings whose rule the asset DECLARES in ``accepted_default_rules`` do
+        not fail this test — the manifest records why each is correct as
+        written, and the boundary document repeats it to the client. Everything
+        else does.
+        """
+        assets = _assets_for(AssetLanguage.PYTHON)
+        paths = [path for _asset, path in assets]
         argv = [sys.executable, "-m", _RUFF_MODULE, *_RUFF_DEFAULT_ARGS, *map(str, paths)]
         result = _run(argv)
-        assert result.returncode == _CLEAN_EXIT_CODE, _remediation(
-            paths, result.stdout + result.stderr
-        )
+
+        unexpected = _findings_not_accepted(result.stdout + result.stderr, assets)
+        assert not unexpected, _remediation(paths, "\n".join(unexpected))
+
+    def test_every_accepted_rule_still_fires(self) -> None:
+        """An accepted rule the asset no longer trips is a stale promise.
+
+        Each entry costs a client a line in their own lint config, so it has to
+        keep earning it. A guard that only asserts the ABSENCE of findings
+        cannot see an exclusion that is no longer needed — which is how two DTZ
+        codes stayed in the boundary document's snippet after the asset was
+        changed to satisfy them (Plan 00245).
+
+        The declared codes are SELECTED explicitly rather than read out of a
+        default-rule run, because a default rule set is a moving target: ruff
+        0.15 does not have BLE in its defaults and 0.16 does, so a default-run
+        comparison would call a live exception stale on the older ruff and be
+        right by accident on the newer. Explicit selection asks the question
+        that actually matters — does this asset still trip this rule?
+        """
+        assets = [
+            (asset, path)
+            for asset, path in _assets_for(AssetLanguage.PYTHON)
+            if asset.accepted_default_rules
+        ]
+        if not assets:
+            pytest.skip("no accepted rules declared for PYTHON assets")
+
+        for asset, path in assets:
+            declared = sorted(code for code, _why in asset.accepted_default_rules)
+            argv = [
+                sys.executable,
+                "-m",
+                _RUFF_MODULE,
+                "check",
+                "--isolated",
+                "--output-format",
+                "concise",
+                "--select",
+                ",".join(declared),
+                str(path),
+            ]
+            observed = _rule_codes(_run(argv).stdout)
+            stale = sorted(set(declared) - observed)
+            assert not stale, (
+                f"{asset.source} declares accepted_default_rules {stale}, but ruff "
+                f"({_ruff_version()}) reports no such finding even with those rules "
+                f"selected explicitly. The asset was presumably fixed — remove the "
+                f"entry from src/claude_code_hooks_daemon/install/client_owned_assets.py "
+                f"and from the snippet in {CLIENT_BOUNDARY_DOC}, so clients stop "
+                f"carrying an exclusion they do not need."
+            )
 
 
 class TestShellAssetsAreCleanUnderShellcheckDefaults:

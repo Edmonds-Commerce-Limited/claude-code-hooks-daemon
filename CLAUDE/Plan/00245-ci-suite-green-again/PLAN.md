@@ -128,16 +128,40 @@ the failure, fix, repeat.
   - [x] ✅ `test_venv_include_resolution` (1): resolver discovered its own
     interpreter; `HOOKS_DAEMON_PYTHON` now pins it, with a guard test
   - [x] ✅ CI installs `uv` so the real bootstrap runs on all three interpreters
-- [ ] ⬜ **Task 3.3**: `test_server_modes` / `test_server_validation` /
+- [x] ✅ **Task 3.3**: `test_server_modes` / `test_server_validation` /
   `test_paths_stale_cleanup`
-- [ ] ⬜ **Task 3.4**: `test_git_sync_rewrite_detection` — git fixture assumptions
-- [ ] ⬜ **Task 3.5**: `test_client_owned_asset_lint` — ruff default rule set
+  - [x] ✅ Root cause: Python 3.12 made `runtime_checkable` Protocol
+    `isinstance` use `inspect.getattr_static`, so a bare `Mock()` stops
+    satisfying `Controller`. Verified on a real 3.12.13 interpreter
+  - [x] ✅ `Mock(spec=Controller)` everywhere, plus an assertion pinning WHICH
+    controller branch runs
+  - [x] ✅ `test_paths_stale_cleanup` passes on 3.12 — not this cause; watch it
+    in the next CI run
+- [x] ✅ **Task 3.4**: `test_git_sync_rewrite_detection` — git fixture assumptions
+  - [x] ✅ Identity was set on three of four repos; `commit-tree` runs in the
+    bare remote, which had none. A developer's global config masked it
+  - [x] ✅ Supplied via `GIT_*_NAME`/`EMAIL` in the fixture environment, which
+    covers repos that do not exist yet
+- [x] ✅ **Task 3.5**: `test_client_owned_asset_lint` — ruff default rule set
+  - [x] ✅ ruff 0.16 promoted DTZ and BLE into its defaults; the two DTZ
+    findings got behaviour-preserving fixes in the asset
+  - [x] ✅ `BLE001` declared in the manifest with its reason, honoured by the
+    guard, and pinned to the client doc by a new test
+  - [x] ✅ Linter output no longer depends on ambient `FORCE_COLOR`
 
 ### Phase 4: Make CI's verdict load-bearing
 
-- [ ] ⬜ **Task 4.1**: Confirm a fully green run on all three interpreters
-- [ ] ⬜ **Task 4.2**: Record in LESSONS.md that a permanently-red CI is a
+- [ ] 🔄 **Task 4.1**: Confirm a fully green run on all three interpreters
+  - [x] ✅ Every previously-failing file passes on real 3.11/3.12/3.13 locally
+    under runner conditions (`CI=true`, no global git identity): 95–96 passed
+  - [x] ✅ The 41 failures in the last two CI runs are accounted for exactly —
+    same 8 files, same counts, so nothing in the set is unexplained
+  - [ ] ⬜ Read the CI run for the pushed commit and confirm green
+- [x] ✅ **Task 4.2**: Record in LESSONS.md that a permanently-red CI is a
   blind guard, not a nuisance
+  - [x] ✅ Plus the two generalisable lessons this phase produced: the ambient
+    -premise defect shared by all six clusters, and installing the interpreter
+    that failed instead of reasoning about it
 
 ## Dependencies
 
@@ -146,121 +170,17 @@ the failure, fix, repeat.
 
 ## Technical Decisions
 
-### Decision 1: set the premise rather than relax the guard
+Recorded in full in [DECISIONS.md](DECISIONS.md) — options considered and why,
+extracted so this plan stays readable at a glance:
 
-**Context**: `init.sh`'s repo-detection guard is what broke the tests in CI.
-
-**Options Considered**:
-
-1. Relax the guard in `init.sh` — it would stop protecting real client installs
-   from a misconfigured self-install.
-2. Mark the tests as requiring a self-installed tree (skip in CI) — buys a green
-   tick and removes the coverage; the bodge.
-3. Have each test establish the premise explicitly.
-
-**Decision**: Option 3. The guard is correct and worth keeping; the defect was a
-test depending on ambient untracked state. Setting `HOOKS_DAEMON_ROOT_DIR` is
-exactly what the untracked `.env` does in a real self-install session, so the
-tests now assert against the same conditions a real session has.
-
-**Date**: 2026-08-17
-
-### Decision 2: no source scanner for Task 2.2 — CI is the guard
-
-**Context**: Task 2.2 asked for a guard catching a NEW test that sources the
-real `init.sh` without establishing the premise. Enumerating the landscape
-first: 30 test files mention `init.sh`, but only five actually run it. Two of
-those five (`test_socket_timeout_daemon_alive.py`,
-`test_emit_hook_error_jqless.py`) copy it into a sandbox and write their own
-`.env`, so they were correctly absent from the CI failure set.
-
-**Options Considered**:
-
-1. **A source scanner** over test files that touch the real `init.sh`. Rejected:
-   the discriminator is not "mentions `init.sh`" (a false-positive machine — most
-   of the 30 only name it in a docstring or a path list) but "hands the REAL path
-   to a subprocess that executes it, rather than a copy". Separating those needs
-   dataflow analysis, which is disproportionate. A weaker text rule ("must
-   mention `HOOKS_DAEMON_ROOT_DIR` somewhere") is satisfied by a bare mention and
-   so proves nothing.
-2. **Require an import of a shared premise helper**, making the check crisp. Rejected:
-   it forces an abstraction at three sites, and `CLAUDE.md`'s own ratio is "three
-   similar lines of code is better than a wrong abstraction… six identical blocks
-   means you need a proper pattern".
-3. **An autouse `conftest.py` fixture** exporting `HOOKS_DAEMON_ROOT_DIR` for the
-   whole session. Rejected as actively harmful: it would make the tests pass for a
-   reason invisible at the test site — relocating the ambient dependency rather
-   than removing it, which is the very defect this plan exists to fix. It also
-   would not reach tests that build their environment from scratch, which is what
-   `_build_clean_env` does.
-4. **CI is the guard.** A fresh checkout with no untracked `.env` is exactly what
-   the runner provides, and it already caught this — 25 consecutive times.
-
-**Decision**: Option 4, plus the contract test from Task 2.1. The blind guard
-here was never a missing scanner: CI detected the defect on every single push and
-no decision depended on the result. Adding a third partial guard while the second
-stays unread would be treating the symptom. Phase 4 is therefore the real
-remedy, and Task 2.1 pins the contract so the two ways through the guard cannot
-be silently narrowed to the untracked one.
-
-**Date**: 2026-08-17
-
-### Decision 3: install `uv` in CI rather than skip the bootstrap tests
-
-**Context**: `ensure_venv` skips its whole body when `CI=true`, which GitHub
-Actions always exports. That made four `test_ensure_venv` tests fail on the
-runner and — worse — made the file's own gate test pass for the wrong reason: the
-skip it asserts was already happening before it set anything. Fixing the premise
-means the tests really build venvs, and `create_venv_at_path` needs `uv`, which
-the runner does not have.
-
-**Options Considered**:
-
-1. `skipif(os.environ.get("CI"))` on the four tests. A green tick that removes
-   the coverage — the same bodge Decision 1 rejected, and it would leave the
-   gate's `CI=true` half unmeasured on every interpreter.
-2. Assert the skip in CI and the creation locally, branching per environment. The
-   test then verifies whichever behaviour the environment happens to select, so
-   neither is verified everywhere and a regression hides in the branch not taken.
-3. Strip the gate vars in the harness and install `uv` in CI, so each test states
-   which side of the gate it exercises.
-
-**Decision**: Option 3. This is the bootstrap path behind two field incidents
-(the v3.9.x `ModuleNotFoundError` class and the v3.10.0 stdout-capture SEV-1), so
-leaving it unexercised on all three interpreters is precisely the blindness this
-plan exists to remove. Measured cost: ~15s for the file including four real venv
-builds. Accepted trade-off: those builds now do network I/O on the runner, so a
-PyPI outage can redden CI — which is a truthful red (the bootstrap genuinely
-cannot run) rather than a false green.
-
-**Date**: 2026-08-17
-
-### Decision 4: construct the interpreter pair instead of reading the ambient one
-
-**Context**: two failures in this cluster shared a shape — a test asserting a
-property about a PAIR of interpreters while taking one of them from whatever the
-environment provided. `test_fingerprint_parity` compared `/usr/bin/python3`
-against `sys.executable` under a guard reading
-`sysconfig.get_config_var("base_prefix")`, which is always `None`, so the guard
-was permanently true; it passed locally only because the dogfood venv's base
-genuinely is `/usr`. `test_venv_include_resolution` compared an in-process
-fingerprint against a resolver that ran its own glob-and-sort discovery.
-
-**Decision**: build the pair the assertion is about. The parity test now creates
-a venv from the running interpreter and compares the two, so it verifies the
-stated property on any box; the resolver test pins `HOOKS_DAEMON_PYTHON` (the
-resolver's documented first precedence) so both sides describe one interpreter.
-The runner's own shape — two unrelated interpreters sharing a major.minor — is
-now asserted as correct behaviour in its own test rather than being the thing
-that broke the file.
-
-Each fix carries a non-vacuity check, because both original tests would have
-passed against a broken implementation: the parity test asserts the constructed
-interpreter really is a venv (`sys.prefix != sys.base_prefix`, the check the
-broken guard was reaching for), and the resolver test asserts the answer tracks a
-NAMED interpreter, so removing the pin fails locally instead of only in CI.
-
-**Date**: 2026-08-17
+| #   | Decision                                                                  |
+| --- | ------------------------------------------------------------------------- |
+| 1   | Set the premise rather than relax the `init.sh` repo-detection guard      |
+| 2   | No source scanner for Task 2.2 — CI is the guard                          |
+| 3   | Install `uv` in CI rather than skip the venv-bootstrap tests              |
+| 4   | Construct the interpreter pair instead of reading the ambient one         |
+| 5   | Declare an accepted lint finding rather than defeat the code or the guard |
+| 6   | The ambient environment is the recurring defect, not the tests            |
 
 ## Success Criteria
 

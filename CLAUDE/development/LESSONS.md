@@ -413,3 +413,67 @@ that fails when it is broken — in the same commit, not later. A convention wit
 no guard decays at exactly the rate people forget it, and the decay is invisible
 until something forces you to touch every site at once. See DBF (`CLAUDE.md`
 Core Standard 15).
+
+## A permanently-red CI is a blind guard, not a nuisance
+
+**What happened (Plan 00245):** GitHub Actions failed on every push for 25+
+consecutive runs while the local suite was fully green. Because it was ALWAYS
+red, no decision ever depended on it — so it had stopped being a check and
+become scenery. The cost was not the red tick: it was that Plan 00244 had just
+added a project-handler test step to that workflow, and a step added to an
+already-red workflow can never be the thing that turns CI red or green. New
+coverage was wired in and inert.
+
+All 41 failures turned out to be real, diagnosable, and fixable in a day.
+
+**Apply:** a check whose result nobody reads is the DBF failure mode (`CLAUDE.md`
+Core Standard 15) one level up from the code. Treat "CI is always red" as an
+outage, not a known quirk: while it is red, every guard downstream of it is
+unverifiable, including ones added later by someone who assumed CI worked.
+
+## Six CI-only failures, one defect: the test took its premise from the environment
+
+**What happened (Plan 00245):** the failures looked like six unrelated bugs. Each
+was the same mistake — a test depending on something the ENVIRONMENT supplied
+rather than something it established:
+
+| Symptom                            | Ambient thing depended on                   |
+| ---------------------------------- | ------------------------------------------- |
+| venv never created                 | `CI` being unset (`ensure_venv` skips on it) |
+| fingerprints differed              | `sys.executable` being a venv of `/usr`     |
+| resolver disagreed with the test   | discovery picking the running interpreter   |
+| mode actions returned the fallback | `hasattr`-based protocol checks (pre-3.12)  |
+| `commit-tree` exited 128           | a global git `user.email`                   |
+| lint findings appeared             | the installed ruff's default rule set       |
+
+Every one passes on a developer machine and fails on a fresh runner. Two also
+passed for the WRONG REASON rather than failing: a gate test asserting "the skip
+happens" passed because ambient `CI=true` was already causing the skip, and a
+`dispatch.assert_not_called()` was vacuous because that interpreter took the
+other branch entirely.
+
+**Apply:** when a test asserts a property about a PAIR — an interpreter and its
+venv, a config and its consumer — construct both rather than reading one from the
+environment. Where the premise cannot be seen from the assertion (an interpreter
+pin, an injected git identity), add a guard that fails LOCALLY when it is
+removed; otherwise the next person rediscovers it from a red CI they cannot
+reproduce. And when a test passes, check it would have failed: a passing
+assertion whose subject was never reached is worse than a red one.
+
+## Install the interpreter that failed; do not reason about it
+
+**What happened (Plan 00245):** three failures were a Python 3.12 change
+(`runtime_checkable` protocol `isinstance` now uses `inspect.getattr_static`,
+which does not fire `Mock.__getattr__`) and one was a 3.13 change (`Path.is_dir()`
+now calls `self.stat(follow_symlinks=...)`). Both were invisible on the local
+3.11. `uv python install 3.12` fetched the exact runner interpreter in four
+seconds, and `uv venv` + `uv pip install -e ".[dev]"` made a full local matrix.
+Diagnosis went from "push and wait ~6 minutes" to seconds per iteration, and the
+fixes were verified on the interpreters that actually failed instead of argued
+about.
+
+**Apply:** for any CI-only failure on a specific interpreter or toolchain
+version, install that version locally before theorising. Also beware where you
+put it: a scratch venv under `untracked/venv-*` is inside the namespace
+`resolve_venv_python` globs, so it silently became the interpreter for every
+`$PY` in the session and made several runs report the wrong Python.

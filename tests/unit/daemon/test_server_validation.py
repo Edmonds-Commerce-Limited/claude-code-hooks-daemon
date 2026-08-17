@@ -10,14 +10,30 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from claude_code_hooks_daemon.config.models import DaemonConfig, InputValidationConfig
-from claude_code_hooks_daemon.daemon.server import HooksDaemon
+from claude_code_hooks_daemon.daemon.server import Controller, HooksDaemon
 
 
 @pytest.fixture
 def mock_controller():
-    """Mock controller for testing."""
-    controller = MagicMock()
-    controller.dispatch = MagicMock(return_value=MagicMock(to_json=lambda x: {}))
+    """A double the server accepts as the modern :class:`Controller`.
+
+    ``spec=`` decides WHICH branch of ``_process_request`` these tests exercise,
+    so it is part of the test's meaning rather than a detail. ``Controller`` is a
+    ``@runtime_checkable`` Protocol, and Python 3.12 changed protocol isinstance
+    checks to use ``inspect.getattr_static()`` instead of ``hasattr()``, which
+    does not fire ``Mock.__getattr__``.
+
+    The previous double was a bare ``MagicMock`` with ``dispatch`` assigned
+    explicitly. On 3.11 it satisfied BOTH protocols, and ``Controller`` is
+    checked first, so the tests ran the modern ``process_request`` path — while
+    the fixture, and the ``dispatch.assert_not_called()`` below, described the
+    legacy one. On 3.12+ only ``dispatch`` survived ``getattr_static`` (it was a
+    real attribute), so the same tests took the LEGACY branch and died on
+    ``to_json=lambda x: {}`` being handed three arguments. Same double, opposite
+    code path, purely by interpreter version. Plan 00245.
+    """
+    controller = MagicMock(spec=Controller)
+    controller.process_request.return_value = {}
     return controller
 
 
@@ -223,6 +239,13 @@ class TestProcessRequestValidation:
         assert response.get("error") != "input_validation_failed"
         # Should have result (processed by controller)
         assert "result" in response or "error" not in response
+        # Pin WHICH controller branch ran. Without this the tests in this class
+        # assert only that validation let the request through, so they pass
+        # whichever branch handled it — which is how the same fixture silently
+        # exercised `process_request` on 3.11 and `dispatch` on 3.12. This fails
+        # on ANY interpreter where the double stops being seen as a Controller,
+        # rather than waiting for the branch it lands in to raise.
+        mock_controller.process_request.assert_called_once()
 
     @pytest.mark.anyio
     async def test_invalid_event_logged_in_fail_open_mode(
@@ -288,7 +311,7 @@ class TestProcessRequestValidation:
             assert response["event_type"] == "PostToolUse"
 
             # Controller should NOT be called
-            mock_controller.dispatch.assert_not_called()
+            mock_controller.process_request.assert_not_called()
 
     @pytest.mark.anyio
     async def test_validation_disabled_skips_check(

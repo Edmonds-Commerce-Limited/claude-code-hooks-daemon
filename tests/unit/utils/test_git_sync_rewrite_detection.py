@@ -24,12 +24,38 @@ a force-push or a second working copy.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
+from typing import Final
 
 from claude_code_hooks_daemon.utils import git_sync
 
 _TIMEOUT = 30
+
+#: Committer identity for EVERY git process these fixtures spawn.
+#:
+#: Supplied through the environment rather than ``git config`` per repository,
+#: because the per-repo form is a rule you have to remember at each new repo and
+#: the failure when you forget is invisible on a developer machine. These
+#: fixtures build four repos (seed, bare remote, clone, pusher) and three of
+#: them were configured; ``_rewrite_remote`` runs ``commit-tree`` in the BARE
+#: remote, which was not. A machine with a global ``user.email`` — every
+#: developer machine — silently lends its own identity, so this passed locally
+#: and exited 128 ("committer identity unknown") on all three CI interpreters.
+#:
+#: The environment covers repos that do not exist yet, which is the property
+#: worth having: a future helper cannot forget it. ``GIT_*_NAME``/``EMAIL`` also
+#: take precedence over config, so this is the single source of truth for the
+#: fixture identity and the per-repo ``config`` calls were removed with it
+#: (Plan 00245).
+_GIT_ENV: Final[dict[str, str]] = {
+    **os.environ,
+    "GIT_AUTHOR_NAME": "Test",
+    "GIT_AUTHOR_EMAIL": "test@example.com",
+    "GIT_COMMITTER_NAME": "Test",
+    "GIT_COMMITTER_EMAIL": "test@example.com",
+}
 
 
 def _run(cwd: Path, *args: str) -> str:
@@ -40,6 +66,7 @@ def _run(cwd: Path, *args: str) -> str:
         text=True,
         check=True,
         timeout=_TIMEOUT,
+        env=_GIT_ENV,
     )
     return result.stdout.strip()
 
@@ -50,9 +77,8 @@ def _init(path: Path) -> None:
         capture_output=True,
         check=True,
         timeout=_TIMEOUT,
+        env=_GIT_ENV,
     )
-    _run(path, "config", "user.email", "test@example.com")
-    _run(path, "config", "user.name", "Test")
 
 
 def _clone_with_remote(tmp_path: Path) -> tuple[Path, Path]:
@@ -69,6 +95,7 @@ def _clone_with_remote(tmp_path: Path) -> tuple[Path, Path]:
         capture_output=True,
         check=True,
         timeout=_TIMEOUT,
+        env=_GIT_ENV,
     )
     clone = tmp_path / "clone"
     subprocess.run(
@@ -76,9 +103,8 @@ def _clone_with_remote(tmp_path: Path) -> tuple[Path, Path]:
         capture_output=True,
         check=True,
         timeout=_TIMEOUT,
+        env=_GIT_ENV,
     )
-    _run(clone, "config", "user.email", "test@example.com")
-    _run(clone, "config", "user.name", "Test")
     return remote, clone
 
 
@@ -98,9 +124,8 @@ def _advance_remote_with_content(tmp_path: Path, remote: Path) -> None:
         capture_output=True,
         check=True,
         timeout=_TIMEOUT,
+        env=_GIT_ENV,
     )
-    _run(pusher, "config", "user.email", "test@example.com")
-    _run(pusher, "config", "user.name", "Test")
     (pusher / "new.txt").write_text("genuinely new\n", encoding="utf-8")
     _run(pusher, "add", "new.txt")
     _run(pusher, "commit", "-qm", "real work")

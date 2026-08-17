@@ -94,6 +94,23 @@ class ClientOwnedAsset:
             repo root, or a module name within this package. Keeps every entry
             traceable to the thing that would have to change.
         why: Why the asset cannot simply live inside the vendor directory.
+        accepted_default_rules: ``(rule_code, why_correct_as_written)`` pairs
+            this asset is allowed to trip under its language's DEFAULT rule
+            set. Empty for almost every asset, and it must stay
+            that way: an entry here is a promise the client boundary document
+            has to repeat, because the finding reaches them and they can neither
+            fix it (the next upgrade overwrites the file) nor suppress it (the
+            daemon's own ``qa_suppression`` handler denies the directive).
+
+            It exists because a default rule set is a MOVING TARGET. ruff 0.16
+            promoted DTZ and BLE into its defaults, so an asset that shipped
+            clean under 0.15 started failing this guard with no change to the
+            asset — and the two DTZ findings had behaviour-preserving fixes
+            while the BLE one did not: it flags a documented safety net whose
+            entire purpose is to catch ANY exception. Without a declared
+            exception the only ways out of that are to defeat the safety net or
+            to stop checking the file, and both are worse than saying so out
+            loud here (Plan 00245).
     """
 
     source: str
@@ -101,6 +118,7 @@ class ClientOwnedAsset:
     language: AssetLanguage
     deployed_by: str
     why: str
+    accepted_default_rules: tuple[tuple[str, str], ...] = ()
 
 
 CLIENT_OWNED_ASSETS: Final[tuple[ClientOwnedAsset, ...]] = (
@@ -167,6 +185,19 @@ CLIENT_OWNED_ASSETS: Final[tuple[ClientOwnedAsset, ...]] = (
             "disposable container, and deliberately committed (Plan 00147/00148) "
             "so teammates receive a working supervisor. Both requirements put it "
             "outside the git-ignored clone."
+        ),
+        accepted_default_rules=(
+            (
+                "BLE001",
+                "The worker's per-tick `except Exception` is a documented safety "
+                "net: one tick's failure must not kill the worker, so it logs the "
+                "full traceback and emits a NOOP reply. Narrowing it to named "
+                "exceptions defeats the entire purpose — containing the "
+                "UNEXPECTED — and the traceback is recorded, so nothing is "
+                "hidden. Became a default-rule finding in ruff 0.16; the two DTZ "
+                "findings alongside it had behaviour-preserving fixes and were "
+                "fixed in the asset instead of accepted here.",
+            ),
         ),
     ),
 )

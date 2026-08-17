@@ -4,6 +4,29 @@ from typing import Any
 from unittest.mock import Mock
 
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
+from claude_code_hooks_daemon.daemon.server import Controller
+
+
+def _controller_mock() -> Mock:
+    """A double the server will accept as a real :class:`Controller`.
+
+    ``spec=`` is load-bearing, not tidiness. Every mode action is guarded by
+    ``isinstance(self.controller, Controller)`` (server.py), and ``Controller``
+    is a ``@runtime_checkable`` Protocol. Python 3.12 changed those isinstance
+    checks to look attributes up with ``inspect.getattr_static()`` instead of
+    ``hasattr()`` — and ``getattr_static`` deliberately does not fire
+    ``Mock.__getattr__``, so a BARE ``Mock()`` satisfies the protocol on 3.11
+    and fails it on 3.12+.
+
+    The consequence was silent: on 3.12/3.13 the server fell through to its
+    no-controller fallback, so three tests failed with 'default'/'unchanged'
+    while the rest PASSED for the wrong reason — the fallback happens to return
+    what they assert. ``spec=`` sets ``__class__``, which satisfies the check on
+    every supported interpreter, and it also stops the double doubling as a
+    ``LegacyController`` (a bare Mock satisfies that protocol too on 3.11, so
+    the wrong branch could be taken). Plan 00245.
+    """
+    return Mock(spec=Controller)
 
 
 class TestServerGetModeAction:
@@ -24,7 +47,7 @@ class TestServerGetModeAction:
         config.enforce_single_daemon_process = False
 
         # Create a mock controller with get_mode/set_mode
-        controller = Mock()
+        controller = _controller_mock()
         controller.get_mode.return_value = {
             ModeConstant.KEY_MODE: DaemonMode.DEFAULT.value,
             ModeConstant.KEY_CUSTOM_MESSAGE: None,
@@ -51,7 +74,7 @@ class TestServerGetModeAction:
         config.strict_mode = False
         config.enforce_single_daemon_process = False
 
-        controller = Mock()
+        controller = _controller_mock()
         controller.get_mode.return_value = {
             ModeConstant.KEY_MODE: DaemonMode.UNATTENDED.value,
             ModeConstant.KEY_CUSTOM_MESSAGE: "finish tasks",
@@ -78,7 +101,7 @@ class TestServerGetModeAction:
         config.strict_mode = False
         config.enforce_single_daemon_process = False
 
-        controller = Mock()
+        controller = _controller_mock()
         controller.get_mode.return_value = {
             ModeConstant.KEY_MODE: DaemonMode.DEFAULT.value,
             ModeConstant.KEY_CUSTOM_MESSAGE: None,
@@ -110,7 +133,7 @@ class TestServerSetModeAction:
         config.strict_mode = False
         config.enforce_single_daemon_process = False
 
-        controller = Mock()
+        controller = _controller_mock()
         controller.set_mode.return_value = True
         controller.get_mode.return_value = {
             ModeConstant.KEY_MODE: DaemonMode.UNATTENDED.value,

@@ -1910,7 +1910,19 @@ def _format_bot_prefix(now_wall: float | None = None) -> str:
     deliberately: the marker is read by a human scrolling their own terminal
     history, for whom local time is the natural "when did this happen" reference.
     """
-    moment = datetime.now() if now_wall is None else datetime.fromtimestamp(now_wall)
+    # Built tz-AWARE and then converted to local with `.astimezone()`, rather
+    # than via the naive `datetime.now()` / `fromtimestamp(now_wall)`. The
+    # rendered string is identical -- `.astimezone()` with no argument converts
+    # to the system local zone, which is what the naive calls already returned
+    # -- so this states the "local, deliberately" intent above in code instead
+    # of only in prose. It also keeps the file clean under ruff's DEFAULT rule
+    # set (DTZ005/DTZ006 joined those defaults in ruff 0.16), which the client
+    # boundary document promises of every deployed asset.
+    moment = (
+        datetime.now(UTC).astimezone()
+        if now_wall is None
+        else datetime.fromtimestamp(now_wall, UTC).astimezone()
+    )
     return f"{_BOT_PREFIX} {moment.strftime(_BOT_PREFIX_TIME_FORMAT)}]"
 
 

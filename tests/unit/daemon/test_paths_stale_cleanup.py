@@ -230,10 +230,17 @@ class TestCleanupStaleDaemonFilesExceptionBranch:
 
         _original_stat = Path.stat
 
-        def exploding_stat(self: Path) -> _os.stat_result:
+        # Mirrors `Path.stat(*, follow_symlinks=True)` exactly. Python 3.13
+        # rewrote `Path.is_dir()` to call `self.stat(follow_symlinks=...)`
+        # rather than a bare `self.stat()`, so a stub taking only `self` raises
+        # TypeError there instead of exercising the branch under test — passing
+        # on 3.11/3.12 and failing on 3.13 alone. A double standing in for a
+        # stdlib method has to accept the signature the stdlib actually calls,
+        # not the shortest one that happens to work today (Plan 00245).
+        def exploding_stat(self: Path, *, follow_symlinks: bool = True) -> _os.stat_result:
             if self.name.endswith(".pid"):
                 raise RuntimeError("unexpected stat failure")
-            return _original_stat(self)
+            return _original_stat(self, follow_symlinks=follow_symlinks)
 
         with (
             patch(
