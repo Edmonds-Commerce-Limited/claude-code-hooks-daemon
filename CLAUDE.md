@@ -1501,37 +1501,6 @@ Do not carry "a missing linter never blocks" across to TypeScript.
 present this handler only advises — and suggests adding `llm:lint` — so silence
 is not evidence that a `.ts` file is clean.
 
-<!-- handler: lint-on-edit -->
-
-## lint_on_edit — source writes are linted, and a failure DENIES
-
-Every `Write`/`Edit` to a Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin or
-Dart file is linted immediately. A lint failure DENIES the tool call.
-
-**The write has ALREADY landed on disk.** A PostToolUse denial is a failure
-report, not a rollback — the file exists, with your content in it. Fix the
-reported problems with `Edit`. Do NOT re-`Write` the file from scratch: that
-rewrites content already on disk from memory, and loses anything you no longer
-have in hand.
-
-A denial also cancels every sibling tool call batched in the same turn, so
-re-issue those separately.
-
-Each language runs a cheap syntax check first (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) and then an optional deeper linter (`ruff`,
-`shellcheck`, `golangci-lint`, `rubocop`, …). Tools are resolved from the
-daemon's venv before `PATH`.
-
-**A linter that is not installed never blocks.** You get an advisory saying it
-was not found and the write stands — so that message means the check was
-SKIPPED, not that it passed. That leniency is specific to THIS handler:
-`.ts`/`.tsx` files are handled by `validate_eslint_on_write`, which denies on
-a timeout and on any failure to run ESLint.
-
-Narrow it under `handlers.post_tool_use.lint_on_edit.options`: `languages`
-restricts which languages are checked, and `command_overrides` replaces a
-language's `default`/`extended` command (set `extended: null` to run only the
-syntax check).
-
 <!-- handler: markdown-table-formatter -->
 
 ## markdown_table_formatter — markdown tables are auto-aligned
@@ -1641,6 +1610,37 @@ When you background a long-lived process:
 - Delete the watchdog cron (CronDelete) when no backgrounded work remains.
 
 Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
+
+<!-- handler: lint-on-edit -->
+
+## lint_on_edit — source writes are linted, and a failure DENIES
+
+Every `Write`/`Edit` to a Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin or
+Dart file is linted immediately. A lint failure DENIES the tool call.
+
+**The write has ALREADY landed on disk.** A PostToolUse denial is a failure
+report, not a rollback — the file exists, with your content in it. Fix the
+reported problems with `Edit`. Do NOT re-`Write` the file from scratch: that
+rewrites content already on disk from memory, and loses anything you no longer
+have in hand.
+
+A denial also cancels every sibling tool call batched in the same turn, so
+re-issue those separately.
+
+Each language runs a cheap syntax check first (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) and then an optional deeper linter (`ruff`,
+`shellcheck`, `golangci-lint`, `rubocop`, …). Tools are resolved from the
+daemon's venv before `PATH`.
+
+**A linter that is not installed never blocks.** You get an advisory saying it
+was not found and the write stands — so that message means the check was
+SKIPPED, not that it passed. That leniency is specific to THIS handler:
+`.ts`/`.tsx` files are handled by `validate_eslint_on_write`, which denies on
+a timeout and on any failure to run ESLint.
+
+Narrow it under `handlers.post_tool_use.lint_on_edit.options`: `languages`
+restricts which languages are checked, and `command_overrides` replaces a
+language's `default`/`extended` command (set `extended: null` to run only the
+syntax check).
 
 <!-- handler: git-upstream-checker -->
 
