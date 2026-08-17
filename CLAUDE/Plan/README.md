@@ -4,6 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00251: tdd_enforcement needs an exclusion escape and a declarable test root](00251-tdd-enforcement-exclude-paths-and-test-roots/PLAN.md) - Not Started (field report: a client monorepo cannot author a custom PHPStan rule because `tdd_enforcement` is the one blocking path handler with no `exclude_paths` support — the follow-up Plan 00150's Non-Goals explicitly deferred, for it and `lint_on_edit`)
 - [00250: CI must actually run the acceptance gates it calls blocking](00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Not Started (Plan 00245's `-rs` flag named 11 acceptance tests that have skipped on every CI run for want of a daemon socket, three of the files being ones `RELEASING.md` Step 12.0 declares BLOCKING)
 - [00243: make the acceptance playbook deterministically executable](00243-deterministic-acceptance-playbook-harness/PLAN.md) - In Progress (Phase 4's doc-snippet guard is delivered and found 8 real defects; the harness phases remain)
 
@@ -1204,28 +1205,34 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 250 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 251 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 205 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 33 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 34 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 33 + 205 + 6 = **244 folders**, spanning
-  **241 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 34 + 205 + 6 = **245 folders**, spanning
+  **242 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **9** of the
-  250 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  251 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210 — abandoned drafts, numbers burned by transient
   probes (00195, during the v3.51.0 acceptance run), and one withdrawn
   duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
-  already covered the work). 241 + 9 = 250. ✅
+  already covered the work). 242 + 9 = 251. ✅
 
-- **Last reconciled by**: the Plan 00248 and 00249 closures — two folders moved
+- **Last reconciled by**: the Plan 00251 creation — one new folder in the plan
+  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
+  by one while Completed and Cancelled were untouched. Recounted from disk (34
+  root, 205 `Completed/`, 6 `Cancelled/`, 242 distinct numbers against a counter
+  of 251).
+
+- **Before that**: the Plan 00248 and 00249 closures — two folders moved
   from the plan root into `Completed/`, so Active fell by two and Completed rose
   by two while Total and the folder count were untouched. Recounted from disk (33
   root, 205 `Completed/`, 6 `Cancelled/`, 241 distinct numbers against a counter
