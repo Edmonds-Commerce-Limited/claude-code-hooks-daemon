@@ -1194,6 +1194,18 @@ Creating a production source file is blocked until a corresponding test file exi
 - Collocated: `{source_dir}/{module}.test.ts` (JS/TS projects)
 - Test subdirectory: `{source_dir}/__tests__/{module}.test.ts`
 
+**The deny message lists every location it searched.** If your project's real test directory is not in that list, no amount of retrying will satisfy the gate — the project needs to DECLARE the directory (below), not move the test.
+
+**A layout the resolvers cannot infer is declarable** via `handlers.pre_tool_use.tdd_enforcement.options.test_path_map` — a list of `{source_glob, test_dir}` entries. `test_dir` is project-root-relative (or absolute) and FLAT: the test filename is placed directly in it, not mirrored under it. This keeps enforcement ON and is the preferred fix, because a test that exists is worth more than an exemption:
+
+```yaml
+test_path_map:
+  - source_glob: "**/qaConfig/PHPStan/Rules/**"
+    test_dir: "apps/app/qaConfig/Tests"
+```
+
+**A path can also be exempted entirely** via that handler's `exclude_paths` option or the project-wide `daemon.exclude_paths` — additive gitignore-style globs. Prefer `test_path_map`: excluding turns the gate OFF for those files.
+
 **Allowed through without blocking**: vendor dirs, node_modules, build outputs, generated files, and file extensions not in the supported language list.
 
 <!-- handler: enforce-lsp-usage -->
@@ -1638,9 +1650,11 @@ SKIPPED, not that it passed. That leniency is specific to THIS handler:
 a timeout and on any failure to run ESLint.
 
 Narrow it under `handlers.post_tool_use.lint_on_edit.options`: `languages`
-restricts which languages are checked, and `command_overrides` replaces a
+restricts which languages are checked, `command_overrides` replaces a
 language's `default`/`extended` command (set `extended: null` to run only the
-syntax check).
+syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
+globs. The project-wide `daemon.exclude_paths` applies here too; the two are
+additive and neither overrides the other.
 
 <!-- handler: git-upstream-checker -->
 
