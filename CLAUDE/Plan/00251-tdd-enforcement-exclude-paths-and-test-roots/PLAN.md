@@ -147,15 +147,29 @@ construction.
 
 ### Phase 3: A declarable test root (finding B)
 
-- [ ] ⬜ **Task 3.1**: RED — a source file under a non-`src/` PSR-4 root with a
+- [x] ✅ **Task 3.1**: RED — a source file under a non-`src/` PSR-4 root with a
   correctly-placed test is still denied
-- [ ] ⬜ **Task 3.2**: Add a configurable source-glob-to-test-dir mapping, so the
+  - [x] ✅ Kept as a permanent regression pin rather than deleted once green:
+    it is the evidence that no inference reaches `qaConfig/Tests/`, which is the
+    entire justification for a config surface
+- [x] ✅ **Task 3.2**: Add a configurable source-glob-to-test-dir mapping, so the
   resolver gains the declared candidate
-  - [ ] ⬜ Decide the config shape against the existing `_effective_test_locations`
+  - [x] ✅ Decide the config shape against the existing `_effective_test_locations`
     option rather than beside it — there is already a test-location config
     surface, and a second unrelated one is how config sprawls
-- [ ] ⬜ **Task 3.3**: Confirm the reporter's layout passes with enforcement ON,
+    - [x] ✅ Resolved as Decision 5: `test_locations` selects among INFERENCE
+      styles, so a DECLARATION is not one of its values and is not gated by it
+  - [x] ✅ `test_path_map: [{source_glob, test_dir}]`, matched with the same glob
+    dialect as `exclude_paths`; declared candidates searched FIRST
+  - [x] ✅ RED proved by disabling only the resolver wiring: 6 failed / 11 passed,
+    then 17 passed with it restored — so the new tests discriminate rather than
+    passing vacuously
+- [x] ✅ **Task 3.3**: Confirm the reporter's layout passes with enforcement ON,
   which is the outcome that keeps the value of the gate
+  - [x] ✅ Executed on the reporter's exact layout: `matches=True` in every case
+    (the gate never stops firing), `allow` with the test present, and with the
+    test deleted the deny message's FIRST searched location is the project's own
+    declared directory
 
 ### Phase 4: Verify
 
@@ -209,6 +223,51 @@ exclusion would leave the better outcome permanently unbuilt.
 **Decision**: Phase 1 extracts before Phase 2 adds. Adding callers 7 and 8 to a
 five-times-duplicated helper is how six copies became a norm in the first place,
 and the extraction is what makes Phase 2 a two-line change per handler.
+
+**Date**: 2026-08-17
+
+### Decision 4: `test_dir` is project-root-relative, not suffix-anchored
+
+**Context**: the report's example writes `test_dir: "qaConfig/Tests"` while the
+real directory is `apps/app/qaConfig/Tests`. So the report implies a SUFFIX,
+resolved by walking up from the source file to the nearest ancestor named
+`qaConfig`. That form handles a whole monorepo in one entry.
+
+**Options considered**:
+
+1. **Project-root-relative** (or absolute). One rule, no walking, no ambiguity.
+   Costs one entry per app in a monorepo.
+2. **Suffix-anchored on `test_dir`'s first segment.** Elegant for the reporter,
+   but it is implicit path magic (Core Standard 9), and it needs a SECOND rule
+   for the case where the first segment names no ancestor — e.g.
+   `test_dir: "Tests"` with the source in `qaConfig/PHPStan/Rules/`. Two rules
+   means the meaning of a value depends on the tree, which is exactly the class
+   of surprise a declaration exists to remove.
+
+**Decision**: Option 1. It also matches the anchoring a project has already
+learned from `exclude_paths` globs (a leading `/` anchors to the project root),
+so the whole config surface has one mental model. The repetition is honest and
+greppable, and a typo surfaces in the deny message's searched-locations list —
+the one place the author is already reading. Option 2 stays available later
+without breaking Option 1, since a suffix form would be a new spelling rather
+than a changed meaning.
+
+**Date**: 2026-08-17
+
+### Decision 5: a declaration is not gated by `test_locations`
+
+**Context**: Task 3.2 required designing against `_effective_test_locations`
+rather than beside it. The obvious reading is to add a fourth style token
+(`mapped`) to that option.
+
+**Decision**: no — and the reason is that the two options answer different
+questions. `test_locations` selects WHICH of three built-in INFERENCE styles to
+attempt. `test_path_map` is the project asserting a FACT about its own tree. A
+fact does not belong in a list of guesses, and gating it there would produce two
+bad outcomes: a project would have to opt in twice (declare the map, then enable
+the style), and a project narrowing to `test_locations: ["collocated"]` would
+silently lose its own declared test root. Declared candidates are therefore
+always added, and added FIRST, because a declaration outranks every inference.
 
 **Date**: 2026-08-17
 

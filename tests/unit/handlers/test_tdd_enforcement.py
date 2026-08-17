@@ -12,6 +12,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.tdd_enforcement import (
     _TEST_LOCATION_SEPARATE,
     _TEST_LOCATION_TEST_SUBDIR,
     _TEST_SUBDIR_NAME,
+    DeclaredTestDir,
     TddEnforcementHandler,
 )
 from claude_code_hooks_daemon.strategies.tdd.go_strategy import GoTddStrategy
@@ -1496,3 +1497,252 @@ class TestExcludePathsEscape:
         handler = TddEnforcementHandler()
         handler._exclude_paths = ["**/qaConfig/**"]
         assert handler.matches(self._write("/proj/apps/app/src/Entity/Company.php"))
+
+
+class TestDeclaredTestDirFailFast:
+    """`DeclaredTestDir` is the TRUSTED construction path, so it raises.
+
+    The asymmetry is deliberate and mirrors `command_hints`: the parser at the
+    config boundary degrades gracefully (one bad YAML line must not disable the
+    handler), while the dataclass it constructs refuses to hold a meaningless
+    value. The parser depends on that refusal instead of re-checking.
+    """
+
+    def test_an_empty_source_glob_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="source_glob"):
+            DeclaredTestDir(source_glob="", test_dir="tests")
+
+    def test_an_empty_test_dir_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="test_dir"):
+            DeclaredTestDir(source_glob="**/x/**", test_dir="")
+
+
+class TestDeclaredTestPathMap:
+    """A project must be able to DECLARE its non-`src/` test root.
+
+    This is the outcome the field report calls "best long-term" and it is
+    strictly better than the exclusion escape of `TestExcludePathsEscape`:
+    excluding turns enforcement OFF for the path, while declaring keeps the gate
+    ON and merely tells it where to look. The reporter's own repo TDDs 40+ custom
+    PHPStan rules with a worked `RuleTestCase` example, so giving that up would
+    be a real loss.
+
+    The layout under test is the reporter's, exactly: rules in
+    `apps/app/qaConfig/PHPStan/Rules/` (no `src/` segment anywhere, so both
+    mirror resolvers bail) with tests in `apps/app/qaConfig/Tests/` (capital T,
+    the only directory their `phpunit.xml` scans, so a test in either
+    hook-accepted alternative would never be executed).
+    """
+
+    _RULE_REL = ("apps", "app", "qaConfig", "PHPStan", "Rules", "EnumColumnMappingPolicy.php")
+    _TEST_REL = ("apps", "app", "qaConfig", "Tests", "EnumColumnMappingPolicyTest.php")
+    _SOURCE_GLOB = "**/qaConfig/PHPStan/Rules/**"
+    _TEST_DIR = "apps/app/qaConfig/Tests"
+
+    @staticmethod
+    def _write(file_path: Path) -> dict:
+        return {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(file_path),
+                "content": "<?php\n\nclass EnumColumnMappingPolicy {}\n",
+            },
+        }
+
+    @staticmethod
+    def _anchor_project_root(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
+        """Make `resolve_project_root()` report `root`.
+
+        A relative `test_dir` is project-root-relative, so these tests cannot use
+        the real uninitialised-ProjectContext state — they would be asserting the
+        unanchorable branch by accident. Same monkeypatch shape as
+        `tests/unit/utils/test_path_exclusion.py`.
+        """
+        import claude_code_hooks_daemon.core.project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: root), raising=False
+        )
+
+    def _rule(self, root: Path) -> Path:
+        return root.joinpath(*self._RULE_REL)
+
+    def _place_real_test(self, root: Path) -> Path:
+        """Create the correctly-placed test file the reporter already had."""
+        test_path = root.joinpath(*self._TEST_REL)
+        test_path.parent.mkdir(parents=True, exist_ok=True)
+        test_path.write_text("<?php\n\nclass EnumColumnMappingPolicyTest {}\n")
+        return test_path
+
+    def _mapped(self) -> list[dict[str, str]]:
+        return [{"source_glob": self._SOURCE_GLOB, "test_dir": self._TEST_DIR}]
+
+    def test_unconfigured_the_correctly_placed_test_is_not_found(self, tmp_path: Path) -> None:
+        """RED baseline: the built-in resolvers cannot reach `qaConfig/Tests/`.
+
+        Pinned as a regression test rather than deleted once green, because the
+        whole justification for a config surface is that no amount of inference
+        finds this directory: both mirror resolvers are gated on a `src/` path
+        segment, and the fallback yields lowercase `tests/`.
+        """
+        self._place_real_test(tmp_path)
+        handler = TddEnforcementHandler()
+        rule = self._rule(tmp_path)
+
+        assert handler.matches(self._write(rule))
+        result = handler.handle(self._write(rule))
+        assert result.decision == "deny"
+        assert str(Path(*self._TEST_REL).parent) not in (result.reason or "")
+
+    def test_a_declared_test_dir_satisfies_the_gate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GREEN: enforcement stays ON and now finds the real test."""
+        self._anchor_project_root(monkeypatch, tmp_path)
+        self._place_real_test(tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = self._mapped()
+        rule = self._rule(tmp_path)
+
+        assert handler.matches(
+            self._write(rule)
+        ), "the gate must still fire — this is not an escape"
+        assert handler.handle(self._write(rule)).decision == "allow"
+
+    def test_a_missing_declared_test_still_denies_and_names_the_right_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The declaration must not weaken the gate, only redirect it.
+
+        With no test on disk the write is still denied — and the deny message
+        must name the DECLARED location, because that string is the instruction
+        the author follows. Suggesting the lowercase `tests/` fallback here would
+        send them to a directory their phpunit config does not scan.
+        """
+        self._anchor_project_root(monkeypatch, tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = self._mapped()
+        rule = self._rule(tmp_path)
+
+        result = handler.handle(self._write(rule))
+        assert result.decision == "deny"
+        assert str(tmp_path.joinpath(*self._TEST_REL)) in (result.reason or "")
+
+    def test_the_declared_candidate_is_searched_first(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Most-specific-first: a declaration outranks every inferred candidate."""
+        self._anchor_project_root(monkeypatch, tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = self._mapped()
+        rule = self._rule(tmp_path)
+        strategy = handler._registry.get_strategy(str(rule))
+        assert strategy is not None
+
+        candidates = handler._get_test_file_paths(str(rule), strategy)
+        assert candidates[0] == tmp_path.joinpath(*self._TEST_REL)
+
+    def test_a_non_matching_source_glob_contributes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A mapping is scoped by its glob, exactly like `exclude_paths`."""
+        self._anchor_project_root(monkeypatch, tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = self._mapped()
+        other = tmp_path / "apps" / "app" / "src" / "Entity" / "Company.php"
+        strategy = handler._registry.get_strategy(str(other))
+        assert strategy is not None
+
+        candidates = handler._get_test_file_paths(str(other), strategy)
+        assert tmp_path.joinpath(*self._TEST_REL).parent not in [path.parent for path in candidates]
+
+    def test_a_declaration_is_not_gated_by_test_locations(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`test_locations` selects among INFERENCE styles; this is a FACT.
+
+        Gating the map behind the style selector would mean a project that sets
+        `test_locations: ["collocated"]` silently loses its own declared test
+        root — the opposite of what declaring something means.
+        """
+        self._anchor_project_root(monkeypatch, tmp_path)
+        self._place_real_test(tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = self._mapped()
+        handler._test_locations = [_TEST_LOCATION_COLLOCATED]
+        rule = self._rule(tmp_path)
+
+        assert handler.handle(self._write(rule)).decision == "allow"
+
+    def test_an_absolute_test_dir_needs_no_project_root(self, tmp_path: Path) -> None:
+        """An absolute `test_dir` is usable where the root is unresolvable."""
+        self._place_real_test(tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [
+            {
+                "source_glob": self._SOURCE_GLOB,
+                "test_dir": str(tmp_path.joinpath(*self._TEST_REL).parent),
+            }
+        ]
+        assert handler.handle(self._write(self._rule(tmp_path))).decision == "allow"
+
+    def test_a_relative_test_dir_without_a_project_root_is_skipped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unanchorable: degrade to the built-in candidates, never crash."""
+        import claude_code_hooks_daemon.core.project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", False, raising=False)
+        self._place_real_test(tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = self._mapped()
+
+        assert handler.handle(self._write(self._rule(tmp_path))).decision == "deny"
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            pytest.param("not-a-list", id="not-a-list"),
+            pytest.param([["source_glob", "x"]], id="entry-not-a-mapping"),
+            pytest.param([{"source_glob": "**/qaConfig/**"}], id="missing-test-dir"),
+            pytest.param([{"test_dir": "x/Tests"}], id="missing-source-glob"),
+            pytest.param([{"source_glob": "", "test_dir": "x/Tests"}], id="empty-source-glob"),
+            pytest.param([{"source_glob": "**/qaConfig/**", "test_dir": ""}], id="empty-test-dir"),
+        ],
+    )
+    def test_malformed_config_degrades_instead_of_breaking_the_handler(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: object
+    ) -> None:
+        """One bad YAML line must not take the handler down.
+
+        Fail-open at the config boundary, per the `command_hints` convention. The
+        author is not left guessing: the deny message lists every location that
+        WAS searched, so a mapping that did not take is visible exactly where
+        they are already looking.
+        """
+        self._anchor_project_root(monkeypatch, tmp_path)
+        self._place_real_test(tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = raw
+
+        result = handler.handle(self._write(self._rule(tmp_path)))
+        assert result.decision == "deny"
+
+    def test_several_declarations_all_contribute_in_config_order(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A monorepo declares one entry per app; every match is searched."""
+        self._anchor_project_root(monkeypatch, tmp_path)
+        handler = TddEnforcementHandler()
+        handler._test_path_map = [
+            {"source_glob": self._SOURCE_GLOB, "test_dir": "apps/admin/qaConfig/Tests"},
+            {"source_glob": self._SOURCE_GLOB, "test_dir": self._TEST_DIR},
+        ]
+        rule = self._rule(tmp_path)
+        strategy = handler._registry.get_strategy(str(rule))
+        assert strategy is not None
+
+        candidates = handler._get_test_file_paths(str(rule), strategy)
+        assert candidates[0] == tmp_path / "apps/admin/qaConfig/Tests" / candidates[0].name
+        assert candidates[1] == tmp_path.joinpath(*self._TEST_REL)

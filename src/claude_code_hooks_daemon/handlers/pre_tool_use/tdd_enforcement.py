@@ -4,6 +4,8 @@ Uses Strategy Pattern: all language-specific logic is delegated to TddStrategy
 implementations. The handler itself has ZERO language awareness.
 """
 
+import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +20,13 @@ from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
-from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
+from claude_code_hooks_daemon.utils.path_exclusion import (
+    handler_excludes_path,
+    path_matches_globs,
+    resolve_project_root,
+)
+
+logger = logging.getLogger(__name__)
 
 # Path mapping constants for the src->tests path-mapping helpers
 _TEST_DIR = "tests"
@@ -34,6 +42,86 @@ _TEST_SUBDIR_NAME = "__tests__"
 _DEFAULT_TEST_LOCATIONS = frozenset(
     {_TEST_LOCATION_SEPARATE, _TEST_LOCATION_COLLOCATED, _TEST_LOCATION_TEST_SUBDIR}
 )
+
+# `test_path_map` option keys (Plan 00251 Phase 3)
+_KEY_SOURCE_GLOB = "source_glob"
+_KEY_TEST_DIR = "test_dir"
+
+
+@dataclass(frozen=True)
+class DeclaredTestDir:
+    """One ``test_path_map`` entry: sources matching a glob are tested in a directory.
+
+    A project uses this to DECLARE a test root the built-in resolvers cannot
+    infer — a layout with no ``src/`` segment, where both mirror resolvers bail
+    and the fallback yields a lowercase ``tests/`` that the project's own test
+    runner does not scan.
+
+    Declaring is strictly better than excluding: an exclusion turns enforcement
+    off for the path, while a declaration keeps the gate ON and only tells it
+    where to look.
+
+    Attributes:
+        source_glob: Gitignore-style glob selecting the source files this applies
+            to, matched with the same dialect as ``exclude_paths`` so a project
+            learns one glob syntax rather than two.
+        test_dir: Directory holding those files' tests. Project-root-relative, or
+            absolute. NOT mirrored — the test filename is placed directly in this
+            directory, because that is what a flat PSR-4 test namespace looks
+            like. Mirroring is already available for ``src/`` layouts via the
+            built-in ``separate`` resolvers.
+    """
+
+    source_glob: str
+    test_dir: str
+
+    def __post_init__(self) -> None:
+        """FAIL FAST on a meaningless mapping.
+
+        This is the TRUSTED construction path; untrusted YAML goes through
+        :func:`_parse_test_path_map`, which degrades gracefully and RELIES on this
+        check rather than duplicating it (the same split as ``command_hints``).
+        """
+        if not self.source_glob:
+            raise ValueError("DeclaredTestDir requires a non-empty source_glob")
+        if not self.test_dir:
+            raise ValueError("DeclaredTestDir requires a non-empty test_dir")
+
+
+def _parse_test_path_map(raw: Any) -> list[DeclaredTestDir]:
+    """Parse the raw ``options.test_path_map`` config value.
+
+    External config is validated defensively and degrades gracefully: a malformed
+    entry is logged and skipped, never raised, so one bad line in a project's
+    YAML cannot disable TDD enforcement wholesale. That matters more here than in
+    an advisory handler — this one DENIES — but the failure stays visible where
+    the author is already looking, because the deny message lists every location
+    that WAS searched, and a mapping that did not take is conspicuous by its
+    absence from that list.
+    """
+    if not raw:
+        return []
+    if not isinstance(raw, list):
+        logger.warning("tdd_enforcement: 'test_path_map' option must be a list; ignoring")
+        return []
+
+    parsed: list[DeclaredTestDir] = []
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            logger.warning("tdd_enforcement: test_path_map[%d] is not a mapping; skipped", index)
+            continue
+        source_glob = str(entry.get(_KEY_SOURCE_GLOB, "") or "").strip()
+        test_dir = str(entry.get(_KEY_TEST_DIR, "") or "").strip()
+        if not source_glob or not test_dir:
+            logger.warning(
+                "tdd_enforcement: test_path_map[%d] missing required %s/%s; skipped",
+                index,
+                _KEY_SOURCE_GLOB,
+                _KEY_TEST_DIR,
+            )
+            continue
+        parsed.append(DeclaredTestDir(source_glob=source_glob, test_dir=test_dir))
+    return parsed
 
 
 class TddEnforcementHandler(Handler):
@@ -77,6 +165,13 @@ class TddEnforcementHandler(Handler):
         # Set via setattr after __init__ from handler options; unions with the
         # project-wide daemon.exclude_paths the registry injects (Plan 00251).
         self._exclude_paths: list[str] | None = None
+        # Config option: declared source-glob -> test-dir mappings for layouts no
+        # resolver can infer (Plan 00251). Typed `Any` deliberately: this is raw
+        # YAML the daemon does not control, and `_parse_test_path_map` handles a
+        # value that is not even a list — a narrower annotation here would be the
+        # same kind of lie Phase 1 removed from `core/handler.py`.
+        self._test_path_map: Any = None
+        self._resolved_test_path_map: list[DeclaredTestDir] | None = None
 
     def _apply_language_filter(self) -> None:
         """Apply language filter to registry on first use (lazy).
@@ -224,6 +319,14 @@ class TddEnforcementHandler(Handler):
         path_parts = Path(source_path).parts
         effective_locations = self._effective_test_locations
 
+        # Declared mappings first: a project stating where its tests live is a
+        # FACT, and it outranks every inferred candidate. Deliberately NOT gated
+        # on _effective_test_locations — that option selects among the three
+        # INFERENCE styles below, so gating a declaration behind it would mean a
+        # project setting `test_locations: ["collocated"]` silently lost its own
+        # declared test root (Plan 00251).
+        candidates.extend(self._map_declared_test_paths(source_path, test_filename))
+
         # Separate test directory strategies (mirror, unit, fallback)
         if _TEST_LOCATION_SEPARATE in effective_locations:
             # Strategy 1: Mirror mapping (PHP PSR-4, Java, etc.)
@@ -250,6 +353,54 @@ class TddEnforcementHandler(Handler):
         if _TEST_LOCATION_TEST_SUBDIR in effective_locations:
             candidates.append(self._map_test_subdir_path(source_path, test_filename))
 
+        return candidates
+
+    def _declared_test_dirs(self) -> list[DeclaredTestDir]:
+        """Parse ``test_path_map`` once, lazily.
+
+        Config options are injected via setattr AFTER ``__init__``, so parsing
+        cannot happen in the constructor; and the value is re-read on every
+        ``handle()``, so it must not be re-parsed each time.
+        """
+        if self._resolved_test_path_map is None:
+            self._resolved_test_path_map = _parse_test_path_map(self._test_path_map)
+        return self._resolved_test_path_map
+
+    def _map_declared_test_paths(self, source_path: str, test_filename: str) -> list[Path]:
+        """Candidate test paths from the project's declared ``test_path_map``.
+
+        Each matching mapping contributes exactly one candidate — the test
+        filename placed FLAT in the declared directory, not mirrored under it.
+        Returns them in config order, so a project controls which of several
+        matching declarations the deny message suggests first.
+        """
+        mappings = self._declared_test_dirs()
+        if not mappings:
+            return []
+
+        project_root = resolve_project_root()
+        candidates: list[Path] = []
+        for mapping in mappings:
+            if not path_matches_globs(
+                source_path, [mapping.source_glob], project_root=project_root
+            ):
+                continue
+            test_dir = Path(mapping.test_dir)
+            if not test_dir.is_absolute():
+                if project_root is None:
+                    # Nothing to anchor a relative dir against. Degrade to the
+                    # inferred candidates rather than guessing a root — a guessed
+                    # root would produce a path that silently never exists, which
+                    # reads as "your test is missing" rather than "your mapping
+                    # could not be resolved".
+                    logger.warning(
+                        "tdd_enforcement: test_path_map test_dir %r is relative but the "
+                        "project root is unresolvable; skipped",
+                        mapping.test_dir,
+                    )
+                    continue
+                test_dir = Path(project_root) / test_dir
+            candidates.append(test_dir / test_filename)
         return candidates
 
     @staticmethod
@@ -353,6 +504,23 @@ class TddEnforcementHandler(Handler):
             "- Separate mirror: `tests/unit/{subdir}/test_{module}.py`\n"
             "- Collocated: `{source_dir}/{module}.test.ts` (JS/TS projects)\n"
             "- Test subdirectory: `{source_dir}/__tests__/{module}.test.ts`\n\n"
+            "**The deny message lists every location it searched.** If your project's real "
+            "test directory is not in that list, no amount of retrying will satisfy the gate "
+            "— the project needs to DECLARE the directory (below), not move the test.\n\n"
+            "**A layout the resolvers cannot infer is declarable** via "
+            "`handlers.pre_tool_use.tdd_enforcement.options.test_path_map` — a list of "
+            "`{source_glob, test_dir}` entries. `test_dir` is project-root-relative (or "
+            "absolute) and FLAT: the test filename is placed directly in it, not mirrored "
+            "under it. This keeps enforcement ON and is the preferred fix, because a test "
+            "that exists is worth more than an exemption:\n\n"
+            "```yaml\n"
+            "test_path_map:\n"
+            '  - source_glob: "**/qaConfig/PHPStan/Rules/**"\n'
+            '    test_dir: "apps/app/qaConfig/Tests"\n'
+            "```\n\n"
+            "**A path can also be exempted entirely** via that handler's `exclude_paths` "
+            "option or the project-wide `daemon.exclude_paths` — additive gitignore-style "
+            "globs. Prefer `test_path_map`: excluding turns the gate OFF for those files.\n\n"
             "**Allowed through without blocking**: vendor dirs, node_modules, build outputs, "
             "generated files, and file extensions not in the supported language list."
         )

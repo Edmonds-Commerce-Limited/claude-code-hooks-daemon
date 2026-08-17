@@ -24,18 +24,25 @@ Handlers are either **blocking** (terminal) or **advisory** (non-terminal):
 
 ---
 
-## Content-Blocker Path Exclusion (`exclude_paths`)
+## Path Exclusion (`exclude_paths`)
 
-The three content-scanning blocking handlers -- `security_antipattern`, `qa_suppression`, and `error_hiding_blocker` -- accept gitignore-style glob patterns that exempt matching files from scanning. This is the supported way for a project (e.g. a QA/linting library) to keep intentionally-"bad" fixture code out of the blockers instead of disabling a whole handler.
+Every path-based blocking handler accepts gitignore-style glob patterns that exempt matching files. This is the supported way for a project (e.g. a QA/linting library) to keep intentionally-"bad" fixture code out of the blockers instead of disabling a whole handler.
+
+The handlers that honour it are deliberately not enumerated here — this list said "three" while six consumed the option, and it has since grown again. To see the current set, grep the source for `handler_excludes_path`, the single shared decision they all call.
 
 Globs support `*` (within a segment), `?` (single char), and `**` (zero-or-more path segments). Examples: `**/fixtures/**`, `samples/**/*.py`, `tests/assets/**`.
 
 **Two levels, combined as a union:**
 
-- **Project-wide** -- `daemon.exclude_paths` (a top-level `daemon:` key). Inherited by all three handlers.
-- **Per-handler** -- `handlers.pre_tool_use.<handler>.options.exclude_paths`. Applies to that handler only.
+- **Project-wide** -- `daemon.exclude_paths` (a top-level `daemon:` key). Inherited by every handler that supports exclusion.
+- **Per-handler** -- `handlers.<event>.<handler>.options.exclude_paths`. Applies to that handler only.
 
-A file is exempt if it matches the union of the project-wide list, the handler's own list, and the handler's built-in defaults.
+A file is exempt if it matches the union of the project-wide list, the handler's own list, and the handler's built-in defaults. The three sources are additive; none overrides another.
+
+**Two of them are not content scanners**, and for those an exclusion means something different — worth understanding before reaching for it:
+
+- `tdd_enforcement` (PreToolUse, blocking) -- excluding a path turns the TDD gate OFF for it. Where the tests merely live somewhere the resolver cannot infer, prefer that handler's `test_path_map` option, which keeps the gate ON and declares the directory instead.
+- `lint_on_edit` (PostToolUse, blocking) -- excluding a path stops it being linted at all. Narrower alternatives exist: `languages` restricts which languages are checked, and `command_overrides` can reduce a language to its cheap syntax check only (`extended: null`).
 
 **Built-in defaults** (always skipped, no config needed):
 
@@ -838,7 +845,7 @@ x = some_func()  # type: ignore
 | `exclude_paths` | `list[str]` | `[]`           | Gitignore-style globs exempting files from scanning. Unioned with `daemon.exclude_paths` and the built-in defaults.           |
 | `languages`     | `list[str]` | all registered | Restrict enforcement to specific languages. Empty/unset enforces every registered strategy; falls back to `daemon.languages`. |
 
-**Built-in exclusions:** per-language vendor / build / `node_modules` directories are always skipped. Use `exclude_paths` for fixtures that must legitimately contain suppression annotations, rather than disabling the handler — see [Content-Blocker Path Exclusion](#content-blocker-path-exclusion-exclude_paths).
+**Built-in exclusions:** per-language vendor / build / `node_modules` directories are always skipped. Use `exclude_paths` for fixtures that must legitimately contain suppression annotations, rather than disabling the handler — see [Path Exclusion](#path-exclusion-exclude_paths).
 
 **Config example:**
 
@@ -1157,6 +1164,8 @@ handlers:
 
 **Allowed through without blocking:** vendor directories, `node_modules`, build outputs, generated files, and any extension with no registered strategy.
 
+**The deny message lists every location it searched.** If a project's real test directory is absent from that list, the gate can never be satisfied by moving the test — the directory has to be declared with `test_path_map` below.
+
 **Example trigger:**
 
 ```
@@ -1166,9 +1175,14 @@ Write tool creating src/handlers/pre_tool_use/new_handler.py
 
 **Options:**
 
-| Option      | Type        | Default        | Description                                                                                                                                                                          |
-| ----------- | ----------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `languages` | `list[str]` | all registered | Restrict TDD enforcement to specific languages. Unset or empty enforces EVERY registered language. Takes precedence over the project-wide `daemon.languages` list when both are set. |
+| Option           | Type         | Default        | Description                                                                                                                                                                                               |
+| ---------------- | ------------ | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `languages`      | `list[str]`  | all registered | Restrict TDD enforcement to specific languages. Unset or empty enforces EVERY registered language. Takes precedence over the project-wide `daemon.languages` list when both are set.                      |
+| `test_locations` | `list[str]`  | all three      | Which INFERENCE styles to try: `separate`, `collocated`, `test_subdir`. Does not affect `test_path_map`, which is a declaration rather than a style.                                                      |
+| `test_path_map`  | `list[dict]` | `[]`           | Declared `{source_glob, test_dir}` mappings for layouts no resolver can infer. `test_dir` is project-root-relative (or absolute) and FLAT — the test filename goes directly in it, not mirrored under it. |
+| `exclude_paths`  | `list[str]`  | `[]`           | Gitignore-style globs exempted from TDD enforcement entirely. Additive with the project-wide `daemon.exclude_paths`; neither overrides the other.                                                         |
+
+**Declaring a test root vs. excluding a path.** Both escape a false block, but they are not equivalent — `exclude_paths` turns the gate OFF for those files, while `test_path_map` keeps it ON and only tells it where to look. Prefer the map. Reach for the exclusion when the files genuinely are not TDD-able, not when their tests merely live somewhere unusual.
 
 **Config example:**
 
@@ -1180,7 +1194,18 @@ handlers:
       priority: 15
       options:
         languages: ["python", "typescript"]  # omit to enforce all 11
+        # A monorepo whose custom PHPStan rules are tested in a flat PSR-4
+        # namespace with no src/ segment anywhere in the path. One entry per
+        # app: test_dir is project-root-relative, so it is explicit rather
+        # than inferred from the source path.
+        test_path_map:
+          - source_glob: "**/qaConfig/PHPStan/Rules/**"
+            test_dir: "apps/app/qaConfig/Tests"
+        exclude_paths:
+          - "**/generated/**"
 ```
+
+A malformed `test_path_map` entry (not a mapping, or missing either key) is logged and skipped rather than raised — one bad line must not disable TDD enforcement wholesale. The skip is visible where you are already looking: the declared directory is simply absent from the deny message's searched-locations list.
 
 ---
 

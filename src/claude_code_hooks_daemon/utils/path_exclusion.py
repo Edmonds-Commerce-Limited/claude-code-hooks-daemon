@@ -132,17 +132,24 @@ def resolve_project_root() -> str | None:
     return str(ProjectContext.project_root())
 
 
-def is_path_excluded(
+def path_matches_globs(
     file_path: str,
     patterns: Sequence[str] | None,
     *,
     project_root: str | os.PathLike[str] | None = None,
 ) -> bool:
-    """Return True if ``file_path`` matches any exclusion glob in ``patterns``.
+    """Return True if ``file_path`` matches any glob in ``patterns``.
+
+    The glob dialect is this module's, documented at the top. Exclusion is only
+    the most common *use* of the answer, not the answer itself — a project may
+    also want to select paths in order to treat them SPECIALLY rather than to
+    skip them, which is what ``tdd_enforcement``'s ``test_path_map`` does
+    (Plan 00251). Sharing this matcher keeps one glob dialect across the whole
+    config surface, so a project learns the syntax once.
 
     Args:
-        file_path: Absolute or relative path of the file being written/edited.
-        patterns: Glob patterns to exclude. ``None`` or empty never excludes.
+        file_path: Absolute or relative path being considered.
+        patterns: Glob patterns. ``None`` or empty never matches.
         project_root: Optional project root; enables project-relative and
             leading-``/`` anchored matching.
 
@@ -159,6 +166,31 @@ def is_path_excluded(
         if any(compiled.fullmatch(candidate) for candidate in candidates):
             return True
     return False
+
+
+def is_path_excluded(
+    file_path: str,
+    patterns: Sequence[str] | None,
+    *,
+    project_root: str | os.PathLike[str] | None = None,
+) -> bool:
+    """Return True if ``file_path`` matches any exclusion glob in ``patterns``.
+
+    A thin naming layer over :func:`path_matches_globs`: identical behaviour,
+    but the name states what the caller MEANS by a match. Kept as the entry point
+    for the exclusion callers so their code reads as exclusion rather than as
+    pattern-matching.
+
+    Args:
+        file_path: Absolute or relative path of the file being written/edited.
+        patterns: Glob patterns to exclude. ``None`` or empty never excludes.
+        project_root: Optional project root; enables project-relative and
+            leading-``/`` anchored matching.
+
+    Returns:
+        True if any pattern matches any candidate form of the path.
+    """
+    return path_matches_globs(file_path, patterns, project_root=project_root)
 
 
 def handler_excludes_path(

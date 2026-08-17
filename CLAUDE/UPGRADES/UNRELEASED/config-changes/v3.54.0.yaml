@@ -1,0 +1,72 @@
+version: "3.54.0"
+date: "UNRELEASED"
+breaking: false
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.tdd_enforcement.options.test_path_map
+      recommended: false
+      dormant: false
+      description: >-
+        NEW option (Plan 00251). A list of {source_glob, test_dir} entries
+        declaring where the tests live for source files the built-in resolvers
+        cannot map. Both mirror resolvers are gated on a src/ path segment and
+        the fallback yields a lowercase tests/ sibling, so a project whose test
+        root is neither -- a flat PSR-4 namespace such as qaConfig/Tests/ with
+        no src/ anywhere in the path -- could not satisfy the gate at all. The
+        deny message listed three locations, none of which was the real one, so
+        no amount of moving the test would help. test_dir is
+        project-root-relative (or absolute) and FLAT: the computed test filename
+        is placed directly in it, not mirrored under it, because that is what a
+        flat test namespace looks like. Matching uses the same gitignore-style
+        glob dialect as exclude_paths, so a project learns one syntax. Declared
+        candidates are searched FIRST, ahead of every inferred one, and are
+        deliberately NOT gated by the sibling test_locations option -- that
+        option selects among the three INFERENCE styles, so gating a declaration
+        behind it would mean a project setting test_locations: ["collocated"]
+        silently lost its own declared test root. A malformed entry is logged
+        and skipped rather than raised, so one bad line cannot disable TDD
+        enforcement wholesale; the skip is visible because the declared
+        directory is then absent from the deny message's searched-locations
+        list.
+      migration_note: >-
+        Only needed if tdd_enforcement denies a file whose test genuinely
+        exists. Read the deny message: if your real test directory is not in
+        the searched-locations list, declare it here. Prefer this over
+        exclude_paths -- this keeps the gate ON and only tells it where to
+        look, whereas excluding turns enforcement off for those files.
+    - key: handlers.pre_tool_use.tdd_enforcement.options.exclude_paths
+      recommended: false
+      dormant: false
+      description: >-
+        NEW option (Plan 00251) -- gitignore-style globs exempting paths from
+        TDD enforcement entirely, additive with the project-wide
+        daemon.exclude_paths. This executes the follow-up Plan 00150 recorded in
+        its own Non-Goals ("Not wiring lint_on_edit / tdd_enforcement this
+        plan"). Until now tdd_enforcement was the only blocking path-based
+        handler with NO configuration that could exempt a path, which is what a
+        client monorepo ran into: a custom PHPStan rule under a QA-tooling
+        directory is correctly classified production source, its real test dir
+        was unreachable, and there was no escape in any config file. The check
+        runs BEFORE the language-strategy lookup, because an exclusion is the
+        project declaring a path out of scope and that must not become
+        conditional on the daemon having a strategy for the extension.
+      migration_note: >-
+        Nothing changes for a project that configures nothing. Reach for this
+        when files genuinely are not TDD-able; when their tests merely live
+        somewhere unusual, use test_path_map instead.
+    - key: handlers.post_tool_use.lint_on_edit.options.exclude_paths
+      recommended: false
+      dormant: false
+      description: >-
+        NEW option (Plan 00251) -- the other half of Plan 00150's deferral.
+        Gitignore-style globs exempting paths from lint-on-write, additive with
+        the project-wide daemon.exclude_paths. lint_on_edit DENIES on a lint
+        failure, so a generated or vendored file that cannot pass the project's
+        linter was previously unwritable with no config escape. Checked before
+        the strategy lookup and before the on-disk existence check, so an
+        excluded path costs no syscall.
+      migration_note: >-
+        Nothing changes without configuration. Narrower alternatives exist and
+        are usually better: `languages` restricts which languages are checked,
+        and `command_overrides` can reduce a language to its cheap syntax check
+        only (set `extended: null`).

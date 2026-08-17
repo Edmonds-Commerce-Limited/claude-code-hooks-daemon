@@ -18,8 +18,45 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     is_path_excluded,
     merge_exclude_patterns,
+    path_matches_globs,
     resolve_project_root,
 )
+
+
+class TestPathMatchesGlobs:
+    """`path_matches_globs` is the matcher; exclusion is one USE of the answer.
+
+    `tdd_enforcement`'s `test_path_map` matches globs in order to treat paths
+    SPECIALLY rather than to skip them (Plan 00251), so the matcher is public
+    under a name that describes what it computes. These tests pin that the two
+    names are the same behaviour, so a future change to one cannot silently
+    diverge from the other.
+    """
+
+    @pytest.mark.parametrize(
+        ("file_path", "patterns", "expected"),
+        [
+            pytest.param("a/qaConfig/PHPStan/Rules/F.php", ["**/qaConfig/**"], True, id="deep"),
+            pytest.param("a/src/F.php", ["**/qaConfig/**"], False, id="no-match"),
+            pytest.param("a/b.py", None, False, id="none-patterns"),
+            pytest.param("a/b.py", [], False, id="empty-patterns"),
+            pytest.param("a/b.py", ["", "a/*.py"], True, id="empty-pattern-skipped"),
+        ],
+    )
+    def test_matching(self, file_path: str, patterns: list[str] | None, expected: bool) -> None:
+        assert path_matches_globs(file_path, patterns) is expected
+
+    def test_is_path_excluded_is_the_same_behaviour(self) -> None:
+        """The alias must not drift: same inputs, same answer, both directions."""
+        cases: list[tuple[str, list[str]]] = [
+            ("a/qaConfig/x.php", ["**/qaConfig/**"]),
+            ("a/src/x.php", ["**/qaConfig/**"]),
+            ("proj/vendor/x.py", ["/vendor/**"]),
+        ]
+        for file_path, patterns in cases:
+            assert path_matches_globs(file_path, patterns, project_root="proj") is is_path_excluded(
+                file_path, patterns, project_root="proj"
+            )
 
 
 class TestMergeExcludePatterns:

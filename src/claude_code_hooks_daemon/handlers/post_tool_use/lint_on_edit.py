@@ -332,9 +332,11 @@ SKIPPED, not that it passed. That leniency is specific to THIS handler:
 a timeout and on any failure to run ESLint.
 
 Narrow it under `handlers.post_tool_use.lint_on_edit.options`: `languages`
-restricts which languages are checked, and `command_overrides` replaces a
+restricts which languages are checked, `command_overrides` replaces a
 language's `default`/`extended` command (set `extended: null` to run only the
-syntax check)."""
+syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
+globs. The project-wide `daemon.exclude_paths` applies here too; the two are
+additive and neither overrides the other."""
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests aggregated from all registered strategies."""
