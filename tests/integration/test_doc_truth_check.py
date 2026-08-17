@@ -246,6 +246,61 @@ def test_accepts_real_subcommands_in_a_shell_fence(tmp_path: Path) -> None:
     assert exit_code == 0, f"valid subcommands were flagged: {report['violations']}"
 
 
+def test_flags_a_slash_command_in_a_shell_fence(tmp_path: Path) -> None:
+    """A ```bash fence asserts "runnable shell". A slash command is not.
+
+    ``/hooks-daemon upgrade`` is typed into the Claude Code chat. Pasted into a
+    terminal it fails with ``bash: /hooks-daemon: No such file or directory`` —
+    and the fence tag is the only thing that told the reader to paste it there.
+    """
+    root = _make_docs(
+        tmp_path,
+        "## Upgrade\n\n```bash\n/hooks-daemon upgrade\n```\n",
+    )
+
+    exit_code, report = _run_checker(root)
+
+    assert exit_code == 1, "a slash command tagged as shell must fail"
+    assert "slash-command-in-shell-fence" in _rules(report)
+
+
+def test_accepts_the_canonical_claude_code_fence(tmp_path: Path) -> None:
+    """NEGATIVE CONTROL — the convention must have a form that passes.
+
+    A rule with no accepted form is a rule nobody can satisfy.
+    """
+    root = _make_docs(
+        tmp_path,
+        "## Upgrade\n\n```claude-code\n/hooks-daemon upgrade\n```\n",
+    )
+
+    exit_code, report = _run_checker(root)
+
+    assert exit_code == 0, f"the canonical form was flagged: {report['violations']}"
+
+
+def test_does_not_flag_an_absolute_path_in_a_shell_fence(tmp_path: Path) -> None:
+    """NEGATIVE CONTROL — a leading slash is not by itself a slash command.
+
+    Shell blocks legitimately start lines with absolute paths. Distinguishing
+    them is what the one-segment lookahead does: a slash command has no second
+    ``/``, a path does.
+    """
+    root = _make_docs(
+        tmp_path,
+        "## Commands\n\n"
+        "```bash\n"
+        "/workspace/scripts/echd-capture 20\n"
+        "/usr/bin/env python3 -c 'print(1)'\n"
+        "/tmp/upgrade.sh --project-root /workspace\n"
+        "```\n",
+    )
+
+    exit_code, report = _run_checker(root)
+
+    assert exit_code == 0, f"absolute paths were misread as slash commands: {report['violations']}"
+
+
 def test_real_repository_docs_are_truthful() -> None:
     """The gate itself: this repository's prose must match generated truth."""
     exit_code, report = _run_checker(REPO_ROOT)

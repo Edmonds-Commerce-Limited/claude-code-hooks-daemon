@@ -114,7 +114,7 @@ gh release delete vX.Y.Z --yes
 
 ## Quick Release
 
-```bash
+```claude-code
 /release          # auto-detect bump
 /release 2.2.0   # explicit version
 /release patch    # bump type

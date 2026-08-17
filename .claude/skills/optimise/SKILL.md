@@ -14,7 +14,7 @@ handler changes and can apply them automatically.
 
 ## Usage
 
-```bash
+```claude-code
 # Run full analysis and show scored report
 /optimise
 ```
@@ -62,6 +62,7 @@ After viewing the report, Claude asks whether to apply recommendations:
 ## Reference Documentation
 
 **SINGLE SOURCE OF TRUTH:**
+
 - Handler options and values: @docs/guides/HANDLER_REFERENCE.md
 - Configuration format: @docs/guides/CONFIGURATION.md
 - Available handlers: @.claude/HOOKS-DAEMON.md

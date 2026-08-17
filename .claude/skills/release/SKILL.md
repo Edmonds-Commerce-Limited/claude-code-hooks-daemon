@@ -43,7 +43,7 @@ Automate the complete release process: version updates, changelog generation, Op
 
 ## Usage
 
-```bash
+```claude-code
 # Auto-detect version bump from commits
 /release
 

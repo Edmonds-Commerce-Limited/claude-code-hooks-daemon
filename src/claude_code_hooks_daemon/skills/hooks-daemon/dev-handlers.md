@@ -4,7 +4,7 @@ Scaffold new project-level handlers with automatic file generation and TDD struc
 
 ## Quick Start
 
-```bash
+```claude-code
 /hooks-daemon dev-handlers
 ```
 

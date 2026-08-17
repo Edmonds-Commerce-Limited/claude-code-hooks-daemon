@@ -37,6 +37,31 @@ claims are checked:
 ``qa-check-count-hardcoded``
     Same treatment for the size of the QA suite, for the same reason.
 
+``cli-subcommand-unknown``
+    A ``bin/hooks-daemon <sub>`` invocation, inside a shell-tagged fence, naming
+    a subcommand the live argparse registry does not have.
+    ``RELEASES/v3.53.0.md`` told every upgrading user to run
+    ``.claude/hooks-daemon/bin/hooks-daemon upgrade``, which exits 2. Upgrading
+    IS reachable — through the SKILL, ``/hooks-daemon upgrade`` — so the words
+    were right and only the form was wrong, which is why review passed it.
+    Requiring the ``bin/`` segment separates the wrapper from the skill: 38
+    release notes use the skill form correctly and must never be flagged.
+
+``slash-command-in-shell-fence``
+    A Claude Code slash command inside a fence tagged as shell. The tag asserts
+    "this is runnable shell"; pasted into a terminal the command fails. The
+    canonical form is a ```` ```claude-code ```` fence — see
+    ``CLAUDE/development/DOC-CONVENTIONS.md``.
+
+Both new rules scan only SHELL-TAGGED fences, and the tag — not the fence — is
+the discriminator. ``CLAUDE/AgentTeam.md`` keeps English prose inside UNTAGGED
+fences, one line reading "Run the daemon CLI as ./bin/hooks-daemon from inside
+that worktree"; a fence-only rule reads ``from`` as a subcommand at seven sites.
+A slash command must additionally resolve to a real skill, because
+``CLAUDE/Worktree.md`` shows ``git worktree list`` OUTPUT whose rows begin
+``/workspace  abc1234 [main]`` — a leading slash in a shell block is often a
+path.
+
 If ``generate-docs`` ever emits a SHIPPED-inventory figure distinct from the
 active one, ``handler-count-unverifiable`` can become an equality assertion
 against that — real ground truth rather than a restatement of the claim.
@@ -86,6 +111,42 @@ RULE_CLAIM_MISMATCH: Final[str] = "handler-claim-mismatch"
 RULE_COUNT_UNVERIFIABLE: Final[str] = "handler-count-unverifiable"
 RULE_QA_COUNT: Final[str] = "qa-check-count-hardcoded"
 RULE_CLI_SUBCOMMAND_UNKNOWN: Final[str] = "cli-subcommand-unknown"
+RULE_SLASH_IN_SHELL_FENCE: Final[str] = "slash-command-in-shell-fence"
+
+# A Claude Code slash command at the start of a line: `/hooks-daemon upgrade`,
+# `/release`. The lookahead is what separates a COMMAND from a PATH — a slash
+# command is one segment, so anything continuing with `/` (`/workspace/scripts`,
+# `/tmp/out.txt`, `/usr/bin/env`) is a filesystem path and is not matched. A
+# bare root-level executable with no extension is vanishingly rare, and would be
+# worth a second look anyway.
+_SLASH_COMMAND_RE: Final[re.Pattern[str]] = re.compile(r"^\s*/(?P<name>[a-z][a-z0-9-]*)(?=\s|$)")
+
+# The canonical fence tag for a Claude Code chat invocation. See
+# CLAUDE/development/DOC-CONVENTIONS.md.
+_CLAUDE_CODE_FENCE_TAG: Final[str] = "claude-code"
+
+# Archives, exempt from the fence-tag rule but NOT from `cli-subcommand-unknown`.
+# The two rules differ in kind, and the asymmetry is deliberate: a nonexistent
+# subcommand is simply WRONG and stays wrong forever, so it is worth correcting
+# wherever it appears (there was exactly one). A slash command in a shell fence
+# is MIS-TAGGED — the command itself is right and works when typed into the chat
+# — so the cost is a reader's misstep, not a broken instruction. Rewriting 47
+# published release notes and the closed-plan record to change a tag would edit
+# history for a lesser fault. New material gets the convention; the archive keeps
+# what it said at the time.
+_FENCE_RULE_EXEMPT_PREFIXES: Final[tuple[str, ...]] = ("RELEASES/", "CLAUDE/Plan/")
+
+# Where skills live. Their DIRECTORY NAMES are the valid slash commands, which
+# is what makes the rule discriminate: a shell fence may legitimately open a
+# line with `/`, and `CLAUDE/Worktree.md` shows `git worktree list` OUTPUT whose
+# rows start `/workspace  abc1234 [main]`. That is a path in captured output,
+# not an invocation. Matching only names that resolve to a real skill separates
+# the two without guessing — the same introspect-don't-restate rule the CLI
+# registry follows above.
+_SKILL_DIR_PARTS: Final[tuple[tuple[str, ...], ...]] = (
+    (".claude", "skills"),
+    ("src", "claude_code_hooks_daemon", "skills"),
+)
 
 # Fence info strings that assert "this block is runnable shell". A command
 # inside one is a command; the same words in prose are a mention. The tag is
@@ -105,9 +166,11 @@ _CLI_INVOCATION_RE: Final[re.Pattern[str]] = re.compile(
     r"bin/hooks-daemon\s+(?P<sub>[a-z][a-z0-9-]*)"
 )
 
-# Directories whose markdown is not this project's documentation.
+# Directories whose markdown is not this project's documentation. `marketplaces`
+# covers the vendored third-party plugin catalogue under `.claude/ccy/plugins/`:
+# upstream content this project does not author and must not rewrite.
 _UNSCANNED_DIR_NAMES: Final[frozenset[str]] = frozenset(
-    {".git", "node_modules", "untracked", "__pycache__", ".venv", "vendor"}
+    {".git", "node_modules", "untracked", "__pycache__", ".venv", "vendor", "marketplaces"}
 )
 
 _MARKDOWN_GLOB: Final[str] = "*.md"
@@ -176,9 +239,16 @@ _REMEDIATION_QA_COUNT: Final[str] = (
 )
 
 _REMEDIATION_CLI_UNKNOWN: Final[str] = (
-    "Use a subcommand the CLI actually has, or the skill form. Upgrading is "
-    "'/hooks-daemon upgrade' (the skill) — NOT a wrapper subcommand; the "
-    "wrapper exits 2 on it."
+    "Use a subcommand the CLI actually has, or use the skill. Upgrading is done "
+    "with the hooks-daemon skill (Skill tool: skill=hooks-daemon, args=upgrade), "
+    "NOT a wrapper subcommand — the wrapper exits 2 on it."
+)
+
+_REMEDIATION_SLASH_FENCE: Final[str] = (
+    f"Move it to a ```{_CLAUDE_CODE_FENCE_TAG} fence. A shell tag asserts the "
+    "block is runnable shell, and a slash command pasted into a terminal fails. "
+    "If the block also holds real shell, split it in two. See "
+    "CLAUDE/development/DOC-CONVENTIONS.md."
 )
 
 
@@ -374,6 +444,34 @@ def live_cli_subcommands() -> frozenset[str]:
     return frozenset(match.group("choices").split(_CHOICE_SEPARATOR))
 
 
+def known_slash_commands() -> frozenset[str]:
+    """Return the slash commands that resolve to a real skill in this repository.
+
+    Read from THIS repository rather than the scanned ``--root``, exactly as the
+    CLI registry is: the convention being enforced is this project's, and a
+    fixture tree under test has no skills of its own.
+
+    Raises:
+        FileNotFoundError: when no skill directory can be found. FAIL FAST — an
+            empty set would make the rule match nothing and report every
+            document clean, which is the silent-pass failure this module exists
+            to prevent.
+    """
+    names: set[str] = set()
+    for parts in _SKILL_DIR_PARTS:
+        skills_dir = _PROJECT_ROOT.joinpath(*parts)
+        if not skills_dir.is_dir():
+            continue
+        names.update(child.name for child in skills_dir.iterdir() if child.is_dir())
+    if not names:
+        raise FileNotFoundError(
+            "no skill directories found under "
+            + ", ".join("/".join(parts) for parts in _SKILL_DIR_PARTS)
+            + f" in {_PROJECT_ROOT}; cannot tell a slash command from a path"
+        )
+    return frozenset(names)
+
+
 def _iter_markdown(root: Path) -> list[Path]:
     """Every documentation markdown file under ``root``, noise directories aside."""
     return sorted(
@@ -383,10 +481,20 @@ def _iter_markdown(root: Path) -> list[Path]:
     )
 
 
-def _check_cli_invocations(root: Path, subcommands: frozenset[str]) -> list[Violation]:
-    """Flag wrapper invocations naming a subcommand the CLI does not have.
+def _check_shell_fences(
+    root: Path, subcommands: frozenset[str], slash_commands: frozenset[str]
+) -> list[Violation]:
+    """Check what a fence tagged as shell claims is runnable shell.
 
-    Only shell-tagged fences are scanned — see ``_SHELL_FENCE_TAGS`` for why the
+    Two rules share this walk because they share its premise — that the fence
+    asserts "runnable shell":
+
+    - ``cli-subcommand-unknown``: the invocation names a subcommand the CLI
+      does not have, so it would exit 2.
+    - ``slash-command-in-shell-fence``: the line is a Claude Code chat
+      invocation, so it is not shell at all.
+
+    Only shell-TAGGED fences are walked — see ``_SHELL_FENCE_TAGS`` for why the
     tag, and not the fence, is the discriminator.
     """
     violations: list[Violation] = []
@@ -418,6 +526,25 @@ def _check_cli_invocations(root: Path, subcommands: frozenset[str]) -> list[Viol
                         remediation=_REMEDIATION_CLI_UNKNOWN,
                     )
                 )
+
+            slash = _SLASH_COMMAND_RE.match(line)
+            if (
+                slash is not None
+                and slash.group("name") in slash_commands
+                and not rel_file.startswith(_FENCE_RULE_EXEMPT_PREFIXES)
+            ):
+                violations.append(
+                    Violation(
+                        rule=RULE_SLASH_IN_SHELL_FENCE,
+                        file=rel_file,
+                        line=line_no,
+                        message=(
+                            f"`/{slash.group('name')}` is a Claude Code chat invocation, "
+                            f"but this fence is tagged `{fence_tag}` (runnable shell)"
+                        ),
+                        remediation=_REMEDIATION_SLASH_FENCE,
+                    )
+                )
     return violations
 
 
@@ -438,7 +565,7 @@ def scan(root: Path) -> list[Violation]:
     # behaviour claim was true when it was written and archived notes should not
     # be re-litigated; a command either runs or it does not, whenever it was
     # written, and a reader will paste it either way.
-    violations.extend(_check_cli_invocations(root, live_cli_subcommands()))
+    violations.extend(_check_shell_fences(root, live_cli_subcommands(), known_slash_commands()))
     return violations
 
 

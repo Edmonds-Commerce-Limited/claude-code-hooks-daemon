@@ -12,7 +12,7 @@ View or change the daemon's operating mode. Supports `default` (normal operation
 
 ## Usage
 
-```bash
+```claude-code
 # Show current mode
 /mode
 /mode get
@@ -29,7 +29,7 @@ View or change the daemon's operating mode. Supports `default` (normal operation
 
 ## Modes
 
-| Mode         | Behaviour                                                                       |
+| Mode         | Behaviour                                                                      |
 | ------------ | ------------------------------------------------------------------------------ |
 | `default`    | Normal operation - all handlers process events as configured                   |
 | `unattended` | Blocks Stop events unconditionally to keep Claude working without interruption |
@@ -48,7 +48,7 @@ The interceptor includes re-entry protection (checks `stop_hook_active` flag) to
 
 When switching to unattended mode, you can include a custom message that gets appended to the block reason. This lets you give Claude specific instructions about what to work on:
 
-```bash
+```claude-code
 /mode unattended complete all remaining tasks in the plan
 ```
 

@@ -12,7 +12,7 @@ View and modify the hooks daemon configuration interactively. Supports listing h
 
 ## Usage
 
-```bash
+```claude-code
 # Show summary of current config (daemon settings + handler overview)
 /configure
 
