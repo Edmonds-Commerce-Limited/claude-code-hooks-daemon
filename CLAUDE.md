@@ -53,16 +53,22 @@ Never tag or publish on a cron tick or failsafe-recovery wake-up, or because the
 tree looks ready. An unwanted release forces a follow-up version and breaks a
 bundle; asking costs minutes.
 
-```bash
-# CORRECT - Use the release skill
-/release
+**CORRECT** — invoke the release skill in the Claude Code chat:
 
-# WRONG - Manual operations bypass validation
+```claude-code
+/release
+```
+
+**WRONG** — these bypass validation and are forbidden:
+
+```bash
 git tag v2.7.0          # ❌ NEVER DO THIS
 git push origin v2.7.0  # ❌ NEVER DO THIS
-Edit CHANGELOG.md       # ❌ NEVER DO THIS
-Edit RELEASES/*.md      # ❌ NEVER DO THIS
 ```
+
+Also forbidden outside a release: editing `CHANGELOG.md` or `RELEASES/*.md`
+with the `Edit`/`Write` tools. Those are not shell commands, which is why they
+are named here rather than shown in a shell block.
 
 **Why this matters**: Manual release operations bypass:
 
