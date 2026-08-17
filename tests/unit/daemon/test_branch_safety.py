@@ -1135,3 +1135,144 @@ class TestBudgetsSuitTheWorkNotTheHookContext:
         ):
             with pytest.raises(subprocess.CalledProcessError):
                 write_recovery_bundle(repo, ["spent"], repo.parent / "x.bundle")
+
+
+def _peer_advances(repo: Path, name: str, workspace: Path) -> str:
+    """A concurrent agent adds a commit to ``name``, as a peer in this repo would.
+
+    Through a real linked worktree because that is how peers here actually work
+    (`isolation: "worktree"`), and because the commit has to land on the branch
+    without disturbing this repo's ``HEAD`` — the whole point is that the deleting
+    process notices nothing. Returns the new tip.
+    """
+    peer = workspace / f"peer-{name}"
+    _git(repo, "worktree", "add", "--quiet", "--detach", str(peer), name)
+    _commit(peer, "peer-only.txt", "peer work that exists nowhere else\n", "Peer work")
+    tip = _git(peer, "rev-parse", "HEAD").strip()
+    _git(repo, "update-ref", f"refs/heads/{name}", tip)
+    return tip
+
+
+class TestABranchThatMovedAfterItsProofIsNotDeleted:
+    """A proof is about a SHA, so it expires the moment the branch moves.
+
+    The recovery bundle is written for the whole batch BEFORE the delete loop, and
+    `git bundle create` packs objects — the reason that call carries a 300 s budget
+    — so on a large repository the window between proof and delete is the length of
+    a pack, not an instant. A commit arriving inside it is covered by neither the
+    proof nor the bundle (Plan 00254).
+    """
+
+    def _delete_while_a_peer_commits(
+        self,
+        repo: Path,
+        name: str,
+        workspace: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> tuple[Any, str]:
+        """Run a real delete with a peer commit landing during the bundle write.
+
+        The bundle write IS the window's widest point, so interposing there models
+        the realistic case rather than a contrived one.
+        """
+        real_bundle = branch_safety.write_recovery_bundle
+        moved: dict[str, str] = {}
+
+        def bundle_then_a_peer_commits(*args: Any, **kwargs: Any) -> Any:
+            written = real_bundle(*args, **kwargs)
+            moved["tip"] = _peer_advances(repo, name, workspace)
+            return written
+
+        monkeypatch.setattr(branch_safety, "write_recovery_bundle", bundle_then_a_peer_commits)
+        report = delete_branches(repo, [name], bundle_path=workspace / "recovery.bundle")
+        return report, moved["tip"]
+
+    def test_a_peer_commit_during_the_bundle_write_is_not_silently_deleted(
+        self, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The shipped failure: exit clean, branch gone, peer's work unrecoverable."""
+        _merged_but_head_is_elsewhere(repo, "done")
+
+        report, _ = self._delete_while_a_peer_commits(repo, "done", tmp_path, monkeypatch)
+
+        assert "done" in _local_branches(repo), (
+            "a branch whose tip moved after its proof must survive: the proof was "
+            "made against a different commit and the bundle predates the new one"
+        )
+        assert report.refused is True
+        assert report.deleted == ()
+
+    def test_the_same_race_is_refused_on_a_tier_that_predates_this_plan(
+        self, repo: Path, remote: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``merged-unpushed`` has forced since Plan 00249, so it was never a regression.
+
+        Included so the fix is proven where the exposure was ORIGINAL rather than
+        only where Plan 00253 removed git's accidental cover.
+        """
+        _merged_but_ahead_of_its_upstream(repo, remote, "feat")
+
+        report, _ = self._delete_while_a_peer_commits(repo, "feat", tmp_path, monkeypatch)
+
+        assert "feat" in _local_branches(repo)
+        assert report.refused is True
+
+    def test_the_refusal_names_both_shas_so_the_reader_can_see_what_moved(
+        self, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A blocker saying only "refused" would leave the reader nothing to act on."""
+        _merged_but_head_is_elsewhere(repo, "done")
+        proven = _git(repo, "rev-parse", "done").strip()
+
+        report, new_tip = self._delete_while_a_peer_commits(repo, "done", tmp_path, monkeypatch)
+
+        blockers = "\n".join(report.blockers)
+        assert proven[:7] in blockers, f"the proven sha must appear: {blockers}"
+        assert new_tip[:7] in blockers, f"the current sha must appear: {blockers}"
+
+    def test_a_moved_tip_does_not_borrow_the_disagreed_with_git_wording(
+        self, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """That diagnosis is about a PREDICATE gap, and this is not one.
+
+        `_REFUSAL_DIAGNOSIS` tells the reader our model of git's delete rule
+        disagreed with git, and sends them to check the predicate. A tip that moved
+        is an ordinary concurrent edit — the predicate was right when it ran — so
+        reusing that text would aim the reader at the wrong thing.
+
+        Unlike its siblings this one could NOT be RED: before the fix there were no
+        blockers at all, so the absence of that phrase was trivially true. It guards
+        the wording of a message that now exists rather than reproducing the bug,
+        and it is recorded as such so nobody reads it as a reproduction it never was.
+        """
+        _merged_but_head_is_elsewhere(repo, "done")
+
+        report, _ = self._delete_while_a_peer_commits(repo, "done", tmp_path, monkeypatch)
+
+        blockers = "\n".join(report.blockers)
+        assert "disagreed with git" not in blockers, blockers
+
+    def test_an_untouched_branch_in_the_same_batch_still_deletes(
+        self, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The check must be per-branch, not a batch-wide abort.
+
+        Refusing the whole batch because one branch moved would make the guard
+        cost more than the race it prevents.
+        """
+        _merged_branch(repo, "quiet")
+        _merged_but_head_is_elsewhere(repo, "done")
+        real_bundle = branch_safety.write_recovery_bundle
+
+        def bundle_then_a_peer_commits(*args: Any, **kwargs: Any) -> Any:
+            written = real_bundle(*args, **kwargs)
+            _peer_advances(repo, "done", tmp_path)
+            return written
+
+        monkeypatch.setattr(branch_safety, "write_recovery_bundle", bundle_then_a_peer_commits)
+        report = delete_branches(repo, ["quiet", "done"], bundle_path=tmp_path / "recovery.bundle")
+
+        assert "quiet" not in _local_branches(repo), "the untouched branch should go"
+        assert "done" in _local_branches(repo), "the moved branch should stay"
+        assert report.deleted == ("quiet",)
+        assert report.refused is True

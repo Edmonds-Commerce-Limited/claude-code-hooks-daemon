@@ -117,6 +117,23 @@ _NO_QUOTE_PATH: tuple[str, ...] = ("-c", "core.quotePath=false")
 # git's refusal is then the ONLY thing protecting that commit — the bundle was
 # written before it existed, so its head predates the peer's work. That is why the
 # advice is to re-run rather than to force.
+#: Abbreviation width for shas quoted in a blocker. Full shas make the message
+#: unreadable; git's own default short form is this long.
+_SHA_DISPLAY_LEN = 7
+
+#: Appended when a branch moved between its proof and its delete. Deliberately
+#: NOT `_REFUSAL_DIAGNOSIS`: that one tells the reader our model of git's delete
+#: rule disagreed with git and sends them to inspect the predicate. This is an
+#: ordinary concurrent edit — the predicate was correct when it ran — so pointing
+#: at the predicate would aim them at the wrong thing entirely.
+_MOVED_TIP_DIAGNOSIS = (
+    "Another process advanced this branch after it was proved safe, so the proof "
+    "no longer describes it and the recovery bundle — written before the delete "
+    "loop — does NOT contain the new commit(s). Nothing was deleted for this "
+    "branch. Re-run to reclassify against the current tip; do not force the "
+    "delete to get past it."
+)
+
 _REFUSAL_DIAGNOSIS = (
     "This means our model of git's delete rule disagreed with git. Either the "
     "branch or its upstream MOVED since it was classified (a concurrent agent in "
@@ -124,6 +141,45 @@ _REFUSAL_DIAGNOSIS = (
     "does NOT cover work added since), or this is a gap in the daemon's predicate "
     "and is worth reporting upstream. Do not force the delete to get past it."
 )
+
+
+def tip_moved_since_proof(repo: Path, classification: BranchClassification) -> str | None:
+    """A blocker if the branch no longer points where its proof was made, else None.
+
+    A tier is a statement about a COMMIT, not about a name, so it expires the
+    instant the branch moves. Between the two there is a real window: one recovery
+    bundle is written for the whole batch before the delete loop, and
+    ``git bundle create`` PACKS objects — the reason that call carries a 300 s
+    budget — so on a large repository the exposure is the length of a pack. A
+    commit arriving inside it is covered by neither the proof nor the bundle, and
+    on the four tiers that force the delete git checks nothing, so the loss is
+    silent (Plan 00254).
+
+    Applied to EVERY tier rather than only the forcing ones. "Never delete a ref
+    whose value differs from the one the proof was made against" needs no reader to
+    know which tiers force, and on ``merged`` it replaces git's generic "not fully
+    merged" with a message naming both shas.
+
+    This narrows the window to a single git invocation; it does not close it.
+    ``git update-ref -d <ref> <expected-sha>`` would, being a compare-and-swap, but
+    it bypasses the checks git's own branch deletes make at DELETE time — notably
+    the refusal to remove a branch checked out in a linked worktree, which a peer
+    can create after classification WITHOUT moving the tip, making it invisible to
+    this check. Keeping git's own delete keeps every such check; see Plan 00254
+    Decision 1.
+    """
+    if not classification.tip:
+        return None
+    current = _git(repo, "rev-parse", classification.name, check=False)
+    now = current.stdout.strip() if current.returncode == 0 else ""
+    if now == classification.tip:
+        return None
+    return (
+        f"{classification.name}: the branch moved after it was proved safe — "
+        f"classified against {classification.tip[:_SHA_DISPLAY_LEN]}, "
+        f"now at {now[:_SHA_DISPLAY_LEN] or '(no longer a branch)'}"
+        f"\n      {_MOVED_TIP_DIAGNOSIS}"
+    )
 
 
 def delete_argv_for_tier(tier: str | None) -> tuple[str, ...]:
@@ -200,6 +256,10 @@ class BranchClassification:
     content_unique_paths: tuple[str, ...] = ()
     unique_commits: int = 0
     detail: str = ""
+    #: The sha this verdict was proved against, "" when the branch does not
+    #: resolve. A proof is a statement about a COMMIT, so it expires the moment
+    #: the branch moves — `delete_branches` re-reads this before deleting.
+    tip: str = ""
 
     @property
     def is_safe(self) -> bool:
@@ -430,6 +490,11 @@ def classify_branch(
             detail=_REFUSAL_DETAIL[REFUSAL_WORKTREE],
         )
 
+    # Read AFTER the refusal checks (the branch is known to resolve here) and
+    # BEFORE any proof is computed, so the recorded sha is the one every tier below
+    # is actually reasoning about.
+    tip = _git(repo, "rev-parse", name).stdout.strip()
+
     ancestor = _git(repo, "merge-base", "--is-ancestor", name, protected_ref, check=False)
     if ancestor.returncode == 0:
         # Ancestry to the protected ref settles SAFETY. It does not settle which
@@ -440,7 +505,7 @@ def classify_branch(
         # the tier here keeps the dry run honest — it can say what the real run
         # will do, and say why.
         tier = _tier_for_merged_branch(repo, name)
-        return BranchClassification(name=name, tier=tier, detail=_TIER_DETAIL[tier])
+        return BranchClassification(name=name, tier=tier, detail=_TIER_DETAIL[tier], tip=tip)
 
     unique_commits = _unique_commit_count(repo, name, protected_ref)
     if unique_commits == 0:
@@ -448,6 +513,7 @@ def classify_branch(
             name=name,
             tier=TIER_PATCH_EQUIVALENT,
             detail=_TIER_DETAIL[TIER_PATCH_EQUIVALENT],
+            tip=tip,
         )
 
     # Commit-level uniqueness does not imply content loss: a stale branch is
@@ -464,6 +530,7 @@ def classify_branch(
             tier=TIER_CONTENT_PRESERVED,
             unique_commits=unique_commits,
             detail=_TIER_DETAIL[TIER_CONTENT_PRESERVED],
+            tip=tip,
         )
 
     unique_paths = tuple(
@@ -475,6 +542,7 @@ def classify_branch(
         unique_paths=unique_paths,
         content_unique_paths=content_unique_paths,
         unique_commits=unique_commits,
+        tip=tip,
         detail=(
             f"{unique_commits} commit(s) not upstream by patch-id; "
             f"{len(content_unique_paths)} file(s) hold content found nowhere "
@@ -615,6 +683,13 @@ def delete_branches(
     deleted: list[str] = []
     failures: list[str] = []
     for classification in classifications:
+        # Re-read the tip BEFORE the delete: the proof above was made against a
+        # sha, and the bundle was written against the same one, so a branch that
+        # moved since is covered by neither (Plan 00254).
+        moved = tip_moved_since_proof(repo, classification)
+        if moved is not None:
+            failures.append(moved)
+            continue
         # Defer to git's own check whenever it is capable of making it — and
         # ACCEPT a refusal rather than raising on it (Plan 00249). git's `-d`
         # refuses on conditions this engine does not model, and a refusal from

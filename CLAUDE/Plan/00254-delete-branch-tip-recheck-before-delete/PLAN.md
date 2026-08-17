@@ -70,26 +70,28 @@ Verified by execution, not inferred (full transcripts in `FINDINGS.md`):
 
 ### Phase 1: Record the tip, and refuse a tip that moved
 
-- [ ] ⬜ **Task 1.1**: RED — a test that advances a branch during the bundle write
-  (the real window's widest point) and asserts the branch is NOT deleted and the
-  peer's content survives. Must fail against current `main`.
-- [ ] ⬜ **Task 1.2**: GREEN — `BranchClassification` gains `tip`, recorded at
-  classification for every tier including the refusal paths where it is unknown.
-- [ ] ⬜ **Task 1.3**: Re-read `git rev-parse <name>` immediately before each
-  delete and refuse THAT branch when it differs from the recorded tip. One rule
-  for all five tiers — the invariant is tier-independent.
-- [ ] ⬜ **Task 1.4**: Cover the pre-existing exposure too: the same test shape on
-  `merged-unpushed`, so the fix is proven where it was never a regression.
+- [x] ✅ **Task 1.1**: RED — 4 of the 5 new tests failed against `main`, on both the
+  new tier and the pre-existing one. The 5th (wording) could not be RED: with no
+  blockers at all the assertion was trivially true, and its docstring records that.
+- [x] ✅ **Task 1.2**: GREEN — `BranchClassification.tip`, read once after the
+  refusal checks (branch known to resolve) and before any proof is computed, so
+  every tier reports the sha it actually reasoned about. Empty on refusal paths.
+- [x] ✅ **Task 1.3**: `tip_moved_since_proof` runs for every classification at the
+  top of the delete loop and appends a blocker instead of deleting.
+- [x] ✅ **Task 1.4**: `merged-unpushed` covered by the same test shape and refused.
 
 ### Phase 2: The refusal has to be readable
 
-- [ ] ⬜ **Task 2.1**: The blocker names both shas, says the classification is now
-  stale, and says the bundle predates the move so it does NOT cover the new commit.
-- [ ] ⬜ **Task 2.2**: Check this reads correctly next to `_REFUSAL_DIAGNOSIS`,
-  which says our model disagreed with git. A moved tip is NOT that, so it must not
-  borrow that wording.
-- [ ] ⬜ **Task 2.3**: Confirm `--format json` reports the same outcome as the text
-  path, as Plan 00253 Decision 4 requires of any new refusal shape.
+- [x] ✅ **Task 2.1**: Verified by executing the real engine, not just the unit test:
+  `classified against bc4a396, now at 8d5bb91`, then the bundle gap, "Nothing was
+  deleted for this branch", re-run to reclassify, and do not force past it.
+- [x] ✅ **Task 2.2**: `_MOVED_TIP_DIAGNOSIS` is a separate constant and the
+  predicate-gap wording is asserted absent — a moved tip is a concurrent edit, so
+  sending the reader to inspect the predicate would misdirect them.
+- [x] ✅ **Task 2.3**: Text says `PARTIALLY REFUSED … quiet` and JSON reports
+  `refused=true, deleted=["quiet"]` with the same blocker; both exit 1. This also
+  restores a NATURAL reproduction of Plan 00253's partial-batch rendering, which
+  that plan had recorded as unreachable after its own fix.
 
 ### Phase 3: Verify
 
