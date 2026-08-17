@@ -177,6 +177,15 @@ _TRACKED_FILES_NO_TEST_MAY_WRITE = ("CLAUDE.md", ".claude/HOOKS-DAEMON.md")
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+#: Where content is preserved before the guard overwrites it. Gitignored, so it
+#: never reaches a commit. A diagnostic must not be the only copy of the work it
+#: is about to discard.
+_REJECTED_WRITE_DIR_PARTS = ("untracked", "rejected-writes")
+
+#: Suffix for a preserved copy, so it never looks like a source file.
+_REJECTED_WRITE_SUFFIX = ".rejected"
+
+
 def _tracked_file_fingerprints() -> dict[str, tuple[int, int]]:
     """Cheap (size, mtime_ns) per protected file. One stat each, per test."""
     fingerprints: dict[str, tuple[int, int]] = {}
@@ -190,28 +199,61 @@ def _tracked_file_fingerprints() -> dict[str, tuple[int, int]]:
     return fingerprints
 
 
-@pytest.fixture(scope="session")
-def _tracked_doc_snapshot() -> dict[str, bytes]:
-    """Byte snapshot of the protected files, taken ONCE for the session.
+def _tracked_file_bytes() -> dict[str, bytes]:
+    """Byte baseline for the protected files, captured PER TEST.
 
-    Restoring from this rather than from ``git checkout --`` matters: the
-    developer may have legitimate uncommitted edits in these files when the
-    suite runs, and a diagnostic fixture must not be the thing that throws
-    them away. It also keeps the suite from running a destructive git command
-    that this project blocks agents from using at all.
+    Per test, deliberately. A session-scoped baseline restores the file to what
+    it held when pytest STARTED, which silently reverts every edit a developer
+    or agent made while the suite ran — the suite runs for minutes, and an edit
+    landing anywhere in that span is attributed to whichever test happened to be
+    executing. Capturing at test setup shrinks that window from the whole
+    session to one test.
+
+    The files are small and already in page cache, so the extra read per test is
+    not measurable against a suite that runs thousands of them.
     """
-    snapshot: dict[str, bytes] = {}
+    captured: dict[str, bytes] = {}
     for relative in _TRACKED_FILES_NO_TEST_MAY_WRITE:
-        path = _REPO_ROOT / relative
         try:
-            snapshot[relative] = path.read_bytes()
+            captured[relative] = (_REPO_ROOT / relative).read_bytes()
         except OSError:
             continue
-    return snapshot
+    return captured
+
+
+def _preserve_rejected_write(
+    relative: str, path: Path, target_dir: Path | None = None
+) -> Path | None:
+    """Copy what is about to be overwritten somewhere recoverable.
+
+    Even with a per-test baseline the guard cannot distinguish a test's write
+    from an external edit that landed inside the same window — it sees only that
+    the bytes changed. So it must never be the sole copy: whatever it is about
+    to discard is written out first, and the failure message names the file.
+
+    Returns:
+        The preserved path, or None when there was nothing to preserve. Never
+        raises: this runs in a fixture teardown, where an exception would
+        replace a useful assertion failure with an unrelated one.
+    """
+    destination_dir = (
+        target_dir if target_dir is not None else _REPO_ROOT.joinpath(*_REJECTED_WRITE_DIR_PARTS)
+    )
+    try:
+        content = path.read_bytes()
+    except OSError:
+        return None
+    try:
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        preserved = destination_dir / (relative.replace("/", "_") + _REJECTED_WRITE_SUFFIX)
+        preserved.write_bytes(content)
+    except OSError:
+        return None
+    return preserved
 
 
 @pytest.fixture(autouse=True)
-def no_test_writes_tracked_generated_docs(_tracked_doc_snapshot: dict[str, bytes]):
+def no_test_writes_tracked_generated_docs():
     """Fail the test that rewrites a tracked generated doc, and undo it.
 
     ``DaemonController.initialise()`` runs ``ClaudeMdInjector`` as a SIDE
@@ -231,7 +273,18 @@ def no_test_writes_tracked_generated_docs(_tracked_doc_snapshot: dict[str, bytes
     A stat per protected file per test is the cost of never diagnosing that
     from scratch again. Tests that legitimately exercise the injector point it
     at ``tmp_path``; nothing has a reason to write the real files.
+
+    The baseline is captured HERE, per test, and never session-wide. A
+    session-scoped baseline restores the file to what it held when pytest
+    started, so an edit made by a developer or agent minutes into the run is
+    reverted wholesale — which is exactly what happened, twice, to a hand edit
+    made while this suite was running. The window cannot be closed entirely
+    (this fixture still cannot distinguish a test's write from an external edit
+    inside the same test), so whatever is about to be overwritten is preserved
+    first and named in the failure. A diagnostic must never be the only copy of
+    the work it discards.
     """
+    baseline = _tracked_file_bytes()
     before = _tracked_file_fingerprints()
     yield
     after = _tracked_file_fingerprints()
@@ -240,13 +293,18 @@ def no_test_writes_tracked_generated_docs(_tracked_doc_snapshot: dict[str, bytes
     if not mutated:
         return
 
-    # Put the file back exactly as the session found it, so a diagnostic never
-    # leaves the developer's tree damaged.
+    # Preserve first, restore second. The guard cannot tell a test's write from
+    # an external edit that landed in the same window, so it must never be the
+    # only copy of what it discards.
     restored = []
+    preserved_paths = []
     for name in mutated:
-        original = _tracked_doc_snapshot.get(name)
+        original = baseline.get(name)
         if original is None:
             continue
+        preserved = _preserve_rejected_write(name, _REPO_ROOT / name)
+        if preserved is not None:
+            preserved_paths.append(str(preserved))
         (_REPO_ROOT / name).write_bytes(original)
         restored.append(name)
 
@@ -264,9 +322,14 @@ def no_test_writes_tracked_generated_docs(_tracked_doc_snapshot: dict[str, bytes
         "agent that modified a protected file while the suite was running lands "
         "inside some test's window and is attributed to it. This fixture cannot "
         "tell the two apart — it sees only that the bytes changed — so the fix "
-        "there is to re-apply your edit and re-run, not to hunt a test. "
-        "Restored to its "
-        "pre-suite content: " + (", ".join(restored) if restored else "nothing to restore") + "."
+        "there is to recover your edit from the preserved copy below and re-run, "
+        "not to hunt a test. "
+        "Restored to its content at the START OF THIS TEST (not of the session, "
+        "which would revert every edit made while the suite ran): "
+        + (", ".join(restored) if restored else "nothing to restore")
+        + ". The overwritten content was preserved first at: "
+        + (", ".join(preserved_paths) if preserved_paths else "nothing preserved")
+        + "."
     )
 
 
