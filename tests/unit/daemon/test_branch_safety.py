@@ -621,9 +621,7 @@ class TestARefusalCarriesItsDiagnosis:
     written before that commit existed.
     """
 
-    def test_a_concurrent_commit_makes_git_refuse_and_the_report_says_so(
-        self, repo: Path
-    ) -> None:
+    def test_a_concurrent_commit_makes_git_refuse_and_the_report_says_so(self, repo: Path) -> None:
         """A peer advances a branch between classification and its delete."""
         for name in ("first", "victim"):
             _merged_branch(repo, name)
@@ -683,6 +681,31 @@ class TestARefusalCarriesItsDiagnosis:
             "the bundle must NOT contain the later commit — this is the fact the "
             "refusal diagnosis warns the reader about"
         )
+
+    def test_the_diagnosis_appears_only_where_git_was_actually_asked(
+        self, repo: Path
+    ) -> None:
+        """On a branch never attempted, "our model disagreed with git" is FALSE.
+
+        The diagnosis is appended inside the delete loop, so it should be absent
+        from blockers raised at classification time — an unproven branch, or a
+        blocking precondition. Checked rather than assumed, because a diagnosis in
+        the wrong place is worse than none: it would send the reader hunting for a
+        predicate gap when git was never consulted.
+        """
+        _unproven_branch(repo, "doomed")
+
+        unproven = delete_branches(repo, ["doomed"], bundle_path=None)
+        precondition = delete_branches(repo, ["main"], bundle_path=None)
+
+        assert unproven.refused is True
+        assert precondition.refused is True
+        for report in (unproven, precondition):
+            assert report.blockers, "precondition: each case must produce a blocker"
+            assert not any("disagreed with git" in b for b in report.blockers), (
+                "the diagnosis must not appear where git was never asked: "
+                + repr(report.blockers)
+            )
 
     def test_the_diagnosis_names_both_causes_and_forbids_forcing(self) -> None:
         """The text is the deliverable, so assert what it must carry."""
