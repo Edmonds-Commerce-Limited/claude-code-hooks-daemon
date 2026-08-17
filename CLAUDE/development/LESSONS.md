@@ -531,3 +531,40 @@ legitimate requirement, and either size the default for that site or keep the kn
 per-call (`_git(..., timeout=Timeout.GIT_BUNDLE_CREATE)`). A chokepoint that is
 right for the average caller is wrong for the tails, and the tails are where the
 expensive work lives.
+
+## Prefer the battle-tested tool's checks — they COMPOSE with yours
+
+**What happened (Plans 00253, 00254):** `delete-branch` proves a branch recoverable
+and then asks git to delete it. Three separate times the decision to keep `git branch`
+rather than route around it paid off, and only the first was foreseen.
+
+1. **00253** kept the safe delete for the `merged` tier so git re-runs its own
+   ancestry check independently of ours — the stated reason being that a bug in our
+   classifier then cannot cause a silent loss.
+2. **00254** rejected a proposal to swap the force tiers for
+   `git update-ref -d <ref> <expected-sha>`, which IS a genuine compare-and-swap and
+   would have closed the moved-tip race completely. The premise was that the force
+   tiers give up nothing because git checks nothing there. Executing it showed that
+   false: `git branch`'s delete refuses a branch checked out in a linked worktree,
+   and the plumbing delete removes it and leaves that worktree on a dangling `HEAD`.
+   It also leaves `branch.<name>.remote`/`.merge` behind — the exact two keys that
+   decide a later same-named branch's tier.
+3. **Unforeseen:** when a same-named tag made the proof describe the wrong object
+   entirely, the `merged`-tier case lost nothing — *because git refused what our
+   corrupted proof had approved*. Git caught a bug in our reasoning, which is the
+   argument in (1) paying out in a form nobody had written down.
+
+**The sharpening that makes it a rule rather than a preference:** the two guards do
+not overlap, they COMPOSE. Our tip re-check catches a branch whose sha moved; git's
+delete-time check catches a peer *checkout*, which moves no sha and is therefore
+structurally invisible to any tip comparison. Verified across all five tiers' actual
+argv — the worktree check fires on the force delete too, not only on the safe one.
+Swapping in the CAS would have closed one window and opened the other.
+
+**Apply:** when you are about to replace a mature tool's operation with plumbing that
+does exactly the part you care about, the question is not "is my version correct for
+my case" but "what else was that operation checking, and who was relying on it".
+Enumerate its checks by running it against the states you are not thinking about — a
+branch someone else has checked out, a name that is also a tag, a ref that moved
+underneath you. The checks you cannot enumerate are precisely the value you would be
+discarding, and they are usually why the tool is longer than your replacement.
