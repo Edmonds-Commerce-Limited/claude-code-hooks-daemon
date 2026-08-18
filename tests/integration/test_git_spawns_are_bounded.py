@@ -2,14 +2,16 @@
 
 `utils/git_repo.py` has stated since Plan 00113 that "new git operations are
 added as methods on `GitRepo`, not by re-implementing
-`subprocess.run(["git", ...])` in each caller". Fifteen files did it anyway, and
+`subprocess.run(["git", ...])` in each caller". Twelve files did it anyway — 24
+spawn sites, measured by running this module's own scanner against the v3.53.1
+tree during the v3.54.0 release (this docstring originally said fifteen) — and
 the cost was not stylistic: two properties every invocation needs — declining
 git's OPTIONAL index lock, and carrying a timeout — had to be remembered
-individually, so a one-line fix became a thirty-site sweep.
+individually, so a one-line fix became a two-dozen-site sweep.
 
 This is the guard for that, and it is the actual deliverable of the plan. DBF
 (`CLAUDE.md` Core Standard 15): the defect worth fixing is the missing check that
-let thirty call sites drift, not the thirty call sites.
+let two dozen call sites drift, not the call sites themselves.
 
 **Why a test rather than a `scripts/qa/` checker**: a test needs no wiring to be
 binding. It runs in the QA suite and in CI by construction, and cannot publish

@@ -591,3 +591,132 @@ def test_repo_without_a_claude_md_is_clean(tmp_path: Path) -> None:
     exit_code, report = _run_checker(repo)
 
     assert exit_code == 0, report
+
+
+# ---------------------------------------------------------------------------
+# unreleased-manifest-date: the placeholder that shipped four times
+#
+# A config-changes manifest is drafted in UNRELEASED/config-changes/ during a
+# cycle, where `date: "UNRELEASED"` is the honest value — the release date does
+# not exist yet. At release time Step 6 `git mv`s it into the live directory.
+# Nothing in that step, in the staging README, or in SCHEMA.md says to replace
+# the placeholder, so it travels with the file.
+#
+# It escaped four separate releases precisely
+# because nothing consumes it: `ConfigMigrationManifest` parses `date` into a
+# field that is never rendered or compared, so a wrong value breaks nothing and
+# announces nothing. That is what makes a static check the ONLY guard available
+# — DBF (CLAUDE.md Core Standard 15), where the bug worth fixing is the blind
+# guard rather than the four instances.
+# ---------------------------------------------------------------------------
+
+_LIVE_MANIFEST_DIR = "CLAUDE/UPGRADES/config-changes"
+_STAGED_MANIFEST_DIR = "CLAUDE/UPGRADES/UNRELEASED/config-changes"
+
+_MANIFEST_RULE = "unreleased-manifest-date"
+
+
+def _manifest(date_line: str) -> str:
+    """A minimal but schema-shaped config-changes manifest."""
+    return (
+        'version: "3.99.0"\n'
+        f"{date_line}\n"
+        "breaking: false\n"
+        "config_changes:\n"
+        "  added:\n"
+        "    - key: handlers.pre_tool_use.example.enabled\n"
+        '      description: "An example option"\n'
+    )
+
+
+def test_flags_live_manifest_still_carrying_the_unreleased_placeholder(tmp_path: Path) -> None:
+    """The exact shape that shipped four times."""
+    repo = _make_repo(
+        tmp_path,
+        {f"{_LIVE_MANIFEST_DIR}/v3.99.0.yaml": _manifest('date: "UNRELEASED"')},
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1, "a live manifest with a placeholder date must fail the gate"
+    assert _MANIFEST_RULE in _rules(report)
+    assert f"{_LIVE_MANIFEST_DIR}/v3.99.0.yaml" in _paths(report)
+
+
+def test_flags_a_live_manifest_whose_date_is_any_other_placeholder(tmp_path: Path) -> None:
+    """Scoped to the schema's contract, not to one spelling.
+
+    SCHEMA.md declares ``date`` an ISO 8601 release date. Matching only the
+    literal ``UNRELEASED`` would leave ``TBD``/``TODO`` free to ship the same
+    defect under a different word — a guard narrowed to the one instance it was
+    written for, which is the failure DBF warns about.
+    """
+    repo = _make_repo(
+        tmp_path,
+        {f"{_LIVE_MANIFEST_DIR}/v3.99.0.yaml": _manifest('date: "TBD"')},
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1, "any non-ISO date in a live manifest must fail the gate"
+    assert _MANIFEST_RULE in _rules(report)
+
+
+def test_flags_a_live_manifest_with_no_date_at_all(tmp_path: Path) -> None:
+    """``date`` is REQUIRED by SCHEMA.md; ``from_dict`` raises KeyError without it."""
+    repo = _make_repo(
+        tmp_path,
+        {
+            f"{_LIVE_MANIFEST_DIR}/v3.99.0.yaml": (
+                'version: "3.99.0"\nbreaking: false\nconfig_changes: {}\n'
+            )
+        },
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1, "a live manifest with no date must fail the gate"
+    assert _MANIFEST_RULE in _rules(report)
+
+
+def test_staged_manifest_may_carry_the_placeholder(tmp_path: Path) -> None:
+    """NEGATIVE CONTROL — the placeholder is CORRECT while the release is in flight.
+
+    A manifest drafted in UNRELEASED/ has no release date to state, so the
+    placeholder is the honest value there. A rule that flagged it would fire
+    on every in-flight release and be switched off within a cycle. The
+    discriminator is location: the `git mv` into the live directory is the
+    moment the date becomes knowable.
+    """
+    repo = _make_repo(
+        tmp_path,
+        {f"{_STAGED_MANIFEST_DIR}/v3.99.0.yaml": _manifest('date: "UNRELEASED"')},
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, f"staged placeholder wrongly flagged: {report['violations']}"
+
+
+def test_live_manifest_with_a_real_date_is_clean(tmp_path: Path) -> None:
+    """NEGATIVE CONTROL — the normal, correct case."""
+    repo = _make_repo(
+        tmp_path,
+        {f"{_LIVE_MANIFEST_DIR}/v3.99.0.yaml": _manifest('date: "2026-08-18"')},
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, f"a correctly dated manifest was flagged: {report['violations']}"
+
+
+def test_non_manifest_files_in_the_live_directory_are_ignored(tmp_path: Path) -> None:
+    """SCHEMA.md lives in the live directory and is not a manifest."""
+    repo = _make_repo(
+        tmp_path,
+        {f"{_LIVE_MANIFEST_DIR}/SCHEMA.md": '# Schema\n\n```yaml\ndate: "UNRELEASED"\n```\n'},
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, f"a non-manifest file was flagged: {report['violations']}"

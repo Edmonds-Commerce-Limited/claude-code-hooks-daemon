@@ -11,7 +11,7 @@ An agent must never start, resume, or complete a release on its own initiative.*
 
 **A release is a decision about SCOPE, and scope is not visible from inside the
 repository.** The human decides which work belongs in a bundle. An agent can see
-that the tree is clean, that QA is 20/20, and that a version is bumped — and from
+that the tree is clean, that QA is fully green, and that a version is bumped — and from
 that it can see nothing at all about whether the intended bundle is complete.
 There may be work not started, work in another session, work not yet described to
 you. Cutting a release early does not just publish sooner: it strands the rest of
@@ -184,7 +184,7 @@ Rules:
 
 ### 1. Pre-Release Validation
 
-Agent verifies: clean git state, all QA passes, version consistency across files (pyproject.toml, version.py, README.md, CLAUDE.md), no existing tag, gh CLI authenticated.
+Agent verifies: clean git state, all QA passes, version consistency across files (pyproject.toml, version.py, README.md), no existing tag, gh CLI authenticated. (`CLAUDE.md` carries no version string — it is a daemon-regenerated doc, not a version-bump target.)
 
 **ANY failure = IMMEDIATE ABORT. NO auto-fixing.**
 
@@ -200,7 +200,7 @@ Agent proposes bump with justification. Manual override accepted.
 
 ### 3. Version Update
 
-Updates version in: `pyproject.toml`, `version.py`, `README.md` (badge), `CLAUDE.md`, and `.claude/ccy/claude-supervise.py` (the standalone supervisor's hardcoded `__version__`, kept in lockstep — enforced by `tests/unit/supervise/test_compaction_gap_repro.py::TestSupervisorVersionMatchesDaemon`, which FAILS the QA gate if the supervisor version drifts from `version.py`).
+Updates version in: `pyproject.toml`, `version.py`, `README.md` (badge), and `.claude/ccy/claude-supervise.py` (the standalone supervisor's hardcoded `__version__`, kept in lockstep — enforced by `tests/unit/supervise/test_compaction_gap_repro.py::TestSupervisorVersionMatchesDaemon`, which FAILS the QA gate if the supervisor version drifts from `version.py`).
 
 Also updates README.md stats: test count badge+body, handler count, event type count from `.claude/HOOKS-DAEMON.md`.
 
@@ -316,11 +316,23 @@ for f in CLAUDE/UPGRADES/UNRELEASED/config-changes/v*.yaml; do
 done
 ```
 
-Verify only `README.md` remains under `UNRELEASED/config-changes/`:
+**Then set `date:` in each moved manifest** to today's release date in ISO 8601
+form (`YYYY-MM-DD`). A staged manifest is drafted with `date: "UNRELEASED"`
+because the release date does not exist yet; the move is the moment it becomes
+knowable. Nothing reads this field at runtime — `ConfigMigrationManifest` parses
+it into an attribute that is never rendered or compared — so a forgotten
+placeholder is completely silent, and four shipped manifests carried one before
+`check_repo_hygiene`'s `unreleased-manifest-date` rule was added to catch it.
+
+Verify only `README.md` remains under `UNRELEASED/config-changes/`, and that no
+live manifest still carries the placeholder:
 
 ```bash
 ls CLAUDE/UPGRADES/UNRELEASED/config-changes/
 # Expected: README.md  (nothing else)
+
+grep -l 'UNRELEASED' CLAUDE/UPGRADES/config-changes/v*.yaml
+# Expected: no output (the Step 8 QA gate enforces this too)
 ```
 
 **ABORT condition**: any `v*.yaml` file remains in `UNRELEASED/config-changes/` when moving to the next step.
@@ -452,7 +464,15 @@ behind it.
 
 ## Step 12: Acceptance Testing Gate (BLOCKING)
 
-**Main thread ONLY. Sub-agent testing is FORBIDDEN** (v2.9.0 incident: async agents create race conditions; sub-agents can't use Write/Edit tools; lifecycle events only fire in main session).
+**Delegation is governed by each test's `Requires Main Thread` field in the
+generated playbook** (see the playbook's "Execution Routing" section). A test
+marked `yes` must NEVER be delegated — lifecycle events and this session's
+system-reminders genuinely cannot be observed from a sub-agent, which is the
+enduring lesson of the v2.9.0 incident (async sub-agent testing created race
+conditions). Tests marked `no` may be delegated to parallel sub-agents —
+verified experimentally: sub-agents ARE blocked by PreToolUse hooks and DO see
+PostToolUse system-reminders in their own context. Batch delegable tests by
+the playbook's `Recommended Model` field for speed.
 
 ### Scope
 
@@ -533,11 +553,17 @@ may not exist on the host.
 
 **Step 12.3**: Generate playbook: `./bin/hooks-daemon generate-playbook > /tmp/playbook.md`
 
-**Step 12.4**: Execute tests sequentially in main thread:
+**Step 12.4**: Execute the playbook's tests, routing each by its
+`Requires Main Thread` field (see the Step 12 intro):
 
-- **BLOCKING tests** (~65): Bash/Write/Edit with dangerous commands, verify hook denies
-- **ADVISORY tests** (~24): Verify system-reminder shows context
+- **BLOCKING tests**: Bash/Write/Edit with dangerous commands, verify hook denies
+- **ADVISORY tests**: Verify system-reminder shows context
 - **Skip**: Untriggerable lifecycle events (verified by daemon load + unit tests)
+
+The generated playbook is the single source of truth for which tests exist and
+how many — do not restate counts here. This section previously hardcoded
+"~65 blocking / ~24 advisory" while `generate-playbook` was emitting over 200
+tests.
 
 **Step 12.5**: All tests must pass. Failed = 0.
 
@@ -699,7 +725,7 @@ gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url \
 ## Manual Release (Bypass Skill)
 
 ```bash
-# 1. Edit versions: pyproject.toml, version.py, README.md, CLAUDE.md
+# 1. Edit versions: pyproject.toml, version.py, README.md
 # 2. Update CHANGELOG.md (Keep a Changelog format)
 # 3. Create RELEASES/vX.Y.Z.md
 # 4. Move UNRELEASED/post-upgrade-tasks/NN-*.md into the versioned upgrade guide

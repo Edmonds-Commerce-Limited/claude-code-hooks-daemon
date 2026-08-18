@@ -1,5 +1,5 @@
 version: "3.29.0"
-date: "UNRELEASED"
+date: "2026-06-24"
 breaking: false
 config_changes:
   added:

@@ -3,7 +3,12 @@
 Stage the per-version config-changes manifest for the in-flight release here. At
 release time the `/release` skill moves every `v{X.Y.Z}.yaml` in this directory
 into the flat `CLAUDE/UPGRADES/config-changes/` directory (keeping the
-version-named filename).
+version-named filename) **and sets its `date:` to the release date**.
+
+Draft the file here with `date: "UNRELEASED"` — the release date genuinely does
+not exist yet. That placeholder is correct only while the file is in THIS
+directory; once moved it asserts a false fact about when the version shipped,
+which the `unreleased-manifest-date` repo-hygiene rule fails the QA gate on.
 
 A config-changes manifest documents `added` / `renamed` / `removed` / `changed`
 config keys for a version. The advisory (`check-config-migrations`) diffs it

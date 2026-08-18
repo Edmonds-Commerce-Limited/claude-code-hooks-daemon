@@ -80,7 +80,10 @@ surfaces as a stale lock file or a mystifying "Unable to create
 
 `utils/git_repo.py` already states the principle: *"new git operations are added
 as methods on `GitRepo`, not by re-implementing `subprocess.run(["git", ...])` in
-each caller"*. Fifteen files bypass it. Had that held, the env var and the
+each caller"*. Twelve files bypass it, across 24 spawn sites (figure corrected
+during the v3.54.0 release after measuring with the guard's own scanner against
+the v3.53.1 tree; this document originally said fifteen). Had that held, the env
+var and the
 timeout would each be a one-line change in one place. This is the DRY /
 single-source-of-truth standard failing in a way that turned a one-line fix into
 a sweep.

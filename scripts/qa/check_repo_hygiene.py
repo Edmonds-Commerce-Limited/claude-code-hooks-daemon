@@ -16,7 +16,9 @@ untracked ``coverage.json`` in a working tree is the normal result of running
 the test suite and must never fail the gate — a check that fired on that would
 be switched off within a day.
 
-Four rule families, deliberately scoped:
+The rule families below are deliberately scoped. ``_ALL_RULES`` is the single
+source of truth for which exist — this note deliberately states no count, having
+already said "four" while six were running.
 
 ``tracked-build-artifact``
     Generated reports and editor/merge/backup detritus that should be produced,
@@ -57,6 +59,19 @@ Four rule families, deliberately scoped:
     justification was true about the *shape* of the rule and false about its
     example, which is exactly the kind of claim a guard should not assert
     without checking. The scope stands on the reasoning above alone.
+
+``ignored-plan-document``
+    A document under the plan directory that ``.gitignore`` is silently
+    swallowing, usually via an unanchored root-level scratch pattern.
+
+``orphaned-handler-guidance``
+    A ``<hooksdaemon>`` guidance section in ``CLAUDE.md`` whose handler no
+    longer exists — resident instructions describing behaviour nothing in the
+    tree implements.
+
+``unreleased-manifest-date``
+    A released config-changes manifest still carrying the ``UNRELEASED``
+    placeholder it was drafted with, or any other non-ISO ``date:``.
 
 Usage:
     python scripts/qa/check_repo_hygiene.py [--json] [--root DIR] [--report-stdout]
@@ -101,6 +116,7 @@ RULE_FROZEN_SUMMARY: Final[str] = "frozen-session-summary"
 RULE_SRC_TEST_STUB: Final[str] = "src-test-stub"
 RULE_IGNORED_PLAN_DOC: Final[str] = "ignored-plan-document"
 RULE_ORPHANED_GUIDANCE: Final[str] = "orphaned-handler-guidance"
+RULE_UNRELEASED_MANIFEST_DATE: Final[str] = "unreleased-manifest-date"
 
 _ALL_RULES: Final[tuple[str, ...]] = (
     RULE_TRACKED_ARTIFACT,
@@ -109,7 +125,33 @@ _ALL_RULES: Final[tuple[str, ...]] = (
     RULE_SRC_TEST_STUB,
     RULE_IGNORED_PLAN_DOC,
     RULE_ORPHANED_GUIDANCE,
+    RULE_UNRELEASED_MANIFEST_DATE,
 )
+
+# ── unreleased-manifest-date ───────────────────────────────────────────────
+# A config-changes manifest is drafted under UNRELEASED/ during a cycle, where
+# `date: "UNRELEASED"` is the honest value — the release date does not exist
+# yet. Release Step 6 `git mv`s it into the live directory below, and nothing
+# in that step, the staging README or SCHEMA.md says to replace the
+# placeholder, so it travels with the file.
+#
+# Nothing consumes the field: ``ConfigMigrationManifest`` parses ``date`` into
+# an attribute that is never rendered or compared. A wrong value therefore
+# breaks nothing and announces nothing, which is exactly why it survived
+# several releases and why a static check is the only guard available.
+#
+# The discriminator is LOCATION, not spelling: the move into the live
+# directory is the moment the date becomes knowable. Matched against SCHEMA.md's
+# declared contract (an ISO 8601 date) rather than the one word observed, so a
+# `TBD` cannot ship the same defect past a guard written for `UNRELEASED`.
+_LIVE_CONFIG_CHANGES_DIR: Final[str] = "CLAUDE/UPGRADES/config-changes/"
+_MANIFEST_PREFIX: Final[str] = "v"
+_MANIFEST_SUFFIX: Final[str] = ".yaml"
+
+_MANIFEST_DATE_RE: Final[re.Pattern[str]] = re.compile(r"^date:\s*(.*)$", re.MULTILINE)
+_ISO_DATE_RE: Final[re.Pattern[str]] = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_YAML_COMMENT_MARKER: Final[str] = "#"
+_YAML_QUOTE_CHARS: Final[str] = "\"' "
 
 # ── orphaned-handler-guidance ──────────────────────────────────────────────
 # The daemon regenerates the <hooksdaemon> block in CLAUDE.md on restart and
@@ -269,6 +311,18 @@ _REMEDIATION_ORPHANED_GUIDANCE: Final[str] = (
     "and the guidance returns. This matters because agents are told to obey "
     "that block: guidance no handler implements is not clutter, it is an "
     "instruction to expect behaviour that will never happen."
+)
+
+
+_REMEDIATION_UNRELEASED_MANIFEST_DATE: Final[str] = (
+    "Set `date:` to the release date in ISO 8601 form (YYYY-MM-DD) — the date "
+    "the version was tagged, recoverable with `git log -1 --format=%cs vX.Y.Z`. "
+    "A manifest keeps the UNRELEASED placeholder only while it is staged under "
+    "CLAUDE/UPGRADES/UNRELEASED/config-changes/; moving it into the live "
+    "directory is the moment the date becomes knowable, so release Step 6 must "
+    "set it as part of that move. Nothing reads this field at runtime, which is "
+    "why a placeholder here is silent — the manifest simply asserts a false "
+    "fact about when the version shipped."
 )
 
 
@@ -550,6 +604,33 @@ def _known_handler_identities(root: Path) -> set[str]:
     return identities
 
 
+def _unreleased_manifest_date(root: Path, rel_path: str) -> str | None:
+    """Describe ``rel_path``'s date defect, or None if it has none.
+
+    Only version-named manifests in the LIVE config-changes directory are
+    candidates: the same file under ``UNRELEASED/`` has no release date to
+    state, so its placeholder is correct and must never be flagged.
+    """
+    if not rel_path.startswith(_LIVE_CONFIG_CHANGES_DIR):
+        return None
+    basename = rel_path[len(_LIVE_CONFIG_CHANGES_DIR) :]
+    if not (basename.startswith(_MANIFEST_PREFIX) and basename.endswith(_MANIFEST_SUFFIX)):
+        return None
+
+    path = root / rel_path
+    if not path.is_file():
+        return None
+
+    match = _MANIFEST_DATE_RE.search(path.read_text(encoding="utf-8"))
+    if match is None:
+        return "no `date:` field, which SCHEMA.md requires"
+
+    value = match.group(1).split(_YAML_COMMENT_MARKER)[0].strip().strip(_YAML_QUOTE_CHARS)
+    if _ISO_DATE_RE.match(value):
+        return None
+    return f"`date: {value or '(empty)'}` where SCHEMA.md requires an ISO 8601 release date"
+
+
 def scan(root: Path) -> Report:
     """Check every tracked path in ``root`` against every rule family."""
     report = Report()
@@ -582,6 +663,17 @@ def scan(root: Path) -> Report:
                     path=rel_path,
                     message="test file under src/, where pytest never collects it",
                     remediation=_REMEDIATION_SRC_TEST_STUB,
+                )
+            )
+            continue
+        defect = _unreleased_manifest_date(root, rel_path)
+        if defect is not None:
+            report.violations.append(
+                Violation(
+                    rule=RULE_UNRELEASED_MANIFEST_DATE,
+                    path=rel_path,
+                    message=f"released config-changes manifest carries {defect}",
+                    remediation=_REMEDIATION_UNRELEASED_MANIFEST_DATE,
                 )
             )
             continue

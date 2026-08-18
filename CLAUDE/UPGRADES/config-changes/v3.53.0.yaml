@@ -1,5 +1,5 @@
 version: "3.53.0"
-date: "UNRELEASED"
+date: "2026-08-14"
 breaking: false
 config_changes:
   added:

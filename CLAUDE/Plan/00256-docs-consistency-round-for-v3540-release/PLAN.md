@@ -65,38 +65,46 @@ while the suite ran 13") — the same failure recurred two steps further down.
 
 ### Phase 1: The v3.54.0 release documents
 
-- [ ] ⬜ **Task 1.1**: Fix the `check-config-migrations` pointer in
+- [x] ✅ **Task 1.1**: Fix the `check-config-migrations` pointer in
   `RELEASES/v3.54.0.md` so the reach change points at `check-truth-changes`,
   which is the command that actually reports it.
-- [ ] ⬜ **Task 1.2**: Restore the safety half of the Plan 00255 entry in
+- [x] ✅ **Task 1.2**: Restore the safety half of the Plan 00255 entry in
   `RELEASES/v3.54.0.md` — a tag named after the default branch could make a
   branch holding unique commits be reported safe to delete.
-- [ ] ⬜ **Task 1.3**: Replace the "15 files" figure in `CHANGELOG.md` and
-  `RELEASES/v3.54.0.md` with the measured one, and state the guard's real
-  scope (it walks all of `src/`, with one exemption).
-- [ ] ⬜ **Task 1.4**: Set a real ISO date in
-  `CLAUDE/UPGRADES/config-changes/v3.54.0.yaml`. Check whether the release
-  flow should set this automatically, since v3.53.0 shipped with the same
-  placeholder — a recurring escape, not a one-off.
+- [x] ✅ **Task 1.3**: Replace the "15 files" figure in `CHANGELOG.md` and
+  `RELEASES/v3.54.0.md` with the measured one (24 spawn sites across 12
+  files), and state the guard's real scope.
+- [x] ✅ **Task 1.4**: Set a real ISO date in
+  `CLAUDE/UPGRADES/config-changes/v3.54.0.yaml`. The check asked for turned it
+  up as a recurring escape, which Task 1.5 closes.
+- [x] ✅ **Task 1.5** (DBF, from what 1.4 found): the placeholder had escaped
+  FOUR times, not two. Nothing consumes `date:` — `ConfigMigrationManifest`
+  parses it into an attribute never rendered or compared — so a wrong value
+  breaks nothing and announces nothing, and a static check is the only guard
+  available. Added the `unreleased-manifest-date` rule to
+  `scripts/qa/check_repo_hygiene.py` (batch half), added the missing
+  instruction to `RELEASING.md` Step 6 and the staging README (write half),
+  and corrected all four shipped manifests to their real tag dates.
 
 ### Phase 2: The upstream that produced a wrong number
 
-- [ ] ⬜ **Task 2.1**: Correct the "Fifteen files" figure in Plan 00246's
+- [x] ✅ **Task 2.1**: Correct the "Fifteen files" figure in Plan 00246's
   archived `PLAN.md`, or annotate it, so the next reader does not re-copy it.
   Editing an archived plan is normally discouraged — record the reasoning.
 
 ### Phase 3: RELEASING.md context rot
 
-- [ ] ⬜ **Task 3.1**: Remove the hardcoded acceptance-test counts from Step
+- [x] ✅ **Task 3.1**: Remove the hardcoded acceptance-test counts from Step
   12 and point at `generate-playbook` as the source of truth, exactly as Step
   8 already does for the QA check count.
-- [ ] ⬜ **Task 3.2**: Resolve the sub-agent contradiction in Step 12. The
+- [x] ✅ **Task 3.2**: Resolve the sub-agent contradiction in Step 12. The
   playbook ships a per-test `Requires Main Thread` field and says delegation
   was verified experimentally; the prose forbids delegation outright, citing a
   v2.9.0 incident. Decide which governs, write it once, and delete the loser.
-- [ ] ⬜ **Task 3.3**: Fix Step 3's file list — `CLAUDE.md` carries no version
+  See Technical Decisions.
+- [x] ✅ **Task 3.3**: Fix Step 3's file list — `CLAUDE.md` carries no version
   string, so bumping it is not a real instruction.
-- [ ] ⬜ **Task 3.4**: Sweep the rest of `RELEASING.md` for the same shape: any
+- [x] ✅ **Task 3.4**: Sweep the rest of `RELEASING.md` for the same shape: any
   restated count or list a generator owns.
 
 ## Dependencies
@@ -106,6 +114,34 @@ while the suite ran 13") — the same failure recurred two steps further down.
 - Related: the two CODE blockers from the same review round, which also hold
   the release — the `delete-branch` protected-ref ambiguity, and the QA suite
   failing whenever a release is in progress.
+
+## Technical Decisions
+
+### Decision 1: the playbook's per-test field governs delegation, not the prose
+
+**Context**: Step 12 forbade sub-agent testing outright, citing the v2.9.0
+incident. The generated playbook meanwhile ships a per-test
+`Requires Main Thread` field and states delegation was verified
+experimentally. Both cannot govern.
+
+**Options considered**:
+
+1. Keep the blanket prohibition and delete the playbook field. Safe, but
+   discards a measured result and makes a 216-test gate serial by decree.
+2. Let the per-test field govern, and keep the v2.9.0 lesson as the reason
+   the `yes` tests exist.
+
+**Decision**: Option 2. The v2.9.0 incident is real, but it is evidence for a
+NARROWER claim than the prose drew from it: lifecycle events and this
+session's system-reminders cannot be observed from a sub-agent. That is
+exactly what `Requires Main Thread: yes` encodes. A blanket ban is the same
+claim over-generalised, and generated per-test routing is strictly better
+information than a hand-written blanket rule — it is the same
+"do not restate what a generator owns" argument as Tasks 3.1 and 3.4.
+
+**Note for the human**: this one is a PROCESS judgement, not a factual
+correction like the other seven items. It is flagged deliberately in case the
+blanket ban was intentional policy rather than drift.
 
 ## Success Criteria
 
