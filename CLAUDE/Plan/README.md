@@ -4,6 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00259: block artefact publishing by default](00259-block-public-artefact-publishing-by-default/PLAN.md) - Not Started (the `Artifact` tool mints a claude.ai URL outside the repository, and it is the one disclosure path with no guard; blocked by default, liftable only by a human config edit)
 - [00257: the protected ref nobody qualified, and a QA gate that fails during releases](00257-delete-branch-protected-ref-ambiguity-and-release-qa-deadlock/PLAN.md) - In Progress (reproduced: a tag shadowing the protected ref makes `delete-branch` force-delete an unmerged branch, because this cycle's new forcing tiers removed git's own refusal; plus QA failing whenever a release state file exists)
 - [00256: docs consistency round, found by the v3.54.0 release](00256-docs-consistency-round-for-v3540-release/PLAN.md) - In Progress (eight documents assert something untrue of the tree; holds the v3.54.0 release, whose own Step 7 and Step 10 gates found them)
 - [00252: guards for premises no write-time hook sees](00252-guards-for-premises-no-write-time-hook-sees/PLAN.md) - Not Started (two defects, one argument from Core Standard 15's corollary: the ambient-git-premise class Plan 00245 fixed seven times by hand without a guard, and the fact that no guard inspects STAGED CONTENT for secret-list terms, so a file arriving by `mv` reached a pushed commit)
@@ -1215,26 +1216,26 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 257 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 259 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 209 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 36 + 209 + 6 = **251 folders**, spanning
-  **248 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 37 + 209 + 6 = **252 folders**, spanning
+  **249 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
-  (`001-`, `002-`, `003-`), so they count as present. That leaves **9** of the
-  257 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
-  00145, 00191, 00195, 00210 — abandoned drafts, numbers burned by transient
-  probes (00195, during the v3.51.0 acceptance run), and one withdrawn
-  duplicate (00210, scaffolded by a sub-agent that then found Plan 00208
-  already covered the work). 246 + 9 = 255. ✅
+  (`001-`, `002-`, `003-`), so they count as present. That leaves **10** of the
+  259 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  00145, 00191, 00195, 00210, 00258 — abandoned drafts, numbers burned by
+  transient probes (00195 during the v3.51.0 acceptance run, 00258 during the
+  v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a sub-agent
+  that then found Plan 00208 already covered the work). 249 + 10 = 259. ✅
 
 - **Last reconciled by**: the Plan 00255 closure — the folder moved from the plan
   root into `Completed/`, so Active fell by one and Completed rose by one while
