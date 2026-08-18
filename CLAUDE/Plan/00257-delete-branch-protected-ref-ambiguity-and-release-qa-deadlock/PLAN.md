@@ -85,30 +85,50 @@ that test exists to detect. The test is right; its isolation went stale.
 
 ### Phase 1: Blocker A — qualify the protected ref
 
-- [ ] ⬜ **Task 1.1**: RED — a test with a tag shadowing the PROTECTED REF,
-  asserting the branch is not classified safe. The existing suite covers a tag
-  shadowing the branch under test but has no case for the base.
-- [ ] ⬜ **Task 1.2**: GREEN — resolve `protected_ref` once, using the same
-  `show-ref --verify` probe shape as `git_sync._merged_base_ref`: qualify to
-  `refs/heads/<name>` when it exists, otherwise pass through unchanged, since
-  it may legitimately be `origin/main`, a sha, or `HEAD~3`.
+- [x] ✅ **Task 1.1**: RED — three tests in
+  `TestASameNamedTagCannotHijackTheProtectedRef`. Two failed as predicted
+  (`assert ('feat',) == ()` — the branch was force-deleted); the third, a
+  legitimate `--protected-ref origin/main`, passed from the start and is what
+  makes a blind `branch_ref(protected_ref)` wrong.
+- [x] ✅ **Task 1.2**: GREEN — `_protected_base_ref` resolves the base once,
+  immediately after the tip is recorded, probing with `show-ref --verify`
+  exactly as `git_sync._merged_base_ref` does and falling back to the value as
+  given. 78 tests in the file pass.
 - [ ] ⬜ **Task 1.3**: Decide whether an ambiguous protected ref should be a
-  blocking `REFUSAL_*` rather than merely qualified. Git emits a warning the
-  engine currently discards; failing safe with a message a human can act on may
-  be the better contract.
-- [ ] ⬜ **Task 1.4**: Verify by re-running the reproduction, not only the
-  unit tests.
+  blocking `REFUSAL_*` rather than merely qualified. Git emits
+  `warning: refname '<x>' is ambiguous.` on every proof command and the engine
+  discards that stderr, so the information is there for free. Qualifying is
+  now correct either way; this would additionally TELL the human their repo
+  has an ambiguous ref, which is worth knowing.
+- [x] ✅ **Task 1.4**: Verified against a real repository, not only the unit
+  tests: tier `unproven`, `is_safe` False, `deleted ()`, `refused` True, and
+  `secret-work.txt` correctly named as content existing nowhere else.
 
 ### Phase 2: Blocker B — restore test isolation
 
-- [ ] ⬜ **Task 2.1**: RED — confirm the three failures reproduce with a state
-  file present and pass without one.
-- [ ] ⬜ **Task 2.2**: GREEN — isolate the tests against the handler's CURRENT
-  input (the state file), not its former one (the working tree), and correct
-  the stale docstring that describes the old mechanism.
-- [ ] ⬜ **Task 2.3**: DBF — a handler whose matcher changes should not be able
-  to silently invalidate the fixture that isolates it. Decide whether a guard
-  is possible here or whether this is inherently a review-time concern.
+- [x] ✅ **Task 2.1**: RED — confirmed. All three failed only because
+  `untracked/release-state.json` existed.
+- [x] ✅ **Task 2.2**: GREEN — the shadowing test now roots the chain walk at
+  an empty `tmp_path` and patches `ProjectContext.project_root`, so it
+  isolates against the state file the handler actually reads; the stale
+  docstring describing the git stub is corrected. It passes WITH a release in
+  flight, which is the only meaningful proof.
+- [x] ✅ **Task 2.3** (widened by what it found): the acceptance pair exposed a
+  PRODUCTION defect, not just a fixture one. `release_blocker` is terminal at
+  priority 8, so during a release an agent hitting a `tool_use_error` received
+  "a release is in progress" instead of the actionable Read-then-retry
+  directive — the release message says nothing about the error just hit. It
+  now stands down for that case, reusing `get_transcript_reader` so the two
+  handlers cannot disagree about what a tool error is. Both deny the stop, so
+  the release loses nothing and the guard fires again on the next attempt.
+  The remaining negative-control test skips with a full explanation during a
+  release, because the DEFAULT branch is genuinely unobservable over the
+  socket while a terminal guard sits ahead of it — its real assertion (Branch
+  2.5 must not fire on a clean turn) still runs.
+- [ ] ⬜ **Task 2.4**: DBF, still open — a handler whose matcher changes
+  silently invalidated the fixture isolating it, and nothing caught that. The
+  general shape ("this fixture neutralises an input the handler no longer
+  reads") may not be mechanically checkable; decide, and record either way.
 
 ### Phase 3: The abort deadlock (found by living it)
 
