@@ -31,11 +31,20 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         gnupg \
         apt-transport-https \
         tmux \
+        git-filter-repo \
     && rm -rf /var/lib/apt/lists/*
 
 # tmux: required for Plan 00135 (event-driven send-keys injection) spikes/feature —
 # lets the container drive a real tmux session + Claude TUI for capture-pane/key-table
 # experiments and (eventually) a CI tmux test harness for the injector.
+
+# git-filter-repo: the supported tool for rewriting published history when a
+# secret-word-list term reaches a commit. Baked into the image rather than
+# pip-installed on demand because the alternatives are all worse here: the venv
+# it used to live in (untracked/fr-venv) is gitignored and vanishes with the
+# container, and `pip install --break-system-packages` is blocked by the daemon's
+# own handler. Debian ships it, so apt is the clean route.
+# Consumed by untracked/rewrite/refresh.sh, which resolves it from PATH.
 
 # ================================================================
 # Dart SDK - dart analyze
@@ -54,4 +63,5 @@ ENV PATH="/usr/lib/dart/bin:${PATH}"
 # ================================================================
 # Verify installations
 # ================================================================
-RUN go version && ruby --version && php --version && dart --version && tmux -V
+RUN go version && ruby --version && php --version && dart --version && tmux -V && \
+    git filter-repo --version
