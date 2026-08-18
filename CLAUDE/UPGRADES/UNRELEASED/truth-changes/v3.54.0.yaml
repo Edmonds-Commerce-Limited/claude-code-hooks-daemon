@@ -1,0 +1,51 @@
+version: "3.54.0"
+truth_changes:
+  - was: >
+      `hooks-daemon delete-branch` classifies every branch into one of FOUR
+      tiers, evaluated cheapest-first: merged (the tip is an ancestor of the
+      protected ref), patch-equivalent (every commit is already upstream by
+      patch-id), content-preserved (every file version is byte-identical to a
+      blob still reachable from the protected ref), and unproven (refused).
+      v3.52.0 published that enumeration and asked projects to correct their
+      own docs to match it.
+    now: >
+      There are SIX tiers. Two were added because the four-tier model conflated
+      "git will delete this" with "this is provably safe", and those are not
+      the same question. `git branch -d` does not measure a branch against
+      `main`: when the branch HAS an upstream it measures against THAT, so a
+      branch fully merged into `main` is refused while it is ahead of
+      `origin/<name>` -- git reports "not yet merged to
+      refs/remotes/origin/<name>, even though it is merged to HEAD". When the
+      branch has NO upstream, git measures against the CHECKED-OUT HEAD, so a
+      branch fully merged into `main` is refused whenever you are standing on
+      some other branch, which is the ordinary way you notice a branch needs
+      tidying. Both now classify as `merged-unpushed` and `merged-not-in-head`
+      respectively. Both carry the IDENTICAL ancestry proof to `merged` --
+      every commit is reachable from the protected ref -- and both delete,
+      using the force flag because git's safe delete is the thing refusing,
+      not the safety analysis. Previously both classified as plain `merged`,
+      which delegates to `git branch --delete`; git then refused, so the
+      command failed on a branch it had itself just proved safe. If your docs
+      enumerate the tiers they now under-count by two, and if they say a
+      `merged` verdict means git will accept the delete, that inference no
+      longer holds -- the tier names now tell you which of the three merged
+      shapes you have.
+  - was: >
+      delete-branch refuses by default and deletes only what it can positively
+      prove is recoverable. Once a branch is proved safe by a tier, the command
+      deletes it: the tier IS the verdict, and a refusal always means the proof
+      failed and the branch holds content found nowhere else.
+    now: >
+      A proof can now EXPIRE, and an expired proof refuses despite a tier that
+      passed. delete-branch re-reads each branch's tip immediately before
+      deleting and refuses -- naming both shas -- when the tip moved after the
+      proof was computed. This is not a tier and does not mean the work is
+      unsafe: it means the proof described a DIFFERENT commit, and the recovery
+      bundle was written before the new one existed, so the bundle does not
+      cover it. The window is real wherever concurrent agents share one
+      checkout, which is this project's own working pattern -- a peer can
+      advance a branch between classification and deletion. Re-run the command
+      to reclassify against the current tip; never force past it. If your docs
+      say a proved branch is always deleted, or that every refusal names files
+      holding unique content, add this second refusal shape: it names shas, not
+      files, and re-running is the whole remedy.
