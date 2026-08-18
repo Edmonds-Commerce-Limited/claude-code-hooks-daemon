@@ -1319,6 +1319,75 @@ class TestABranchThatMovedAfterItsProofIsNotDeleted:
         assert report.refused is True
 
 
+class TestASameNamedTagCannotHijackTheProtectedRef:
+    """The BASE of every proof was bare, which is the third axis of the same defect.
+
+    Plan 00254 qualified the branch under test and Plan 00255 qualified
+    ``git_sync``'s merge base. The ``protected_ref`` this engine measures
+    EVERYTHING against stayed bare, so a tag named ``main`` makes every proof
+    describe the tag: the ancestry test, ``cherry``, the object walk and the path
+    walk all resolve ``refs/tags/main`` ahead of ``refs/heads/main``.
+
+    Before the forcing tiers existed this was contained rather than safe: the
+    mis-verdict came out as ``merged``, which delegates to ``git branch -d``, and
+    git re-ran its own ancestry check and refused. ``merged-unpushed`` and
+    ``merged-not-in-head`` return ``--force`` precisely to bypass that refusal, so
+    adding them removed the backstop. Reproduced against real git before fixing.
+    """
+
+    def _tag_shadows_the_base(self, repo: Path, name: str) -> None:
+        """Build: branch ``name`` holds the only copy of a file; tag ``main`` points at it.
+
+        No upstream anywhere, and ``HEAD`` left on ``main`` — the shape that
+        reaches ``merged-not-in-head`` once the base resolves to the tag.
+        """
+        _git(repo, "branch", name)
+        _git(repo, "checkout", name)
+        _commit(repo, "secret-work.txt", "the only copy\n", "Irreplaceable work")
+        tip = _git(repo, "rev-parse", "HEAD").strip()
+        _git(repo, "checkout", "main")
+        _git(repo, "tag", "main", tip)
+
+    def test_a_branch_holding_unique_work_is_not_called_safe(self, repo: Path) -> None:
+        """The verdict must describe refs/heads/main, not the tag standing in front of it."""
+        self._tag_shadows_the_base(repo, "feat")
+
+        classification = classify_branch(repo, "feat")
+
+        assert not classification.is_safe, (
+            "the branch holds a file reachable from no branch, so it cannot be "
+            f"proved safe — got tier {classification.tier!r}, which describes the tag"
+        )
+
+    def test_the_only_copy_of_a_file_survives_the_delete(self, repo: Path) -> None:
+        """The end-to-end consequence: this is the command that destroys work."""
+        self._tag_shadows_the_base(repo, "feat")
+
+        report = delete_branches(repo, ["feat"], bundle_path=None)
+
+        assert report.deleted == (), "a force delete ran on an unproved branch"
+        assert "feat" in _local_branches(repo)
+        assert _git(repo, "cat-file", "-t", "refs/heads/feat:secret-work.txt").strip() == "blob"
+
+    def test_a_legitimate_non_branch_protected_ref_still_works(self, repo: Path) -> None:
+        """Qualifying must not be blind: the base is not always a local branch.
+
+        ``--protected-ref origin/main`` is a supported and sensible invocation, and
+        ``refs/heads/origin/main`` is a malformed object name. This is the case that
+        makes a bare ``branch_ref(protected_ref)`` wrong, and it is why the fix
+        probes with ``show-ref --verify`` exactly as ``git_sync`` does.
+        """
+        _merged_branch(repo, "tidy")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "refs/heads/main")
+
+        classification = classify_branch(repo, "tidy", protected_ref="origin/main")
+
+        assert classification.is_safe, (
+            "a remote-tracking protected ref must still resolve — got "
+            f"tier {classification.tier!r}"
+        )
+
+
 class TestASameNamedTagCannotHijackTheProof:
     """A bare refname resolves the TAG first, so the proof can describe the wrong object.
 

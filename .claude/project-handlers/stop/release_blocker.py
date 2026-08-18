@@ -229,6 +229,34 @@ class ReleaseBlockerHandler(Handler):
 
         return step >= self.PREP_COMPLETE_STEP and not authorised
 
+    @staticmethod
+    def _stopped_on_a_tool_error(hook_input: dict) -> bool:
+        """True when the session stopped straight after a failed tool call.
+
+        This guard is terminal at priority 8, so whatever it says is the ONLY
+        thing the agent hears — it shadows `auto_continue_stop` at 10 entirely.
+        That is correct for an ordinary stop, and wrong for this one: the
+        tool-error branch answers with a specific, actionable directive (Read
+        the file, then retry), and replacing it with "a release is in progress"
+        tells the agent nothing about the error it just hit. Both handlers deny
+        the stop, so standing down here costs the release nothing — the session
+        continues either way, and this guard fires again on the next stop
+        attempt, which by then carries no tool error.
+
+        Reuses `get_transcript_reader` rather than re-parsing the transcript, so
+        the two handlers cannot disagree about what "a tool error" means.
+        """
+        try:
+            from claude_code_hooks_daemon.utils.stop_hook_helpers import get_transcript_reader
+        except ImportError as exc:  # pragma: no cover - daemon always ships this
+            logger.debug("release-blocker: no transcript helper (%s), staying active", exc)
+            return False
+
+        reader = get_transcript_reader(hook_input)
+        if reader is None:
+            return False
+        return bool(reader.last_tool_result_was_error())
+
     def matches(self, hook_input: dict) -> bool:
         """Check if handler should trigger.
 
@@ -243,6 +271,10 @@ class ReleaseBlockerHandler(Handler):
         """
         # Prevent infinite loops - check both snake_case and camelCase variants
         if hook_input.get("stop_hook_active") or hook_input.get("stopHookActive"):
+            return False
+
+        if self._stopped_on_a_tool_error(hook_input):
+            logger.info("release-blocker: standing down so tool-error recovery can answer")
             return False
 
         state = self._read_release_state(hook_input)

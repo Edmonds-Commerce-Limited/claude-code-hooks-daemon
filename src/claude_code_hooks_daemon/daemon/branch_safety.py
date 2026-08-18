@@ -477,6 +477,34 @@ def _paths_in_history(repo: Path, ref: str) -> set[str]:
     return paths
 
 
+def _protected_base_ref(repo: Path, protected_ref: str) -> str:
+    """The ref to measure every proof against, preferring the LOCAL branch.
+
+    ``protected_ref`` defaults to a BARE name, and a bare name is ambiguous: git
+    resolves ``refs/tags/<name>`` ahead of ``refs/heads/<name>``. With a tag named
+    ``main``, every proof in this module describes the TAG — the ancestry test,
+    ``cherry``, the object walk and the path walk alike — while the delete acts on
+    the branch.
+
+    Plan 00254 qualified the branch under test and Plan 00255 qualified
+    ``git_sync``'s merge base for the same reason. This is the third axis, and it
+    is the one that matters most: until ``merged-unpushed`` and
+    ``merged-not-in-head`` existed, a mis-verdict here came out as ``merged`` and
+    git's own check refused the safe delete, so the bug was contained. Those tiers
+    force, so the containment is gone and the mis-proof reaches a real deletion.
+
+    Falls back to the value as given when no local branch of that name exists,
+    because a protected ref is legitimately not always one: ``origin/main``, a
+    sha and ``HEAD~3`` are all supported, and ``refs/heads/origin/main`` is a
+    malformed object name. Probed exactly as :func:`git_sync._merged_base_ref`.
+    """
+    qualified = branch_ref(protected_ref)
+    probe = _git(repo, "show-ref", "--verify", "--quiet", qualified, check=False)
+    if probe.returncode == 0:
+        return qualified
+    return protected_ref
+
+
 def classify_branch(
     repo: Path,
     name: str,
@@ -514,6 +542,11 @@ def classify_branch(
     # BEFORE any proof is computed, so the recorded sha is the one every tier below
     # is actually reasoning about.
     tip = _git(repo, "rev-parse", branch_ref(name)).stdout.strip()
+
+    # Resolve the BASE once, here, so every proof below measures against the same
+    # unambiguous ref. Passing the bare name to git would let a same-named tag
+    # answer for it — see :func:`_protected_base_ref`.
+    protected_ref = _protected_base_ref(repo, protected_ref)
 
     ancestor = _git(
         repo, "merge-base", "--is-ancestor", branch_ref(name), protected_ref, check=False

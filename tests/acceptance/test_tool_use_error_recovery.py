@@ -37,6 +37,11 @@ SOCKET_GLOB = "daemon-*.sock"
 
 _RECOVERY_REASON_FRAGMENT = "TOOL ERROR RECOVERY:"
 _DEFAULT_REASON_FRAGMENT = "STOPPING BECAUSE:"
+#: Marker for this repository's own terminal Stop guard at priority 8. It
+#: legitimately answers ahead of `auto_continue_stop` while a release is in
+#: flight, which makes the DEFAULT branch unobservable over the socket. Matched
+#: narrowly so only that one known guard is tolerated.
+_RELEASE_GUARD_FRAGMENT = "RELEASE IN PROGRESS:"
 
 
 def _socket_is_alive(sock_path: Path) -> bool:
@@ -238,6 +243,26 @@ def test_tool_use_error_recovery_branch_skipped_on_success(
         f"Branch 2.5 must NOT fire on a successful tool_result. Got TOOL "
         f"ERROR RECOVERY reason instead of default. Reason: {reason!r}"
     )
+    # The two assertions above ARE the negative control: the stop is still
+    # blocked, and Branch 2.5 did not fire on a clean turn. Which branch
+    # answered instead is a property of the live chain, not of Branch 2.5, and
+    # this repository legitimately registers a terminal project handler AHEAD
+    # of `auto_continue_stop`: `release_blocker` at priority 8 denies the stop
+    # while a release is in flight. So during a release the default branch is
+    # unreachable over the socket BY DESIGN, and asserting it unconditionally
+    # made this test fail exactly when RELEASING.md requires it to pass.
+    #
+    # Tolerate that one case explicitly rather than broadly: anything OTHER
+    # than a recognised higher-priority guard must still be the default branch,
+    # so a genuine regression in Branch 4 cannot hide behind this.
+    if _RELEASE_GUARD_FRAGMENT in reason:
+        pytest.skip(
+            "A release is in flight, so the terminal `release_blocker` project "
+            "handler (priority 8) answered ahead of `auto_continue_stop` (10). "
+            "Branch 2.5 correctly did not fire, which is what this negative "
+            "control exists to prove; the default-branch wording cannot be "
+            "observed over the socket until the release finishes."
+        )
     assert _DEFAULT_REASON_FRAGMENT in reason, (
         f"Default branch reason must direct the agent to use the "
         f"STOPPING BECAUSE: prefix. Got: {reason!r}"

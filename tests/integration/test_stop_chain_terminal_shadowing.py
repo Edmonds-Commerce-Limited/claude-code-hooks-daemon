@@ -309,33 +309,52 @@ class TestThisProjectHasNotFallenIntoTheTrap:
             "project's handlers, so the shadowing check below has nothing to find."
         )
 
-    def test_nothing_is_registered_after_the_handler_that_breaks_the_chain(self) -> None:
+    def test_nothing_is_registered_after_the_handler_that_breaks_the_chain(
+        self, tmp_path: Path
+    ) -> None:
         """Shadowing is BEHAVIOURAL: only a terminal handler that MATCHES breaks it.
 
         "Anything after the lowest-numbered terminal handler" is the wrong
         test, and the first draft of this check used it and was wrong in the
         opposite direction — it flagged `auto_continue_stop` as shadowed by
         `release_blocker`, which sits at 8 and is terminal but matches only
-        when release files are dirty. A narrowly-matching terminal handler is
-        exactly how you place a guard AHEAD of the catch-all, and the check
-        must not forbid the correct pattern while hunting the broken one.
+        during a release. A narrowly-matching terminal handler is exactly how
+        you place a guard AHEAD of the catch-all, and the check must not forbid
+        the correct pattern while hunting the broken one.
 
         So the chain is walked in real priority order against an ordinary Stop
-        event, with git stubbed to a clean tree so the release guard's own
-        `matches()` is deterministic rather than depending on whatever happens
-        to be uncommitted when the suite runs.
+        event, rooted at an EMPTY project directory so the release guard's own
+        `matches()` is deterministic rather than depending on whether a release
+        happens to be in flight when the suite runs.
+
+        That isolation must track what the handler actually READS. It used to
+        stub `subprocess.run` to feign a clean working tree, because the guard
+        inferred a release from modified version files. The guard was then
+        changed to read `untracked/release-state.json` instead — the working
+        tree cannot express intent — and the git stub silently stopped
+        isolating anything. The suite went red the moment a real release wrote
+        that file, which is precisely when RELEASING.md requires it to be
+        green. A fixture that neutralises a handler's OLD input is not a
+        fixture, so this one points the handler at a root that has no state
+        file at all.
         """
         handlers = self._registered_stop_handlers()
         hook_input: dict[str, Any] = {
             "hook_event_name": "Stop",
             "stop_hook_active": False,
             "session_id": "shadow-audit",
-            "cwd": str(self._project_root()),
+            "cwd": str(tmp_path),
         }
 
         breaker: Handler | None = None
         after: list[tuple[str, int]] = []
-        with patch("subprocess.run", return_value=Mock(returncode=0, stdout="", stderr="")):
+        with (
+            patch("subprocess.run", return_value=Mock(returncode=0, stdout="", stderr="")),
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+                return_value=tmp_path,
+            ),
+        ):
             for handler in handlers:
                 if breaker is not None:
                     after.append((handler.name, handler.priority))
