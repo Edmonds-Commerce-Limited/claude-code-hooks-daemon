@@ -5,6 +5,186 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.54.0] - 2026-08-18
+
+### Added
+
+- **`tdd_enforcement` can be told where a project's tests actually live, and
+  both it and `lint_on_edit` can exempt paths (Plan 00251).** Three new
+  options, all opt-in with no default behaviour change. Reported from a client
+  monorepo whose PHPStan rules under a QA-tooling directory are correctly
+  classified production source, but whose test root is a flat PSR-4 namespace
+  with no `src/` segment — so both mirror resolvers and the lowercase-`tests/`
+  fallback missed it, the deny message listed three locations none of which was
+  real, and no amount of moving the test could satisfy the gate.
+  `handlers.pre_tool_use.tdd_enforcement.options.test_path_map` takes
+  `{source_glob, test_dir}` entries; `test_dir` is project-root-relative (or
+  absolute) and **flat** — the computed filename is placed directly in it, not
+  mirrored under it. Declared candidates are searched first and are
+  deliberately **not** gated by `test_locations`, so a project setting
+  `test_locations: ["collocated"]` cannot silently lose its own declared root.
+  A malformed entry is logged and skipped rather than raised, so one bad line
+  cannot disable TDD enforcement wholesale.
+  `handlers.pre_tool_use.tdd_enforcement.options.exclude_paths` and
+  `handlers.post_tool_use.lint_on_edit.options.exclude_paths` complete the
+  follow-up Plan 00150 recorded in its own Non-Goals: until now
+  `tdd_enforcement` was the only blocking path-based handler with no
+  configuration that could exempt a path, and `lint_on_edit` DENIES on lint
+  failure, so a generated or vendored file that cannot pass the project's
+  linter was unwritable with no escape in any config file. Prefer
+  `test_path_map` over excluding — it keeps the gate on and only tells it where
+  to look.
+- **Two more proof tiers for `hooks-daemon delete-branch` (Plans 00249,
+  00253).** `merged-unpushed` and `merged-not-in-head` join `merged`,
+  `patch-equivalent`, `content-preserved` and `unproven`. Both carry the
+  *identical* ancestry proof to `merged` — every commit reachable from the
+  protected ref — and exist because `git branch -d` does not measure a branch
+  against `main`: with an upstream it measures against that, and with none it
+  measures against the checked-out `HEAD`. See Fixed below for what that broke.
+- **A repo-hygiene rule for released upgrade manifests (Plan 00256).**
+  A `config-changes` manifest is drafted under `UNRELEASED/` with
+  `date: "UNRELEASED"` — honest, because the release date does not exist yet —
+  and moved into the live directory at release time. Nothing instructed anyone
+  to replace the placeholder, and nothing reads the field at runtime, so four
+  shipped manifests carried it and no behaviour ever revealed the fact. The new
+  `unreleased-manifest-date` rule in `scripts/qa/check_repo_hygiene.py` matches
+  the schema's declared contract (an ISO 8601 date) rather than the one word
+  observed, so another placeholder cannot ship the same defect; the staged copy
+  stays exempt by location. All four historical manifests are corrected.
+
+### Fixed
+
+- **The daemon no longer silently discards a concurrent `CLAUDE.md` edit.**
+  Observed in this repository: `CLAUDE.md` was written byte-identical to a
+  snapshot taken three minutes earlier, discarding a line added in between —
+  a line **outside** the generated block, which a block update has no business
+  touching. `_is_user_content_preserved` could never catch this: it compares
+  the injector's snapshot against an updated value derived from that same
+  snapshot, validating the transformation while staying structurally blind to
+  the file moving underneath. The defect is the whole-file read-modify-write.
+  `ClaudeMdInjector` now re-reads immediately before writing and, when the
+  content has changed, recomputes the block replacement against what is on
+  disk now, leaving every byte outside the block untouched; after three
+  unreconcilable attempts it **declines** to write, because a stale generated
+  block is recoverable on the next restart and a discarded edit is not.
+  `markdown_table_formatter` had the same shape and now re-reads before its
+  write, skipping the rewrite rather than reverting newer content.
+- **The daemon no longer takes the git index lock it does not need (Plan
+  00246).** `git status` refreshes and **rewrites** `.git/index`, so three
+  daemon paths contended with the agent for the lock in the user's own working
+  tree: `git_context_injector` (every user prompt), the `git_branch` status-line
+  handler (every status refresh), and `core/claude_md_injector.py` (every daemon
+  start). All git spawns now route through a single `run_git` in
+  `utils/git_repo.py`, which sets `GIT_OPTIONAL_LOCKS=0` and always carries a
+  timeout. The `CLAUDE.md` auto-commit stages with `git add` only when the file
+  is untracked — one lock instead of two in the normal tracked case — and lock
+  contention is logged at WARNING with git's own stderr instead of debug. An
+  AST guard now covers all of `src/`, closing the 24 direct git spawns across
+  12 files that previously bypassed the facade — and a 25th, in
+  `plan_qa/gitfacts.py`, which the guard could not initially see because its
+  argv began with a module constant (`[_GIT_BINARY, "-C", …]`) rather than a
+  bare `"git"` literal. That one mattered most: it ran `git diff --cached` from
+  the **commit gate**, taking the index lock at the moment the agent needed it
+  for the commit being gated. The guard now resolves module-level string
+  constants, which is reading rather than guessing, so the shape cannot hide
+  again.
+- **`delete-branch` no longer force-deletes an unmerged branch when a tag
+  shares the protected ref's name (Plan 00257).** A bare refname is ambiguous:
+  git resolves `refs/tags/main` ahead of `refs/heads/main` and warns only on
+  stderr, which the engine discarded. Every proof in `branch_safety` was
+  measured against that unqualified name, so a repository holding a tag called
+  `main` had the whole engine prove a property of the **tag** and then act on
+  the **branch**. Reproduced end to end: a branch holding the only copy of a
+  file was classified `merged-not-in-head` and deleted, and `--dry-run` agreed,
+  so the human preview endorsed it. The mis-verdict itself was not new — but
+  until this release it produced tier `merged`, which delegates to
+  `git branch -d`, and git's own ancestry check refused. The new
+  `merged-unpushed` and `merged-not-in-head` tiers return `--force` precisely
+  to bypass that refusal, so **this release removed the backstop that had been
+  containing the bug**. `classify_branch` now resolves the base once through
+  `show-ref --verify`, mirroring `git_sync._merged_base_ref`, and falls back to
+  the value as given so a legitimate `--protected-ref origin/main`, a sha or
+  `HEAD~3` still works. The reproduction now reports `unproven`, refuses, and
+  names the file whose content exists nowhere else.
+- **`delete-branch` crashed on a branch merged into `main` but ahead of its own
+  upstream (Plan 00249).** Reported from a client repo against v3.53.1: the
+  command died with a raw traceback, and `--dry-run` reported "merged — nothing
+  can be lost" while the real run deleted nothing. `classify_branch` proves
+  ancestry to the protected ref (recoverability); `git branch -d` enforces
+  merged-into-its-upstream (publication). Two different predicates, so the two
+  halves disagreed. Fixed with the distinct `merged-unpushed` tier rather than
+  by widening `merged` to force-delete. Deletes now run with `check=False` and
+  report git's own stderr, `delete_branches` pre-flights every branch before
+  mutating any, and the orphaned recovery bundle is removed when nothing was
+  deleted.
+- **`delete-branch` inherited a 5-second hook budget and died on real repos
+  (Plan 00248).** The `run_git` centralisation imposed `Timeout.GIT_CONTEXT` on
+  `git bundle create` and two `rev-list --objects` walks, so the command raised
+  a traceback instead of refusing. Object walks now use
+  `Timeout.GIT_BRANCH_SAFETY` and the pack uses `Timeout.GIT_BUNDLE_CREATE`, and
+  a git failure is reported as a refusal quoting git's stderr. The same plan
+  fixed `run_git`'s "never raises" contract, which was false: `text=True`
+  decodes strictly, so a single invalid byte raised an uncaught
+  `UnicodeDecodeError` that could fail daemon startup through
+  `claude_md_injector` → `DaemonController.initialise`. Now decodes with
+  `errors="replace"`.
+- **`delete-branch` now re-checks a tip it has already proved (Plan 00254).** A
+  proof describes one commit; if a peer advances the branch between
+  classification and deletion, the recovery bundle predates the new commit and
+  does not cover it. The command refuses that branch and names both shas —
+  re-run to reclassify against the current tip. The same plan fixed a
+  same-named tag making the proof describe the wrong object entirely.
+- **A same-named tag could flip a merged/not-merged verdict (Plan 00255).** A
+  bare refname is ambiguous — git resolves `refs/tags/<name>` ahead of
+  `refs/heads/<name>`, warning only on stderr. In `utils/git_sync.py` the
+  gone-branch advisory named branches as `heads/<name>`, a string no git
+  command accepts, so the `git branch -d` it offered could not work as typed;
+  worse, the base of the merged comparison was also bare, so a tag named after
+  the default branch made git answer about the tag and a branch holding unique
+  commits was reported safe to delete. A semgrep rule now flags
+  `%(refname:short)` in git format strings.
+- **`recovery_cron_advisor` stacked a new hourly cron for every plan (Plan
+  00247).** The creation advisory said "create a cron NOW" unconditionally, so
+  a session touching several plans accumulated identical hourly crons — two
+  were observed live, both firing at the same minute. Both that handler and
+  `background_process_tracker`'s watchdog advisory are now CronList-first:
+  reuse an existing cron, delete extras, create only when none exists. This
+  enforces Plan 00139's Decision D2, which the handler's docstring already
+  cited.
+- **`RELEASES/v3.53.0.md` told every upgrading user to run a CLI subcommand
+  that does not exist**, which argparse rejects with exit 2. Upgrading is
+  reachable through the skill, so the words were right and only the form was
+  wrong — which is why review passed it. A new `cli-subcommand-unknown` rule in
+  `check_doc_truth.py` reads the live argparse registry by asking the CLI to
+  render itself, and a `slash-command-in-shell-fence` rule enforces the new
+  ```` ```claude-code ```` fence for chat invocations across 82 sites in 18
+  files.
+- **CI is green on Python 3.11, 3.12 and 3.13 again (Plan 00245)**, after 25+
+  consecutive red runs caused by four defects each hidden behind the one
+  before it. Repository infrastructure only — no handler, CLI or config change.
+
+### Changed
+
+- **`daemon.exclude_paths` now reaches two more handlers (Plan 00251).** The
+  project-wide glob list is honoured by `tdd_enforcement` and `lint_on_edit` in
+  addition to the content-scanning blockers that already read it. **A project
+  that already sets this key gets new behaviour on upgrade with no config edit
+  of its own**: paths excluded from content scanning now also skip the TDD gate
+  and lint-on-write. For the usual contents of such a list — vendor, generated
+  code, build output — that is the intended reading and needs no action. It is
+  worth one look if any glob was added for a narrow reason. Recorded in
+  `CLAUDE/UPGRADES/truth-changes/v3.54.0.yaml`.
+- **The QA suite now runs the project handlers' own tests.**
+  `scripts/qa/gate-scope.bash` excludes `.claude/project-handlers/` from mypy
+  (mypy refuses a directory whose name contains a hyphen) and justified it by
+  citing coverage elsewhere — but `testpaths = ["tests"]` meant neither
+  `run_all.sh`, nor `llm_qa.py`, nor CI ever executed those tests, and
+  `validate-project-handlers` proves only that the modules import. Both
+  handlers there are `terminal=True` and both DENY. The new check invokes the
+  production runner and conjoins exit code, zero failures **and** a positive
+  test count, so an absent pytest or a collection error fails the gate rather
+  than reporting a clean run.
+
 ## [3.53.1] - 2026-08-16
 
 ### Fixed
