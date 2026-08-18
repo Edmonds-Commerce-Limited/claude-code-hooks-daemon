@@ -49,3 +49,23 @@ truth_changes:
       say a proved branch is always deleted, or that every refusal names files
       holding unique content, add this second refusal shape: it names shas, not
       files, and re-running is the whole remedy.
+  - was: >
+      `daemon.exclude_paths` is the project-wide exemption list for the
+      CONTENT-SCANNING blockers -- security_antipattern, qa_suppression,
+      error_hiding_blocker, sensitive_content. Putting a glob there exempts a
+      path from having its CONTENT inspected, and nothing else.
+    now: >
+      The same list is now also honoured by `tdd_enforcement` and
+      `lint_on_edit` (Plan 00251), so a glob you added years ago to silence
+      content scanning ALSO turns off the TDD gate and lint-on-write for those
+      paths -- on upgrade, with no config edit and no announcement. For the
+      usual contents of such a list (vendor, generated code, build output) that
+      is the intended reading and needs no action. It is worth one look if any
+      glob was added for a NARROW reason, because its exemption is now broader
+      than it was when written: the fix is to remove that glob from
+      `daemon.exclude_paths` and set it on the specific handlers that should
+      still skip it, since every one of them keeps its own `exclude_paths` and
+      the sources are additive with none overriding another. The list's own
+      description previously enumerated the consuming handlers and had already
+      drifted -- it named four while six read it -- so treat any enumeration in
+      YOUR docs as stale rather than authoritative.

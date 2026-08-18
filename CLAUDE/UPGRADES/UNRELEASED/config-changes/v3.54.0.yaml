@@ -70,3 +70,11 @@ config_changes:
         are usually better: `languages` restricts which languages are checked,
         and `command_overrides` can reduce a language to its cheap syntax check
         only (set `extended: null`).
+# NOTE: the widened reach of daemon.exclude_paths (it is now consumed by
+# tdd_enforcement and lint_on_edit too) is deliberately NOT filed here as a
+# `changed:` entry. A `changed:` entry without a `recommended_value` is
+# documentation-only BY DESIGN -- config_migrations.py skips it and it
+# produces no advisory -- and this change has no value to recommend, because
+# the right setting depends entirely on why each glob was added. It is
+# recorded as a truth-change instead, which renders unconditionally. That is
+# the same route v3.50.0 and v3.52.0 took for their own behaviour changes.
