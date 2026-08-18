@@ -202,7 +202,13 @@ Agent proposes bump with justification. Manual override accepted.
 
 Updates version in: `pyproject.toml`, `version.py`, `README.md` (badge), and `.claude/ccy/claude-supervise.py` (the standalone supervisor's hardcoded `__version__`, kept in lockstep — enforced by `tests/unit/supervise/test_compaction_gap_repro.py::TestSupervisorVersionMatchesDaemon`, which FAILS the QA gate if the supervisor version drifts from `version.py`).
 
-Also updates README.md stats: test count badge+body, handler count, event type count from `.claude/HOOKS-DAEMON.md`.
+Also check README.md's stats still hold. Both the badge and the body state a
+deliberately ROUNDED test figure ("12,000+"), which stays true across many
+releases — update it only when the real count crosses the next round number,
+not every release. README carries no handler count and no event-type count, so
+there is nothing to sync from `.claude/HOOKS-DAEMON.md`; an earlier version of
+this step named both, sending the reader hunting for figures that are not
+there.
 
 **Regenerate `.claude/HOOKS-DAEMON.md` after the version bump**: run `./bin/hooks-daemon generate-docs`. This tracked, generated doc embeds the daemon version in its header (`> Generated on YYYY-MM-DD (vX.Y.Z) …`), so without regenerating it the header ships stale one version behind (v3.43.1 shipped with a v3.43.0 header before this step existed). Stage `.claude/HOOKS-DAEMON.md` with the release commit (add it to the Step 13 `git add` list).
 
@@ -513,11 +519,21 @@ PY="$(resolve_venv_python /workspace)"
 "$PY" -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py tests/acceptance/test_stop_hook_hard_block.py tests/acceptance/test_skill_install_python_discovery.py -v
 # Expected: tests/acceptance/test_diagnostic_scripts.py — 12 passed
 #           tests/acceptance/test_install_sh_end_to_end.py — 2 passed
-#           tests/acceptance/test_tool_use_error_recovery.py — 2 passed
+#           tests/acceptance/test_tool_use_error_recovery.py — 1 passed, 1 skipped
 #           tests/acceptance/test_stop_hook_hard_block.py — 3 passed
 #           tests/acceptance/test_skill_install_python_discovery.py — 4 passed
-#           combined: 23 passed, 0 failed
+#           combined: 22 passed, 1 skipped, 0 failed
 ```
+
+**The one expected skip is `test_tool_use_error_recovery_branch_skipped_on_success`,
+and ONLY while a release is in flight.** This repository's own terminal
+`release_blocker` project handler sits at priority 8, ahead of
+`auto_continue_stop` at 10, so during a release it answers first and the
+default branch's wording cannot be observed over the socket. The test's real
+assertion — Branch 2.5 must not fire on a clean turn — still executes; only the
+question of which branch answered instead is unobservable. Its skip message
+names the release explicitly, so read it rather than assuming: a skip here for
+any OTHER reason is an abort condition (see below).
 
 ANY failure in any file = ABORT release. The 2026-05-01 field report
 (Issues #1, #4, #6) escaped because the v3.9.0 acceptance suite never invoked
@@ -535,8 +551,10 @@ The Plan 00101 Phase 9 suggestion-level-downgrade regression class
 `.claude/hooks/stop` and `.claude/hooks/subagent-stop` as subprocesses
 and asserts the exit-2 + stderr contract that v2.1.114 honours for hard
 re-entry. The test skips cleanly when no daemon is running locally; under
-H-1 the daemon is always started before this step, so a skip there is
-itself an abort condition. The Plan 00110 host-a field-report regression
+H-1 the daemon is always started before this step, so a skip for THAT
+reason is itself an abort condition — distinct from the release-in-flight
+skip described above, which is expected. Always read the skip message
+rather than counting skips. The Plan 00110 host-a field-report regression
 class (host has `python3` → 3.9 alongside `python3.13` / `python3.14`, but
 pre-Plan-00110 install.sh aborted with a hardcoded `python3.11` suggestion
 that the host did not have) is closed by adding

@@ -653,6 +653,39 @@ def test_generate_markdown_no_hardcoded_stale_test_count_estimate() -> None:
     assert "**Total Tests**: 0" in markdown
 
 
+def test_routing_section_states_what_an_absent_main_thread_field_means() -> None:
+    """An unclassified test must default to the main thread, and say so.
+
+    RELEASING.md Step 12 routes every test by its ``Requires Main Thread``
+    field, which makes the field load-bearing — and nine of the tests the
+    generator emits do not carry it. Two shapes reach that state and NEITHER
+    is delegable: a SKIP test is not run at all, and a CLI-feature test may
+    restart the daemon or change the active mode, which would disrupt every
+    test running in parallel with it.
+
+    The sibling ``Recommended Model`` field already declares its absent case
+    ("use your own judgment"), so a reader reasonably infers that an
+    undeclared absence is permissive. Here it must not be.
+
+    This lives in the generator rather than in RELEASING.md deliberately: the
+    playbook owns the field, and a second copy of the rule in a hand-written
+    document is the copy that goes stale — the exact context rot Plan 00256
+    removed from that file's Step 12.
+    """
+    config: dict[str, Any] = {}
+    registry = HandlerRegistry()
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    markdown = generator.generate_markdown()
+
+    assert "If `Requires Main Thread` is absent" in markdown
+    absent_clause = markdown.split("If `Requires Main Thread` is absent", 1)[1][:200]
+    assert "do NOT delegate" in absent_clause, (
+        "the absent case must resolve to the conservative side; an unclassified "
+        f"test is not evidence that delegation is safe. Got: {absent_clause!r}"
+    )
+
+
 def test_generate_markdown_handles_none_handler_class() -> None:
     """Test that None handler classes are skipped gracefully."""
 
@@ -1824,6 +1857,14 @@ def test_generate_markdown_still_runs_tests_without_the_marker() -> None:
     with patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[test]):
         markdown = generator.generate_markdown()
 
-    assert "SKIP" not in markdown
+    # Anchored on the skip MARKER, not on the bare word. This assertion was a
+    # whole-document scan for "SKIP", which the routing section now uses in
+    # ordinary prose when explaining what an unclassified test means — so the
+    # broad form failed on static boilerplate that has nothing to do with how
+    # THIS test rendered. The marker is what the skip path emits, so anchoring
+    # to it tests the same property without depending on the word appearing
+    # nowhere else in a 200-test document. Paired with the PASS/FAIL result
+    # line below, which independently proves the normal path ran.
+    assert "**⚠️ SKIP**" not in markdown
     assert 'echo "git reset --hard"' in markdown
     assert "**Result**: [ ] PASS [ ] FAIL" in markdown

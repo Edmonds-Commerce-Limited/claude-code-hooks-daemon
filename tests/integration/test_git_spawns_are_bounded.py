@@ -93,12 +93,54 @@ def _argv_node(call: ast.Call) -> ast.expr | None:
     return None
 
 
-def _argv_starts_with_git(call: ast.Call) -> str | None:
-    """Return a readable argv head when this call's argv literal starts with git.
+def _module_string_constants(tree: ast.Module) -> dict[str, str]:
+    """Module-level ``NAME = "value"`` bindings, including annotated ones.
+
+    Only the module body is read, and only string constants. A name assigned
+    inside a function or resolved from an import is deliberately absent — those
+    would require following control flow or another file, which is the guessing
+    :func:`_argv_starts_with_git` refuses to do.
+    """
+    constants: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign):
+            targets: list[ast.expr] = [node.target]
+        elif isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        else:
+            continue
+        value = node.value
+        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                constants[target.id] = value.value
+    return constants
+
+
+def _literal_string(node: ast.expr, constants: dict[str, str]) -> str | None:
+    """The string this node denotes, or None if it does not denote one plainly."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return constants.get(node.id)
+    return None
+
+
+def _argv_starts_with_git(call: ast.Call, constants: dict[str, str]) -> str | None:
+    """Return a readable argv head when this call's argv starts with git.
 
     Only a list/tuple literal is inspected. `["git", "status"]` is unambiguous;
     a name referring to a list built elsewhere is not, and guessing is what makes
     a checker untrustworthy.
+
+    An ELEMENT may still be a module-level string constant, which is not
+    guessing: `[_GIT_BINARY, "-C", ...]` beside `_GIT_BINARY = "git"` in the same
+    file is an assignment two screens up, and resolving it is reading. Requiring
+    a bare literal here was not a stricter rule, it was a blind spot —
+    `plan_qa/gitfacts.py` sat in it through the whole of Plan 00246's sweep,
+    keeping an inline spawn with no declined index lock. A name the module does
+    not itself define stays unresolved.
 
     Positional AND `args=`: the keyword is the parameter's documented name, so
     `subprocess.run(args=["git", ...])` is exactly as clear as the positional
@@ -109,13 +151,10 @@ def _argv_starts_with_git(call: ast.Call) -> str | None:
         return None
     if not isinstance(argv, (ast.List, ast.Tuple)) or not argv.elts:
         return None
-    first = argv.elts[0]
-    if not isinstance(first, ast.Constant) or first.value != _GIT:
+    if _literal_string(argv.elts[0], constants) != _GIT:
         return None
     words = [
-        element.value
-        for element in argv.elts
-        if isinstance(element, ast.Constant) and isinstance(element.value, str)
+        word for word in (_literal_string(element, constants) for element in argv.elts) if word
     ]
     return " ".join(words)
 
@@ -174,10 +213,11 @@ def _direct_git_spawns(source_root: Path) -> list[_Spawn]:
             continue
         tree = ast.parse(module.read_text(encoding="utf-8"), filename=str(module))
         bindings = _subprocess_bindings(tree)
+        constants = _module_string_constants(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not _is_subprocess_spawn(node, bindings):
                 continue
-            argv_head = _argv_starts_with_git(node)
+            argv_head = _argv_starts_with_git(node, constants)
             if argv_head is not None:
                 found.append(_Spawn(relative, node.lineno, argv_head))
     return found
@@ -281,5 +321,61 @@ class TestOrdinaryImportIdiomsDoNotEscape:
 
     def test_a_non_git_call_through_an_alias_is_not_flagged(self, tmp_path: Path) -> None:
         source = 'import subprocess as sp\nsp.run(["ruff", "check"])\n'
+
+        assert self._scan_source(tmp_path, source) == []
+
+
+class TestAModuleConstantIsNotAHidingPlace:
+    """A real spawn hid here for the whole of Plan 00246's sweep.
+
+    The scanner read only `["git", ...]` literals, on the stated principle that
+    argv assembled elsewhere would mean guessing. That principle is right, but
+    it was drawn one step too wide: `[_GIT_BINARY, "-C", ...]` where the SAME
+    module says `_GIT_BINARY = "git"` requires no guessing at all — the value is
+    an assignment two screens up, and resolving it is reading, not inferring.
+
+    `plan_qa/gitfacts.py` spawned git in exactly that shape. It was invisible to
+    the guard, so the sweep passed it over and it kept its own inline
+    `subprocess.run` with no `GIT_OPTIONAL_LOCKS=0` — the one property the whole
+    exercise existed to make universal. Worse than average placement, too: that
+    module runs `git diff --cached` from the commit gate, which is precisely
+    when the agent needs the index lock itself.
+
+    A name bound to something the module does NOT define locally is still left
+    alone, because that genuinely would be a guess.
+    """
+
+    def _scan_source(self, tmp_path: Path, source: str) -> list[str]:
+        (tmp_path / "offender.py").write_text(source, encoding="utf-8")
+        return [spawn.argv_head for spawn in _direct_git_spawns(tmp_path)]
+
+    def test_a_locally_defined_constant_head_is_caught(self, tmp_path: Path) -> None:
+        source = (
+            "import subprocess\n"
+            '_GIT_BINARY = "git"\n'
+            'subprocess.run([_GIT_BINARY, "status"], check=False)\n'
+        )
+
+        assert self._scan_source(tmp_path, source) == ["git status"]
+
+    def test_an_annotated_constant_head_is_caught(self, tmp_path: Path) -> None:
+        """The real spelling in this codebase is `Final[str]`, not a bare assign."""
+        source = (
+            "import subprocess\n"
+            "from typing import Final\n"
+            '_GIT_BINARY: Final[str] = "git"\n'
+            '_ = subprocess.run([_GIT_BINARY, "-C", "/repo", "diff", "--cached"], check=False)\n'
+        )
+
+        assert self._scan_source(tmp_path, source) == ["git -C /repo diff --cached"]
+
+    def test_a_constant_naming_another_tool_is_not_flagged(self, tmp_path: Path) -> None:
+        source = 'import subprocess\n_BINARY = "ruff"\nsubprocess.run([_BINARY, "check"])\n'
+
+        assert self._scan_source(tmp_path, source) == []
+
+    def test_a_name_the_module_does_not_define_is_left_alone(self, tmp_path: Path) -> None:
+        """Resolving an IMPORTED name would be the guess the docstring rules out."""
+        source = 'import subprocess\nfrom elsewhere import BINARY\nsubprocess.run([BINARY, "x"])\n'
 
         assert self._scan_source(tmp_path, source) == []

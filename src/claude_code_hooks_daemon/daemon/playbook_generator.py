@@ -559,6 +559,15 @@ class PlaybookGenerator:
         lines.append("- Sub-agents DO see PostToolUse system-reminders in their own context.")
         lines.append("- These tests can run safely in parallel sub-agents for speed.")
         lines.append("")
+        lines.append(
+            "**If `Requires Main Thread` is absent, treat it as `yes` — do NOT delegate.**"
+        )
+        lines.append("Absence means the test was never classified, not that it is safe to")
+        lines.append("delegate. Two shapes reach this state, and neither is delegable by")
+        lines.append("default: a test marked SKIP is not run at all, and a CLI-feature test")
+        lines.append("may restart the daemon or change the active mode, which would disrupt")
+        lines.append("every test running in parallel with it.")
+        lines.append("")
         lines.append("### Efficient Execution Strategy")
         lines.append("")
         lines.append(

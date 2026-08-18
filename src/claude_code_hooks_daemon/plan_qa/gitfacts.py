@@ -14,7 +14,6 @@ Everything the cross-file checks need from git, behind one small class:
 Strictly read-only: this module never mutates the repository.
 """
 
-import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -23,8 +22,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import read_plan_counter
-
-_GIT_BINARY: Final[str] = "git"
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 # name-status codes that carry TWO paths (old NUL new) in -z output.
 _TWO_PATH_STATUS_PREFIXES: Final[tuple[str, ...]] = ("R", "C")
@@ -126,16 +124,21 @@ class GitFacts:
         A non-zero exit here is a documented "fact not available" signal
         (unknown path, empty repo), not a hidden error: the caller branches
         on ``None`` and surfaces the absence as a finding where relevant.
+
+        Routed through :func:`run_git` rather than spawning git here, so the
+        declined optional index lock applies. This module ran
+        ``git diff --cached`` with its own inline spawn, which refreshes and
+        REWRITES ``.git/index`` — from the commit gate, at the exact moment the
+        agent needs ``.git/index.lock`` for the commit being gated. Plan 00246
+        centralised every other spawn for this reason and missed this one
+        because the guard could not see an argv whose head was a module
+        constant.
+
+        ``run_git`` also never raises, so a wedged git now yields ``None``
+        (the "fact not available" answer this method already documents) instead
+        of a ``TimeoutExpired`` escaping into hook dispatch.
         """
-        # SECURITY: subprocess with list-form argv and no shell (B603); git is
-        # a trusted system tool (B607) — same pattern as utils/git_repo.py.
-        result = subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary
-            [_GIT_BINARY, "-C", str(self._repo_root), *args],
-            capture_output=True,
-            text=True,
-            timeout=Timeout.GIT_CONTEXT,
-            check=False,
-        )
+        result = run_git(self._repo_root, *args, timeout=Timeout.GIT_CONTEXT)
         if result.returncode != 0:
             return None
         return result.stdout

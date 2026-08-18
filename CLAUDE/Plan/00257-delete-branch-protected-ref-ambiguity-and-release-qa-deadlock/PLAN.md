@@ -138,6 +138,51 @@ that test exists to detect. The test is right; its isolation went stale.
   agent is denied the Stop it needs in order to REPORT the abort. Name deleting
   the state file as the abort action in the deny text, and allow the stop.
 
+### Phase 4: The guard that could not see a module constant
+
+- [x] ✅ **Task 4.1**: RED — four tests in
+  `TestAModuleConstantIsNotAHidingPlace`. The two positives failed as
+  predicted; the two negative controls (another tool's binary, an IMPORTED
+  name) passed from the start and are what keep the fix from becoming the
+  guessing the scanner's docstring rules out.
+- [x] ✅ **Task 4.2**: GREEN — `_argv_starts_with_git` now resolves
+  module-level string constants via `_module_string_constants`, reading only
+  the module body. Applied to the real tree it found exactly one spawn and no
+  false positives: `plan_qa/gitfacts.py:132`.
+- [x] ✅ **Task 4.3**: Fixed that spawn — `_git_output` now routes through
+  `run_git`, so the declined index lock applies and a wedged git yields the
+  `None` the method already documents instead of a `TimeoutExpired` escaping
+  into hook dispatch. `CHANGELOG.md`'s Plan 00246 entry corrected: it claimed
+  the guard covered all of `src/`.
+- [ ] ⬜ **Task 4.4**: Consider whether `run_git` should be the only *importable*
+  path to git at all — an import-graph check would catch a future
+  `import subprocess` in a module that has no business spawning anything,
+  which is a strictly stronger guard than matching call shapes.
+
+### Phase 5: Review findings captured, not fixed in the release
+
+RELEASING.md forbids dropping a review finding: each is either fixed before the
+release ships, or tracked here with file:line and severity and fixed
+immediately after. These two are deliberately NOT fixed in the release — both
+are no-op cleanups, and widening a release diff for a no-op is the wrong trade.
+
+- [ ] ⬜ **Task 5.1** (LOW, dead code): eight handlers still read
+  `self._languages or getattr(self, "_project_languages", None)` —
+  `lint_on_edit.py:82`, `qa_suppression.py:87`, `error_hiding_blocker.py:94`,
+  `security_antipattern.py:79`, `comment_changelog.py:202`,
+  `comment_size.py:141`, `tdd_enforcement.py:189`, `pipe_blocker.py:329`.
+  Plan 00251 made `Handler.__init__` set `self._project_languages = None`
+  unconditionally, and all eight classes call `super().__init__()`, so the
+  `getattr` default is provably unreachable. Replace with plain attribute
+  access. No behaviour change — the point is that the declared type stops
+  being contradicted by a workaround for a state that can no longer occur.
+- [ ] ⬜ **Task 5.2** (UNCONFIRMED): the lost review also labelled an
+  "unreachable `| None` branch". A targeted sweep of every `| None` introduced
+  since v3.53.1 found no instance — each candidate is legitimately nullable
+  (`tip_moved_since_proof`, `_discard_unused_bundle`, `_git_output`, the
+  exclude-path sequences). Either find it or record that the label did not
+  survive; an unrefuted label is not the same as a defect.
+
 ## Success Criteria
 
 - [ ] The reproduction no longer deletes the branch
