@@ -93,17 +93,37 @@ promises sed is allowed in `.md` documentation, and for the Bash route that
 promise is false. This repository writes prose about sed constantly, so the
 guard blocks its own documentation.
 
-**Decision**: do NOT bolt on a `.md` special case in the Bash branch. Route the
-fix through Task 3.1's shared "is this Bash call a file write, and to what
-target?" utility, which has to parse redirect targets anyway. A special case
-here would be a second, weaker implementation of exactly the parsing Task 3.1
-exists to centralise — and it would need to be careful about a compound command
-(`cat > x.md <<'EOF' … EOF && sed -i 's/a/b/' real.py` must stay blocked), which
-is precisely the analysis Task 3.1 is scoped to do once.
+**Decision — the two halves are split, and only ONE is deferred.**
+
+**Guidance half: FIXED IMMEDIATELY.** Decision 1 of this plan says a guidance
+defect is corrected at once and never used to justify a silent behaviour change.
+That rule was applied to the `-n`, command-head and `grep`/`echo` cases in Phase
+1 and then, inconsistently, NOT applied to this one — it was initially deferred
+wholesale alongside the behaviour, which left `get_claude_md()` publishing a flat
+"`.md` documentation files" allowance that is true for `Write` and false for a
+Bash heredoc. An agent following it gets denied and learns the guard is
+unreliable, which is precisely the harm Finding 1 is about. The guidance now
+states that the exemption is **Write-tool-only**, names the heredoc case that is
+denied, and gives the Bash form that genuinely works
+(`echo 'avoid sed' > NOTES.md`, allowed because `echo` reaches
+`_is_safe_readonly_command`). Pinned by two tests asserting verdict and guidance
+together.
+
+**Behaviour half: deferred to Task 3.1.** Do NOT bolt on a `.md` special case in
+the Bash branch. It would be a second, weaker implementation of exactly the
+redirect-target parsing Task 3.1 exists to centralise, and it would still have to
+keep a compound command blocked
+(`cat > x.md <<'EOF' … EOF && sed -i 's/a/b/' real.py`), which is the analysis
+Task 3.1 is scoped to do once.
 
 Pinned meanwhile as `xfail(strict=True)` in `TestHeredocWrittenShellScripts`,
 so it flips to a plain pass the moment Task 3.1 lands and fails loudly if it is
 ever "fixed" by accident.
 
-**Date**: 2026-08-19
+**Lesson recorded, because the miss is the interesting part**: having written
+Decision 1, I still deferred a guidance defect on the grounds that its
+*behaviour* fix was expensive. The two are separable and the cheap half should
+never wait for the expensive one — nothing published should stay false while a
+code change is pending.
 
+**Date**: 2026-08-19

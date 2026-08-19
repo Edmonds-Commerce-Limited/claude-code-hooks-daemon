@@ -1352,16 +1352,84 @@ class TestHeredocWrittenShellScripts:
         """
         assert handler.matches(self._bash(self._FLAGGED_SCRIPT_HEREDOC)) is True
 
+    def test_bare_word_in_an_unrelated_command_is_blocked(self, handler):
+        """Deny-by-default, demonstrated where a pattern list would predict 'allowed'.
+
+        No `-i`, no command-head position, no pipe stage, no xargs. Under the old
+        guidance's list-of-blocked-shapes framing an agent would confidently
+        expect this to pass. It does not.
+        """
+        assert handler.matches(self._bash("python3 -c \"print('sed')\"")) is True
+
+    def test_xargs_without_a_flag_is_blocked(self, handler):
+        """Also unlisted by the old framing, also blocked."""
+        assert handler.matches(self._bash("xargs sed 's/a/b/' file.txt")) is True
+
+    def test_word_inside_a_filename_is_not_blocked(self, handler):
+        """The boundary of deny-by-default: it matches the WORD, not substrings.
+
+        Included so the rule is not over-stated in the other direction --
+        `sed_notes.txt` contains the letters but not the word.
+        """
+        assert handler.matches(self._bash("ls sed_notes.txt")) is False
+
+    def test_guidance_states_deny_by_default_not_a_pattern_list(self, handler):
+        """The framing itself is the thing under test.
+
+        A list of blocked shapes and a deny-by-default rule with exemptions are
+        not two wordings of one rule -- they make opposite predictions about
+        every case nobody thought to list. The guidance must say which it is.
+        """
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "DENY-BY-DEFAULT" in guidance
+        assert "exemption" in guidance.lower()
+
+    def test_guidance_admits_the_md_exemption_is_write_tool_only(self, handler):
+        """The guidance must not promise a `.md` allowance the Bash route lacks.
+
+        Plan 00260 Decision 1: a guidance defect is fixed IMMEDIATELY; only the
+        behaviour change is deferred. The old wording listed "`.md`
+        documentation files" as flatly Allowed, which is true for `Write` and
+        false for a Bash heredoc -- so an agent following it got denied and
+        learned the guard was unreliable.
+
+        This is the same guard shape as the rest of this file: verdict and
+        guidance asserted together, so neither can drift alone.
+        """
+        # The behaviour the guidance must now describe honestly.
+        assert handler.matches(self._bash(self._MARKDOWN_HEREDOC)) is True
+
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "Write` tool" in guidance, "guidance must say the .md exemption is Write-tool-only"
+        assert "heredoc" in guidance, "guidance must name the heredoc case that is denied"
+
+    def test_guidance_gives_the_allowed_bash_markdown_form(self, handler):
+        """Naming only the denial teaches avoidance; name the working route too.
+
+        `echo` carries the command into `_is_safe_readonly_command`, so an
+        echo-redirect to markdown genuinely is allowed. Stating that keeps the
+        guidance a map rather than a warning.
+        """
+        assert handler.matches(self._bash("echo 'avoid sed' > NOTES.md")) is False
+
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "echo 'avoid sed' > NOTES.md" in guidance
+
     @pytest.mark.xfail(
         strict=True,
         reason=(
-            "Known defect, Plan 00260 Task 1.5/3.1: the Bash branch blocks a heredoc "
-            "writing MARKDOWN, while the Write branch explicitly allows .md. Same "
-            "content, same destination, opposite verdicts by route -- and the "
-            "handler's own guidance promises the .md allowance. Fixing it needs the "
-            "redirect-target parsing Task 3.1 builds, so this is xfail(strict) rather "
-            "than a bolted-on special case: it flips to a plain pass the moment the "
-            "shared utility lands, and fails loudly if someone 'fixes' it by accident."
+            "Known BEHAVIOUR defect, Plan 00260 Task 3.1: the Bash branch blocks a "
+            "heredoc writing MARKDOWN while the Write branch allows .md. The GUIDANCE "
+            "half was fixed immediately per Decision 1 (it now states the exemption is "
+            "Write-tool-only and names the working echo-redirect form), so nothing "
+            "published is false any more. Only the behaviour is deferred, because "
+            "fixing it needs Task 3.1's redirect-target parsing -- a .md check bolted "
+            "into the Bash branch would be a second, weaker copy of it and would still "
+            "have to keep `cat > x.md <<EOF && sed -i ... real.py` blocked. Flips to a "
+            "plain pass when 3.1 lands; fails loudly if 'fixed' by accident."
         ),
     )
     def test_markdown_heredoc_mentioning_sed_is_not_blocked(self, handler):
