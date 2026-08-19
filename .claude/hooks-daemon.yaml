@@ -94,6 +94,14 @@ handlers:
     # so the heuristic could not distinguish a real leaked path from a
     # fixture without naming the specific real segments — which belongs in
     # the secret list, not here.
+    # Plan 00261. Dogfooded ON, which is also the shipped default. A Write to an
+    # existing file not read this session is denied — it would replace contents
+    # the agent has never seen. New files and Edits are unaffected; `Read` is the
+    # one-call remedy, which is why there is no escape hatch.
+    write_clobber_guard:
+      enabled: true
+      priority: 16
+
     # Plan 00259. Dogfooded ON, which is also the shipped default. Publishing
     # renders a local file to a page hosted on claude.ai and returns a URL —
     # an egress path this repository cannot audit or retract. Read-only

@@ -209,6 +209,15 @@ class HandlerID:
         config_key="artifact_publish_blocker",
         display_name="block-artefact-publishing",
     )
+    # Write-clobber guard (Plan 00261): a Write to an existing file the agent
+    # has not read destroys its contents with no warning and no diff. The
+    # harness documents read-before-overwrite but does not enforce it under
+    # bypassPermissions, so the daemon restores that contract.
+    WRITE_CLOBBER_GUARD = HandlerIDMeta(
+        class_name="WriteClobberGuardHandler",
+        config_key="write_clobber_guard",
+        display_name="block-unread-overwrite",
+    )
     GIT_STASH = HandlerIDMeta(
         class_name="GitStashHandler",
         config_key="git_stash",

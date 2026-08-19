@@ -64,6 +64,9 @@ class Priority:
     ARTIFACT_PUBLISH_BLOCKER = 14
 
     ROOT_RECURSION_GUARD = 16
+    # Runs after the blocking safety handlers on purpose: a Read they DENY never
+    # happened, so it must not be recorded as knowledge of the file.
+    WRITE_CLOBBER_GUARD = 16
 
     TDD_ENFORCEMENT = 15
     DANGEROUS_PERMISSIONS = 15

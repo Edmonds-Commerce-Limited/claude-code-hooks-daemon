@@ -35,3 +35,30 @@ config_changes:
         the setting themselves. This does not affect a human publishing
         through the claude.ai UI -- the daemon sees tool calls, not browser
         clicks.
+    - key: handlers.pre_tool_use.write_clobber_guard
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PreToolUse blocking handler (Plan 00261). Denies a Write to a file
+        that already exists and that the session has not Read. Write replaces a
+        file's ENTIRE contents, so an agent writing blind destroys content it
+        cannot describe -- it could not report the loss even afterwards. This is
+        a recorded incident, not a hypothetical: a Write destroyed a tracked
+        58-line journal in the daemon's own repository, noticed only because
+        that path happened to fall under an ADVISE-level plan-QA rule. The
+        handler exists because the Write tool's own description states
+        "Overwriting an existing file you haven't Read will fail" and, measured
+        under bypassPermissions, it does not -- so this restores a documented
+        contract rather than adding a new rule. Creating a NEW file is never
+        blocked, nor is rewriting a file read or written earlier in the same
+        session, nor any Edit. Non-terminal by design: the handler ALLOWs on its
+        common path and a terminal ALLOW would shadow every handler behind it.
+      migration_note: >-
+        On by default; no action needed to adopt. If a Write is denied, Read the
+        file and retry, or use Edit -- either is one call. There is deliberately
+        no MUST_..._BECAUSE escape hatch, because a Read actually removes the
+        hazard whereas a typed justification would only declare it acceptable.
+        Note the guard tracks READS, not sizes: a byte-threshold rule would not
+        have caught the motivating incident, because the clobbering write made
+        the file BIGGER. Bash-mediated writes (>, >>, tee, heredoc) are not
+        covered by this handler.

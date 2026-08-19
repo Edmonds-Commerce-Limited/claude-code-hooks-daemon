@@ -65,6 +65,10 @@ handlers:
       enabled: true
       priority: 15
 
+    write_clobber_guard:   # Blocks Write to an existing file not read this session
+      enabled: true         # New files and Edits are unaffected. `Read` the file to proceed —
+      priority: 16          # that is the remedy, so no escape hatch exists or is needed.
+
     artifact_publish_blocker:  # Blocks publishing artefacts (a claude.ai URL outside the project)
       enabled: true         # Read-only `action: "list"` is never blocked. No agent-side escape
       priority: 14          # hatch by design — only a human sets this to false.

@@ -98,6 +98,11 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "SecurityAntipatternHandler": "T1 denies known-dangerous constructs",
     "SedBlockerHandler": "T1 denies sed used to modify files",
     "SensitiveContentHandler": "T1 denies blocked terms in content and git metadata",
+    "WriteClobberGuardHandler": (
+        "T1 denies a Write that would destroy unread file contents, and the guidance "
+        "carries what the deny reason cannot: that new files and Edits are never "
+        "blocked, so an agent does not over-correct into avoiding Write entirely"
+    ),
     "ArtifactPublishBlockerHandler": (
         "T1 denies publishing an artefact, and the guidance carries something the "
         "deny reason alone cannot: that there is deliberately NO escape hatch, so an "

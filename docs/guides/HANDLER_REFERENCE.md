@@ -582,6 +582,41 @@ handlers:
 
 ---
 
+#### write_clobber_guard
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `write_clobber_guard`   |
+| **Priority**   | 16                      |
+| **Type**       | Blocking (non-terminal) |
+| **Event**      | PreToolUse              |
+
+**Description:** Denies a `Write` to a file that already exists and that the session has not `Read`. `Write` replaces a file's entire contents, so an agent writing blind destroys content it cannot describe — it could not report the loss even afterwards.
+
+**Never blocked:** creating a new file; rewriting a file read or written earlier in the same session; any `Edit` (a targeted replacement of known text, not a whole-file overwrite).
+
+**The remedy is one call:** `Read` the file and retry, or use `Edit`. There is deliberately **no escape hatch** — not for Plan 00259's reason (irreversibility) but because none is needed: a `Read` actually removes the hazard, whereas a typed justification would only declare it acceptable.
+
+**Why it exists.** The `Write` tool documents *"Overwriting an existing file you haven't Read will fail."* Measured under `bypassPermissions`, it does not — an unread file was clobbered and its contents destroyed, reproduced both inside and outside the project. In other permission modes the approval prompt is a real net, so this closes a gap specific to unattended operation. This handler restores a documented contract rather than adding a new rule.
+
+**Why reads and not sizes.** The natural design is to generalise [`plan-shrink-without-journal`](#plan_qa_edit) and block a write that loses many bytes. The incident that motivated this handler defeats that: the clobbering `Write` made the file **bigger** (58 → ~67 lines). The hazard is replacement without knowledge, not shrinkage.
+
+**Non-terminal by design.** The handler ALLOWs on its common path (recording a read), and a terminal ALLOW ends the dispatch chain, disabling every handler behind it. The chain merges most-restrictive-wins, so a non-terminal DENY still denies.
+
+**Not covered:** Bash-mediated writes (`>`, `>>`, `tee`, heredoc) — that surface belongs to the shared bash-write-target work, not here.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    write_clobber_guard:
+      enabled: true
+      priority: 16
+```
+
+---
+
 #### artifact_publish_blocker
 
 | Property       | Value                      |
@@ -2306,6 +2341,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `error_hiding_blocker`         | PreToolUse        | 13       | Code that silently swallows errors                                   |
 | `security_antipattern`         | PreToolUse        | 14       | Dangerous constructs (eval, shell exec, deserialization, XSS, creds) |
 | `artifact_publish_blocker`     | PreToolUse        | 14       | Publishing an artefact (a claude.ai URL outside the project)         |
+| `write_clobber_guard`          | PreToolUse        | 16       | Write to an existing file not read this session                      |
 | `worktree_file_copy`           | PreToolUse        | 15       | cp/mv/rsync between worktrees                                        |
 | `pipe_blocker`                 | PreToolUse        | 15       | Expensive commands piped to tail/head                                |
 | `dangerous_permissions`        | PreToolUse        | 15       | chmod 777, chmod a+rwx                                               |

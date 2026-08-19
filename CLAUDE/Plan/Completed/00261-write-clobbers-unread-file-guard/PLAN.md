@@ -1,6 +1,6 @@
 # Plan 00261: `Write` clobbers an existing file nobody read
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-08-19
 **Owner**: Unassigned
 **Priority**: High
@@ -69,36 +69,45 @@ a named path list. No guard covers an arbitrary file.
 
 ### Phase 1: Confirm the mechanism
 
-- [ ] ⬜ **Task 1.1**: Re-confirm the harness behaviour on the current Claude
+- [x] ✅ **Task 1.1**: Re-confirm the harness behaviour on the current Claude
   Code version before building anything — if read-before-overwrite starts being
   enforced, this plan is obsolete and should be cancelled rather than shipped.
-  Record the version tested.
-- [ ] ⬜ **Task 1.2**: Confirm the daemon sees `Read` tool calls as PreToolUse
+  Record the version tested. **Confirmed NOT enforced** under
+  `bypassPermissions`; reproduced twice (under `/tmp` and in-repo) — see
+  Overview.
+- [x] ✅ **Task 1.2**: Confirm the daemon sees `Read` tool calls as PreToolUse
   events (capture a real payload via `payload_capture`, as Plan 00259 Task 1.1
-  did — do not assume). The whole design depends on it.
+  did — do not assume). The whole design depends on it. **Confirmed**: the live
+  verification in Task 3.3 only passes if the `Read` PreToolUse event reaches
+  the handler.
 
 ### Phase 2: TDD implementation
 
-- [ ] ⬜ **Task 2.1**: RED — `matches()`: fires on `Write` to a path that
+- [x] ✅ **Task 2.1**: RED — `matches()`: fires on `Write` to a path that
   exists on disk and has not been read this session; does NOT fire on `Write`
   to a non-existent path; does NOT fire on `Edit`; does NOT fire on any other
   tool.
-- [ ] ⬜ **Task 2.2**: RED — session-state tests: a `Read` of the path clears
+- [x] ✅ **Task 2.2**: RED — session-state tests: a `Read` of the path clears
   the block for that path; a `Read` of a DIFFERENT path does not.
-- [ ] ⬜ **Task 2.3**: GREEN — implement, following `lsp_enforcement`'s
-  established per-session-state pattern.
-- [ ] ⬜ **Task 2.4**: `get_claude_md()` and `get_acceptance_tests()` with both
+- [x] ✅ **Task 2.3**: GREEN — implement, following `lsp_enforcement`'s
+  established per-session-state pattern. 18 tests in
+  `tests/unit/handlers/pre_tool_use/test_write_clobber_guard.py`.
+- [x] ✅ **Task 2.4**: `get_claude_md()` and `get_acceptance_tests()` with both
   a DENY case and an ALLOW case (a new-file write), since a deny-only suite
   cannot catch over-broad matching.
 
 ### Phase 3: Wiring
 
-- [ ] ⬜ **Task 3.1**: Register default-ON, dogfood in this repo, and decide the
-  priority band (safety, 10-20).
-- [ ] ⬜ **Task 3.2**: `config-changes` manifest. Consider whether a
+- [x] ✅ **Task 3.1**: Register default-ON, dogfood in this repo, and decide the
+  priority band (safety, 10-20). Landed at priority 16 — see Decision 3.
+- [x] ✅ **Task 3.2**: `config-changes` manifest. Consider whether a
   `truth-changes` entry is warranted — this changes what a `Write` call does in
-  every client project, so probably yes.
-- [ ] ⬜ **Task 3.3**: Full QA, daemon restart RUNNING, live verification.
+  every client project, so probably yes. **Both filed**, since a project whose
+  docs say "rewrite the file" now has a false instruction.
+- [x] ✅ **Task 3.3**: Full QA, daemon restart RUNNING, live verification.
+  Verified in BOTH directions on the live daemon: a `Write` to an unread 3-line
+  file was denied naming `AT RISK: 3 lines`; after a `Read` of that same path
+  the identical `Write` succeeded.
 
 ## Technical Decisions
 
@@ -130,13 +139,33 @@ was withheld because the action is irreversible. Here it is simply unnecessary:
 `Read` IS the escape hatch, it costs one call, and unlike a typed justification
 it actually removes the hazard rather than declaring it acceptable.
 
+### Decision 3: priority 16, and NON-terminal
+
+**Context**: the plan said "safety band, 10-20" without picking a number, and
+said nothing about the terminal flag.
+
+**Decision**: priority 16, `terminal=False`.
+
+**Rationale for 16**: it sits *after* the blocking safety handlers (10-15). That
+ordering is load-bearing rather than cosmetic — this handler records a `Read` as
+knowledge of a file, so it must not record one that a handler ahead of it
+DENIED. A denied `Read` never happened, and treating it as knowledge would let
+the very next `Write` clobber the file.
+
+**Rationale for non-terminal**: the handler ALLOWs on its common path (every
+`Read`, and every `Write` it is not blocking). A terminal ALLOW ends the
+dispatch chain, silently disabling every handler behind it — the shadowing
+defect Plan 00241 diagnosed. The chain merges most-restrictive-wins, so a
+non-terminal DENY still denies; being terminal would buy nothing and cost the
+rest of the chain. `test_handler_is_not_terminal` pins this with the reason.
+
 ## Success Criteria
 
-- [ ] `Write` to an existing, unread file is denied
-- [ ] `Write` to a new path is unaffected
-- [ ] A prior `Read` of that path allows the write
-- [ ] Handler carries guidance and both acceptance-test cases
-- [ ] QA green, daemon restart RUNNING, verified live
+- [x] `Write` to an existing, unread file is denied
+- [x] `Write` to a new path is unaffected
+- [x] A prior `Read` of that path allows the write
+- [x] Handler carries guidance and both acceptance-test cases
+- [x] QA green, daemon restart RUNNING, verified live
 
 ## Delivery & Milestones
 
@@ -144,3 +173,6 @@ it actually removes the hazard rather than declaring it acceptable.
 
 - Filed from a live incident in this repository plus a measured harness
   behaviour, not from a hypothetical.
+- Delivered in the commit that closes this plan: handler, 18 unit tests,
+  constants, config + example config, `HANDLER_REFERENCE.md`, and both the
+  `config-changes` and `truth-changes` UNRELEASED manifests.

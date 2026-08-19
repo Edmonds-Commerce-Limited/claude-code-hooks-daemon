@@ -41,3 +41,37 @@ truth_changes:
       This has no effect on a human publishing through the claude.ai UI. The
       daemon sees tool calls, not browser clicks — the same honest limitation
       `ancestry_preserving_merge` records about the GitHub merge button.
+  - was: >
+      `Write` is the tool for putting content into a file, and using it on an
+      existing path simply replaces that file. A project's own docs, skills or
+      agent instructions could tell an agent to "write the updated file" without
+      qualification, and that instruction worked whether or not the agent had
+      read what was already there.
+    now: >
+      A `Write` to a file that ALREADY EXISTS and that the session has not
+      `Read` is BLOCKED (Plan 00261). `Write` replaces a file's entire
+      contents, so writing blind destroys content the agent cannot describe --
+      it could not report the loss even afterwards.
+
+      Creating a NEW file is never blocked. Neither is rewriting a file the
+      session already read or wrote, nor any `Edit`. The remedy is one call:
+      `Read` the file and retry, or use `Edit`. There is deliberately no
+      `MUST_..._BECAUSE` escape hatch, because a `Read` actually removes the
+      hazard whereas a typed justification would only declare it acceptable.
+
+      IF YOUR DOCS OR SKILLS INSTRUCT AN AGENT TO REGENERATE OR REWRITE A FILE
+      WHOLESALE, add "read it first" to that instruction — otherwise the agent
+      will be denied the first time it follows them on an existing file.
+
+      Two things worth knowing about the reasoning, because they change what
+      you should expect. First, this restores a contract the harness already
+      DOCUMENTS: the `Write` tool states that overwriting an unread file will
+      fail, and measured under `bypassPermissions` it does not. In other
+      permission modes the approval prompt is a real net, so this closes a gap
+      specific to unattended operation. Second, the guard tracks READS, not
+      sizes — a byte-threshold rule would not have caught the incident that
+      motivated it, because the clobbering write made the file BIGGER. The
+      hazard is replacement without knowledge, not shrinkage.
+
+      Not covered: Bash-mediated writes (`>`, `>>`, `tee`, heredoc). Those
+      bypass every Write/Edit-keyed handler and are tracked separately.

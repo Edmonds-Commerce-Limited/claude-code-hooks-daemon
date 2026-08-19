@@ -238,6 +238,11 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
 _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "AbsolutePathHandler": "matches on the file_path parameter, not a command",
     "AgentIsolationAdvisorHandler": "matches on the Agent tool, not a command",
+    "WriteClobberGuardHandler": (
+        "matches a Write file path plus per-session read state, not a command string - "
+        "there is no shell spelling to evade, and the Bash-mediated write route is "
+        "Plan 00260's subject rather than an evasion of this handler"
+    ),
     "ArtifactPublishBlockerHandler": (
         "matches on the Artifact tool and its action field, not a command string - "
         "there is no shell spelling to evade, and an unrecognised action is treated "

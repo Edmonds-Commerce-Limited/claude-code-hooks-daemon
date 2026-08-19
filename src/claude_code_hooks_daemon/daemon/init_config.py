@@ -135,6 +135,10 @@ class ConfigTemplate:
             # guard. Read-only `action: "list"` stays allowed. Only a human may
             # lift this -- the handler deliberately has no agent-side hatch.
             "    artifact_publish_blocker: {enabled: true, priority: 14}  # Block publishing artefacts outside the project\n"
+            # On by default (Plan 00261): Write replaces a file wholesale, and the
+            # harness does not enforce its own documented read-before-overwrite
+            # contract under bypassPermissions. New files are never blocked.
+            "    write_clobber_guard: {enabled: true, priority: 16}  # Block Write to an existing file not read this session\n"
             "    root_recursion_guard: {enabled: true, priority: 16}  # Block recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME\n"
             "    pipe_blocker: {enabled: true, priority: 15}      # Block dangerous pipe patterns\n"
             "    worktree_file_copy: {enabled: true, priority: 15}  # Prevent worktree file copies\n"
