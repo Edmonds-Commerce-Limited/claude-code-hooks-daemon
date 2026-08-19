@@ -690,6 +690,8 @@ The handlers listed below are active in this project. Read this section to avoid
 
 **When a tool is blocked by a handler, do not stop working.** Read the block reason, modify your approach, and continue with your task.
 
+**A file written through Bash is not seen by the content guards.** The handlers below that inspect what a file CONTAINS, or where it lives, key on the `Write` and `Edit` tools — so a `>`, `>>`, `tee` or a `cat <<EOF` heredoc reaches disk unexamined by them: no block, no advisory, no record. **A Bash write that drew no complaint is NOT a write that passed a check** — use `Write`/`Edit` for file content and the guards apply. The handlers that judge a Bash COMMAND — destructive git, `sed`, pipes, permissions, `curl | sh` — are unaffected and still cover you.
+
 <!-- handler: prevent-destructive-git -->
 
 ## destructive_git — blocked git commands
@@ -790,7 +792,7 @@ Prepend the absolute path of the project root — the working directory Claude C
 
 ## error_hiding_blocker — error-suppression patterns are blocked
 
-Writing code that silently swallows errors is blocked. All errors must be handled explicitly.
+A `Write`/`Edit` of code that silently swallows errors is blocked. All errors must be handled explicitly.
 
 **Blocked patterns (examples)**:
 
@@ -823,7 +825,7 @@ The `Artifact` tool renders a local file to a page hosted on claude.ai and retur
 
 ## security_antipattern — OWASP security antipatterns are blocked
 
-Writing code that contains security antipatterns is blocked across all supported languages. Fix the code to use safe patterns instead.
+A `Write`/`Edit` of code containing security antipatterns is blocked, across all supported languages. Fix the code to use safe patterns instead.
 
 **Blocked categories**:
 
@@ -843,13 +845,15 @@ Writing code that contains security antipatterns is blocked across all supported
 
 ## sensitive_content — blocked patterns and secret terms are never written
 
-Writing content that matches a configured public pattern or a gitignored secret word list is blocked. Two sources, two different disclosure rules:
+A `Write`/`Edit` whose content matches a configured public pattern or a gitignored secret word list is blocked. Two sources, two different disclosure rules:
 
 **Public patterns** (`handlers.pre_tool_use.sensitive_content.options.public_patterns`): named regexes safe to name — the deny reason shows the pattern name and the exact matched text so you can fix it.
 
 **Secret word list** (`options.secret_word_list_path`, default `.claude/block-words.secret`, gitignored): a term never appears anywhere — not in the deny reason, not in any log, not in payload capture, not in a transcript archive. The deny reason names only an index (`entry N of M in the secret word list`), which is meaningless without the gitignored file. **Do NOT try to guess or work around the block** — open the secret word list file (if you have access) to see what matched, or ask the user. Only the ADDED text is checked on `Edit` (`new_string`) — removing sensitive content is never blocked.
 
 **Git metadata is checked too.** File contents and file PATHS are only two of the seven places a term can enter a repository — the other five are git metadata, and none of them is a file write. So a `Bash` command that records metadata is also checked: `git commit` (messages), `git tag` (names and messages), `git branch` / `checkout -b` / `switch -c` (branch names), `git config user.name|user.email` (author identity), `git merge -m`. A match denies the command.
+
+**But a Bash command that writes a FILE is NOT checked, and that is the gap most likely to bite.** Git metadata is the only Bash surface this handler covers, so a term entering through `cat > f <<EOF`, `>`, `>>` or `tee` reaches disk unexamined — no block, no advisory, no record. Once pushed, removing it needs a history rewrite. Write file content with `Write`/`Edit` so this handler can see it.
 
 **Reading is never blocked.** Only commands that WRITE metadata are candidates, so `grep`, `cat`, `git log --grep=`, `git show`, `git branch --list` and `git tag -l` stay allowed even when the term is right there on the command line — searching for a term and removing it are exactly the work of cleaning a repository.
 
@@ -1117,7 +1121,7 @@ Before making a `git commit` in the hooks daemon repository, this handler advise
 
 ## qa_suppression — QA suppression annotations are blocked
 
-Writing QA suppression directives into source files is blocked across all supported languages. Fix the underlying code issue instead.
+A `Write`/`Edit` that puts QA suppression directives into a source file is blocked, across all supported languages. Fix the underlying code issue instead.
 
 **Blocked annotation types (by language)**:
 
@@ -1137,7 +1141,7 @@ Writing QA suppression directives into source files is blocked across all suppor
 
 ## comment_changelog — no changelog narrative in code comments
 
-Writing HISTORICAL NARRATIVE into a code comment is blocked. A comment describes CURRENT STATE; changelog narrative belongs in git (the commit message), the project's changelog file, or a plan's `JOURNAL/` day-file.
+A `Write`/`Edit` that puts HISTORICAL NARRATIVE into a code comment is blocked. A comment describes CURRENT STATE; changelog narrative belongs in git (the commit message), the project's changelog file, or a plan's `JOURNAL/` day-file.
 
 **Blocked (high-precision) signals**, either of which denies the write:
 
@@ -1213,7 +1217,7 @@ Add 1 to that value (zero-pad to 5 digits, e.g. counter `117` → next plan `001
 
 ## tdd_enforcement — test file must exist before source file
 
-Creating a production source file is blocked until a corresponding test file exists.
+Creating a production source file with `Write` is blocked until a corresponding test file exists.
 
 **TDD workflow (required)**:
 
@@ -1411,7 +1415,7 @@ only ever advise. Lint any file on demand:
 
 ## plan_time_estimates — plans describe WHAT, not WHEN
 
-Writing time estimates into a plan document is blocked — that is any `CLAUDE/Plan/**/*.md` EXCEPT anything under a plan's `JOURNAL/`. Plans capture the work to be done, not how long it will take.
+A `Write`/`Edit` that puts time estimates into a plan document is blocked — that is any `CLAUDE/Plan/**/*.md` EXCEPT anything under a plan's `JOURNAL/`. Plans capture the work to be done, not how long it will take.
 
 **Everything under `JOURNAL/` is exempt** — day-files (`NNNNN-Journal-YY-MM-DD.md`) and any other file in there. A journal records what actually happened, so an elapsed duration is a historical fact, not a forward estimate. The exemption is by LOCATION as well as by filename, so a mis-named day-file stays exempt.
 
@@ -1484,6 +1488,13 @@ auto-memory files (`~/.claude/projects/*/memory/*.md`) is **blocked** — via th
 Write/Edit tools AND via bash redirect/`tee` side-doors. **Reading memory is
 still allowed** so existing memory can be migrated out.
 
+**The bash coverage is two spellings, not every route.** `>`, `>>` and
+`tee` are detected; `cp`, `mv`, `install`, `dd of=`, `>|`, a quoted target
+containing a space, a variable target (`> "$OUT"`) and a script that opens
+the file itself are NOT. Treat the rule as the policy and honour it — do not
+read an unblocked command as permission. The markdown-LOCATION rule below is
+checked on `Write`/`Edit` only, with no bash detection at all.
+
 **Put durable knowledge in TRACKED project docs (progressive disclosure):**
 
 - Always-relevant facts → `CLAUDE.md` (keep lean; resident every session)
@@ -1500,7 +1511,7 @@ Keep ONE source of truth per fact and link to it. Normal markdown-location rules
 
 ## validate_instruction_content — CLAUDE.md and README.md must have stable content
 
-Writing ephemeral or session-specific content to `CLAUDE.md` or `README.md` is blocked. These files should contain only stable instructions, not implementation logs or session state.
+A `Write`/`Edit` of ephemeral or session-specific content to `CLAUDE.md` or `README.md` is blocked. These files should contain only stable instructions, not implementation logs or session state.
 
 **Blocked content types**:
 
