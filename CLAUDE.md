@@ -1664,12 +1664,6 @@ When you background a long-lived process:
 
 Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
 
-<!-- handler: git-hooks-executable-fixer -->
-
-## git_hooks_executable_fixer — auto-fixes non-executable git hooks
-
-When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
-
 <!-- handler: lint-on-edit -->
 
 ## lint_on_edit — source writes are linted, and a failure DENIES
@@ -1702,6 +1696,12 @@ language's `default`/`extended` command (set `extended: null` to run only the
 syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
 globs. The project-wide `daemon.exclude_paths` applies here too; the two are
 additive and neither overrides the other.
+
+<!-- handler: git-hooks-executable-fixer -->
+
+## git_hooks_executable_fixer — auto-fixes non-executable git hooks
+
+When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
 
 <!-- handler: git-upstream-checker -->
 
