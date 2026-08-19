@@ -799,6 +799,22 @@ Writing code that silently swallows errors is blocked. All errors must be handle
 
 **Excluded paths**: vendor/, node_modules/, and test-fixture dirs (tests/fixtures/, tests/assets/, __fixtures__/) are skipped by default. Exempt more paths with glob patterns via `handlers.pre_tool_use.error_hiding_blocker.options.exclude_paths` or the project-wide `daemon.exclude_paths` — use these for fixtures of deliberately-broken code instead of disabling the handler.
 
+<!-- handler: block-artefact-publishing -->
+
+## artifact_publish_blocker — publishing artefacts is blocked by default
+
+The `Artifact` tool renders a local file to a page hosted on claude.ai and returns a URL. The page starts private, but it lives OUTSIDE the project: the repository cannot audit what left it, and deleting the artefact later does not un-share a link someone has already opened. Whether content leaves is the USER's call.
+
+**Blocked**: any `Artifact` publish or update (an absent `action`, `action: "publish"`, or passing `url` to update an existing page).
+
+**Always allowed**: `action: "list"` — enumerating existing artefacts discloses nothing new.
+
+**Do instead**: write the file locally and give the user its path, or report your findings in your reply. The user loses nothing — publishing is a step they can take themselves at any time.
+
+**There is NO escape hatch.** Unlike `git_stash` or `ancestry_preserving_merge`, this handler accepts no `MUST_..._BECAUSE` declaration. Those hatches let an agent declare intent for an action whose consequences stay inside the repository; publishing leaves it. An agent that can type its own justification has self-authorised disclosure, which is the precise thing this guard exists to prevent — the same reason `delete-branch --allow-unproven` still demands an interactive human.
+
+**To lift it**, a HUMAN sets `handlers.pre_tool_use.artifact_publish_blocker.enabled: false`. Ask them; do not apply it yourself, and do not hunt for another way to publish.
+
 <!-- handler: block-security-antipatterns -->
 
 ## security_antipattern — OWASP security antipatterns are blocked
