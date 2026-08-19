@@ -132,15 +132,28 @@ build a parallel mechanism.
     path-only utility restores them outright), `plan_time_estimates` is NOT
     path-keyed, and `absolute_path` should be dropped from Task 3.1's list
     because extending it to Bash would block ordinary relative-path shell use.
-- [ ] ⬜ **Task 2.2**: For each handler that is blind, add one sentence to its
-  `get_claude_md()` naming the boundary — e.g. "this handler sees
-  `Write`/`Edit` only; a file written via a Bash heredoc is not checked".
-  This is remedy option 3 from the report and the cheapest real win: an agent
-  that knows a guard is blind can compensate; one that assumes coverage
-  cannot.
-- [ ] ⬜ **Task 2.3**: Add a coverage test in the spirit of
-  `test_claude_md_guidance_coverage.py` that fails when a Write/Edit-keyed
-  handler carries no recorded verdict about its Bash blindness.
+- [x] ✅ **Task 2.2**: Name the boundary in the resident guidance. Delivered
+  differently from the brief, and the difference is the point — see
+  [DECISIONS.md](DECISIONS.md). The harm was not a missing sentence but a
+  FALSE CLAIM: eight sections opened with an unqualified "Writing X is
+  blocked", so an agent read a clean Bash write as evidence of safety. Each
+  claim was made route-accurate (no extra words; appending a disclaimer would
+  have left the wrong sentence standing), and the class-wide fact is stated
+  ONCE in the shared guidance intro rather than 22 times. The intro also names
+  the guards that are UNAFFECTED — a reader told only that Bash bypasses the
+  content guards could conclude Bash is unguarded generally, which is false and
+  more dangerous than the gap being described. Two sections earned an explicit
+  sentence because they IMPLY coverage rather than merely omitting it:
+  `sensitive_content` (documents its git-metadata Bash handling) and
+  `markdown_organization` (claims the bash side-doors are shut when two
+  spellings of many are).
+- [x] ✅ **Task 2.3**: `tests/integration/test_bash_write_blindness_coverage.py`
+  — 37 tests. Enumerates rather than audits, in the spirit of
+  `test_claude_md_guidance_coverage.py`, and forces a verdict plus a reason per
+  handler. It immediately found `WriteClobberGuardHandler`, which shipped one
+  day earlier with exactly this hole and is absent from the Task 2.1 map
+  because that map predates it — so the guard has already done the job a
+  hand-written sweep could not.
 
 ### Phase 3: Choose and build a remedy
 
@@ -179,14 +192,22 @@ build a parallel mechanism.
     commits whose MESSAGE mentions a redirect. Scope this as quote/heredoc-aware
     scanning plus `shlex` tokenisation plus cwd resolution.
 
-- [ ] ⬜ **Task 3.1a** (BLOCKER for 3.1, found by the Task 2.1 map): audit every
-  candidate handler's `handle()` for an explicit non-Write/Edit ALLOW before
-  routing any Bash event to it. `validate_instruction_content.handle()` ends
-  with `else: return HookResult(decision=Decision.ALLOW, reason="Tool type not handled by validator")` (verified at
-  `validate_instruction_content.py:99-103`). Routing a Bash event there
-  path-only would not merely fail to help — it would convert a blind spot into
-  a POSITIVE ALL-CLEAR, which is strictly worse than the status quo. Silence
-  and ALLOW are not the same answer.
+- [x] ✅ **Task 3.1a** (BLOCKER for 3.1): done by MEASUREMENT — every handler
+  called with a real Bash payload, rather than read. Two findings, both in
+  [DECISIONS.md](DECISIONS.md) Decision 4, and both make the remedy narrower:
+
+  - The explicit-ALLOW trap is **18 handlers of 22**, not the one the map
+    found. `matches()` is False for all 22 today (no live bug), but
+    `handle()` returns ALLOW for 18 if it is ever reached. Reading finds only
+    `validate_instruction_content`, whose reason string makes the
+    fall-through legible; the other 17 allow silently.
+  - A **second trap the map did not identify**: even without an explicit
+    ALLOW, feeding a PATH with no CONTENT makes a handler that WOULD have
+    denied report nothing. Demonstrated on `security_antipattern` and
+    `error_hiding_blocker` — DENY with content, no match with it stripped.
+  - Consequence: the Group 1 / Group 2 split is now a **safety boundary**.
+    Group 2 must never be routed a Bash event without real content, and for
+    `>`/`tee` that content does not exist at PreToolUse.
 
 - [ ] ⬜ **Task 3.1b**: fix the blindness at its actual source. It is not 21
   independent decisions: `core/utils.py:36` `get_file_path()` returns `None`
@@ -194,10 +215,12 @@ build a parallel mechanism.
   way, so a handler CANNOT opt in even if it wanted to. The new accessor
   belongs beside those two, not inside any one handler.
 
-- [ ] ⬜ **Task 3.2**: Evaluate a `bypassPermissions`-aware SessionStart advisory
-  stating that the harness will push toward Bash-first editing and that
-  write-time guards do not cover it. Cheap, honest, no parsing — it converts
-  a silent gap into a known one.
+- [x] ✅ **Task 3.2**: Evaluated and **declined** — see
+  [DECISIONS.md](DECISIONS.md) Decision 5. Phase 2 put this statement in the
+  shared guidance intro, which is resident in `CLAUDE.md` and read in full at
+  the start of every session. That is the same reach a SessionStart advisory
+  would have, for no extra handler and no second copy to drift. Reversal
+  condition recorded.
 
 - [ ] ⬜ **Task 3.3**: Record the decision in Technical Decisions with the
   rationale, then implement whichever options are adopted under TDD.

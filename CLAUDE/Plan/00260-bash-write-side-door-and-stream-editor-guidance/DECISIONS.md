@@ -127,3 +127,85 @@ never wait for the expensive one — nothing published should stay false while a
 code change is pending.
 
 **Date**: 2026-08-19
+
+### Decision 4: the ALLOW-trap is 18 handlers of 22, not one — and there is a second trap underneath it
+
+**Context**: Task 3.1a was filed as a blocker on the strength of ONE handler.
+Note E of [BASH-BLINDSPOT-MAP.md](BASH-BLINDSPOT-MAP.md) found that
+`validate_instruction_content.handle()` ends with an explicit
+`Decision.ALLOW` for any tool that is not Write/Edit, and reasoned that routing
+a Bash event there would manufacture a false all-clear.
+
+**Settled by measurement, not by reading.** Every discovered handler was called
+with a real Bash payload and its actual return recorded. Reading `handle()`
+would have found the one handler whose *reason string* makes the fall-through
+visible ("Tool type not handled by validator"); the others reach the same
+outcome silently, with no reason text to notice.
+
+| Bash payload result      | Count | Handlers                                                                   |
+| ------------------------ | ----- | -------------------------------------------------------------------------- |
+| `matches()` False        | 22    | ALL of them — so there is no live bug today                                |
+| `handle()` returns ALLOW | 18    | the trap, if `matches()` were ever flipped                                 |
+| `handle()` returns DENY  | 3     | `absolute_path`, `sed_blocker` (own Bash rules), and `plan_time_estimates` |
+| `handle()` returns None  | 1     | —                                                                          |
+
+So the hazard is **eighteen times larger than the map recorded**, and the map
+found the one instance that was legible from source. Silence and ALLOW are not
+the same answer, and here almost nothing returns silence.
+
+**The second trap, which the map did not identify at all.** Even a handler with
+no explicit ALLOW is unsafe to feed a PATH without CONTENT. Demonstrated by
+running each Group 2 handler twice on the same file path, once with dangerous
+content and once with it stripped — which is exactly what a path-only utility
+would deliver:
+
+| Handler                | With content | Content stripped | Effect              |
+| ---------------------- | ------------ | ---------------- | ------------------- |
+| `security_antipattern` | DENY         | no match         | **false all-clear** |
+| `error_hiding_blocker` | DENY         | no match         | **false all-clear** |
+
+A guard that would have denied instead reports nothing. That is worse than the
+blindness it replaces, because the blindness at least produces no verdict.
+
+**Decision — Task 3.1's utility is re-scoped, and the split is now a SAFETY
+boundary rather than a convenience one.**
+
+1. **Group 1 (PATH-only, 7 handlers) may be routed a Bash write.** They decide
+   from the path, and the three PostToolUse members read the bytes off disk
+   themselves — where, being PostToolUse, the bytes are genuinely there. Two of
+   them DENY (`lint_on_edit`, `validate_eslint_on_write`), so this slice
+   restores two denying guards with no content plumbing.
+2. **Group 2 (CONTENT-required, 11 handlers) must NEVER be routed a Bash event
+   without real content.** Not "should prefer not to" — routing them path-only
+   converts a silent gap into a positive all-clear, and the two rows above are
+   the proof.
+3. **For `>` redirect and `tee`, content does not exist at PreToolUse**, so
+   Group 2 can never be safely served on those routes at that event. A heredoc
+   body IS in the command string and is the exception. Any utility must
+   therefore return content as `str | None` and callers must treat `None` as
+   "do not decide", never as "nothing found".
+
+**Why this does not reopen Decision 1.** The guidance half shipped in Phase 2
+and does not depend on any of this: the resident block now states the boundary
+once and eight false claims were corrected. This decision governs only the
+behaviour half.
+
+**Date**: 2026-08-19
+
+### Decision 5: Task 3.2's SessionStart advisory is superseded by the Phase 2 intro
+
+**Context**: Task 3.2 proposed a `bypassPermissions`-aware SessionStart advisory
+announcing that the harness pushes toward Bash-first editing and that
+write-time guards do not cover it.
+
+**Decision**: do not build it. Phase 2 put that statement in the shared
+guidance intro, which is resident in `CLAUDE.md` and read in full at the start
+of every session — the same reach a SessionStart advisory would have, for no
+extra handler, no extra dispatch and no second copy to drift. Adding it would
+violate single-source-of-truth to buy nothing.
+
+**Reversal condition**: if the guidance block is ever made opt-in or trimmed
+per-project, the intro stops being guaranteed-resident and this should be
+revisited.
+
+**Date**: 2026-08-19
