@@ -736,15 +736,18 @@ hooks-daemon delete-branch <name>              # deletes only if provably safe
 
 `sed` is blocked because Claude gets sed syntax wrong and a single error can silently destroy hundreds of files with no recovery possible.
 
+**The rule is broader than 'no in-place editing' — read this before assuming a read-only `sed` is fine.**
+
 **Blocked**:
 
-- `sed -i` / `sed -e` (in-place file editing via Bash tool)
+- `sed` with a flag cluster containing `i`, `e` or `n` — so `sed -i` and `sed -e`, but ALSO `sed -n`, anywhere in the command. `sed -n '1,20p' file` prints to stdout and cannot write, and is blocked anyway: `-n` and `-i` differ by one character, and the block costs you nothing because `Read` with `offset`/`limit` does the same job
+- `sed` as a command HEAD — at the start, or after `;`, `&&` or `||` — with or without flags
 - `grep -rl X | xargs sed -i` (mass file modification)
 - Shell scripts (`.sh`/`.bash`) written via Write tool that contain `sed`
 
-**Allowed** (read-only, no file modification):
+**Allowed**:
 
-- `cat file | sed 's/x/y/' | grep z` (pipeline transforming stdout only)
+- `sed` as a PIPE STAGE (after a single `|`, no `i`/`e`/`n` flags) — but ONLY when a `grep` or an `echo` also appears somewhere in the command. That condition is the surprising part: `cat f | sed 's/x/y/' | grep z` is allowed, while `cat f | sed 's/x/y/' | wc -l` is DENIED, even though neither can modify a file
 - `sed` mentioned in commit messages, PR bodies, or `.md` documentation files
 
 **Use instead**:
