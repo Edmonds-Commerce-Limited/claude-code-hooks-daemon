@@ -138,7 +138,7 @@ class CommentSizeHandler(Handler):
         if self._languages_applied:
             return
         self._languages_applied = True
-        effective_languages = self._languages or getattr(self, "_project_languages", None)
+        effective_languages = self._languages or self._project_languages
         if effective_languages:
             self._registry.filter_by_languages(effective_languages)
 

@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00260: the Bash write side-door, and a handler that under-describes its own rule](00260-bash-write-side-door-and-stream-editor-guidance/PLAN.md) - In Progress (verified field report: 21 handlers key on `Write`/`Edit`, so a heredoc/redirect/`tee` write is seen by none of them while the harness actively steers agents toward exactly that route; plus `sed_blocker` guidance that under-states what it blocks)
 
-- [00257: the protected ref nobody qualified, and a QA gate that fails during releases](00257-delete-branch-protected-ref-ambiguity-and-release-qa-deadlock/PLAN.md) - In Progress (reproduced: a tag shadowing the protected ref makes `delete-branch` force-delete an unmerged branch, because this cycle's new forcing tiers removed git's own refusal; plus QA failing whenever a release state file exists)
-
 - [00252: guards for premises no write-time hook sees](00252-guards-for-premises-no-write-time-hook-sees/PLAN.md) - Not Started (two defects, one argument from Core Standard 15's corollary: the ambient-git-premise class Plan 00245 fixed seven times by hand without a guard, and the fact that no guard inspects STAGED CONTENT for secret-list terms, so a file arriving by `mv` reached a pushed commit)
 
 - [00250: CI must actually run the acceptance gates it calls blocking](00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Not Started (Plan 00245's `-rs` flag named 11 acceptance tests that have skipped on every CI run for want of a daemon socket, three of the files being ones `RELEASING.md` Step 12.0 declares BLOCKING)
@@ -167,6 +165,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00257: the protected ref nobody qualified, and a QA gate that fails during releases](Completed/00257-delete-branch-protected-ref-ambiguity-and-release-qa-deadlock/PLAN.md) - Complete at the commit that archives it (protected ref now resolved once before any proof; the release abort deadlock closed by NAMING the abort route rather than widening `matches()`; a `list(CONST)` argv shape was hiding a real unbounded git spawn from the guard)
 
 - [00262: QA runs are not isolated from each other](Completed/00262-qa-runs-are-not-isolated-from-each-other/PLAN.md) - Complete at the commit that archives it (both QA entry points now share one `flock` and refuse a second run rather than race; a contended run made a GATING verdict unreliable in both directions)
 
@@ -1229,15 +1229,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 262 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 213 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 214 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 35 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 36 + 213 + 6 = **255 folders**, spanning
+- **Folder-to-number reconciliation**: 35 + 214 + 6 = **255 folders**, spanning
   **252 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

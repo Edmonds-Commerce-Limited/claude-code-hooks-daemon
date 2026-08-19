@@ -201,13 +201,24 @@ class TestGitHooksExecutableFixerHandlerHandle:
         assert result.decision == Decision.ALLOW
 
     def test_graceful_when_git_unavailable(self, handler, monkeypatch):
-        def _boom(*_args, **_kwargs):
-            raise FileNotFoundError("git not installed")
+        """An absent git binary must degrade to advice, never crash dispatch.
+
+        Patches `run_git` rather than `subprocess.run` because the handler now
+        goes through the bounded runner (Plan 00257). That is not a cosmetic
+        swap: `run_git` NEVER raises — an absent binary or a timeout arrives as
+        a non-zero returncode with the reason in stderr — so the shape under
+        test is the returncode, and an exception-based stub would assert a
+        contract the handler no longer has.
+        """
+
+        def _unavailable(*_args, **_kwargs):
+            return subprocess.CompletedProcess(
+                ["git"], returncode=127, stdout="", stderr="git not installed"
+            )
 
         monkeypatch.setattr(
-            "claude_code_hooks_daemon.handlers.post_tool_use."
-            "git_hooks_executable_fixer.subprocess.run",
-            _boom,
+            "claude_code_hooks_daemon.handlers.post_tool_use." "git_hooks_executable_fixer.run_git",
+            _unavailable,
         )
 
         result = handler.handle(
@@ -221,6 +232,25 @@ class TestGitHooksExecutableFixerHandlerHandle:
         assert result.decision == Decision.ALLOW
         joined = "\n".join(result.context or [])
         assert "git" in joined.lower()
+
+    def test_reports_visibly_when_the_event_carries_no_directory(self, handler):
+        """An event with no cwd must say so, not silently run git in `/`.
+
+        The previous code passed `cwd=None` to `subprocess.run`, which inherits
+        the DAEMON's working directory — and that is `/`, never the project
+        (Plan 00237). git then failed in a non-repository and the handler did
+        nothing, which is indistinguishable from a repo with nothing to fix.
+
+        There is deliberately no ProjectContext fallback to test: the warning
+        came from a git command in a SPECIFIC working tree, possibly a worktree
+        or submodule, so resolving anywhere else would fix a different
+        repository's hooks.
+        """
+        result = handler.handle({"tool_name": "Bash", "tool_response": {"stderr": _GIT_WARNING}})
+
+        assert result.decision == Decision.ALLOW
+        joined = "\n".join(result.context or [])
+        assert "no project directory could be resolved" in joined.lower()
 
 
 class TestGitHooksExecutableFixerHandlerHelpers:

@@ -84,7 +84,7 @@ class QaSuppressionHandler(Handler):
             return
         self._languages_applied = True
         # Handler-level override takes priority over project-level default
-        effective_languages = self._languages or getattr(self, "_project_languages", None)
+        effective_languages = self._languages or self._project_languages
         if effective_languages:
             self._registry.filter_by_languages(effective_languages)
 

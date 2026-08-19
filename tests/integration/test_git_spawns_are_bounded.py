@@ -61,6 +61,11 @@ _ARGV_KEYWORD: Final[str] = "args"
 #: The module whose spawners this guard is about.
 _SUBPROCESS: Final[str] = "subprocess"
 
+#: Builtins that re-wrap a sequence without changing its elements. An argv held
+#: in a module constant is routinely passed as `list(_CMD)` to hand the callee a
+#: mutable copy, and that wrapper must not hide the spawn.
+_SEQUENCE_BUILTINS: Final[frozenset[str]] = frozenset({"list", "tuple"})
+
 #: Files permitted to spawn git directly, each with the reason it is exempt.
 #: A new entry is a deliberate decision that must carry its justification —
 #: without one this degrades into a list of whatever failed last.
@@ -118,6 +123,48 @@ def _module_string_constants(tree: ast.Module) -> dict[str, str]:
     return constants
 
 
+def _module_sequence_constants(tree: ast.Module) -> dict[str, tuple[str, ...]]:
+    """Module-level ``NAME = ("git", ...)`` / ``["git", ...]`` bindings.
+
+    The sibling of :func:`_module_string_constants`, and it exists because the
+    argument that justified that function does not stop at a single string. A
+    whole argv held in a module-level tuple is the same kind of assignment two
+    screens up, and reading it is reading.
+
+    Not resolving it was a live blind spot, not a hypothetical one:
+    ``git_hooks_executable_fixer.py`` spawned git as
+    ``subprocess.run(list(_GIT_HOOKS_PATH_CMD))`` while this guard reported "NO
+    direct git spawns" for the entire tree — the same escape Plan 00246 made
+    through ``_GIT_BINARY``, one container out.
+
+    ONLY all-string sequences are recorded. A sequence carrying anything else
+    cannot be an argv, and coercing one would be the guessing this module
+    refuses.
+    """
+    sequences: dict[str, tuple[str, ...]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign):
+            targets: list[ast.expr] = [node.target]
+        elif isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        else:
+            continue
+        value = node.value
+        if not isinstance(value, (ast.Tuple, ast.List)) or not value.elts:
+            continue
+        words = [
+            element.value
+            for element in value.elts
+            if isinstance(element, ast.Constant) and isinstance(element.value, str)
+        ]
+        if len(words) != len(value.elts):
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                sequences[target.id] = tuple(words)
+    return sequences
+
+
 def _literal_string(node: ast.expr, constants: dict[str, str]) -> str | None:
     """The string this node denotes, or None if it does not denote one plainly."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -127,7 +174,44 @@ def _literal_string(node: ast.expr, constants: dict[str, str]) -> str | None:
     return None
 
 
-def _argv_starts_with_git(call: ast.Call, constants: dict[str, str]) -> str | None:
+def _argv_words(
+    node: ast.expr,
+    constants: dict[str, str],
+    sequences: dict[str, tuple[str, ...]],
+) -> list[str | None] | None:
+    """The argv words this expression denotes, or None if it denotes none plainly.
+
+    Three shapes, all of them reading rather than inference:
+
+    - a list/tuple LITERAL, whose elements may be module string constants;
+    - a NAME bound to a module-level sequence constant;
+    - ``list(...)`` / ``tuple(...)`` wrapped around either — the wrapper changes
+      the container and nothing else, so declining to look inside it would be
+      the blind spot rather than caution.
+
+    A name the module does not itself bind stays unresolved, which is the line
+    this module has always drawn.
+    """
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return [_literal_string(element, constants) for element in node.elts] or None
+    if isinstance(node, ast.Name):
+        words = sequences.get(node.id)
+        return list(words) if words else None
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in _SEQUENCE_BUILTINS
+        and node.args
+    ):
+        return _argv_words(node.args[0], constants, sequences)
+    return None
+
+
+def _argv_starts_with_git(
+    call: ast.Call,
+    constants: dict[str, str],
+    sequences: dict[str, tuple[str, ...]],
+) -> str | None:
     """Return a readable argv head when this call's argv starts with git.
 
     Only a list/tuple literal is inspected. `["git", "status"]` is unambiguous;
@@ -149,14 +233,10 @@ def _argv_starts_with_git(call: ast.Call, constants: dict[str, str]) -> str | No
     argv = _argv_node(call)
     if argv is None:
         return None
-    if not isinstance(argv, (ast.List, ast.Tuple)) or not argv.elts:
+    words = _argv_words(argv, constants, sequences)
+    if not words or words[0] != _GIT:
         return None
-    if _literal_string(argv.elts[0], constants) != _GIT:
-        return None
-    words = [
-        word for word in (_literal_string(element, constants) for element in argv.elts) if word
-    ]
-    return " ".join(words)
+    return " ".join(word for word in words if word)
 
 
 class _SubprocessBindings(NamedTuple):
@@ -214,10 +294,11 @@ def _direct_git_spawns(source_root: Path) -> list[_Spawn]:
         tree = ast.parse(module.read_text(encoding="utf-8"), filename=str(module))
         bindings = _subprocess_bindings(tree)
         constants = _module_string_constants(tree)
+        sequences = _module_sequence_constants(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not _is_subprocess_spawn(node, bindings):
                 continue
-            argv_head = _argv_starts_with_git(node, constants)
+            argv_head = _argv_starts_with_git(node, constants, sequences)
             if argv_head is not None:
                 found.append(_Spawn(relative, node.lineno, argv_head))
     return found
@@ -377,5 +458,62 @@ class TestAModuleConstantIsNotAHidingPlace:
     def test_a_name_the_module_does_not_define_is_left_alone(self, tmp_path: Path) -> None:
         """Resolving an IMPORTED name would be the guess the docstring rules out."""
         source = 'import subprocess\nfrom elsewhere import BINARY\nsubprocess.run([BINARY, "x"])\n'
+
+        assert self._scan_source(tmp_path, source) == []
+
+    def test_a_whole_argv_held_in_a_module_constant_is_caught(self, tmp_path: Path) -> None:
+        """The same argument as the class docstring, one level up.
+
+        Resolving a module-level STRING constant was accepted as reading rather
+        than guessing. A module-level SEQUENCE constant is the identical claim
+        about the identical kind of assignment -- and the guard did not make it,
+        so `subprocess.run(_CMD)` stayed invisible.
+        """
+        source = (
+            "import subprocess\n"
+            '_CMD = ("git", "rev-parse", "--git-path", "hooks")\n'
+            "subprocess.run(_CMD, check=False)\n"
+        )
+
+        assert self._scan_source(tmp_path, source) == ["git rev-parse --git-path hooks"]
+
+    def test_a_constant_argv_wrapped_in_list_is_caught(self, tmp_path: Path) -> None:
+        """The shape that was actually hiding one, found while auditing Task 4.4.
+
+        `git_hooks_executable_fixer.py:85` spawned git as
+        `subprocess.run(list(_GIT_HOOKS_PATH_CMD))`. The guard reported "NO
+        direct git spawns" for the whole tree while that call sat in it --
+        exactly the Plan 00246 failure this class was written about, recurring
+        one wrapper out. `list(...)` around a constant changes the container and
+        nothing else; declining to look inside it is not caution, it is the
+        blind spot with a different spelling.
+        """
+        source = (
+            "import subprocess\n"
+            '_CMD = ("git", "status")\n'
+            "subprocess.run(list(_CMD), check=False)\n"
+        )
+
+        assert self._scan_source(tmp_path, source) == ["git status"]
+
+    def test_a_constant_argv_naming_another_tool_is_not_flagged(self, tmp_path: Path) -> None:
+        """Negative control: widening the resolution must not widen the verdict."""
+        source = 'import subprocess\n_CMD = ("ruff", "check")\nsubprocess.run(list(_CMD))\n'
+
+        assert self._scan_source(tmp_path, source) == []
+
+    def test_a_sequence_the_module_does_not_define_is_left_alone(self, tmp_path: Path) -> None:
+        """`list(name)` where the module never binds `name` is still a guess."""
+        source = "import subprocess\nfrom elsewhere import CMD\nsubprocess.run(list(CMD))\n"
+
+        assert self._scan_source(tmp_path, source) == []
+
+    def test_a_mixed_type_sequence_constant_is_not_resolved(self, tmp_path: Path) -> None:
+        """An argv is strings. A sequence carrying anything else is not one.
+
+        Kept as its own case so the resolver cannot quietly start coercing --
+        a constant like `(TIMEOUT, "git")` must not be read as an argv head.
+        """
+        source = 'import subprocess\n_CMD = ("git", 5)\nsubprocess.run(list(_CMD))\n'
 
         assert self._scan_source(tmp_path, source) == []

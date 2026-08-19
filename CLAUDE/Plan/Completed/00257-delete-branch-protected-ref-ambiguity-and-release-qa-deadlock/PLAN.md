@@ -1,6 +1,6 @@
 # Plan 00257: the protected ref nobody qualified, and a QA gate that fails during releases
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-18
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -94,12 +94,16 @@ that test exists to detect. The test is right; its isolation went stale.
   immediately after the tip is recorded, probing with `show-ref --verify`
   exactly as `git_sync._merged_base_ref` does and falling back to the value as
   given. 78 tests in the file pass.
-- [ ] ⬜ **Task 1.3**: Decide whether an ambiguous protected ref should be a
-  blocking `REFUSAL_*` rather than merely qualified. Git emits
-  `warning: refname '<x>' is ambiguous.` on every proof command and the engine
-  discards that stderr, so the information is there for free. Qualifying is
-  now correct either way; this would additionally TELL the human their repo
-  has an ambiguous ref, which is worth knowing.
+- [x] ✅ **Task 1.3**: Decided — **not a refusal**. `delete-branch`'s contract is
+  to refuse when it cannot PROVE safety. After Task 1.2 it can:
+  `_protected_base_ref` resolves the base deterministically via
+  `show-ref --verify` before any proof runs, so every tier measures the
+  intended ref and ambiguity elsewhere in the repo no longer affects
+  correctness. Refusing would block a provably-safe deletion because of an
+  unrelated repository condition — punishing the user for a hygiene problem
+  the tool has already routed around. Telling the human is still worth doing,
+  but it is a REPORTING change, not a safety gate, and it belongs with the
+  other reporting work rather than in this plan's blast radius.
 - [x] ✅ **Task 1.4**: Verified against a real repository, not only the unit
   tests: tier `unproven`, `is_safe` False, `deleted ()`, `refused` True, and
   `secret-work.txt` correctly named as content existing nowhere else.
@@ -125,10 +129,21 @@ that test exists to detect. The test is right; its isolation went stale.
   release, because the DEFAULT branch is genuinely unobservable over the
   socket while a terminal guard sits ahead of it — its real assertion (Branch
   2.5 must not fire on a clean turn) still runs.
-- [ ] ⬜ **Task 2.4**: DBF, still open — a handler whose matcher changes
-  silently invalidated the fixture isolating it, and nothing caught that. The
-  general shape ("this fixture neutralises an input the handler no longer
-  reads") may not be mechanically checkable; decide, and record either way.
+- [x] ✅ **Task 2.4**: DBF — decided, and the answer is **not mechanically
+  checkable, so record the convention instead**. Detecting "this fixture
+  neutralises an input the handler no longer reads" requires knowing which
+  inputs a handler reads, which is dataflow analysis across config, helpers
+  and transcript readers. A checker that guessed would fail exactly where this
+  one did, only louder.
+  - The cheap general form — "an isolation fixture must be LOAD-BEARING, i.e.
+    removing it must change the outcome" — is mutation testing, and running it
+    across the suite costs more than the class of bug it catches.
+  - Convention recorded instead: **a fixture that exists to isolate must
+    assert what it isolates against.** Task 2.2's replacement does exactly
+    this — it patches `ProjectContext.project_root` and passes WITH a release
+    in flight, so the isolation is proved by the test rather than assumed by
+    its author. A fixture that merely sets a value proves nothing once the
+    matcher moves.
 
 ### Phase 3: The abort deadlock (found by living it)
 
@@ -163,10 +178,40 @@ that test exists to detect. The test is right; its isolation went stale.
   `None` the method already documents instead of a `TimeoutExpired` escaping
   into hook dispatch. `CHANGELOG.md`'s Plan 00246 entry corrected: it claimed
   the guard covered all of `src/`.
-- [ ] ⬜ **Task 4.4**: Consider whether `run_git` should be the only *importable*
-  path to git at all — an import-graph check would catch a future
-  `import subprocess` in a module that has no business spawning anything,
-  which is a strictly stronger guard than matching call shapes.
+- [x] ✅ **Task 4.4**: Considered and **declined**, on evidence gathered while
+  considering it. Five handler modules import `subprocess`; three do so
+  legitimately (`lint_on_edit` and `validate_eslint_on_write` spawn linters,
+  not git) and two import it only for exception TYPES while already using
+  `run_git`. So an import-graph check would need an allowlist covering the
+  majority of its own hits, and an allowlist that large is the "list of
+  whatever failed last" this plan's `_EXEMPT` docstring warns against.
+  It would also not have caught the real defect: the offender imported
+  `subprocess` legitimately-looking and hid in the ARGV, which is a call-shape
+  problem. Closing the call-shape guard's remaining hiding place (Task 4.5) is
+  narrower, needs no allowlist, and is evidenced by a live instance.
+- [x] ✅ **Task 4.5** (found while auditing 4.4): the guard resolved module-level
+  STRING constants but not module-level SEQUENCE constants, so
+  `subprocess.run(list(_GIT_HOOKS_PATH_CMD))` was invisible. Verified before
+  fixing: `_direct_git_spawns` reported "NO direct git spawns" for the whole
+  tree while `git_hooks_executable_fixer.py:85` demonstrably spawned git. This
+  is the Plan 00246 escape recurring one container out — `list(...)` around a
+  constant changes the container and nothing else. Fixed with
+  `_module_sequence_constants` + `_argv_words`, covering a bare `NAME`, a
+  `list(NAME)`/`tuple(NAME)` wrapper, and the existing literal. Three negative
+  controls (another tool, an unbound name, a mixed-type sequence) passed from
+  the start, which is what keeps the widening from becoming guessing.
+- [x] ✅ **Task 4.6**: fixed what 4.5 exposed. `git_hooks_executable_fixer` now
+  routes through `run_git`, so it inherits the declined index lock and the
+  timeout. Two follow-on corrections fell out of it:
+  - `import subprocess` and its `# nosec B404` are gone from the module
+    entirely — `run_git` never raises, so the exception handling it existed
+    for is unnecessary.
+  - It passed `cwd=None` to `subprocess.run` when the event carried no cwd,
+    which inherits the DAEMON's working directory — and that is `/`, never the
+    project (the Plan 00237 scoping shape). git then failed in a
+    non-repository and the handler silently did nothing, which reads exactly
+    like a repo with nothing to fix. `_repo_root` now falls back to
+    `ProjectContext.project_root()` and reports visibly when neither resolves.
 
 ### Phase 5: Review findings captured, not fixed in the release
 
@@ -175,29 +220,39 @@ release ships, or tracked here with file:line and severity and fixed
 immediately after. These two are deliberately NOT fixed in the release — both
 are no-op cleanups, and widening a release diff for a no-op is the wrong trade.
 
-- [ ] ⬜ **Task 5.1** (LOW, dead code): eight handlers still read
-  `self._languages or getattr(self, "_project_languages", None)` —
-  `lint_on_edit.py:82`, `qa_suppression.py:87`, `error_hiding_blocker.py:94`,
-  `security_antipattern.py:79`, `comment_changelog.py:202`,
-  `comment_size.py:141`, `tdd_enforcement.py:189`, `pipe_blocker.py:329`.
-  Plan 00251 made `Handler.__init__` set `self._project_languages = None`
-  unconditionally, and all eight classes call `super().__init__()`, so the
-  `getattr` default is provably unreachable. Replace with plain attribute
-  access. No behaviour change — the point is that the declared type stops
-  being contradicted by a workaround for a state that can no longer occur.
-- [ ] ⬜ **Task 5.2** (UNCONFIRMED): the lost review also labelled an
-  "unreachable `| None` branch". A targeted sweep of every `| None` introduced
-  since v3.53.1 found no instance — each candidate is legitimately nullable
-  (`tip_moved_since_proof`, `_discard_unused_bundle`, `_git_output`, the
-  exclude-path sequences). Either find it or record that the label did not
-  survive; an unrefuted label is not the same as a defect.
+- [x] ✅ **Task 5.1** (LOW, dead code): done — all eight sites now read
+  `self._languages or self._project_languages`. Unreachability re-verified
+  before touching anything rather than taken from the note: `handler.py:124`
+  assigns the slot unconditionally in `__init__`, it is declared in
+  `__slots__`, and all eight classes call `super().__init__()` exactly once.
+  `tests/unit/core/test_handler.py:229` already asserts it reads as `None`
+  before injection. 263 tests pass across the affected handlers. No behaviour
+  change — the point is that the declared type stops being contradicted by a
+  workaround for a state that can no longer occur.
+- [x] ✅ **Task 5.2** (UNCONFIRMED → **recorded as not surviving**): the lost
+  review labelled an "unreachable `| None` branch". A targeted sweep of every
+  `| None` introduced since v3.53.1 found no instance — each candidate is
+  legitimately nullable (`tip_moved_since_proof`, `_discard_unused_bundle`,
+  `_git_output`, the exclude-path sequences). Closing it as **not reproduced**
+  rather than leaving it open: an unrefuted label is not a defect, and a task
+  that can never be discharged is indistinguishable from one nobody looked at.
+  Reopen if a specific file:line is ever produced.
 
 ## Success Criteria
 
-- [ ] The reproduction no longer deletes the branch
-- [ ] No `branch_safety` proof is measured against a bare refname
-- [ ] QA passes with a release state file present
-- [ ] Daemon restart RUNNING
+- [x] The reproduction no longer deletes the branch (Task 1.4, verified against
+  a real repository: tier `unproven`, `refused` True, `deleted ()`)
+- [x] No `branch_safety` proof is measured against a bare refname (Task 1.2 —
+  `_protected_base_ref` resolves once, before any proof is computed)
+- [x] QA passes with a release state file present (Task 2.2 — the shadowing
+  test roots its chain walk at an empty `tmp_path` and patches
+  `ProjectContext.project_root`, so it isolates against the file the
+  handler actually reads)
+- [x] Daemon restart RUNNING (re-verified after every change in this plan)
+- [x] A failed BLOCKING gate cannot trap the session (Task 3.1, verified live
+  over the socket in both directions)
+- [x] No module spawns git outside the bounded runner, and the guard can SEE
+  the shapes that occur (Tasks 4.5/4.6)
 
 ## Delivery & Milestones
 

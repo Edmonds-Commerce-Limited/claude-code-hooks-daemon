@@ -14,7 +14,6 @@ granted).
 """
 
 import stat
-import subprocess  # nosec B404 - git invoked with a fixed, trusted argument list only
 from pathlib import Path
 from typing import Any
 
@@ -23,10 +22,10 @@ from claude_code_hooks_daemon.constants import (
     HandlerTag,
     HookInputField,
     Priority,
-    Timeout,
     ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 # Stable fragment of git's hint that a hook was skipped for lacking +x.
 # Matched case-insensitively against combined stdout/stderr.
@@ -37,9 +36,10 @@ _TOOL_RESPONSE_FIELD = "tool_response"
 _STDOUT_FIELD = "stdout"
 _STDERR_FIELD = "stderr"
 
-# git command to resolve the active hooks directory (worktree/submodule safe,
-# honours core.hooksPath).
-_GIT_HOOKS_PATH_CMD = ("git", "rev-parse", "--git-path", "hooks")
+# git ARGUMENTS resolving the active hooks directory (worktree/submodule safe,
+# honours core.hooksPath). The binary is not named here: `run_git` supplies it
+# along with `-C <repo>`, the declined index lock and the timeout.
+_GIT_HOOKS_PATH_ARGS = ("rev-parse", "--git-path", "hooks")
 
 # Sample hooks are intentionally inert; git ignores any file ending in .sample.
 _SAMPLE_SUFFIX = ".sample"
@@ -80,24 +80,22 @@ class GitHooksExecutableFixerHandler(Handler):
         cwd = hook_input.get(HookInputField.CWD)
 
         # Resolve the active hooks directory via git itself (worktree/submodule
-        # safe, honours core.hooksPath). Degrade visibly - never crash dispatch.
-        try:
-            git_result = subprocess.run(  # nosec B603 B607 - fixed trusted git argv, no shell
-                list(_GIT_HOOKS_PATH_CMD),
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=Timeout.GIT_CONTEXT,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+        # safe, honours core.hooksPath), through the bounded runner so the
+        # optional index lock is declined and a timeout applies. run_git never
+        # raises: an absent binary or a timeout arrives as a non-zero
+        # returncode, which _parse_hooks_dir already treats as "no answer".
+        repo = self._repo_root(cwd)
+        if repo is None:
             return HookResult(
                 decision=Decision.ALLOW,
                 context=[
-                    "git reported a hook is not set as executable, but git could "
-                    f"not be run to locate the hooks directory ({exc}) - no "
-                    "automatic fix applied."
+                    "git reported a hook is not set as executable, but no project "
+                    "directory could be resolved for the event - no automatic fix "
+                    "applied."
                 ],
             )
+
+        git_result = run_git(repo, *_GIT_HOOKS_PATH_ARGS)
 
         hooks_dir = self._parse_hooks_dir(git_result.returncode, git_result.stdout, cwd)
         if hooks_dir is None or not hooks_dir.is_dir():
@@ -121,6 +119,31 @@ class GitHooksExecutableFixerHandler(Handler):
                 f"be silently skipped: {listing} (in {hooks_dir})."
             ],
         )
+
+    @staticmethod
+    def _repo_root(cwd: str | None) -> Path | None:
+        """The directory to run git in: the EVENT's cwd, or None.
+
+        The event's cwd is the only correct source here. The warning this
+        handler reacts to was emitted by a git command in a particular working
+        tree, which may be a worktree or a submodule — exactly where
+        ``--git-path`` earns its keep — so resolving anywhere else would fix
+        the hooks of a different repository.
+
+        That rules out a ``ProjectContext`` fallback, and the absence is
+        deliberate rather than an omission: falling back to the project root
+        would answer confidently for the WRONG tree, which is worse than
+        declining. Returning None here is a resolved verdict ("the event did
+        not say where"), not a swallowed error — the caller turns it into
+        visible advisory text.
+
+        What this replaces: the previous code passed ``cwd=None`` straight to
+        ``subprocess.run``, which inherits the DAEMON's working directory —
+        and that is ``/``, never the project (the git-scoping lesson of Plan
+        00237). git then failed in a non-repository and the handler silently
+        did nothing, which reads exactly like a repo with nothing to fix.
+        """
+        return Path(cwd) if cwd else None
 
     @staticmethod
     def _combined_output(hook_input: dict[str, Any]) -> str:
