@@ -1,6 +1,6 @@
 # Plan 00260: The Bash write side-door, and `sed_blocker`'s inaccurate guidance
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-19
 **Owner**: Unassigned
 **Priority**: High
@@ -108,22 +108,22 @@ build a parallel mechanism.
   VERDICT and the guidance text together, so changing either alone fails.
 - [x] ✅ **Task 1.4**: Decided — see Decision 2. The behaviour is an ARTEFACT,
   not a design, but it stays; only the guidance changed.
-- [ ] ⬜ **Task 1.5** (behaviour, NOT guidance — found by the Task 2.1 map):
-  `_SED_AS_COMMAND_HEAD` is compiled with `re.IGNORECASE` only, so its `^` is
-  start-of-STRING, not start-of-line. A heredoc body line beginning with a
-  FLAGLESS `sed` therefore matches neither that pattern nor
-  `_SED_WITH_EXECUTION_FLAG`, so writing a shell script by heredoc evades the
-  Write-branch premise that `.sh` files containing sed are blocked. The flagged
-  form (`sed -i`) IS still caught, because that pattern is position-independent
-  — confirmed empirically when the map agent was denied for exactly that. Fix
-  is likely `re.MULTILINE`, but it WIDENS what is blocked, so it needs its own
-  RED test and a check for false positives on prose containing a line that
-  starts with the word. Deliberately not folded into the Phase 1 guidance fix
-  (Decision 1).
+- [x] ✅ **Task 1.5** — **premise disproved by measurement; no `re.MULTILINE`
+  change made.** The task claimed a flagless `sed` inside a heredoc body evades
+  the block because `_SED_AS_COMMAND_HEAD` anchors to start-of-STRING. Tested
+  directly (`TestHeredocWrittenShellScripts` in
+  `tests/unit/handlers/test_sed_blocker.py`): the flagless heredoc **is already
+  blocked**. It never reaches that pattern. `matches()` Case 1 blocks any Bash
+  command merely MENTIONING sed unless it is a git/gh command or
+  `_is_safe_readonly_command` finds a `grep`/`echo` in it — and
+  `cat > x.sh <<'EOF'` has none, so the catch-all denies it long before any
+  anchor is consulted. Adding `re.MULTILINE` would therefore have changed
+  nothing for this case, while widening an already-broad pattern. See Decision 3
+  for the real defect the test found instead.
 
 ### Phase 2: Map the blind spot
 
-- [ ] ⬜ **Task 2.1**: Enumerate every handler keying on `ToolName.WRITE` /
+- [x] ✅ **Task 2.1**: Enumerate every handler keying on `ToolName.WRITE` /
   `ToolName.EDIT` (21 at v3.53.1) and record, per handler, whether a
   Bash-mediated write can reach the same premise it guards.
   - Input map (all 21 read and verified): [BASH-BLINDSPOT-MAP.md](BASH-BLINDSPOT-MAP.md).
@@ -234,65 +234,17 @@ build a parallel mechanism.
 
 ## Technical Decisions
 
-### Decision 1: Guidance fix and behaviour change are separate
+Recorded in full, with their reasoning, in **[DECISIONS.md](DECISIONS.md)**:
 
-**Context**: Finding 1 reads as a bug, but the surprising behaviour is asserted
-by passing tests, so changing it is a deliberate behaviour change, not a fix.
-
-**Options Considered**:
-
-1. Fix guidance only — honest immediately, leaves a rule that is arguably
-   over-broad.
-2. Loosen the handler so any pipe stage is allowed — changes safety behaviour on
-   the strength of a documentation complaint.
-
-**Decision**: Option 1 for Phase 1; Task 1.4 raises the behaviour question
-explicitly rather than resolving it by accident. A guidance defect must never be
-the justification for a silent safety change.
-
-**Date**: 2026-08-19
-
-### Decision 2: the pipe-stage-needs-`grep` condition is an artefact, and it stays
-
-**Context**: Task 1.4 asked whether `_is_safe_readonly_command` returning
-`False` when neither `grep` nor `echo` appears is *wanted* or merely *tested*.
-Concretely: `cat f | sed 's/x/y/' | grep z` is allowed and
-`cat f | sed 's/x/y/' | wc -l` is denied, though neither can modify a file.
-
-**Finding**: it is an **artefact**, not a design. The handler's stated rationale
-is that sed can silently destroy files. A pipe stage after a single `|` carrying
-no `i`/`e`/`n` flag cannot write to a file at all, so the rationale does not
-reach it. The `grep`/`echo` test is a proxy for "this looks read-only" that is
-simply over-narrow — it asks whether a *particular other command* is present
-rather than whether sed can write.
-
-**Options Considered**:
-
-1. Leave the behaviour, fix only the guidance.
-2. Loosen `_is_safe_readonly_command` so any non-writing pipe stage is allowed.
-
-**Decision**: Option 1 — the behaviour stays unchanged and only the guidance
-was corrected. Three reasons, in order of weight:
-
-1. **The cost of the false positive is near zero.** The agent uses `Read`, or
-   adds the `grep` it probably wanted anyway. Nothing is unachievable; one tool
-   call replaces another. A guard whose worst outcome is a marginally less
-   convenient route is not worth loosening.
-2. **Loosening widens where sed is permitted, which is the wrong direction for
-   this plan.** Finding 2 is that agents are being pushed toward shell-first
-   file manipulation; relaxing the stream-editor guard in the same release that
-   documents that pressure would be working against ourselves.
-3. **It is locked in by passing tests** (`test_matches_bash_sed_in_pipeline_without_grep`,
-   `test_is_safe_readonly_command_rejects_cat_pipe_sed`). Changing it is a
-   deliberate behaviour change needing its own tasks, not a rider on a
-   documentation fix.
-
-**Open for a human**: if the blunt rule is judged to cost more than it saves,
-Option 2 is a small change — replace the `grep`/`echo` proxy with the real
-question (can this invocation write?). That is a decision about policy, not a
-defect to fix, which is why it is recorded here rather than actioned.
-
-**Date**: 2026-08-19
+1. **Guidance fix and behaviour change are separate** — a guidance defect must
+   never justify a silent safety change.
+2. **The pipe-stage-needs-`grep` condition is an artefact, and it stays** — it
+   is over-narrow rather than wrong, and loosening it is a policy call for a
+   human, not a rider on a documentation fix.
+3. **The Bash branch is STRICTER than the Write branch** — the real Task 1.5
+   defect, found by disproving the predicted one: a heredoc writing `.md` is
+   blocked while `Write` to `.md` is explicitly allowed. Routed to Task 3.1
+   rather than special-cased, and pinned meanwhile as `xfail(strict=True)`.
 
 ## Success Criteria
 

@@ -1289,3 +1289,88 @@ class TestGuidanceMatchesBehaviour:
             "wc -l" in guidance
         ), "guidance must give the DENIED counter-example, not only the allowed one"
         assert "grep" in guidance and "echo" in guidance
+
+
+class TestHeredocWrittenShellScripts:
+    """A shell script written BY HEREDOC must be judged like one written by `Write`.
+
+    Plan 00260 Task 1.5. The handler's Write branch blocks a `.sh`/`.bash` file
+    whose content contains sed. The Bash branch is meant to agree, but
+    `_SED_AS_COMMAND_HEAD` is compiled with `re.IGNORECASE` only, so its `^` is
+    start-of-STRING. A flagless `sed` on its own line inside a heredoc body sits
+    at start-of-LINE and matches neither that pattern nor
+    `_SED_WITH_EXECUTION_FLAG` -- so the heredoc route writes a script the Write
+    route would have refused.
+
+    The flagged spelling (`sed -i`) IS still caught, because that pattern is
+    position-independent. That asymmetry is what makes the gap easy to miss:
+    the obvious probe passes.
+
+    The naive fix -- adding `re.MULTILINE` -- is what the third test guards
+    against. It would also block a heredoc writing MARKDOWN, and the handler's
+    own guidance promises that sed mentioned in `.md` documentation is allowed.
+    Widening a guard until it blocks documentation is how a guard gets disabled.
+    """
+
+    @pytest.fixture
+    def handler(self):
+        return SedBlockerHandler()
+
+    @staticmethod
+    def _bash(command: str) -> dict:
+        return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+    _FLAGLESS_SCRIPT_HEREDOC = (
+        "cat > deploy.sh <<'EOF'\n"
+        "#!/bin/bash\n"
+        "sed 's/old/new/' input.txt > output.txt\n"
+        "EOF"
+    )
+
+    _FLAGGED_SCRIPT_HEREDOC = (
+        "cat > deploy.sh <<'EOF'\n" "#!/bin/bash\n" "sed -i 's/old/new/' input.txt\n" "EOF"
+    )
+
+    _MARKDOWN_HEREDOC = (
+        "cat > NOTES.md <<'EOF'\n"
+        "# Stream editors\n"
+        "\n"
+        "sed is blocked in this project because it is easy to get wrong.\n"
+        "Use the Edit tool instead.\n"
+        "EOF"
+    )
+
+    def test_flagless_sed_in_a_heredoc_written_script_is_blocked(self, handler):
+        """The gap: this writes a .sh containing sed, which `Write` would refuse."""
+        assert handler.matches(self._bash(self._FLAGLESS_SCRIPT_HEREDOC)) is True
+
+    def test_flagged_sed_in_a_heredoc_written_script_is_blocked(self, handler):
+        """Control: proves the flag pattern is position-independent already.
+
+        This one passed before the fix too. Keeping it pins the asymmetry so a
+        future change cannot quietly lose the half that already worked.
+        """
+        assert handler.matches(self._bash(self._FLAGGED_SCRIPT_HEREDOC)) is True
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "Known defect, Plan 00260 Task 1.5/3.1: the Bash branch blocks a heredoc "
+            "writing MARKDOWN, while the Write branch explicitly allows .md. Same "
+            "content, same destination, opposite verdicts by route -- and the "
+            "handler's own guidance promises the .md allowance. Fixing it needs the "
+            "redirect-target parsing Task 3.1 builds, so this is xfail(strict) rather "
+            "than a bolted-on special case: it flips to a plain pass the moment the "
+            "shared utility lands, and fails loudly if someone 'fixes' it by accident."
+        ),
+    )
+    def test_markdown_heredoc_mentioning_sed_is_not_blocked(self, handler):
+        """`.md` documentation mentioning sed must be writable by EITHER route.
+
+        `get_claude_md()` promises sed is allowed in `.md` documentation files.
+        That promise holds for `Write` and is false for a Bash heredoc.
+        Documenting the rule must not trip the rule -- this repository writes
+        exactly such prose, and a guard that blocks its own documentation is one
+        an agent learns to route around.
+        """
+        assert handler.matches(self._bash(self._MARKDOWN_HEREDOC)) is False
