@@ -1485,15 +1485,19 @@ If no `llm:` commands exist in `package.json`, the handler operates in advisory 
 
 This project sets `allow_untracked_claude_memory: false`. Writing to Claude
 auto-memory files (`~/.claude/projects/*/memory/*.md`) is **blocked** — via the
-Write/Edit tools AND via bash redirect/`tee` side-doors. **Reading memory is
+Write/Edit tools AND via bash side-doors. **Reading memory is
 still allowed** so existing memory can be migrated out.
 
-**The bash coverage is two spellings, not every route.** `>`, `>>` and
-`tee` are detected; `cp`, `mv`, `install`, `dd of=`, `>|`, a quoted target
-containing a space, a variable target (`> "$OUT"`) and a script that opens
-the file itself are NOT. Treat the rule as the policy and honour it — do not
-read an unblocked command as permission. The markdown-LOCATION rule below is
-checked on `Write`/`Edit` only, with no bash detection at all.
+**The bash coverage is wide but still not every route.** Detected: `>`,
+`>>`, `>|`, `&>`, `&>>`, every `tee` operand, `cp`/`mv`/`install`
+destinations, `dd of=`, quoted targets containing spaces, `~` paths, and
+heredoc bodies. NOT detected, because no single written path can be named:
+a target needing an expansion — a variable (`> "$OUT"`) or a glob — a
+destination that is an existing DIRECTORY (`cp x somedir`, `cp -t somedir x`), and a script that opens the file itself. `$HOME` specifically IS still
+caught, by a separate raw-string scan. Treat the rule as the policy and
+honour it — do not read an unblocked command as permission. The
+markdown-LOCATION rule below is checked on `Write`/`Edit` only, with no bash
+detection at all.
 
 **Put durable knowledge in TRACKED project docs (progressive disclosure):**
 
