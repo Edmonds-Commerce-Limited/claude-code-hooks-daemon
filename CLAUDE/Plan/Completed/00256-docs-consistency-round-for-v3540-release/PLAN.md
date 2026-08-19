@@ -1,6 +1,6 @@
 # Plan 00256: docs consistency round, found by the v3.54.0 release
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-18
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -145,13 +145,27 @@ blanket ban was intentional policy rather than drift.
 
 ## Success Criteria
 
-- [ ] No claim in the v3.54.0 release documents is contradicted by the code
-- [ ] `RELEASING.md` restates no count a generator owns
-- [ ] The sub-agent question has one answer, in one place
-- [ ] QA green, daemon restart RUNNING
+- [x] No claim in the v3.54.0 release documents is contradicted by the code
+- [x] `RELEASING.md` restates no count a generator owns
+- [x] The sub-agent question has one answer, in one place
+- [x] QA green, daemon restart RUNNING
 
 ## Delivery & Milestones
 
 <!-- Curated milestones + delivery commit hashes. Blow-by-blow log lives in JOURNAL/. -->
 
 - Filed during the v3.54.0 release, from its own Step 7 and Step 10 gates.
+- Filed at `3ff4078e` (jointly with Plan 00257, from the same gate output).
+- Delivered at `4e064e15` — the eight documentation corrections, plus the
+  `unreleased-manifest-date` repo-hygiene rule that Task 1.5 earned.
+- Remaining `RELEASING.md` corrections shipped in the release commit itself,
+  `3b1c99a0` (Step 12.0's expected-count line and the Step 3 file list).
+- The plan's own reason for existing was met: the human's condition for
+  shipping v3.54.0 was that the docs be clear and consistent, and the release
+  proceeded to Step 13 on that basis.
+
+**What this plan is evidence for**: the release gates found *documentation*
+defects, not only code ones, and one of them (a placeholder date shipped in
+four manifests) was invisible to every existing check. The durable outcome is
+therefore not the eight fixes — it is the guard added at `4e064e15`, which is
+why a ninth instance cannot ship silently.
