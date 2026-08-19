@@ -192,6 +192,68 @@ behaviour half.
 
 **Date**: 2026-08-19
 
+### Decision 5b: Phase 3 splits at the DENY line — the utility ships, the new denials do not
+
+**Context**: Phase 3 was written as one task: give handlers a Bash write
+accessor and wire them to it. Building it made the two halves plainly
+different in kind.
+
+**Decision**: ship the accessor (`get_bash_write_targets`) and migrate
+`markdown_organization` onto it. Do NOT wire `lint_on_edit` or
+`validate_eslint_on_write` to fire on Bash writes without the user asking.
+
+**Why the line is at DENY, not at effort.** Migrating
+`markdown_organization` changes nothing about *what is allowed* — the policy
+already forbids those writes, and the migration only stops six spellings from
+evading a rule that was already in force. Wiring the two linters is a
+different act: both handlers DENY, both currently see only `Write`/`Edit`, and
+pointing them at Bash writes would create a denial surface that has never
+existed. Every `>` into a `.py` file in every project using this daemon would
+become lintable, and a lint failure there is a *post*-hoc denial — the write
+has already landed, so the deny is a failure report the agent must then repair.
+That is a product decision about how intrusive the daemon is, and it belongs to
+the human who runs it.
+
+**Consequence recorded honestly**: the blind spot is therefore NARROWED, not
+closed. Phase 2's guidance still tells the truth for the handlers that remain
+Write/Edit-keyed, and `tests/integration/test_bash_write_blindness_coverage.py`
+still carries a verdict for each of them. This decision is why that file must
+not be read as a to-do list.
+
+**Reversal condition**: an explicit request to lint Bash-authored files, or a
+measured incident where a `>`-authored source file shipped a defect the linter
+would have caught.
+
+**Date**: 2026-08-19
+
+### Decision 5c: the shared accessor is CONSERVATIVE, so the legacy regexes stay unioned beside it
+
+**Context**: `markdown_organization` detected memory writes with two
+unanchored regexes over the raw command string. The obvious migration was to
+delete them and call the new accessor.
+
+**Decision**: call the accessor AND keep the regexes; union the results.
+
+**Why**: the accessor declines any target needing an expansion the daemon
+cannot perform, because a wrong path is worse than no path — it would attribute
+a write to a file that was never touched. `$HOME/.claude/projects/x/memory/y.md`
+is exactly that case, and the raw-string scan has always caught it. Replacing
+the regexes would have quietly REOPENED a spelling the policy already blocked,
+in the same commit whose stated purpose was closing bypasses. The union is safe
+from the regexes' known prose false positive (`echo 'the arrow > file thing'`
+yields the target `file`) because every candidate from either source is
+filtered through `_is_claude_memory_path` before it can deny anything.
+
+**A related sub-decision**: `~` was initially grouped with `$VAR` and globs as
+"unexpandable" and declined. That was measured as a regression before the
+migration landed — Claude's memory files live at `~/.claude/projects/*/memory/`,
+so the most natural spelling of the policy's own target would have stopped
+being blocked. A leading tilde is HOME by definition and the daemon can expand
+it exactly, unlike a shell variable whose value it can only guess. It is now
+expanded; `~otheruser` is still declined.
+
+**Date**: 2026-08-19
+
 ### Decision 5: Task 3.2's SessionStart advisory is superseded by the Phase 2 intro
 
 **Context**: Task 3.2 proposed a `bypassPermissions`-aware SessionStart advisory

@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00260: the Bash write side-door, and a handler that under-describes its own rule](00260-bash-write-side-door-and-stream-editor-guidance/PLAN.md) - In Progress (verified field report: 21 handlers key on `Write`/`Edit`, so a heredoc/redirect/`tee` write is seen by none of them while the harness actively steers agents toward exactly that route; plus `sed_blocker` guidance that under-states what it blocks)
+- [00260: the Bash write side-door, and a handler that under-describes its own rule](00260-bash-write-side-door-and-stream-editor-guidance/PLAN.md) - In Progress (verified field report: 22 handlers key on `Write`/`Edit`, so a heredoc/redirect/`tee` write is seen by none of them while the harness actively steers agents toward exactly that route; plus `sed_blocker` guidance that under-states what it blocks)
 
 - [00252: guards for premises no write-time hook sees](00252-guards-for-premises-no-write-time-hook-sees/PLAN.md) - Not Started (two defects, one argument from Core Standard 15's corollary: the ambient-git-premise class Plan 00245 fixed seven times by hand without a guard, and the fact that no guard inspects STAGED CONTENT for secret-list terms, so a file arriving by `mv` reached a pushed commit)
 

@@ -25,8 +25,10 @@ somewhere in the same command. So `cat f | sed 's/x/y/' | grep z` is allowed
 while `cat f | sed 's/x/y/' | wc -l` is denied — a distinction the guidance never
 hints at, and whose only surviving example happens to fall on the allowed side.
 
-**Finding 2 — an architectural blind spot.** 21 handlers key on the `Write`/`Edit`
-tool names. A file that reaches disk through a Bash heredoc, redirect or `tee` is
+**Finding 2 — an architectural blind spot.** 22 handlers key on the `Write`/`Edit`
+tool names. (The field report said 21. Task 2.3's enumerating test found a 22nd,
+`write_clobber_guard`, which shipped a day after the report was written — which
+is the argument for a test over a hand-written census.) A file that reaches disk through a Bash heredoc, redirect or `tee` is
 seen by none of them. This has always been true, but it used to be a theoretical
 gap because agents reached for `Write`/`Edit` by default. It is now routinely
 reachable: Claude Code injects a `system-reminder` in `bypassPermissions` mode
@@ -157,40 +159,13 @@ build a parallel mechanism.
 
 ### Phase 3: Choose and build a remedy
 
-- [ ] ⬜ **Task 3.1**: Evaluate a shared "is this Bash call a file write?"
-  utility, returning target paths — and, where cheaply available, the heredoc
-  body. The seven PATH-only handlers it fully restores are
-  `lock_file_edit_blocker`, `markdown_organization`, `plan_workflow`,
-  `tdd_enforcement`, `lint_on_edit`, `markdown_table_formatter` and
-  `validate_eslint_on_write`. Four corrections from the Task 2.1 map, all
-  verified against source:
-
-  - **`absolute_path` is OFF this list.** Its premise is about a TOOL
-    ARGUMENT, not a file on disk; a Bash-aware version would have to block
-    `ls src/`. `plan_time_estimates` is off it too — it genuinely needs
-    content.
-  - **The three PostToolUse handlers are PATH-only, not content-keyed**, which
-    is the opposite of the obvious reading: they take the path and read the
-    bytes off disk themselves. Two of the three DENY, so a path-only utility
-    fully restores two DENYING guards with no content plumbing at all. That is
-    the strongest single argument for this task.
-  - **Heredoc bodies are literally in the command string**, unlike redirect
-    output and `tee` (unknowable at PreToolUse). A utility returning
-    `(target_path, heredoc_body | None)` therefore also serves much of the
-    CONTENT column — and heredocs are precisely the shape the
-    `bypassPermissions` reminder pushes agents toward, so this is the high-value
-    case rather than an edge one.
-  - **This is NOT "move `_bash_memory_write_target` to a shared module".**
-    Measured against 15 command shapes, it covers `>`, `>>` and `tee` (first
-    target only), and misses `>|`, quoted paths with spaces, `"$OUT"`, `dd of=`,
-    `cp`/`mv`/`install`, and any script that opens the file itself; it never
-    resolves relative targets. Worse, it FALSE-POSITIVES on prose —
-    `echo 'the arrow > file thing'` yields target `file` — and the Task 2.1
-    agent was denied by exactly that while gathering evidence. Its narrow
-    memory-path substring test is what makes that tolerable today; generalised
-    to every path in the tree, `lock_file_edit_blocker` would start denying
-    commits whose MESSAGE mentions a redirect. Scope this as quote/heredoc-aware
-    scanning plus `shlex` tokenisation plus cwd resolution.
+- [x] ✅ **Task 3.1**: Evaluated and **adopted**. The evaluation that produced
+  this — the seven PATH-only handlers a path utility restores, the two
+  corrections to the Task 2.1 map (`absolute_path` and `plan_time_estimates`
+  are off the list), and the 15-shape measurement showing
+  `_bash_memory_write_target` is not fit to generalise — is in
+  [BASH-BLINDSPOT-MAP.md](BASH-BLINDSPOT-MAP.md); the resulting scope decisions
+  are [DECISIONS.md](DECISIONS.md) Decisions 5b and 5c.
 
 - [x] ✅ **Task 3.1a** (BLOCKER for 3.1): done by MEASUREMENT — every handler
   called with a real Bash payload, rather than read. Two findings, both in
@@ -209,11 +184,16 @@ build a parallel mechanism.
     Group 2 must never be routed a Bash event without real content, and for
     `>`/`tee` that content does not exist at PreToolUse.
 
-- [ ] ⬜ **Task 3.1b**: fix the blindness at its actual source. It is not 21
-  independent decisions: `core/utils.py:36` `get_file_path()` returns `None`
-  for anything that is not Write/Edit, and `get_file_content()` gates the same
-  way, so a handler CANNOT opt in even if it wanted to. The new accessor
-  belongs beside those two, not inside any one handler.
+- [x] ✅ **Task 3.1b**: fixed the blindness at its actual source. It was not 21
+  independent decisions: `get_file_path()`/`get_file_content()` return `None`
+  for anything that is not Write/Edit, so a handler CANNOT opt in even if it
+  wanted to. `get_bash_write_targets()` now sits beside them in
+  `core/utils.py`, tokenising with `shlex` (`punctuation_chars=True`) so the
+  prose false positive is structurally impossible rather than filtered, and
+  resolving relative targets against the event's `cwd`. Covered by
+  `tests/unit/core/test_bash_write_targets.py` (37 tests). Contract is
+  CONSERVATIVE — a target needing an expansion the daemon cannot perform yields
+  nothing, because a wrong path is worse than no path.
 
 - [x] ✅ **Task 3.2**: Evaluated and **declined** — see
   [DECISIONS.md](DECISIONS.md) Decision 5. Phase 2 put this statement in the
@@ -222,12 +202,31 @@ build a parallel mechanism.
   would have, for no extra handler and no second copy to drift. Reversal
   condition recorded.
 
-- [ ] ⬜ **Task 3.3**: Record the decision in Technical Decisions with the
-  rationale, then implement whichever options are adopted under TDD.
+- [x] ✅ **Task 3.3**: Decisions recorded — [DECISIONS.md](DECISIONS.md) 5b
+  (Phase 3 splits at the DENY line) and 5c (the accessor is conservative, so
+  the legacy regexes stay unioned beside it, and `~` is expanded rather than
+  declined).
 
-- [ ] ⬜ **Task 3.4**: If the shared utility is adopted, migrate
-  `markdown_organization` onto it so there is one implementation, not two
-  (DRY / single source of truth).
+- [x] ✅ **Task 3.4**: `markdown_organization` migrated onto the accessor,
+  closing six measured bypasses — `>|`, quoted paths containing spaces,
+  `dd of=`, `cp`/`mv`/`install` destinations, and every `tee` operand after the
+  first. The two raw-string regexes are KEPT and unioned rather than replaced:
+  the accessor declines `$HOME/...` as unexpandable, and that spelling has
+  always been blocked, so deleting them would have reopened a bypass in the
+  commit meant to close them. Guidance updated to state the new, wider
+  coverage and the narrower remaining gap.
+
+- [ ] ⬜ **Task 3.5** (NOT started — needs a human decision): wire
+  `lint_on_edit` and `validate_eslint_on_write` to fire on Bash-authored files.
+  Deliberately excluded from Phase 3 — see [DECISIONS.md](DECISIONS.md)
+  Decision 5b. Both handlers DENY, so this creates a denial surface that has
+  never existed, and post-hoc: the write has already landed, so the deny is a
+  failure report the agent must repair. That is a product decision about how
+  intrusive the daemon is, not an engineering one. **Consequence recorded
+  honestly**: until this is decided, the blind spot is NARROWED, not closed,
+  and the verdict table in
+  `tests/integration/test_bash_write_blindness_coverage.py` still describes
+  live behaviour.
 
 ### Phase 4: Verify and close
 

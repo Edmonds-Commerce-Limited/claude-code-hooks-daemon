@@ -1,10 +1,90 @@
 """Utility functions for hook handlers."""
 
+import os
+import re
+import shlex
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Final, cast
 
+from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
+
+# --- Bash write-target detection (Plan 00260) --------------------------------
+# Shell operators and verbs that put bytes into a named file. Each is here
+# because a real bypass was measured against it, not for completeness: the
+# raw-string regexes in `markdown_organization` missed `>|`, `&>`, `dd of=`,
+# `cp`/`mv`/`install` and every `tee` target after the first.
+#
+# This SUPPLEMENTS those regexes rather than replacing them, and that handler
+# unions the two on purpose: this module declines any target needing an
+# expansion it cannot perform (`$HOME/...`), which the regexes do catch by
+# substring. Deleting them would reopen a spelling the policy already blocked.
+
+#: Redirections that WRITE. `>|` overrides noclobber and was missed entirely;
+#: `&>`/`&>>` are bash's both-streams forms and were missed too.
+#:
+#: `>&` is deliberately EXCLUDED. It looks like a sibling but `2>&1` tokenises
+#: as `2`, `>&`, `1`, so accepting it would report the file `1` -- a path the
+#: command never wrote. The rule is not "operators containing `>`"; it is
+#: "operators whose operand is always a filename".
+_REDIRECT_OPERATORS: Final[frozenset[str]] = frozenset({">", ">>", ">|", "&>", "&>>"})
+
+#: Writes every operand it is given, not just one.
+_TEE: Final[str] = "tee"
+
+#: Write their LAST operand -- UNLESS `-t`/`--target-directory` is present,
+#: which moves the destination to the front and makes that rule name a SOURCE.
+#: See `_TARGET_DIRECTORY_FLAGS`, which is why such a command is declined.
+_COPY_VERBS: Final[frozenset[str]] = frozenset({"cp", "mv", "install"})
+
+#: `dd`'s destination is an `of=` operand rather than a redirect.
+_DD_OUTPUT_PREFIX: Final[str] = "of="
+
+#: Stop consuming operands here, so a later command is never absorbed into an
+#: earlier one's target list.
+_OPERAND_TERMINATORS: Final[frozenset[str]] = frozenset(
+    {"|", "&&", "||", ";", "&", "<", ">", ">>", ">|", "&>", "&>>"}
+)
+
+_FLAG_PREFIX: Final[str] = "-"
+
+#: `cp a b` needs a source AND a destination before the last operand is a write.
+_MIN_COPY_OPERANDS: Final[int] = 2
+
+#: `-t DEST` / `--target-directory=DEST` move the destination to the FRONT, so
+#: "the last operand is the destination" becomes false and would name a SOURCE
+#: -- a file the command reads. The flag also means the destination is a
+#: directory, so no single written path exists to report. Decline the command.
+_TARGET_DIRECTORY_FLAGS: Final[tuple[str, ...]] = ("-t", "--target-directory")
+
+#: Characters meaning the token needs an expansion the daemon cannot perform.
+#: Naming the wrong file is worse than naming none, so these are declined.
+#:
+#: `~` is deliberately ABSENT: unlike `$VAR` or a glob, a leading tilde is a
+#: deterministic expansion of HOME that this process can perform exactly. It
+#: also must not be declined -- Claude's own memory files live at
+#: `~/.claude/projects/*/memory/`, and `markdown_organization` blocks writes to
+#: them today, so treating `~` as unresolvable would silently un-enforce that
+#: policy for its most natural spelling.
+_UNEXPANDABLE_CHARACTERS: Final[tuple[str, ...]] = ("$", "*", "?", "`")
+
+_HOME_PREFIX: Final[str] = "~"
+_HOME_RELATIVE_PREFIX: Final[str] = "~/"
+_HOME_VARIABLE: Final[str] = "HOME"
+
+#: Device nodes are not files a handler should judge.
+_DEV_PREFIX: Final[str] = "/dev/"
+
+#: `<<EOF` / `<<-'EOF'` / `<<"EOF"`. Group 2 is the delimiter word.
+_HEREDOC_RE: Final[re.Pattern[str]] = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+_HEREDOC_DELIMITER_GROUP: Final[int] = 2
+
+#: Cheap "could this text name a write target at all?" test, run over a heredoc
+#: body before deciding to tokenise it. Every operator and verb recognised by
+#: `_write_target_tokens` appears here, so a body this misses provably has no
+#: target to find -- it is an optimisation, never a coverage decision.
+_WRITE_INDICATOR_RE: Final[re.Pattern[str]] = re.compile(r">|of=|\b(?:tee|cp|mv|install|dd)\b")
 
 
 def get_bash_command(hook_input: dict[str, Any]) -> str | None:
@@ -61,6 +141,245 @@ def get_file_content(hook_input: dict[str, Any]) -> str | None:
         return None
     tool_input: dict[str, Any] = hook_input.get("tool_input", {})
     return cast("str", tool_input.get("content", ""))
+
+
+def get_bash_write_targets(
+    hook_input: dict[str, Any],
+    *,
+    include_heredoc_bodies: bool = False,
+) -> list[str]:
+    """Absolute paths a Bash command plainly writes. Conservative by contract.
+
+    The sibling of :func:`get_file_path` for the OTHER route a file reaches
+    disk. Those two accessors return ``None`` for any tool that is not
+    Write/Edit, which is where the Bash blind spot actually lives — twenty-two
+    handlers inherit it without deciding to (Plan 00260). This lifts it in one
+    place rather than twenty-two.
+
+    Returns ``[]`` for a non-Bash event, so a caller can ask unconditionally.
+
+    **Conservative means a target appears only when the command plainly says
+    so.** A variable (``> "$OUT"``), a glob, or anything else needing an
+    expansion the daemon cannot perform yields nothing. A WRONG path is worse
+    than no path: it attributes a write to a file that was never touched, and a
+    path-keyed guard then judges the wrong file.
+
+    **Why ``shlex`` and not regexes.** The existing detector in
+    ``markdown_organization`` scans the raw string, so
+    ``echo 'the arrow > file thing'`` yields the target ``file`` — a false
+    positive that denied a sub-agent gathering evidence for this plan. It is
+    tolerable there only because a narrow memory-path substring test filters it
+    out. Tokenising with ``punctuation_chars=True`` makes that case
+    structurally impossible instead of filtered: a quoted string is ONE token,
+    so a ``>`` inside it is never an operator.
+
+    Args:
+        hook_input: Hook input dictionary.
+        include_heredoc_bodies: Scan heredoc BODIES too. Off by default,
+            because authoring a script that would write later is not writing
+            now. A deny-by-default POLICY wants it on, where over-blocking is
+            cheap -- and ``markdown_organization`` already behaves that way, so
+            stripping bodies unconditionally would silently regress it.
+
+    Returns:
+        Absolute paths, in command order, de-duplicated. Empty when the command
+        writes nothing this function can name with confidence.
+    """
+    command = get_bash_command(hook_input)
+    if not command:
+        return []
+
+    outside_bodies, bodies = _split_heredoc_bodies(command)
+    segments = [outside_bodies]
+    if include_heredoc_bodies:
+        # A body with no redirect and no write verb cannot name a target, so it
+        # is never tokenised. Purely an optimisation, and a load-bearing one:
+        # tokenising is per-character Python, a 40 KB prose body measured ~25 ms,
+        # and a dispatched event pays it twice.
+        segments.extend(body for body in bodies if _WRITE_INDICATOR_RE.search(body))
+
+    cwd = hook_input.get(HookInputField.CWD)
+    found: list[str] = []
+    for segment in segments:
+        for raw in _write_target_tokens(_tokenise(segment)):
+            resolved = _resolve_write_target(raw, cwd)
+            if resolved is not None and resolved not in found:
+                found.append(resolved)
+    return found
+
+
+def _tokenise(text: str) -> list[str]:
+    """Shell tokens, or an empty list when the text cannot be parsed.
+
+    Returning empty rather than raising is what makes the per-segment split
+    matter: an unbalanced quote in one heredoc body costs that body only. When
+    the whole command was parsed as a single string, a stray `"` in ordinary
+    prose discarded the genuine target on the introducing line too — silently
+    un-enforcing any policy keyed on that path.
+    """
+    try:
+        lexer = shlex.shlex(text, posix=False, punctuation_chars=True)
+        lexer.whitespace_split = True
+        return list(lexer)
+    except ValueError:
+        return []
+
+
+def _split_heredoc_bodies(command: str) -> tuple[str, list[str]]:
+    """Separate the shell being RUN from the heredoc bodies being WRITTEN.
+
+    Returns ``(command_without_bodies, bodies)``. The introducing line stays
+    with the command because the real target lives on it
+    (``cat > out.md <<'EOF'``); the body is data.
+
+    They are returned apart rather than as one string so each can be tokenised
+    on its own — see :func:`_tokenise` for why that matters, and
+    :func:`get_bash_write_targets` for the cost it avoids.
+    """
+    lines = command.split("\n")
+    kept: list[str] = []
+    bodies: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        kept.append(line)
+        delimiters = [match.group(_HEREDOC_DELIMITER_GROUP) for match in _HEREDOC_RE.finditer(line)]
+        index += 1
+        for delimiter in delimiters:
+            start = index
+            while index < len(lines) and lines[index].strip() != delimiter:
+                index += 1
+            bodies.append("\n".join(lines[start:index]))
+            index += 1  # step past the closing delimiter itself
+    return "\n".join(kept), bodies
+
+
+def _write_target_tokens(tokens: list[str]) -> list[str]:
+    """Raw target tokens, in command order, before quoting or path resolution."""
+    targets: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+
+        if token in _REDIRECT_OPERATORS and index + 1 < len(tokens):
+            targets.append(tokens[index + 1])
+            index += 2
+            continue
+
+        if token == _TEE:
+            index = _collect_trailing_operands(tokens, index + 1, targets, keep_all=True)
+            continue
+
+        if token in _COPY_VERBS:
+            index = _collect_trailing_operands(tokens, index + 1, targets, keep_all=False)
+            continue
+
+        if token.startswith(_DD_OUTPUT_PREFIX):
+            targets.append(token[len(_DD_OUTPUT_PREFIX) :])
+            index += 1
+            continue
+
+        index += 1
+    return targets
+
+
+def _collect_trailing_operands(
+    tokens: list[str],
+    start: int,
+    targets: list[str],
+    *,
+    keep_all: bool,
+) -> int:
+    """Consume one command's operands, appending the written ones.
+
+    ``tee`` writes EVERY operand; ``cp``/``mv``/``install`` write only the last.
+    Both stop at a shell separator so a later command is never absorbed.
+    """
+    index = start
+    operands: list[str] = []
+    names_a_target_directory = False
+    while index < len(tokens) and tokens[index] not in _OPERAND_TERMINATORS:
+        token = tokens[index]
+        if token.startswith(_FLAG_PREFIX):
+            if token.split("=", 1)[0] in _TARGET_DIRECTORY_FLAGS:
+                names_a_target_directory = True
+        else:
+            operands.append(token)
+        index += 1
+
+    if keep_all:
+        targets.extend(operands)
+    elif not names_a_target_directory and len(operands) >= _MIN_COPY_OPERANDS:
+        targets.append(operands[-1])
+    return index
+
+
+def _expand_home(target: str) -> str | None:
+    """A `~`-leading token as an absolute path, or None when it cannot be.
+
+    Only the HOME-relative form (`~` alone, or `~/...`) is expanded. `~otheruser`
+    is declined deliberately: resolving another account's home would name a file
+    outside the session's reach, and the policy this serves -- Claude's own
+    memory files under `~/.claude/projects/*/memory/` -- is always the CURRENT
+    user's.
+
+    ``HOME`` is read directly rather than through ``Path.expanduser()`` because
+    that raises ``RuntimeError`` when no home can be determined, and an accessor
+    returning a list must not throw out of one malformed token. Reading the
+    variable makes "no home" an ordinary declined verdict.
+    """
+    if target != _HOME_PREFIX and not target.startswith(_HOME_RELATIVE_PREFIX):
+        return None
+    home = os.environ.get(_HOME_VARIABLE)
+    if not home:
+        return None
+    if target == _HOME_PREFIX:
+        return str(Path(home))
+    return str(Path(home) / target[len(_HOME_RELATIVE_PREFIX) :])
+
+
+def _resolve_write_target(raw: str, cwd: Any) -> str | None:
+    """One raw token as an absolute path, or None when it cannot be named.
+
+    Declines rather than guesses. A directory destination is declined too: the
+    written file is ``dest/<basename>``, so reporting ``dest`` would name a
+    path no path-keyed guard matches -- failing safe (a missed write) instead
+    of dangerously (the wrong file judged).
+    """
+    target = raw.strip("'\"")
+    if not target or target.endswith("/"):
+        return None
+    if any(character in target for character in _UNEXPANDABLE_CHARACTERS):
+        return None
+    if target.startswith(_DEV_PREFIX):
+        return None
+
+    if target.startswith(_HOME_PREFIX):
+        return _decline_if_directory(_expand_home(target))
+
+    path = Path(target)
+    if path.is_absolute():
+        return _decline_if_directory(str(path))
+    if not isinstance(cwd, str) or not cwd:
+        return None
+    return _decline_if_directory(str(Path(cwd) / path))
+
+
+def _decline_if_directory(resolved: str | None) -> str | None:
+    """Drop a path that is an existing DIRECTORY rather than a file.
+
+    ``cp a.py somedir`` writes ``somedir/a.py``; reporting ``somedir`` would
+    name a path that was never written, which a path-keyed guard would then
+    judge. A trailing slash is caught earlier by shape alone, but ``somedir``
+    and ``somefile`` are indistinguishable as strings -- only the filesystem
+    knows. One ``is_dir()`` is cheap beside naming the wrong file.
+
+    A path that does not exist yet is KEPT: that is the ordinary case of a
+    command creating a file, and it is the whole point of the accessor.
+    """
+    if resolved is None:
+        return None
+    return None if Path(resolved).is_dir() else resolved
 
 
 def get_workspace_root() -> Path:

@@ -2154,6 +2154,90 @@ class TestUntrackedClaudeMemoryPolicy:
     ) -> None:
         assert policy_handler.matches(self._bash(f"grep foo {self.MEMORY_PATH}")) is False
 
+    # --- bash routes the two regexes never saw (Plan 00260 Task 3.4) ---
+    #
+    # The handler's guidance USED to promise `>`, `>>` and `tee` and disclose
+    # the rest as uncovered. Each shape below is one of the six the blind-spot
+    # map measured as a real bypass, now closed by `get_bash_write_targets`.
+
+    def test_policy_blocks_noclobber_override_redirect(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        """`>|` — the redirect regex cannot match it: `|` is in its exclusion set."""
+        assert policy_handler.matches(self._bash(f"echo x >| {self.MEMORY_PATH}")) is True
+
+    def test_policy_blocks_a_quoted_memory_path_containing_a_space(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        """The regex truncated at the space, losing the `/memory/` marker entirely."""
+        spaced = "/root/.claude/projects/my proj/memory/y.md"
+
+        assert policy_handler.matches(self._bash(f'cat > "{spaced}"')) is True
+
+    def test_policy_blocks_dd_output_target(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert policy_handler.matches(self._bash(f"dd if=/tmp/a of={self.MEMORY_PATH}")) is True
+
+    @pytest.mark.parametrize("verb", ["cp", "mv", "install"])
+    def test_policy_blocks_copy_verb_destinations(
+        self, policy_handler: MarkdownOrganizationHandler, verb: str
+    ) -> None:
+        assert policy_handler.matches(self._bash(f"{verb} /tmp/a.md {self.MEMORY_PATH}")) is True
+
+    def test_policy_blocks_a_tee_target_that_is_not_the_first(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        """The regex returned only the first operand, so a second one hid a write."""
+        command = f"echo x | tee /tmp/decoy.md {self.MEMORY_PATH}"
+
+        assert policy_handler.matches(self._bash(command)) is True
+
+    # --- spellings the CONSERVATIVE accessor declines, so the legacy scan stays ---
+
+    def test_policy_still_blocks_a_dollar_home_memory_path(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        """A regression guard, not a new capability.
+
+        `get_bash_write_targets` declines any target needing an expansion it
+        cannot perform, and `$HOME` is one — the shell's value is unknown to
+        this process. Replacing the raw-string regexes with the accessor would
+        therefore have quietly REOPENED a spelling this policy has always
+        blocked, which is why the handler unions the two sources.
+        """
+        command = "cat foo > $HOME/.claude/projects/x/memory/y.md"
+
+        assert policy_handler.matches(self._bash(command)) is True
+
+    def test_policy_blocks_a_tilde_memory_path(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        """`~` is expanded rather than declined — the natural spelling of this path."""
+        command = "cat foo > ~/.claude/projects/x/memory/y.md"
+
+        assert policy_handler.matches(self._bash(command)) is True
+
+    def test_policy_blocks_a_heredoc_authored_memory_write(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Bodies are scanned deliberately: over-blocking is cheap for a deny policy."""
+        command = f"cat > /tmp/deploy.sh <<'EOF'\necho x > {self.MEMORY_PATH}\nEOF"
+
+        assert policy_handler.matches(self._bash(command)) is True
+
+    def test_prose_mentioning_a_redirect_is_not_a_memory_write(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        """The regexes' known false positive stays harmless.
+
+        `echo 'the arrow > file thing'` yields the target `file` from the raw
+        scan, and that is tolerable only because every candidate — from either
+        source — is filtered through `_is_claude_memory_path` before it can deny
+        anything.
+        """
+        assert policy_handler.matches(self._bash("echo 'the arrow > file thing'")) is False
+
     def test_policy_ignores_non_memory_bash_redirect(
         self, policy_handler: MarkdownOrganizationHandler
     ) -> None:

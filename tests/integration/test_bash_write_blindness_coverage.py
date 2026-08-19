@@ -108,10 +108,14 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
     ),
     "MarkdownOrganizationHandler": (
         _PARTIAL,
-        "redirect and `tee` ARE covered for memory paths, but `cp`, `mv`, "
-        "`install`, `dd of=`, `>|`, quoted and variable targets are not, and "
-        "the markdown-location rule is fully blind -- a policy enforced against "
-        "two spellings out of many is trusted more than it deserves",
+        "narrowed in Plan 00260 Task 3.4 and still PARTIAL for two different "
+        "reasons. The memory-path rule now uses `get_bash_write_targets`, so "
+        "`>|`, `dd of=`, `cp`/`mv`/`install`, every `tee` operand and quoted "
+        "paths with spaces are covered; what remains uncovered there is a "
+        "target the daemon cannot resolve (a variable or a glob) -- declined "
+        "deliberately, because a wrong path would make a guard judge the wrong "
+        "file. The markdown-LOCATION rule, by contrast, is still fully blind: "
+        "it has no bash detection at all",
     ),
     "MarkdownTableFormatterHandler": (
         _BLIND,
@@ -354,20 +358,40 @@ class TestTheTwoSectionsThatImplyBashCoverage:
         )
 
     def test_markdown_organization_admits_its_bash_coverage_is_partial(self) -> None:
-        """It claims bash side-doors are closed; two of many spellings are."""
+        """It claims bash side-doors are closed; the claim must stay bounded.
+
+        This assertion was INVERTED by Task 3.4 and is worth the note. It used
+        to require that `cp`, `mv`, `dd of=` and `>|` were named in the
+        guidance as UNCOVERED. Those spellings are now covered, and the
+        rewritten guidance still names all four -- as things it detects -- so
+        the old substring checks kept passing while asserting the opposite of
+        the truth. A test that passes for the wrong reason is worse than one
+        that fails, because nothing ever revisits it.
+
+        So it now pins what is still MISSING, which is the claim a reader can
+        actually be misled by.
+        """
         handler = _discover_write_edit_keyed_handlers()["MarkdownOrganizationHandler"]()
         guidance = handler.get_claude_md() or ""
 
-        if "bash redirect" not in guidance:
+        if "bash" not in guidance.lower():
             pytest.skip("project allows untracked Claude memory; the claim is not made")
 
-        for uncovered in ("cp", "mv", "dd of=", ">|"):
-            assert uncovered in guidance, (
-                "markdown_organization claims to close the bash side-doors to memory "
-                f"paths, but does not disclose that {uncovered!r} is uncovered. A "
-                "policy believed to be enforced, that is enforced against two "
-                "spellings out of many, is trusted more than it deserves."
-            )
+        assert "not every route" in guidance, (
+            "markdown_organization must not present its bash coverage as total. "
+            "It is wide now, but a target the daemon cannot resolve is still "
+            "declined by design, and a policy believed to be fully enforced is "
+            "trusted more than it deserves."
+        )
+        assert "variable" in guidance, (
+            "the specific uncovered shape -- an unresolvable target such as a "
+            "variable -- must be named, not merely gestured at."
+        )
+        assert "LOCATION" in guidance, (
+            "the markdown-LOCATION rule has no bash detection at all. That is "
+            "the larger blind spot of the two and the guidance must say so, "
+            "rather than letting the memory rule's coverage imply it."
+        )
 
 
 class TestTheClassWideBoundaryIsStatedOnce:

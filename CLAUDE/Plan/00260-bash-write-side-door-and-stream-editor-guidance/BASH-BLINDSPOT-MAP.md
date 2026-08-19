@@ -1,5 +1,13 @@
 # Bash-Write Blind Spot Map — the 21 Write/Edit-keyed handlers
 
+> **This census is a SNAPSHOT and is already one row short.** It was taken at
+> v3.53.1; the enumerating test added in Task 2.3
+> (`tests/integration/test_bash_write_blindness_coverage.py`) finds **22**,
+> because `write_clobber_guard` shipped a day later with exactly this hole. The
+> 21 rows below remain accurate and the analysis stands — but the test, not this
+> file, is the authority on WHICH handlers are affected, precisely because a
+> hand-written census cannot notice a handler added after it was written.
+
 Input to Plan 00260 Task 2.1. Every row below was settled by reading
 `matches()`/`handle()` in the named file; nothing here is inferred from the
 handler's documentation or from `get_claude_md()`. The headline result is that

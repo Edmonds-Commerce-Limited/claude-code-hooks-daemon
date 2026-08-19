@@ -14,7 +14,11 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
-from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
+from claude_code_hooks_daemon.core.utils import (
+    get_bash_command,
+    get_bash_write_targets,
+    get_file_path,
+)
 from claude_code_hooks_daemon.core.worktree_paths import effective_project_relative_path
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     next_plan_number_for_target,
@@ -653,10 +657,37 @@ class MarkdownOrganizationHandler(Handler):
     def _bash_memory_write_target(self, hook_input: dict[str, Any]) -> str | None:
         """Return a Claude-memory path being WRITTEN by a bash command, else None.
 
-        Closes the `cat > ~/.claude/projects/x/memory/y.md` side-door: detects
-        redirect (`>`/`>>`) and `tee` targets that point at a memory path. Reads
+        Closes the `cat > ~/.claude/projects/x/memory/y.md` side-door. Reads
         (cat/grep/less with no write operator) are intentionally not matched.
+
+        Two sources, deliberately UNIONED rather than one replacing the other
+        (Plan 00260 Task 3.4):
+
+        1. :func:`get_bash_write_targets` — a shlex tokeniser that understands
+           `>`, `>>`, `>|`, every `tee` operand, `cp`/`mv`/`install`
+           destinations, `dd of=`, and quoted paths containing spaces. Six
+           shapes the two regexes below miss outright.
+        2. The original raw-string regexes — kept because that accessor is
+           CONSERVATIVE by contract and declines any target needing an expansion
+           it cannot perform. `cat > $HOME/.claude/projects/x/memory/y.md` is
+           exactly that case, and it is a spelling this policy has always
+           blocked. Dropping the regexes to "clean up" would have quietly
+           reopened it.
+
+        The union is safe from the regexes' known false positive (prose such as
+        `echo 'the arrow > file thing'` yields the target `file`) because every
+        candidate from either source is filtered through
+        :meth:`_is_claude_memory_path` before it can deny anything.
+
+        Heredoc bodies ARE scanned. This is a deny-by-default policy where
+        over-blocking is cheap, and the previous raw-string scan already caught
+        a heredoc-authored script that would write to a memory path — stripping
+        bodies would have been a silent regression.
         """
+        for target in get_bash_write_targets(hook_input, include_heredoc_bodies=True):
+            if self._is_claude_memory_path(target):
+                return target
+
         command = get_bash_command(hook_input)
         if not command:
             return None
@@ -1016,14 +1047,19 @@ class MarkdownOrganizationHandler(Handler):
                 "## markdown_organization — tracked-docs policy (untracked Claude memory BLOCKED)\n\n"
                 "This project sets `allow_untracked_claude_memory: false`. Writing to Claude\n"
                 "auto-memory files (`~/.claude/projects/*/memory/*.md`) is **blocked** — via the\n"
-                "Write/Edit tools AND via bash redirect/`tee` side-doors. **Reading memory is\n"
+                "Write/Edit tools AND via bash side-doors. **Reading memory is\n"
                 "still allowed** so existing memory can be migrated out.\n\n"
-                "**The bash coverage is two spellings, not every route.** `>`, `>>` and\n"
-                "`tee` are detected; `cp`, `mv`, `install`, `dd of=`, `>|`, a quoted target\n"
-                'containing a space, a variable target (`> "$OUT"`) and a script that opens\n'
-                "the file itself are NOT. Treat the rule as the policy and honour it — do not\n"
-                "read an unblocked command as permission. The markdown-LOCATION rule below is\n"
-                "checked on `Write`/`Edit` only, with no bash detection at all.\n\n"
+                "**The bash coverage is wide but still not every route.** Detected: `>`,\n"
+                "`>>`, `>|`, `&>`, `&>>`, every `tee` operand, `cp`/`mv`/`install`\n"
+                "destinations, `dd of=`, quoted targets containing spaces, `~` paths, and\n"
+                "heredoc bodies. NOT detected, because no single written path can be named:\n"
+                'a target needing an expansion — a variable (`> "$OUT"`) or a glob — a\n'
+                "destination that is an existing DIRECTORY (`cp x somedir`, `cp -t somedir\n"
+                "x`), and a script that opens the file itself. `$HOME` specifically IS still\n"
+                "caught, by a separate raw-string scan. Treat the rule as the policy and\n"
+                "honour it — do not read an unblocked command as permission. The\n"
+                "markdown-LOCATION rule below is checked on `Write`/`Edit` only, with no bash\n"
+                "detection at all.\n\n"
                 "**Put durable knowledge in TRACKED project docs (progressive disclosure):**\n\n"
                 "- Always-relevant facts → `CLAUDE.md` (keep lean; resident every session)\n"
                 "- Path-specific guidance → `.claude/rules/*.md` with `paths:` glob frontmatter "
