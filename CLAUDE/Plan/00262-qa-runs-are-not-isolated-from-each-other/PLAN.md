@@ -83,19 +83,24 @@ that actually bit us. What remains is the narrower case of someone invoking
 
 ### Phase 1: serialise the suite runner
 
-- [ ] ⬜ **Task 1.1**: RED — a test that starts a run while a lock is held and
+- [x] ✅ **Task 1.1**: RED — a test that starts a run while a lock is held and
   asserts the second does not proceed to execute tools. Must also assert that
-  `--read-only` is unaffected.
-- [ ] ⬜ **Task 1.2**: Decide refuse-vs-wait and record it in Technical
-  Decisions. Refusing is FAIL FAST and gives the agent an immediate, actionable
-  message; waiting is friendlier for a human at a terminal but can hang a hook
-  or a CI step with no output. Consider refuse-by-default with an opt-in wait.
-- [ ] ⬜ **Task 1.3**: GREEN — implement in `scripts/qa/llm_qa.py` around the
-  executing loop, and in `run_all.sh` so the human-facing path is covered too.
-  A stale lock (holder no longer alive) must not wedge the suite forever.
-- [ ] ⬜ **Task 1.4**: The message must name the live run's PID and start time,
-  and say what to do. A lock whose message is only "already running" invites an
-  agent to delete the lock file.
+  `--read-only` is unaffected. Delivered as
+  `tests/unit/qa/test_llm_qa_run_lock.py` (7 tests). The contention test spawns
+  a REAL second process, because `flock` is advisory per open-file-description
+  and a same-process second acquire would prove nothing.
+- [x] ✅ **Task 1.2**: Decide refuse-vs-wait — **refuse**, see Decision 1. No
+  wait mode; dropped under YAGNI.
+- [x] ✅ **Task 1.3**: GREEN — implemented in `scripts/qa/llm_qa.py` (the
+  executing path only) and in the sibling shell runner, sharing ONE lock file so
+  the two exclude each other (Decision 4). No stale-lock class exists by
+  construction (Decision 2).
+- [x] ✅ **Task 1.4**: The refusal names the live run's PID, points at
+  `--read-only` for inspection, and states explicitly that a lock file on disk
+  does NOT mean a lock is held — the sentence that stops someone deleting it.
+  (Start time was dropped: the PID is what makes the holder checkable, and a
+  second field invites the reader to reason about staleness, which is exactly
+  the reasoning `flock` makes unnecessary.)
 
 ### Phase 2: decide on acceptance-test worktree isolation
 
@@ -107,13 +112,104 @@ that actually bit us. What remains is the narrower case of someone invoking
 ### Phase 3: verification
 
 - [ ] ⬜ **Task 3.1**: Full QA, daemon restart RUNNING.
-- [ ] ⬜ **Task 3.2**: Verify by actually racing two runs, not only by unit
+- [x] ✅ **Task 3.2**: Verify by actually racing two runs, not only by unit
   test — the failure mode is a real concurrent process, and a mocked lock proves
-  nothing about it.
+  nothing about it. Verified with live processes in FOUR directions rather than
+  inferring any of them:
+  - Python holder → shell runner refused (exit 3), holder PID named
+  - Shell holder → `llm_qa.py` refused (exit 3), holder PID named
+  - Lock held → `--read-only` still succeeded (exit 0)
+  - Holder SIGKILLed → next run proceeded, despite the lock file still on disk
 
 ## Technical Decisions
 
-<!-- Task 1.2's refuse-vs-wait decision is recorded here when made. -->
+### Decision 1: refuse, do not wait — and no opt-in wait flag
+
+**Context**: Task 1.2. A second run can either be refused immediately or queued
+behind the first.
+
+**Decision**: refuse, with exit code 3. No wait mode.
+
+**Rationale**: refusing is what Core Standard 06 (FAIL FAST) asks for — the
+caller learns immediately and can act. Waiting would silently convert a QA
+invocation into an unbounded stall, and this runner is invoked from hooks, from
+CI steps and from release gates, none of which want a command that produces no
+output for an arbitrary period. An opt-in `--wait` was considered and dropped
+under YAGNI: nothing needs it today, and it is trivial to add if something does.
+
+### Decision 2: `flock`, not a PID file
+
+**Context**: the obvious implementation is a PID file plus a liveness check.
+
+**Decision**: `fcntl.flock` (Python) and `flock(1)` (shell), on one shared file.
+
+**Rationale**: the kernel drops a `flock` when the holder exits, **including on
+SIGKILL**. That removes the entire stale-lock class rather than adding cleanup
+logic for it — and a guard that could wedge the suite permanently would be worse
+than the race it prevents, because an agent would quickly learn to delete the
+lock file, which reintroduces the race AND destroys the signal. The refusal
+message therefore says explicitly that a lock file on disk does not mean a lock
+is held.
+
+The PID is still recorded, but only as a diagnostic so the refusal can name the
+live run. It never decides anything; `flock` does.
+
+### Decision 3: exit code 3, skipping 2
+
+**Context**: `run_all.sh` already exits 2 for "cannot run" (venv resolver
+missing).
+
+**Decision**: "busy" is 3 in **both** entry points, and 2 is left alone.
+
+**Rationale**: the two scripts are alternative front doors to the same suite, so
+the same number must not mean two different things depending on which one the
+caller used. 0 pass / 1 failed / 2 cannot run / 3 busy reads as a ladder.
+
+### Decision 4: one lock file shared by both entry points
+
+**Context**: `run_all.sh` does not delegate to `llm_qa.py` — it invokes the
+per-tool scripts directly.
+
+**Decision**: both acquire the SAME path, `untracked/qa/.llm_qa.lock`.
+
+**Rationale**: they must exclude EACH OTHER, not merely themselves. A human
+running `run_all.sh` while an agent runs `llm_qa.py` is precisely the cross-path
+race worth preventing, and separate locks would permit it while appearing
+guarded. `flock(1)` and `fcntl.flock` share the underlying kernel lock, so this
+works across the language boundary — verified with real processes in both
+directions, not inferred from symmetry.
+
+**Bug caught while implementing this**: `exec {FD}> file` in bash truncates at
+OPEN time, which happens BEFORE `flock` is attempted. A contending run would
+therefore erase the holder's PID stamp and then report `pid=unknown` in the very
+message that needs it. Fixed by opening append (`>>`) and truncating only after
+the lock is held.
+
+### Decision 5: the known limitation, stated rather than discovered later
+
+**Context**: `daemon/server.py` (Plan 00127) already documents that `flock` is a
+no-op on some filesystems — older NFS without lockd, some 9p configs.
+
+**The limitation**: where that holds, this guard silently provides no mutual
+exclusion and two runs race exactly as they do today.
+
+**Why it is accepted**: the failure mode is **no worse than the status quo** —
+the guard cannot make anything worse, it just stops helping. And the supported
+deployment is the same one the daemon already assumes: a normal-disk bind mount
+where `flock` works, including across PID namespaces.
+
+**Honest difference from the daemon's case**, worth stating rather than glossing:
+`server.py` degrades *loudly* there (two racing winners both reach
+`start_unix_server` and the loser exits 1). This guard degrades *silently*. That
+is acceptable for a QA runner and would not be for the daemon, but it means "the
+lock is in place" must not be read as "concurrent runs are impossible on every
+filesystem".
+
+**No reuse of the daemon's implementation**: it is inline async code inside the
+package, specific to protecting the socket-bind critical section, not a public
+utility — and the shell entry point could not call a Python helper regardless.
+Extracting one would couple the QA tooling to the package it tests, for ~15
+lines that also have to exist twice across a language boundary anyway.
 
 ## Success Criteria
 

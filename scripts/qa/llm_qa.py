@@ -13,11 +13,14 @@ Usage:
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Final, NamedTuple, TypeAlias
 
@@ -26,9 +29,136 @@ SCRIPTS_DIR = PROJECT_ROOT / "scripts" / "qa"
 QA_OUTPUT_DIR = PROJECT_ROOT / "untracked" / "qa"
 VENV_PYTHON = PROJECT_ROOT / "untracked" / "venv" / "bin" / "python"
 
-# Exit codes
+# Exit codes. 2 is deliberately skipped: the sibling run_all.sh already uses it
+# for "cannot run" (venv resolver missing), and the two entry points must not
+# give the same number two meanings.
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
+EXIT_BUSY = 3
+
+# Run lock (Plan 00262). Concurrent suite runs share one `tests/` tree and one
+# coverage.json, so their verdicts contend and NEITHER can be trusted -- a
+# contended run can fail a check that is fine and pass one that is not. Since a
+# green run gates commits and releases, that turns a blocking gate into a coin
+# flip with no signal that it happened.
+#
+# NOT in /tmp: security standard B108 -- runtime files live under the project's
+# untracked dir, never a world-writable shared directory.
+RUN_LOCK_NAME = ".llm_qa.lock"
+_PID_PREFIX = "pid="
+_UNKNOWN_PID = "unknown"
+_LOCK_FILE_MODE = 0o644
+
+
+def run_lock_path() -> Path:
+    """Return the canonical run-lock path (never ``/tmp`` -- B108)."""
+    return QA_OUTPUT_DIR / RUN_LOCK_NAME
+
+
+def _open_lock_fd(path: Path | str) -> int:
+    """Open (creating if needed) the lock file and return a raw descriptor.
+
+    A raw descriptor rather than a buffered text handle: a lock is a file
+    DESCRIPTOR, and ``flock`` operates on one. Using ``os.open`` also keeps the
+    "held for the process lifetime" case honest -- there is no stream to leave
+    unclosed, so nothing has to be excused to a linter.
+    """
+    lock_path = Path(path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    return os.open(lock_path, os.O_RDWR | os.O_CREAT, _LOCK_FILE_MODE)
+
+
+def _stamp_holder(fd: int) -> None:
+    """Record the holder's pid so a refusal can name it.
+
+    A bare "already running" invites deleting the lock file, which reintroduces
+    the race AND removes the signal. Naming the pid lets the reader check
+    whether it is alive and decide between waiting and investigating.
+    """
+    os.ftruncate(fd, 0)
+    os.lseek(fd, 0, os.SEEK_SET)
+    os.write(fd, f"{_PID_PREFIX}{os.getpid()}\n".encode())
+
+
+def try_acquire_run_lock(path: str) -> bool:
+    """Attempt a non-blocking acquire; return whether it succeeded.
+
+    Exposed separately from ``run_lock`` so a caller (or a test) can ask the
+    question without taking ownership. On success the descriptor is deliberately
+    left open for the process lifetime: the kernel releases the lock when the
+    process exits, which is the whole point of using ``flock``.
+    """
+    fd = _open_lock_fd(path)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        # Contention is the EXPECTED answer here, not an error: another run
+        # holds the lock. Only this errno means "held" -- anything else (a bad
+        # path, a full disk) propagates rather than being misreported as a busy
+        # suite, which would silently skip the gate.
+        os.close(fd)
+        return False
+    _stamp_holder(fd)
+    return True
+
+
+def read_holder_pid(path: str) -> str:
+    """Return the recorded holder pid, or a reason it could not be read.
+
+    Diagnostic only. The refusal itself is decided by ``flock``, never by this
+    file's contents -- so an unreadable lock file degrades the MESSAGE and must
+    never be allowed to change the DECISION.
+    """
+    lock_file = Path(path)
+    if not lock_file.is_file():
+        return _UNKNOWN_PID
+    try:
+        content = lock_file.read_text(encoding="utf-8")
+    except OSError as exc:
+        return f"{_UNKNOWN_PID} (lock file unreadable: {exc.strerror})"
+    for line in content.splitlines():
+        if line.startswith(_PID_PREFIX):
+            return line.split("=", 1)[1].strip()
+    return _UNKNOWN_PID
+
+
+def busy_message(path: str) -> str:
+    """Explain the refusal well enough that nobody deletes the lock file."""
+    holder = read_holder_pid(path)
+    return (
+        f"QA is already running (pid {holder}).\n"
+        "\n"
+        "Two concurrent runs share this tree and one coverage.json, so their\n"
+        "verdicts contend and NEITHER can be trusted -- a contended run can\n"
+        "fail a check that is fine, and pass one that is not. Refusing rather\n"
+        "than producing a verdict you would have to distrust.\n"
+        "\n"
+        "  - Wait for that run to finish, then re-run.\n"
+        "  - Inspect the run in progress with:  llm_qa.py --read-only all\n"
+        f"  - If pid {holder} is genuinely dead, the lock is ALREADY released:\n"
+        f"    flock drops it on process exit, so do NOT delete {path}.\n"
+        "    A lock file on disk does not mean a lock is held.\n"
+    )
+
+
+@contextmanager
+def run_lock(path: Path | str) -> Generator[None]:
+    """Hold the run lock for the duration of the block.
+
+    ``flock`` rather than a PID-file convention: the kernel drops it when the
+    holder dies, INCLUDING on SIGKILL. That removes the entire stale-lock class
+    instead of adding cleanup logic for it -- and a guard that could wedge the
+    suite permanently would be worse than the race it prevents, because an agent
+    would soon learn to delete the lock file.
+    """
+    fd = _open_lock_fd(path)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _stamp_holder(fd)
+        yield
+    finally:
+        os.close(fd)
+
 
 # A QA tool's parsed JSON report. Every tool writes its own schema, so the
 # value type is genuinely open — but the mapping itself is not, and a bare
@@ -598,6 +728,23 @@ def main() -> int:
                 return EXIT_FAILURE
             tools.append(name)
 
+    # The run lock guards the EXECUTING path only. `--read-only` runs no tools,
+    # so it cannot contend -- and it is exactly the command someone reaches for
+    # to inspect a run already in progress. Locking it would block the
+    # diagnostic during the one situation the diagnostic is for.
+    if read_only:
+        return _run_tools(tools, read_only=True)
+
+    lock_file = run_lock_path()
+    if not try_acquire_run_lock(str(lock_file)):
+        print(busy_message(str(lock_file)), file=sys.stderr)
+        return EXIT_BUSY
+
+    return _run_tools(tools, read_only=False)
+
+
+def _run_tools(tools: list[str], *, read_only: bool) -> int:
+    """Run (or merely summarize) each tool and print the overall verdict."""
     all_passed = True
     tool_results: dict[str, tuple[bool, str]] = {}
 

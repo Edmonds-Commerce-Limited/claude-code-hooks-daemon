@@ -5,6 +5,8 @@
 # Exit codes:
 #   0 - All checks passed
 #   1 - At least one check failed
+#   2 - Cannot run (venv resolver unavailable)
+#   3 - Another QA run is already in progress (Plan 00262)
 #
 
 set -euo pipefail
@@ -31,6 +33,35 @@ else
 fi
 
 cd "${PROJECT_ROOT}"
+
+# Run lock (Plan 00262). Deliberately the SAME lock file llm_qa.py uses: this
+# script and that one drive the same tree and the same coverage.json, so they
+# must exclude EACH OTHER, not merely themselves. A human running this while an
+# agent runs llm_qa.py is the exact cross-path race worth preventing.
+#
+# flock(1) and Python's fcntl.flock share the underlying kernel lock, so one
+# path genuinely blocks the other. The kernel drops the lock when the holder
+# exits (SIGKILL included), so there is no stale-lock class to clean up and the
+# lock file lingering on disk never means a lock is held.
+QA_RUN_LOCK="${PROJECT_ROOT}/untracked/qa/.llm_qa.lock"
+mkdir -p "$(dirname "${QA_RUN_LOCK}")"
+# APPEND, not truncate: `exec {FD}> file` truncates at OPEN time, which happens
+# before flock is attempted -- so a contending run would erase the holder's pid
+# stamp and then report "pid=unknown" in the very message that needs it.
+exec {QA_LOCK_FD}>> "${QA_RUN_LOCK}"
+if ! flock -n "${QA_LOCK_FD}"; then
+    QA_LOCK_HOLDER="$(cat "${QA_RUN_LOCK}" 2> /dev/null || echo "pid=unknown")"
+    echo "ERROR: QA is already running (${QA_LOCK_HOLDER})." >&2
+    echo "       Two concurrent runs share this tree and one coverage.json, so" >&2
+    echo "       their verdicts contend and NEITHER can be trusted." >&2
+    echo "       Wait for that run to finish, or inspect it with:" >&2
+    echo "         ./scripts/qa/llm_qa.py --read-only all" >&2
+    echo "       Do NOT delete ${QA_RUN_LOCK}: flock releases on process exit," >&2
+    echo "       so a lock file on disk does not mean a lock is held." >&2
+    exit 3
+fi
+# Safe to truncate now: the lock is held, so no other run can be mid-read.
+echo "pid=$$" > "${QA_RUN_LOCK}"
 
 echo "========================================"
 echo "Running ALL QA Checks"
