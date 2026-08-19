@@ -1,6 +1,6 @@
 # Plan 00262: QA runs are not isolated from each other
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-08-19
 **Owner**: Unassigned
 **Priority**: Medium
@@ -104,14 +104,15 @@ that actually bit us. What remains is the narrower case of someone invoking
 
 ### Phase 2: decide on acceptance-test worktree isolation
 
-- [ ] ⬜ **Task 2.1**: With Phase 1 landed, re-assess whether the shared
-  `.git/worktrees/` mutation still warrants a change. Record the decision either
-  way — including "leave it, Plan 00105's trade-off stands" — so the next person
-  to notice does not re-derive this.
+- [x] ✅ **Task 2.1**: With Phase 1 landed, re-assess whether the shared
+  `.git/worktrees/` mutation still warrants a change. **Decided: leave it.** See
+  Decision 6 — Plan 00105's trade-off stands, Phase 1 removes the route that
+  actually bit us, and the decision records the one condition that would reopen
+  it.
 
 ### Phase 3: verification
 
-- [ ] ⬜ **Task 3.1**: Full QA, daemon restart RUNNING.
+- [x] ✅ **Task 3.1**: Full QA (23/23 PASSED), daemon restart RUNNING.
 - [x] ✅ **Task 3.2**: Verify by actually racing two runs, not only by unit
   test — the failure mode is a real concurrent process, and a mocked lock proves
   nothing about it. Verified with live processes in FOUR directions rather than
@@ -211,13 +212,37 @@ utility — and the shell entry point could not call a Python helper regardless.
 Extracting one would couple the QA tooling to the package it tests, for ~15
 lines that also have to exist twice across a language boundary anyway.
 
+### Decision 6: leave the acceptance-test worktree sharing alone
+
+**Context**: Task 2.1. `test_install_sh_end_to_end.py` mutates the shared repo's
+`.git/worktrees/` (`git worktree add` / `remove --force` against `REPO_ROOT`).
+
+**Decision**: no change. Two reasons, plus one condition that would reverse it.
+
+1. **Phase 1 removes the route that actually bit us.** The collision was reached
+   by two full suite runs racing. Both entry points now take one lock, so that
+   cannot happen. What remains is invoking `pytest` on that one file twice in
+   parallel by hand, which is not a workflow anyone has.
+2. **Plan 00105 Task 1.3 chose this deliberately.** The clone helpers exist and
+   are used by the upgrade test; `_create_daemon_worktree` was *retained* for the
+   install test because a worktree shares `.git/objects` and is markedly cheaper
+   than a clone. Reversing a considered decision needs a reason better than
+   "I noticed it", and swapping in a clone would slow a gate that already runs
+   at release time.
+
+**The condition that reopens this**: if acceptance tests are ever run in
+PARALLEL across jobs that share one checkout — which is squarely Plan 00250's
+territory (CI must actually run the blocking acceptance gates) — this becomes a
+real flake source and the clone swap is the fix. Recorded here so 00250 does not
+have to rediscover it.
+
 ## Success Criteria
 
-- [ ] A second concurrent suite run cannot silently race a first
-- [ ] `--read-only` inspection still works while a run is in flight
-- [ ] A stale lock does not wedge the suite
-- [ ] The Phase 2 decision is recorded, whichever way it goes
-- [ ] QA green, daemon restart RUNNING
+- [x] A second concurrent suite run cannot silently race a first
+- [x] `--read-only` inspection still works while a run is in flight
+- [x] A stale lock does not wedge the suite
+- [x] The Phase 2 decision is recorded, whichever way it goes
+- [x] QA green, daemon restart RUNNING
 
 ## Delivery & Milestones
 
