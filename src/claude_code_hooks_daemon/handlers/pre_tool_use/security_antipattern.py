@@ -132,7 +132,8 @@ class SecurityAntipatternHandler(Handler):
     def get_claude_md(self) -> str | None:
         return (
             "## security_antipattern — OWASP security antipatterns are blocked\n\n"
-            "Writing code that contains security antipatterns is blocked across all "
+            "A `Write`/`Edit` of code containing security antipatterns is blocked, "
+            "across all "
             "supported languages. Fix the code to use safe patterns instead.\n\n"
             "**Blocked categories**:\n"
             "- Code injection: `eval`, `exec`, `new Function`, `__import__`, "

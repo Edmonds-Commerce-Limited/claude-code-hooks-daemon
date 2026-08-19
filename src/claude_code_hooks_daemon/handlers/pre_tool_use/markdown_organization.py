@@ -1018,6 +1018,12 @@ class MarkdownOrganizationHandler(Handler):
                 "auto-memory files (`~/.claude/projects/*/memory/*.md`) is **blocked** — via the\n"
                 "Write/Edit tools AND via bash redirect/`tee` side-doors. **Reading memory is\n"
                 "still allowed** so existing memory can be migrated out.\n\n"
+                "**The bash coverage is two spellings, not every route.** `>`, `>>` and\n"
+                "`tee` are detected; `cp`, `mv`, `install`, `dd of=`, `>|`, a quoted target\n"
+                'containing a space, a variable target (`> "$OUT"`) and a script that opens\n'
+                "the file itself are NOT. Treat the rule as the policy and honour it — do not\n"
+                "read an unblocked command as permission. The markdown-LOCATION rule below is\n"
+                "checked on `Write`/`Edit` only, with no bash detection at all.\n\n"
                 "**Put durable knowledge in TRACKED project docs (progressive disclosure):**\n\n"
                 "- Always-relevant facts → `CLAUDE.md` (keep lean; resident every session)\n"
                 "- Path-specific guidance → `.claude/rules/*.md` with `paths:` glob frontmatter "

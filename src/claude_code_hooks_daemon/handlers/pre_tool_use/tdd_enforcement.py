@@ -492,7 +492,8 @@ class TddEnforcementHandler(Handler):
     def get_claude_md(self) -> str | None:
         return (
             "## tdd_enforcement — test file must exist before source file\n\n"
-            "Creating a production source file is blocked until a corresponding test file exists.\n\n"
+            "Creating a production source file with `Write` is blocked until a "
+            "corresponding test file exists.\n\n"
             "**TDD workflow (required)**:\n"
             "1. Create the **test file first** (e.g. `tests/unit/handlers/test_my_handler.py`)\n"
             "2. Write failing tests — RED phase\n"

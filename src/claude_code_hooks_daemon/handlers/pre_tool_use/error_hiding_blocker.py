@@ -162,7 +162,7 @@ class ErrorHidingBlockerHandler(Handler):
     def get_claude_md(self) -> str | None:
         return (
             "## error_hiding_blocker — error-suppression patterns are blocked\n\n"
-            "Writing code that silently swallows errors is blocked. "
+            "A `Write`/`Edit` of code that silently swallows errors is blocked. "
             "All errors must be handled explicitly.\n\n"
             "**Blocked patterns (examples)**:\n"
             "- Python: bare `except` clauses with an empty body, "

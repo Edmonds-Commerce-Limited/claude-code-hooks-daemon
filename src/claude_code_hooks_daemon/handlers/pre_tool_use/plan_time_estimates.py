@@ -153,7 +153,8 @@ class PlanTimeEstimatesHandler(Handler):
     def get_claude_md(self) -> str | None:
         return (
             "## plan_time_estimates — plans describe WHAT, not WHEN\n\n"
-            "Writing time estimates into a plan document is blocked — that is any "
+            "A `Write`/`Edit` that puts time estimates into a plan document is "
+            "blocked — that is any "
             "`CLAUDE/Plan/**/*.md` EXCEPT anything under a plan's `JOURNAL/`. Plans "
             "capture the work to be done, not how long it will take.\n\n"
             "**Everything under `JOURNAL/` is exempt** — day-files "

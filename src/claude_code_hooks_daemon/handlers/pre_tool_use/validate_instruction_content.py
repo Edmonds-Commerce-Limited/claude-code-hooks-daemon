@@ -188,7 +188,8 @@ class ValidateInstructionContentHandler(Handler):
     def get_claude_md(self) -> str | None:
         return (
             "## validate_instruction_content — CLAUDE.md and README.md must have stable content\n\n"
-            "Writing ephemeral or session-specific content to `CLAUDE.md` or `README.md` is "
+            "A `Write`/`Edit` of ephemeral or session-specific content to `CLAUDE.md` "
+            "or `README.md` is "
             "blocked. These files should contain only stable instructions, not implementation "
             "logs or session state.\n\n"
             "**Blocked content types**:\n"

@@ -43,11 +43,32 @@ _AUTO_COMMENT = (
 # Section header shown inside the <hooksdaemon> block
 _SECTION_HEADER = "## Hooks Daemon — Active Handler Guidance\n"
 
+# The class-wide Bash blind spot, stated ONCE (Plan 00260). Every handler that
+# inspects file content or a file path keys on the Write/Edit tools, because
+# `core/utils.py`'s get_file_path()/get_file_content() return None for any other
+# tool — so a handler cannot opt in even if its author wanted to. Twenty-two
+# handlers are affected, and a sentence in each would cost every client project
+# ~22 copies of one fact on every session while reading as boilerplate. The
+# second half matters as much as the first: a reader told only that Bash
+# bypasses the guards could conclude Bash is unguarded generally, which is
+# false and more dangerous than the gap being described.
+_BASH_WRITE_BOUNDARY = (
+    "**A file written through Bash is not seen by the content guards.** "
+    "The handlers below that inspect what a file CONTAINS, or where it lives, "
+    "key on the `Write` and `Edit` tools — so a `>`, `>>`, `tee` or a "
+    "`cat <<EOF` heredoc reaches disk unexamined by them: no block, no "
+    "advisory, no record. **A Bash write that drew no complaint is NOT a write "
+    "that passed a check** — use `Write`/`Edit` for file content and the guards "
+    "apply. The handlers that judge a Bash COMMAND — destructive git, `sed`, "
+    "pipes, permissions, `curl | sh` — are unaffected and still cover you."
+)
+
 _SECTION_INTRO = (
     "The handlers listed below are active in this project. "
     "Read this section to avoid triggering unnecessary blocks.\n\n"
     "**When a tool is blocked by a handler, do not stop working.** "
-    "Read the block reason, modify your approach, and continue with your task."
+    "Read the block reason, modify your approach, and continue with your task.\n\n"
+    f"{_BASH_WRITE_BOUNDARY}"
 )
 
 # Provenance marker emitted before each handler's guidance (DBF, Core

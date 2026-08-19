@@ -217,7 +217,8 @@ class QaSuppressionHandler(Handler):
     def get_claude_md(self) -> str | None:
         return (
             "## qa_suppression — QA suppression annotations are blocked\n\n"
-            "Writing QA suppression directives into source files is blocked across all "
+            "A `Write`/`Edit` that puts QA suppression directives into a source file "
+            "is blocked, across all "
             "supported languages. Fix the underlying code issue instead.\n\n"
             "**Blocked annotation types (by language)**:\n"
             "- Python: `noqa` directives, `type: ignore` annotations\n"
