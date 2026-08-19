@@ -230,12 +230,25 @@ build a parallel mechanism.
 
 ### Phase 4: Verify and close
 
-- [ ] ⬜ **Task 4.1**: Full QA — `./scripts/qa/llm_qa.py all`.
-- [ ] ⬜ **Task 4.2**: Restart the daemon and confirm RUNNING; re-probe the
-  socket cases from the report's verdict table and confirm the new expected
-  outcomes.
-- [ ] ⬜ **Task 4.3**: Add a `truth-changes` entry if any documented statement
-  about `sed` usage or handler coverage becomes false for client projects.
+- [x] ✅ **Task 4.1**: Full QA — 23/23 PASSED (12,730 tests, 95.2% coverage) on
+  the exact committed tree.
+- [x] ✅ **Task 4.2**: Daemon restarted, RUNNING, no load errors; the socket
+  re-probed through the deployed forwarder. Every previously-bypassing shape
+  now DENIES live (`cp`/`mv` into a memory file, `dd of=`, `>|`, a second `tee`
+  operand, a quoted path containing a space) while prose containing `>`, reads
+  of memory, and ordinary project writes still ALLOW. The quoted-space case
+  proved itself by denying the probe command that carried the path literally.
+- [x] ✅ **Task 4.3**: Two `truth-changes` entries staged in
+  `CLAUDE/UPGRADES/UNRELEASED/truth-changes/vUNRELEASED.yaml` — one for the
+  guidance truth (a Bash write was never seen by the content guards, and eight
+  handlers had said otherwise), one for the enforcement truth (six memory-path
+  spellings that previously succeeded now deny). The `sed` guidance reframing
+  from Phase 1 is covered by the first entry's scope: it corrected the same
+  class of false claim.
+
+**Phase 4 does not close this plan.** Task 3.5 is open and needs a human
+decision, so the status stays In Progress. Verification here covers what was
+built, not the whole brief.
 
 ## Dependencies
 

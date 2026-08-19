@@ -75,3 +75,65 @@ truth_changes:
 
       Not covered: Bash-mediated writes (`>`, `>>`, `tee`, heredoc). Those
       bypass every Write/Edit-keyed handler and are tracked separately.
+  - was: >
+      A file written through Bash was covered by the same guards as one written
+      with `Write` or `Edit`. Handler guidance said so directly — eight sections
+      opened with an unqualified "Writing X is blocked" — so a `>`, `>>`, `tee`
+      or heredoc write that drew no complaint read as evidence that the content
+      had been checked and passed.
+    now: >
+      It never was, and the guidance now says so (Plan 00260). Twenty-two
+      handlers key on the `Write`/`Edit` TOOL NAMES, so a file reaching disk
+      through Bash is seen by none of them: no block, no advisory, no record.
+      The eight false claims are corrected in place, and the class-wide fact is
+      stated once in the shared guidance intro.
+
+      NOTHING ABOUT ENFORCEMENT CHANGED HERE — this entry exists because what
+      you were TOLD changed. If your project treated a clean Bash write as
+      evidence that a content guard approved it, that inference was always
+      wrong. Nothing needs fixing in your config; what needs revisiting is any
+      doc, skill or review checklist that relies on it.
+
+      The intro deliberately also names the guards that are UNAFFECTED —
+      destructive git, `sed`, pipes, permissions, `curl | sh` judge the Bash
+      COMMAND and still cover you. A reader told only that Bash bypasses the
+      content guards could conclude Bash is unguarded generally, which is false
+      and more dangerous than the gap being described.
+
+      This matters more than it used to because Claude Code injects a
+      `system-reminder` under `bypassPermissions` directing agents to edit
+      files "with `sed`, heredocs, or short scripts, rather than using the
+      dedicated Read, Edit, or Write tools". The daemon cannot suppress that
+      instruction, so for a project where `bypassPermissions` is permanent this
+      is a standing condition of every session, not an edge case.
+  - was: >
+      With `allow_untracked_claude_memory: false`, the bash side-door to Claude
+      auto-memory paths was closed. In practice only two spellings were
+      detected — a `>`/`>>` redirect and the FIRST `tee` operand — so a command
+      using any other route wrote the file and was allowed.
+    now: >
+      The memory-path rule now resolves write targets by tokenising the command
+      (Plan 00260), so six further spellings are DENIED that previously
+      succeeded: `>|`, `&>`/`&>>`, `dd of=`, `cp`/`mv`/`install` destinations,
+      every `tee` operand after the first, and a quoted path containing a space.
+      Heredoc bodies are scanned too.
+
+      IF YOUR PROJECT HAS A SCRIPT OR DOCUMENTED WORKFLOW THAT COPIES OR TEES A
+      FILE INTO A MEMORY PATH, IT WILL NOW BE DENIED where it previously worked.
+      This affects only projects that set `allow_untracked_claude_memory: false`;
+      reads are still never blocked, so migrating existing memory out is
+      unaffected.
+
+      Still NOT detected, and stated so you do not over-trust it: a target the
+      daemon cannot resolve exactly — a variable such as `> "$OUT"`, or a glob —
+      and a destination that is an existing DIRECTORY (`cp x somedir`,
+      `cp -t somedir x`). These are declined deliberately rather than guessed,
+      because naming the WRONG path would make a path-keyed guard judge a file
+      that was never written, which is worse than naming none. One common
+      variable spelling is still caught by a separate raw-string scan that was
+      kept alongside the new resolver for exactly that reason.
+
+      The wider resolver is available to other handlers as
+      `get_bash_write_targets()` but is currently used only here. Handlers that
+      DENY — the linters — were deliberately NOT wired to Bash writes, because
+      that would create a denial surface that has never existed.
