@@ -132,11 +132,20 @@ that test exists to detect. The test is right; its isolation went stale.
 
 ### Phase 3: The abort deadlock (found by living it)
 
-- [ ] ⬜ **Task 3.1**: `release_blocker._is_awaiting_publish_authorisation`
-  only stands down at `last_completed_step >= 13`. RELEASING.md mandates ABORT
-  on any failed gate (Steps 8-12), when the step is still below 13 — so the
-  agent is denied the Stop it needs in order to REPORT the abort. Name deleting
-  the state file as the abort action in the deny text, and allow the stop.
+- [x] ✅ **Task 3.1**: Fixed in the deny TEXT, deliberately not in `matches()`.
+  The mechanism out already existed — no state file means no release in
+  flight, so deleting it releases the guard — and a test now pins that. What
+  was missing was any statement of it, and an undocumented escape hatch is
+  indistinguishable from none: the agent retries, is denied again, and burns
+  turns. The deny text now names the file to delete, uses RELEASING.md's own
+  word (ABORT) so the two connect, and requires reporting which gate failed.
+  - **Why not widen `matches()`**: no signal in a Stop event distinguishes
+    "aborting a failed gate" from "avoiding the acceptance suite", and this
+    handler exists specifically to stop the latter. Detecting an abort would
+    mean trusting the agent's own say-so about the one thing it is most
+    motivated to misreport. A second test asserts the message warns against
+    deleting the file merely to end the session, so making the exit
+    discoverable does not make it attractive.
 
 ### Phase 4: The guard that could not see a module constant
 

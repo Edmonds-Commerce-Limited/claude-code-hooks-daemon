@@ -403,6 +403,88 @@ class TestReleaseBlockerHandlerMatches:
         assert handler.matches({"stopHookActive": True}) is False
 
 
+class TestTheAbortRouteIsReachable:
+    """A failed BLOCKING gate must not trap the session (Plan 00257 Task 3.1).
+
+    RELEASING.md mandates ABORT on any failed gate, and the gates are Steps
+    8-12 -- all below ``PREP_COMPLETE_STEP``. So on an abort the publish
+    stand-down does not apply and this guard denies the Stop, while the agent's
+    only correct move is to report the abort to a human. Found by living it.
+
+    The mechanism out already existed: no state file means no release in
+    flight, so deleting it releases the guard. Nothing SAID so. A guard whose
+    escape hatch is undocumented is, for the agent hitting it, indistinguishable
+    from one that has none -- it retries, gets denied again, and burns turns.
+
+    The fix is deliberately the message and not ``matches()``. There is no
+    signal in a Stop event that distinguishes "aborting a failed gate" from
+    "avoiding the acceptance suite", and this handler exists specifically to
+    stop the latter (see the example-context.md it cites). Detecting an abort
+    would mean trusting the agent's own say-so about the one thing it is most
+    motivated to misreport. Naming the route costs nothing and removes the trap;
+    widening ``matches()`` would remove the guard.
+    """
+
+    def test_the_deny_text_names_the_abort_action(self) -> None:
+        handler = ReleaseBlockerHandler()
+
+        result = handler.handle({})
+
+        assert "release-state.json" in result.reason, (
+            "The deny text must name the state file as the thing to delete when "
+            "aborting. Without it the agent is denied the Stop it needs to REPORT "
+            "a failed gate, and has no stated way out."
+        )
+        assert "ABORT" in result.reason, (
+            "RELEASING.md's word for a failed blocking gate is ABORT. The deny "
+            "text must use it, or an agent reading the abort instruction in "
+            "RELEASING.md will not connect it to this block."
+        )
+
+    def test_the_abort_route_is_not_offered_as_a_way_to_end_the_session(self) -> None:
+        """Making the exit discoverable must not make it attractive.
+
+        This handler was written because agents avoid acceptance testing. A
+        message that says "delete this file to stop" without qualification
+        converts the guard into an instruction for defeating itself.
+        """
+        handler = ReleaseBlockerHandler()
+
+        result = handler.handle({})
+
+        lowered = (result.reason or "").lower()
+        assert "do not delete" in lowered or "not merely" in lowered, (
+            "The deny text names the abort route but does not warn against using "
+            "it simply to end the session. The guard exists to prevent exactly "
+            "that, so the qualification is not optional."
+        )
+
+    def test_deleting_the_state_file_actually_releases_the_guard(self, tmp_path: Path) -> None:
+        """The documented route must be the real one.
+
+        Pins message and mechanism together: if resolution ever stops keying on
+        the file's existence, the deny text becomes a lie and this fails.
+        """
+        handler = ReleaseBlockerHandler()
+        state_path = tmp_path / "untracked" / "release-state.json"
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text(json.dumps({"version": "9.9.9", "last_completed_step": 8}))
+        hook_input = {"cwd": str(tmp_path)}
+
+        with patch(
+            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+            return_value=tmp_path,
+        ):
+            assert handler.matches(hook_input) is True, "guard should be active mid-gate"
+
+            state_path.unlink()
+
+            assert handler.matches(hook_input) is False, (
+                "Deleting the state file is the abort route named in the deny text, "
+                "so it must release the guard."
+            )
+
+
 class TestReleaseBlockerHandlerHandle:
     """Test handler execution behavior."""
 
