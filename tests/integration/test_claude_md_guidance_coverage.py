@@ -98,6 +98,11 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "SecurityAntipatternHandler": "T1 denies known-dangerous constructs",
     "SedBlockerHandler": "T1 denies sed used to modify files",
     "SensitiveContentHandler": "T1 denies blocked terms in content and git metadata",
+    "ArtifactPublishBlockerHandler": (
+        "T1 denies publishing an artefact, and the guidance carries something the "
+        "deny reason alone cannot: that there is deliberately NO escape hatch, so an "
+        "agent does not waste turns hunting for one or try to lift the config itself"
+    ),
     "SudoPipHandler": "T1 denies sudo pip install",
     "TddEnforcementHandler": "T1 denies a source file with no test file",
     "ValidateInstructionContentHandler": "T1 denies ephemeral content in CLAUDE.md",

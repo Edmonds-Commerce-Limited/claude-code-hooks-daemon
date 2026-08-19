@@ -582,6 +582,39 @@ handlers:
 
 ---
 
+#### artifact_publish_blocker
+
+| Property       | Value                      |
+| -------------- | -------------------------- |
+| **Config key** | `artifact_publish_blocker` |
+| **Priority**   | 14                         |
+| **Type**       | Blocking (terminal)        |
+| **Event**      | PreToolUse                 |
+
+**Description:** Blocks publishing an artefact. The `Artifact` tool renders a local file to a page hosted on claude.ai and returns a URL. The page starts private, but it lives **outside** the project: the repository cannot audit what left it, and deleting the artefact later does not un-share a link somebody has already opened. Whether content leaves is the user's decision, so an agent may not make it.
+
+**What it matches:** any `Artifact` call that would create or update a hosted page — an absent `action` (which means publish), `action: "publish"`, or passing `url` to update an existing page. An **unrecognised** action is treated as publishing rather than allowed, so an added action cannot silently open a hole.
+
+**Always allowed:** `action: "list"`. Enumerating existing artefacts discloses nothing new.
+
+**Options:** none beyond `enabled` and `priority`.
+
+**No escape hatch — by design.** Unlike [`git_stash`](#git_stash) and [`ancestry_preserving_merge`](#ancestry_preserving_merge), this handler accepts no `MUST_..._BECAUSE` declaration. Those hatches cover actions whose consequences stay inside the repository; publishing leaves it. An agent able to type its own justification would have self-authorised disclosure, which is the precise thing this guard exists to prevent — the same reasoning behind `delete-branch --allow-unproven` still requiring an interactive human.
+
+**Not covered:** a human publishing through the claude.ai UI. The daemon sees tool calls, not browser clicks — the same honest limitation [`ancestry_preserving_merge`](#ancestry_preserving_merge) records about the GitHub merge button. This handler also does not scan artefact **content**; that is [`sensitive_content`](#sensitive_content)'s job and it already ran when the file was written.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    artifact_publish_blocker:
+      enabled: true   # default; only a HUMAN should set this to false
+      priority: 14
+```
+
+---
+
 #### git_stash
 
 | Property       | Value                                        |
@@ -2272,6 +2305,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `absolute_path`                | PreToolUse        | 12       | Relative paths in Read/Write/Edit                                    |
 | `error_hiding_blocker`         | PreToolUse        | 13       | Code that silently swallows errors                                   |
 | `security_antipattern`         | PreToolUse        | 14       | Dangerous constructs (eval, shell exec, deserialization, XSS, creds) |
+| `artifact_publish_blocker`     | PreToolUse        | 14       | Publishing an artefact (a claude.ai URL outside the project)         |
 | `worktree_file_copy`           | PreToolUse        | 15       | cp/mv/rsync between worktrees                                        |
 | `pipe_blocker`                 | PreToolUse        | 15       | Expensive commands piped to tail/head                                |
 | `dangerous_permissions`        | PreToolUse        | 15       | chmod 777, chmod a+rwx                                               |

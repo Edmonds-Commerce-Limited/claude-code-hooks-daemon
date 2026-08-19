@@ -1,0 +1,43 @@
+version: "UNRELEASED"
+truth_changes:
+  - was: >
+      Publishing an artefact is an ordinary step an agent can take on its own
+      initiative. A project's own documentation and skills could instruct an
+      agent to render a report as an artefact and hand the user the resulting
+      link, and that instruction would simply work — nothing in the daemon
+      inspected or restricted the `Artifact` tool, because no handler keyed on
+      it at all.
+    now: >
+      Artefact publishing is BLOCKED by default (Plan 00259). The
+      `artifact_publish_blocker` PreToolUse handler denies any `Artifact`
+      publish or update: an absent `action` (which means publish),
+      `action: "publish"`, or passing `url` to update an existing page. An
+      unrecognised future action is treated as publishing rather than being
+      waved through, so the default is fail-safe. Read-only `action: "list"`
+      is never blocked, since enumerating discloses nothing new.
+
+      The reasoning is disclosure, not content: publishing renders a local
+      file to a page hosted on claude.ai and returns a URL. The page starts
+      private, but it lives OUTSIDE the project — the repository cannot audit
+      what left it, and deleting the artefact later does not un-share a link
+      somebody has already opened. Whether content leaves is the user's call.
+      Content scanning remains `sensitive_content`'s job and already happened
+      when the file was written; this handler guards the ACT of publishing.
+
+      IF YOUR PROJECT'S DOCS, SKILLS OR AGENT INSTRUCTIONS TELL AN AGENT TO
+      PUBLISH AN ARTEFACT OR SHARE AN ARTEFACT LINK, THOSE INSTRUCTIONS ARE
+      NOW FALSE and the agent will be denied when it follows them. Either
+      rewrite them to write the file locally and give the user its path, or
+      have a HUMAN set
+      `handlers.pre_tool_use.artifact_publish_blocker.enabled: false`.
+
+      Note there is deliberately NO agent-side `MUST_..._BECAUSE` escape
+      hatch, unlike `git_stash` or `ancestry_preserving_merge`. Those hatches
+      cover actions whose consequences stay inside the repository; publishing
+      leaves it, so an agent able to type its own justification would have
+      self-authorised disclosure — the same reason
+      `delete-branch --allow-unproven` still demands an interactive human.
+
+      This has no effect on a human publishing through the claude.ai UI. The
+      daemon sees tool calls, not browser clicks — the same honest limitation
+      `ancestry_preserving_merge` records about the GitHub merge button.

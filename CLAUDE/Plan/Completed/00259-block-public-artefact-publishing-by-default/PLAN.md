@@ -1,6 +1,6 @@
 # Plan 00259: block artefact publishing by default
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-08-18
 **Owner**: Claude (Opus 5)
 **Priority**: High
@@ -62,39 +62,39 @@ Relevant precedent in this codebase:
 
 ### Phase 1: Design confirmation
 
-- [ ] ⬜ **Task 1.1**: Confirm the daemon actually receives `Artifact` tool
+- [x] ✅ **Task 1.1**: Confirm the daemon actually receives `Artifact` tool
   calls as PreToolUse with `tool_name: "Artifact"`, and capture a real payload
   with `scripts/debug_hooks.sh` rather than assuming the shape. Record the
   observed `tool_input` keys (`file_path`, `action`, `url`, `title`, …).
-- [ ] ⬜ **Task 1.2**: Fix the handler id, config key and priority. Proposed
+- [x] ✅ **Task 1.2**: Fix the handler id, config key and priority. Proposed
   `artifact_publish_blocker` at priority 14, sitting with `sensitive_content`
   (14) and `security_antipattern` (14) in the disclosure/safety band.
 
 ### Phase 2: TDD implementation
 
-- [ ] ⬜ **Task 2.1**: RED — tests for `matches()`: fires on `Artifact` with no
+- [x] ✅ **Task 2.1**: RED — tests for `matches()`: fires on `Artifact` with no
   `action`, fires on `action: "publish"`, does NOT fire on `action: "list"`,
   does NOT fire on any other tool.
-- [ ] ⬜ **Task 2.2**: RED — tests for `handle()`: `Decision.DENY`, and the
+- [x] ✅ **Task 2.2**: RED — tests for `handle()`: `Decision.DENY`, and the
   reason names the config key AND states the agent must ask a human.
-- [ ] ⬜ **Task 2.3**: GREEN — implement the handler, terminal, in
+- [x] ✅ **Task 2.3**: GREEN — implement the handler, terminal, in
   `handlers/pre_tool_use/`.
-- [ ] ⬜ **Task 2.4**: `get_claude_md()` — resident guidance, since a blocking
+- [x] ✅ **Task 2.4**: `get_claude_md()` — resident guidance, since a blocking
   handler with no guidance is exactly what the coverage gate catches.
-- [ ] ⬜ **Task 2.5**: `get_acceptance_tests()` — a DENY case and an ALLOW case
+- [x] ✅ **Task 2.5**: `get_acceptance_tests()` — a DENY case and an ALLOW case
   (`action: "list"`), because a positive-only suite cannot catch over-broad
   matching (the `find_deny_capable_handlers_without_allow_case` rule).
 
 ### Phase 3: Wiring and disclosure
 
-- [ ] ⬜ **Task 3.1**: Register in config defaults as `enabled: true`, and add
+- [x] ✅ **Task 3.1**: Register in config defaults as `enabled: true`, and add
   it to this project's own `.claude/hooks-daemon.yaml` (dogfooding).
-- [ ] ⬜ **Task 3.2**: `config-changes` manifest entry for the new key.
-- [ ] ⬜ **Task 3.3**: A `truth-changes` entry. This one matters: a project
+- [x] ✅ **Task 3.2**: `config-changes` manifest entry for the new key.
+- [x] ✅ **Task 3.3**: A `truth-changes` entry. This one matters: a project
   whose own docs say "publish a report as an artefact and share the link" now
   has a false instruction, and truth-changes is the channel that renders
   unconditionally on upgrade.
-- [ ] ⬜ **Task 3.4**: Full QA, daemon restart RUNNING, and run the handler's
+- [x] ✅ **Task 3.4**: Full QA, daemon restart RUNNING, and run the handler's
   own acceptance tests live.
 
 ## Technical Decisions
@@ -120,12 +120,16 @@ block is a config edit, made by a human, visible in review.
 
 ## Success Criteria
 
-- [ ] Publishing an artefact is denied in a default-configured project
-- [ ] `action: "list"` is not denied
-- [ ] The deny reason names the config key and says to ask a human
-- [ ] Handler carries `get_claude_md()` and both acceptance-test cases
-- [ ] QA green, daemon restart RUNNING
-- [ ] config-changes and truth-changes entries staged
+- [x] Publishing an artefact is denied in a default-configured project
+- [x] `action: "list"` is not denied
+- [x] The deny reason names the config key and says to ask a human
+- [x] Handler carries `get_claude_md()` and both acceptance-test cases
+- [x] QA green, daemon restart RUNNING
+- [x] config-changes and truth-changes entries staged
+
+Verified live, not only by unit test: the daemon was restarted, the socket
+probed (publish → `deny`, list → no decision), and a real publish attempt
+through the `Artifact` tool was blocked with nothing published.
 
 ## Delivery & Milestones
 
@@ -133,3 +137,7 @@ block is a config edit, made by a human, visible in review.
 
 - Requested during the v3.54.0 release; deliberately NOT added to that bundle
   (see JOURNAL for the sequencing reasoning).
+- Delivered at the commit that archives this plan. Ships in the NEXT release —
+  the `truth-changes` entry is the load-bearing part of that, since any project
+  whose docs tell an agent to publish a report and share the link now holds a
+  false instruction.

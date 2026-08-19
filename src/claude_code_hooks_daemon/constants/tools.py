@@ -78,6 +78,9 @@ class ToolName:
     # Code intelligence
     LSP = "LSP"
 
+    # Publishing (renders a local file to a page hosted outside the project)
+    ARTIFACT = "Artifact"
+
 
 # Type alias for valid tool names (for type checking)
 ToolNameLiteral = Literal[
@@ -102,6 +105,7 @@ ToolNameLiteral = Literal[
     "AskUserQuestion",
     "NotebookEdit",
     "LSP",
+    "Artifact",
 ]
 
 

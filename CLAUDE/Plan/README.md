@@ -5,7 +5,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Active Plans
 
 - [00260: the Bash write side-door, and a handler that under-describes its own rule](00260-bash-write-side-door-and-stream-editor-guidance/PLAN.md) - Not Started (verified field report: 21 handlers key on `Write`/`Edit`, so a heredoc/redirect/`tee` write is seen by none of them while the harness actively steers agents toward exactly that route; plus `sed_blocker` guidance that under-states what it blocks)
-- [00259: block artefact publishing by default](00259-block-public-artefact-publishing-by-default/PLAN.md) - Not Started (the `Artifact` tool mints a claude.ai URL outside the repository, and it is the one disclosure path with no guard; blocked by default, liftable only by a human config edit)
 - [00257: the protected ref nobody qualified, and a QA gate that fails during releases](00257-delete-branch-protected-ref-ambiguity-and-release-qa-deadlock/PLAN.md) - In Progress (reproduced: a tag shadowing the protected ref makes `delete-branch` force-delete an unmerged branch, because this cycle's new forcing tiers removed git's own refusal; plus QA failing whenever a release state file exists)
 - [00252: guards for premises no write-time hook sees](00252-guards-for-premises-no-write-time-hook-sees/PLAN.md) - Not Started (two defects, one argument from Core Standard 15's corollary: the ambient-git-premise class Plan 00245 fixed seven times by hand without a guard, and the fact that no guard inspects STAGED CONTENT for secret-list terms, so a file arriving by `mv` reached a pushed commit)
 - [00250: CI must actually run the acceptance gates it calls blocking](00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Not Started (Plan 00245's `-rs` flag named 11 acceptance tests that have skipped on every CI run for want of a daemon socket, three of the files being ones `RELEASING.md` Step 12.0 declares BLOCKING)
@@ -164,6 +163,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00259: block artefact publishing by default](Completed/00259-block-public-artefact-publishing-by-default/PLAN.md) - Complete at the commit that archives it (the `Artifact` tool mints a claude.ai URL outside the repository and was the one disclosure path with no guard; blocked by default, `action: "list"` still allowed, and deliberately NO agent-side escape hatch — verified live, not just by unit test)
 
 - [00256: docs consistency round, found by the v3.54.0 release](Completed/00256-docs-consistency-round-for-v3540-release/PLAN.md) - Complete at `3ff4078e` + `4e064e15` + the commit that archives it (eight documents asserting something untrue of the tree, found by the release's own Step 7 and Step 10 gates; the durable half is the `unreleased-manifest-date` guard, since the placeholder it catches had already shipped silently in four manifests)
 
@@ -1220,15 +1221,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 260 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 210 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 211 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 37 + 210 + 6 = **253 folders**, spanning
+- **Folder-to-number reconciliation**: 36 + 211 + 6 = **253 folders**, spanning
   **250 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1239,11 +1240,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a sub-agent
   that then found Plan 00208 already covered the work). 250 + 10 = 260. ✅
 
-- **Last reconciled by**: the Plan 00260 creation — one new folder in the plan
-  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
-  by one while Completed and Cancelled were untouched. Recounted from disk (37
-  root, 210 `Completed/`, 6 `Cancelled/`, 250 distinct numbers against a counter
-  of 260).
+- **Last reconciled by**: the Plan 00259 closure — the folder moved from the plan
+  root into `Completed/`, so Active fell by one and Completed rose by one while
+  Total, Cancelled and the folder count were untouched. This closure lands on top
+  of the Plan 00260 creation (one new root folder, counter advanced by
+  `mkplan.bash`), so the two cancel out in the root count. Counts verified from
+  disk at this commit (36 root, 211 `Completed/`, 6 `Cancelled/`, against a
+  counter of 260).
 
 - **Before that**: the Plan 00256 closure — the folder moved from the plan
   root into `Completed/`, so Active fell by one and Completed rose by one while

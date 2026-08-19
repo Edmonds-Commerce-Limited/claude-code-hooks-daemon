@@ -59,6 +59,9 @@ class Priority:
 
     SECURITY_ANTIPATTERN = 14
     SENSITIVE_CONTENT = 14
+    # Same band as the two above, and for the same reason: all three guard
+    # content leaving the project rather than a workflow preference.
+    ARTIFACT_PUBLISH_BLOCKER = 14
 
     ROOT_RECURSION_GUARD = 16
 

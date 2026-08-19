@@ -238,6 +238,11 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
 _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "AbsolutePathHandler": "matches on the file_path parameter, not a command",
     "AgentIsolationAdvisorHandler": "matches on the Agent tool, not a command",
+    "ArtifactPublishBlockerHandler": (
+        "matches on the Artifact tool and its action field, not a command string - "
+        "there is no shell spelling to evade, and an unrecognised action is treated "
+        "as publishing rather than allowed"
+    ),
     "AskUserQuestionBlockerHandler": "matches on the AskUserQuestion tool",
     "BritishEnglishHandler": "matches written content",
     "CommentChangelogHandler": "matches written content (comment spans)",

@@ -1,0 +1,37 @@
+version: "UNRELEASED"
+date: "UNRELEASED"
+breaking: false
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.artifact_publish_blocker
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PreToolUse blocking handler (Plan 00259). Denies publishing an
+        artefact. The Artifact tool renders a local file to a page hosted on
+        claude.ai and returns a URL; the page starts private, but it lives
+        OUTSIDE the project, so the repository cannot audit what left it and
+        deleting the artefact later does NOT un-share a link somebody has
+        already opened. Whether content leaves is the user's decision, and
+        this was the one disclosure path in the daemon with no guard at all.
+        Fires on any publish or update -- an absent action (which means
+        publish), action "publish", or passing url to update an existing page
+        -- and deliberately defaults unknown future actions to "this
+        publishes" rather than waving them through. Read-only action "list"
+        is never blocked, because enumerating discloses nothing new. The
+        payload shape was captured from the live daemon rather than assumed.
+        Ships default-ON: a guard that must be discovered and enabled before
+        it protects anything protects nobody, and the cost of the default is
+        one config line for projects that genuinely want to publish.
+      migration_note: >-
+        On by default; no action needed to adopt. If your project legitimately
+        publishes artefacts (dashboards, shared reports), a HUMAN sets
+        handlers.pre_tool_use.artifact_publish_blocker.enabled to false. Note
+        there is deliberately NO agent-side MUST_..._BECAUSE escape hatch:
+        the hatches on git_stash and ancestry_preserving_merge cover actions
+        whose consequences stay inside the repository, whereas publishing
+        leaves it, so an agent able to type its own justification would have
+        self-authorised disclosure. Agents are told to ask rather than apply
+        the setting themselves. This does not affect a human publishing
+        through the claude.ai UI -- the daemon sees tool calls, not browser
+        clicks.

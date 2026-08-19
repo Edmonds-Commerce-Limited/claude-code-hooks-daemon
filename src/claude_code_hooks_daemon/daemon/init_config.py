@@ -130,6 +130,11 @@ class ConfigTemplate:
             # is a one-line config edit rather than also discovering the handler
             # exists -- a guard nobody knows about protects nobody.
             "    sensitive_content: {enabled: true, priority: 14}  # Block configured public patterns + gitignored secret word list\n"
+            # On by default (Plan 00259): publishing mints a claude.ai URL for a
+            # locally-rendered page, and that is the one disclosure path with no
+            # guard. Read-only `action: "list"` stays allowed. Only a human may
+            # lift this -- the handler deliberately has no agent-side hatch.
+            "    artifact_publish_blocker: {enabled: true, priority: 14}  # Block publishing artefacts outside the project\n"
             "    root_recursion_guard: {enabled: true, priority: 16}  # Block recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME\n"
             "    pipe_blocker: {enabled: true, priority: 15}      # Block dangerous pipe patterns\n"
             "    worktree_file_copy: {enabled: true, priority: 15}  # Prevent worktree file copies\n"

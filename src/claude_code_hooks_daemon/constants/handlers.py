@@ -201,6 +201,14 @@ class HandlerID:
         config_key="sensitive_content",
         display_name="block-sensitive-content",
     )
+    # Artefact publishing (Plan 00259): the Artifact tool mints a claude.ai URL
+    # for a locally-rendered page. It is the one disclosure path with no guard,
+    # so it is blocked by default and only a human may lift the block.
+    ARTIFACT_PUBLISH_BLOCKER = HandlerIDMeta(
+        class_name="ArtifactPublishBlockerHandler",
+        config_key="artifact_publish_blocker",
+        display_name="block-artefact-publishing",
+    )
     GIT_STASH = HandlerIDMeta(
         class_name="GitStashHandler",
         config_key="git_stash",

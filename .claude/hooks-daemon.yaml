@@ -94,6 +94,15 @@ handlers:
     # so the heuristic could not distinguish a real leaked path from a
     # fixture without naming the specific real segments — which belongs in
     # the secret list, not here.
+    # Plan 00259. Dogfooded ON, which is also the shipped default. Publishing
+    # renders a local file to a page hosted on claude.ai and returns a URL —
+    # an egress path this repository cannot audit or retract. Read-only
+    # `action: "list"` stays allowed. There is deliberately no agent-side
+    # escape hatch: lifting this is a human's config edit, visible in review.
+    artifact_publish_blocker:
+      enabled: true
+      priority: 14
+
     sensitive_content:
       enabled: true
       priority: 14

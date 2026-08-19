@@ -65,6 +65,10 @@ handlers:
       enabled: true
       priority: 15
 
+    artifact_publish_blocker:  # Blocks publishing artefacts (a claude.ai URL outside the project)
+      enabled: true         # Read-only `action: "list"` is never blocked. No agent-side escape
+      priority: 14          # hatch by design — only a human sets this to false.
+
     sensitive_content:     # Blocks configured public patterns + a gitignored secret word list
       enabled: true         # Inert until configured: public_patterns defaults to [] and the
       priority: 14          # secret word list path defaults to a file that does not exist yet.
