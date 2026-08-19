@@ -736,22 +736,20 @@ hooks-daemon delete-branch <name>              # deletes only if provably safe
 
 `sed` is blocked because Claude gets sed syntax wrong and a single error can silently destroy hundreds of files with no recovery possible.
 
-**The rule is broader than 'no in-place editing' — read this before assuming a read-only `sed` is fine.**
+**THE RULE IS DENY-BY-DEFAULT, NOT A LIST OF BAD PATTERNS.** Any Bash command containing the WORD `sed` is blocked unless it matches one of the four narrow exemptions below. This framing matters: an earlier version of this guidance listed specific blocked shapes, which read as though anything unlisted was fine. It is not — `python3 -c "print('sed')"` is blocked, and so is `xargs sed 's/a/b/'` despite having no `-i`, no command-head position and no pipe stage.
 
-**Blocked**:
+**The four exemptions, in the order they are applied**:
 
-- `sed` with a flag cluster containing `i`, `e` or `n` — so `sed -i` and `sed -e`, but ALSO `sed -n`, anywhere in the command. `sed -n '1,20p' file` prints to stdout and cannot write, and is blocked anyway: `-n` and `-i` differ by one character, and the block costs you nothing because `Read` with `offset`/`limit` does the same job
-- `sed` as a command HEAD — at the start, or after `;`, `&&` or `||` — with or without flags
-- `grep -rl X | xargs sed -i` (mass file modification)
-- Shell scripts (`.sh`/`.bash`) written via Write tool that contain `sed`
+1. **None of them apply if sed is EXECUTED.** sed at a command HEAD (start, or after `;`, `&&`, `||`), any flag cluster containing `i`, `e` or `n`, or sed via `xargs`, is blocked no matter what else is in the command. So `grep x f; sed -i 's/a/b/' f` is still denied — the `grep` does not rescue it. Note `sed -n '1,20p' file` prints to stdout and cannot write, and is blocked anyway: `-n` and `-i` differ by one character, and `Read` with `offset`/`limit` does the same job.
+2. A `git commit` message mentioning sed (sed must follow `git commit` with no command separator between).
+3. A `gh` issue/PR/release body mentioning sed (same separator rule).
+4. The command contains a `grep`, or an `echo` that does not itself carry a `sed 's/…'` substitution.
 
-**Allowed**:
+**Consequence worth internalising**: exemption 4 is a proxy for 'this looks read-only', and it is the reason two commands that BOTH cannot modify a file get opposite verdicts — `cat f | sed 's/x/y/' | grep z` is allowed while `cat f | sed 's/x/y/' | wc -l` is DENIED. Nothing about writing distinguishes them; only the presence of `grep`.
 
-- `sed` as a PIPE STAGE (after a single `|`, no `i`/`e`/`n` flags) — but ONLY when a `grep` or an `echo` also appears somewhere in the command. That condition is the surprising part: `cat f | sed 's/x/y/' | grep z` is allowed, while `cat f | sed 's/x/y/' | wc -l` is DENIED, even though neither can modify a file
-- `sed` mentioned in a `git commit` message, or in a `gh` issue/PR body
-- writing a `.md` file **with the `Write` tool** — markdown is exempt there
+**Write/Edit tool (a separate branch, different rule)**: a `.sh`/`.bash` file whose content contains sed is blocked; a `.md` file is always allowed; any other path is not examined.
 
-**The `.md` exemption is Write-tool-only, and this catches people out.** The Bash branch judges the COMMAND, not the destination, so `cat > NOTES.md <<'EOF'` whose body mentions sed is DENIED even though `Write` to that same path is allowed. A Bash command is spared only if it contains a `grep` or an `echo` (so `echo 'avoid sed' > NOTES.md` is fine) or is a `git`/`gh` command. **Write markdown about sed with the `Write` tool**, not a heredoc, and this never bites.
+**The `.md` exemption is Write-tool-only, and this catches people out.** The Bash branch judges the COMMAND, not the destination, so `cat > NOTES.md <<'EOF'` whose body mentions sed is DENIED even though `Write` to that same path is allowed. Only exemption 4 can spare a Bash write (so `echo 'avoid sed' > NOTES.md` is fine). **Write markdown about sed with the `Write` tool**, not a heredoc, and this never bites.
 
 **Use instead**:
 
