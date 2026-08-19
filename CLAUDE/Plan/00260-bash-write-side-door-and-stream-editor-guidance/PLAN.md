@@ -114,6 +114,12 @@ build a parallel mechanism.
 - [ ] ⬜ **Task 2.1**: Enumerate every handler keying on `ToolName.WRITE` /
   `ToolName.EDIT` (21 at v3.53.1) and record, per handler, whether a
   Bash-mediated write can reach the same premise it guards.
+  - Input map (all 21 read and verified): [BASH-BLINDSPOT-MAP.md](BASH-BLINDSPOT-MAP.md).
+    It corrects the provisional split used in Task 3.1 below — `lint_on_edit`
+    and `validate_eslint_on_write` are PATH-keyed (they read from disk, so a
+    path-only utility restores them outright), `plan_time_estimates` is NOT
+    path-keyed, and `absolute_path` should be dropped from Task 3.1's list
+    because extending it to Bash would block ordinary relative-path shell use.
 - [ ] ⬜ **Task 2.2**: For each handler that is blind, add one sentence to its
   `get_claude_md()` naming the boundary — e.g. "this handler sees
   `Write`/`Edit` only; a file written via a Bash heredoc is not checked".
