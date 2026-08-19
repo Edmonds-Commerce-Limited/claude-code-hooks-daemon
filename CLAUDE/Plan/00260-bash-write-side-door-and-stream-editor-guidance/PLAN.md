@@ -157,6 +157,16 @@ build a parallel mechanism.
   Task 3.1 after 00252's staged-content work if that lands first, and reuse it.
 - Related: Plan 00131 (introduced the memory-path bash side-door closure that
   Task 3.1 generalises).
+- Corroborated by: Plan 00257's `JOURNAL/00257-Journal-26-08-19.md`, where
+  Finding 1 was hit independently and live during the v3.54.0 release (a
+  `sed -n` range-read was denied) before this report was verified. That entry
+  reaches the same conclusion by a different route and reasons the same way
+  about the remedy — fix the guidance, do not loosen the guard — which is worth
+  noting because two independent arrivals at one conclusion is the strongest
+  evidence here that the defect is real and the fix is the documented one.
+  It also records the aggravating factor: the harness instruction pushing
+  agents toward Bash-first editing was observed in that same session, so
+  Finding 2's premise is not hypothetical.
 
 ## Technical Decisions
 
