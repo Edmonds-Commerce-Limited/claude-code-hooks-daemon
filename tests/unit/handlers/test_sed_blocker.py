@@ -1225,3 +1225,67 @@ class TestSedBlockerHandlerBlockingMode:
             },
         }
         assert direct_invocation_handler.matches(hook_input) is False
+
+
+class TestGuidanceMatchesBehaviour:
+    """The resident guidance must describe the rule the code actually enforces.
+
+    Plan 00260 Finding 1: `get_claude_md()` documented `sed -i` / `sed -e` and
+    offered an "Allowed (read-only, no file modification)" section, while the
+    code blocks strictly more than that -- `sed -n`, a flagless `sed` at a
+    command head, and any pipe stage in a command carrying neither `grep` nor
+    `echo`. An agent that finds the guidance wrong starts working around the
+    guard, so a guard whose published rule is narrower than its real one is a
+    defect even when the blocking behaviour is correct.
+
+    DBF: the missing guard was that NOTHING checked guidance against behaviour.
+    These tests are that guard. Each asserts the real verdict AND that the
+    guidance mentions the case, so changing one without the other fails.
+    """
+
+    @pytest.fixture
+    def handler(self):
+        return SedBlockerHandler()
+
+    @staticmethod
+    def _bash(command: str) -> dict:
+        return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+    def test_quiet_flag_is_blocked_and_guidance_says_so(self, handler):
+        """`sed -n` cannot write, and is blocked anyway. The guidance must admit it."""
+        assert handler.matches(self._bash("sed -n '1,20p' /workspace/PLAN.md")) is True
+
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "-n" in guidance, "guidance must name the quiet flag it blocks"
+
+    def test_command_head_without_flags_is_blocked_and_guidance_says_so(self, handler):
+        """A bare `sed` at a command head is blocked regardless of arguments."""
+        assert handler.matches(self._bash("sed 's/x/y/' /workspace/file.txt")) is True
+
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "command HEAD" in guidance or "command head" in guidance
+
+    def test_pipe_stage_with_grep_is_allowed(self, handler):
+        """The one shape the old guidance documented -- still true, still allowed."""
+        assert handler.matches(self._bash("cat f | sed 's/x/y/' | grep z")) is False
+
+    def test_pipe_stage_without_grep_or_echo_is_blocked(self, handler):
+        """The surprising half, and the reason the old guidance misled.
+
+        Neither this nor the grep form can modify a file. They differ only by
+        whether a `grep`/`echo` appears elsewhere in the command, which the old
+        guidance never hinted at -- its single example happened to be the
+        allowed one, so the boundary was invisible.
+        """
+        assert handler.matches(self._bash("cat f | sed 's/x/y/' | wc -l")) is True
+
+    def test_guidance_states_the_grep_echo_condition_with_its_counterexample(self, handler):
+        """A rule stated only by a passing example teaches the wrong boundary."""
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert (
+            "wc -l" in guidance
+        ), "guidance must give the DENIED counter-example, not only the allowed one"
+        assert "grep" in guidance and "echo" in guidance

@@ -93,21 +93,33 @@ build a parallel mechanism.
 
 ### Phase 1: Correct the `sed_blocker` guidance
 
-- [ ] ⬜ **Task 1.1**: Rewrite `get_claude_md()` in `sed_blocker.py` so the
+- [x] ✅ **Task 1.1**: Rewrite `get_claude_md()` in `sed_blocker.py` so the
   blocked list includes `sed -n`, and a bare `sed` as a command head with or
   without flags.
-- [ ] ⬜ **Task 1.2**: Retitle the "Allowed (read-only, no file modification)"
+- [x] ✅ **Task 1.2**: Retitle the "Allowed (read-only, no file modification)"
   section to describe the real rule — a pipe stage, and only when a `grep` or
   `echo` also appears in the command. State the `wc -l` counter-example
   explicitly so the boundary is not inferred from one lucky example.
-- [ ] ⬜ **Task 1.3**: Add a test asserting the guidance text names `-n` and the
+- [x] ✅ **Task 1.3**: Add a test asserting the guidance text names `-n` and the
   command-head case, so the description cannot silently drift from the code
   again (DBF: the missing guard here is "nothing checks that guidance matches
-  behaviour").
-- [ ] ⬜ **Task 1.4**: Decide and record whether the pipe-stage-needs-`grep`
-  behaviour is *wanted* or merely *tested*. If wanted, leave it and document
-  it. If not, that is a behaviour change and needs its own tasks plus updated
-  tests — do not fold it silently into a guidance fix.
+  behaviour"). Delivered as `TestGuidanceMatchesBehaviour` in
+  `tests/unit/handlers/test_sed_blocker.py` — five tests that assert the real
+  VERDICT and the guidance text together, so changing either alone fails.
+- [x] ✅ **Task 1.4**: Decided — see Decision 2. The behaviour is an ARTEFACT,
+  not a design, but it stays; only the guidance changed.
+- [ ] ⬜ **Task 1.5** (behaviour, NOT guidance — found by the Task 2.1 map):
+  `_SED_AS_COMMAND_HEAD` is compiled with `re.IGNORECASE` only, so its `^` is
+  start-of-STRING, not start-of-line. A heredoc body line beginning with a
+  FLAGLESS `sed` therefore matches neither that pattern nor
+  `_SED_WITH_EXECUTION_FLAG`, so writing a shell script by heredoc evades the
+  Write-branch premise that `.sh` files containing sed are blocked. The flagged
+  form (`sed -i`) IS still caught, because that pattern is position-independent
+  — confirmed empirically when the map agent was denied for exactly that. Fix
+  is likely `re.MULTILINE`, but it WIDENS what is blocked, so it needs its own
+  RED test and a check for false positives on prose containing a line that
+  starts with the word. Deliberately not folded into the Phase 1 guidance fix
+  (Decision 1).
 
 ### Phase 2: Map the blind spot
 
@@ -133,17 +145,63 @@ build a parallel mechanism.
 ### Phase 3: Choose and build a remedy
 
 - [ ] ⬜ **Task 3.1**: Evaluate a shared "is this Bash call a file write?"
-  utility generalising `markdown_organization._bash_memory_write_target`
-  (redirect, `tee`, and heredoc targets), returning target paths only — not
-  content. Path-keyed handlers (`markdown_organization`,
-  `lock_file_edit_blocker`, `absolute_path`, `tdd_enforcement`,
-  `plan_time_estimates`) get most of the value at that cost.
+  utility, returning target paths — and, where cheaply available, the heredoc
+  body. The seven PATH-only handlers it fully restores are
+  `lock_file_edit_blocker`, `markdown_organization`, `plan_workflow`,
+  `tdd_enforcement`, `lint_on_edit`, `markdown_table_formatter` and
+  `validate_eslint_on_write`. Four corrections from the Task 2.1 map, all
+  verified against source:
+
+  - **`absolute_path` is OFF this list.** Its premise is about a TOOL
+    ARGUMENT, not a file on disk; a Bash-aware version would have to block
+    `ls src/`. `plan_time_estimates` is off it too — it genuinely needs
+    content.
+  - **The three PostToolUse handlers are PATH-only, not content-keyed**, which
+    is the opposite of the obvious reading: they take the path and read the
+    bytes off disk themselves. Two of the three DENY, so a path-only utility
+    fully restores two DENYING guards with no content plumbing at all. That is
+    the strongest single argument for this task.
+  - **Heredoc bodies are literally in the command string**, unlike redirect
+    output and `tee` (unknowable at PreToolUse). A utility returning
+    `(target_path, heredoc_body | None)` therefore also serves much of the
+    CONTENT column — and heredocs are precisely the shape the
+    `bypassPermissions` reminder pushes agents toward, so this is the high-value
+    case rather than an edge one.
+  - **This is NOT "move `_bash_memory_write_target` to a shared module".**
+    Measured against 15 command shapes, it covers `>`, `>>` and `tee` (first
+    target only), and misses `>|`, quoted paths with spaces, `"$OUT"`, `dd of=`,
+    `cp`/`mv`/`install`, and any script that opens the file itself; it never
+    resolves relative targets. Worse, it FALSE-POSITIVES on prose —
+    `echo 'the arrow > file thing'` yields target `file` — and the Task 2.1
+    agent was denied by exactly that while gathering evidence. Its narrow
+    memory-path substring test is what makes that tolerable today; generalised
+    to every path in the tree, `lock_file_edit_blocker` would start denying
+    commits whose MESSAGE mentions a redirect. Scope this as quote/heredoc-aware
+    scanning plus `shlex` tokenisation plus cwd resolution.
+
+- [ ] ⬜ **Task 3.1a** (BLOCKER for 3.1, found by the Task 2.1 map): audit every
+  candidate handler's `handle()` for an explicit non-Write/Edit ALLOW before
+  routing any Bash event to it. `validate_instruction_content.handle()` ends
+  with `else: return HookResult(decision=Decision.ALLOW, reason="Tool type not handled by validator")` (verified at
+  `validate_instruction_content.py:99-103`). Routing a Bash event there
+  path-only would not merely fail to help — it would convert a blind spot into
+  a POSITIVE ALL-CLEAR, which is strictly worse than the status quo. Silence
+  and ALLOW are not the same answer.
+
+- [ ] ⬜ **Task 3.1b**: fix the blindness at its actual source. It is not 21
+  independent decisions: `core/utils.py:36` `get_file_path()` returns `None`
+  for anything that is not Write/Edit, and `get_file_content()` gates the same
+  way, so a handler CANNOT opt in even if it wanted to. The new accessor
+  belongs beside those two, not inside any one handler.
+
 - [ ] ⬜ **Task 3.2**: Evaluate a `bypassPermissions`-aware SessionStart advisory
   stating that the harness will push toward Bash-first editing and that
   write-time guards do not cover it. Cheap, honest, no parsing — it converts
   a silent gap into a known one.
+
 - [ ] ⬜ **Task 3.3**: Record the decision in Technical Decisions with the
   rationale, then implement whichever options are adopted under TDD.
+
 - [ ] ⬜ **Task 3.4**: If the shared utility is adopted, migrate
   `markdown_organization` onto it so there is one implementation, not two
   (DRY / single source of truth).
@@ -191,6 +249,48 @@ by passing tests, so changing it is a deliberate behaviour change, not a fix.
 **Decision**: Option 1 for Phase 1; Task 1.4 raises the behaviour question
 explicitly rather than resolving it by accident. A guidance defect must never be
 the justification for a silent safety change.
+
+**Date**: 2026-08-19
+
+### Decision 2: the pipe-stage-needs-`grep` condition is an artefact, and it stays
+
+**Context**: Task 1.4 asked whether `_is_safe_readonly_command` returning
+`False` when neither `grep` nor `echo` appears is *wanted* or merely *tested*.
+Concretely: `cat f | sed 's/x/y/' | grep z` is allowed and
+`cat f | sed 's/x/y/' | wc -l` is denied, though neither can modify a file.
+
+**Finding**: it is an **artefact**, not a design. The handler's stated rationale
+is that sed can silently destroy files. A pipe stage after a single `|` carrying
+no `i`/`e`/`n` flag cannot write to a file at all, so the rationale does not
+reach it. The `grep`/`echo` test is a proxy for "this looks read-only" that is
+simply over-narrow — it asks whether a *particular other command* is present
+rather than whether sed can write.
+
+**Options Considered**:
+
+1. Leave the behaviour, fix only the guidance.
+2. Loosen `_is_safe_readonly_command` so any non-writing pipe stage is allowed.
+
+**Decision**: Option 1 — the behaviour stays unchanged and only the guidance
+was corrected. Three reasons, in order of weight:
+
+1. **The cost of the false positive is near zero.** The agent uses `Read`, or
+   adds the `grep` it probably wanted anyway. Nothing is unachievable; one tool
+   call replaces another. A guard whose worst outcome is a marginally less
+   convenient route is not worth loosening.
+2. **Loosening widens where sed is permitted, which is the wrong direction for
+   this plan.** Finding 2 is that agents are being pushed toward shell-first
+   file manipulation; relaxing the stream-editor guard in the same release that
+   documents that pressure would be working against ourselves.
+3. **It is locked in by passing tests** (`test_matches_bash_sed_in_pipeline_without_grep`,
+   `test_is_safe_readonly_command_rejects_cat_pipe_sed`). Changing it is a
+   deliberate behaviour change needing its own tasks, not a rider on a
+   documentation fix.
+
+**Open for a human**: if the blunt rule is judged to cost more than it saves,
+Option 2 is a small change — replace the `grep`/`echo` proxy with the real
+question (can this invocation write?). That is a decision about policy, not a
+defect to fix, which is why it is recorded here rather than actioned.
 
 **Date**: 2026-08-19
 
