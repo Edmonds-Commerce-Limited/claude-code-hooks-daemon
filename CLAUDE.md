@@ -748,7 +748,10 @@ hooks-daemon delete-branch <name>              # deletes only if provably safe
 **Allowed**:
 
 - `sed` as a PIPE STAGE (after a single `|`, no `i`/`e`/`n` flags) — but ONLY when a `grep` or an `echo` also appears somewhere in the command. That condition is the surprising part: `cat f | sed 's/x/y/' | grep z` is allowed, while `cat f | sed 's/x/y/' | wc -l` is DENIED, even though neither can modify a file
-- `sed` mentioned in commit messages, PR bodies, or `.md` documentation files
+- `sed` mentioned in a `git commit` message, or in a `gh` issue/PR body
+- writing a `.md` file **with the `Write` tool** — markdown is exempt there
+
+**The `.md` exemption is Write-tool-only, and this catches people out.** The Bash branch judges the COMMAND, not the destination, so `cat > NOTES.md <<'EOF'` whose body mentions sed is DENIED even though `Write` to that same path is allowed. A Bash command is spared only if it contains a `grep` or an `echo` (so `echo 'avoid sed' > NOTES.md` is fine) or is a `git`/`gh` command. **Write markdown about sed with the `Write` tool**, not a heredoc, and this never bites.
 
 **Use instead**:
 
