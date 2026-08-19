@@ -903,6 +903,18 @@ cat /tmp/script.sh          # inspect
 bash /tmp/script.sh         # execute if safe
 ```
 
+<!-- handler: block-unread-overwrite -->
+
+## write_clobber_guard — `Write` to an existing file you have not read
+
+`Write` replaces a file's ENTIRE contents. A `Write` to a file that already exists and that you have NOT read in this session is blocked, because you cannot know what you are destroying — and so could not report the loss even afterwards.
+
+**Never blocked**: creating a new file; rewriting a file you read or wrote earlier this session; any `Edit` (it replaces known text, not the file).
+
+**The fix is one call**: `Read` the file and retry, or use `Edit`. Reading first is what you should do regardless, so there is no escape hatch and none is needed — unlike a `MUST_..._BECAUSE` declaration, a `Read` actually removes the hazard instead of declaring it acceptable.
+
+**Why this exists**: the `Write` tool's own description says overwriting an unread file will fail. Measured under `bypassPermissions`, it does not — so this handler restores the documented contract rather than adding a new rule. A `Write` destroyed a tracked 58-line journal in this repository, and a size-based rule would NOT have caught it: the clobbering write made the file bigger. Replacement, not shrinkage, is the hazard.
+
 <!-- handler: pipe-blocker -->
 
 ### Pipe Blocker
