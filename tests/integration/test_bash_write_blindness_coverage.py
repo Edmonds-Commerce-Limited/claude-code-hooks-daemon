@@ -57,13 +57,29 @@ _WRITE_EDIT_KEYING_MARKERS = (
 )
 
 # Verdicts. BLIND = a Bash write can violate the guarded premise and nothing
-# sees it. PARTIAL = some Bash routes are covered. OUT-OF-FRAME = the premise
-# is not about a file reaching disk, so a write detector would not help.
+# sees it. PARTIAL = some Bash routes are covered. COVERED = every route that
+# can violate the premise is seen. OUT-OF-FRAME = the premise is not about a
+# file reaching disk, so a write detector would not help.
+#
+# COVERED is NOT "sees every possible command". `cp`/`mv`/`install`/`dd` are
+# excluded from the content guards on purpose (Plan 00260 Task 3.5): those
+# relocate bytes that were already on disk, so a linter denying them would
+# report a defect the command did not introduce. The premise a linter guards is
+# "content this command AUTHORED is well-formed", and every authoring route is
+# seen.
 _BLIND = "BLIND"
 _PARTIAL = "PARTIAL"
+_COVERED = "COVERED"
 _OUT_OF_FRAME = "OUT-OF-FRAME"
 
-_VALID_VERDICTS = (_BLIND, _PARTIAL, _OUT_OF_FRAME)
+# Source markers that mean "this handler resolves what a Bash command writes".
+# A COVERED row must show one; a BLIND row must show none.
+_BASH_WRITE_ACCESSORS = (
+    "get_written_file_paths",
+    "get_bash_write_targets",
+)
+
+_VALID_VERDICTS = (_BLIND, _PARTIAL, _COVERED, _OUT_OF_FRAME)
 
 _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
     "AbsolutePathHandler": (
@@ -97,9 +113,12 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "Write lands via heredoc, and the clean write reads as a safety signal",
     ),
     "LintOnEditHandler": (
-        _BLIND,
-        "a DENYING guard going silent -- the file lands with no lint and no "
-        "advisory; PATH-only, so a path detector would restore it outright",
+        _COVERED,
+        "closed in Plan 00260 Task 3.5: every AUTHORING route (redirect, `tee`, "
+        "heredoc) is linted via `get_written_file_paths`, so a heredoc can no "
+        "longer land unparseable source in silence. Relocation (`cp`/`mv`/"
+        "`install`/`dd`) is excluded by design, not by oversight -- see the "
+        "COVERED note above",
     ),
     "LockFileEditBlockerHandler": (
         _BLIND,
@@ -173,9 +192,10 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "equivalent walks the tree for untested source",
     ),
     "ValidateEslintOnWriteHandler": (
-        _BLIND,
-        "a second DENYING guard going silent; PATH-only, so a path detector "
-        "would restore it outright with no content plumbing",
+        _COVERED,
+        "closed in Plan 00260 Task 3.5 alongside `lint_on_edit`: a `.ts`/`.tsx` "
+        "file authored by a redirect, `tee` or a heredoc is ESLint-checked. "
+        "Relocation is excluded by design",
     ),
     "ValidateInstructionContentHandler": (
         _BLIND,
@@ -302,6 +322,55 @@ class TestEveryKeyedHandlerHasAVerdict:
             f"{class_name}: the reason is too short to be an argument ({reason!r}). "
             "A bare verdict records that someone typed a word, not that the question "
             "was asked."
+        )
+
+
+class TestTheVerdictMatchesTheSource:
+    """The table must not be able to drift from the code again.
+
+    This exists because it already did. Plan 00260 Task 3.5 wired
+    `lint_on_edit` and `validate_eslint_on_write` to Bash-authored files, and
+    every test in this file kept passing while both rows still read BLIND --
+    the census recorded a judgement made by hand and never re-checked it
+    against the source. A hand-maintained table that silently goes stale is the
+    same defect this whole file was written to catch, one level up.
+
+    Only the two unambiguous verdicts are bound. PARTIAL is deliberately left
+    alone: those handlers reach Bash by unrelated mechanisms -- a `mkplan.bash`
+    command check, an unanchored regex that matches inside a heredoc body by
+    accident -- so requiring the accessor there would assert a false uniformity.
+    """
+
+    @staticmethod
+    def _source_of(class_name: str) -> str:
+        handler_class = _discover_write_edit_keyed_handlers()[class_name]
+        return inspect.getsource(importlib.import_module(handler_class.__module__))
+
+    @pytest.mark.parametrize(
+        "class_name",
+        sorted(name for name, (v, _) in _BASH_BLINDNESS_VERDICT.items() if v == _COVERED),
+    )
+    def test_a_covered_handler_actually_reads_bash_write_targets(self, class_name: str) -> None:
+        source = self._source_of(class_name)
+
+        assert any(marker in source for marker in _BASH_WRITE_ACCESSORS), (
+            f"{class_name} is recorded as {_COVERED}, but its module calls none of "
+            f"{_BASH_WRITE_ACCESSORS}. Either the wiring was removed and the row is "
+            "now a false claim of safety, or the verdict was never true."
+        )
+
+    @pytest.mark.parametrize(
+        "class_name",
+        sorted(name for name, (v, _) in _BASH_BLINDNESS_VERDICT.items() if v == _BLIND),
+    )
+    def test_a_blind_handler_has_not_been_quietly_wired(self, class_name: str) -> None:
+        source = self._source_of(class_name)
+        wired = [marker for marker in _BASH_WRITE_ACCESSORS if marker in source]
+
+        assert not wired, (
+            f"{class_name} is recorded as {_BLIND}, but its module now calls {wired}. "
+            "The row is stale: update it (and the handler's resident guidance, which "
+            "will still be describing a Write/Edit-only surface)."
         )
 
 

@@ -330,3 +330,64 @@ per-project, the intro stops being guaranteed-resident and this should be
 revisited.
 
 **Date**: 2026-08-19
+
+### Decision 5f: content guards see what a command AUTHORS, never what it RELOCATES
+
+**Context**: Task 3.5 wires `lint_on_edit` and `validate_eslint_on_write` to
+Bash writes. Both DENY, so this creates a denial surface that has never
+existed. The question is not only *whether* to wire it, but *how much* of
+`get_bash_write_targets`' answer a denying handler should act on.
+
+**Options considered**:
+
+1. **Every write route.** Simple, and consistent with the memory-path guard.
+   But `cp broken.py copy.py` would be denied for the state of a file the
+   command did not author. The bytes were already on disk, already broken, and
+   already past whatever check should have caught them; the agent's only remedy
+   would be repairing a file it never chose to write. It also makes the linter
+   fire on ordinary repository mechanics — vendoring, fixture copying, build
+   staging — none of which introduced the defect.
+2. **Authoring routes only** (`>`, `>>`, `>|`, `&>`, `tee`, heredoc), excluding
+   `cp`/`mv`/`install`/`dd`.
+3. **Advisory instead of denying for Bash.** Avoids the surface entirely, but
+   splits one handler into two behaviours keyed on how the file arrived, which
+   is precisely the inconsistency this plan exists to remove.
+
+**Decision**: Option 2, exposed as `get_written_file_paths()` so the choice is
+made once rather than per handler, and as `authored_only=` on the underlying
+accessor.
+
+The separating principle is what the guard's premise is ABOUT. A LOCATION guard
+asks "did a file reach this path?" — every route can violate that, including a
+copy, which is why the memory-path rule must see them all. A CONTENT guard asks
+"is the content this command produced well-formed?" — a relocation produced no
+content, so it cannot violate that premise and denying it reports a fault that
+belongs to whatever wrote the source.
+
+Heredoc BODIES are excluded on the same reasoning taken further: that mode is a
+documented superset (Decision 5e) that can yield phantom paths from prose, and a
+denying handler acting on a file the command never wrote is the worst outcome
+available here.
+
+**Consequences**: closing the blind spot for the linters is not the same as
+closing it for the PreToolUse content guards (`qa_suppression`,
+`security_antipattern`, `sensitive_content`, …), which remain BLIND. The
+class-wide guidance intro had to be rewritten to state that split rather than
+the flat "Bash is not seen by the content guards" it carried before — which the
+moment this landed became false in one direction and still true in the other.
+
+**Also fixed here, and the more interesting failure**: the census in
+`test_bash_write_blindness_coverage.py` kept passing with both handlers still
+recorded BLIND. It was a hand-maintained table checked only for internal
+consistency, so it recorded a judgement and never re-checked it. Each verdict
+is now verified against the handler's SOURCE — COVERED must show an accessor
+call, BLIND must show none. That is the same defect the file was written to
+catch, one level up.
+
+**Reversal condition**: if a project reports the new denials firing on
+generated source it cannot make lint-clean, `lint_bash_writes` /
+`check_bash_writes` turn the surface off without disabling the handler. If that
+turns out to be the common case, the default should flip rather than the
+feature being removed.
+
+**Date**: 2026-08-20

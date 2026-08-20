@@ -637,14 +637,27 @@ class TestNoStdoutPrinting:
 
 
 class TestNodeModulesBinPath:
-    """Tests for node_modules/.bin PATH injection (Bug 1 fix)."""
+    """Tests for node_modules/.bin PATH injection (Bug 1 fix).
+
+    **These test functions are deliberately NOT named after `node_modules`.**
+    pytest derives `tmp_path` from the test function name, and `SKIP_PATHS` is a
+    naive SUBSTRING test over the whole file path -- so a test called
+    `test_node_modules_...` writes its fixture into a directory whose name
+    contains `node_modules`, and the handler correctly declines to lint it.
+
+    That went unnoticed while `handle()` skipped the scope filter `matches()`
+    applies (Plan 00260 Task 3.5 made the two consistent, since a Bash command
+    can author several files and each must be filtered on its own). The tests
+    then failed for a real reason: they were asking the handler to lint a path
+    it is configured to ignore.
+    """
 
     @pytest.fixture
     def handler(self, tmp_path: Path) -> ValidateEslintOnWriteHandler:
         return ValidateEslintOnWriteHandler(workspace_root=tmp_path)
 
     @patch("subprocess.run")
-    def test_node_modules_bin_prepended_to_path_when_exists(
+    def test_local_bin_prepended_to_path_when_exists(
         self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
     ) -> None:
         """subprocess.run env must include node_modules/.bin when directory exists."""
@@ -663,7 +676,7 @@ class TestNodeModulesBinPath:
         assert str(bin_dir) in call_kwargs["env"]["PATH"]
 
     @patch("subprocess.run")
-    def test_node_modules_bin_first_in_path(
+    def test_local_bin_first_in_path(
         self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
     ) -> None:
         """node_modules/.bin must appear BEFORE other PATH entries."""

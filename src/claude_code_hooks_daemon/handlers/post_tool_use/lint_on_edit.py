@@ -19,7 +19,7 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
-from claude_code_hooks_daemon.core.utils import get_file_path
+from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
 from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
@@ -73,6 +73,12 @@ class LintOnEditHandler(Handler):
         # project-wide daemon.exclude_paths the registry injects (Plan 00251,
         # the other half of the follow-up Plan 00150's Non-Goals deferred).
         self._exclude_paths: list[str] | None = None
+        # Lint files a Bash command AUTHORED -- a redirect, `tee`, a heredoc
+        # (Plan 00260 Task 3.5). Before this, `cat > x.py <<EOF` reached disk
+        # unlinted while the identical content via `Write` was denied, so the
+        # safest-looking route was the unguarded one. Relocation (`cp`/`mv`/
+        # `dd`) is never linted -- see `get_written_file_paths`.
+        self._lint_bash_writes: bool = True
 
     def _apply_language_filter(self) -> None:
         """Apply language filter to registry on first use (lazy)."""
@@ -83,19 +89,21 @@ class LintOnEditHandler(Handler):
         if effective_languages:
             self._registry.filter_by_languages(effective_languages)
 
-    def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if this is a Write/Edit operation to a lintable file."""
-        self._apply_language_filter()
+    def _lintable_paths(self, hook_input: dict[str, Any]) -> list[str]:
+        """Files this event authored that this handler should actually lint.
 
-        # Only match Write/Edit tools
+        A Bash command can author several files at once (`tee a.py b.py`), so
+        this is a LIST where the Write/Edit path was always a single file.
+        """
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
-        if tool_name not in (ToolName.WRITE, ToolName.EDIT):
-            return False
+        if tool_name == ToolName.BASH and not self._lint_bash_writes:
+            return []
+        if tool_name not in (ToolName.WRITE, ToolName.EDIT, ToolName.BASH):
+            return []
+        return [path for path in get_written_file_paths(hook_input) if self._is_lintable(path)]
 
-        file_path = get_file_path(hook_input)
-        if not file_path:
-            return False
-
+    def _is_lintable(self, file_path: str) -> bool:
+        """Whether one authored path is in scope for linting."""
         # A project may exempt a path from linting entirely (Plan 00251). Checked
         # before the strategy lookup and before the exists() stat: an exclusion is
         # the project declaring this path out of scope, which should not depend on
@@ -116,18 +124,36 @@ class LintOnEditHandler(Handler):
         if matches_skip_path(file_path, strategy.skip_paths):
             return False
 
-        # File must exist (PostToolUse runs after write)
+        # File must exist. For Write/Edit this is a formality -- PostToolUse runs
+        # after the write. For Bash it is load-bearing: the target is PREDICTED
+        # from the command text, and a command that failed (or was never going to
+        # write) leaves nothing on disk. Linting a path that does not exist would
+        # manufacture an error the agent cannot act on.
         return Path(file_path).exists()
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        """Check if this event authored a lintable file, via any write route."""
+        self._apply_language_filter()
+        return bool(self._lintable_paths(hook_input))
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Run lint commands and deny if errors found."""
-        file_path = get_file_path(hook_input)
-        if not file_path:
+        paths = self._lintable_paths(hook_input)
+        if not paths:
             return HookResult(decision=Decision.ALLOW, reason="No file path found")
 
+        for file_path in paths:
+            result = self._lint_one(file_path)
+            if result is not None:
+                return result
+
+        return HookResult(decision=Decision.ALLOW)
+
+    def _lint_one(self, file_path: str) -> HookResult | None:
+        """Lint a single file; a HookResult means it failed, None means it passed."""
         strategy = self._registry.get_strategy(file_path)
         if strategy is None:
-            return HookResult(decision=Decision.ALLOW)
+            return None
 
         # Get lint commands (config overrides take priority)
         default_cmd, extended_cmd = self._get_lint_commands(strategy)
@@ -139,13 +165,9 @@ class LintOnEditHandler(Handler):
 
         # Run extended lint command if configured and default passed
         if extended_cmd:
-            extended_result = self._run_lint_command(
-                extended_cmd, file_path, strategy.language_name
-            )
-            if extended_result is not None:
-                return extended_result
+            return self._run_lint_command(extended_cmd, file_path, strategy.language_name)
 
-        return HookResult(decision=Decision.ALLOW)
+        return None
 
     def _get_lint_commands(self, strategy: LintStrategy) -> tuple[str, str | None]:
         """Get lint commands, checking config overrides first."""
@@ -310,6 +332,21 @@ class LintOnEditHandler(Handler):
 
 Every `Write`/`Edit` to a Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin or
 Dart file is linted immediately. A lint failure DENIES the tool call.
+
+**Bash-authored files are linted too.** A file a command writes with `>`, `>>`,
+`tee` or a `cat <<EOF` heredoc gets the same treatment — so the heredoc route is
+no longer the quiet way to land unparseable source. A command can author several
+files at once (`tee a.py b.py`); each is linted and the first failure is
+reported. Two boundaries are deliberate:
+
+- **Relocation is NOT linted.** `cp`, `mv`, `install` and `dd` move bytes that
+  were already on disk, so denying them would report a defect the command did
+  not introduce and leave you repairing a file you never wrote.
+- **A target that does not exist is NOT linted.** The path is inferred from the
+  command text, so a command that failed leaves nothing to check.
+
+Opt out with `handlers.post_tool_use.lint_on_edit.options.lint_bash_writes:
+false`, which leaves `Write`/`Edit` linting untouched.
 
 **The write has ALREADY landed on disk.** A PostToolUse denial is a failure
 report, not a rollback — the file exists, with your content in it. Fix the

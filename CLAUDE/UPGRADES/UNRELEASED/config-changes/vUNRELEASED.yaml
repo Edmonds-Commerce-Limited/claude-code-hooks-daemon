@@ -62,3 +62,41 @@ config_changes:
         have caught the motivating incident, because the clobbering write made
         the file BIGGER. Bash-mediated writes (>, >>, tee, heredoc) are not
         covered by this handler.
+    - key: handlers.post_tool_use.lint_on_edit.options.lint_bash_writes
+      recommended: false
+      dormant: false
+      description: >-
+        NEW option (Plan 00260 Task 3.5), default TRUE. Lints source files a
+        Bash command AUTHORS -- a > / >> / >| / &> redirect, tee, or a
+        cat <<EOF heredoc -- in addition to Write/Edit. Before this, a heredoc
+        put unparseable Python on disk in silence while identical content
+        through Write was denied, so the route that looked safest because
+        nothing complained was the only unguarded one. A command that authors
+        several files (tee a.py b.py) has each of them linted, and the first
+        failure is reported. Files the command merely RELOCATES (cp, mv,
+        install, dd) are deliberately NEVER linted: those bytes were already on
+        disk, so denying the copy would report a defect the command did not
+        introduce. A predicted target that does not exist is skipped, since a
+        failed command leaves nothing to check.
+      migration_note: >-
+        On by default. THIS IS A NEW DENIAL SURFACE -- lint_on_edit DENIES, and
+        the write has already landed when it runs, so a denial is a failure
+        report to fix with Edit, not a rollback (and it cancels sibling tool
+        calls batched in the same turn). If your project generates source files
+        via heredoc or redirect and cannot make them lint-clean, set
+        lint_bash_writes to false; Write/Edit linting is unaffected either way.
+    - key: handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes
+      recommended: false
+      dormant: false
+      description: >-
+        NEW option (Plan 00260 Task 3.5), default TRUE. The .ts/.tsx sibling of
+        lint_bash_writes: a TypeScript file authored by a redirect, tee or a
+        heredoc is ESLint-checked, not only one written with Write/Edit.
+        Relocation routes are excluded on the same reasoning.
+      migration_note: >-
+        On by default, and this handler is the STRICTER of the two -- it denies
+        on an ESLint timeout and on any failure to run ESLint at all, so do not
+        carry lint_on_edit's "a missing linter never blocks" across to it. Note
+        enforcement is still gated on llm: scripts in package.json: with none
+        present the handler only advises, so silence is not evidence a .ts file
+        is clean. Opt out with check_bash_writes: false.

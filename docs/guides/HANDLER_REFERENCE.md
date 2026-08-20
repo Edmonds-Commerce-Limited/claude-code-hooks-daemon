@@ -1898,6 +1898,12 @@ handlers:
 
 **Checked extensions:** `.ts`, `.tsx`
 
+**Bash-authored files**: a `.ts`/`.tsx` file written by a Bash command is checked too, not only one written with `Write`/`Edit`. Only AUTHORING routes count — a `>`, `>>`, `>|` or `&>` redirect, `tee`, or a `cat <<EOF` heredoc. A file the command merely RELOCATES (`cp`, `mv`, `install`, `dd`) is never checked, because those bytes were already on disk and denying the copy would report a defect the command did not introduce. A predicted target that does not exist on disk is skipped.
+
+| Option              | Values         | Default | Effect                                                                                                     |
+| ------------------- | -------------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `check_bash_writes` | `true`/`false` | `true`  | Check `.ts`/`.tsx` files authored by a Bash command. `false` restricts the handler to `Write`/`Edit` only. |
+
 **Config example:**
 
 ```yaml
@@ -1906,6 +1912,42 @@ handlers:
     validate_eslint_on_write:
       enabled: true
       priority: 10
+      options:
+        check_bash_writes: true   # false = Write/Edit only
+```
+
+---
+
+#### lint_on_edit
+
+| Property       | Value          |
+| -------------- | -------------- |
+| **Config key** | `lint_on_edit` |
+| **Priority**   | 25             |
+| **Type**       | Blocking       |
+| **Event**      | PostToolUse    |
+
+**Description:** Runs a language-aware lint check on source files after they are written, and DENIES on failure. Each language runs a cheap syntax check first (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) then an optional deeper linter (`ruff`, `shellcheck`, `golangci-lint`, `rubocop`, …). Tools resolve from the daemon's venv before `PATH`. A linter that is not installed ALLOWs with an advisory — that message means the check was skipped, not that it passed. `.ts`/`.tsx` files are handled by `validate_eslint_on_write` instead, which is stricter.
+
+**Bash-authored files**: as for `validate_eslint_on_write` above — authoring routes are linted, relocation routes are not. A command that authors several files (`tee a.py b.py`) has each linted, and the first failure is reported.
+
+| Option              | Values         | Default | Effect                                                                                          |
+| ------------------- | -------------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `lint_bash_writes`  | `true`/`false` | `true`  | Lint files authored by a Bash command. `false` restricts the handler to `Write`/`Edit` only.    |
+| `languages`         | list           | all     | Restrict which languages are checked.                                                           |
+| `command_overrides` | map            | none    | Replace a language's `default`/`extended` command; `extended: null` runs only the syntax check. |
+| `exclude_paths`     | glob list      | none    | Exempt paths entirely; unions with `daemon.exclude_paths`.                                      |
+
+**Config example:**
+
+```yaml
+handlers:
+  post_tool_use:
+    lint_on_edit:
+      enabled: true
+      priority: 25
+      options:
+        lint_bash_writes: true   # false = Write/Edit only
 ```
 
 ---

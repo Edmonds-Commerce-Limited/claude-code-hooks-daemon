@@ -135,6 +135,40 @@ truth_changes:
       resolver for exactly that reason.
 
       The wider resolver is available to other handlers as
-      `get_bash_write_targets()` but is currently used only here. Handlers that
-      DENY — the linters — were deliberately NOT wired to Bash writes, because
-      that would create a denial surface that has never existed.
+      `get_bash_write_targets()`. The two linters now use it as well — see the
+      next entry, which covers the denial surface that creates.
+  - was: >
+      A source file written through Bash was never linted. `cat > x.py <<'EOF'`
+      put unparseable Python on disk in silence, while the identical content
+      through `Write` was denied by `lint_on_edit` — so the route that appeared
+      safest, because nothing complained, was the only unguarded one.
+    now: >
+      Both linters now check files a Bash command AUTHORS (Plan 00260 Task
+      3.5). `lint_on_edit` covers Python, Shell, Go, PHP, Ruby, Rust, Swift,
+      Kotlin and Dart; `validate_eslint_on_write` covers `.ts`/`.tsx`. The
+      routes seen are the AUTHORING ones — `>`, `>>`, `>|`, `&>`, `tee`, and a
+      heredoc — and a command that authors several files has each of them
+      checked.
+
+      THIS IS A NEW DENIAL SURFACE. Both handlers DENY on failure, and the
+      write has ALREADY landed when they run, so the denial is a failure report
+      to repair with `Edit`, never a rollback. A denial also cancels sibling
+      tool calls batched in the same turn. IF YOUR PROJECT HAS SCRIPTS OR
+      DOCUMENTED WORKFLOWS THAT GENERATE SOURCE FILES VIA HEREDOC OR REDIRECT,
+      they will now be linted and can be denied where they previously passed
+      unexamined.
+
+      Opt out per handler without disabling it:
+      `handlers.post_tool_use.lint_on_edit.options.lint_bash_writes: false` and
+      `handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes:
+      false`. Both leave `Write`/`Edit` linting exactly as it was.
+
+      Two exclusions are deliberate, and both LIMIT the new denials. A file the
+      command merely RELOCATES — `cp`, `mv`, `install`, `dd` — is never linted,
+      because those bytes were already on disk: denying the copy would report a
+      defect the command did not introduce and leave the agent repairing a file
+      it never chose to write. And a predicted target that does not exist is
+      never linted, since a command that failed leaves nothing to check.
+      Heredoc BODIES are not scanned for nested targets either, because that
+      mode yields occasional phantom paths from prose and a DENYING handler
+      must never act on a file the command did not write.

@@ -6,7 +6,7 @@ import shlex
 from pathlib import Path
 from typing import Any, Final, NamedTuple, cast
 
-from claude_code_hooks_daemon.constants import HookInputField
+from claude_code_hooks_daemon.constants import HookInputField, ToolName
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
 
@@ -103,11 +103,20 @@ class _TargetCandidate(NamedTuple):
     which `-t`/`--target-directory` is. Without it, a `-t` naming a directory
     that does not exist would be reported as a written FILE -- an overclaim,
     and one a real shell refuses outright.
+
+    ``authored`` separates putting NEW content on disk (a redirect, ``tee``, a
+    heredoc) from RELOCATING content that already exists (``cp``/``mv``/
+    ``install``/``dd``). Both are writes, so a LOCATION guard must see both --
+    copying into a guarded directory is a real bypass. A CONTENT guard must see
+    only the first: denying `cp broken.py copy.py` reports a defect the command
+    did not introduce, and the agent's only remedy would be to repair a file it
+    never chose to write.
     """
 
     destination: str
     sources: tuple[str, ...] = ()
     directory_only: bool = False
+    authored: bool = True
 
 
 def get_bash_command(hook_input: dict[str, Any]) -> str | None:
@@ -170,6 +179,7 @@ def get_bash_write_targets(
     hook_input: dict[str, Any],
     *,
     include_heredoc_bodies: bool = False,
+    authored_only: bool = False,
 ) -> list[str]:
     """Absolute paths a Bash command plainly writes. Conservative by contract.
 
@@ -215,6 +225,18 @@ def get_bash_write_targets(
             caller that filters the result by path, which is what the one
             caller does. Leave it off for anything that acts on a target
             directly.
+        authored_only: Return only destinations the command puts NEW content
+            into -- a redirect, ``tee``, a heredoc -- and drop the ones it
+            merely relocates (``cp``/``mv``/``install``/``dd``). Off by
+            default, because the original caller is a LOCATION guard and a copy
+            into a guarded directory is a genuine bypass it must see.
+
+            **A CONTENT guard wants it on**, and should reach for
+            :func:`get_written_file_paths` rather than setting it by hand.
+            Denying `cp broken.py copy.py` would report a defect the command
+            did not introduce: the bytes were already on disk and already
+            broken, so the write is the messenger. That matters here precisely
+            because the handlers this serves DENY.
 
     Returns:
         Absolute paths, in command order, de-duplicated. Empty when the command
@@ -237,10 +259,48 @@ def get_bash_write_targets(
     found: list[str] = []
     for segment in segments:
         for candidate in _write_target_tokens(_tokenise(segment)):
+            if authored_only and not candidate.authored:
+                continue
             for resolved in _written_paths(candidate, cwd):
                 if resolved not in found:
                     found.append(resolved)
     return found
+
+
+def get_written_file_paths(hook_input: dict[str, Any]) -> list[str]:
+    """Every file this event put NEW content into, whichever tool did it.
+
+    The accessor a CONTENT guard should use -- a linter, a syntax check,
+    anything that judges what a file now CONTAINS. It unifies the two routes so
+    a handler does not re-derive the tool-name switch (Plan 00260 Task 3.5):
+
+    - ``Write``/``Edit`` -> the single ``file_path``, exactly as
+      :func:`get_file_path` reports it.
+    - ``Bash`` -> the paths the command AUTHORS, via
+      :func:`get_bash_write_targets` with ``authored_only=True``.
+    - anything else -> ``[]``, so a caller can ask unconditionally.
+
+    **Relocation routes are deliberately absent.** ``cp``/``mv``/``install``/
+    ``dd`` all write a file, and a LOCATION guard must see them -- copying into
+    a guarded directory is a real bypass, which is why
+    :func:`get_bash_write_targets` reports them by default. A content guard must
+    not: denying `cp broken.py copy.py` blames a command for a defect that was
+    already on disk, and leaves the agent repairing a file it never chose to
+    write.
+
+    Heredoc BODIES are excluded for the same reason. That flag yields a
+    superset containing occasional phantoms from prose, and a handler that
+    DENIES must never act on a path the command did not write.
+
+    Returns:
+        Absolute paths, in command order, de-duplicated. Empty when this event
+        authored nothing the daemon can name with confidence.
+    """
+    tool_name = hook_input.get(HookInputField.TOOL_NAME)
+    if tool_name in (ToolName.WRITE, ToolName.EDIT):
+        file_path = get_file_path(hook_input)
+        return [file_path] if file_path else []
+    return get_bash_write_targets(hook_input, authored_only=True)
 
 
 def _written_paths(candidate: _TargetCandidate, cwd: Any) -> list[str]:
@@ -334,11 +394,13 @@ def _write_target_tokens(tokens: list[str]) -> list[_TargetCandidate]:
             continue
 
         if token in _COPY_VERBS:
-            index = _collect_trailing_operands(tokens, index + 1, targets, keep_all=False)
+            index = _collect_trailing_operands(
+                tokens, index + 1, targets, keep_all=False, authored=False
+            )
             continue
 
         if token.startswith(_DD_OUTPUT_PREFIX):
-            targets.append(_TargetCandidate(token[len(_DD_OUTPUT_PREFIX) :]))
+            targets.append(_TargetCandidate(token[len(_DD_OUTPUT_PREFIX) :], authored=False))
             index += 1
             continue
 
@@ -352,6 +414,7 @@ def _collect_trailing_operands(
     targets: list[_TargetCandidate],
     *,
     keep_all: bool,
+    authored: bool = True,
 ) -> int:
     """Consume one command's operands, appending the written ones.
 
@@ -359,6 +422,9 @@ def _collect_trailing_operands(
     destination, which is the last operand -- or the value of
     ``-t``/``--target-directory``, which moves it to the front. Both stop at a
     shell separator so a later command is never absorbed.
+
+    ``authored`` is stamped onto every candidate this call produces: ``tee``
+    writes content it is handed, a copy verb relocates content that exists.
     """
     index = start
     operands: list[str] = []
@@ -381,12 +447,16 @@ def _collect_trailing_operands(
         index += 1
 
     if keep_all:
-        targets.extend(_TargetCandidate(operand) for operand in operands)
+        targets.extend(_TargetCandidate(operand, authored=authored) for operand in operands)
     elif target_directory is not None:
         # Destination first: every remaining operand is a SOURCE.
-        targets.append(_TargetCandidate(target_directory, tuple(operands), directory_only=True))
+        targets.append(
+            _TargetCandidate(
+                target_directory, tuple(operands), directory_only=True, authored=authored
+            )
+        )
     elif len(operands) >= _MIN_COPY_OPERANDS:
-        targets.append(_TargetCandidate(operands[-1], tuple(operands[:-1])))
+        targets.append(_TargetCandidate(operands[-1], tuple(operands[:-1]), authored=authored))
     return index
 
 

@@ -216,17 +216,16 @@ build a parallel mechanism.
   commit meant to close them. Guidance updated to state the new, wider
   coverage and the narrower remaining gap.
 
-- [ ] ⬜ **Task 3.5** (NOT started — needs a human decision): wire
-  `lint_on_edit` and `validate_eslint_on_write` to fire on Bash-authored files.
-  Deliberately excluded from Phase 3 — see [DECISIONS.md](DECISIONS.md)
-  Decision 5b. Both handlers DENY, so this creates a denial surface that has
-  never existed, and post-hoc: the write has already landed, so the deny is a
-  failure report the agent must repair. That is a product decision about how
-  intrusive the daemon is, not an engineering one. **Consequence recorded
-  honestly**: until this is decided, the blind spot is NARROWED, not closed,
-  and the verdict table in
-  `tests/integration/test_bash_write_blindness_coverage.py` still describes
-  live behaviour.
+- [x] ✅ **Task 3.5** (human decision taken — "get it done"): `lint_on_edit` and
+  `validate_eslint_on_write` now fire on Bash-authored files, via a new
+  `get_written_file_paths()` accessor. Both DENY, so the new surface is bounded
+  by two deliberate exclusions that keep the denials honest: RELOCATION
+  (`cp`/`mv`/`install`/`dd`) is never linted, because those bytes were already
+  on disk and blaming the copy reports a defect the command did not introduce;
+  and heredoc BODIES are not scanned, because that mode is a superset that can
+  yield phantom paths and a denying handler must never act on a file the
+  command did not write. Opt out per handler with `lint_bash_writes` /
+  `check_bash_writes`. See [DECISIONS.md](DECISIONS.md) Decision 5f.
 
 ### Phase 4: Verify and close
 
@@ -255,9 +254,8 @@ build a parallel mechanism.
   equality with bash), because fixing defects while leaving the METHOD blind is
   what DBF exists to prevent. Detail: Decisions 5d/5e, journal `26-08-20`.
 
-**Phase 4 does not close this plan.** Task 3.5 is open and needs a human
-decision, so the status stays In Progress. Verification here covers what was
-built, not the whole brief.
+- [ ] 🔄 **Task 4.5**: Re-verify after Task 3.5 — full QA, daemon restart, and a
+  live socket probe of the new linter surface.
 
 ## Dependencies
 
