@@ -113,10 +113,12 @@ truth_changes:
       using any other route wrote the file and was allowed.
     now: >
       The memory-path rule now resolves write targets by tokenising the command
-      (Plan 00260), so six further spellings are DENIED that previously
+      (Plan 00260), so seven further spellings are DENIED that previously
       succeeded: `>|`, `&>`/`&>>`, `dd of=`, `cp`/`mv`/`install` destinations,
-      every `tee` operand after the first, and a quoted path containing a space.
-      Heredoc bodies are scanned too.
+      every `tee` operand after the first, a quoted path containing a space, and
+      a copy INTO a memory DIRECTORY (`cp note.md <memory-dir>` or
+      `cp -t <memory-dir> note.md`), which is resolved to the file it really
+      writes. Heredoc bodies are scanned too.
 
       IF YOUR PROJECT HAS A SCRIPT OR DOCUMENTED WORKFLOW THAT COPIES OR TEES A
       FILE INTO A MEMORY PATH, IT WILL NOW BE DENIED where it previously worked.
@@ -125,13 +127,12 @@ truth_changes:
       unaffected.
 
       Still NOT detected, and stated so you do not over-trust it: a target the
-      daemon cannot resolve exactly — a variable such as `> "$OUT"`, or a glob —
-      and a destination that is an existing DIRECTORY (`cp x somedir`,
-      `cp -t somedir x`). These are declined deliberately rather than guessed,
-      because naming the WRONG path would make a path-keyed guard judge a file
-      that was never written, which is worse than naming none. One common
-      variable spelling is still caught by a separate raw-string scan that was
-      kept alongside the new resolver for exactly that reason.
+      daemon cannot resolve exactly — a variable such as `> "$OUT"`, or a glob.
+      These are declined deliberately rather than guessed, because naming the
+      WRONG path would make a path-keyed guard judge a file that was never
+      written, which is worse than naming none. One common variable spelling is
+      still caught by a separate raw-string scan that was kept alongside the new
+      resolver for exactly that reason.
 
       The wider resolver is available to other handlers as
       `get_bash_write_targets()` but is currently used only here. Handlers that

@@ -254,6 +254,65 @@ expanded; `~otheruser` is still declined.
 
 **Date**: 2026-08-19
 
+### Decision 5d: the accessor is differential-tested against a real shell, and that test is TRACKED
+
+**Context**: after 44 unit tests, a full QA pass and a careful read-through,
+`get_bash_write_targets` was believed correct. A one-off script that ran each
+command through bash and compared the files that actually changed found four
+defects in a single pass.
+
+**Decision**: keep the harness as
+`tests/integration/test_bash_write_targets_vs_real_shell.py`, not as scratch.
+
+**Why**: the four defects were not subtle-in-hindsight, they were invisible to
+the method being used. Hand-written tests encode what the author already
+believes; a differential test encodes what the shell does. Two of the four were
+in the worst class — `cp -t DEST src` reported the SOURCE, a file the command
+READS, and `cp a.py somedir` reported nothing while bash wrote `somedir/a.py`.
+That second one was a live bypass: copying a file INTO a guarded directory
+reaches it without ever naming it.
+
+Under the project's defence-before-fix rule the defects are the symptom; the
+missing guard is the bug. Fixing four by hand and leaving the method blind is
+exactly what that rule exists to prevent.
+
+**Scope**: the tracked test runs with `include_heredoc_bodies=False`. The strict
+contract can be held to exact equality with a shell and is (28/28). The
+body-scanning flag cannot, by construction — see 5e.
+
+**Cost**: 28 bash subprocesses, ~0.4s. Subprocess use in tests is already
+established here (`test_git_hooks_executable_fixer` shells out to `git init`).
+
+**Date**: 2026-08-19
+
+### Decision 5e: `include_heredoc_bodies` is a documented SUPERSET, not a stricter scan
+
+**Context**: the differential test showed a heredoc body containing the prose
+`route out > somewhere` yielding the target `somewhere`, which the command
+never writes. The existing unit test had missed this because it supplied no
+`cwd`, so the relative target was declined for an unrelated reason — the test
+agreed with the code and both were wrong about the contract.
+
+**Decision**: keep the behaviour, and say what it is. With bodies scanned the
+result is a superset — writes this command performs, plus writes a nested
+command would perform, plus the occasional phantom from prose.
+
+**Why not tighten it**: nothing distinguishes a script being authored from
+prose that happens to contain a redirect. Both are data in a body. Any rule
+that suppressed the phantom would also suppress a genuine authored write, and
+for a deny-by-default policy under-blocking is the expensive direction.
+
+**Why not drop the flag**: the one caller is a memory-path policy that filters
+every candidate by path before acting, so a phantom is inert there. Removing
+body scanning would narrow real coverage to buy purity the caller does not need.
+
+**The obligation this creates**: the flag is safe ONLY for callers that filter
+by path. That is now stated in the docstring and pinned by a test asserting the
+phantom appears, so the next caller meets the cost before opting in rather than
+discovering it.
+
+**Date**: 2026-08-19
+
 ### Decision 5: Task 3.2's SessionStart advisory is superseded by the Phase 2 intro
 
 **Context**: Task 3.2 proposed a `bypassPermissions`-aware SessionStart advisory

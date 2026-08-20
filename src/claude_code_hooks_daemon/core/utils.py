@@ -4,7 +4,7 @@ import os
 import re
 import shlex
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import Any, Final, NamedTuple, cast
 
 from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -34,8 +34,9 @@ _REDIRECT_OPERATORS: Final[frozenset[str]] = frozenset({">", ">>", ">|", "&>", "
 _TEE: Final[str] = "tee"
 
 #: Write their LAST operand -- UNLESS `-t`/`--target-directory` is present,
-#: which moves the destination to the front and makes that rule name a SOURCE.
-#: See `_TARGET_DIRECTORY_FLAGS`, which is why such a command is declined.
+#: which moves the destination to the FRONT and makes that rule name a SOURCE.
+#: Either way the destination may be a directory, in which case the file really
+#: written is `dest/<basename of each source>`; see `_written_paths`.
 _COPY_VERBS: Final[frozenset[str]] = frozenset({"cp", "mv", "install"})
 
 #: `dd`'s destination is an `of=` operand rather than a redirect.
@@ -54,8 +55,11 @@ _MIN_COPY_OPERANDS: Final[int] = 2
 
 #: `-t DEST` / `--target-directory=DEST` move the destination to the FRONT, so
 #: "the last operand is the destination" becomes false and would name a SOURCE
-#: -- a file the command reads. The flag also means the destination is a
-#: directory, so no single written path exists to report. Decline the command.
+#: -- a file the command READS. Differential-testing against a real shell caught
+#: exactly that. The flag also declares the destination to be a directory, which
+#: is what `_TargetCandidate.directory_only` records: the written files are
+#: `DEST/<basename>` per source, and if DEST is not a real directory the shell
+#: refuses the command, so nothing is reported.
 _TARGET_DIRECTORY_FLAGS: Final[tuple[str, ...]] = ("-t", "--target-directory")
 
 #: Characters meaning the token needs an expansion the daemon cannot perform.
@@ -85,6 +89,25 @@ _HEREDOC_DELIMITER_GROUP: Final[int] = 2
 #: `_write_target_tokens` appears here, so a body this misses provably has no
 #: target to find -- it is an optimisation, never a coverage decision.
 _WRITE_INDICATOR_RE: Final[re.Pattern[str]] = re.compile(r">|of=|\b(?:tee|cp|mv|install|dd)\b")
+
+
+class _TargetCandidate(NamedTuple):
+    """One destination, before resolution, with what it needs to be judged.
+
+    ``sources`` supply the basename when ``destination`` turns out to be a
+    directory (`cp a.py somedir` writes `somedir/a.py`). They are empty for
+    everything except copy verbs, because only those write INTO a directory --
+    `echo x > somedir` is a shell error, not a write.
+
+    ``directory_only`` marks a destination that is a directory BY DEFINITION,
+    which `-t`/`--target-directory` is. Without it, a `-t` naming a directory
+    that does not exist would be reported as a written FILE -- an overclaim,
+    and one a real shell refuses outright.
+    """
+
+    destination: str
+    sources: tuple[str, ...] = ()
+    directory_only: bool = False
 
 
 def get_bash_command(hook_input: dict[str, Any]) -> str | None:
@@ -181,6 +204,18 @@ def get_bash_write_targets(
             cheap -- and ``markdown_organization`` already behaves that way, so
             stripping bodies unconditionally would silently regress it.
 
+            **This flag WEAKENS the conservative guarantee, deliberately.** A
+            body is data, and nothing distinguishes a script being authored
+            from prose that happens to contain a redirect: the body
+            ``route out > somewhere`` yields the target ``somewhere``, which
+            the command never writes. Differential-testing against a real shell
+            confirmed it. So with bodies on the result is a SUPERSET -- writes
+            this command performs, PLUS writes a nested command would perform,
+            PLUS the occasional phantom from prose. That is safe only for a
+            caller that filters the result by path, which is what the one
+            caller does. Leave it off for anything that acts on a target
+            directly.
+
     Returns:
         Absolute paths, in command order, de-duplicated. Empty when the command
         writes nothing this function can name with confidence.
@@ -201,11 +236,34 @@ def get_bash_write_targets(
     cwd = hook_input.get(HookInputField.CWD)
     found: list[str] = []
     for segment in segments:
-        for raw in _write_target_tokens(_tokenise(segment)):
-            resolved = _resolve_write_target(raw, cwd)
-            if resolved is not None and resolved not in found:
-                found.append(resolved)
+        for candidate in _write_target_tokens(_tokenise(segment)):
+            for resolved in _written_paths(candidate, cwd):
+                if resolved not in found:
+                    found.append(resolved)
     return found
+
+
+def _written_paths(candidate: _TargetCandidate, cwd: Any) -> list[str]:
+    """Every file this one candidate actually writes. Usually zero or one.
+
+    A destination that is an existing DIRECTORY is not itself written -- but
+    for a copy verb the written files are still nameable exactly, as
+    ``dest/<basename of each source>``. That was measured against a real shell:
+    `cp a.py somedir` writes `somedir/a.py`, and returning nothing there left a
+    live gap, since copying a file INTO a guarded directory is the obvious way
+    to reach one without ever naming the file.
+
+    With no sources there is nothing to expand and the directory is dropped:
+    ``echo x > somedir`` is a shell error that writes nothing, so inventing a
+    path would be fabrication. A ``directory_only`` destination that is not a
+    real directory is dropped for the same reason -- the shell refuses it.
+    """
+    destination = _resolve_write_target(candidate.destination, cwd)
+    if destination is None:
+        return []
+    if Path(destination).is_dir():
+        return [str(Path(destination) / Path(source).name) for source in candidate.sources]
+    return [] if candidate.directory_only else [destination]
 
 
 def _tokenise(text: str) -> list[str]:
@@ -254,15 +312,20 @@ def _split_heredoc_bodies(command: str) -> tuple[str, list[str]]:
     return "\n".join(kept), bodies
 
 
-def _write_target_tokens(tokens: list[str]) -> list[str]:
-    """Raw target tokens, in command order, before quoting or path resolution."""
-    targets: list[str] = []
+def _write_target_tokens(tokens: list[str]) -> list[_TargetCandidate]:
+    """Candidate targets, in command order, before quoting or path resolution.
+
+    Each candidate carries the SOURCE operands that would supply a basename if
+    the destination turns out to be a directory. Only copy verbs have any --
+    ``cp a.py somedir`` writes ``somedir/a.py``, a path nothing else can name.
+    """
+    targets: list[_TargetCandidate] = []
     index = 0
     while index < len(tokens):
         token = tokens[index]
 
         if token in _REDIRECT_OPERATORS and index + 1 < len(tokens):
-            targets.append(tokens[index + 1])
+            targets.append(_TargetCandidate(tokens[index + 1]))
             index += 2
             continue
 
@@ -275,7 +338,7 @@ def _write_target_tokens(tokens: list[str]) -> list[str]:
             continue
 
         if token.startswith(_DD_OUTPUT_PREFIX):
-            targets.append(token[len(_DD_OUTPUT_PREFIX) :])
+            targets.append(_TargetCandidate(token[len(_DD_OUTPUT_PREFIX) :]))
             index += 1
             continue
 
@@ -286,31 +349,44 @@ def _write_target_tokens(tokens: list[str]) -> list[str]:
 def _collect_trailing_operands(
     tokens: list[str],
     start: int,
-    targets: list[str],
+    targets: list[_TargetCandidate],
     *,
     keep_all: bool,
 ) -> int:
     """Consume one command's operands, appending the written ones.
 
-    ``tee`` writes EVERY operand; ``cp``/``mv``/``install`` write only the last.
-    Both stop at a shell separator so a later command is never absorbed.
+    ``tee`` writes EVERY operand; ``cp``/``mv``/``install`` write ONE
+    destination, which is the last operand -- or the value of
+    ``-t``/``--target-directory``, which moves it to the front. Both stop at a
+    shell separator so a later command is never absorbed.
     """
     index = start
     operands: list[str] = []
-    names_a_target_directory = False
+    target_directory: str | None = None
+    expects_directory_value = False
     while index < len(tokens) and tokens[index] not in _OPERAND_TERMINATORS:
         token = tokens[index]
-        if token.startswith(_FLAG_PREFIX):
-            if token.split("=", 1)[0] in _TARGET_DIRECTORY_FLAGS:
-                names_a_target_directory = True
+        if expects_directory_value:
+            target_directory = token
+            expects_directory_value = False
+        elif token.startswith(_FLAG_PREFIX):
+            flag, _, inline_value = token.partition("=")
+            if flag in _TARGET_DIRECTORY_FLAGS:
+                if inline_value:
+                    target_directory = inline_value
+                else:
+                    expects_directory_value = True
         else:
             operands.append(token)
         index += 1
 
     if keep_all:
-        targets.extend(operands)
-    elif not names_a_target_directory and len(operands) >= _MIN_COPY_OPERANDS:
-        targets.append(operands[-1])
+        targets.extend(_TargetCandidate(operand) for operand in operands)
+    elif target_directory is not None:
+        # Destination first: every remaining operand is a SOURCE.
+        targets.append(_TargetCandidate(target_directory, tuple(operands), directory_only=True))
+    elif len(operands) >= _MIN_COPY_OPERANDS:
+        targets.append(_TargetCandidate(operands[-1], tuple(operands[:-1])))
     return index
 
 
@@ -355,31 +431,14 @@ def _resolve_write_target(raw: str, cwd: Any) -> str | None:
         return None
 
     if target.startswith(_HOME_PREFIX):
-        return _decline_if_directory(_expand_home(target))
+        return _expand_home(target)
 
     path = Path(target)
     if path.is_absolute():
-        return _decline_if_directory(str(path))
+        return str(path)
     if not isinstance(cwd, str) or not cwd:
         return None
-    return _decline_if_directory(str(Path(cwd) / path))
-
-
-def _decline_if_directory(resolved: str | None) -> str | None:
-    """Drop a path that is an existing DIRECTORY rather than a file.
-
-    ``cp a.py somedir`` writes ``somedir/a.py``; reporting ``somedir`` would
-    name a path that was never written, which a path-keyed guard would then
-    judge. A trailing slash is caught earlier by shape alone, but ``somedir``
-    and ``somefile`` are indistinguishable as strings -- only the filesystem
-    knows. One ``is_dir()`` is cheap beside naming the wrong file.
-
-    A path that does not exist yet is KEPT: that is the ordinary case of a
-    command creating a file, and it is the whole point of the accessor.
-    """
-    if resolved is None:
-        return None
-    return None if Path(resolved).is_dir() else resolved
+    return str(Path(cwd) / path)
 
 
 def get_workspace_root() -> Path:

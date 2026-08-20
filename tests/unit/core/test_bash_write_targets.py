@@ -113,53 +113,83 @@ class TestTeeAndCopyVerbs:
     def test_copy_verbs_report_their_destination(self, command: str, expected: list[str]) -> None:
         assert get_bash_write_targets(_bash(command)) == expected
 
+    def test_a_directory_destination_expands_to_the_file_actually_written(
+        self, tmp_path: Path
+    ) -> None:
+        """`cp a.py somedir` writes `somedir/a.py` — a path we CAN name exactly.
+
+        Found by differential-testing against a real shell: bash wrote
+        `adir/src.txt` while this returned nothing. Declining was safe but
+        lossy, and it left a live gap — copying a file INTO a guarded directory
+        is the obvious way to reach one without ever naming the file.
+
+        The destination basename comes from the SOURCE, which is why this
+        needs the source operands and not just the last one.
+        """
+        destination = tmp_path / "dest"
+        destination.mkdir()
+
+        found = get_bash_write_targets(_bash(f"cp /tmp/a.py {destination}"))
+
+        assert found == [str(destination / "a.py")]
+
+    def test_a_target_directory_flag_expands_each_source(self, tmp_path: Path) -> None:
+        """`cp -t DEST src` — destination first, so every operand is a source."""
+        destination = tmp_path / "dest"
+        destination.mkdir()
+
+        found = get_bash_write_targets(_bash(f"cp -t {destination} /tmp/a.py /tmp/b.py"))
+
+        assert found == [str(destination / "a.py"), str(destination / "b.py")]
+
+    def test_a_multi_source_copy_expands_every_source(self, tmp_path: Path) -> None:
+        """`cp a b destdir` — 3+ operands means a directory destination."""
+        destination = tmp_path / "destdir"
+        destination.mkdir()
+
+        found = get_bash_write_targets(_bash(f"mv /tmp/a.py /tmp/b.py {destination}"))
+
+        assert found == [str(destination / "a.py"), str(destination / "b.py")]
+
+    def test_a_redirect_into_a_directory_still_yields_nothing(self, tmp_path: Path) -> None:
+        """`echo x > somedir` is a shell ERROR — it writes nothing at all.
+
+        The expansion above is specific to copy verbs. A redirect has no source
+        operand to take a basename from, and bash refuses it outright, so
+        inventing a path here would be pure fabrication.
+        """
+        destination = tmp_path / "dest"
+        destination.mkdir()
+
+        assert get_bash_write_targets(_bash(f"echo x > {destination}")) == []
+
     def test_a_target_directory_flag_yields_nothing_rather_than_the_source(self) -> None:
         """`cp -t DEST src` puts the destination FIRST, so "last operand" lies.
 
         This returned `/tmp/a.py` — a file the command READS. Naming a read as
         a write is the precise failure the conservative contract exists to
         prevent: a path-keyed guard would judge a file that was never written,
-        while the real destination went unmentioned. `-t` also means the
-        destination is a directory, so there is no correct single path to
-        report and declining is the only right answer.
+        while the real destination went unmentioned.
+
+        With a destination that does not exist, there is still nothing to name:
+        `-t` requires a directory, and bash fails outright when it is missing.
+        When the directory DOES exist the sources are expanded instead — see
+        `test_a_target_directory_flag_expands_each_source`.
         """
         for command in (
-            "cp -t /tmp/dest /tmp/a.py",
-            "mv --target-directory /tmp/dest /tmp/a.py",
-            "install -t /tmp/dest /tmp/a.py",
+            "cp -t /tmp/nosuchdir-eb9f1 /tmp/a.py",
+            "mv --target-directory /tmp/nosuchdir-eb9f1 /tmp/a.py",
+            "install -t /tmp/nosuchdir-eb9f1 /tmp/a.py",
         ):
             assert get_bash_write_targets(_bash(command)) == [], command
 
-    def test_an_existing_directory_destination_is_declined(self, tmp_path: Path) -> None:
-        """`cp a.py somedir` writes `somedir/a.py`; the directory is not the file.
+    def test_a_trailing_slash_destination_is_declined(self) -> None:
+        """`cp a.py dest/` names a directory that does not exist here.
 
-        Only reachable by asking the filesystem — `somedir` and `somefile` are
-        indistinguishable as strings. One `is_dir()` per candidate is cheap
-        next to naming the wrong path.
+        Kept as a decline because the expansion needs the destination to be a
+        REAL directory; a trailing slash alone only signals intent.
         """
-        destination = tmp_path / "dest"
-        destination.mkdir()
-
-        assert get_bash_write_targets(_bash(f"cp /tmp/a.py {destination}")) == []
-
-    def test_a_multi_source_copy_names_no_file(self, tmp_path: Path) -> None:
-        """`cp a b destdir` — with 3+ operands the last is necessarily a directory."""
-        destination = tmp_path / "destdir"
-        destination.mkdir()
-
-        command = f"mv /tmp/a /tmp/b {destination}"
-
-        assert get_bash_write_targets(_bash(command)) == []
-
-    def test_a_directory_destination_is_not_reported_as_the_written_file(self) -> None:
-        """`cp a.py src/` writes `src/a.py`, not `src/`.
-
-        Reporting the directory would attribute the write to a path no
-        path-keyed guard matches, so it fails safe (a missed write) rather than
-        dangerously (the wrong file judged). Recorded as a test so the
-        behaviour is a decision rather than an accident.
-        """
-        assert get_bash_write_targets(_bash("cp /tmp/a.py /tmp/dest/")) == []
+        assert get_bash_write_targets(_bash("cp /tmp/a.py /tmp/nosuchdir-eb9f1/")) == []
 
 
 class TestProseIsNeverAWriteTarget:
@@ -305,6 +335,30 @@ class TestHeredocBodies:
         assert get_bash_write_targets(_bash(command), include_heredoc_bodies=True) == [
             "/tmp/doc.md"
         ]
+
+    def test_prose_in_a_scanned_body_CAN_yield_a_phantom_target(self) -> None:
+        """The honest cost of `include_heredoc_bodies`, pinned rather than hidden.
+
+        Found by differential-testing against a real shell: bash wrote only
+        `notes.md`, while this also reported `somewhere` from the body text
+        `route out > somewhere`. Nothing distinguishes a script being authored
+        from prose containing a redirect, so scanning bodies necessarily
+        produces a SUPERSET.
+
+        The sibling test below passed while missing this, because it supplied
+        no `cwd` and the relative target was declined for THAT reason. Real
+        events always carry a cwd, so the test agreed with the code and both
+        were wrong about the contract.
+
+        This is safe only because the one caller filters every candidate by
+        path before acting. Recorded here so the next caller sees the cost
+        before opting in.
+        """
+        command = "cat > /tmp/notes.md <<'EOF'\nroute out > somewhere\nEOF"
+
+        found = get_bash_write_targets(_bash(command, cwd="/repo"), include_heredoc_bodies=True)
+
+        assert found == ["/tmp/notes.md", "/repo/somewhere"]
 
     def test_prose_in_a_body_is_still_not_a_target(self) -> None:
         command = "cat > /tmp/notes.md <<'EOF'\nwrite output > somewhere sensible\nEOF"
