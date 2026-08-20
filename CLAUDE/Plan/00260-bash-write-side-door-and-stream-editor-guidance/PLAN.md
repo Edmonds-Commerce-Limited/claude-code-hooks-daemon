@@ -254,8 +254,10 @@ build a parallel mechanism.
   equality with bash), because fixing defects while leaving the METHOD blind is
   what DBF exists to prevent. Detail: Decisions 5d/5e, journal `26-08-20`.
 
-- [ ] 🔄 **Task 4.5**: Re-verify after Task 3.5 — full QA, daemon restart, and a
-  live socket probe of the new linter surface.
+- [x] ✅ **Task 4.5**: Re-verified after Task 3.5 — full QA (12,824 passed,
+  95.1%), daemon RUNNING, and a live probe on the restarted daemon: a heredoc
+  authoring invalid Python was DENIED, `cp` of that same file ALLOWED. Both
+  halves of Decision 5f, observed not inferred. Detail: journal `26-08-20`.
 
 ## Dependencies
 
