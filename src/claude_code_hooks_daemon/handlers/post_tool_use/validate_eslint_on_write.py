@@ -250,4 +250,32 @@ is not evidence that a `.ts` file is clean."""
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
+            AcceptanceTest(
+                title="ESLint denies a Bash-authored TypeScript file",
+                # A LITERAL shell command, not prose: the Bash write route made
+                # this handler's surface machine-executable for the first time
+                # (Plan 00260 Task 3.5). The sibling test above must stay prose
+                # because it exercises the Write TOOL, which no shell command
+                # can express.
+                command=(
+                    "mkdir -p /tmp/acceptance-test-eslint-bash && "
+                    "cat > /tmp/acceptance-test-eslint-bash/broken.ts <<'EOF'\n"
+                    "const x: number = ;\n"
+                    "EOF"
+                ),
+                description=(
+                    "A heredoc authoring invalid TypeScript is ESLint-checked and DENIED, "
+                    "proving the Bash write route is no longer a way past this handler. "
+                    "The write lands on disk first, so the denial is a failure report to "
+                    "repair with Edit, not a rollback."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"broken\.ts"],
+                safety_notes="Writes a temporary TypeScript file under /tmp; removed by cleanup",
+                test_type=TestType.BLOCKING,
+                setup_commands=["mkdir -p /tmp/acceptance-test-eslint-bash"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-eslint-bash"],
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
+            ),
         ]

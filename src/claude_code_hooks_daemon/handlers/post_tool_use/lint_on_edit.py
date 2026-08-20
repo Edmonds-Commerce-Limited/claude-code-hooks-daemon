@@ -385,4 +385,70 @@ additive and neither overrides the other."""
             seen_languages.add(strategy.language_name)
             if hasattr(strategy, "get_acceptance_tests"):
                 tests.extend(strategy.get_acceptance_tests())
+        tests.extend(self._bash_route_acceptance_tests())
         return tests
+
+    def _bash_route_acceptance_tests(self) -> list[Any]:
+        """Tests for the Bash write route, which is handler-level, not per-language.
+
+        The per-strategy tests above all drive the `Write` TOOL and are therefore
+        English prose -- no shell command can express "use the Write tool". The
+        Bash route is the opposite: it IS a shell command, so these are literal
+        and machine-executable, which is what `CLAUDE/CodeLifecycle/Features.md`
+        asks for wherever a test can be expressed that way.
+
+        Both directions are covered on purpose. A test that only proves the
+        denial would pass just as well against a handler that denied every Bash
+        command, so the relocation case is what shows the boundary is real.
+        """
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+
+        # nosec B108 - acceptance test fixture path a human runs in a shell, not a
+        # runtime temp file. B108 guards sockets/PID files/logs, which CLAUDE.md
+        # routes to the daemon's untracked dir; the same convention is used at
+        # recovery_cron_advisor.py for an identical fixture path.
+        directory = "/tmp/acceptance-test-lint-bash"  # nosec B108
+        return [
+            AcceptanceTest(
+                title="Bash heredoc authoring invalid Python is DENIED",
+                command=(f"cat > {directory}/authored.py <<'EOF'\ndef broken(\nEOF"),
+                description=(
+                    "Plan 00260 Task 3.5. Before this, a heredoc put unparseable Python on "
+                    "disk in silence while identical content through Write was denied -- so "
+                    "the route that looked safest, because nothing complained, was the only "
+                    "unguarded one. The write lands first, so the denial is a failure report "
+                    "to repair with Edit, not a rollback."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"authored\.py"],
+                safety_notes="Writes a temporary Python file under /tmp; removed by cleanup",
+                test_type=TestType.BLOCKING,
+                setup_commands=[f"mkdir -p {directory}"],
+                cleanup_commands=[f"rm -rf {directory}"],
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="Copying an already-broken file is NOT denied",
+                command=(f"cp {directory}/source.py {directory}/copied.py"),
+                description=(
+                    "The boundary that makes the Bash route safe to enable by default. "
+                    "`cp` writes a file, and the memory-path guard must see it -- copying "
+                    "INTO a guarded directory is a real bypass. A LINTER must not: the bytes "
+                    "were already on disk, so denying the copy would report a defect the "
+                    "command did not introduce and leave the agent repairing a file it never "
+                    "chose to write. The source here is deliberately invalid Python."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Copies a temporary file under /tmp; removed by cleanup",
+                test_type=TestType.ADVISORY,
+                setup_commands=[
+                    f"mkdir -p {directory}",
+                    f"printf 'def broken(\\n' > {directory}/source.py",
+                ],
+                cleanup_commands=[f"rm -rf {directory}"],
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
+            ),
+        ]
