@@ -172,3 +172,36 @@ truth_changes:
       Heredoc BODIES are not scanned for nested targets either, because that
       mode yields occasional phantom paths from prose and a DENYING handler
       must never act on a file the command did not write.
+  - was: >
+      The Behaviour column in the generated `.claude/HOOKS-DAEMON.md` could be
+      read as describing what a handler does, so a row saying ADVISORY or
+      NON-TERMINAL meant that handler would warn rather than stop a tool call.
+    now: >
+      That column was never derived from behaviour — `_detect_behavior` renders
+      a HAND-DECLARED tag, and nothing compared the tag to the code. Five
+      handlers had drifted: `lint_on_edit`, `write_clobber_guard`,
+      `plan_qa_edit`, `plan_time_estimates` and `plan_number_helper` all DENY,
+      most of them unconditionally, while advertising themselves as ADVISORY or
+      NON-TERMINAL. They are now tagged BLOCKING and the table states it
+      (Plan 00260). `plan_number_helper` was the sharpest case: already
+      `terminal=True`, but the advisory tag is checked FIRST and overrode it.
+
+      NO HANDLER BEHAVIOUR CHANGED. Tags are documentation metadata and are
+      never consulted in dispatch — verified against the front controller and
+      event router — so nothing blocks that did not block before. What changes
+      on upgrade is what the table SAYS about handlers that already blocked.
+
+      Two consequences once you regenerate (`hooks-daemon generate-docs`).
+      First, `check_doc_truth` uses that column as ground truth when judging
+      whether prose claiming a handler "blocks" is a false claim, so an opt-in
+      handler bullet in YOUR docs describing one of these five as advisory will
+      now be flagged — correctly — where it previously passed. Second,
+      `check_handler_reference` requires every BLOCKING handler to carry a
+      section in `HANDLER_REFERENCE.md`; all five already do upstream.
+
+      Three handlers deliberately KEEP an advisory label because their deny
+      paths are config-conditional: `plan_qa_commit_gate` (ships
+      `commit_gate_mode: warn`), plus `npm_command` and
+      `validate_eslint_on_write` (both inert without `llm:` scripts in
+      package.json). Calling those BLOCKING would overstate what a default
+      installation does, which is the same untruth pointed the other way.

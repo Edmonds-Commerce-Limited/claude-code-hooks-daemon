@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-08-19 (v3.54.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-08-20 (v3.54.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (41 handlers)
+### PreToolUse (42 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -19,6 +19,7 @@
 | 15 | root_recursion_guard | BLOCKING | Block recursive scanners (grep -r, find, fd, rg, ...) rooted at ``/``/home/etc |
 | 15 | worktree_file_copy | BLOCKING | Prevent copying files between worktrees and main repo |
 | 16 | curl_pipe_shell | TERMINAL | Block curl/wget piped to shell commands |
+| 16 | write_clobber_guard | BLOCKING | Deny ``Write`` to an existing file that was not read this session |
 | 17 | pipe_blocker | BLOCKING | Block expensive commands piped to tail/head to prevent information loss |
 | 18 | dangerous_permissions | TERMINAL | Block chmod 777 and dangerous permission commands |
 | 19 | ancestry_preserving_merge | BLOCKING | Block (or, in warn mode, advise against) ancestry-severing merges |
@@ -32,15 +33,15 @@
 | 30 | qa_suppression | BLOCKING | Block QA suppression comments across all supported languages |
 | 31 | comment_changelog | BLOCKING | Block Write/Edit content that writes historical narrative into a comment |
 | 33 | comment_size | BLOCKING | Block/advise on over-long comments, tiered like plan-doc-size |
-| 33 | plan_number_helper | ADVISORY | Detect bash commands attempting to discover plan numbers and provide correct answer |
+| 33 | plan_number_helper | BLOCKING | Detect bash commands attempting to discover plan numbers and provide correct answer |
 | 35 | tdd_enforcement | BLOCKING | Enforce TDD by blocking production file creation without corresponding test file |
 | 38 | lsp_enforcement | BLOCKING | Enforce LSP tool usage instead of Grep/Bash grep for symbol lookups |
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
 | 42 | global_npm_advisor | NON-TERMINAL | Advise on global npm/yarn package installations |
 | 44 | plan_qa_commit_gate | NON-TERMINAL | Warn-first cross-file plan QA gate on git commit |
-| 44 | plan_qa_edit | NON-TERMINAL | Blocking/advisory edit-time lint for plan documents |
-| 45 | plan_time_estimates | ADVISORY | Block time estimates in plan documents |
+| 44 | plan_qa_edit | BLOCKING | Blocking/advisory edit-time lint for plan documents |
+| 45 | plan_time_estimates | BLOCKING | Block time estimates in plan documents |
 | 46 | agent_isolation_advisor | ADVISORY | Advise ``isolation: worktree`` when peers are already active in this checkout |
 | 46 | plan_workflow | ADVISORY | Provide guidance when creating plan files |
 | 49 | npm_command | ADVISORY | Enforce llm: prefixed npm commands and block direct npx tool usage |
@@ -55,7 +56,7 @@
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 20 | validate_eslint_on_write | ADVISORY | Run ESLint validation on TypeScript/TSX files after write |
-| 25 | lint_on_edit | NON-TERMINAL | Run language-aware lint validation on files after Write/Edit |
+| 25 | lint_on_edit | BLOCKING | Run language-aware lint validation on files after Write/Edit |
 | 26 | markdown_table_formatter | NON-TERMINAL | Auto-format markdown tables after Write/Edit of .md files |
 | 27 | git_hooks_executable_fixer | NON-TERMINAL | Detect git's "not set as executable" hint and fix the hooks automatically |
 | 28 | background_process_tracker | ADVISORY | Track backgrounded Bash processes and advise on watchdog/harvest (never kills) |

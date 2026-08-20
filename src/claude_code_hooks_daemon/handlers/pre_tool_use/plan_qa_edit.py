@@ -67,6 +67,11 @@ class PlanQaEditHandler(Handler):
                 HandlerTag.PLANNING,
                 HandlerTag.VALIDATION,
                 HandlerTag.CONTENT_QUALITY,
+                # BLOCKING because `edit_mode: block` is the SHIPPED default in
+                # .claude/hooks-daemon.yaml, so a block-level finding denies the
+                # write in a default install. (Its sibling plan_qa_commit_gate
+                # ships `warn` and is deliberately NOT tagged blocking.)
+                HandlerTag.BLOCKING,
             ],
         )
         # Injected by the registry for PLANNING-tagged handlers.

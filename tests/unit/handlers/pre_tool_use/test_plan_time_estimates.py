@@ -302,7 +302,13 @@ class TestPlanTimeEstimatesHandler:
         """Handler has correct tags."""
         assert "workflow" in handler.tags
         assert "planning" in handler.tags
-        assert "advisory" in handler.tags
+        # "blocking", not "advisory": handle() denies unconditionally. This
+        # assertion previously pinned the advisory tag, so it agreed with the
+        # stale metadata rather than with the code -- and the generated handler
+        # table, which renders whatever is tagged here, advertised a blocker as
+        # a warning. See tests/integration/test_declared_behaviour_matches_source.py.
+        assert "blocking" in handler.tags
+        assert "advisory" not in handler.tags
         assert "non-terminal" in handler.tags
 
     # Tests for ESTIMATE_PATTERNS constant

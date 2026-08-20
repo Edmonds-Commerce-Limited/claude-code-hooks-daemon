@@ -61,6 +61,12 @@ class LintOnEditHandler(Handler):
                 HandlerTag.VALIDATION,
                 HandlerTag.MULTI_LANGUAGE,
                 HandlerTag.QA_ENFORCEMENT,
+                # BLOCKING despite terminal=False: a lint failure returns
+                # Decision.DENY. The two are independent -- `terminal` controls
+                # whether dispatch continues, not whether the call is denied --
+                # and rendering this as NON-TERMINAL contradicted this handler's
+                # own resident guidance, which states plainly that it DENIES.
+                HandlerTag.BLOCKING,
                 HandlerTag.NON_TERMINAL,
             ],
         )

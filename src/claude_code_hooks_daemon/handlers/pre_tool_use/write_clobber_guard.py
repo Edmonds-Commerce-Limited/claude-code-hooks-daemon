@@ -29,6 +29,7 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
+from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.handler import Handler
@@ -67,6 +68,11 @@ class WriteClobberGuardHandler(Handler):
             handler_id=HandlerID.WRITE_CLOBBER_GUARD,
             priority=Priority.WRITE_CLOBBER_GUARD,
             terminal=False,
+            # BLOCKING, not decoration: this handler denies unconditionally, and
+            # the generated handler table renders whatever is declared here. An
+            # untagged blocker rendered as NON-TERMINAL, telling agents to expect
+            # a warning where they will meet a wall.
+            tags=[HandlerTag.SAFETY, HandlerTag.FILE_OPS, HandlerTag.BLOCKING],
         )
         # session id -> paths whose contents this session has seen.
         self._known_paths: dict[str, set[str]] = {}

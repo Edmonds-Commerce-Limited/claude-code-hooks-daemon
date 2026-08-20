@@ -67,7 +67,11 @@ class PlanTimeEstimatesHandler(Handler):
             tags=[
                 HandlerTag.WORKFLOW,
                 HandlerTag.PLANNING,
-                HandlerTag.ADVISORY,
+                # BLOCKING, not ADVISORY: `handle()` returns Decision.DENY
+                # unconditionally for a matched time estimate. The generated
+                # handler table renders whatever is declared here, so an
+                # ADVISORY tag advertised this blocker as a mere warning.
+                HandlerTag.BLOCKING,
                 HandlerTag.NON_TERMINAL,
             ],
         )

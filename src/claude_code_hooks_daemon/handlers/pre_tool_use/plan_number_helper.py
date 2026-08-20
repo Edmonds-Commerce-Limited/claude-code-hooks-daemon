@@ -78,7 +78,11 @@ class PlanNumberHelperHandler(Handler):
             handler_id=HandlerID.PLAN_NUMBER_HELPER,
             priority=Priority.PLAN_NUMBER_HELPER,  # Run before markdown_organization (35)
             terminal=True,  # Block broken commands that return incorrect plan numbers
-            tags=[HandlerTag.WORKFLOW, HandlerTag.ADVISORY, HandlerTag.PLANNING],
+            # BLOCKING, not ADVISORY: this handler is already `terminal=True`
+            # and denies a hand-rolled plan-folder mkdir. `_detect_behavior`
+            # checks the advisory tag BEFORE falling back to the terminal flag,
+            # so the ADVISORY tag actively overrode the truth the flag stated.
+            tags=[HandlerTag.WORKFLOW, HandlerTag.BLOCKING, HandlerTag.PLANNING],
         )
 
         # Configuration attributes (set by registry after instantiation)

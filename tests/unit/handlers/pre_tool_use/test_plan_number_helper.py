@@ -68,7 +68,13 @@ class TestPlanNumberHelperHandler:
         assert handler.priority == 30  # Run before other workflow handlers
         assert handler.terminal  # Block broken commands
         assert "workflow" in handler.tags
-        assert "advisory" in handler.tags
+        # "blocking", not "advisory" -- and the line above is why: this test
+        # asserted `terminal` with the comment "Block broken commands" while
+        # simultaneously pinning an advisory tag. _detect_behavior checks the
+        # advisory tag BEFORE the terminal flag, so the tag won and the
+        # generated table called this handler ADVISORY.
+        assert "blocking" in handler.tags
+        assert "advisory" not in handler.tags
 
     def test_disabled_when_planning_mode_off(
         self, handler_disabled: PlanNumberHelperHandler
