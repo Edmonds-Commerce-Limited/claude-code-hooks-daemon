@@ -690,7 +690,11 @@ The handlers listed below are active in this project. Read this section to avoid
 
 **When a tool is blocked by a handler, do not stop working.** Read the block reason, modify your approach, and continue with your task.
 
-**A file written through Bash is not seen by the content guards.** The handlers below that inspect what a file CONTAINS, or where it lives, key on the `Write` and `Edit` tools — so a `>`, `>>`, `tee` or a `cat <<EOF` heredoc reaches disk unexamined by them: no block, no advisory, no record. **A Bash write that drew no complaint is NOT a write that passed a check** — use `Write`/`Edit` for file content and the guards apply. The handlers that judge a Bash COMMAND — destructive git, `sed`, pipes, permissions, `curl | sh` — are unaffected and still cover you.
+**A file written through Bash is not seen by the content guards that run BEFORE the write.** The PreToolUse handlers below that inspect what a file CONTAINS, or where it lives, key on the `Write` and `Edit` tools — so a `>`, `>>`, `tee` or a `cat <<EOF` heredoc reaches disk unexamined by them: no block, no advisory, no record. **A Bash write that drew no complaint is NOT a write that passed those checks** — use `Write`/`Edit` for file content and they apply.
+
+**The LINTERS are the exception, and they DENY.** `lint_on_edit` and `validate_eslint_on_write` do run on a file a Bash command AUTHORS — a redirect, `tee`, a heredoc — so unparseable Python or failing TypeScript is reported however it reached disk. The write has already landed, so the denial is a failure report to repair with `Edit`, not a rollback. A file the command merely RELOCATES (`cp`, `mv`, `install`, `dd`) is never linted: those bytes were already on disk, so blaming the copy would report a defect the command did not introduce.
+
+The handlers that judge a Bash COMMAND — destructive git, `sed`, pipes, permissions, `curl | sh` — are unaffected and still cover you.
 
 <!-- handler: prevent-destructive-git -->
 
@@ -1538,27 +1542,6 @@ PostToolUse advisory (never blocks). When a configured command is detected in a 
 
 **Configure** via `handlers.post_tool_use.command_hints.options`: `mode: additive` (default) appends your `hints` list to the built-in set — a project entry whose `id` matches a built-in one overrides it; `mode: replace` discards the built-in set entirely and uses only your list. Each hint: `id`, `pattern` (a literal command name, matched at the start of a shell segment — path-qualified and `env`-prefixed spellings are recognised, but it never fires on the word appearing as an unrelated argument), `hint` (the reminder text), `ttl_seconds`, and optional `min_calls_between` (secondary count-based gate). Disable with `handlers.post_tool_use.command_hints.enabled: false`.
 
-<!-- handler: validate-eslint-on-write -->
-
-## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
-
-A `Write`/`Edit` to a `.ts` or `.tsx` file is run through ESLint. Reported
-errors DENY the tool call.
-
-**The write has ALREADY landed on disk.** The denial is a failure report, not
-a rollback — the file exists with your content in it. Fix the reported problems
-with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
-sibling tool calls that were cancelled alongside the denied one.
-
-**This is STRICTER than `lint_on_edit`, which covers the other languages.**
-That handler ALLOWs when its linter is missing or when the check times out;
-this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
-Do not carry "a missing linter never blocks" across to TypeScript.
-
-**Enforcement is gated on `llm:` scripts in `package.json`.** With none
-present this handler only advises — and suggests adding `llm:lint` — so silence
-is not evidence that a `.ts` file is clean.
-
 <!-- handler: markdown-table-formatter -->
 
 ## markdown_table_formatter — markdown tables are auto-aligned
@@ -1669,12 +1652,32 @@ When you background a long-lived process:
 
 Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
 
+<!-- handler: git-hooks-executable-fixer -->
+
+## git_hooks_executable_fixer — auto-fixes non-executable git hooks
+
+When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
+
 <!-- handler: lint-on-edit -->
 
 ## lint_on_edit — source writes are linted, and a failure DENIES
 
 Every `Write`/`Edit` to a Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin or
 Dart file is linted immediately. A lint failure DENIES the tool call.
+
+**Bash-authored files are linted too.** A file a command writes with `>`, `>>`,
+`tee` or a `cat <<EOF` heredoc gets the same treatment — so the heredoc route is
+no longer the quiet way to land unparseable source. A command can author several
+files at once (`tee a.py b.py`); each is linted and the first failure is
+reported. Two boundaries are deliberate:
+
+- **Relocation is NOT linted.** `cp`, `mv`, `install` and `dd` move bytes that
+  were already on disk, so denying them would report a defect the command did
+  not introduce and leave you repairing a file you never wrote.
+- **A target that does not exist is NOT linted.** The path is inferred from the
+  command text, so a command that failed leaves nothing to check.
+
+Opt out with `handlers.post_tool_use.lint_on_edit.options.lint_bash_writes: false`, which leaves `Write`/`Edit` linting untouched.
 
 **The write has ALREADY landed on disk.** A PostToolUse denial is a failure
 report, not a rollback — the file exists, with your content in it. Fix the
@@ -1702,11 +1705,31 @@ syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
 globs. The project-wide `daemon.exclude_paths` applies here too; the two are
 additive and neither overrides the other.
 
-<!-- handler: git-hooks-executable-fixer -->
+<!-- handler: validate-eslint-on-write -->
 
-## git_hooks_executable_fixer — auto-fixes non-executable git hooks
+## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
 
-When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
+A `Write`/`Edit` to a `.ts` or `.tsx` file is run through ESLint. Reported
+errors DENY the tool call.
+
+**A Bash-authored `.ts`/`.tsx` file is checked too** — one written with `>`,
+`>>`, `tee` or a `cat <<EOF` heredoc. A file the command merely RELOCATES
+(`cp`, `mv`, `install`, `dd`) is not: those bytes were already on disk. Opt out
+with `handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes: false`, which leaves `Write`/`Edit` checking untouched.
+
+**The write has ALREADY landed on disk.** The denial is a failure report, not
+a rollback — the file exists with your content in it. Fix the reported problems
+with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
+sibling tool calls that were cancelled alongside the denied one.
+
+**This is STRICTER than `lint_on_edit`, which covers the other languages.**
+That handler ALLOWs when its linter is missing or when the check times out;
+this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
+Do not carry "a missing linter never blocks" across to TypeScript.
+
+**Enforcement is gated on `llm:` scripts in `package.json`.** With none
+present this handler only advises — and suggests adding `llm:lint` — so silence
+is not evidence that a `.ts` file is clean.
 
 <!-- handler: git-upstream-checker -->
 
