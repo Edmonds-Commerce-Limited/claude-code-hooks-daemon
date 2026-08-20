@@ -1491,13 +1491,14 @@ still allowed** so existing memory can be migrated out.
 **The bash coverage is wide but still not every route.** Detected: `>`,
 `>>`, `>|`, `&>`, `&>>`, every `tee` operand, `cp`/`mv`/`install`
 destinations, `dd of=`, quoted targets containing spaces, `~` paths, and
-heredoc bodies. NOT detected, because no single written path can be named:
-a target needing an expansion — a variable (`> "$OUT"`) or a glob — a
-destination that is an existing DIRECTORY (`cp x somedir`, `cp -t somedir x`), and a script that opens the file itself. `$HOME` specifically IS still
-caught, by a separate raw-string scan. Treat the rule as the policy and
-honour it — do not read an unblocked command as permission. The
-markdown-LOCATION rule below is checked on `Write`/`Edit` only, with no bash
-detection at all.
+heredoc bodies. A copy INTO a directory is resolved to the file it really
+writes, so `cp note.md <memory-dir>` and `cp -t <memory-dir> note.md` are
+both caught. NOT detected, because no single written path can be named: a
+target needing an expansion — a variable (`> "$OUT"`) or a glob — and a
+script that opens the file itself. `$HOME` specifically IS still caught, by
+a separate raw-string scan. Treat the rule as the policy and honour it — do
+not read an unblocked command as permission. The markdown-LOCATION rule
+below is checked on `Write`/`Edit` only, with no bash detection at all.
 
 **Put durable knowledge in TRACKED project docs (progressive disclosure):**
 
