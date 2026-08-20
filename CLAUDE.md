@@ -1658,6 +1658,32 @@ Advisory is rate-limited per session (default-on). Disable with `handlers.post_t
 
 When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
 
+<!-- handler: validate-eslint-on-write -->
+
+## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
+
+A `Write`/`Edit` to a `.ts` or `.tsx` file is run through ESLint. Reported
+errors DENY the tool call.
+
+**A Bash-authored `.ts`/`.tsx` file is checked too** — one written with `>`,
+`>>`, `tee` or a `cat <<EOF` heredoc. A file the command merely RELOCATES
+(`cp`, `mv`, `install`, `dd`) is not: those bytes were already on disk. Opt out
+with `handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes: false`, which leaves `Write`/`Edit` checking untouched.
+
+**The write has ALREADY landed on disk.** The denial is a failure report, not
+a rollback — the file exists with your content in it. Fix the reported problems
+with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
+sibling tool calls that were cancelled alongside the denied one.
+
+**This is STRICTER than `lint_on_edit`, which covers the other languages.**
+That handler ALLOWs when its linter is missing or when the check times out;
+this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
+Do not carry "a missing linter never blocks" across to TypeScript.
+
+**Enforcement is gated on `llm:` scripts in `package.json`.** With none
+present this handler only advises — and suggests adding `llm:lint` — so silence
+is not evidence that a `.ts` file is clean.
+
 <!-- handler: lint-on-edit -->
 
 ## lint_on_edit — source writes are linted, and a failure DENIES
@@ -1704,32 +1730,6 @@ language's `default`/`extended` command (set `extended: null` to run only the
 syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
 globs. The project-wide `daemon.exclude_paths` applies here too; the two are
 additive and neither overrides the other.
-
-<!-- handler: validate-eslint-on-write -->
-
-## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
-
-A `Write`/`Edit` to a `.ts` or `.tsx` file is run through ESLint. Reported
-errors DENY the tool call.
-
-**A Bash-authored `.ts`/`.tsx` file is checked too** — one written with `>`,
-`>>`, `tee` or a `cat <<EOF` heredoc. A file the command merely RELOCATES
-(`cp`, `mv`, `install`, `dd`) is not: those bytes were already on disk. Opt out
-with `handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes: false`, which leaves `Write`/`Edit` checking untouched.
-
-**The write has ALREADY landed on disk.** The denial is a failure report, not
-a rollback — the file exists with your content in it. Fix the reported problems
-with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
-sibling tool calls that were cancelled alongside the denied one.
-
-**This is STRICTER than `lint_on_edit`, which covers the other languages.**
-That handler ALLOWs when its linter is missing or when the check times out;
-this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
-Do not carry "a missing linter never blocks" across to TypeScript.
-
-**Enforcement is gated on `llm:` scripts in `package.json`.** With none
-present this handler only advises — and suggests adding `llm:lint` — so silence
-is not evidence that a `.ts` file is clean.
 
 <!-- handler: git-upstream-checker -->
 
