@@ -64,7 +64,11 @@ config_changes:
         covered by this handler.
     - key: handlers.post_tool_use.lint_on_edit.options.lint_bash_writes
       recommended: false
-      dormant: false
+      # dormant: the OPTION defaults true, but the HANDLER ships
+      # `enabled: false` for clients, so this does nothing until a project opts
+      # the handler in. Verified in a real client install -- this repository
+      # enables lint_on_edit and is not representative.
+      dormant: true
       description: >-
         NEW option (Plan 00260 Task 3.5), default TRUE. Lints source files a
         Bash command AUTHORS -- a > / >> / >| / &> redirect, tee, or a
@@ -87,7 +91,10 @@ config_changes:
         lint_bash_writes to false; Write/Edit linting is unaffected either way.
     - key: handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes
       recommended: false
-      dormant: false
+      # dormant for the same reason as lint_bash_writes: validate_eslint_on_write
+      # also ships `enabled: false` for clients, and is additionally gated on
+      # `llm:` scripts in package.json -- two opt-ins before this option matters.
+      dormant: true
       description: >-
         NEW option (Plan 00260 Task 3.5), default TRUE. The .ts/.tsx sibling of
         lint_bash_writes: a TypeScript file authored by a redirect, tee or a

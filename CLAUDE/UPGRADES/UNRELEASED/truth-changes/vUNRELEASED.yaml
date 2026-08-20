@@ -150,13 +150,18 @@ truth_changes:
       heredoc — and a command that authors several files has each of them
       checked.
 
-      THIS IS A NEW DENIAL SURFACE. Both handlers DENY on failure, and the
+      THIS IS A NEW DENIAL SURFACE, BUT ONLY WHERE THESE HANDLERS ARE ALREADY
+      ENABLED. Both ship `enabled: false` in the default client configuration,
+      so a project that has not opted in sees NO change from this — verified in
+      a real client install rather than inferred from this repository, which
+      enables both and is therefore not representative.
+
+      If your project HAS enabled either handler: both DENY on failure, and the
       write has ALREADY landed when they run, so the denial is a failure report
       to repair with `Edit`, never a rollback. A denial also cancels sibling
-      tool calls batched in the same turn. IF YOUR PROJECT HAS SCRIPTS OR
-      DOCUMENTED WORKFLOWS THAT GENERATE SOURCE FILES VIA HEREDOC OR REDIRECT,
-      they will now be linted and can be denied where they previously passed
-      unexamined.
+      tool calls batched in the same turn. Scripts or documented workflows that
+      generate source files via heredoc or redirect will now be linted and can
+      be denied where they previously passed unexamined.
 
       Opt out per handler without disabling it:
       `handlers.post_tool_use.lint_on_edit.options.lint_bash_writes: false` and
