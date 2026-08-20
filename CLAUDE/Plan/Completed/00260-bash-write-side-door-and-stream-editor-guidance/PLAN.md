@@ -1,6 +1,6 @@
 # Plan 00260: The Bash write side-door, and `sed_blocker`'s inaccurate guidance
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-19
 **Owner**: Unassigned
 **Priority**: High
@@ -292,14 +292,22 @@ Recorded in full, with their reasoning, in **[DECISIONS.md](DECISIONS.md)**:
 
 ## Success Criteria
 
-- [ ] `sed_blocker`'s guidance names `-n`, the command-head case, and the
-  `grep`/`echo` condition, and a test pins that.
-- [ ] Every Write/Edit-keyed handler has a recorded verdict on Bash blindness,
-  enforced by a test.
-- [ ] The chosen side-door remedy is implemented, or explicitly declined with a
-  recorded rationale.
-- [ ] No duplicate implementation of bash-write-target detection remains.
-- [ ] Full QA passes and the daemon restarts RUNNING.
+- [x] `sed_blocker`'s guidance names `-n`, the command-head case, and the
+  `grep`/`echo` condition, pinned by 8 guidance assertions in
+  `tests/unit/handlers/test_sed_blocker.py`.
+- [x] Every Write/Edit-keyed handler has a recorded verdict on Bash blindness,
+  enforced by `test_bash_write_blindness_coverage.py` — and each verdict is now
+  checked against the handler's SOURCE, not merely for internal consistency.
+- [x] The side-door remedy is implemented: Task 3.5 wired both linters, with
+  Decision 5f recording the authoring/relocation split that makes it safe to
+  enable by default.
+- [x] No duplicate implementation of bash-write-target detection remains. All
+  three callers use the shared accessor; `markdown_organization` passes
+  `include_heredoc_bodies=True` rather than reimplementing. It keeps a
+  complementary raw-string `$HOME` scan, which is deliberately NOT target
+  detection — it catches a case the tokeniser cannot resolve to a path.
+- [x] Full QA passes (23/23, 12,833 tests, 95.1% coverage) and the daemon
+  restarts RUNNING with no load errors.
 
 ## Delivery & Milestones
 
@@ -307,3 +315,10 @@ Recorded in full, with their reasoning, in **[DECISIONS.md](DECISIONS.md)**:
 
 - Filed from a verified field report; verification evidence in
   `REPORT-2026-08-18-original.md`.
+- Phases 1–4 (guidance corrections, blindness census, shared accessor) delivered
+  across `b1b47ace`, `a9c4e730` and `e0729c85`.
+- Task 3.5 — both linters wired to Bash-authored files — `083210ac`.
+- Bash-route acceptance tests + the deny-coverage DBF — `aa981eae`.
+- Task 4.5 verification — `d7cee90b`.
+- Follow-on found while closing: five blocking handlers were advertised as
+  advisory by the generated handler table, with a guard added — `5094526e`.
