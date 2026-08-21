@@ -22,10 +22,13 @@ external factor (API error, rate limit, usage limit) actually stalls it.
 Decision D1 (PLAN.md): crons are created non-durable (durable:false) so they
 are session-only and cleaned up naturally on session exit.
 
-Decision D2 (PLAN.md): dedup is via an in-session per-plan PROGRESS edit
-counter owned by the handler.  The handler advises on every Nth progress
-edit for a given plan (independent of global daemon traffic).  The agent
-uses CronList to avoid duplicate creates.
+Decision D2 (PLAN.md): dedup is via in-session per-plan tracking owned by the
+handler.  PROGRESS uses a per-plan edit counter and advises on every Nth
+progress edit for a given plan (independent of global daemon traffic).
+CREATION and COMPLETION are state TRANSITIONS rather than ongoing activity,
+so each advises only on the FIRST occurrence for a given plan folder, then
+stays silent for that plan.  The agent uses CronList to avoid duplicate
+creates.
 
 Decision D4 (PLAN.md): this is a PostToolUse handler, not an extension of the
 PreToolUse plan_workflow handler.
@@ -104,11 +107,19 @@ _PROGRESS_ADVISE_INTERVAL: Final[int] = 5
 # First progress edit per plan is recorded at this count and always advises.
 _PROGRESS_COUNT_START: Final[int] = 1
 
-# Maximum number of plan folders tracked in the per-plan progress-count map.
-# Bounds memory on the daemon-lifetime singleton: when exceeded, the oldest
-# inserted entry is evicted (insertion-ordered dict).  A plan re-entering after
-# eviction simply restarts its progress count — harmless for an advisory.
+# Maximum number of plan folders tracked in each per-plan tracking map
+# (progress counts, creation-seen, completion-seen). Bounds memory on the
+# daemon-lifetime singleton: when exceeded, the oldest inserted entry is
+# evicted (insertion-ordered dict). A plan re-entering after eviction simply
+# restarts tracking for that phase — harmless for an advisory.
 _MAX_TRACKED_PLANS: Final[int] = 256
+
+# Fallback key for CREATION events with no derivable plan folder — a Bash
+# invocation of mkplan.bash carries only the shell command in its hook input,
+# not the folder the script created on disk. Every such invocation in a
+# session shares this one bucket, so a repeat mkplan.bash call is treated as
+# the same identity for once-per-plan gating (see _resolve_plan_folder).
+_MKPLAN_SENTINEL_KEY: Final[str] = "__mkplan__"
 
 # ─── Canonical recovery-cron prompt ──────────────────────────────────────────
 
@@ -198,6 +209,23 @@ def _is_plan_path(file_path: str) -> tuple[bool, str]:
     if not m:
         return False, ""
     return True, m.group(1)
+
+
+# ─── Bounded per-plan tracking helper ─────────────────────────────────────────
+
+
+def _evict_oldest_tracked_entry_if_full(tracked: dict[str, Any]) -> None:
+    """Evict the oldest inserted key from a bounded per-plan tracking map.
+
+    Shared by every per-plan tracking map on this handler (progress counts,
+    creation-seen markers, completion-seen markers) so the bound
+    (_MAX_TRACKED_PLANS) and eviction policy — oldest-first, relying on
+    insertion-ordered dict iteration — live in exactly one place rather than
+    being copy-pasted per map.  No-op while the map has room.
+    """
+    if len(tracked) >= _MAX_TRACKED_PLANS:
+        oldest_key = next(iter(tracked))
+        del tracked[oldest_key]
 
 
 # Matches a bare Complete/Completed VALUE occupying its own line (no
@@ -324,9 +352,11 @@ class RecoveryCronAdvisorHandler(Handler):
 
     A per-plan PROGRESS edit counter (keyed by plan folder name) advises only on
     every Nth progress edit, preventing spam on every single PLAN.md edit while
-    staying independent of unrelated daemon traffic.  Completion advisories
-    always fire regardless of the counter.  The counter map is bounded
-    (_MAX_TRACKED_PLANS) so it cannot grow without limit on the daemon-lifetime
+    staying independent of unrelated daemon traffic.  CREATION and COMPLETION
+    are state transitions rather than ongoing activity, so each advises only
+    once per plan folder — a repeat creation or a re-save of an
+    already-complete plan is silent.  All three tracking maps are bounded
+    (_MAX_TRACKED_PLANS) so none can grow without limit on the daemon-lifetime
     singleton.
 
     Opt-out: get_default_enabled() returns True (advisory-only, safe + useful, so
@@ -349,6 +379,13 @@ class RecoveryCronAdvisorHandler(Handler):
         # Insertion-ordered so the oldest entry can be evicted once the map
         # exceeds _MAX_TRACKED_PLANS.
         self._progress_counts: dict[str, int] = {}
+        # Per-plan CREATION / COMPLETION "seen" markers: {plan_folder: True}.
+        # Presence of a key means that phase has already advised once for that
+        # plan folder. Insertion-ordered so the oldest entry can be evicted
+        # once a map exceeds _MAX_TRACKED_PLANS — same policy as
+        # _progress_counts, via the shared _evict_oldest_tracked_entry helper.
+        self._creation_seen: dict[str, bool] = {}
+        self._completion_seen: dict[str, bool] = {}
         # Phase computed in matches() and reused in handle() (avoids running the
         # detection twice per event).  Set per-call; never relied on across
         # events.
@@ -393,26 +430,55 @@ class RecoveryCronAdvisorHandler(Handler):
         """Record a progress edit for plan_folder and return whether to advise.
 
         Advises on the 1st progress edit and every _PROGRESS_ADVISE_INTERVAL-th
-        edit thereafter.  Bounds the tracking map at _MAX_TRACKED_PLANS by
-        evicting the oldest inserted entry when a new plan would overflow it.
+        edit thereafter.  Bounds the tracking map at _MAX_TRACKED_PLANS via the
+        shared eviction helper.
         """
         count = self._progress_counts.get(plan_folder)
         if count is None:
-            if len(self._progress_counts) >= _MAX_TRACKED_PLANS:
-                oldest_key = next(iter(self._progress_counts))
-                del self._progress_counts[oldest_key]
+            _evict_oldest_tracked_entry_if_full(self._progress_counts)
             count = _PROGRESS_COUNT_START
         else:
             count += 1
         self._progress_counts[plan_folder] = count
         return (count - _PROGRESS_COUNT_START) % _PROGRESS_ADVISE_INTERVAL == 0
 
+    def _should_advise_once(self, tracked: dict[str, bool], plan_folder: str) -> bool:
+        """Record plan_folder as seen and return True only the FIRST time.
+
+        Shared by CREATION and COMPLETION, which are one-shot state
+        TRANSITIONS — the meaningful event is the first one for a given plan
+        folder, so a repeat creation or a re-save of an already-complete plan
+        carries no new information and stays silent. This is deliberately NOT
+        the PROGRESS rule (every Nth edit), which tracks ongoing activity
+        rather than a transition. Bounded and evicted identically to
+        _progress_counts via the shared eviction helper.
+        """
+        if plan_folder in tracked:
+            return False
+        _evict_oldest_tracked_entry_if_full(tracked)
+        tracked[plan_folder] = True
+        return True
+
+    def _resolve_plan_folder(self, hook_input: dict[str, Any]) -> str:
+        """Return the plan-folder key used by every per-plan tracking map.
+
+        Derived from the file path for Write/Edit events. A Bash invocation of
+        mkplan.bash carries no file path in its hook input — the daemon cannot
+        see which folder the script created from the Bash tool call alone — so
+        it falls back to the shared _MKPLAN_SENTINEL_KEY bucket.
+        """
+        file_path = get_file_path(hook_input) or ""
+        _, plan_folder = _is_plan_path(file_path)
+        return plan_folder or _MKPLAN_SENTINEL_KEY
+
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Inject advisory context appropriate for the detected lifecycle phase.
 
         Phase routing:
-        - CREATION   → always advise (cron setup is part of plan execution).
-        - COMPLETION → always advise (teardown the cron).
+        - CREATION   → advise once per plan folder (a state transition, not
+                        ongoing activity — a repeat creation write is silent).
+        - COMPLETION → advise once per plan folder (same rationale — re-saving
+                        an already-complete plan is silent).
         - PROGRESS   → advise on every Nth progress edit per plan.
 
         Returns:
@@ -423,19 +489,19 @@ class RecoveryCronAdvisorHandler(Handler):
             return HookResult(decision=Decision.ALLOW)
 
         if phase == LifecyclePhase.CREATION:
+            plan_folder = self._resolve_plan_folder(hook_input)
+            if not self._should_advise_once(self._creation_seen, plan_folder):
+                return HookResult(decision=Decision.ALLOW)
             return HookResult(decision=Decision.ALLOW, context=[_CREATION_GUIDANCE])
 
         if phase == LifecyclePhase.COMPLETION:
-            # Completion always fires — bypass the progress interval.
+            plan_folder = self._resolve_plan_folder(hook_input)
+            if not self._should_advise_once(self._completion_seen, plan_folder):
+                return HookResult(decision=Decision.ALLOW)
             return HookResult(decision=Decision.ALLOW, context=[_COMPLETION_GUIDANCE])
 
         # PROGRESS — advise on every Nth progress edit for this plan.
-        file_path = get_file_path(hook_input) or ""
-        _, plan_folder = _is_plan_path(file_path)
-        # For Bash (mkplan.bash) there is no file_path; use a sentinel key.
-        if not plan_folder:
-            plan_folder = "__mkplan__"
-
+        plan_folder = self._resolve_plan_folder(hook_input)
         if not self._should_advise_progress(plan_folder):
             return HookResult(decision=Decision.ALLOW)
 
@@ -467,7 +533,9 @@ class RecoveryCronAdvisorHandler(Handler):
             "| **Completion** | `**Status**: Complete[d]` written/edited | Plan complete — **warns first**: deleting now leaves the still-live session with no recovery coverage. Keep the cron if any further work may happen (it is non-durable and dies on session exit); `CronDelete` only when certain the session is finished. |\n\n"
             "Progress reminders are rate-limited per plan: the handler advises on the first\n"
             "progress edit and then once every few progress edits for that plan, so it does\n"
-            "not spam context on every edit.  Completion always advises (bypasses the interval).\n\n"
+            "not spam context on every edit.  Creation and completion each advise ONCE per\n"
+            "plan folder instead — they are state transitions, not ongoing activity, so a\n"
+            "repeat creation write or a re-save of an already-complete plan stays silent.\n\n"
             "### CRITICAL: recovery cron is NOT a heartbeat\n\n"
             "The recovery cron is a **failsafe safety net**, not a pacing mechanism:\n\n"
             "- The agent **must never** wait for the cron between units of work.\n"

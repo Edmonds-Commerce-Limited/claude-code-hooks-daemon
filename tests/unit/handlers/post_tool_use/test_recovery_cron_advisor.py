@@ -695,6 +695,96 @@ class TestProgressInterval:
         assert len(handler._progress_counts) <= _MAX_TRACKED_PLANS
 
 
+class TestCreationAndCompletionFireOncePerPlan:
+    """CREATION and COMPLETION are one-shot per plan, unlike PROGRESS's interval.
+
+    Regression: prior to this fix, both phases fired unconditionally on EVERY
+    matching event -- a repeated Write to a PLAN.md still lacking progress
+    icons re-injected the full ``_CREATION_GUIDANCE`` (embedding the entire
+    canonical cron prompt) every time, and re-saving an already-Complete plan
+    re-injected ``_COMPLETION_GUIDANCE`` every time. Both are state
+    TRANSITIONS: the meaningful event is the first one for a given plan
+    folder -- a second creation, or a re-save of an already-complete plan,
+    carries no new information. This is deliberately NOT the PROGRESS rule
+    (every Nth edit), which tracks ongoing activity rather than a transition.
+    """
+
+    def test_creation_fires_on_first_write(self, handler: RecoveryCronAdvisorHandler) -> None:
+        """First CREATION event for a plan folder produces advisory context."""
+        hook_input = _write_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            "# Plan\n\n**Status**: Not Started\n",
+        )
+        result = handler.handle(hook_input)
+        assert result.context
+
+    def test_creation_suppressed_on_second_write_same_plan(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        """A second CREATION-classified write to the SAME plan is silent."""
+        path = "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md"
+        content = "# Plan\n\n**Status**: Not Started\n"
+        handler.handle(_write_input(path, content))  # 1st write advises
+        result = handler.handle(_write_input(path, content))  # 2nd write silent
+        assert not result.context
+
+    def test_creation_fires_independently_per_plan(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        """A DIFFERENT plan folder still gets its own first creation advisory."""
+        content = "# Plan\n\n**Status**: Not Started\n"
+        handler.handle(_write_input("/workspace/CLAUDE/Plan/00042-plan-a/PLAN.md", content))
+        result = handler.handle(
+            _write_input("/workspace/CLAUDE/Plan/00043-plan-b/PLAN.md", content)
+        )
+        assert result.context
+
+    def test_completion_fires_on_first_write(self, handler: RecoveryCronAdvisorHandler) -> None:
+        """First COMPLETION event for a plan folder produces advisory context."""
+        hook_input = _write_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            "**Status**: Complete\n",
+        )
+        result = handler.handle(hook_input)
+        assert result.context
+
+    def test_completion_suppressed_on_second_write_same_plan(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        """Re-saving an already-Complete plan is silent the second time."""
+        path = "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md"
+        content = "**Status**: Complete\n"
+        handler.handle(_write_input(path, content))  # 1st write advises
+        result = handler.handle(_write_input(path, content))  # 2nd write silent
+        assert not result.context
+
+    def test_completion_fires_independently_per_plan(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        """A DIFFERENT plan folder still gets its own first completion advisory."""
+        handler.handle(
+            _write_input("/workspace/CLAUDE/Plan/00042-plan-a/PLAN.md", "**Status**: Complete\n")
+        )
+        result = handler.handle(
+            _write_input("/workspace/CLAUDE/Plan/00043-plan-b/PLAN.md", "**Status**: Complete\n")
+        )
+        assert result.context
+
+    def test_creation_seen_map_is_bounded(self, handler: RecoveryCronAdvisorHandler) -> None:
+        """The per-plan creation-seen map never exceeds _MAX_TRACKED_PLANS entries."""
+        content = "# Plan\n\n**Status**: Not Started\n"
+        for i in range(_MAX_TRACKED_PLANS + 50):
+            handler.handle(_write_input(f"/workspace/CLAUDE/Plan/{i:05d}-plan/PLAN.md", content))
+        assert len(handler._creation_seen) <= _MAX_TRACKED_PLANS
+
+    def test_completion_seen_map_is_bounded(self, handler: RecoveryCronAdvisorHandler) -> None:
+        """The per-plan completion-seen map never exceeds _MAX_TRACKED_PLANS entries."""
+        content = "**Status**: Complete\n"
+        for i in range(_MAX_TRACKED_PLANS + 50):
+            handler.handle(_write_input(f"/workspace/CLAUDE/Plan/{i:05d}-plan/PLAN.md", content))
+        assert len(handler._completion_seen) <= _MAX_TRACKED_PLANS
+
+
 class TestPhaseCacheContract:
     """matches() caches the phase; handle() reuses it without re-detecting."""
 

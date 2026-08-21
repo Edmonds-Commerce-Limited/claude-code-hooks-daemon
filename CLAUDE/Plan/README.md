@@ -28,8 +28,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00205: destructive git synonym respellings](00205-destructive-git-synonym-respellings/PLAN.md) - Not Started (tracked follow-up captured by the v3.52.0 release gate per RELEASING.md "never drop a finding": v3.52.0 closed ten *invocation* respellings but not *synonym* ones — `git update-ref -d refs/heads/X` is an unguarded `git branch -D`, and `git push origin +main:main` an unguarded `git push --force`.)
 
-- [00209: field feedback — daemon self-observability](00209-field-feedback-daemon-self-observability/PLAN.md) - In Progress (verdict log + `hooks-daemon verdicts` delivered and verified live; Phase 3 advisory-noise tweaks remain)
-
 ### Status Line / Agent View
 
 - [00175: statusline refreshInterval first-class default + startup validation](00175-statusline-refresh-interval-first-class/PLAN.md) - Dormant, part-shipped (root-caused the Ctrl+Z notice lag to `statusLine.refreshInterval: 10` — Claude Code re-runs the status command only on events (Ctrl+Z is not one) plus this optional timer whose minimum is 1s, so an …)
@@ -165,6 +163,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00209: field feedback — daemon self-observability](Completed/00209-field-feedback-daemon-self-observability/PLAN.md) - Complete (verdict log + `hooks-daemon verdicts`, verified against a live daemon; Phase 3's investigation then found 15 phantom handlers in the shipped config template and extended the QA guard that could not see them)
 
 - [00263: an escaped quote made the bash tokeniser invent a write target](Completed/00263-bash-tokeniser-escaped-quote-phantom-targets/PLAN.md) - Complete at `0e99b260` (non-POSIX `shlex` left escaped quotes unprocessed, exposing quoted text as live shell; fixed with `posix=True`)
 
@@ -1233,15 +1233,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 264 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 216 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 217 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 35 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 34 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 35 + 216 + 6 = **257 folders**, spanning
+- **Folder-to-number reconciliation**: 34 + 217 + 6 = **257 folders**, spanning
   **254 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

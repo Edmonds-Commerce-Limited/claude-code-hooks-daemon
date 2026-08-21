@@ -43,8 +43,27 @@ Its known limitation is inherited: that file is titled "Active Configuration",
 so a handler DISABLED in this project is not required to be documented. The
 rule is therefore a floor, not a ceiling.
 
-Deliberately NOT checked: prose accuracy, option tables, descriptions. Those
-need judgement, and a gate that guesses gets switched off.
+``example-config-phantom-handler`` covers the SECOND copy-pasteable surface,
+``.claude/hooks-daemon.yaml.example``. The guard originally saw only the
+reference doc, and the template a new project starts from had meanwhile
+accumulated FIFTEEN entries for handlers that no longer exist. That surface is
+the more dangerous of the two, and it splits into two failure modes:
+
+- A name in ``RETIRED_HANDLERS`` is deliberately EXEMPTED from
+  ``config/validator.py``'s unknown-handler error (Plan 00233: retiring a
+  handler upstream must not break a client's existing config). So copying such
+  a block yields no error, no handler, and the belief that a protection is
+  running — silent false assurance.
+- A name that was never retired at all (five of the fifteen) hits the hard
+  ``Unknown handler`` error instead, so the shipped template does not validate.
+
+Finding ten by hand and fifteen with the guard is the whole argument for
+writing the guard.
+
+Deliberately NOT checked: prose accuracy, option tables, descriptions, and
+retired names appearing in ``CHANGELOG.md``, ``RELEASES/``, ``CLAUDE/UPGRADES/``
+or ``CLAUDE/Plan/`` — those SHOULD name them, because that is the record of the
+removal. Judgement cases, and a gate that guesses gets switched off.
 
 Usage:
     python scripts/qa/check_handler_reference.py [--json] [--root DIR] [--report-stdout]
@@ -77,11 +96,17 @@ _TOOL_NAME: Final[str] = "handler_reference"
 _REFERENCE_DOC_PARTS: Final[tuple[str, str, str]] = ("docs", "guides", "HANDLER_REFERENCE.md")
 _GENERATED_DOC_PARTS: Final[tuple[str, str]] = (".claude", "HOOKS-DAEMON.md")
 
+# The SECOND copy-pasteable surface. Optional: a project need not ship one, so
+# its absence is not drift (unlike the reference doc, which is this check's
+# whole subject and whose absence is an operational failure).
+_EXAMPLE_CONFIG_PARTS: Final[tuple[str, str]] = (".claude", "hooks-daemon.yaml.example")
+
 RULE_REF_UNKNOWN: Final[str] = "handler-ref-unknown"
 RULE_PRIORITY_MISMATCH: Final[str] = "priority-mismatch"
 RULE_PRIORITY_UNRESOLVABLE: Final[str] = "priority-unresolvable"
 RULE_CONFIG_KEY_MISMATCH: Final[str] = "config-key-mismatch"
 RULE_UNDOCUMENTED_BLOCKER: Final[str] = "undocumented-blocking-handler"
+RULE_EXAMPLE_CONFIG_PHANTOM: Final[str] = "example-config-phantom-handler"
 
 _ALL_RULES: Final[tuple[str, ...]] = (
     RULE_REF_UNKNOWN,
@@ -89,6 +114,7 @@ _ALL_RULES: Final[tuple[str, ...]] = (
     RULE_PRIORITY_UNRESOLVABLE,
     RULE_CONFIG_KEY_MISMATCH,
     RULE_UNDOCUMENTED_BLOCKER,
+    RULE_EXAMPLE_CONFIG_PHANTOM,
 )
 
 # Handlers whose ``Priority`` constant is NOT simply the uppercased config key.
@@ -163,6 +189,14 @@ _QUICK_REF_ROW_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 # ── Generated-registry grammar ─────────────────────────────────────
+# ── Example-config grammar ─────────────────────────────────────────
+# The block whose children are event sections, and the two indent levels below
+# it. A key at the handler indent is a handler name; `options:` sits deeper and
+# an event sits shallower, so neither can be mistaken for one.
+_HANDLERS_BLOCK_KEY: Final[str] = "handlers:"
+_TOP_LEVEL_KEY_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]*:")
+_HANDLER_ENTRY_RE: Final[re.Pattern[str]] = re.compile(r"^ {4}(?P<key>[a-z][a-z0-9_]*):(?:\s|$)")
+
 _GENERATED_EVENT_RE: Final[re.Pattern[str]] = re.compile(r"^###\s+(?P<event>[A-Za-z]+)\b")
 _GENERATED_ROW_RE: Final[re.Pattern[str]] = re.compile(
     r"^\|\s*\d+\s*\|\s*(?P<handler>[a-z][a-z0-9_]*)\s*\|\s*(?P<behavior>[A-Z-]+)\s*\|"
@@ -191,6 +225,15 @@ _REMEDIATION_CONFIG_KEY_MISMATCH: Final[str] = (
     "The section heading and its **Config key** row must name the SAME key — "
     "readers copy the row, not the heading. Make them agree."
 )
+_REMEDIATION_EXAMPLE_CONFIG_PHANTOM: Final[str] = (
+    "Delete this key from the example config. It names a handler that no longer "
+    "exists, and `config/validator.py` deliberately EXEMPTS retired names from "
+    "its unknown-handler error (Plan 00233), so a user who copies this block "
+    "gets no error, no handler, and the belief that a protection is running. "
+    "Retirements reach existing installs through the upgrade manifests; the "
+    "example config is a fresh start and must name only live handlers."
+)
+
 _REMEDIATION_UNDOCUMENTED_BLOCKER: Final[str] = (
     "Add a `#### <key>` section for this handler. A blocking handler with no "
     "entry in the canonical reference is one a user cannot diagnose when it "
@@ -487,6 +530,48 @@ def documented_sections(doc_path: Path) -> frozenset[str]:
     return frozenset(keys)
 
 
+def scan_example_config(config_path: Path, rel_file: str, truth: GroundTruth) -> list[Violation]:
+    """Flag example-config handler keys that no handler answers to.
+
+    Parsed by indentation rather than with a YAML loader on purpose: the file
+    is a commented TEMPLATE, and the comments are half its value. A loader
+    discards them, and round-tripping to report an accurate line number would
+    mean depending on a comment-preserving parser for one check. Indentation is
+    the grammar the file already commits to.
+
+    Within the top-level ``handlers:`` block the nesting is fixed — event at
+    one level, handler key at the next, ``options:`` below that — so a key at
+    exactly the handler indent is unambiguous.
+    """
+    violations: list[Violation] = []
+    in_handlers = False
+
+    for number, raw_line in enumerate(config_path.read_text(encoding="utf-8").splitlines(), 1):
+        if _TOP_LEVEL_KEY_RE.match(raw_line):
+            in_handlers = raw_line.startswith(_HANDLERS_BLOCK_KEY)
+            continue
+        if not in_handlers:
+            continue
+
+        entry = _HANDLER_ENTRY_RE.match(raw_line)
+        if entry is None or entry.group("key") in truth.handler_keys:
+            continue
+
+        violations.append(
+            Violation(
+                rule=RULE_EXAMPLE_CONFIG_PHANTOM,
+                file=rel_file,
+                line=number,
+                message=(
+                    f"example config offers `{entry.group('key')}`, which is not a "
+                    "handler in this checkout"
+                ),
+                remediation=_REMEDIATION_EXAMPLE_CONFIG_PHANTOM,
+            )
+        )
+    return violations
+
+
 def scan(root: Path) -> Report:
     """Check ``root``'s handler reference against the handler code.
 
@@ -505,6 +590,12 @@ def scan(root: Path) -> Report:
     truth = load_ground_truth()
     report = Report()
     report.violations.extend(scan_reference_doc(doc_path, rel_file, truth))
+
+    example_config = root.joinpath(*_EXAMPLE_CONFIG_PARTS)
+    if example_config.is_file():
+        report.violations.extend(
+            scan_example_config(example_config, "/".join(_EXAMPLE_CONFIG_PARTS), truth)
+        )
 
     blocking = parse_blocking_handlers(root.joinpath(*_GENERATED_DOC_PARTS))
     documented = documented_sections(doc_path)

@@ -16,8 +16,10 @@ Applies three mitigations to constrain mdformat's default behaviour:
    SKILL.md files and any other frontmatter-bearing markdown document.
 """
 
+import difflib
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -34,6 +36,140 @@ from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
 # Extensions treated as markdown (lowercase match).
 _MARKDOWN_EXTENSIONS: tuple[str, ...] = (".md", ".markdown")
+
+# --- Advisory-message classification --------------------------------------
+#
+# The PostToolUse advisory names WHICH of the formatter's transformations
+# actually fired on this file, derived by diffing the before/after text —
+# never by instrumenting `format_markdown_text` (see markdown_format.py,
+# the single source of truth for the transform itself). Order here is fixed
+# and matches the order documented in `get_claude_md()` below, regardless of
+# where in the document each change physically appears.
+_LABEL_TABLE_PIPES: Final[str] = "aligned table pipes"
+_LABEL_ORDERED_LISTS: Final[str] = "renumbered ordered lists"
+_LABEL_THEMATIC_BREAKS: Final[str] = "restored thematic breaks"
+_LABEL_ASTERISKS: Final[str] = "escaped stray asterisks"
+
+# The post-processed thematic-break form `format_markdown_text` always
+# produces (see `_THEMATIC_BREAK_DASHES` in markdown_format.py). Duplicated
+# here deliberately rather than importing that module's private constant:
+# this is the stable CommonMark thematic-break literal, not shared logic.
+_THEMATIC_BREAK: Final[str] = "---"
+
+# An ordered-list marker at the start of a line: leading whitespace, digits,
+# a '.' or ')' delimiter, then the whitespace that must follow it.
+_ORDERED_LIST_MARKER_RE: Final[re.Pattern[str]] = re.compile(r"^(\s*)\d+([.)])(\s)")
+# Same marker with the digits replaced by a placeholder, used to test
+# whether two lines differ ONLY in their list number.
+_ORDERED_LIST_MARKER_NORMALIZED: Final[str] = r"\1#\2\3"
+
+
+def _ordered_list_renumbered(before_chunk: list[str], after_chunk: list[str]) -> bool:
+    """Return True if this diff chunk's only change is an ordered-list number.
+
+    `format_markdown_text` runs mdformat with `options={"number": True}`,
+    which preserves already-consecutive numbering and only rewrites numbers
+    that were NOT consecutive (e.g. `1. 1. 1.` -> `1. 2. 3.`). Comparing a
+    line with its digits normalised to a placeholder isolates exactly that:
+    if two same-position lines are equal once the digits are blanked out,
+    the digits are the only thing that changed.
+    """
+    if len(before_chunk) != len(after_chunk):
+        return False
+    for before_line, after_line in zip(before_chunk, after_chunk, strict=True):
+        if before_line == after_line:
+            continue
+        if not _ORDERED_LIST_MARKER_RE.match(before_line):
+            continue
+        if not _ORDERED_LIST_MARKER_RE.match(after_line):
+            continue
+        before_normalized = _ORDERED_LIST_MARKER_RE.sub(
+            _ORDERED_LIST_MARKER_NORMALIZED, before_line
+        )
+        after_normalized = _ORDERED_LIST_MARKER_RE.sub(_ORDERED_LIST_MARKER_NORMALIZED, after_line)
+        if before_normalized == after_normalized:
+            return True
+    return False
+
+
+def _stray_asterisk_escaped(before_chunk: list[str], after_chunk: list[str]) -> bool:
+    """Return True if this diff chunk added a backslash-escaped asterisk.
+
+    mdformat only ever ADDS a backslash before a literal `*` it cannot parse
+    as emphasis markup — it never removes one, and paired emphasis markers
+    like `*word*` are left alone. Counting `\\*` occurrences on each side of
+    the SAME diff chunk is therefore precise: a rise means an asterisk was
+    newly escaped here, not that surrounding whitespace merely shifted.
+    """
+    before_escaped = "\n".join(before_chunk).count("\\*")
+    after_escaped = "\n".join(after_chunk).count("\\*")
+    return after_escaped > before_escaped
+
+
+def classify_markdown_changes(before: str, formatted: str) -> list[str]:
+    """Return the ordered labels of transformation categories that fired.
+
+    Diffs `before` against `formatted` line-by-line and reports only the
+    categories that genuinely differ in THIS pair — never the fixed menu of
+    everything the formatter is capable of. Order is fixed (table pipes,
+    ordered lists, thematic breaks, asterisks) regardless of where in the
+    document each change appears.
+
+    Frontmatter is never reported: `format_markdown_text` re-attaches it
+    byte-for-byte, so its lines are identical before/after and never enter a
+    diff chunk in the first place.
+
+    Returns an empty list both when there is no diff at all, and when
+    `formatted` differs from `before` in a way none of the four categories
+    explains — callers distinguish the two via their own `formatted != before`
+    check and fall back to a generic message for the latter.
+    """
+    before_lines = before.split("\n")
+    after_lines = formatted.split("\n")
+    matcher = difflib.SequenceMatcher(a=before_lines, b=after_lines, autojunk=False)
+
+    saw_table_pipes = False
+    saw_ordered_lists = False
+    saw_thematic_breaks = False
+    saw_asterisks = False
+
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        before_chunk = before_lines[i1:i2]
+        after_chunk = after_lines[j1:j2]
+
+        if any("|" in line for line in before_chunk + after_chunk):
+            saw_table_pipes = True
+        if _THEMATIC_BREAK in after_chunk and _THEMATIC_BREAK not in before_chunk:
+            saw_thematic_breaks = True
+        if _ordered_list_renumbered(before_chunk, after_chunk):
+            saw_ordered_lists = True
+        if _stray_asterisk_escaped(before_chunk, after_chunk):
+            saw_asterisks = True
+
+    labels: list[str] = []
+    if saw_table_pipes:
+        labels.append(_LABEL_TABLE_PIPES)
+    if saw_ordered_lists:
+        labels.append(_LABEL_ORDERED_LISTS)
+    if saw_thematic_breaks:
+        labels.append(_LABEL_THEMATIC_BREAKS)
+    if saw_asterisks:
+        labels.append(_LABEL_ASTERISKS)
+    return labels
+
+
+def _build_reformat_message(file_name: str, labels: list[str]) -> str:
+    """Build the PostToolUse advisory naming what changed in `file_name`.
+
+    Only names transformations `classify_markdown_changes` actually found;
+    when the file changed but no tracked category explains it, falls back
+    to a truthful generic message rather than silently reporting nothing.
+    """
+    if not labels:
+        return f"Reformatted markdown in {file_name}"
+    return f"Reformatted markdown in {file_name}: {', '.join(labels)}"
 
 
 class MarkdownTableFormatterHandler(Handler):
@@ -136,9 +272,10 @@ class MarkdownTableFormatterHandler(Handler):
             )
 
         path.write_text(formatted, encoding="utf-8")
+        labels = classify_markdown_changes(before, formatted)
         return HookResult(
             decision=Decision.ALLOW,
-            context=[f"Reformatted markdown tables in {path.name}"],
+            context=[_build_reformat_message(path.name, labels)],
         )
 
     def get_claude_md(self) -> str | None:
@@ -158,6 +295,13 @@ class MarkdownTableFormatterHandler(Handler):
             "- `---` thematic breaks are preserved (mdformat's 70-underscore default is "
             "post-processed back).\n"
             "- Asterisks in table cells are escaped (`*` → `\\*`) as required by GFM.\n"
+            "\n"
+            "**The advisory names exactly what changed in THIS file** — e.g. "
+            "`Reformatted markdown in NOTES.md: aligned table pipes, renumbered ordered "
+            "lists` — never the full menu above. If mdformat changed the file in a way none "
+            "of the four categories explains, the advisory falls back to a generic "
+            "`Reformatted markdown in NOTES.md` rather than naming a transformation that "
+            "did not happen.\n"
             "\n"
             "**Exempt:** anything under a plan's `JOURNAL/` directory is NEVER "
             "reformatted — day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`, Plan 00163) "
@@ -194,7 +338,7 @@ class MarkdownTableFormatterHandler(Handler):
                     "vertically aligned and delimiter row matches cell widths."
                 ),
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"Reformatted markdown tables"],
+                expected_message_patterns=[r"Reformatted markdown in doc\.md.*table pipes"],
                 safety_notes="Creates temporary markdown file in /tmp for formatting test",
                 test_type=TestType.ADVISORY,
                 setup_commands=["mkdir -p /tmp/acceptance-test-mdformat"],

@@ -1,6 +1,6 @@
 # Plan 00209: field feedback daemon self observability
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-12
 **Owner**: joseph
 **Priority**: High
@@ -127,21 +127,54 @@ codebase of a different kind (code, not docs).
   its own narrow config-slice parameter through `initialise()`, the same DI
   idiom already used for `plan_workflow`/`pseudo_events_config`.
 
-### Phase 3: Advisory noise — §2, §4, §5 (NOT STARTED — deliberately deferred)
+### Phase 3: Advisory noise — §2, §4, §5
 
 Deprioritised per this plan's own Decision 1 (the verdict log is the
 priority) and the report's own framing of these three as "minor noise" /
-"optional, offered as such". Left for a follow-up session rather than rushed:
+"optional, offered as such". Closed on 26-08-21:
 
-- [ ] ⬜ **Task 3.1**: §2 (optional, offered as such) — skip the output-keyword
-  advisory when the trigger keyword also appears in the COMMAND string, e.g. a
-  `grep` pattern or a repo name. Those fires cannot carry signal
-- [ ] ⬜ **Task 3.2**: §4 — rate-limit `recovery_cron_advisor`'s creation and
-  completion phases the way the progress phase already is, and/or suppress for
-  the rest of a session after N ignored fires
-- [ ] ⬜ **Task 3.3**: §5 — have `markdown_table_formatter`'s advisory NAME the
-  transformations it applied (list renumbering, pipe alignment) so an `Edit`
-  retry after a stale-string failure is targeted rather than a blind re-read
+- [x] ✅ **Task 3.1**: CLOSED AS SUPERSEDED, not implemented. §2 asked to skip
+  the output-keyword advisory when the trigger word also appears in the COMMAND
+  string. There is nothing left to skip: `bash_error_detector` was DELETED
+  wholesale by Plan 00237 (commit `f782d0a28`), on evidence from the very
+  verdict log this plan built — 274 fires, 45% of all behavioural handler
+  activity, `allow=274`, never once restricting anything. Removing it solved
+  §2 completely rather than narrowing it, which is the better outcome
+- [x] ✅ **Task 3.2**: §4 — `recovery_cron_advisor`'s creation and completion
+  phases now fire ONCE PER PLAN, then stay silent. Deliberately not the
+  progress rule (every Nth): these are state TRANSITIONS, so the meaningful
+  event is the first one — a second creation advisory for the same plan
+  carries no new information, and neither does re-saving an already-Complete
+  plan. The eviction bound is shared with the progress counter rather than
+  copy-pasted three times
+- [x] ✅ **Task 3.3**: §5 — `markdown_table_formatter`'s advisory now NAMES the
+  transformations it applied, classified by diffing the before/after already
+  live at the call site (no extra I/O). Only transformations that actually
+  occurred are listed: a wrong list is worse than a vague one, because the
+  agent will trust it when targeting the retry `Edit`
+
+**Task 3.1's investigation found a live defect of its own**, on a surface no
+guard could see:
+
+- [x] ✅ **Task 3.4**: `.claude/hooks-daemon.yaml.example` — the template a new
+  project starts from — offered FIFTEEN handlers that no longer exist. Two
+  distinct harms: a name in `RETIRED_HANDLERS` is deliberately EXEMPTED from
+  `src/claude_code_hooks_daemon/config/validator.py`'s unknown-handler error (Plan 00233), so copying that
+  block gives no error, no handler, and the belief that a protection is
+  running; while the five names that were never retired at all fail validation
+  outright, so the shipped template does not even parse as valid config
+- [x] ✅ **Task 3.5**: DBF — `check_handler_reference.py` already existed for
+  exactly this class and was already built under DBF, but saw only ONE
+  copy-pasteable surface. Extended with `example-config-phantom-handler` so it
+  sees both. Cross-referencing by hand against `RETIRED_HANDLERS` found ten;
+  the guard found fifteen, which is the whole argument for writing guards
+  instead of doing sweeps
+- [x] ✅ **Task 3.6**: The same phantoms in LIVE guidance corrected — root
+  `CLAUDE.md` (resident every session), `ARCHITECTURE.md`,
+  `HANDLER_DEVELOPMENT.md`, `Architecture/StatusLine.md`, and the `optimise`
+  skill. Historical mentions in `CHANGELOG.md`, `RELEASES/`, `UPGRADES/` and
+  archived plans are left untouched — those are the record of the removal and
+  SHOULD name them
 
 ### Phase 4: Phase 1 regression — length is not evidence of prose
 
@@ -237,11 +270,12 @@ other findings raise answerable with a query rather than a discussion.
 - [x] ✅ The retention decision for `verdicts.jsonl` is explicit and documented,
   and does not silently corrupt cumulative statistics (the report is explicit
   that its numbers describe the retained window, not lifetime totals)
-- [ ] ⬜ Full QA passes; daemon restarts RUNNING — QA is 18/20 in-worktree (see
-  JOURNAL); the 2 gaps are a daemon restart / live-socket smoke test this
-  worktree cannot run, and a confirmed pre-existing test-order flake
-  unrelated to this plan's changes. **Daemon restart verification is
-  OUTSTANDING** for the same worktree-isolation reason
+- [x] ✅ Full QA passes; daemon restarts RUNNING. Discharged from the main
+  checkout on 26-08-21: **QA 23/23** on the committed tree, daemon restarted
+  and verified RUNNING with zero load errors, and both Phase 3 handlers probed
+  through the production forwarder rather than only in unit tests. The two
+  gaps recorded here were artefacts of the isolated worktree the work was
+  executed in, which structurally cannot restart the project's real daemon
 
 ## Risks & Mitigations
 
@@ -258,5 +292,9 @@ other findings raise answerable with a query rather than a discussion.
      JOURNAL/00209-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Phases 1 and 2 delivered on branch `agent-ac1ec50c70f9ed8b8-2fdf9107`
+- Phase 5 (the report contradicting its own roster) delivered at `e09c12ee`,
+  found by the first run of `hooks-daemon verdicts` against a live daemon
+- Phase 3 closed in the commit that archives this plan; Task 3.1 needed no
+  code, and its investigation produced Tasks 3.4-3.6
   (isolated worktree). See JOURNAL for the full commit list. Phase 3 not
   started — see Tasks above.

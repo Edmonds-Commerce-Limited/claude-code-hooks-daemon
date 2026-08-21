@@ -69,7 +69,7 @@ Claude Code displays in terminal status bar
 
 ## Handler Chain
 
-All status line handlers are **non-terminal** (`terminal=False`). They all return `matches() = True` for every status event (except `UsageTrackingHandler` which is currently disabled). Each handler contributes context fragments that are accumulated and joined with spaces.
+All status line handlers are **non-terminal** (`terminal=False`). They all return `matches() = True` for every status event. Each handler contributes context fragments that are accumulated and joined with spaces.
 
 ### Handler Execution Order
 
@@ -78,7 +78,6 @@ All status line handlers are **non-terminal** (`terminal=False`). They all retur
 | 5        | `AccountDisplayHandler`       | `account_display`       | `username \|`                                      | `~/.claude/.last-launch.conf`                                        |
 | 10       | `ModelContextHandler`         | `model_context`         | `Claude Opus 4.5 \| Ctx: [colored]12.3%[/colored]` | `hook_input.model`, `hook_input.context_window`, `hook_input.effort` |
 | 11       | `EnvironmentIndicatorHandler` | `environment_indicator` | `\| 💻 desktop` / `\| 🐳 docker` / `\| 📦 podman`  | `ProjectContext.container_runtime()` (cached at startup)             |
-| 15       | `UsageTrackingHandler`        | `usage_tracking`        | `\| daily: 45.2% \| weekly: 23.1%`                 | `~/.claude/stats-cache.json` (DISABLED)                              |
 | 20       | `GitBranchHandler`            | `git_branch`            | `\| main`                                          | `git branch --show-current` subprocess                               |
 | 30       | `DaemonStatsHandler`          | `daemon_stats`          | `\| hook-icon 5.2m 34MB \| INFO`                   | `DaemonController.get_stats()`, `psutil`                             |
 | 32       | `UpgradeNotifierHandler`      | `upgrade_notifier`      | `\| 📦 v3.41.0 → v3.42.0`                          | `version_check_cache.json` (written by `version_check` SessionStart) |
@@ -114,14 +113,6 @@ All status line handlers are **non-terminal** (`terminal=False`). They all retur
 - **Output format**: `| 💻 desktop` (host) / `| 🐳 docker` / `| 📦 podman` / `| 📦 container` (generic runtime)
 - **Honesty note**: detection NEVER counts the tautological `CLAUDECODE` / `CLAUDE_CODE_ENTRYPOINT` signals — those mean "running under Claude Code" (always true for this daemon), not "in a container"
 - **Failure mode**: `container_runtime()` is `None` on a host → shows the desktop icon
-
-#### UsageTrackingHandler (Priority 15) -- CURRENTLY DISABLED
-
-- **Purpose**: Shows daily and weekly token usage percentages
-- **Data source**: `~/.claude/stats-cache.json` via `stats_cache_reader.py`
-- **Status**: Disabled (`matches()` returns `False`). The approach is flawed because `stats-cache.json` only contains completed historical days, daily limits are hardcoded, and there is no reliable way to get real-time current-day token counts.
-- **Supporting module**: `stats_cache_reader.py` provides `read_stats_cache()`, `calculate_daily_usage()`, `calculate_weekly_usage()` with hardcoded daily limits (200k Sonnet, 100k Opus)
-- **Options**: `show_daily` (bool), `show_weekly` (bool)
 
 #### GitBranchHandler (Priority 20)
 
@@ -191,7 +182,7 @@ Claude Code sends a JSON payload on every status-line call. The daemon accepts u
 
 **Currently READ by handlers**: `model.{id,display_name}`, `context_window.*`, `workspace.{current_dir,project_dir}`, `cost`, `effort.level`, `session_id`, `session_name`, `agent_type`, plus the forwarded `terminal_columns` / `terminal_lines` (see wrapping, above).
 
-**Documented but currently UNUSED** (available opportunistically): top-level `version`, `cwd`, `output_style`, `exceeds_200k_tokens`, `rate_limits.*`, `prompt_id`, and nested `agent.*`, `pr.*`, `worktree.*`, `vim.*`. The highest-value unused fields are `rate_limits` (a natural home for a rework of the disabled `usage_tracking`) and `version`.
+**Documented but currently UNUSED** (available opportunistically): top-level `version`, `cwd`, `output_style`, `exceeds_200k_tokens`, `rate_limits.*`, `prompt_id`, and nested `agent.*`, `pr.*`, `worktree.*`, `vim.*`. The highest-value unused fields are `rate_limits` (a natural home for a usage indicator built from live payload data — the old `usage_tracking` handler was REMOVED in Plan 00237, so this would be new work, not a re-enable) and `version`.
 
 > `COLUMNS` / `LINES` are NOT in this JSON — they are environment variables the `init.sh` transport forwards explicitly as `terminal_columns` / `terminal_lines`.
 
@@ -236,13 +227,6 @@ handlers:
     model_context:
       enabled: true
       priority: 10
-
-    usage_tracking:
-      enabled: true       # Note: handler also self-disables via matches()
-      priority: 15
-      options:
-        show_daily: true
-        show_weekly: true
 
     git_branch:
       enabled: true
@@ -292,7 +276,6 @@ handlers:
 | ----------------------- | ----------------------------------------- | ---------------- |
 | `AccountDisplayHandler` | File read (`~/.claude/.last-launch.conf`) | \<1ms            |
 | `ModelContextHandler`   | In-memory (from hook_input)               | \<0.1ms          |
-| `UsageTrackingHandler`  | File read (`stats-cache.json`)            | \<1ms (disabled) |
 | `GitBranchHandler`      | Subprocess (`git`)                        | 5-50ms           |
 | `DaemonStatsHandler`    | In-process (`get_stats()` + `psutil`)     | \<2ms            |
 

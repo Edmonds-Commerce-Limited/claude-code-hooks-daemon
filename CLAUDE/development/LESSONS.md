@@ -175,7 +175,7 @@ them (empirically dogfooded, ranked strongest → weakest):
 **Apply:** when designing an advisory handler that must change behaviour, do not
 rely on SessionStart. Prefer riding an existing PreToolUse block, a PreToolUse
 advisory at the Edit/Write that touches the relevant file, or a
-once-per-session UserPromptSubmit line (alongside `post_clear_auto_execute`).
+once-per-session UserPromptSubmit line.
 Stickiness comes from interrupting the relevant action at the decision moment.
 
 ## Restoring intended behaviour is a bug fix, not a breaking change

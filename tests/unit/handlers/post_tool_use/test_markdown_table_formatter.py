@@ -8,8 +8,15 @@ import pytest
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.markdown_table_formatter import (
+    _LABEL_ASTERISKS,
+    _LABEL_ORDERED_LISTS,
+    _LABEL_TABLE_PIPES,
+    _LABEL_THEMATIC_BREAKS,
     MarkdownTableFormatterHandler,
+    _build_reformat_message,
+    classify_markdown_changes,
 )
+from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
 _UNALIGNED_TABLE = (
     "# Test\n"
@@ -251,6 +258,34 @@ class TestHandle:
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
+    def test_advisory_names_the_table_pipe_transformation(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        test_file = tmp_path / "doc.md"
+        test_file.write_text(_UNALIGNED_TABLE)
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        result = handler.handle(hook_input)
+        assert result.context == ["Reformatted markdown in doc.md: aligned table pipes"]
+
+    def test_advisory_falls_back_to_generic_message_when_no_category_matches(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        # Setext heading -> ATX + blank-line collapsing: a real, non-empty
+        # diff that matches none of the four tracked categories.
+        test_file = tmp_path / "doc.md"
+        test_file.write_text(
+            "Heading\n=======\n\nSome text.\n\n\n\nMore text with trailing spaces.   \n"
+        )
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        result = handler.handle(hook_input)
+        assert result.context == ["Reformatted markdown in doc.md"]
+
     def test_skips_missing_file_race_condition(
         self, handler: MarkdownTableFormatterHandler, tmp_path: Path
     ) -> None:
@@ -369,6 +404,91 @@ class TestHandle:
         handler.handle(hook_input)
         content_after = test_file.read_text()
         assert "| Field             |" in content_after
+
+
+class TestClassifyMarkdownChanges:
+    """Tests for the pure ``classify_markdown_changes`` diff classifier.
+
+    Each test drives the REAL ``format_markdown_text`` transform on a
+    minimal document engineered to trip exactly one category, so a passing
+    test proves the classifier reports that category and no other.
+    """
+
+    def test_table_pipes_only(self) -> None:
+        formatted = format_markdown_text(_UNALIGNED_TABLE)
+        assert classify_markdown_changes(_UNALIGNED_TABLE, formatted) == [_LABEL_TABLE_PIPES]
+
+    def test_ordered_list_renumbering_only(self) -> None:
+        before = "1. First\n1. Second\n1. Third\n"
+        formatted = format_markdown_text(before)
+        assert formatted == "1. First\n2. Second\n3. Third\n"
+        assert classify_markdown_changes(before, formatted) == [_LABEL_ORDERED_LISTS]
+
+    def test_thematic_break_restoration_only(self) -> None:
+        before = "Top\n\n***\n\nBottom\n"
+        formatted = format_markdown_text(before)
+        assert formatted == "Top\n\n---\n\nBottom\n"
+        assert classify_markdown_changes(before, formatted) == [_LABEL_THEMATIC_BREAKS]
+
+    def test_stray_asterisk_escaping_only(self) -> None:
+        before = "Some text with a stray c*d asterisk in a paragraph.\n"
+        formatted = format_markdown_text(before)
+        assert formatted == "Some text with a stray c\\*d asterisk in a paragraph.\n"
+        assert classify_markdown_changes(before, formatted) == [_LABEL_ASTERISKS]
+
+    def test_paired_emphasis_asterisks_are_not_reported_as_escaped(self) -> None:
+        # `*x*` is valid emphasis markup, not a stray asterisk - mdformat
+        # leaves it alone, so no category should fire for this alone.
+        before = "Some *emphasised* text with no other change needed.\n"
+        formatted = format_markdown_text(before)
+        assert formatted == before
+        assert classify_markdown_changes(before, formatted) == []
+
+    def test_multiple_categories_reported_in_fixed_order(self) -> None:
+        before = "1. First\n1. Second\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"
+        formatted = format_markdown_text(before)
+        labels = classify_markdown_changes(before, formatted)
+        # Fixed order (table pipes, then ordered lists) regardless of which
+        # change appears first in the document.
+        assert labels == [_LABEL_TABLE_PIPES, _LABEL_ORDERED_LISTS]
+
+    def test_frontmatter_is_never_reported_as_changed(self) -> None:
+        before = "---\ntitle: Test\n---\n\n" + _UNALIGNED_TABLE
+        formatted = format_markdown_text(before)
+        # Frontmatter is preserved byte-for-byte by format_markdown_text.
+        assert formatted.startswith("---\ntitle: Test\n---\n")
+        # Only the body table change is reported - nothing frontmatter-shaped.
+        assert classify_markdown_changes(before, formatted) == [_LABEL_TABLE_PIPES]
+
+    def test_fallback_when_no_tracked_category_explains_a_real_diff(self) -> None:
+        # Setext heading -> ATX + blank-line collapsing + trailing-whitespace
+        # trim: a genuine, non-empty diff that matches none of the four
+        # tracked categories.
+        before = "Heading\n=======\n\nSome text.\n\n\n\nMore text with trailing spaces.   \n"
+        formatted = format_markdown_text(before)
+        assert formatted != before
+        assert classify_markdown_changes(before, formatted) == []
+
+    def test_no_diff_returns_empty_list(self) -> None:
+        assert classify_markdown_changes(_ALIGNED_TABLE, _ALIGNED_TABLE) == []
+
+
+class TestBuildReformatMessage:
+    """Tests for the pure ``_build_reformat_message`` advisory-text builder."""
+
+    def test_single_label(self) -> None:
+        message = _build_reformat_message("doc.md", [_LABEL_TABLE_PIPES])
+        assert message == "Reformatted markdown in doc.md: aligned table pipes"
+
+    def test_multiple_labels_joined_in_order(self) -> None:
+        message = _build_reformat_message("doc.md", [_LABEL_TABLE_PIPES, _LABEL_ORDERED_LISTS])
+        assert message == (
+            "Reformatted markdown in doc.md: aligned table pipes, renumbered ordered lists"
+        )
+
+    def test_generic_fallback_when_no_labels(self) -> None:
+        message = _build_reformat_message("doc.md", [])
+        assert message == "Reformatted markdown in doc.md"
 
 
 class TestGuidance:

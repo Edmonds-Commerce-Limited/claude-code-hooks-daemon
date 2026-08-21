@@ -265,6 +265,85 @@ def test_accurate_reference_passes(tmp_path: Path) -> None:
     assert report["violations"] == []
 
 
+_EXAMPLE_CONFIG_RELATIVE_PARTS = (".claude", "hooks-daemon.yaml.example")
+
+
+def _write_example_config(root: Path, body: str) -> None:
+    target = root.joinpath(*_EXAMPLE_CONFIG_RELATIVE_PARTS)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body, encoding="utf-8")
+
+
+def test_flags_an_example_config_entry_naming_a_handler_that_does_not_exist(
+    tmp_path: Path,
+) -> None:
+    """The SECOND copy-pasteable surface — the guard could only see the first.
+
+    ``.claude/hooks-daemon.yaml.example`` is the template a new project starts
+    from, and it had accumulated TEN entries for handlers retired long ago.
+    That surface is worse than a stale doc section, because
+    ``config/validator.py`` deliberately EXEMPTS retired names from its
+    unknown-handler error (Plan 00233: retiring a handler upstream must not
+    break a client's existing config). So a user who copies the example and
+    sets ``enabled: true`` gets no error, no handler, and the belief that a
+    protection is running. Silent false assurance is exactly what
+    ``project_handler_load_checker`` exists to prevent elsewhere.
+    """
+    root = _make_root(tmp_path, _ACCURATE_SECTION)
+    _write_example_config(
+        root,
+        """handlers:
+  post_tool_use:
+    bash_error_detector:   # retired in Plan 00237
+      enabled: true
+      priority: 10
+""",
+    )
+
+    exit_code, report = _run_checker(root)
+
+    assert exit_code == 1
+    assert "example-config-phantom-handler" in _rules(report)
+    assert any("bash_error_detector" in v["message"] for v in report["violations"])
+
+
+def test_an_example_config_naming_only_live_handlers_passes(tmp_path: Path) -> None:
+    """NEGATIVE CONTROL for the new surface.
+
+    Without this, a rule that flagged every key in the example config would
+    satisfy the positive case above while making the file unmaintainable.
+    """
+    root = _make_root(tmp_path, _ACCURATE_SECTION)
+    _write_example_config(
+        root,
+        """handlers:
+  post_tool_use:
+    lint_on_edit:
+      enabled: false
+      priority: 25
+""",
+    )
+
+    exit_code, report = _run_checker(root)
+
+    assert exit_code == 0, f"a live handler was flagged: {report['violations']}"
+
+
+def test_a_repo_with_no_example_config_is_not_a_failure(tmp_path: Path) -> None:
+    """A project need not ship an example config; absence is not drift.
+
+    Distinct from the missing REFERENCE doc below, which IS an operational
+    failure: that doc is this check's whole subject, so having nothing to read
+    means the check cannot do its job. The example config is an additional
+    surface, so nothing to read means nothing to contradict.
+    """
+    root = _make_root(tmp_path, _ACCURATE_SECTION)
+
+    exit_code, report = _run_checker(root)
+
+    assert exit_code == 0, f"absence of an example config was flagged: {report['violations']}"
+
+
 def test_missing_reference_doc_is_an_operational_failure(tmp_path: Path) -> None:
     """FAIL FAST — a check with nothing to read must not report 'clean'."""
     root = tmp_path / "empty"

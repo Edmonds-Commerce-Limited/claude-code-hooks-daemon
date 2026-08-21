@@ -206,6 +206,27 @@ def get_bash_write_targets(
     deliberate shape. So the limit is documented rather than fixed, and callers
     that DENY must keep checking the path exists before acting on it.
 
+    That existence check bounds the residual but does NOT remove it, and the
+    difference was measured against the live daemon rather than reasoned about.
+    When the conditionally-named file is ABSENT the denying linters cannot fire
+    at all (``lint_on_edit`` and ``validate_eslint_on_write`` both gate on
+    ``Path(...).exists()``), so the common shape is harmless. When it is PRESENT
+    and already failing lint, the command IS denied for a file it never touched.
+    Reaching that needs all three of: a conditional write, to a pre-existing
+    file, that already fails its linter.
+
+    Two candidate fixes were considered and both are worse:
+
+    - **An mtime window** (lint only a target modified since the command began)
+      fails DANGEROUS. A long command that wrote early looks stale by the time
+      PostToolUse runs, so a real write is missed — and a miss is the direction
+      a guard must never fail in.
+    - **The command's exit code**, which PostToolUse does receive, cannot
+      disambiguate either operator. For ``A || B`` an overall 0 means A
+      succeeded *or* B ran and succeeded; for ``A && B`` a non-zero means A
+      failed *or* B ran and failed. The compound status simply does not carry
+      which branch executed.
+
     **Why ``shlex`` and not regexes.** The existing detector in
     ``markdown_organization`` scans the raw string, so
     ``echo 'the arrow > file thing'`` yields the target ``file`` — a false

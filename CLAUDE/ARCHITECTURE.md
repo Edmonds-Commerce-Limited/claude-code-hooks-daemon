@@ -510,7 +510,6 @@ These remain in individual projects due to project-specific logic:
 - **markdown_organization_handler** - Enforce documentation structure
 - **plan_workflow_handler** - Plan creation guidance
 - **official_plan_command_handler** - Enforce canonical plan discovery
-- **validate_plan_number_handler** - Validate plan numbering
 
 ---
 

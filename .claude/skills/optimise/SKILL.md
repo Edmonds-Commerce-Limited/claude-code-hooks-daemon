@@ -26,7 +26,7 @@ No arguments — the skill profiles the project automatically.
 The skill analyses five areas, scoring each PASS / WARN / FAIL:
 
 1. **Safety** — Critical blocking handlers (destructive_git, sed_blocker, security_antipattern, etc.)
-2. **Stop Quality** — Handlers that prevent poor stopping behaviour (auto_continue_stop, task_completion_checker, hedging/dismissive detectors)
+2. **Stop Quality** — Handlers that prevent poor stopping behaviour (auto_continue_stop, plus the nitpick.hedging_language and nitpick.dismissive_language detectors)
 3. **Plan Workflow** — Plan tracking handlers and whether the workflow is actively being used
 4. **Code Quality** — TDD, QA suppression, lint-on-edit, LSP enforcement, daemon restart verification
 5. **Daemon Settings** — Session-start advisories, version checks, git context injection

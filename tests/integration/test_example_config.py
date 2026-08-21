@@ -13,6 +13,32 @@ from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID
 
 
+def _event_types_with_shipped_handlers() -> frozenset[str]:
+    """Config keys of every event type that actually ships a handler module.
+
+    Ground truth is the handler package on disk, intersected with the declared
+    event registry. The intersection matters in both directions: it drops
+    non-event directories that live alongside the real ones (``nitpick`` is a
+    pseudo-event, ``utils`` is shared code), and it cannot invent an event the
+    registry does not declare.
+    """
+    import claude_code_hooks_daemon.handlers as handlers_package
+    from claude_code_hooks_daemon.constants.events import EventID, EventIDMeta
+
+    declared = {meta.config_key for meta in vars(EventID).values() if isinstance(meta, EventIDMeta)}
+    handlers_root = Path(handlers_package.__file__).parent
+
+    shipped: set[str] = set()
+    for child in handlers_root.iterdir():
+        if not child.is_dir() or child.name not in declared:
+            continue
+        if any(
+            module.suffix == ".py" and not module.name.startswith("_") for module in child.iterdir()
+        ):
+            shipped.add(child.name)
+    return frozenset(shipped)
+
+
 @pytest.fixture
 def example_config_path() -> Path:
     """Path to example config file."""
@@ -128,26 +154,48 @@ def test_example_config_workflow_handlers_disabled(example_config: dict) -> None
             )
 
 
-def test_example_config_all_events_covered(example_config: dict) -> None:
-    """All event types should be present in example config."""
+def test_example_config_covers_every_event_that_ships_a_handler(example_config: dict) -> None:
+    """Every event type with a shipped handler must appear in the example config.
+
+    The requirement is derived from the registry, not from a hardcoded list.
+    The list this replaced named eleven events, three of which
+    (``session_end``, ``notification``, ``subagent_stop``) ship no handler at
+    all any more — their only entries had been retired. That left the test
+    demanding sections the example config could fill only with a phantom
+    handler or an empty key, so a STALE LIST was actively holding a false claim
+    in place.
+
+    Deriving it keeps the real intent and strengthens it: add a handler for a
+    new event type and this fails until the example config covers it, with no
+    list to remember to update.
+    """
     handlers = example_config["handlers"]
+    shipped_events = _event_types_with_shipped_handlers()
 
-    required_event_types = [
-        "pre_tool_use",
-        "post_tool_use",
-        "session_start",
-        "session_end",
-        "pre_compact",
-        "user_prompt_submit",
-        "permission_request",
-        "notification",
-        "stop",
-        "subagent_stop",
-        "status_line",
-    ]
+    assert shipped_events, "no shipped handlers discovered — the derivation itself is broken"
 
-    for event_type in required_event_types:
-        assert event_type in handlers, f"Event type {event_type} missing from example config"
+    missing = sorted(event for event in shipped_events if event not in handlers)
+    assert not missing, (
+        f"event type(s) {missing} ship handlers but have no section in the "
+        "example config, so a new project starts with them undocumented"
+    )
+
+
+def test_example_config_offers_no_event_without_a_shipped_handler(example_config: dict) -> None:
+    """The other direction — an event section nothing can fill is dead weight.
+
+    Paired with the test above so the check discriminates. Without it, an
+    example config could satisfy coverage while carrying empty sections for
+    events whose handlers were all retired, which is how the three stale
+    sections survived in the first place.
+    """
+    shipped_events = _event_types_with_shipped_handlers()
+
+    orphans = sorted(event for event in example_config["handlers"] if event not in shipped_events)
+    assert not orphans, (
+        f"example config offers section(s) {orphans} for event type(s) that ship "
+        "no handler; a user filling one in has nothing valid to name"
+    )
 
 
 def test_example_config_status_line_handlers_enabled(example_config: dict) -> None:
