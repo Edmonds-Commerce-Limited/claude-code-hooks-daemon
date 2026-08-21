@@ -333,17 +333,28 @@ class TestDaemonSmoke:
         hook_input = {
             "event": "PostToolUse",
             "hook_input": {
+                "hook_event_name": "PostToolUse",
                 "tool_name": "Bash",
                 "tool_input": {"command": "echo test"},
-                "tool_output": {"stdout": "test\n", "stderr": "", "exit_code": 0},
+                # "tool_response", NOT "tool_output" — the input schema requires
+                # this name and explicitly rejects the other. A Bash response
+                # also carries no exit_code, so none is modelled here.
+                "tool_response": {"stdout": "test\n", "stderr": ""},
             },
             "request_id": "test-post-tool-use",
         }
 
         response = send_hook_event(socket_path, hook_input)
 
-        # Should process successfully (no post-tool-use handlers match)
+        # `isinstance(response, dict)` alone cannot fail: a validation REJECTION
+        # is also a dict, so the previous assertion passed whether the daemon
+        # processed this event or refused it — while the comment claimed it
+        # proved processing. Assert the absence of an error instead, which is
+        # the thing that actually distinguishes the two.
         assert isinstance(response, dict), "Response should be a dictionary"
+        assert (
+            "error" not in response
+        ), f"daemon rejected a well-formed PostToolUse event: {response.get('error')}"
 
     def test_daemon_processes_session_start_hook(self, daemon_process: dict[str, Any]) -> None:
         """Daemon processes SessionStart hook events correctly."""

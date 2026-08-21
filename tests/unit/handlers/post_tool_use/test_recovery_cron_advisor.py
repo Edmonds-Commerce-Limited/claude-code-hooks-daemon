@@ -79,7 +79,7 @@ def _write_input(file_path: str, content: str) -> dict[str, Any]:
     return {
         "tool_name": "Write",
         "tool_input": {"file_path": file_path, "content": content},
-        "tool_output": {},
+        "tool_response": {},
     }
 
 
@@ -92,7 +92,7 @@ def _edit_input(file_path: str, new_string: str, old_string: str = "old") -> dic
             "new_string": new_string,
             "old_string": old_string,
         },
-        "tool_output": {},
+        "tool_response": {},
     }
 
 
@@ -101,7 +101,7 @@ def _bash_mkplan_input(command: str) -> dict[str, Any]:
     return {
         "tool_name": "Bash",
         "tool_input": {"command": command},
-        "tool_output": {"stdout": "/workspace/CLAUDE/Plan/00042-my-plan\n", "stderr": ""},
+        "tool_response": {"stdout": "/workspace/CLAUDE/Plan/00042-my-plan\n", "stderr": ""},
     }
 
 
@@ -306,7 +306,7 @@ class TestDetectLifecyclePhase:
         hook_input = {
             "tool_name": "Read",
             "tool_input": {"file_path": "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md"},
-            "tool_output": {},
+            "tool_response": {},
         }
         assert _detect_lifecycle_phase(hook_input) is None
 
@@ -365,7 +365,7 @@ class TestMatches:
         hook_input = {
             "tool_name": "Read",
             "tool_input": {"file_path": "/workspace/CLAUDE/Plan/00042/PLAN.md"},
-            "tool_output": {},
+            "tool_response": {},
         }
         assert handler.matches(hook_input) is False
 

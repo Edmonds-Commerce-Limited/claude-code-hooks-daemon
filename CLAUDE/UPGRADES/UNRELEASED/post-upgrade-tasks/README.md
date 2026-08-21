@@ -85,10 +85,9 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-| File                                               | Type             | Severity    | Applies to                    | One-line summary                                                                                                                            |
-| -------------------------------------------------- | ---------------- | ----------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `01-migrate-allowed-markdown-paths-to-additive.md` | config-migration | recommended | sets `allowed_markdown_paths` | Migrate the markdown_organization full override to the additive `extra_allowed_markdown_paths` so upstream defaults are kept automatically. |
-| `02-review-daemon-owned-file-banners.md`           | notification     | optional    | all                           | Expect a comment-only diff across ~39 committed daemon-owned files: each now declares its ownership and points at the new boundary docs.    |
+| File                                         | Type            | Severity | Applies to                   | One-line summary                                                                                                            |
+| -------------------------------------------- | --------------- | -------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `01-replace-removed-tool-output-constant.md` | workflow-change | optional | handlers using `TOOL_OUTPUT` | `HookInputField.TOOL_OUTPUT` named a field no event carries and is removed; use `TOOL_RESPONSE`, then check the dead logic. |
 
 <!-- END TASK INDEX -->
 

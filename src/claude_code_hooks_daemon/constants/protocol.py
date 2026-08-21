@@ -50,7 +50,14 @@ class HookInputField:
     # Tool-related fields (PreToolUse, PostToolUse)
     TOOL_NAME = "tool_name"
     TOOL_INPUT = "tool_input"
-    TOOL_OUTPUT = "tool_output"
+    # A real PostToolUse event carries "tool_response", NEVER "tool_output" —
+    # POST_TOOL_USE_INPUT_SCHEMA requires the former and explicitly rejects the
+    # latter. A TOOL_OUTPUT constant lived here with no user in src/, so the one
+    # handler reading the response defined the correct name privately while this
+    # module published only the wrong one. Naming a never-present field as a peer
+    # of the real ones makes NO MAGIC lead an author straight into a silent read
+    # of nothing, so the wrong name is not kept here in any form.
+    TOOL_RESPONSE = "tool_response"
     TOOL_USE_ID = "tool_use_id"
 
     # Message/prompt fields

@@ -31,8 +31,10 @@ from claude_code_hooks_daemon.utils.git_repo import run_git
 # Matched case-insensitively against combined stdout/stderr.
 _WARNING_SIGNATURE = "not set as executable"
 
-# tool_response field names (real Claude Code Bash events).
-_TOOL_RESPONSE_FIELD = "tool_response"
+# Sub-fields of tool_response for a real Claude Code Bash event. The envelope
+# field itself is HookInputField.TOOL_RESPONSE — it was duplicated privately here
+# only because the shared constants module published the wrong name and not this
+# one. Note a Bash tool_response carries NO exit_code, so nothing may read one.
 _STDOUT_FIELD = "stdout"
 _STDERR_FIELD = "stderr"
 
@@ -148,7 +150,7 @@ class GitHooksExecutableFixerHandler(Handler):
     @staticmethod
     def _combined_output(hook_input: dict[str, Any]) -> str:
         """Return stdout+stderr from the Bash tool response as a single string."""
-        tool_response = hook_input.get(_TOOL_RESPONSE_FIELD)
+        tool_response = hook_input.get(HookInputField.TOOL_RESPONSE)
         if not isinstance(tool_response, dict):
             return ""
         stdout = tool_response.get(_STDOUT_FIELD) or ""

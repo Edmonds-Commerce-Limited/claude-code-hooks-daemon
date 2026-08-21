@@ -21,10 +21,18 @@ class TestHookInputFieldConstants:
         assert HookInputField.TRANSCRIPT_PATH == "transcript_path"
 
     def test_tool_related_fields(self) -> None:
-        """Test tool-related input fields."""
+        """Test tool-related input fields.
+
+        The response envelope is ``tool_response``. This previously asserted a
+        ``TOOL_OUTPUT`` constant naming ``tool_output`` — a field the PostToolUse
+        schema explicitly REJECTS and that nothing in ``src/`` ever read. The
+        assertion was true and the constant was still a trap, which is why the
+        canonical-name property is guarded separately in
+        ``tests/integration/test_tool_response_field_name_is_canonical.py``.
+        """
         assert HookInputField.TOOL_NAME == "tool_name"
         assert HookInputField.TOOL_INPUT == "tool_input"
-        assert HookInputField.TOOL_OUTPUT == "tool_output"
+        assert HookInputField.TOOL_RESPONSE == "tool_response"
 
     def test_message_prompt_fields(self) -> None:
         """Test message and prompt fields."""

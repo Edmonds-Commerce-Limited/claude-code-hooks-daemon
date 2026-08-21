@@ -119,6 +119,20 @@ _MAX_TRACKED_PLANS: Final[int] = 256
 # not the folder the script created on disk. Every such invocation in a
 # session shares this one bucket, so a repeat mkplan.bash call is treated as
 # the same identity for once-per-plan gating (see _resolve_plan_folder).
+#
+# CONSEQUENCE, stated plainly rather than left to be derived: creating a SECOND,
+# genuinely different plan via mkplan.bash in one session is silent — it is not
+# a repeat, but it is bucketed as one. Accepted deliberately, because the advice
+# it would repeat is "CronList first, reuse the cron already running": there is
+# exactly ONE recovery cron per session (Plan 00247), so by the second plan it
+# already exists and the agent has already been told how to handle it. The
+# advisory is a safety net for the transition, not a per-plan entitlement.
+#
+# It IS now fixable — mkplan.bash prints the created folder on stdout, which a
+# real event carries at HookInputField.TOOL_RESPONSE. It is not done here because
+# the gain is the low-value case above, and reading the response would couple
+# this handler to a payload sub-shape nothing else in it depends on. Revisit if
+# multi-plan sessions become common, not before.
 _MKPLAN_SENTINEL_KEY: Final[str] = "__mkplan__"
 
 # ─── Canonical recovery-cron prompt ──────────────────────────────────────────
