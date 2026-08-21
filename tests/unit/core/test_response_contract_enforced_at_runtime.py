@@ -98,6 +98,53 @@ class TestARefusalIsNeverSilentlyWeakened:
         ), f"the reason was discarded along with the decision on {event_name}"
 
 
+class TestTheSubstituteIsValidForEveryEventAndDecision:
+    """The fallback must never be the thing that breaks.
+
+    ``_safe_substitute_response`` is only reached when the primary response is
+    already invalid, and no ALLOW or CONTINUE currently produces one — so this
+    is unreachable today. It is still worth holding, for two reasons.
+
+    First, the fallback assumed ``systemMessage`` for anything that was not a
+    refusal, and none of the five decision-capable events permits that key. The
+    ``remaining`` check would then have raised ``RuntimeError`` from inside
+    ``to_json`` — a guard whose failure mode is crashing the serialiser is worse
+    than the bug it guards against.
+
+    Second, the message it produced was simply untrue: "a handler returned
+    'allow' for PreToolUse, which cannot express it". PreToolUse expresses allow
+    perfectly well.
+
+    Unreachable-today is exactly the condition under which this rots unnoticed,
+    which is why the property is asserted over the full cross-product rather
+    than over the paths that currently fire.
+    """
+
+    @pytest.mark.parametrize("event_name", _DECISION_CAPABLE + _MESSAGE_ONLY)
+    @pytest.mark.parametrize("decision", list(Decision))
+    def test_the_substitute_satisfies_the_schema(self, event_name: str, decision: Decision) -> None:
+        result = HookResult(decision=decision, reason="why")
+        substitute = result._safe_substitute_response(event_name)
+
+        errors = validate_response(event_name, substitute)
+        assert not errors, (
+            f"the substitute for {decision.value} on {event_name} is itself invalid "
+            f"({substitute} -> {errors}), so to_json would raise instead of recovering"
+        )
+
+    @pytest.mark.parametrize("event_name", _DECISION_CAPABLE)
+    def test_a_non_refusal_substitute_does_not_claim_the_event_cannot_express_it(
+        self, event_name: str
+    ) -> None:
+        """These events express allow fine; the message must not say otherwise."""
+        substitute = HookResult(decision=Decision.ALLOW)._safe_substitute_response(event_name)
+
+        assert "cannot express" not in str(substitute), (
+            f"the substitute for an ALLOW on {event_name} claims the event cannot "
+            "express it, which is false and would mislead whoever reads the log"
+        )
+
+
 class TestOrdinaryResponsesAreUntouched:
     """Enforcement must be invisible for the overwhelmingly common cases."""
 

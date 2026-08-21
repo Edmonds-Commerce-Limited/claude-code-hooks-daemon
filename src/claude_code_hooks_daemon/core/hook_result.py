@@ -327,19 +327,37 @@ class HookResult(BaseModel):
                 return self._format_pre_tool_use_response(event_name)
 
         detail = f": {self.reason}" if self.reason else ""
-        message = (
-            f"⚠️ HOOKS DAEMON: a handler returned '{self.decision.value}' for "
-            f"{event_name}, which cannot express it. The request was NOT "
-            f"enforced{detail}"
-        )
+        if self.decision in (Decision.DENY, Decision.ASK):
+            message = (
+                f"⚠️ HOOKS DAEMON: a handler returned '{self.decision.value}' for "
+                f"{event_name}, which cannot express it. The request was NOT "
+                f"enforced{detail}"
+            )
+        else:
+            # Reaching here for a non-refusal means the response was malformed
+            # for some other reason. Saying "cannot express it" would be false —
+            # every event expresses allow — and would mislead whoever reads it.
+            message = (
+                f"⚠️ HOOKS DAEMON: a handler produced an invalid {event_name} "
+                f"response for decision '{self.decision.value}'{detail}"
+            )
 
-        # The channel for an advisory message differs per event, and picking the
-        # wrong one just swaps one contract violation for another. Status accepts
-        # only `text`; UserPromptSubmit only `hookSpecificOutput`; the
-        # systemMessage-only events accept neither of those.
+        # The advisory channel differs per event, and picking the wrong one just
+        # swaps one contract violation for another. Status accepts only `text`;
+        # the five decision-capable events and UserPromptSubmit accept only
+        # `hookSpecificOutput`; the systemMessage-only events accept neither.
+        # Assuming systemMessage here previously made the SUBSTITUTE invalid for
+        # those six, so the FAIL FAST below would have raised out of to_json.
         if event_name == "Status":
             return {"text": message}
-        if event_name == "UserPromptSubmit":
+        if event_name in (
+            "PreToolUse",
+            "PostToolUse",
+            "Stop",
+            "SubagentStop",
+            "PermissionRequest",
+            "UserPromptSubmit",
+        ):
             return {
                 "hookSpecificOutput": {
                     "hookEventName": event_name,
