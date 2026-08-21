@@ -1,6 +1,6 @@
 # Plan 00263: An escaped quote makes the bash tokeniser hallucinate a write target
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-20
 **Owner**: joseph
 **Priority**: Medium
@@ -152,9 +152,17 @@ Three corrections to the original account:
 
 ### Phase 3: Verify
 
-- [ ] 🔄 **Task 3.1**: Full QA, daemon restart RUNNING
-- [ ] ⬜ **Task 3.2**: Live probe — reproduce the original false denial and
-  confirm it no longer fires, and that genuine denials still do
+- [x] ✅ **Task 3.1**: Full QA (12,876 passed, coverage 95.14% against a 95.00
+  gate), daemon restarted RUNNING with zero load errors
+- [x] ✅ **Task 3.2**: Live probe over the production socket, BOTH halves. The
+  original false-denial shape now returns `{}` (allow); the control — a genuine
+  `cat >` authoring the same broken file — still returns `decision: block` with
+  the real `SyntaxError`. The control is the half that matters: an allow alone
+  would be equally consistent with a disabled or broken handler
+- [x] ✅ **Task 3.3**: Regression-probed the OTHER consumers live —
+  `markdown_organization` still denies a memory-path write (tilde expansion
+  intact), and the Decision 5f split still holds: `cp` INTO the broken file is
+  allowed while `tee` INTO the same file is denied
 
 ## Dependencies
 
@@ -163,11 +171,18 @@ Three corrections to the original account:
 
 ## Success Criteria
 
-- [ ] A redirect inside a quoted argument yields no write target, pinned by
-  tests for both the multi-line and escaped-quote shapes.
-- [ ] The differential harness passes exactly, with the new cases included.
-- [ ] Authoring routes still detected and relocation routes still excluded.
-- [ ] Full QA passes and the daemon restarts RUNNING.
+- [x] No write verb inside a quoted argument yields a write target — pinned by
+  unit tests for the escaped-quote redirect, `tee` and copy-verb shapes, and by
+  a generated differential matrix crossing five quoting styles with all seven
+  write mechanisms.
+- [x] The differential harness passes exactly, with the new cases included, and
+  is proven able to FAIL: reverting the one-flag fix produces 12 failures.
+- [x] A backslash-escaped space names the single file bash writes, closing the
+  mirror-image miss.
+- [x] Authoring routes still detected and relocation routes still excluded,
+  confirmed live as well as in tests.
+- [x] Full QA passes (95.14% coverage against the 95.00 gate) and the daemon
+  restarts RUNNING.
 
 ## Delivery & Milestones
 
@@ -176,3 +191,8 @@ Three corrections to the original account:
      JOURNAL/00263-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Found live during Plan 00260's closing client-mode verification.
+- Fix, regression tests and the class-covering differential matrix delivered at
+  `0e99b260`.
+- Verified live over the production socket after a deliberate daemon restart:
+  the phantom shape allows, the genuine-authoring control still denies, and
+  both other consumers of the accessor were regression-probed.
