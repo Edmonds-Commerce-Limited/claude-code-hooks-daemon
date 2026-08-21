@@ -31,12 +31,17 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Final
 
 import pytest
 
 from claude_code_hooks_daemon.core.utils import get_bash_write_targets
 
-# `{S}` is substituted with the sandbox directory.
+#: `{S}` is substituted with the sandbox directory. Plain `str.replace`, not
+#: `str.format`: a case body may contain literal braces (a JSON payload is one
+#: of the shapes under test) and `format` would try to interpret them as fields.
+_SANDBOX_PLACEHOLDER: Final[str] = "{S}"
+
 _CASES: list[tuple[str, str]] = [
     ("plain redirect", "echo hi > {S}/a.txt"),
     ("append to existing", "echo hi >> {S}/a.txt"),
@@ -64,6 +69,17 @@ _CASES: list[tuple[str, str]] = [
     ("heredoc write", "cat > {S}/hd.txt <<'EOF'\nbody line\nEOF"),
     ("heredoc body with an arrow", "cat > {S}/hd2.txt <<'EOF'\nroute out > somewhere\nEOF"),
     ("heredoc body with a stray quote", "cat > {S}/hd3.txt <<'EOF'\nhe said \"hi\nEOF"),
+    # Plan 00263. An escaped quote inside a double-quoted argument must not end
+    # the quote. Every one of these OVERCLAIMED before the fix -- the shell
+    # writes nothing at all, while the accessor named a file. The last is the
+    # mirror image: one real write, previously reported as a fragment.
+    (
+        "escaped quote hiding a redirect",
+        'echo "{\\"cmd\\": \\"cat > {S}/phantom.py <<EOF\\"}"',
+    ),
+    ("escaped quote hiding a tee", 'echo "he said \\"pipe to tee {S}/phantom.py\\" loudly"'),
+    ("escaped quote hiding a copy", 'echo "run \\"cp {S}/src.txt {S}/phantom.py\\" next"'),
+    ("backslash-escaped space in a real path", "echo hi > {S}/sp\\ ace.txt"),
 ]
 
 # Cases needing a tool that may be absent. A missing tool writes nothing, which
@@ -121,7 +137,7 @@ def _run_case(command: str, sandbox: Path) -> tuple[set[str], set[str]]:
 def test_prediction_matches_a_real_shell(label: str, template: str, tmp_path: Path) -> None:
     """Exact equality: every predicted path written, every written path predicted."""
     _seed(tmp_path)
-    command = template.format(S=tmp_path)
+    command = template.replace(_SANDBOX_PLACEHOLDER, str(tmp_path))
 
     actual, predicted = _run_case(command, tmp_path)
 
@@ -136,6 +152,78 @@ def test_prediction_matches_a_real_shell(label: str, template: str, tmp_path: Pa
     )
 
 
+#: Ways to put text inside a quoted argument, where `PAYLOAD` is substituted.
+#: The escaped-quote form is the one that broke (Plan 00263); the others are
+#: here so the matrix proves the property holds across quoting styles rather
+#: than only in the shape that happened to be reported.
+_QUOTING_CONTEXTS: Final[list[tuple[str, str]]] = [
+    ("single-quoted", "echo 'PAYLOAD'"),
+    ("double-quoted", 'echo "PAYLOAD"'),
+    ("escaped-quote", 'echo "he said \\"PAYLOAD\\" then"'),
+    ("multi-line double-quoted", 'echo "\nPAYLOAD\n"'),
+    ("escaped-quote multi-line", 'echo "\nhe said \\"PAYLOAD\\"\n"'),
+]
+
+#: One payload per write mechanism `_write_target_tokens` recognises. Quoted,
+#: none of them writes anything -- they are text being echoed.
+_QUOTED_WRITE_PAYLOADS: Final[list[tuple[str, str]]] = [
+    ("redirect", "cat > {S}/phantom.py"),
+    ("append", "cat >> {S}/phantom.log"),
+    ("noclobber", "cat >| {S}/phantom.cfg"),
+    ("both-streams", "make &> {S}/phantom.out"),
+    ("tee", "printf hi | tee {S}/phantom.txt"),
+    ("copy verb", "cp {S}/src.txt {S}/phantom.copy"),
+    ("dd operand", "dd if={S}/src.txt of={S}/phantom.img"),
+]
+
+_QUOTED_MATRIX: Final[list[tuple[str, str]]] = [
+    (
+        f"{verb_label} inside a {context_label} argument",
+        context_template.replace("PAYLOAD", payload),
+    )
+    for context_label, context_template in _QUOTING_CONTEXTS
+    for verb_label, payload in _QUOTED_WRITE_PAYLOADS
+]
+
+
+@pytest.mark.parametrize(
+    ("label", "template"), _QUOTED_MATRIX, ids=[case[0] for case in _QUOTED_MATRIX]
+)
+def test_a_write_verb_inside_a_quoted_argument_writes_nothing(
+    label: str, template: str, tmp_path: Path
+) -> None:
+    """The CLASS the harness was blind to, not just the shapes that bit us.
+
+    Plan 00263's defect was found in production, and the handful of shapes it
+    produced were added above as regression cases. Fixing those would have left
+    the class unexamined -- exactly the failure the project's defence-before-fix
+    rule names: the defect is the symptom, the blind guard is the bug.
+
+    Writing the matrix is what measured the real reach. Reverting the fix makes
+    ALL SEVEN write mechanisms fail here in the escaped-quote context -- `dd`,
+    `>|` and `&>` among them, none of which appeared in the original report or
+    in the hand-built probes. A future change that re-breaks quote handling for
+    one of them fails here even though nobody thought to write that case.
+
+    The property is the strongest one available: text inside a quoted argument
+    is DATA. `bash` writes nothing, so the accessor must name nothing.
+    """
+    _seed(tmp_path)
+    command = template.replace(_SANDBOX_PLACEHOLDER, str(tmp_path))
+
+    actual, predicted = _run_case(command, tmp_path)
+
+    assert actual == set(), (
+        f"{label}: the sandbox changed, so this case is not testing what it "
+        f"claims -- a quoted payload must be inert. bash wrote {sorted(actual)}"
+    )
+    assert predicted == set(), (
+        f"{label}: PHANTOM — named a write target for text bash only echoed. "
+        f"A denying handler acting on this judges a file the command never "
+        f"wrote. predicted {sorted(predicted)}"
+    )
+
+
 @pytest.mark.parametrize(
     ("label", "tool", "template"), _TOOL_CASES, ids=[case[0] for case in _TOOL_CASES]
 )
@@ -147,7 +235,7 @@ def test_prediction_matches_a_real_shell_for_optional_tools(
         pytest.skip(f"{tool} is not installed; a missing tool would read as an overclaim")
 
     _seed(tmp_path)
-    command = template.format(S=tmp_path)
+    command = template.replace(_SANDBOX_PLACEHOLDER, str(tmp_path))
 
     actual, predicted = _run_case(command, tmp_path)
 

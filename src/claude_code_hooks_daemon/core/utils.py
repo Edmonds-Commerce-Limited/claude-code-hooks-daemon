@@ -197,6 +197,15 @@ def get_bash_write_targets(
     than no path: it attributes a write to a file that was never touched, and a
     path-keyed guard then judges the wrong file.
 
+    **One overclaim survives that rule deliberately: conditional execution.**
+    ``cp a b || echo x > f`` names ``f`` even when ``cp`` succeeds and the branch
+    never runs, and ``false && echo x > f`` is the mirror. Resolving it would mean
+    learning the command's exit code, which requires EXECUTING it -- something a
+    PreToolUse accessor must never do. Dropping conditional branches instead
+    would trade this for a MISS on every legitimate ``&& >`` write, a common and
+    deliberate shape. So the limit is documented rather than fixed, and callers
+    that DENY must keep checking the path exists before acting on it.
+
     **Why ``shlex`` and not regexes.** The existing detector in
     ``markdown_organization`` scans the raw string, so
     ``echo 'the arrow > file thing'`` yields the target ``file`` — a false
@@ -334,9 +343,35 @@ def _tokenise(text: str) -> list[str]:
     the whole command was parsed as a single string, a stray `"` in ordinary
     prose discarded the genuine target on the introducing line too — silently
     un-enforcing any policy keyed on that path.
+
+    **``posix=True`` is load-bearing, not a default (Plan 00263).** Non-POSIX
+    mode does not process backslash escapes, so a ``\\"`` inside a double-quoted
+    argument TERMINATES the quote and everything after it is read as live shell.
+    That falsifies the one guarantee this module rests on — "a quoted string is
+    a single token, so a ``>`` inside it is never an operator" — and it produced
+    PHANTOM targets: paths reported as written by a command that only mentioned
+    them. It was found by a live false denial, not by inspection.
+
+    The reach went past redirects. Once the quote broke, ``tee`` and the copy
+    verbs consumed the trailing operands, so a run of prose words became a list
+    of written files (``... \\" loudly"`` yielded the target ``loudly``). A
+    phantom that is a bare plausible word is worse than a malformed one, because
+    a malformed path fails the ``exists()`` check and a plausible one need not.
+
+    POSIX mode also fixes the mirror-image defect: ``> sp\\ ace.txt`` is one path
+    to bash, and unprocessed escapes split it into ``sp\\`` and ``ace.txt`` —
+    naming a file nothing writes while missing the file that was written.
+
+    Tokens arrive UNQUOTED as a result, which is why callers must not re-strip
+    quote characters; see :func:`_resolve_write_target`.
+
+    The one behaviour traded away is that POSIX mode also rejects a trailing
+    lone backslash ("No escaped character") where non-POSIX tolerated it. That
+    is the fail-safe direction — a segment yields no targets rather than a wrong
+    one — and such a command is unterminated to bash as well.
     """
     try:
-        lexer = shlex.shlex(text, posix=False, punctuation_chars=True)
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         return list(lexer)
     except ValueError:
@@ -484,15 +519,20 @@ def _expand_home(target: str) -> str | None:
     return str(Path(home) / target[len(_HOME_RELATIVE_PREFIX) :])
 
 
-def _resolve_write_target(raw: str, cwd: Any) -> str | None:
+def _resolve_write_target(target: str, cwd: Any) -> str | None:
     """One raw token as an absolute path, or None when it cannot be named.
 
     Declines rather than guesses. A directory destination is declined too: the
     written file is ``dest/<basename>``, so reporting ``dest`` would name a
     path no path-keyed guard matches -- failing safe (a missed write) instead
     of dangerously (the wrong file judged).
+
+    **No quote-stripping happens here.** :func:`_tokenise` runs in POSIX mode,
+    so quotes are already removed by the lexer, which knows which ones were
+    syntax. Stripping again would corrupt the rare path whose name genuinely
+    begins or ends with a quote character -- turning a correct target into a
+    wrong one, the exact failure this function exists to avoid.
     """
-    target = raw.strip("'\"")
     if not target or target.endswith("/"):
         return None
     if any(character in target for character in _UNEXPANDABLE_CHARACTERS):

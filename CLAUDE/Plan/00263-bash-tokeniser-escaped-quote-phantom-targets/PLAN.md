@@ -1,6 +1,6 @@
 # Plan 00263: An escaped quote makes the bash tokeniser hallucinate a write target
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-20
 **Owner**: joseph
 **Priority**: Medium
@@ -9,15 +9,19 @@
 
 ## Overview
 
-`get_bash_write_targets` tokenises a Bash command with
+`get_bash_write_targets` tokenised a Bash command with
 `shlex.shlex(text, posix=False, punctuation_chars=True)`. In non-POSIX mode
 shlex does **not** process backslash escapes, so a `\"` inside a double-quoted
-argument *terminates* the quote instead of escaping it. Everything after it is
+argument *terminates* the quote instead of escaping it. Everything after it was
 then treated as live shell — including a redirect that was only ever data
 inside a quoted string.
 
-The result is a **phantom write target**: a path the accessor reports as
+The result was a **phantom write target**: a path the accessor reported as
 written by a command that never wrote it.
+
+**Fixed by switching the lexer to `posix=True`**, which is what bash itself
+does with an escaped quote. The past tense above is deliberate — this document
+describes the defect as it was, and the code no longer behaves this way.
 
 This was found live, not by inspection. Immediately after Plan 00260 Task 3.5
 wired the two linters to Bash-authored files, a command was DENIED for a file
@@ -55,8 +59,11 @@ Against that: it was hit within an hour of shipping, by ordinary work.
 
 ## Goals
 
-- A redirect appearing inside a quoted argument is never reported as a write
-  target, regardless of escaped quotes or line breaks in that argument.
+- No write verb or operator appearing inside a quoted argument — a redirect,
+  `tee`, or a copy verb — is ever reported as a write target, regardless of
+  escaped quotes in that argument.
+- A path whose name contains a backslash-escaped space is reported as the single
+  file bash writes, not split into fragments.
 - The differential harness still passes exactly, and gains cases for this shape
   so the fix is measured against a real shell rather than belief.
 - No regression for the routes Plan 00260 established: authoring routes still
@@ -69,47 +76,83 @@ Against that: it was hit within an hour of shipping, by ordinary work.
 - The heredoc-body phantom of Decision 5e, which is a DIFFERENT and deliberate
   superset: `include_heredoc_bodies=True` is documented as inherently
   over-broad and is not used by the denying handlers.
+- **Conditional execution** — found while verifying this fix, and confirmed
+  PRE-EXISTING against both tokenisers rather than caused by it.
+  `cp a b || echo x > f` names `f` even when `cp` succeeds and the branch never
+  runs; `false && echo x > f` is the mirror. The reason it is not fixed here is
+  not that it belongs to another plan: learning the exit code means EXECUTING
+  the command, which an accessor running inside a PreToolUse dispatch must never
+  do. Dropping conditional branches instead would trade this overclaim for a
+  MISS on every legitimate `&& >` write, which is a common deliberate shape.
+  Documenting the limit is the better trade, so it sits with the accessor's
+  other conservatism limits (the `$VAR` and glob declines). Both denying linters
+  check `Path.exists()` first, which is the same thin protection the
+  escaped-quote phantom had — so this is recorded, not dismissed.
 
 ## Context & Background
 
-Measured against the shipped accessor:
+The first diagnosis of this defect, written from two hand-built examples, was
+**wrong on both counts** and is corrected here. It claimed the damaging shape
+needed a line break inside the quoted argument, and that only redirects were
+affected. Running candidate shapes through a real shell and diffing against the
+accessor showed neither holds. Recording the correction rather than quietly
+replacing it: the original reasoning was an inference from two data points, and
+the measurement is what settled it.
 
-| command shape                                        | reported target                        |
-| ---------------------------------------------------- | -------------------------------------- |
-| multi-line quoted arg containing an escaped redirect | `/workspace/untracked/phantom.py`      |
-| single-line equivalent                               | `.../phantom.py\"}` — malformed, inert |
-| single-quoted `echo` containing a redirect           | none                                   |
-| plain double-quoted `echo`, single line              | none                                   |
-| a genuine `cat > real.py`                            | `/workspace/real.py`                   |
+Measured against the shipped accessor, with a real `bash` as the authority:
 
-Only the first is dangerous: it yields a **clean, plausible path** that can
-exist on disk. The single-line variant produces a malformed path that no
-`exists()` check will match, which is why this went unnoticed — the damaging
-shape needs a line break inside the quoted argument.
+| command shape                                        | reported target             | bash writes  |
+| ---------------------------------------------------- | --------------------------- | ------------ |
+| escaped quote, then a redirect, path then a space    | `.../phantom.py`            | nothing      |
+| escaped quote, then a redirect, path at end of value | `.../phantom.py\"}` — inert | nothing      |
+| escaped quote, then `tee`                            | `.../phantom.py\`, `loudly` | nothing      |
+| escaped quote, then `cp`                             | `next`                      | nothing      |
+| `> sp\ ace.txt` (backslash-escaped space)            | `sp\` — and MISSES the file | `sp ace.txt` |
+| multi-line double-quoted arg mentioning a redirect   | none                        | nothing      |
+| single-quoted / plain double-quoted prose            | none                        | nothing      |
+
+Three corrections to the original account:
+
+1. **Line breaks are irrelevant.** Both multi-line shapes came back clean. What
+   decides whether a phantom is *clean* or *malformed* is only whether the path
+   token happens to be followed by whitespace.
+2. **The blast radius is wider than redirects.** Once the quote breaks, `tee`
+   and the copy verbs consume trailing operands, so a run of ordinary prose
+   words becomes a list of "written files" — `loudly` is an adverb, and `next`
+   is a preposition. A phantom that is a bare plausible word is *worse* than a
+   malformed one: a malformed path fails `Path.exists()` and a plausible one
+   need not.
+3. **It also causes the opposite failure.** `sp\ ace.txt` is one path to bash;
+   unprocessed escapes split it, so the accessor named a fragment nothing writes
+   **and missed the file that was written**. One defect, both failure directions.
 
 ## Tasks
 
 ### Phase 1: Pin the defect
 
-- [ ] ⬜ **Task 1.1**: Add failing tests for the phantom shapes
-  - [ ] ⬜ Multi-line double-quoted argument containing a redirect
-  - [ ] ⬜ Escaped-quote sequence inside a double-quoted argument
-  - [ ] ⬜ Assert the SAFE shapes stay safe (single quotes, plain double quotes)
-- [ ] ⬜ **Task 1.2**: Extend the differential harness with these cases and
+- [x] ✅ **Task 1.1**: Add failing tests for the phantom shapes, in
+  `tests/unit/core/test_bash_write_targets.py::TestAnEscapedQuoteDoesNotExposeProse`
+  - [x] ✅ Escaped quote exposing a redirect, `tee`, and a copy verb
+  - [x] ✅ Backslash-escaped space in a genuine path (the MISS direction)
+  - [x] ✅ Assert the SAFE shapes stay safe (single quotes, plain double quotes)
+- [x] ✅ **Task 1.2**: Extend the differential harness with these cases and
   confirm the real shell writes nothing, so the expectation is measured rather
-  than asserted from belief
+  than asserted from belief. All four failed as OVERCLAIM before the fix
 
 ### Phase 2: Fix
 
-- [ ] ⬜ **Task 2.1**: Correct quote tracking so an escaped quote does not
-  terminate a double-quoted region. Evaluate `posix=True` versus targeted
-  pre-processing; `posix=True` changes token content (strips quotes, processes
-  escapes) and so ripples into `_write_target_tokens` — measure before choosing
-- [ ] ⬜ **Task 2.2**: Re-run the full differential harness; it must stay exact
+- [x] ✅ **Task 2.1**: Correct quote tracking so an escaped quote does not
+  terminate a double-quoted region. `posix=True` chosen over pre-processing —
+  measured, not assumed: it is what bash itself does, and the alternative meant
+  hand-rolling escape rules the lexer already implements correctly
+- [x] ✅ **Task 2.2**: Re-run the full differential harness; it stayed exact
+- [x] ✅ **Task 2.3**: Remove the now-redundant `strip("'\"")` in
+  `_resolve_write_target`. POSIX mode strips quotes that are SYNTAX; stripping
+  again would corrupt a path whose name genuinely contains a quote character
 
 ### Phase 3: Verify
 
-- [ ] ⬜ **Task 3.1**: Full QA, daemon restart RUNNING
+- [ ] 🔄 **Task 3.1**: Full QA, daemon restart RUNNING
 - [ ] ⬜ **Task 3.2**: Live probe — reproduce the original false denial and
   confirm it no longer fires, and that genuine denials still do
 

@@ -212,6 +212,58 @@ class TestProseIsNeverAWriteTarget:
             assert get_bash_write_targets(_bash(command)) == [], command
 
 
+class TestAnEscapedQuoteDoesNotExposeProse:
+    """Plan 00263: `\\"` inside a double-quoted argument must not end the quote.
+
+    Found live, not by inspection. Within an hour of the two linters being wired
+    to Bash-authored files (Plan 00260 Task 3.5), a command was DENIED for a file
+    it had not authored: it carried a JSON probe payload whose body MENTIONED
+    `cat > untracked/cmp-broken.py`, that file existed, and it contained
+    deliberately-invalid Python -- so a real `SyntaxError` about a real file was
+    attributed to a command that had only quoted the path.
+
+    The cause is that `shlex(posix=False)` does not process backslash escapes,
+    so an escaped quote TERMINATES the quoted region and everything after it is
+    read as live shell. That makes the guarantee in
+    :class:`TestProseIsNeverAWriteTarget` -- "a quoted string is one token" --
+    false for any argument containing `\\"`.
+
+    **The reach is wider than a redirect.** Once the quote is broken, `tee` and
+    the copy verbs consume trailing operands, so an ordinary run of prose words
+    becomes a list of "written files": the `tee` case below invents `loudly`
+    from an adverb. A phantom that is a bare plausible word is worse than a
+    malformed one, because a malformed path fails `Path.exists()` and a
+    plausible one may not.
+    """
+
+    def test_an_escaped_quote_does_not_expose_a_redirect(self) -> None:
+        """The measured shape: a JSON payload quoting a heredoc command."""
+        command = 'echo "{\\"cmd\\": \\"cat > /workspace/untracked/phantom.py <<EOF\\"}"'
+        assert get_bash_write_targets(_bash(command)) == []
+
+    def test_an_escaped_quote_does_not_expose_a_tee(self) -> None:
+        """`tee` claims every trailing operand, so prose became two targets."""
+        command = 'echo "he said \\"pipe to tee /workspace/phantom.py\\" loudly"'
+        assert get_bash_write_targets(_bash(command)) == []
+
+    def test_an_escaped_quote_does_not_expose_a_copy_verb(self) -> None:
+        """A copy verb claims its last operand -- here, the word `next`."""
+        command = 'echo "run \\"cp /workspace/src.txt /workspace/phantom.py\\" next"'
+        assert get_bash_write_targets(_bash(command)) == []
+
+    def test_a_backslash_escaped_space_names_the_real_file(self) -> None:
+        """Not a phantom but its mirror: the genuine write was MISSED.
+
+        `sp\\ ace.txt` is one path to bash. Unprocessed escapes split it in two,
+        so the accessor reported the fragment `sp\\` -- a file nothing writes --
+        while missing `sp ace.txt`, which bash really wrote. An overclaim and a
+        miss from a single defect.
+        """
+        assert get_bash_write_targets(_bash("echo hi > /workspace/sp\\ ace.txt")) == [
+            "/workspace/sp ace.txt"
+        ]
+
+
 class TestUnresolvableTargetsAreDeclined:
     """A wrong path is worse than no path."""
 
