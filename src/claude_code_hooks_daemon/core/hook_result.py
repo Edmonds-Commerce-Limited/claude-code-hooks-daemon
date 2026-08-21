@@ -4,12 +4,15 @@ This module provides the Pydantic model for representing hook results
 with full type safety, validation, and proper response formatting.
 """
 
+import logging
 import re
 import unicodedata
 from enum import StrEnum
 from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 
 class Decision(StrEnum):
@@ -213,6 +216,139 @@ class HookResult(BaseModel):
         return self
 
     def to_json(
+        self,
+        event_name: str,
+        *,
+        stop_hook_active: bool = False,
+        terminal_columns: int | None = None,
+    ) -> dict[str, Any]:
+        """Convert to Claude Code hook JSON format, enforcing the response contract.
+
+        This is the single choke point: ``front_controller``, ``daemon/server``
+        and ``daemon/controller`` all serialise through here, so a response that
+        violates its event's schema cannot reach Claude Code by any route.
+
+        Enforcement matters most for the case the serialiser already knew about.
+        ``_format_system_message_response`` DELIBERATELY emits ``{"decision": ...}``
+        for a DENY/ASK on an event that cannot express one, so that validation
+        rejects it — but validation never ran in production, so the deny was
+        silently dropped instead: the handler believed it blocked and nothing did.
+
+        Args:
+            event_name: Hook event type (PreToolUse, PostToolUse, etc.)
+            stop_hook_active: Only meaningful for Stop/SubagentStop.
+            terminal_columns: Only meaningful for Status.
+
+        Returns:
+            A response dictionary that satisfies its event's schema.
+        """
+        response = self._build_wire_response(
+            event_name,
+            stop_hook_active=stop_hook_active,
+            terminal_columns=terminal_columns,
+        )
+        return self._enforce_response_contract(event_name, response)
+
+    def _enforce_response_contract(
+        self, event_name: str, response: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Return ``response`` if it satisfies its schema, else a safe substitute.
+
+        The substitute is chosen to be NEVER WEAKER than what the handler asked
+        for. It deliberately does NOT reuse ``generate_daemon_error_response``,
+        which is fail-open for every event but Stop/SubagentStop: routing a
+        failed DENY through that would turn a block into a permit, which is a
+        worse outcome than the bug being fixed.
+
+        An event with no schema at all is passed through with a warning rather
+        than rejected. That is not leniency about a violated contract — it is
+        the absence of one, and a newly-wired event must not hard-fail here.
+
+        Cost, measured rather than assumed, since this now runs on every hook
+        dispatch: 0.034 ms for a silent allow and 0.060 ms for a deny, against
+        the ~1.8 ms daemon-side dispatch this project advertises — 1.9% and 3.3%.
+        A violation is logged at ERROR every time it occurs, deliberately
+        unthrottled: it should never happen (every shipped handler validates),
+        so a flood is a signal worth its volume rather than noise to suppress.
+        """
+        from claude_code_hooks_daemon.core.response_schemas import (
+            RESPONSE_SCHEMAS,
+            validate_response,
+        )
+
+        if event_name not in RESPONSE_SCHEMAS:
+            logger.warning(
+                "No response schema for event %s; emitting %s unvalidated",
+                event_name,
+                response,
+            )
+            return response
+
+        errors = validate_response(event_name, response)
+        if not errors:
+            return response
+
+        logger.error(
+            "RESPONSE CONTRACT VIOLATION on %s: %s violates its schema (%s). "
+            "Handler decision was %s. Emitting a safe substitute instead.",
+            event_name,
+            response,
+            "; ".join(errors),
+            self.decision.value,
+        )
+
+        substitute = self._safe_substitute_response(event_name)
+        remaining = validate_response(event_name, substitute)
+        if remaining:
+            # FAIL FAST: a substitute that is itself invalid would put us back
+            # to emitting rubbish, silently. Better to crash with the reason.
+            raise RuntimeError(
+                f"Response contract substitute for {event_name} is itself invalid: "
+                f"{substitute} -> {remaining}"
+            )
+        return substitute
+
+    def _safe_substitute_response(self, event_name: str) -> dict[str, Any]:
+        """Build a schema-valid response that does not weaken a refusal.
+
+        For an event that CAN carry a refusal, re-emit one through that event's
+        own formatter. For an event that cannot, the refusal is impossible on
+        the wire — so the reason is surfaced as a loud ``systemMessage`` rather
+        than discarded, which is the outcome the old code got wrong.
+        """
+        if self.decision in (Decision.DENY, Decision.ASK):
+            if event_name in ("Stop", "SubagentStop"):
+                return self._format_stop_response(event_name, False)
+            if event_name == "PostToolUse":
+                return self._format_post_tool_use_response(event_name)
+            if event_name == "PermissionRequest":
+                return self._format_permission_request_response(event_name)
+            if event_name == "PreToolUse":
+                return self._format_pre_tool_use_response(event_name)
+
+        detail = f": {self.reason}" if self.reason else ""
+        message = (
+            f"⚠️ HOOKS DAEMON: a handler returned '{self.decision.value}' for "
+            f"{event_name}, which cannot express it. The request was NOT "
+            f"enforced{detail}"
+        )
+
+        # The channel for an advisory message differs per event, and picking the
+        # wrong one just swaps one contract violation for another. Status accepts
+        # only `text`; UserPromptSubmit only `hookSpecificOutput`; the
+        # systemMessage-only events accept neither of those.
+        if event_name == "Status":
+            return {"text": message}
+        if event_name == "UserPromptSubmit":
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": event_name,
+                    "additionalContext": message,
+                }
+            }
+        return {"systemMessage": message}
+
+    def _build_wire_response(
         self,
         event_name: str,
         *,

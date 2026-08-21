@@ -100,14 +100,30 @@ Integration tests verify handler works with daemon components.
 
 ### Required Integration Tests
 
-1. **Response Validation** (MANDATORY):
-   Add test case to `tests/integration/test_all_handlers_response_validation.py`
+1. **Response Validation** (AUTOMATIC — nothing to add):
 
-   ```python
-   def test_{handler}_returns_valid_response():
-       """Verify {handler} returns valid HookResult."""
-       # Test handler integrates with response validation
-   ```
+   `tests/integration/test_every_handler_response_validates.py` DERIVES its
+   population from the handler package, so a new handler is covered on the
+   commit that adds it. It reads the decisions your handler can return from its
+   own AST and asserts each one serialises to a response its event's schema
+   accepts. You do not register anything.
+
+   If it fails, your handler returns a decision its event type cannot express —
+   for example a DENY on `SessionStart`, `SessionEnd`, `PreCompact`,
+   `Notification` or either worktree event, none of which can refuse anything.
+   Fix the handler; do not exempt it.
+
+   `to_json` enforces the same contract at runtime, so an invalid response never
+   reaches Claude Code. It substitutes a valid one that is never weaker than what
+   you asked for, and logs the violation at ERROR. A silent downgrade is
+   therefore impossible — but a downgrade still happens, so a test failure here
+   is real.
+
+   `tests/integration/test_all_handlers_response_validation.py` is the older
+   hand-written suite. It is a per-handler file covering a fraction of the
+   handlers, kept for its richer per-scenario `hook_input` cases. Adding a case
+   there is welcome and optional; the derived guard above is what guarantees
+   coverage.
 
 2. **FrontController Integration** (if complex):
    Create `tests/integration/test_{handler}_integration.py` if handler has:

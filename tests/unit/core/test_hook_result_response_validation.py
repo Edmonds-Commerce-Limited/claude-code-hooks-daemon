@@ -200,15 +200,23 @@ class TestSessionStartResponses:
         )
         hook_result_validator.assert_valid("SessionStart", result)
 
-    def test_deny_response_invalid(self, hook_result_validator):
-        """EXPECTED TO FAIL: SessionStart should NOT support deny decisions."""
-        result = HookResult(
-            decision=Decision.DENY,
-            reason="Cannot start session",
-        )
-        # This should fail because SessionStart doesn't support permissionDecision
+    def test_deny_is_downgraded_to_a_visible_message(self, hook_result_validator):
+        """SessionStart cannot deny, so the attempt is reported, not emitted.
+
+        This previously asserted the response was INVALID, which was true while
+        ``to_json`` deliberately emitted ``{"decision": ...}`` as a tripwire for
+        a validator that production never ran. ``to_json`` now enforces the
+        contract, so what must be asserted is the outcome that actually protects
+        anyone: a valid response that still says the refusal was not enforced.
+        """
+        result = HookResult(decision=Decision.DENY, reason="Cannot start session")
+
         errors = hook_result_validator.get_errors("SessionStart", result)
-        assert len(errors) > 0, "SessionStart should not accept deny decisions"
+        assert not errors, f"SessionStart response should now be valid, got {errors}"
+
+        output = result.to_json("SessionStart")
+        assert "decision" not in output
+        assert "Cannot start session" in output["systemMessage"]
 
 
 class TestSessionEndResponses:

@@ -230,6 +230,41 @@ STATUS_SCHEMA: Final[dict[str, Any]] = {
 # Schema Registry - Map event names to schemas
 # =============================================================================
 
+# =============================================================================
+# WorktreeCreate / WorktreeRemove Hook Response Schemas
+# =============================================================================
+# These two are the ONLY wired events outside the eleven-event baseline that
+# ship a built-in handler, so they are the only ones the permissive fail-open
+# schema below must not cover — its premise is that such an event emits nothing
+# but a passthrough. They emit a real response, and one of them emits a bespoke
+# key nothing else does.
+#
+# Both fall through to _format_system_message_response, which DELIBERATELY emits
+# {"decision": ...} for a DENY/ASK so that validation rejects it. Under a
+# permissive schema that tripwire was disarmed: the payload that fails on
+# SessionStart passed here. additionalProperties: False re-arms it.
+
+WORKTREE_CREATE_SCHEMA: Final[dict[str, Any]] = {
+    "type": "object",
+    "properties": {
+        # Claude Code parses this hook's stdout as a raw path (Plan 00188), so
+        # this key is the entire purpose of the event.
+        "worktreePath": {"type": "string"},
+        "systemMessage": {"type": "string"},
+    },
+    "additionalProperties": False,
+}
+
+# No path: a removal has none to report. Kept separate from the create schema so
+# the distinction is enforced rather than merely described.
+WORKTREE_REMOVE_SCHEMA: Final[dict[str, Any]] = {
+    "type": "object",
+    "properties": {
+        "systemMessage": {"type": "string"},
+    },
+    "additionalProperties": False,
+}
+
 RESPONSE_SCHEMAS: Final[dict[str, dict[str, Any]]] = {
     "PreToolUse": PRE_TOOL_USE_SCHEMA,
     "PostToolUse": POST_TOOL_USE_SCHEMA,
@@ -242,6 +277,8 @@ RESPONSE_SCHEMAS: Final[dict[str, dict[str, Any]]] = {
     "UserPromptSubmit": USER_PROMPT_SUBMIT_SCHEMA,
     "Notification": NOTIFICATION_SCHEMA,
     "Status": STATUS_SCHEMA,
+    "WorktreeCreate": WORKTREE_CREATE_SCHEMA,
+    "WorktreeRemove": WORKTREE_REMOVE_SCHEMA,
 }
 
 

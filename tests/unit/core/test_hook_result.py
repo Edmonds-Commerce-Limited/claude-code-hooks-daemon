@@ -697,49 +697,56 @@ class TestHookResultContextOnlyFormat:
 
 
 class TestHookResultContextOnlyDenyFormat:
-    """Test context-only response formatting with DENY decision."""
+    """Context-only events cannot refuse, so the attempt must surface loudly.
 
-    def test_context_only_deny_returns_invalid_response(self):
-        """UserPromptSubmit with DENY returns invalid response for schema validation."""
+    These previously asserted that ``to_json`` emitted a response the schema
+    REJECTS — ``permissionDecision`` inside a ``hookSpecificOutput`` that permits
+    only ``hookEventName``/``additionalContext``/``guidance``. That was a
+    deliberate tripwire, but nothing in production ever validated the response,
+    so the real effect was a silent downgrade: the deny was dropped on the wire
+    and the handler believed it had blocked.
+
+    ``to_json`` now enforces the contract, so the assertions move from "emits
+    something invalid" to "emits something valid that still says what happened".
+    """
+
+    def test_context_only_deny_is_surfaced_as_context(self):
+        """UserPromptSubmit cannot deny, so the attempt becomes visible context."""
         result = HookResult(decision=Decision.DENY, reason="Blocked prompt")
         output = result.to_json("UserPromptSubmit")
 
-        # Should return hookSpecificOutput with permissionDecision (invalid for context-only)
         assert "hookSpecificOutput" in output
-        assert output["hookSpecificOutput"]["permissionDecision"] == Decision.DENY
-        assert output["hookSpecificOutput"]["permissionDecisionReason"] == "Blocked prompt"
+        assert "permissionDecision" not in output["hookSpecificOutput"]
+        assert "Blocked prompt" in output["hookSpecificOutput"]["additionalContext"]
 
-    def test_context_only_deny_with_guidance(self):
-        """UserPromptSubmit DENY should not include guidance since it returns invalid response."""
+    def test_context_only_deny_names_the_event_that_cannot_enforce_it(self):
+        """The message must say WHICH event dropped the refusal, and that it did."""
         result = HookResult(decision=Decision.DENY, reason="Blocked", guidance="Try something else")
         output = result.to_json("UserPromptSubmit")
 
-        assert "hookSpecificOutput" in output
-        assert output["hookSpecificOutput"]["permissionDecision"] == Decision.DENY
+        context = output["hookSpecificOutput"]["additionalContext"]
+        assert "UserPromptSubmit" in context
+        assert "NOT" in context
 
 
 class TestHookResultSystemMessageDenyFormat:
-    """Test system message response formatting with DENY decision."""
+    """systemMessage-only events likewise cannot refuse — see the class above."""
 
-    def test_system_message_deny_returns_invalid_response(self):
-        """SessionStart with DENY returns deliberately invalid response."""
+    def test_system_message_deny_is_surfaced_not_dropped(self):
+        """SessionStart cannot deny; the reason must survive as a systemMessage."""
         result = HookResult(decision=Decision.DENY, reason="Session rejected")
         output = result.to_json("SessionStart")
 
-        # Should return decision field (invalid for systemMessage-only events)
-        assert "decision" in output
-        assert output["decision"] == "deny"
-        assert output["reason"] == "Session rejected"
-        assert "systemMessage" not in output
+        assert "decision" not in output
+        assert "Session rejected" in output["systemMessage"]
 
-    def test_system_message_deny_without_reason(self):
-        """SessionStart with DENY and no reason returns decision only."""
+    def test_system_message_deny_without_reason_still_reports(self):
+        """Even with no reason, the dropped refusal must not be silent."""
         result = HookResult(decision=Decision.DENY)
         output = result.to_json("SessionStart")
 
-        assert "decision" in output
-        assert output["decision"] == "deny"
-        assert "reason" not in output
+        assert "decision" not in output
+        assert "SessionStart" in output["systemMessage"]
 
     def test_system_message_allow_no_context_no_guidance_returns_empty(self):
         """SessionStart with ALLOW and no context/guidance returns empty dict."""
@@ -748,13 +755,13 @@ class TestHookResultSystemMessageDenyFormat:
 
         assert output == {}
 
-    def test_pre_compact_deny_returns_invalid_response(self):
-        """PreCompact with DENY returns deliberately invalid response."""
+    def test_pre_compact_deny_is_surfaced_not_dropped(self):
+        """Same contract as SessionStart."""
         result = HookResult(decision=Decision.DENY, reason="Compact rejected")
         output = result.to_json("PreCompact")
 
-        assert "decision" in output
-        assert output["decision"] == "deny"
+        assert "decision" not in output
+        assert "Compact rejected" in output["systemMessage"]
 
 
 class TestHookResultErrorFactory:
