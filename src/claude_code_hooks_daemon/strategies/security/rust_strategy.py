@@ -58,7 +58,7 @@ class RustSecurityStrategy:
             AcceptanceTest(
                 title="Block Rust transmute in source file",
                 command=(
-                    "Use the Write tool to write file_path='/workspace/src/test_security.rs' "
+                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.rs' "
                     "with content 'let x: u32 = std::mem::transmute(y);'"
                 ),
                 description="Blocks writing Rust file with transmute call",

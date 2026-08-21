@@ -450,13 +450,15 @@ class SedBlockerHandler(Handler):
             ),
             AcceptanceTest(
                 title="Write tool: shell script with sed (strict mode)",
-                command="/workspace/untracked/test_sed_acceptance.sh",
+                command=(
+                    "Use the Write tool to write "
+                    "file_path='$CLAUDE_PROJECT_DIR/untracked/test_sed_acceptance.sh' "
+                    "with content '#!/bin/bash\\nsed -i \"s/foo/bar/g\" file.txt'"
+                ),
                 description=(
-                    "In strict mode (default), blocks Write tool from creating shell scripts "
-                    "containing sed. Use the Write tool to write "
-                    "/workspace/untracked/test_sed_acceptance.sh with "
-                    "content: '#!/bin/bash\\nsed -i \\'s/foo/bar/g\\' file.txt'. "
-                    "The hook should block the Write call before the file is created. "
+                    "In strict mode (default), blocks the Write tool from creating shell "
+                    "scripts containing sed. The hook should block the Write call before "
+                    "the file is created. "
                     "NOTE: In direct_invocation_only mode this would be allowed."
                 ),
                 expected_decision=Decision.DENY,

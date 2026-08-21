@@ -410,6 +410,11 @@ class PlaybookGenerator:
                         test.recommended_model.value if test.recommended_model else None
                     ),
                     "requires_main_thread": test.requires_main_thread,
+                    # The harness's only signal that a test must be SKIPPED rather
+                    # than executed. The markdown renderer shows it as a SKIP block;
+                    # without it here a harness runs the test and reports a false
+                    # failure, which is how a harness gets switched off.
+                    "harness_cannot_produce": test.harness_cannot_produce,
                 }
                 result.append(test_dict)
                 test_number += 1

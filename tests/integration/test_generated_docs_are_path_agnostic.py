@@ -211,3 +211,71 @@ class TestGeneratedHooksDaemonDoc:
     def test_regenerate_hint_still_names_the_wrapper(self) -> None:
         """Path-agnostic must not become path-less — the hint must stay usable."""
         assert _PORTABLE_CLIENT_PREFIX in self._render()
+
+
+class TestAcceptanceTestTextNamesNoMachine:
+    """The THIRD rendered artifact — the one this guard originally missed.
+
+    ``get_claude_md()`` feeds ``CLAUDE.md`` and ``DocsGenerator`` feeds
+    ``.claude/HOOKS-DAEMON.md``; both were covered above. ``get_acceptance_tests()``
+    feeds ``generate-playbook``, which renders its strings verbatim for a human
+    to follow during a release — and it was never checked. The consequence is
+    worse than a stale doc line: a tester in a client install is instructed to
+    WRITE to an absolute path outside their project.
+
+    Grepping the handlers package finds only part of this. Five handlers declare
+    no tests of their own and delegate the whole set to per-language strategies,
+    so their strings live in another package entirely. Collecting through the
+    handler instance is what reaches them.
+    """
+
+    @staticmethod
+    def _offenders(needle: str) -> list[str]:
+        """Every acceptance-test text field containing ``needle``."""
+        found: list[str] = []
+        for class_name, handler_class in sorted(_discover_handler_classes().items()):
+            handler: Any = handler_class()
+            for test in handler.get_acceptance_tests():
+                for field_name in ("command", "description", "safety_notes"):
+                    value = getattr(test, field_name, None)
+                    if isinstance(value, str) and needle in value:
+                        found.append(f"{class_name}: {test.title!r} -> {field_name}")
+        return found
+
+    def test_acceptance_text_does_not_hardcode_the_dogfood_root(self) -> None:
+        """``/workspace`` is real here and nowhere else."""
+        offenders = self._offenders(_DOGFOOD_ROOT)
+
+        assert not offenders, (
+            "acceptance test text hardcodes this repo's own project root. The "
+            "playbook renders it verbatim, so a client-install tester is told to "
+            "write to a path that does not exist there. Use "
+            "$CLAUDE_PROJECT_DIR instead:\n  " + "\n  ".join(offenders)
+        )
+
+    def test_acceptance_text_does_not_embed_the_rendering_project_root(self) -> None:
+        """The derived variant — a test string built from a runtime path builder."""
+        offenders = self._offenders(str(_CLIENT_ROOT))
+
+        assert not offenders, (
+            "acceptance test text names the rendering machine's project root, so "
+            "the playbook differs per machine:\n  " + "\n  ".join(offenders)
+        )
+
+    def test_the_sweep_actually_reaches_the_shipped_tests(self) -> None:
+        """A discovery bug would make both checks above pass by finding nothing.
+
+        The two assertions are satisfied by an empty sweep, so without this the
+        guard could silently stop guarding — the same blindness it exists to
+        catch. The bound is deliberately far below the real count (200+) so it
+        reports breakage, not routine churn.
+        """
+        total = sum(
+            len(handler_class().get_acceptance_tests())
+            for handler_class in _discover_handler_classes().values()
+        )
+
+        assert total > 100, (
+            f"only {total} acceptance tests reached — the sweep is not finding "
+            "the shipped handlers, so the checks above prove nothing"
+        )

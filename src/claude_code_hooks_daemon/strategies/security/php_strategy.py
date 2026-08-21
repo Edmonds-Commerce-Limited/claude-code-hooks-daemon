@@ -87,7 +87,7 @@ class PhpSecurityStrategy:
             AcceptanceTest(
                 title="Block PHP eval in source file",
                 command=(
-                    "Use the Write tool to write file_path='/workspace/src/test_security.php' "
+                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.php' "
                     "with content '<?php eval($userInput);'"
                 ),
                 description="Blocks writing PHP file with eval() call",

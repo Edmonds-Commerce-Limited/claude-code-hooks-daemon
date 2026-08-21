@@ -63,7 +63,7 @@ class SwiftSecurityStrategy:
             AcceptanceTest(
                 title="Block Swift Process() in source file",
                 command=(
-                    "Use the Write tool to write file_path='/workspace/src/test_security.swift' "
+                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.swift' "
                     "with content 'let task = Process()'"
                 ),
                 description="Blocks writing Swift file with Process() call",

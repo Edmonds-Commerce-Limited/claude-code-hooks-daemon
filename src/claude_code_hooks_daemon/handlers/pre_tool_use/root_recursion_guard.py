@@ -227,7 +227,7 @@ class RootRecursionGuardHandler(Handler):
             ),
             AcceptanceTest(
                 title="scoped recursive grep allowed",
-                command='false && grep -rl "needle" /workspace',
+                command='false && grep -rl "needle" "$CLAUDE_PROJECT_DIR"',
                 description="Allows a recursive scan scoped to the project root",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],

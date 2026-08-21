@@ -75,7 +75,7 @@ class JavaScriptSecurityStrategy:
             AcceptanceTest(
                 title="Block JS eval in source file",
                 command=(
-                    "Use the Write tool to write file_path='/workspace/src/utils.ts' "
+                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/utils.ts' "
                     "with content 'const result = eval(userCode);'"
                 ),
                 description="Blocks writing TS file with eval() call",

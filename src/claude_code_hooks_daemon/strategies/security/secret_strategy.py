@@ -84,7 +84,7 @@ class SecretDetectionStrategy:
             AcceptanceTest(
                 title="Block hardcoded AWS key",
                 command=(
-                    "Use the Write tool to write file_path='/workspace/src/config.ts' "
+                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/config.ts' "
                     "with content 'const key = \"AKIAIOSFODNN7EXAMPLE1\";'"
                 ),
                 description="Blocks writing file with hardcoded AWS access key",
@@ -102,7 +102,7 @@ class SecretDetectionStrategy:
                 title="Allow test fixture files",
                 command=(
                     "Use the Write tool to write "
-                    "file_path='/workspace/tests/fixtures/security_test.py' "
+                    "file_path='$CLAUDE_PROJECT_DIR/tests/fixtures/security_test.py' "
                     "with content 'AWS_KEY = \"AKIAIOSFODNN7EXAMPLE1\"'"
                 ),
                 description="Allows writing secrets in test fixture files (excluded path)",

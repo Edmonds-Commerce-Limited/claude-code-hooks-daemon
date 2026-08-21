@@ -1106,7 +1106,7 @@ class MarkdownOrganizationHandler(Handler):
             AcceptanceTest(
                 title="Block markdown in wrong location",
                 command=(
-                    "Use the Write tool to write to /workspace/random-notes.md"
+                    "Use the Write tool to write to $CLAUDE_PROJECT_DIR/random-notes.md"
                     " with content '# Some Notes\\n\\nRandom markdown file.'"
                 ),
                 description="Blocks markdown files written to non-standard locations within the project",

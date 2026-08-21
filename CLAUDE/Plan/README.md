@@ -10,7 +10,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00250: CI must actually run the acceptance gates it calls blocking](00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Not Started (Plan 00245's `-rs` flag named 11 acceptance tests that have skipped on every CI run for want of a daemon socket, three of the files being ones `RELEASING.md` Step 12.0 declares BLOCKING)
 
-- [00243: make the acceptance playbook deterministically executable](00243-deterministic-acceptance-playbook-harness/PLAN.md) - Dormant (Phase 4's doc-snippet guard is delivered and found 8 real defects; the harness phases remain, 2/19 tasks, quiet since 26-08-14)
+- [00243: make the acceptance playbook deterministically executable](00243-deterministic-acceptance-playbook-harness/PLAN.md) - In Progress (Task 1.1's audit sized the work and found 4 defects; Phase 0 fixed the 3 real ones and refuted the 4th, 7/23 tasks)
 
 ### Security / Presentation Audit
 

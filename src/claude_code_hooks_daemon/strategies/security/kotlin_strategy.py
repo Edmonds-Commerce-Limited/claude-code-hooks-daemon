@@ -69,7 +69,7 @@ class KotlinSecurityStrategy:
             AcceptanceTest(
                 title="Block Kotlin ObjectInputStream in source file",
                 command=(
-                    "Use the Write tool to write file_path='/workspace/src/test_security.kt' "
+                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.kt' "
                     "with content 'val ois = ObjectInputStream(socket.getInputStream())'"
                 ),
                 description="Blocks writing Kotlin file with ObjectInputStream() call",

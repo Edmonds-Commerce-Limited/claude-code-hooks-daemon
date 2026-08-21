@@ -69,7 +69,7 @@ class CSharpSecurityStrategy:
             AcceptanceTest(
                 title="Block C# BinaryFormatter in source file",
                 command=(
-                    "Use the Write tool to write file_path='/workspace/src/test_security.cs' "
+                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.cs' "
                     "with content 'BinaryFormatter formatter = new BinaryFormatter();'"
                 ),
                 description="Blocks writing C# file with BinaryFormatter usage",

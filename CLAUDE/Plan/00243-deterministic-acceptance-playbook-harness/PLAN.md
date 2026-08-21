@@ -1,6 +1,6 @@
 # Plan 00243: Make the Acceptance Playbook Deterministically Executable
 
-**Status**: Dormant
+**Status**: In Progress
 **Created**: 2026-08-14
 **Owner**: joseph
 **Priority**: Medium
@@ -76,10 +76,55 @@ half of this plan.
 
 ## Tasks
 
+### Phase 0: The defects the audit surfaced — fix before building on them
+
+Task 1.1 found four live bugs. Each one would corrupt the harness's own
+results, so they are prerequisites, not follow-ups.
+
+- [x] ✅ **Task 0.1**: `cmd_generate_playbook` never passed `project_handlers=`,
+  so the generator's project-handler branch was dead on the CLI path and three
+  declared tests reached no playbook at all
+  - [x] ✅ The loading is now one shared helper, because `generate-docs` had a
+    correct copy five lines away — two copies is how they drifted
+  - [x] ✅ Verified live: the real playbook grew by 82 lines and now carries
+    both of this repo's project handlers
+- [x] ✅ **Task 0.2**: `generate_json` did not emit `harness_cannot_produce`,
+  so a JSON-driven harness could not see a SKIP marker the markdown already
+  shows — this blocked Task 2.2 directly
+  - [x] ✅ Guarded by the property, not the instance: the expectation is derived
+    from the dataclass, so the NEXT field added is caught on the same commit
+- [x] ✅ **Task 0.3**: `SedBlockerHandler`'s test declared a FILE PATH as its
+  `command` with the real instruction buried in `description`; it looked like a
+  literal shell test and was not, and could not produce its expected deny
+  - [x] ✅ Rewritten into the dominant Write-payload grammar, so Task 1.2
+    converts it mechanically along with the other 76
+  - [x] ✅ The hardcoded `/workspace` root proved to be a CLASS: **17**
+    occurrences, not the 4 a grep of `handlers/` finds — 13 live in
+    `strategies/security/` behind the five delegating handlers. All fixed to
+    `$CLAUDE_PROJECT_DIR`
+  - [x] ✅ Guarded in `test_generated_docs_are_path_agnostic.py`, which already
+    owned this property for the other two rendered artifacts and simply never
+    covered the playbook
+- [x] ✅ **Task 0.4**: Verified whether `plan_number_helper`'s tests are answered
+  by `pipe_blocker` (priority 17) rather than by themselves
+  - [x] ✅ **REFUTED.** All four driven through the production forwarder against
+    the live daemon: every one matches its declared decision, and the two denies
+    carry `plan_number_helper`'s own reason with both patterns present. `sort`
+    is whitelisted, so `pipe_blocker` never fires. Nothing to fix
+
 ### Phase 1: Make executability explicit rather than guessed
 
-- [ ] ⬜ **Task 1.1**: Audit all `get_acceptance_tests()` implementations and
+- [x] ✅ **Task 1.1**: Audit all `get_acceptance_tests()` implementations and
   classify each `command` as literal-shell or prose
+  - [x] ✅ Findings: [AUDIT-task-1.1-command-field.md](AUDIT-task-1.1-command-field.md)
+  - [x] ✅ 219 tests: 98 literal shell, 115 convertible prose, **6 genuinely
+    needing a human**. Honest assertive-coverage figure is ~148/219 (68%),
+    because 35 of the 98 are vacuous `echo` probes and ~30 of the 115 describe
+    their payload in English rather than stating it
+  - [x] ✅ Five string grammars cover 76 of the prose tests, all expressing the
+    identical Write payload — that concentration is what makes Task 1.2 cheap
+  - [x] ✅ Five handlers declare zero tests and inherit all of theirs from
+    strategies, so a per-handler converter would miss them
 - [ ] ⬜ **Task 1.2**: Convert to a literal command every prose test that can
   be one — the Write/Edit tests are the bulk, and a payload is expressible
 - [ ] ⬜ **Task 1.3**: For the genuine remainder, add an explicit optional

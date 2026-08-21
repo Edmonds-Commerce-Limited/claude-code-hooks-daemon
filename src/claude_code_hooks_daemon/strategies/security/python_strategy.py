@@ -87,7 +87,7 @@ class PythonSecurityStrategy:
             AcceptanceTest(
                 title="Block Python eval in source file",
                 command=(
-                    "Use the Write tool to write file_path='/workspace/src/test_security.py' "
+                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.py' "
                     "with content 'result = eval(user_input)'"
                 ),
                 description="Blocks writing Python file with eval() call",

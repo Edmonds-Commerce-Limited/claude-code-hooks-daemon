@@ -63,7 +63,7 @@ class DartSecurityStrategy:
             AcceptanceTest(
                 title="Block Dart Process.run() in source file",
                 command=(
-                    "Use the Write tool to write file_path='/workspace/src/test_security.dart' "
+                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.dart' "
                     "with content \"await Process.run('ls', ['-la']);\""
                 ),
                 description="Blocks writing Dart file with Process.run() call",

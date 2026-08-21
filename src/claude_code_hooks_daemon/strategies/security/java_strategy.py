@@ -69,7 +69,7 @@ class JavaSecurityStrategy:
             AcceptanceTest(
                 title="Block Java Runtime.exec() in source file",
                 command=(
-                    "Use the Write tool to write file_path='/workspace/src/test_security.java' "
+                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.java' "
                     "with content 'Runtime.getRuntime().exec(userInput);'"
                 ),
                 description="Blocks writing Java file with Runtime.getRuntime().exec() call",

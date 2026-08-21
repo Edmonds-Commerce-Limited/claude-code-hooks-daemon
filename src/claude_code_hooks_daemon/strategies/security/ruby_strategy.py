@@ -87,7 +87,7 @@ class RubySecurityStrategy:
             AcceptanceTest(
                 title="Block Ruby eval in source file",
                 command=(
-                    "Use the Write tool to write file_path='/workspace/src/test_security.rb' "
+                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.rb' "
                     "with content 'eval(user_input)'"
                 ),
                 description="Blocks writing Ruby file with eval() call",

@@ -63,7 +63,7 @@ class GoSecurityStrategy:
             AcceptanceTest(
                 title="Block Go template.HTML() in source file",
                 command=(
-                    "Use the Write tool to write file_path='/workspace/src/test_security.go' "
+                    "Use the Write tool to write file_path='$CLAUDE_PROJECT_DIR/src/test_security.go' "
                     "with content 'safe := template.HTML(userInput)'"
                 ),
                 description="Blocks writing Go file with template.HTML() call",

@@ -1578,6 +1578,35 @@ def _read_project_handler_health(
     return read_load_failures_at(_daemon_untracked_dir(project_path))
 
 
+def _load_project_handlers(config: "Config", project_path: Path) -> list[Any]:
+    """Discover this project's own handler instances for a generator.
+
+    Shared by ``generate-docs`` and ``generate-playbook``. It is factored out
+    because those two had drifted: ``generate-docs`` loaded project handlers and
+    ``generate-playbook`` did not, so every project-handler acceptance test was
+    silently absent from the release gate while the generator's branch for them
+    sat there fully tested and never reached. Two copies of five lines is how
+    that happened, so there is now one copy.
+
+    Returns an empty list when project handlers are disabled or the configured
+    directory does not exist — neither is an error, and a generator with nothing
+    to add must still render the rest of the document.
+    """
+    if not config.project_handlers.enabled:
+        return []
+
+    from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
+
+    handlers_path = Path(config.project_handlers.path)
+    if not handlers_path.is_absolute():
+        handlers_path = project_path / handlers_path
+    if not handlers_path.exists():
+        return []
+
+    discovered = ProjectHandlerLoader.discover_handlers(handlers_path)
+    return [handler for _event_type, handler in discovered]
+
+
 def _format_project_handler_health_lines(
     state: "ProjectHandlerHealthState",
 ) -> list[str]:
@@ -2251,6 +2280,7 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
             config=handlers_dict,
             registry=registry,
             plugins=plugins,
+            project_handlers=_load_project_handlers(config, project_path),
             cli_acceptance_tests=get_cli_acceptance_tests(),
             pseudo_events=config.pseudo_events or None,
         )
@@ -2318,17 +2348,8 @@ def cmd_generate_docs(args: argparse.Namespace) -> int:
 
         plugins = PluginLoader.load_from_plugins_config(config.plugins, project_path)
 
-        # Load project handlers
-        project_handlers_list: list[Any] = []
-        if config.project_handlers.enabled:
-            from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
-
-            ph_path = Path(config.project_handlers.path)
-            if not ph_path.is_absolute():
-                ph_path = project_path / ph_path
-            if ph_path.exists():
-                discovered = ProjectHandlerLoader.discover_handlers(ph_path)
-                project_handlers_list = [handler for _event_type, handler in discovered]
+        # Load project handlers (shared with generate-playbook — see the helper)
+        project_handlers_list = _load_project_handlers(config, project_path)
 
         # Create docs generator
         from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
