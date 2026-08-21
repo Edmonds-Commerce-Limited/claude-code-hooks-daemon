@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00264: cap the size of a GitHub issue/PR comment](00264-github-comment-size-cap/PLAN.md) - Not Started (field report: agent sessions flooded two issues with 44,467- and 22,398-character comments until neither ticket's state was findable by the humans reading it; a PreToolUse cap on `gh` comment bodies steering the content into `JOURNAL/`, plus seven open questions the report's proposed design asserts rather than settles)
+
 - [00263: an escaped quote makes the bash tokeniser hallucinate a write target](00263-bash-tokeniser-escaped-quote-phantom-targets/PLAN.md) - Not Started (found live an hour after Plan 00260 wired two DENYING linters to the accessor: `shlex` in non-POSIX mode does not process backslash escapes, so an escaped quote inside a multi-line argument ends the quote and exposes a quoted redirect as a real one — a false denial on a file the command never wrote)
 
 - [00252: guards for premises no write-time hook sees](00252-guards-for-premises-no-write-time-hook-sees/PLAN.md) - Not Started (two defects, one argument from Core Standard 15's corollary: the ambient-git-premise class Plan 00245 fixed seven times by hand without a guard, and the fact that no guard inspects STAGED CONTENT for secret-list terms, so a file arriving by `mv` reached a pushed commit)
@@ -1229,28 +1231,37 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 263 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 264 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 215 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 35 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 35 + 215 + 6 = **256 folders**, spanning
-  **253 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 36 + 215 + 6 = **257 folders**, spanning
+  **254 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **10** of the
-  263 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  264 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258 — abandoned drafts, numbers burned by
   transient probes (00195 during the v3.51.0 acceptance run, 00258 during the
   v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a sub-agent
-  that then found Plan 00208 already covered the work). 252 + 10 = 262. ✅
+  that then found Plan 00208 already covered the work). 254 + 10 = 264. ✅
 
-- **Last reconciled by**: the Plan 00262 closure — the folder moved from the
+- **Last reconciled by**: the Plan 00264 creation — one new folder in the plan
+  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
+  by one while Completed and Cancelled were untouched. Every figure above was
+  recounted from disk at this commit (36 root, 215 `Completed/`, 6 `Cancelled/`,
+  254 distinct numbers against a counter of 264). That recount also corrected a
+  standing arithmetic slip in this block: the previous reconciliation carried
+  `252 + 10 = 262` while its own line above it said 253 distinct numbers against
+  a counter of 263, so neither the addends nor the total were self-consistent.
+
+- **Before that**: the Plan 00262 closure — the folder moved from the
   plan root into `Completed/`, so Active fell by one and Completed rose by one
   while Total and Cancelled were untouched. Counts verified from disk at this
   commit (36 root, 213 `Completed/`, 6 `Cancelled/`, against a counter of 262).
