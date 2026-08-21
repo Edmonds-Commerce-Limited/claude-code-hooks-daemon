@@ -170,6 +170,38 @@ real command. See `JOURNAL/00209-Journal-26-08-12.md` for the full analysis.
   forwarder — real command gets remediation, field-report prose still gets the
   short reason, short unknown commands unchanged
 
+### Phase 5: The report contradicted itself — found by dogfooding the feature
+
+The first run of `hooks-daemon verdicts` against a genuinely LIVE daemon (this
+plan's own outstanding criterion, discharged 26-08-21) exposed a defect in the
+reader, not the writer. The report's standing caveat says status handlers "are
+omitted from the roster below" and then listed thirteen of them at the top of
+that roster — 19,750 of 26,676 retained records (74%), all from one 30-minute
+window on 26-08-13, before Plan 00234's exclusion landed. The log is a rolling
+window, so pre-change records stay until trimmed.
+
+Two enumeration surfaces disagreed: `cli.py`'s `_behavioural_handler_names`
+drops Status renderers from the REGISTERED side, while `aggregate_verdicts`
+kept them on the FIRED side — the class Plan 00237 closed in the registry,
+reappearing in the report. It also inflated the override denominator with
+records that cannot carry an override, understating the rate ~4x (0.1% vs the
+true 0.3%) — the one number this plan calls "the strongest available signal
+that a rule is mis-tuned".
+
+- [x] ✅ **Task 5.1**: RED — six failing tests, including `assert 0.2 == 0.5`
+  catching the inflated denominator directly rather than arguing for it
+- [x] ✅ **Task 5.2**: GREEN — partition Status renders out of the roster, the
+  verdict mix and the override denominator; report them in an explicit block
+  naming the count, the share and the date range. Partitioned, never dropped:
+  discarding three quarters of a window in silence would present the rest as
+  freshly collected
+- [x] ✅ **Task 5.3**: DBF — nothing pinned the caveat's wording, which is how
+  it drifted into being false. The guard added is a PROPERTY (no roster line
+  may name a handler the report says it omitted), not a regression case
+- [x] ✅ **Task 5.4**: Verified against the same live log that exposed it — the
+  roster now leads with `lint-on-edit`, carries no `status-*` entry, and the
+  override rate reads 0.3% of 6,947 behavioural decisions
+
 ## Dependencies
 
 - Related: Plan 00206 — its retention finding (a capped log cannot back a
@@ -195,10 +227,11 @@ other findings raise answerable with a query rather than a discussion.
 - [x] ✅ `verdicts.jsonl` records every handler decision — proven end-to-end via
   `TestControllerVerdictLog` (real `process_event()` → real
   `HandlerChain.execute()` → real file on disk, reading the content back and
-  asserting on it). **Confirming this against a genuinely LIVE daemon session
-  is OUTSTANDING** — this work was executed in an isolated worktree that
-  cannot restart the project's real daemon; do this as part of the next
-  daemon restart in the main checkout
+  asserting on it). **Confirmed against a genuinely LIVE daemon** on 26-08-21
+  from the main checkout: `untracked/logs/hooks/verdicts.jsonl` is appended to
+  in real time (6.3 MB, written inside the observing session). The worktree
+  isolation that blocked this for nine days is gone — and the first live run
+  is what exposed the Phase 5 reporting defect
 - [x] ✅ `hooks-daemon verdicts` answers "which handlers have never fired" and
   "what is the override rate per handler" over that data
 - [x] ✅ The retention decision for `verdicts.jsonl` is explicit and documented,

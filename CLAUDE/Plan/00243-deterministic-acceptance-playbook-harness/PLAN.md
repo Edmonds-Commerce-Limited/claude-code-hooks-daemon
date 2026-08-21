@@ -1,6 +1,6 @@
 # Plan 00243: Make the Acceptance Playbook Deterministically Executable
 
-**Status**: In Progress
+**Status**: Dormant
 **Created**: 2026-08-14
 **Owner**: joseph
 **Priority**: Medium

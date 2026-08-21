@@ -10,7 +10,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00250: CI must actually run the acceptance gates it calls blocking](00250-ci-runs-the-blocking-acceptance-gates/PLAN.md) - Not Started (Plan 00245's `-rs` flag named 11 acceptance tests that have skipped on every CI run for want of a daemon socket, three of the files being ones `RELEASING.md` Step 12.0 declares BLOCKING)
 
-- [00243: make the acceptance playbook deterministically executable](00243-deterministic-acceptance-playbook-harness/PLAN.md) - In Progress (Phase 4's doc-snippet guard is delivered and found 8 real defects; the harness phases remain)
+- [00243: make the acceptance playbook deterministically executable](00243-deterministic-acceptance-playbook-harness/PLAN.md) - Dormant (Phase 4's doc-snippet guard is delivered and found 8 real defects; the harness phases remain, 2/19 tasks, quiet since 26-08-14)
 
 ### Security / Presentation Audit
 
@@ -28,7 +28,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00205: destructive git synonym respellings](00205-destructive-git-synonym-respellings/PLAN.md) - Not Started (tracked follow-up captured by the v3.52.0 release gate per RELEASING.md "never drop a finding": v3.52.0 closed ten *invocation* respellings but not *synonym* ones — `git update-ref -d refs/heads/X` is an unguarded `git branch -D`, and `git push origin +main:main` an unguarded `git push --force`.)
 
-- [00209: field feedback — daemon self-observability](00209-field-feedback-daemon-self-observability/PLAN.md) - Not Started (the daemon makes hundreds of decisions per session and persists none, so "which handlers earn their keep" and "what is the per-handler false-positive rate" are unanswerable. Adds a verdict log plus a reporting command; also fixes `pipe_blocker` quoting a heredoc of prose back as a shell command.)
+- [00209: field feedback — daemon self-observability](00209-field-feedback-daemon-self-observability/PLAN.md) - In Progress (verdict log + `hooks-daemon verdicts` delivered and verified live; Phase 3 advisory-noise tweaks remain)
 
 ### Status Line / Agent View
 

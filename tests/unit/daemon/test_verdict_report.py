@@ -8,6 +8,7 @@ registered-handler set) which handlers never fired at all.
 import json
 from pathlib import Path
 
+from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.daemon.verdict_report import (
     aggregate_verdicts,
     format_report,
@@ -175,3 +176,125 @@ class TestFormatReport:
         text = format_report(agg)
         assert isinstance(text, str)
         assert text
+
+
+class TestLegacyStatusRecordsInTheRetainedWindow:
+    """The report must not assert an omission its own roster contradicts.
+
+    Found by dogfooding, not by a test: on this project's live log the report
+    printed "status handlers are omitted from the roster below" and then listed
+    thirteen of them at the top of that very roster. Nothing pinned that
+    sentence, which is how it drifted into being false.
+
+    The cause is two enumeration surfaces disagreeing — the same class Plan
+    00237 closed in the registry and Plan 00234 closed in the writer.
+    ``cli.py``'s ``_behavioural_handler_names`` drops Status renderers from the
+    REGISTERED side so they cannot land in never-fired; the aggregate kept them
+    on the FIRED side. Status records stopped being written when Plan 00234
+    landed, but the log is a rolling window, so records predating that change
+    stay visible until they are trimmed.
+
+    Separating them is not narrowing: a renderer can only ever return 'allow',
+    so it can carry neither a deny nor an override. Leaving it in the
+    denominator understates the override rate, and leaving it in the roster
+    contradicts the never-fired side. Dropping it SILENTLY would be the real
+    narrowing, which is why the report has to name what it set aside.
+    """
+
+    def _status(self, handler: str, ts: str) -> dict[str, object]:
+        return {
+            "ts": ts,
+            "event": EventType.STATUS_LINE.value,
+            "handler": handler,
+            "verdict": "allow",
+            "overridden": False,
+        }
+
+    def _behavioural(
+        self, handler: str, verdict: str, overridden: bool = False
+    ) -> dict[str, object]:
+        return {
+            "ts": "2026-08-21T12:00:00+00:00",
+            "event": "PreToolUse",
+            "handler": handler,
+            "verdict": verdict,
+            "overridden": overridden,
+        }
+
+    def _mixed(self) -> list[dict[str, object]]:
+        return [
+            self._status("status-git-branch", "2026-08-13T17:36:25+00:00"),
+            self._status("status-daemon-stats", "2026-08-13T17:40:00+00:00"),
+            self._status("status-git-branch", "2026-08-13T18:06:21+00:00"),
+            self._behavioural("pipe-blocker", "deny"),
+            self._behavioural("git-stash", "allow", overridden=True),
+        ]
+
+    def test_status_renders_are_kept_out_of_the_handler_roster(self) -> None:
+        agg = aggregate_verdicts(self._mixed())
+
+        assert "status-git-branch" not in agg["handler_counts"]
+        assert "status-daemon-stats" not in agg["handler_counts"]
+        assert agg["handler_counts"]["pipe-blocker"] == 1
+
+    def test_legacy_status_renders_are_counted_and_dated_not_discarded(self) -> None:
+        agg = aggregate_verdicts(self._mixed())
+
+        assert agg["legacy_status_records"] == 3
+        assert agg["behavioural_records"] == 2
+        assert agg["total_records"] == 5
+        assert agg["legacy_status_window"] == (
+            "2026-08-13T17:36:25+00:00",
+            "2026-08-13T18:06:21+00:00",
+        )
+
+    def test_override_rate_excludes_status_renders_from_its_denominator(self) -> None:
+        agg = aggregate_verdicts(self._mixed())
+
+        # One override in two behavioural records. Against the retained total
+        # of five it would read 20%, understating a real signal by 2.5x — on
+        # the live log the same error understated it roughly fourfold.
+        assert agg["override_count"] == 1
+        assert agg["override_rate"] == 0.5
+
+    def test_the_report_names_the_records_it_set_aside(self) -> None:
+        text = format_report(aggregate_verdicts(self._mixed()))
+
+        assert "3" in text
+        assert "2026-08-13T17:36:25+00:00" in text
+        assert "2026-08-13T18:06:21+00:00" in text
+
+    def test_no_roster_line_names_a_handler_the_report_calls_omitted(self) -> None:
+        """The property, not just the shape that bit us.
+
+        Whatever the record mix, a handler the report says it excluded must
+        not then appear in the roster it says it excluded them from.
+        """
+        text = format_report(aggregate_verdicts(self._mixed()))
+        roster = text.split("Per-handler fire counts:")[1].split("Verdict mix")[0]
+
+        assert "status-git-branch" not in roster
+        assert "status-daemon-stats" not in roster
+        assert "pipe-blocker" in roster
+
+    def test_the_verdict_mix_heading_does_not_claim_a_population_it_excludes(self) -> None:
+        """The same drift, one heading further down.
+
+        The caveat became false by claiming an omission the roster contradicted.
+        The verdict-mix heading said "all handlers" over a tally that now
+        excludes renderers — unpinned prose describing a filtered population is
+        exactly what went wrong the first time.
+        """
+        text = format_report(aggregate_verdicts(self._mixed()))
+
+        assert "Verdict mix (all handlers" not in text
+        assert "behavioural" in text.split("Verdict mix")[1].split(":")[0]
+
+    def test_a_window_with_no_status_renders_says_nothing_about_them(self) -> None:
+        """No legacy block when there is no legacy — silence is the clean case."""
+        agg = aggregate_verdicts([self._behavioural("pipe-blocker", "deny")])
+        text = format_report(agg)
+
+        assert agg["legacy_status_records"] == 0
+        assert agg["legacy_status_window"] is None
+        assert "LEGACY STATUS RECORDS" not in text

@@ -142,11 +142,24 @@ Reports:
 
 - Total recorded decisions (in the retained window)
 
-- Override count and rate
+- Override count, and the rate **over behavioural decisions** — a Status
+  render can never carry an override, so counting renders in the denominator
+  understates the rate. On this project's own log it read 0.1% instead of
+  0.3%, roughly fourfold low
 
 - Per-handler fire counts, with each handler's own verdict mix
 
-- Overall verdict mix across all handlers (allow/deny/ask/override)
+- Overall verdict mix across all **behavioural** handlers
+  (allow/deny/ask/override)
+
+- **Legacy Status records, when the window still holds any.** Plan 00234
+  stopped recording renders, but the log is a rolling sample, so renders
+  written before that change stay retained until trimmed — 74% of this
+  project's window eight days later. They are partitioned out of the roster,
+  the verdict mix and the override denominator (matching the never-fired
+  side), and reported in their own block with the count, the share and the
+  date range. Partitioned, never dropped: silently discarding three quarters
+  of a window would present the remainder as freshly collected
 
 - **Never-fired handlers** — only available when the daemon is running (the
   full registered-handler set is queried over the socket, the same way

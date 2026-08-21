@@ -23,14 +23,19 @@ import json
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.core.event import EventType
+
 _WINDOW_CAVEAT = (
     "NOTE: these figures describe the RETAINED WINDOW of verdicts.jsonl "
     "(a bounded rolling sample, capped like every other daemon JSONL log) — "
     "they are NOT lifetime totals. A handler that fired long ago and was "
     "since trimmed from the log will not appear here.\n"
-    "Status-line renders are not recorded and status handlers are omitted "
-    "from the roster below: a renderer can only ever return 'allow', so its "
-    "records carry no information while arriving at the refresh rate.\n"
+    "Status-line renders are NO LONGER recorded (Plan 00234) and status "
+    "handlers are kept out of the roster below: a renderer can only ever "
+    "return 'allow', so its records carry no information while arriving at "
+    "the refresh rate. The log is a rolling window, so renders written BEFORE "
+    "that change can still be retained — when any are, they are counted and "
+    "dated under the totals rather than dropped.\n"
     "'Never fired' is NOT evidence a handler is pointless. A guard on a rare, "
     "catastrophic operation is SUPPOSED to sit silent — rarity is what success "
     "looks like for it. Read this list as 'not exercised in this window', and "
@@ -83,14 +88,45 @@ def aggregate_verdicts(
         synthetic escape-hatch-override entries, which carry
         ``handler: None``), ``handler_verdict_mix`` (per-handler breakdown),
         ``verdict_mix`` (overall, includes ``"override"``),
-        ``override_count``, ``override_rate``, and ``never_fired``.
+        ``override_count``, ``override_rate``, ``never_fired``,
+        ``behavioural_records``, ``legacy_status_records`` and
+        ``legacy_status_window``.
+
+    Status-line renders are partitioned OUT of every behavioural figure —
+    the roster, the verdict mix and the override denominator — and reported
+    separately (see ``legacy_status_records``).
+
+    Plan 00234 stopped recording them, so a clean window has none. But the
+    log is a bounded ROLLING sample: renders written before that change stay
+    retained until trimmed, and on this project's own log they were 74% of
+    the window eight days later. Counting them was wrong three ways. They put
+    ``status-*`` entries in a roster that ``cli.py``'s
+    ``_behavioural_handler_names`` deliberately excludes from the
+    never-fired side, so the two enumeration surfaces disagreed — the class
+    Plan 00237 closed in the registry, reappearing here. They inflated the
+    override denominator with records that cannot carry an override,
+    understating the rate ~4x. And the report's own caveat asserted they were
+    omitted while the roster listed them.
+
+    They are partitioned, never discarded: dropping three quarters of a
+    window in silence would present the remainder as freshly collected.
     """
+    status_event = EventType.STATUS_LINE.value
     handler_counts: dict[str, int] = {}
     handler_verdict_mix: dict[str, dict[str, int]] = {}
     verdict_mix: dict[str, int] = {}
     override_count = 0
+    behavioural_records = 0
+    status_timestamps: list[str] = []
 
     for record in records:
+        if record.get("event") == status_event:
+            timestamp = record.get("ts")
+            if timestamp:
+                status_timestamps.append(str(timestamp))
+            continue
+
+        behavioural_records += 1
         verdict = str(record.get("verdict", "unknown"))
         verdict_mix[verdict] = verdict_mix.get(verdict, 0) + 1
 
@@ -107,7 +143,12 @@ def aggregate_verdicts(
         per_handler[verdict] = per_handler.get(verdict, 0) + 1
 
     total_records = len(records)
-    override_rate = (override_count / total_records) if total_records else 0.0
+    legacy_status_records = total_records - behavioural_records
+    override_rate = (override_count / behavioural_records) if behavioural_records else 0.0
+
+    legacy_status_window: tuple[str, str] | None = None
+    if status_timestamps:
+        legacy_status_window = (min(status_timestamps), max(status_timestamps))
 
     never_fired: list[str] | None = None
     if all_handlers is not None:
@@ -115,6 +156,9 @@ def aggregate_verdicts(
 
     return {
         "total_records": total_records,
+        "behavioural_records": behavioural_records,
+        "legacy_status_records": legacy_status_records,
+        "legacy_status_window": legacy_status_window,
         "handler_counts": handler_counts,
         "handler_verdict_mix": handler_verdict_mix,
         "verdict_mix": verdict_mix,
@@ -129,12 +173,34 @@ def format_report(aggregate: dict[str, Any]) -> str:
     lines: list[str] = [_WINDOW_CAVEAT, ""]
 
     total = aggregate["total_records"]
+    behavioural = aggregate["behavioural_records"]
+    legacy = aggregate["legacy_status_records"]
+
     lines.append(f"Total recorded decisions: {total}")
+    if legacy:
+        lines.append(f"Behavioural decisions (excludes legacy Status renders): {behavioural}")
     lines.append(
         f"Overrides (MUST_..._BECAUSE used): {aggregate['override_count']} "
-        f"({aggregate['override_rate']:.1%})"
+        f"({aggregate['override_rate']:.1%} of {behavioural} behavioural decisions)"
     )
     lines.append("")
+
+    if legacy:
+        window = aggregate["legacy_status_window"]
+        share = legacy / total if total else 0.0
+        lines.append(
+            f"LEGACY STATUS RECORDS: {legacy} of {total} retained records "
+            f"({share:.1%}) are Status-line renders written before Plan 00234 "
+            f"stopped recording them" + (f" ({window[0]} to {window[1]})" if window else "") + "."
+        )
+        lines.append(
+            "  They are counted in the total above but kept OUT of the roster, "
+            "the verdict mix and the override rate: a renderer can only ever "
+            "return 'allow', so it cannot carry an override, and the never-fired "
+            "side already excludes status handlers. Dropping them silently would "
+            "present the rest of the window as freshly collected."
+        )
+        lines.append("")
 
     handler_counts: dict[str, int] = aggregate["handler_counts"]
     if handler_counts:
@@ -149,7 +215,7 @@ def format_report(aggregate: dict[str, Any]) -> str:
 
     verdict_mix: dict[str, int] = aggregate["verdict_mix"]
     if verdict_mix:
-        lines.append("Verdict mix (all handlers, includes overrides):")
+        lines.append("Verdict mix (all behavioural handlers, includes overrides):")
         for verdict, count in sorted(verdict_mix.items(), key=lambda kv: -kv[1]):
             lines.append(f"  {verdict}: {count}")
     lines.append("")
