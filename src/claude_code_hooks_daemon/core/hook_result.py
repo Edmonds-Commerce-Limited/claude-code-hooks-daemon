@@ -556,8 +556,20 @@ class HookResult(BaseModel):
         if self.decision in (Decision.ALLOW, Decision.DENY, Decision.ASK):
             hook_output["decision"] = {"behavior": self.decision.value}
 
-        if self.context:
-            hook_output["additionalContext"] = "\n\n".join(self.context)
+        # The reason shares additionalContext with context, because the nested
+        # decision object permits only `behavior` and `updatedInput` — there is
+        # nowhere else in this event's schema for an explanation to go. Without
+        # this the refusal arrived bare: AutoApproveReadsHandler denies a
+        # non-read tool with a three-line explanation that was discarded in
+        # full, leaving the user refused and told nothing. The sibling
+        # PreToolUse formatter has always emitted permissionDecisionReason.
+        explanation: list[str] = []
+        if self.reason and self.decision in (Decision.DENY, Decision.ASK):
+            explanation.append(self.reason)
+        explanation.extend(self.context)
+
+        if explanation:
+            hook_output["additionalContext"] = "\n\n".join(explanation)
 
         if self.guidance:
             hook_output["guidance"] = self.guidance
