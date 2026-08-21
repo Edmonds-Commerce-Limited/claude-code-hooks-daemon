@@ -1560,12 +1560,6 @@ When you background a long-lived process:
 
 Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
 
-<!-- handler: git-hooks-executable-fixer -->
-
-## git_hooks_executable_fixer — auto-fixes non-executable git hooks
-
-When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
-
 <!-- handler: validate-eslint-on-write -->
 
 ## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
@@ -1639,6 +1633,35 @@ syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
 globs. The project-wide `daemon.exclude_paths` applies here too; the two are
 additive and neither overrides the other.
 
+<!-- handler: markdown-table-formatter -->
+
+## markdown_table_formatter — markdown tables are auto-aligned
+
+After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-formatted via `mdformat + mdformat-gfm` so that table pipes are aligned and column widths are consistent. The handler is non-terminal and advisory — it never blocks, it just rewrites the file on disk.
+
+**What changes:**
+
+- Table pipes are aligned vertically and delimiter rows widened to match cell widths.
+- Ordered lists keep consecutive numbering (`1.` `2.` `3.`).
+- `---` thematic breaks are preserved (mdformat's 70-underscore default is post-processed back).
+- Asterisks in table cells are escaped (`*` → `\*`) as required by GFM.
+
+**The advisory names exactly what changed in THIS file** — e.g. `Reformatted markdown in NOTES.md: aligned table pipes, renumbered ordered lists` — never the full menu above. If mdformat changed the file in a way none of the four categories explains, the advisory falls back to a generic `Reformatted markdown in NOTES.md` rather than naming a transformation that did not happen.
+
+**Exempt:** anything under a plan's `JOURNAL/` directory is NEVER reformatted — day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`, Plan 00163) and any other file in there. A journal is an append-only, byte-stable log; rewriting it would trip the `journal-append-only` check. The exemption is by LOCATION as well as by filename, so a mis-named day-file is still safe.
+
+**Ad-hoc formatting of existing files:**
+
+```
+bin/hooks-daemon format-markdown <path>
+```
+
+<!-- handler: git-hooks-executable-fixer -->
+
+## git_hooks_executable_fixer — auto-fixes non-executable git hooks
+
+When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
+
 <!-- handler: recovery-cron-advisor -->
 
 ## recovery_cron_advisor — failsafe recovery cron lifecycle advisory
@@ -1710,29 +1733,6 @@ handlers:
   post_tool_use:
     recovery_cron_advisor:
       enabled: false
-```
-
-<!-- handler: markdown-table-formatter -->
-
-## markdown_table_formatter — markdown tables are auto-aligned
-
-After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-formatted via `mdformat + mdformat-gfm` so that table pipes are aligned and column widths are consistent. The handler is non-terminal and advisory — it never blocks, it just rewrites the file on disk.
-
-**What changes:**
-
-- Table pipes are aligned vertically and delimiter rows widened to match cell widths.
-- Ordered lists keep consecutive numbering (`1.` `2.` `3.`).
-- `---` thematic breaks are preserved (mdformat's 70-underscore default is post-processed back).
-- Asterisks in table cells are escaped (`*` → `\*`) as required by GFM.
-
-**The advisory names exactly what changed in THIS file** — e.g. `Reformatted markdown in NOTES.md: aligned table pipes, renumbered ordered lists` — never the full menu above. If mdformat changed the file in a way none of the four categories explains, the advisory falls back to a generic `Reformatted markdown in NOTES.md` rather than naming a transformation that did not happen.
-
-**Exempt:** anything under a plan's `JOURNAL/` directory is NEVER reformatted — day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`, Plan 00163) and any other file in there. A journal is an append-only, byte-stable log; rewriting it would trip the `journal-append-only` check. The exemption is by LOCATION as well as by filename, so a mis-named day-file is still safe.
-
-**Ad-hoc formatting of existing files:**
-
-```
-bin/hooks-daemon format-markdown <path>
 ```
 
 <!-- handler: git-upstream-checker -->
