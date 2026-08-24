@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00265: static type safe handler results](00265-static-type-safe-handler-results/PLAN.md) - In Progress (three guards detect a handler returning a decision its event cannot deliver, but none makes it unwritable; per-event bases narrow `handle()` once so the constraint is inherited, verified under strict mypy and Pydantic before any production change)
-
 - [00264: cap the size of a GitHub issue/PR comment](00264-github-comment-size-cap/PLAN.md) - Not Started (field report: agent sessions flooded two issues with 44,467- and 22,398-character comments until neither ticket's state was findable by the humans reading it; a PreToolUse cap on `gh` comment bodies steering the content into `JOURNAL/`, plus seven open questions the report's proposed design asserts rather than settles)
 
 - [00252: guards for premises no write-time hook sees](00252-guards-for-premises-no-write-time-hook-sees/PLAN.md) - Not Started (two defects, one argument from Core Standard 15's corollary: the ambient-git-premise class Plan 00245 fixed seven times by hand without a guard, and the fact that no guard inspects STAGED CONTENT for secret-list terms, so a file arriving by `mv` reached a pushed commit)
@@ -165,6 +163,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00265: static type safe handler results](Completed/00265-static-type-safe-handler-results/PLAN.md) - Complete at `6fc2db3a` + the commit that archives it (an undeliverable decision is now unwritable, not merely detectable: per-event bases narrow `handle()` once and all 84 handlers inherit it; a shipped example whose `SessionStart` refusal had never blocked anything was found and fixed en route)
 
 - [00209: field feedback — daemon self-observability](Completed/00209-field-feedback-daemon-self-observability/PLAN.md) - Complete (verdict log + `hooks-daemon verdicts`, verified against a live daemon; Phase 3's investigation then found 15 phantom handlers in the shipped config template and extended the QA guard that could not see them)
 
@@ -1235,15 +1235,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 265 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 217 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 218 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 35 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 34 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 35 + 217 + 6 = **258 folders**, spanning
+- **Folder-to-number reconciliation**: 34 + 218 + 6 = **258 folders**, spanning
   **255 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1254,10 +1254,18 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a sub-agent
   that then found Plan 00208 already covered the work). 255 + 10 = 265. ✅
 
-- **Last reconciled by**: the Plan 00265 creation — one new folder in the plan
+- **Last reconciled by**: the Plan 00265 closure — the folder moved from the
+  plan root into `Completed/`, so Active fell by one and Completed rose by one
+  while Total and Cancelled were untouched. Counts recounted from disk at this
+  commit (34 root, 218 `Completed/`, 6 `Cancelled/`, 255 distinct numbers
+  against a counter of 266). The counter reads 266 rather than 265 because
+  Plan 00266 was scaffolded in the same session; its folder and index row land
+  in the NEXT commit, so it is deliberately absent from the 34 counted here.
+
+- **Before that**: the Plan 00265 creation — one new folder in the plan
   root and the counter advanced by `mkplan.bash`, so Total and Active each rose
   by one while Completed and Cancelled were untouched. Counts recounted from
-  disk at this commit (35 root, 217 `Completed/`, 6 `Cancelled/`, 255 distinct
+  disk at that commit (35 root, 217 `Completed/`, 6 `Cancelled/`, 255 distinct
   numbers against a counter of 265). That recount also corrected the previous
   entry's figures, which recorded 35 root / 216 `Completed/` against stats
   reading 34 / 217 — the block disagreed with itself and with disk.

@@ -1,6 +1,6 @@
 # Plan 00265: static type safe handler results
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-24
 **Owner**: joseph
 **Priority**: Medium
@@ -218,11 +218,19 @@ guard.
 
 ## Success Criteria
 
-- [ ] A `SessionStart` handler returning DENY fails `./scripts/qa/llm_qa.py all`
-- [ ] Every concrete handler descends from its event's base, enforced by a test
-- [ ] `merge_pseudo_results` cannot produce an undeliverable decision
-- [ ] All existing response-contract tests still pass unchanged
-- [ ] QA green, daemon restarts RUNNING, client-mode fixture verified
+- [x] A `SessionStart` handler returning DENY fails `./scripts/qa/llm_qa.py all`
+  — `tests/integration/test_static_type_safety_is_enforced.py` runs a real
+  mypy over two fixtures pinning 14 deliberate violations, and pytest is
+  part of the QA suite
+- [x] Every concrete handler descends from its event's base, enforced by a test
+  — and a second sweep asserts each `handle()` still DECLARES its tier,
+  since inheriting the base is not enough if the override re-widens
+- [x] `merge_pseudo_results` cannot produce an undeliverable decision
+- [x] All existing response-contract tests still pass unchanged
+- [x] QA green (23/23), daemon restarts RUNNING, client-mode fixture verified
+  — provisioned the real fixture, confirmed its daemon came up RUNNING on a
+  genuine client install, and validated a probe handler that IMPORTS an
+  event base to prove the `project_loader` fix on the surface that matters
 
 ## Risks & Mitigations
 
@@ -237,3 +245,13 @@ guard.
 
 - Design verified against real `HookResult`/`Handler` under strict mypy, before
   any production change
+- Phases 1-2 (result hierarchy + per-event bases) at `999fdbba`
+- Phase 4 (pseudo-event merge clamped to the trigger's tier) at `557f9cc2`
+- Factory-form blind spot in the AST scan closed at `0877bbf0`
+- Phase 3 groundwork (`Self` factories, one shared discovery predicate) at
+  `32914462`
+- Phases 3+5 (all 84 handlers reparented, docs, manifests, the shipped example
+  whose refusal never worked) at `6fc2db3a`
+- The CLAUDE.md handler-skeleton rewrite belonging to this plan landed
+  separately at `b2c38307`, swept there by the daemon's auto-commit on restart
+  rather than by intent — see the 2026-08-24 JOURNAL entry
