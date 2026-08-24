@@ -22,11 +22,9 @@ still costing seconds per invocation, so the question is no longer
 but "given that native hooks already exist, does a daemon-side AI handler
 earn its cost at all, and for which specific judgements" (`DECISIONS.md` §4).
 
-Two real false positives surfaced *while this plan was being written* —
-`nitpick.hedging_language` flagging honest uncertainty that named its own
-resolution path, and `qa_suppression` blocking a comment that argued
-*against* a suppression it happened to name — and both are used as the
-concrete, evidenced motivation for what to build, rather than a hypothetical
+Two real false positives surfaced *while this plan was being written* — in
+`nitpick.hedging_language` and `qa_suppression` — and are the concrete,
+evidenced motivation for what to build, rather than a hypothetical
 (`DECISIONS.md` §0).
 
 **Headline finding**: Claude Code does support AI-driven hooks natively —
@@ -37,32 +35,29 @@ official docs, and confirmed to run **in parallel** with this daemon's own
 COMPOUND, not that the latency is free: the tool call still blocks on the
 slowest hook, so a `prompt` hook on `PreToolUse` still costs seconds.
 
-**Two constraints govern adopting a native hook here**, both measured against
-the code rather than inferred (`RESEARCH-claude-code-native-hooks.md`):
+**Native hooks have now been run live in this repository — read
+`EXPERIMENTS.md` before writing any native-hook config.** Summary of what
+constrains adoption: a native hook must be added ALONGSIDE the daemon wrapper
+(`reconcile_settings_hooks` is additive per EVENT, so a replacement is never
+restored); it must carry a `matcher` leaving `Edit`/`Write` reachable, because
+unparseable model output FAILS CLOSED and an unscoped hook denies the very
+tools needed to remove it; and that matcher forces the one layout
+`validate_hook_commands` misreports, which is why Task 4.0 comes first.
 
-- `reconcile_settings_hooks` is additive per EVENT, not per entry. A native
-  hook must be added ALONGSIDE the daemon wrapper — replace it and the
-  wrapper is never restored, and every handler on that event goes dark.
-- `validate_hook_commands` misreports two of the three layouts for doing that
-  as registration faults. Only Layout B (appended after the daemon command,
-  same entry) is clean today, which is why Task 4.0 fixes the validator
-  before Task 4.1 prototypes anything.
+**The decisive finding, and it arrived from experiment rather than reading**:
+a native hook's prompt does NOT have to be a static string. The `PreToolUse`
+payload carries `tool_use_id`, which the daemon's hook and a native `agent`
+hook both receive independently — so the daemon can compose a per-event prompt,
+key it by that id, and the agent hook fetches it. Measured working end to end
+(`EXPERIMENTS.md` §6).
 
-So native hooks are adoptable here, but not quite for free: one small
-validator fix comes first.
-
-**Phase 1's conclusions have now been tested live** — see `EXPERIMENTS.md`.
-A `prompt` hook was registered in this repository and triggered. It works;
-it also locked the session out of `Edit`/`Write` when its model answered in
-prose, because unparseable output FAILS CLOSED. Read that document before
-writing any native-hook config.
-
-**The decisive finding for what to build daemon-side**: native hooks see only
-raw event JSON, never a *prior daemon-side regex match*. That rules them out
-for **confirm-the-positive** (`DECISIONS.md` §3c) — the safest way found to
+That makes **confirm-the-positive** (`DECISIONS.md` §3c) reachable natively
+after all: the daemon runs its regex first and invokes the model only on an
+existing match, with daemon-computed context. It is the safest way found to
 let AI influence a shipping *blocking* handler, since it can only ever remove
-a block, never add one — which is also the design this plan's live evidence
-most directly motivates.
+a block, never add one — and it needs no API credentials of the daemon's own,
+because Claude Code makes the model call. This is now the plan's leading
+architecture.
 
 ## Goals
 
@@ -212,6 +207,10 @@ brainstorm, mechanism mapping, and ranking.
   needed to remove it — and a matcher forces **Layout A**, which is why Task
   4.0 is a prerequisite rather than a tidy-up. Prototype an ADVISORY judgement
   only: Findings 9/10 show a native hook cannot deliver a readable block.
+- [ ] ⬜ **Task 4.1b**: Build out DYNAMIC PROMPTING — the leading architecture.
+  Design, constraints and a working probe are in `EXPERIMENTS.md` §6 and
+  `prototype/dynamic-prompt-probe.sh`. Non-negotiable: a missing prompt file
+  MUST mean allow, so losing the ordering race degrades to today's behaviour.
 - [ ] ⬜ **Task 4.2**: Evaluate the prototype; decide whether it earns
   daemon-side infrastructure or stays a native experiment.
 - [ ] ⬜ **Task 4.3**: Repeat for #4 and #13 if #3's prototype proves the

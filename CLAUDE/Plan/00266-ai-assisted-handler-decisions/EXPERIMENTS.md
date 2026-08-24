@@ -191,6 +191,115 @@ answered separately from the behaviour under test.
 
 ---
 
+## Experiment 5 — Latency, measured properly
+
+An earlier version of this document called latency "not cleanly measurable from
+inside the session", on the grounds that the gap between two tool calls is
+dominated by the agent's own generation time. That reasoning was wrong: it only
+applies to measuring *between* turns. Measured *within a single tool call* the
+confound disappears entirely.
+
+**Method**: a `command` hook stamps `date +%s%3N` into a file at the start of the
+hook phase. The Bash command then stamps its own start time. The difference is
+the hook phase duration, with no generation time inside it.
+
+| Configuration               | Samples (ms)     | Median       |
+| --------------------------- | ---------------- | ------------ |
+| Daemon `command` hooks only | 53, 51, 48       | **~51 ms**   |
+| Daemon + one `prompt` hook  | 1230, 1330, 1007 | **~1230 ms** |
+
+| #   | Finding                                                                              | Note                                                                                                                                                                            |
+| --- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 13  | A `prompt` hook costs **~1.0–1.3 s**, roughly **24×** the daemon's entire round trip | The baseline matches the ~45 ms documented for the forwarder path, so the method is sound                                                                                       |
+| 14  | That figure is a **floor, not a typical cost**                                       | The measured hook had the simplest possible prompt — a constant response, no `$ARGUMENTS`, nothing to reason about. A real judge reads the event and weighs a nuanced criterion |
+
+This is the number the plan needed. It reframes the event-choice question
+concretely: ~1.2 s is invisible on `Stop` or `SessionStart`, where the user is
+already waiting, and unacceptable on `PreToolUse`, which this daemon exists to
+keep at ~45 ms.
+
+---
+
+## Experiment 6 — Dynamic prompting: the daemon composes, a native hook fetches
+
+**This experiment tests an idea raised by the project owner**, and it is the
+most consequential result in this document. The idea: have the daemon respond
+first, compose its own prompt, key it by a UUID, and have the native hook fetch
+the real prompt by that key — making the native hook's prompt **dynamic and
+daemon-authored** rather than a static string frozen in `settings.json`.
+
+### The handoff problem solves itself
+
+The proposal assumed a UUID would have to be minted and passed. It does not:
+the `PreToolUse` payload **already contains `tool_use_id`**, a unique per-event
+identifier, and *both* hooks receive the same payload independently. Captured
+live, the payload carries:
+
+```
+session_id, transcript_path, cwd, prompt_id, permission_mode,
+effort, hook_event_name, tool_name, tool_input, tool_use_id
+```
+
+So both sides derive the same key from the same event, and **no coordination
+channel is needed at all**.
+
+### Setup
+
+- A `command` hook (`prototype/dynamic-prompt-probe.sh`) reads the payload,
+  extracts `tool_use_id`, decides a verdict, and writes
+  `untracked/prompts/<tool_use_id>.txt` containing the instruction the model
+  should be given **for this specific event**.
+- An `agent` hook — `prompt` hooks cannot do this, they have no tool access —
+  told to read `untracked/prompts/<tool_use_id>.txt` using the `tool_use_id`
+  from its own input, follow whatever it finds, and fall back to `{"ok": true}`
+  if the file is absent.
+
+### Result: it works, in both directions
+
+| #   | Finding                                                          | Evidence                                                                                                                                                                       |
+| --- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 15  | **Dynamic prompting works end-to-end**                           | A command carrying the sentinel was denied with `DYNAMIC_PROMPT_FETCHED_BY_TOOL_USE_ID` — a string that existed only in a file the daemon-side hook wrote milliseconds earlier |
+| 16  | The allow path works too                                         | A command without the sentinel ran untouched, driven by the same mechanism writing an allow instruction                                                                        |
+| 17  | One instruction file per event, correctly keyed                  | Three `toolu_*.txt` files, each holding exactly the verdict for its own event                                                                                                  |
+| 18  | **`agent` hooks present denials far better than `prompt` hooks** | `Agent hook error: Agent hook condition was not met: <reason>` — the full prompt is **not** echoed, unlike Finding 10                                                          |
+| 19  | The race did not materialise in practice                         | The daemon-side hook (~51 ms, Finding 13) finishes long before an agent hook's first `Read`. It remains a race *in principle* — hooks run in parallel, nothing orders them     |
+
+### Why this matters more than anything else measured here
+
+It **overturns Finding 4's consequence**. This document previously concluded
+that native hooks see only raw event JSON, therefore cannot see a prior
+daemon-side regex match, therefore **confirm-the-positive is unreachable
+natively** and must be daemon-side. That conclusion is now wrong.
+
+With this mechanism the daemon runs its regex first and writes either "adjudicate
+this, here is the context" or "respond `{ok: true}`" — so the model is invoked
+*only on an existing match*, with daemon-computed context, which is exactly the
+confirm-the-positive shape.
+
+It also inverts the economics. The model call is made by **Claude Code**, on the
+user's existing authentication and billing. A daemon-side implementation
+(Mechanism B) would need the daemon to hold its own API credentials — a
+deployment burden this project has never taken on. Dynamic prompting gets
+daemon-authored judgement *without* that.
+
+### The remaining objections, honestly
+
+- **`agent` hooks are documented as experimental** ("Behavior and configuration
+  may change"). This whole mechanism rests on that.
+- **The ordering is a race, not a guarantee.** It is currently won by a wide
+  margin (~51 ms vs seconds), but nothing in the documentation promises it.
+  A daemon that is slow for one event — a large diff, a cold cache — could lose.
+  The fallback must therefore be safe by construction: file absent ⇒ allow, so
+  losing the race degrades to today's behaviour rather than to a spurious block.
+- **Fail-closed still applies** (Finding 3). Prose from the model still denies.
+- **Latency is still ~1.2 s minimum** (Finding 13), and an `agent` hook that
+  performs a `Read` will be slower than the `prompt` hook measured there.
+
+None of these is fatal, and together they describe a real design rather than a
+blocker. This is the strongest candidate architecture the plan has produced.
+
+---
+
 ## What this changes in the plan
 
 1. `RESEARCH-...md`'s "adoptable today" framing is confirmed for *mechanism*
@@ -207,24 +316,30 @@ answered separately from the behaviour under test.
    prose-becomes-reason, error-framing, prompt-echo) belong in
    `CLAUDE/ARCHITECTURE.md` if this project ever ships native-hook guidance,
    since no reader can derive any of them from the official docs.
-4. **The native-vs-daemon question is now decided for blocking judgements**,
-   and Phase 1 had left it open. Findings 3, 9 and 10 together mean a native
-   hook cannot deliver a *readable* block: its error mode creates a block, and
-   a real block is indistinguishable from an error and costs the whole prompt
-   in context. Task 4.1 should therefore prototype a native hook only for an
-   **advisory** judgement, and any blocking candidate — `IDEAS.md` #2 and #16,
-   both B-confirm — belongs daemon-side where the deny reason can be authored.
+4. ~~The native-vs-daemon question is decided against native hooks for blocking
+   judgements.~~ **Superseded by Experiment 6.** That conclusion rested on
+   `prompt` hooks — which echo the whole prompt into every denial (Finding 10)
+   and cannot read anything (Finding 4). `agent` hooks do neither: they present
+   denials cleanly (Finding 18) and can fetch a daemon-composed prompt
+   (Finding 15). Blocking candidates are therefore back on the table for a
+   native implementation, via dynamic prompting rather than a static prompt.
+5. **Dynamic prompting (Experiment 6) is now the plan's leading architecture**
+   and Phase 4 should be re-scoped around it. It is the only mechanism found
+   that gives daemon-authored, context-aware judgement *without* the daemon
+   holding its own API credentials. Phase 2/3's daemon-side designs remain the
+   fallback if `agent` hooks' experimental status proves unstable.
+6. Any dynamic-prompting design must make the missing-file case **allow**, so
+   that losing the ordering race degrades to today's behaviour and never to a
+   spurious block (Finding 19).
 
 ---
 
 ## Still unmeasured
 
-- **Latency cost per invocation.** Not measured — the lockout in Experiment 2
-  ended the run before a controlled timing comparison could be set up, and
-  Experiment 3 was kept deliberately short.
 - **Token/billing cost per invocation.** Still undocumented and still
-  unmeasured; it remains the plan's largest open unknown, and Finding 10
-  (the whole prompt echoed per denial) suggests the context cost is not small.
+  unmeasured; now the plan's largest remaining unknown. Finding 13 gives a
+  latency floor but says nothing about tokens, and an `agent` hook that
+  performs a `Read` will consume more than the `prompt` hook measured there.
 - **The reverse disagreement: a native DENY against a daemon ALLOW.**
   Experiment 4 settled native-allow vs daemon-deny (the deny wins). The mirror
   case is already implied by Experiment 3 — the sentinel denial fired on a
