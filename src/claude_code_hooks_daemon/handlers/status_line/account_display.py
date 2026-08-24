@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
 
 _CONF_RELATIVE_PATH = (".claude", ".last-launch.conf")
@@ -32,7 +33,7 @@ _username_reader: MtimeCachedFile[str | None] = MtimeCachedFile(
 )
 
 
-class AccountDisplayHandler(Handler):
+class AccountDisplayHandler(StatusLineHandlerBase):
     """Display Claude account username in status line."""
 
     def __init__(self) -> None:
@@ -47,14 +48,14 @@ class AccountDisplayHandler(Handler):
         """Always run for status events."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Extract and format account username.
 
         Args:
             hook_input: Status event input (not used)
 
         Returns:
-            HookResult with username in context list, or empty list if unavailable
+            AdvisoryResult with username in context list, or empty list if unavailable
         """
         try:
             username = _username_reader.read(Path.home().joinpath(*_CONF_RELATIVE_PATH))
@@ -62,13 +63,13 @@ class AccountDisplayHandler(Handler):
             # has. Tuning must not change what the line displays (Plan 00238
             # Non-Goals), and `if not username` would have silently dropped it.
             if username is None:
-                return HookResult(context=[])
+                return AdvisoryResult(context=[])
 
-            return HookResult(context=[f"👤 {username} |"])
+            return AdvisoryResult(context=[f"👤 {username} |"])
 
         except Exception:
             # Silent fail - don't break status line for account display issues
-            return HookResult(context=[])
+            return AdvisoryResult(context=[])
 
     def get_claude_md(self) -> str | None:
         return None

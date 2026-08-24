@@ -4,7 +4,8 @@ import re
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
@@ -105,7 +106,7 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
 )
 
 
-class DestructiveGitHandler(Handler):
+class DestructiveGitHandler(PreToolUseHandlerBase):
     """Block destructive git commands that permanently destroy data."""
 
     def __init__(self) -> None:
@@ -185,11 +186,11 @@ class DestructiveGitHandler(Handler):
             "The LLM is NOT ALLOWED to run destructive git commands. Ask the user to do it."
         )
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block the destructive command with explanation."""
         command = get_bash_command(hook_input)
         if not command:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         # Determine which pattern matched and provide its reason. Both matches() and
         # handle() consume the same ordered mapping, so they can never drift.
@@ -205,7 +206,7 @@ class DestructiveGitHandler(Handler):
         else:
             reason = self._verbose_reason(specific_reason, command)
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=reason,
         )

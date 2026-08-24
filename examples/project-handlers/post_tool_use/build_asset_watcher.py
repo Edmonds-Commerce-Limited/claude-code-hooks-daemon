@@ -9,7 +9,8 @@ source patterns to your project's asset structure.
 
 from typing import Any
 
-from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
+from claude_code_hooks_daemon.core import AcceptanceTest, BlockingResult, TestType
+from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.utils import get_file_path
 
@@ -21,11 +22,17 @@ _SOURCE_PATTERNS = (
 )
 
 
-class BuildAssetWatcherHandler(Handler):
+class BuildAssetWatcherHandler(PostToolUseHandlerBase):
     """Remind to rebuild assets after editing frontend source files.
 
     Frontend source files (TypeScript, SCSS) must be compiled before
     they take effect. This handler provides advisory reminders.
+
+    This handler only ever advises, but `PostToolUse` is a BLOCKING event —
+    it can deny, just not ask — so subclassing `PostToolUseHandlerBase`
+    narrows `handle()` to `BlockingResult` rather than the advisory-only
+    tier. The narrowing tracks what the EVENT can deliver, not what this
+    particular handler happens to do with it.
     """
 
     def __init__(self) -> None:
@@ -43,9 +50,9 @@ class BuildAssetWatcherHandler(Handler):
             return False
         return any(pattern in file_path for pattern in _SOURCE_PATTERNS)
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Provide reminder about rebuilding assets."""
-        return HookResult(
+        return BlockingResult(
             decision=Decision.ALLOW,
             context=[
                 "ASSET BUILD REMINDER:",

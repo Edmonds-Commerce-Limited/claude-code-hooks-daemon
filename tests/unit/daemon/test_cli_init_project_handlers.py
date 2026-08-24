@@ -89,9 +89,15 @@ class TestInitProjectHandlers:
         assert example_handler.exists()
         assert example_test.exists()
 
-        # Verify handler content has Handler subclass
+        # Verify the handler subclasses its EVENT's base, not plain `Handler`.
+        # The scaffold lands in pre_tool_use/, so the gating tier is the correct
+        # one. This matters because the scaffold is what every client project
+        # starts from: emitting plain `Handler` while PROJECT_HANDLERS.md tells
+        # people to use the event base put the tool and the docs in conflict.
         handler_content = example_handler.read_text()
-        assert "class ExampleHandler(Handler):" in handler_content
+        assert "class ExampleHandler(PreToolUseHandlerBase):" in handler_content
+        assert "PreToolUseHandlerBase" in handler_content
+        assert "-> GatingResult:" in handler_content
         assert "def matches(" in handler_content
         assert "def handle(" in handler_content
         assert "def get_acceptance_tests(" in handler_content

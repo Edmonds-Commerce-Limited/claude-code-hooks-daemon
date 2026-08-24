@@ -9,7 +9,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 
 
@@ -35,7 +36,7 @@ def _absolute_example(file_path: str) -> str:
         return ""
 
 
-class AbsolutePathHandler(Handler):
+class AbsolutePathHandler(PreToolUseHandlerBase):
     """Require absolute paths for Read/Write/Edit tool file_path parameters.
 
     This handler enforces that all file operations use absolute paths to avoid
@@ -66,13 +67,13 @@ class AbsolutePathHandler(Handler):
         # Check if path is relative (doesn't start with /)
         return not file_path.startswith("/")
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block relative paths with explanation."""
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         file_path = tool_input.get("file_path", "")
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=(
                 f"BLOCKED: {tool_name} tool requires absolute path\n\n"

@@ -16,8 +16,9 @@ import logging
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
+from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ _cache_reader: MtimeCachedFile[dict[str, Any]] = MtimeCachedFile(
 )
 
 
-class UpgradeNotifierHandler(Handler):
+class UpgradeNotifierHandler(StatusLineHandlerBase):
     """Show a daemon-upgrade-available indicator on the status line."""
 
     def __init__(self) -> None:
@@ -76,14 +77,14 @@ class UpgradeNotifierHandler(Handler):
         """Always run for status line events."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Return the upgrade-notifier segment, failing safe on any error."""
         try:
             segment = self._detect_upgrade_segment()
         except Exception as e:
             logger.debug("Failed to read version cache: %s", e)
-            return HookResult(context=[])
-        return HookResult(context=[segment] if segment else [])
+            return AdvisoryResult(context=[])
+        return AdvisoryResult(context=[segment] if segment else [])
 
     def _detect_upgrade_segment(self) -> str | None:
         """Return the upgrade-arrow segment text, or None if nothing to show."""

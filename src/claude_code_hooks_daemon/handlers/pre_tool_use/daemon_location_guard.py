@@ -4,8 +4,9 @@ import re
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
@@ -23,7 +24,7 @@ _CD_INTO_DAEMON_DIR = re.compile(
 )
 
 
-class DaemonLocationGuardHandler(Handler):
+class DaemonLocationGuardHandler(PreToolUseHandlerBase):
     """Prevent agents from cd-ing into .claude/hooks-daemon and running commands.
 
     This handler blocks attempts to change directory into the hooks-daemon
@@ -59,7 +60,7 @@ class DaemonLocationGuardHandler(Handler):
 
         return bool(_CD_INTO_DAEMON_DIR.search(command))
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block cd into hooks-daemon with helpful guidance."""
         command = hook_input.get("tool_input", {}).get("command", "")
 
@@ -94,7 +95,7 @@ class DaemonLocationGuardHandler(Handler):
             "    .claude/hooks-daemon.yaml → daemon_location_guard.enabled: false"
         )
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=reason,
             guidance=guidance,

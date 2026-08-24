@@ -5,7 +5,8 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.constants.paths import ProjectPath
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
 # Both worktree root prefixes — untracked/ is manually managed, .claude/ is Claude Code managed
@@ -15,7 +16,7 @@ _WORKTREE_PREFIXES = (ProjectPath.WORKTREES_DIR, ProjectPath.CLAUDE_WORKTREES_DI
 _WORKTREE_RE = r"(?:untracked/worktrees|\.claude/worktrees)"
 
 
-class WorktreeFileCopyHandler(Handler):
+class WorktreeFileCopyHandler(PreToolUseHandlerBase):
     """Prevent copying files between worktrees and main repo."""
 
     def __init__(self) -> None:
@@ -62,11 +63,11 @@ class WorktreeFileCopyHandler(Handler):
 
         return False
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block worktree file copying."""
         command = get_bash_command(hook_input)
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=(
                 "❌ BLOCKED: Attempting to copy files from worktree to main repo\n\n"

@@ -35,7 +35,8 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.constants.protocol import HookInputField
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult
+from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
     _CONTEXT_TIER_200K_CRITICAL_PCT,
@@ -72,7 +73,7 @@ _SESSION_ID_FALLBACK = "unknown"
 _UNSAFE_SESSION_CHARS = re.compile(r"[^A-Za-z0-9_.-]")
 
 
-class ContextSidecarHandler(Handler):
+class ContextSidecarHandler(StatusLineHandlerBase):
     """Write an observe-only context-state sidecar for the PTY supervisor."""
 
     def __init__(self) -> None:
@@ -105,14 +106,14 @@ class ContextSidecarHandler(Handler):
         """Run on every status event (writing is cheap and idempotent)."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Write the context-state sidecar; render/inject nothing.
 
         Args:
             hook_input: Status event input with model and context_window data
 
         Returns:
-            HookResult with an empty context (this handler is display-silent)
+            AdvisoryResult with an empty context (this handler is display-silent)
         """
         ctx_data = hook_input.get("context_window", {})
         used_pct = float(ctx_data.get("used_percentage") or 0)
@@ -144,7 +145,7 @@ class ContextSidecarHandler(Handler):
         }
 
         self._write_sidecar(session_id, payload)
-        return HookResult(context=[])
+        return AdvisoryResult(context=[])
 
     def _read_cost(self, hook_input: dict[str, Any]) -> float | None:
         """Extract session cost in USD if the payload carries it, else None.

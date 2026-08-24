@@ -34,7 +34,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.handlers.status_line.thread_registry import (
     _REGISTRY_SUBDIR,
     read_live_entries,
@@ -53,7 +54,7 @@ _WORKTREE_ISOLATION = "worktree"
 _MIN_THREADS_TO_ADVISE = 2
 
 
-class AgentIsolationAdvisorHandler(Handler):
+class AgentIsolationAdvisorHandler(PreToolUseHandlerBase):
     """Advise ``isolation: worktree`` when peers are already active in this checkout.
 
     Silent in the common case. It only speaks when ALL of:
@@ -104,11 +105,11 @@ class AgentIsolationAdvisorHandler(Handler):
 
         return self._count_live_threads() >= _MIN_THREADS_TO_ADVISE
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Suggest isolation, and name the case where the shared tree is correct."""
         live = self._count_live_threads()
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.ALLOW,
             context=[
                 f"🌳 CONCURRENT AGENTS: {live} live threads share this checkout\n\n"

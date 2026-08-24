@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, Timeout
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
 logger = logging.getLogger(__name__)
@@ -112,7 +113,7 @@ _GIT_SSH_BATCH_MODE = "ssh -oBatchMode=yes"
 _FETCH_THREAD_NAME = "status-git-branch-fetch"
 
 
-class GitBranchHandler(Handler):
+class GitBranchHandler(StatusLineHandlerBase):
     """Show current git branch with magicmonty-style status icons if in a git repo."""
 
     def __init__(self) -> None:
@@ -156,7 +157,7 @@ class GitBranchHandler(Handler):
         """Always run for status events."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Get current git branch with status icons and format for status line.
 
         Renders are served from a short per-cwd TTL cache (Plan 00155 T4) so a
@@ -168,21 +169,21 @@ class GitBranchHandler(Handler):
             hook_input: Status event input with workspace data
 
         Returns:
-            HookResult with formatted git branch + icons, or empty if not in git repo
+            AdvisoryResult with formatted git branch + icons, or empty if not in git repo
         """
         workspace = hook_input.get("workspace", {})
         cwd = workspace.get("current_dir") or workspace.get("project_dir")
 
         if not cwd or not Path(cwd).exists():
-            return HookResult(context=[])
+            return AdvisoryResult(context=[])
 
         cached = self._cached_render(cwd)
         if cached is not None:
-            return HookResult(context=cached)
+            return AdvisoryResult(context=cached)
 
         context = self._render_git_context(cwd)
         self._store_render(cwd, context)
-        return HookResult(context=context)
+        return AdvisoryResult(context=context)
 
     def _cached_render(self, cwd: str) -> list[str] | None:
         """Return the cached render for ``cwd`` if still within the TTL, else None.

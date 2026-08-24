@@ -26,7 +26,8 @@ import shlex
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
 # Escape hatch: MUST_SCAN_ROOT_BECAUSE="non-empty reason" bypasses the block.
@@ -124,7 +125,7 @@ def _segment_is_dangerous(segment: str) -> bool:
     return any(_is_dangerous_root(arg) for arg in args)
 
 
-class RootRecursionGuardHandler(Handler):
+class RootRecursionGuardHandler(PreToolUseHandlerBase):
     """Block recursive scanners (grep -r, find, fd, rg, ...) rooted at ``/``/home/etc."""
 
     def __init__(self) -> None:
@@ -143,8 +144,8 @@ class RootRecursionGuardHandler(Handler):
             return False
         return any(_segment_is_dangerous(seg) for seg in _SEGMENT_SPLIT_RE.split(command))
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        return HookResult(
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
+        return GatingResult(
             decision=Decision.DENY,
             reason=(
                 "BLOCKED: recursive scan rooted at a catastrophic location\n\n"

@@ -30,7 +30,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.strategies.comments.extractor import (
     CommentSpan,
@@ -93,7 +94,7 @@ def _breaches(span: CommentSpan, max_line_chars: int, max_block_lines: int) -> b
     return span.max_line_length > max_line_chars or span.line_count > max_block_lines
 
 
-class CommentSizeHandler(Handler):
+class CommentSizeHandler(PreToolUseHandlerBase):
     """Block/advise on over-long comments, tiered like plan-doc-size.
 
     Configuration options (set via config YAML):
@@ -215,23 +216,23 @@ class CommentSizeHandler(Handler):
 
         return bool(self._breaching_spans(content, strategy))
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny a GROWING over-limit comment; advise on same-size; silent on shrink."""
         file_path = get_file_path(hook_input)
         if not file_path:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         strategy = self._registry.get_strategy(file_path)
         if strategy is None:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         content_after = self._region_after(hook_input)
         if not content_after:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         breaching = self._breaching_spans(content_after, strategy)
         if not breaching:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         content_before = self._region_before(hook_input, file_path)
         chars_after = _total_comment_chars(content_after, strategy.syntax)
@@ -246,21 +247,21 @@ class CommentSizeHandler(Handler):
             if chars_before is not None and chars_after < chars_before:
                 # Shrinking is the remedy in progress -- always silent, or an
                 # over-limit comment could never be refactored down.
-                return HookResult(decision=Decision.ALLOW)
-            return HookResult(
+                return GatingResult(decision=Decision.ALLOW)
+            return GatingResult(
                 decision=Decision.ALLOW, context=[self._build_advisory(breaching, grew=False)]
             )
 
         if _has_justified_escape_hatch(content_after):
-            return HookResult(
+            return GatingResult(
                 decision=Decision.ALLOW, context=[self._build_advisory(breaching, grew=True)]
             )
         if self._mode == _MODE_WARN:
-            return HookResult(
+            return GatingResult(
                 decision=Decision.ALLOW, context=[self._build_advisory(breaching, grew=True)]
             )
 
-        return HookResult(decision=Decision.DENY, reason=self._build_deny_reason(breaching))
+        return GatingResult(decision=Decision.DENY, reason=self._build_deny_reason(breaching))
 
     def _describe(self, span: CommentSpan) -> str:
         parts: list[str] = []

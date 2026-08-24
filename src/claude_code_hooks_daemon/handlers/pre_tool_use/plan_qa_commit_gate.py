@@ -21,7 +21,8 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.plan_qa.context import staged_context
 from claude_code_hooks_daemon.plan_qa.report import format_advisory, format_block_reason
@@ -140,7 +141,7 @@ def _extract_commit_pathspecs(tokens: list[str]) -> list[str]:
     return pathspecs
 
 
-class PlanQaCommitGateHandler(Handler):
+class PlanQaCommitGateHandler(PreToolUseHandlerBase):
     """Warn-first cross-file plan QA gate on git commit."""
 
     def __init__(self) -> None:
@@ -169,12 +170,12 @@ class PlanQaCommitGateHandler(Handler):
         command = hook_input.get(HookInputField.TOOL_INPUT, {}).get(_FIELD_COMMAND, "")
         return _is_git_commit(_tokenise(command))
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         project_root = ProjectContext.project_root()
         plan_dir_rel = str(self._track_plans_in_project)
 
         if self._is_foreign_repo(hook_input, project_root):
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return GatingResult(decision=Decision.ALLOW, context=[])
 
         command = hook_input.get(HookInputField.TOOL_INPUT, {}).get(_FIELD_COMMAND, "")
         tokens = _tokenise(command)
@@ -187,7 +188,7 @@ class PlanQaCommitGateHandler(Handler):
                 pathspecs=_extract_commit_pathspecs(tokens),
             )
         except FileNotFoundError:
-            return HookResult(
+            return GatingResult(
                 decision=Decision.ALLOW,
                 context=[
                     f"⚠️  PLAN QA: configured plan directory {plan_dir_rel}/ does not exist — "
@@ -197,12 +198,12 @@ class PlanQaCommitGateHandler(Handler):
 
         findings = run_stage(Stage.COMMIT, context)
         if not findings:
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return GatingResult(decision=Decision.ALLOW, context=[])
 
         blockers = [finding for finding in findings if finding.level == Level.BLOCK]
         if blockers and self._plan_qa.commit_gate_mode == _MODE_BLOCK:
-            return HookResult(decision=Decision.DENY, reason=format_block_reason(blockers))
-        return HookResult(decision=Decision.ALLOW, context=[format_advisory(findings)])
+            return GatingResult(decision=Decision.DENY, reason=format_block_reason(blockers))
+        return GatingResult(decision=Decision.ALLOW, context=[format_advisory(findings)])
 
     @staticmethod
     def _is_foreign_repo(hook_input: dict[str, Any], project_root: Path) -> bool:

@@ -13,7 +13,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import (
     get_bash_command,
     get_bash_write_targets,
@@ -82,7 +83,7 @@ _STANDARD_ROOT_MARKDOWN_FILES: Final[frozenset[str]] = frozenset(
 )
 
 
-class MarkdownOrganizationHandler(Handler):
+class MarkdownOrganizationHandler(PreToolUseHandlerBase):
     """Enforce markdown file organization rules.
 
     CRITICAL: This handler must match legacy hook behavior EXACTLY.
@@ -413,11 +414,11 @@ class MarkdownOrganizationHandler(Handler):
         # Return highest numbered match (most recent)
         return sorted(matches_found, key=lambda p: p.name, reverse=True)[0]
 
-    def _check_claude_code_sync(self) -> HookResult | None:
+    def _check_claude_code_sync(self) -> GatingResult | None:
         """Check if plansDirectory in .claude/settings.json matches plan_workflow.directory.
 
         Returns:
-            HookResult with DENY if out of sync, None if in sync or enforcement disabled
+            GatingResult with DENY if out of sync, None if in sync or enforcement disabled
         """
         if not self._enforce_claude_code_sync or not self._track_plans_in_project:
             return None
@@ -426,7 +427,7 @@ class MarkdownOrganizationHandler(Handler):
         expected_value = f"./{self._track_plans_in_project}"
 
         if not settings_path.exists():
-            return HookResult.deny(
+            return GatingResult.deny(
                 reason=(
                     "BLOCKED: .claude/settings.json not found.\n\n"
                     "Plan workflow requires plansDirectory to be configured.\n\n"
@@ -440,7 +441,7 @@ class MarkdownOrganizationHandler(Handler):
             settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as e:
             logger.error(f"Failed to read .claude/settings.json: {e}")
-            return HookResult.deny(
+            return GatingResult.deny(
                 reason=(
                     "BLOCKED: Cannot read .claude/settings.json.\n\n"
                     f"Error: {e}\n\n"
@@ -450,7 +451,7 @@ class MarkdownOrganizationHandler(Handler):
 
         plans_directory = settings_data.get("plansDirectory")
         if plans_directory is None:
-            return HookResult.deny(
+            return GatingResult.deny(
                 reason=(
                     "BLOCKED: plansDirectory not set in .claude/settings.json.\n\n"
                     "Plan workflow requires plansDirectory to match daemon config.\n\n"
@@ -465,7 +466,7 @@ class MarkdownOrganizationHandler(Handler):
         normalised_expected = self._track_plans_in_project.lstrip("./")
 
         if normalised_actual != normalised_expected:
-            return HookResult.deny(
+            return GatingResult.deny(
                 reason=(
                     "BLOCKED: plansDirectory mismatch.\n\n"
                     f'  .claude/settings.json: "{plans_directory}"\n'
@@ -479,7 +480,7 @@ class MarkdownOrganizationHandler(Handler):
 
         return None
 
-    def handle_planning_mode_write(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle_planning_mode_write(self, hook_input: dict[str, Any]) -> GatingResult:
         """Handle planning mode write by creating numbered plan folder.
 
         For Write tool: Creates CLAUDE/Plan/{number}-{name}/PLAN.md alongside
@@ -493,13 +494,13 @@ class MarkdownOrganizationHandler(Handler):
             hook_input: Hook input data
 
         Returns:
-            HookResult with ALLOW decision and context about plan folder
+            GatingResult with ALLOW decision and context about plan folder
         """
         file_path = get_file_path(hook_input)
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
 
         if not self._track_plans_in_project or not file_path:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         # Enforce plansDirectory sync before processing plan writes
         sync_result = self._check_claude_code_sync()
@@ -515,7 +516,7 @@ class MarkdownOrganizationHandler(Handler):
 
         except FileNotFoundError as e:
             logger.error(f"Planning mode write failed - directory not found: {e}")
-            return HookResult(
+            return GatingResult(
                 decision=Decision.ALLOW,
                 context=[
                     f"Warning: Could not create plan folder. "
@@ -525,7 +526,7 @@ class MarkdownOrganizationHandler(Handler):
 
         except PermissionError as e:
             logger.error(f"Planning mode write failed - permission error: {e}")
-            return HookResult(
+            return GatingResult(
                 decision=Decision.ALLOW,
                 context=[
                     f"Warning: Permission denied creating plan folder in "
@@ -535,14 +536,14 @@ class MarkdownOrganizationHandler(Handler):
 
         except Exception as e:
             logger.error(f"Planning mode write failed: {e}", exc_info=True)
-            return HookResult(
+            return GatingResult(
                 decision=Decision.ALLOW,
                 context=[f"Warning: Could not create plan folder: {type(e).__name__}: {e}"],
             )
 
     def _handle_plan_write(
         self, hook_input: dict[str, Any], plan_base: Path, file_path: str
-    ) -> HookResult:
+    ) -> GatingResult:
         """Handle Write tool for planning mode — create numbered folder, ALLOW flat file.
 
         Creates the numbered plan folder with PLAN.md and returns ALLOW so the
@@ -558,7 +559,7 @@ class MarkdownOrganizationHandler(Handler):
             file_path: Path to the flat plan file being written
 
         Returns:
-            HookResult with ALLOW decision and context describing the numbered folder
+            GatingResult with ALLOW decision and context describing the numbered folder
         """
         content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("content", "")
 
@@ -603,11 +604,11 @@ class MarkdownOrganizationHandler(Handler):
                     f"See `{self._plan_workflow_docs}` for plan workflow conventions."
                 )
 
-        return HookResult(decision=Decision.ALLOW, context=context_parts)
+        return GatingResult(decision=Decision.ALLOW, context=context_parts)
 
     def _handle_plan_edit(
         self, hook_input: dict[str, Any], plan_base: Path, file_path: str
-    ) -> HookResult:
+    ) -> GatingResult:
         """Handle Edit tool for planning mode — sync edit to numbered folder.
 
         Args:
@@ -616,18 +617,18 @@ class MarkdownOrganizationHandler(Handler):
             file_path: Path to the flat plan file being edited
 
         Returns:
-            HookResult with ALLOW decision and optional sync context
+            GatingResult with ALLOW decision and optional sync context
         """
         old_string = hook_input.get(HookInputField.TOOL_INPUT, {}).get("old_string", "")
         new_string = hook_input.get(HookInputField.TOOL_INPUT, {}).get("new_string", "")
 
         plan_folder = self._find_matching_plan_folder(plan_base, file_path)
         if not plan_folder:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         plan_file = plan_folder / "PLAN.md"
         if not plan_file.exists():
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         current_content = plan_file.read_text(encoding="utf-8")
         if old_string and old_string in current_content:
@@ -635,12 +636,12 @@ class MarkdownOrganizationHandler(Handler):
             plan_file.write_text(updated, encoding="utf-8")
 
             rel_folder = plan_folder.relative_to(self._workspace_root)
-            return HookResult(
+            return GatingResult(
                 decision=Decision.ALLOW,
                 context=[f"Edit synced to: {rel_folder}/PLAN.md"],
             )
 
-        return HookResult(decision=Decision.ALLOW)
+        return GatingResult(decision=Decision.ALLOW)
 
     @staticmethod
     def _is_claude_memory_path(file_path: str) -> bool:
@@ -950,7 +951,7 @@ class MarkdownOrganizationHandler(Handler):
 
         return True  # Block — no rule matched
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Handle markdown write based on location.
 
         Planning mode writes are redirected to project structure.
@@ -966,14 +967,14 @@ class MarkdownOrganizationHandler(Handler):
 
         file_path = get_file_path(hook_input)
         if not file_path:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         # Check if this is a planning mode write to redirect
         if self._track_plans_in_project and self.is_planning_mode_write(file_path):
             return self.handle_planning_mode_write(hook_input)
 
         # Otherwise, deny with standard message
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=(
                 "MARKDOWN FILE IN WRONG LOCATION\n\n"
@@ -1006,14 +1007,14 @@ class MarkdownOrganizationHandler(Handler):
             ),
         )
 
-    def _deny_untracked_memory(self, target: str) -> HookResult:
+    def _deny_untracked_memory(self, target: str) -> GatingResult:
         """Specialist DENY for the forbid-untracked-memory policy.
 
         Distinct from the generic wrong-location message: it explains the policy,
         confirms reads stay allowed (for migration), and routes durable knowledge
         into tracked project docs using progressive disclosure. Plan 00131.
         """
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=(
                 "UNTRACKED CLAUDE MEMORY IS DISABLED FOR THIS PROJECT\n\n"

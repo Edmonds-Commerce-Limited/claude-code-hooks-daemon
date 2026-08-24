@@ -4,7 +4,8 @@ import re
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
 
@@ -25,7 +26,7 @@ _ESCAPE_HATCH_PATTERN = re.compile(
 )
 
 
-class GitStashHandler(Handler):
+class GitStashHandler(PreToolUseHandlerBase):
     """Block or warn about git stash based on mode configuration.
 
     Modes:
@@ -85,12 +86,12 @@ class GitStashHandler(Handler):
 
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block or warn about git stash based on mode configuration."""
         mode = getattr(self, "_mode", "deny")
 
         if mode == "deny":
-            return HookResult(
+            return GatingResult(
                 decision=Decision.DENY,
                 reason=(
                     "BLOCKED: git stash\n\n"
@@ -105,7 +106,7 @@ class GitStashHandler(Handler):
                 ),
             )
         else:
-            return HookResult(
+            return GatingResult(
                 decision=Decision.ALLOW,
                 context=[
                     "WARNING: git stash detected",

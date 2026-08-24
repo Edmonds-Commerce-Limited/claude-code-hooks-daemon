@@ -30,7 +30,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
 logger = logging.getLogger(__name__)
@@ -144,7 +145,7 @@ _LSP_OP_REFERENCES = "findReferences"
 _LSP_OP_WORKSPACE_SYMBOL = "workspaceSymbol"
 
 
-class LspEnforcementHandler(Handler):
+class LspEnforcementHandler(PreToolUseHandlerBase):
     """Enforce LSP tool usage instead of Grep/Bash grep for symbol lookups.
 
     Detects patterns like 'class ClassName', 'def func_name', PascalCase identifiers,
@@ -356,7 +357,7 @@ class LspEnforcementHandler(Handler):
         # Plain identifiers -> workspaceSymbol (broad search) or findReferences
         return _LSP_OP_WORKSPACE_SYMBOL
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Handle a symbol-like grep, steering toward LSP tools."""
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         pattern = self._extract_search_pattern(hook_input, tool_name) or ""
@@ -373,16 +374,16 @@ class LspEnforcementHandler(Handler):
 
         # Determine decision based on mode
         if mode == LspEnforcementMode.ADVISORY:
-            return HookResult(decision=Decision.ALLOW, context=[reason])
+            return GatingResult(decision=Decision.ALLOW, context=[reason])
 
         if mode == LspEnforcementMode.STRICT:
-            return HookResult(decision=Decision.DENY, reason=reason)
+            return GatingResult(decision=Decision.DENY, reason=reason)
 
         # block_once: deny first time, allow subsequent
         block_count = self._get_block_count()
         if block_count == 0:
-            return HookResult(decision=Decision.DENY, reason=reason)
-        return HookResult(decision=Decision.ALLOW, context=[reason])
+            return GatingResult(decision=Decision.DENY, reason=reason)
+        return GatingResult(decision=Decision.ALLOW, context=[reason])
 
     def _build_reason(self, pattern: str, suggested_op: str, lsp_available: bool) -> str:
         """Build the guidance message for the LLM."""

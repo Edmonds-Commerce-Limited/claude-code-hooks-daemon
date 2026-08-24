@@ -9,7 +9,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 
 # Pattern that identifies the daemon's internal docs directory.
 # In normal installs, the daemon is cloned to .claude/hooks-daemon/, which brings
@@ -26,7 +27,7 @@ def _get_file_path(hook_input: dict[str, Any]) -> str:
     return str(tool_input.get("file_path", ""))
 
 
-class DaemonDocsGuardHandler(Handler):
+class DaemonDocsGuardHandler(PreToolUseHandlerBase):
     """Warn when reading from the hooks-daemon internal CLAUDE/ docs directory.
 
     The daemon is git-cloned to .claude/hooks-daemon/, which creates
@@ -61,7 +62,7 @@ class DaemonDocsGuardHandler(Handler):
 
         return _DAEMON_CLAUDE_PATTERN in file_path
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Allow the operation but inject a warning about the wrong CLAUDE/ directory."""
         file_path = _get_file_path(hook_input)
         filename = file_path.split("/")[-1] if file_path else ""
@@ -78,7 +79,7 @@ class DaemonDocsGuardHandler(Handler):
             f"different content from your project's documentation."
         )
 
-        return HookResult(decision=Decision.ALLOW, context=[warning])
+        return GatingResult(decision=Decision.ALLOW, context=[warning])
 
     def get_claude_md(self) -> str | None:
         return None

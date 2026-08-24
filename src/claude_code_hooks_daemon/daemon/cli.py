@@ -3236,15 +3236,30 @@ def edit_hook_input():
 
 from typing import Any
 
-from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
+from claude_code_hooks_daemon.core import AcceptanceTest, GatingResult, TestType
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 
 
-class ExampleHandler(Handler):
+class ExampleHandler(PreToolUseHandlerBase):
     """Example advisory handler.
 
     This handler demonstrates the project handler pattern.
     Replace this with your own handler logic.
+
+    Subclass the base named after YOUR event — every event has one in
+    `claude_code_hooks_daemon.core.handler_bases`. This file lives in
+    `pre_tool_use/`, so it uses `PreToolUseHandlerBase`, whose `handle()`
+    returns a `GatingResult` (allow / deny / ask). `PostToolUseHandlerBase`,
+    `StopHandlerBase` and `SubagentStopHandlerBase` return `BlockingResult`
+    (allow / deny); every other event returns `AdvisoryResult` (allow only).
+
+    That choice is not cosmetic: an event which cannot express a refusal
+    DROPS one silently, so a deny returned from, say, a SessionStart handler
+    produces a perfectly valid response with the refusal removed — the handler
+    believes it blocked and nothing blocked. Using the event's base makes that
+    a type error instead. Subclassing `Handler` directly still works if you
+    prefer it.
     """
 
     def __init__(self) -> None:
@@ -3261,9 +3276,9 @@ class ExampleHandler(Handler):
         command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
         return "example-trigger" in command
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Handler logic - customise this."""
-        return HookResult(
+        return GatingResult(
             decision=Decision.ALLOW,
             context=["EXAMPLE: This is an example project handler context message."],
         )

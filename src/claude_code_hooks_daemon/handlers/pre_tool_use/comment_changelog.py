@@ -29,7 +29,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.strategies.comments.extractor import (
     CommentSpan,
@@ -147,7 +148,7 @@ def _advisory_reasons(text: str, max_history_entries: int) -> list[str]:
     return reasons
 
 
-class CommentChangelogHandler(Handler):
+class CommentChangelogHandler(PreToolUseHandlerBase):
     """Block Write/Edit content that writes historical narrative into a comment.
 
     This is the valuable half of Plan 00208 -- size is a proxy, history is
@@ -256,29 +257,29 @@ class CommentChangelogHandler(Handler):
 
         return bool(self._find_violations(content, strategy))
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny (or advise) when a comment span carries changelog narrative."""
         file_path = get_file_path(hook_input)
         if not file_path:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         strategy = self._registry.get_strategy(file_path)
         if strategy is None:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         content = self._get_content(hook_input)
         if not content:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         violations = self._find_violations(content, strategy)
         if not violations:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         blocking = [(span, reasons) for span, reasons, _advisory in violations if reasons]
         if blocking and self._mode == _MODE_BLOCK:
-            return HookResult(decision=Decision.DENY, reason=self._build_deny_reason(blocking))
+            return GatingResult(decision=Decision.DENY, reason=self._build_deny_reason(blocking))
 
-        return HookResult(decision=Decision.ALLOW, context=[self._build_advisory(violations)])
+        return GatingResult(decision=Decision.ALLOW, context=[self._build_advisory(violations)])
 
     def _build_deny_reason(self, blocking: list[tuple[CommentSpan, list[str]]]) -> str:
         lines: list[str] = []

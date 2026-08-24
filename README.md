@@ -327,23 +327,26 @@ Version-specific migration guides are in [CLAUDE/UPGRADES/](CLAUDE/UPGRADES/).
 ## Writing Custom Handlers
 
 ```python
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 
-class MyHandler(Handler):
+class MyHandler(PreToolUseHandlerBase):
     def __init__(self) -> None:
         super().__init__(name="my-handler", priority=50, terminal=True)
 
     def matches(self, hook_input: dict) -> bool:
         return "pattern" in hook_input.get("tool_input", {}).get("command", "")
 
-    def handle(self, hook_input: dict) -> HookResult:
-        return HookResult(
+    def handle(self, hook_input: dict) -> GatingResult:
+        return GatingResult(
             decision=Decision.DENY,
             reason="Blocked because...",
             context=["Additional context line"]
         )
 ```
+
+Plain `Handler` still works too — subclassing the per-event base (`PreToolUseHandlerBase` here) is not required, it just lets a type-checker catch a decision your event can't actually deliver.
 
 Place handlers in `.claude/project-handlers/{event_type}/` — they're auto-discovered on daemon restart. Before writing a handler, capture real event data first:
 

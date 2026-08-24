@@ -388,7 +388,7 @@ Hooks communicate back to Claude Code through two mechanisms: exit codes and JSO
 
 ### Exit Code Protocol
 
-| Exit Code | Meaning            | stdout behaviour                                  | stderr behaviour                      |
+| Exit Code | Meaning            | stdout behaviour                                 | stderr behaviour                     |
 | --------- | ------------------ | ------------------------------------------------ | ------------------------------------ |
 | **0**     | Success            | Parsed as JSON if valid; context for some events | Ignored                              |
 | **2**     | Blocking error     | **Ignored** (JSON not processed)                 | Used as error message, fed to Claude |
@@ -561,10 +561,13 @@ EventRouter --> HandlerChain --> Handler.matches() --> Handler.handle()
 
 ### Handler Skeleton
 
-```python
-from claude_code_hooks_daemon.core import Handler, HookResult
+The base you subclass is chosen by your EVENT, not `Handler` directly — every wired event has one in `core.handler_bases` (e.g. `PreToolUseHandlerBase`, `SessionStartHandlerBase`).
 
-class MyHandler(Handler):
+```python
+from claude_code_hooks_daemon.core import GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+
+class MyHandler(PreToolUseHandlerBase):
     """One-line description of what this handler does."""
 
     def __init__(self) -> None:
@@ -579,9 +582,9 @@ class MyHandler(Handler):
         """Return True if this handler should execute."""
         return hook_input.get("tool_name") == "Bash"
 
-    def handle(self, hook_input: dict) -> HookResult:
+    def handle(self, hook_input: dict) -> GatingResult:
         """Execute handler logic, return result."""
-        return HookResult(
+        return GatingResult(
             decision="deny",
             reason="Blocked: clear explanation with alternatives"
         )
@@ -605,23 +608,28 @@ class MyHandler(Handler):
 
 **Non-Terminal (`terminal=False`)**: Allows subsequent handlers to run. Decision is ignored (always treated as allow). Context is accumulated. Use when you want to **warn or guide**.
 
-### HookResult Options
+### Result Options
+
+Construct your event's result type. `AdvisoryResult` is shown for the options
+every tier supports; the last two need an event that can actually carry them,
+and asking for one your tier lacks is a mypy error rather than a silent no-op
+on the wire.
 
 ```python
-# Silent allow
-HookResult(decision="allow")
+# Silent allow — any tier
+AdvisoryResult(decision=Decision.ALLOW)
 
-# Allow with context (injected into Claude's awareness)
-HookResult(decision="allow", context="Reminder: update docs")
+# Allow with context (injected into Claude's awareness) — any tier
+AdvisoryResult(decision=Decision.ALLOW, context=["Reminder: update docs"])
 
-# Allow with guidance
-HookResult(decision="allow", guidance="Consider using X instead")
+# Allow with guidance — any tier
+AdvisoryResult(decision=Decision.ALLOW, guidance="Consider using X instead")
 
-# Deny (block the operation)
-HookResult(decision="deny", reason="Clear explanation + alternatives")
+# Deny (block the operation) — blocking or gating tier only
+GatingResult(decision=Decision.DENY, reason="Clear explanation + alternatives")
 
-# Ask (request user approval)
-HookResult(decision="ask", reason="This requires confirmation because...")
+# Ask (request user approval) — gating tier only
+GatingResult(decision=Decision.ASK, reason="This requires confirmation because...")
 ```
 
 ### Utility Functions

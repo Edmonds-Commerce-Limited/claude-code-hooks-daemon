@@ -19,7 +19,8 @@ from typing import Any
 
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
@@ -55,7 +56,7 @@ _SOURCE_HASH_HEX_LEN = 12
 _VERSION_RE = re.compile(r"""__version__\s*=\s*["']([^"']+)["']""")
 
 
-class CcySupervisorIntegrityHandler(Handler):
+class CcySupervisorIntegrityHandler(SessionStartHandlerBase):
     """Advisory: warn when the ccy supervisor is armed but its files are unsafe."""
 
     def __init__(self) -> None:
@@ -295,18 +296,18 @@ class CcySupervisorIntegrityHandler(Handler):
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return not is_resume_session(hook_input)
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         project_root = self._get_project_root()
         if project_root is None:
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         ccy_dir = project_root.joinpath(*_CCY_DIR_PARTS)
         if not ccy_dir.is_dir():
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         if not self._is_armed(ccy_dir / _CCY_ENV_NAME):
             # Not armed → supervisor is inert; nothing to enforce.
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         problems = self._find_problems(project_root, ccy_dir)
         stale_lines = self._check_supervisor_staleness(project_root, ccy_dir)
@@ -332,8 +333,8 @@ class CcySupervisorIntegrityHandler(Handler):
             context += stale_lines
 
         if not context:
-            return HookResult(decision=Decision.ALLOW, context=[])
-        return HookResult(decision=Decision.ALLOW, context=context)
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
+        return AdvisoryResult(decision=Decision.ALLOW, context=context)
 
     def get_claude_md(self) -> str | None:
         return (

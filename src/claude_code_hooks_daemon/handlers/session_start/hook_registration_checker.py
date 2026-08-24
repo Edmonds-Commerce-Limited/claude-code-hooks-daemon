@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.hook_command_migration import (
@@ -42,7 +43,7 @@ _SETTINGS_LOCAL_FILE = "settings.local.json"
 _CLAUDE_DIR = ".claude"
 
 
-class HookRegistrationCheckerHandler(Handler):
+class HookRegistrationCheckerHandler(SessionStartHandlerBase):
     """Validate hook registrations in Claude Code settings on session start.
 
     Checks:
@@ -129,18 +130,18 @@ class HookRegistrationCheckerHandler(Handler):
         """
         return not is_resume_session(hook_input)
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Validate hook registrations and report issues.
 
         Args:
             hook_input: Hook input dictionary
 
         Returns:
-            HookResult with ALLOW decision and advisory context
+            AdvisoryResult with ALLOW decision and advisory context
         """
         project_root = self._get_project_root()
         if project_root is None:
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         claude_dir = project_root / _CLAUDE_DIR
 
@@ -175,7 +176,7 @@ class HookRegistrationCheckerHandler(Handler):
 
         # Skip if no settings.json at all (not a hooks daemon project)
         if not settings:
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         # Run all validations
         all_issues: list[str] = []
@@ -230,7 +231,7 @@ class HookRegistrationCheckerHandler(Handler):
                 "via `init-project-handlers`."
             )
 
-        return HookResult(decision=Decision.ALLOW, context=lines)
+        return AdvisoryResult(decision=Decision.ALLOW, context=lines)
 
     def get_claude_md(self) -> str | None:
         """Return agent-facing remediation guidance for hook-config drift."""

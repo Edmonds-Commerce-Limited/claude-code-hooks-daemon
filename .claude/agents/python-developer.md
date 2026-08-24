@@ -29,41 +29,49 @@ Implement Python code with strict adherence to project coding standards. This ag
 **Before writing ANY code, internalize these principles:**
 
 ### 1. FAIL FAST
+
 - Detect errors early, validate at boundaries
 - Explicit error handling, no silent failures
 - Raise exceptions for invalid states
 
 ### 2. YAGNI (You Aren't Gonna Need It)
+
 - Don't build for hypothetical futures
 - Implement what's needed now, nothing more
 - Delete speculative code
 
 ### 3. DRY (Don't Repeat Yourself)
+
 - Single source of truth for all logic
 - Extract common patterns to shared utilities
 - No copy-paste code
 
 ### 4. SINGLE SOURCE OF TRUTH
+
 - Config is truth, code reads config
 - Never hardcode values that should be configurable
 - Constants in one place
 
 ### 5. PROPER NOT QUICK
+
 - No workarounds, no hacks
 - Fix root causes, not symptoms
 - Take time to do it right
 
 ### 6. TYPE SAFETY
+
 - Full type annotations on ALL functions
 - Strict mypy compliance
 - No `Any` without justification and comment
 
 ### 7. TEST COVERAGE
+
 - 95% minimum coverage
 - Write tests FIRST (TDD)
 - Integration tests for all flows
 
 ### 8. SCHEMA VALIDATION
+
 - Validate ALL external data
 - Use Pydantic or dataclasses
 - Never trust input
@@ -197,6 +205,7 @@ For each feature:
 ### 3. Code Review Checklist
 
 Before submitting code, verify:
+
 - [ ] All functions have type annotations
 - [ ] All public functions have docstrings
 - [ ] No `Any` types without justification
@@ -212,10 +221,18 @@ Before submitting code, verify:
 
 ### Handler Pattern
 
-```python
-from claude_code_hooks_daemon.core import Handler, HookResult
+The base class a handler subclasses is chosen by its EVENT, not by whether it
+happens to block: every wired event has a matching base in
+`claude_code_hooks_daemon.core.handler_bases` (`PreToolUseHandlerBase` below is
+one of them) that narrows `handle()` to the result type that event can
+actually deliver — plain `Handler`/`HookResult` still works, but it cannot
+catch a decision the event will silently drop on the wire.
 
-class MyHandler(Handler):
+```python
+from claude_code_hooks_daemon.core import GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+
+class MyHandler(PreToolUseHandlerBase):
     """Description of what this handler does."""
 
     def __init__(self) -> None:
@@ -230,10 +247,10 @@ class MyHandler(Handler):
         tool_name = hook_input.get("tool_name", "")
         return tool_name == "Bash"
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Process the input and return a result."""
         # Implementation here
-        return HookResult(decision="allow")
+        return GatingResult(decision="allow")
 ```
 
 ### Test Pattern

@@ -18,7 +18,8 @@ from claude_code_hooks_daemon.constants import (
     Timeout,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
@@ -34,7 +35,7 @@ _FILE_PLACEHOLDER = "{file}"
 _INTERPRETER_BIN_DIR: Final[Path] = Path(sys.executable).parent
 
 
-class LintOnEditHandler(Handler):
+class LintOnEditHandler(PostToolUseHandlerBase):
     """Run language-aware lint validation on files after Write/Edit.
 
     Uses Strategy Pattern: delegates ALL language-specific decisions to LintStrategy
@@ -142,21 +143,21 @@ class LintOnEditHandler(Handler):
         self._apply_language_filter()
         return bool(self._lintable_paths(hook_input))
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Run lint commands and deny if errors found."""
         paths = self._lintable_paths(hook_input)
         if not paths:
-            return HookResult(decision=Decision.ALLOW, reason="No file path found")
+            return BlockingResult(decision=Decision.ALLOW, reason="No file path found")
 
         for file_path in paths:
             result = self._lint_one(file_path)
             if result is not None:
                 return result
 
-        return HookResult(decision=Decision.ALLOW)
+        return BlockingResult(decision=Decision.ALLOW)
 
-    def _lint_one(self, file_path: str) -> HookResult | None:
-        """Lint a single file; a HookResult means it failed, None means it passed."""
+    def _lint_one(self, file_path: str) -> BlockingResult | None:
+        """Lint a single file; a BlockingResult means it failed, None means it passed."""
         strategy = self._registry.get_strategy(file_path)
         if strategy is None:
             return None
@@ -244,12 +245,12 @@ class LintOnEditHandler(Handler):
 
     def _run_lint_command(
         self, command_template: str, file_path: str, language_name: str
-    ) -> HookResult | None:
-        """Run a lint command and return HookResult if it fails, None if it passes.
+    ) -> BlockingResult | None:
+        """Run a lint command and return BlockingResult if it fails, None if it passes.
 
         Returns:
-            HookResult with DENY if lint fails, None if lint passes.
-            HookResult with ALLOW if linter not found or times out (graceful degradation).
+            BlockingResult with DENY if lint fails, None if lint passes.
+            BlockingResult with ALLOW if linter not found or times out (graceful degradation).
         """
         # Find module/project root for languages that require it (e.g., Go needs go.mod)
         working_dir: str | None = None
@@ -278,7 +279,7 @@ class LintOnEditHandler(Handler):
         # venv, which is the normal case for a Python project.
         resolved = self._resolve_executable(command_parts[0])
         if resolved is None:
-            return HookResult(
+            return BlockingResult(
                 decision=Decision.ALLOW,
                 context=[
                     f"⚠️ {language_name} lint tool not found ({command_parts[0]}) "
@@ -304,7 +305,7 @@ class LintOnEditHandler(Handler):
                         error_output + "\n" + result.stderr if error_output else result.stderr
                     )
 
-                return HookResult(
+                return BlockingResult(
                     decision=Decision.DENY,
                     reason=(
                         f"{language_name} lint FAILED for {Path(file_path).name}\n\n"
@@ -316,7 +317,7 @@ class LintOnEditHandler(Handler):
 
         except FileNotFoundError:
             # Linter not installed - advisory allow (visible in system-reminders)
-            return HookResult(
+            return BlockingResult(
                 decision=Decision.ALLOW,
                 context=[
                     f"⚠️ {language_name} lint tool not found ({command_parts[0]}) "
@@ -324,7 +325,7 @@ class LintOnEditHandler(Handler):
                 ],
             )
         except subprocess.TimeoutExpired:
-            return HookResult(
+            return BlockingResult(
                 decision=Decision.ALLOW,
                 context=[
                     f"Lint check timed out after {Timeout.LINT_CHECK}s for {Path(file_path).name}"

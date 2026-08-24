@@ -43,7 +43,7 @@ Non-negotiable rules (already followed by `context_sidecar.py`,
 2. **Reads are fail-silent and defensive.** A missing / malformed / partial /
    foreign-schema file must yield "no segment", **never** raise — a broken
    status line is worse than a missing element. Wrap `handle()` bodies so any
-   unexpected error returns `HookResult(context=[])` (see `daemon_stats.py`,
+   unexpected error returns `AdvisoryResult(context=[])` (see `daemon_stats.py`,
    `supervisor_indicator.py`).
 3. **In-memory caches are per-process and must tolerate concurrent peers.** A
    handler instance's caches (e.g. `supervisor_indicator`'s memoised pid) live

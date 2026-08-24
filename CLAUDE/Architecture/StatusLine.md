@@ -314,10 +314,11 @@ Create a new file in `src/claude_code_hooks_daemon/handlers/status_line/`:
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult
+from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 
 
-class MyElementHandler(Handler):
+class MyElementHandler(StatusLineHandlerBase):
     """Display my element in the status line."""
 
     def __init__(self) -> None:
@@ -332,10 +333,10 @@ class MyElementHandler(Handler):
         """Always run for status events."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Generate status text."""
         # Include leading separator
-        return HookResult(context=["| my-data"])
+        return AdvisoryResult(context=["| my-data"])
 ```
 
 ### Step 2: Register Constants
@@ -359,8 +360,8 @@ Create `tests/handlers/status_line/test_my_element.py` with tests for `matches()
 ### Important Rules
 
 - **Always set `terminal=False`** -- terminal handlers would stop the chain and suppress all subsequent status elements.
-- **Always return `HookResult(context=[...])`** -- never use `decision="deny"`.
-- **Always fail silently** -- catch all exceptions and return `HookResult(context=[])`.
+- **Always return `AdvisoryResult(context=[...])`** -- and note you no longer *can* deny: `StatusLineHandlerBase` narrows `handle()` to the advisory tier, so a refusal is a type error rather than something the wire silently discards.
+- **Always fail silently** -- catch all exceptions and return `AdvisoryResult(context=[])`.
 - **Include the `|` separator** in your output fragment.
 - **Priority determines position** -- lower priority = further left in the status line.
 

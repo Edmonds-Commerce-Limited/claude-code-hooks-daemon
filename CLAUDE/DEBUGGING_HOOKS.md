@@ -189,13 +189,14 @@ def matches(self, hook_input: dict) -> bool:
 **What action to take?**
 
 ```python
-def handle(self, hook_input: dict) -> HookResult:
+def handle(self, hook_input: dict) -> GatingResult:
     # From logs, you know what data is available
     tool_input = hook_input.get("tool_input", {})
 
-    # Block action
-    return HookResult(
-        decision="deny",
+    # Block action — only available because this is a PreToolUse handler.
+    # On an event that cannot refuse, the narrowed result type rejects this.
+    return GatingResult(
+        decision=Decision.DENY,
         reason="Blocked because X"
     )
 
@@ -203,9 +204,9 @@ def handle(self, hook_input: dict) -> HookResult:
     # denies, or adds context — it never rewrites tool_input.
 
     # Advisory warning
-    return HookResult(
-        decision="allow",
-        context="⚠️ Warning: this might..."
+    return GatingResult(
+        decision=Decision.ALLOW,
+        context=["⚠️ Warning: this might..."]
     )
 ```
 
@@ -264,15 +265,15 @@ We want to inject custom context when Claude enters planning mode.
 
 ```python
 # Option 1: Intercept before planning starts (PreToolUse)
-class PlanningModePrep(Handler):
+class PlanningModePrep(PreToolUseHandlerBase):
     def __init__(self) -> None:
         super().__init__(name="planning-mode-prep", priority=30, terminal=False)
 
     def matches(self, hook_input: dict) -> bool:
         return hook_input.get("tool_name") == "EnterPlanMode"
 
-    def handle(self, hook_input: dict) -> HookResult:
-        return HookResult(
+    def handle(self, hook_input: dict) -> GatingResult:
+        return GatingResult(
             decision="allow",
             context="📋 Entering planning mode. Remember to:\n"
                    "- Consider architecture trade-offs\n"
@@ -280,38 +281,38 @@ class PlanningModePrep(Handler):
         )
 
 # Option 2: Detect plan agent (SubagentStart)
-class PlanAgentDetector(Handler):
+class PlanAgentDetector(SubagentStartHandlerBase):
     def __init__(self) -> None:
         super().__init__(name="plan-agent-detector", priority=10, terminal=False)
 
     def matches(self, hook_input: dict) -> bool:
         return hook_input.get("agent_type") == "Plan"
 
-    def handle(self, hook_input: dict) -> HookResult:
-        return HookResult(
+    def handle(self, hook_input: dict) -> AdvisoryResult:
+        return AdvisoryResult(
             decision="allow",
             context="🎯 Plan agent started - architectural planning mode active"
         )
 
 # Option 3: Validate after planning (SubagentStop)
-class PlanValidator(Handler):
+class PlanValidator(SubagentStopHandlerBase):
     def __init__(self) -> None:
         super().__init__(name="plan-validator", priority=20, terminal=False)
 
     def matches(self, hook_input: dict) -> bool:
         return hook_input.get("agent_type") == "Plan"
 
-    def handle(self, hook_input: dict) -> HookResult:
+    def handle(self, hook_input: dict) -> BlockingResult:
         result = hook_input.get("result", "")
 
         # Check if plan mentions tests
         if "test" not in result.lower():
-            return HookResult(
+            return BlockingResult(
                 decision="allow",
                 context="⚠️ Plan doesn't mention testing strategy"
             )
 
-        return HookResult(decision="allow")
+        return BlockingResult(decision="allow")
 ```
 
 ## Common Scenarios to Debug

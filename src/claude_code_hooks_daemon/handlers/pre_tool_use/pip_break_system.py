@@ -10,13 +10,12 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
-from claude_code_hooks_daemon.core import Decision
-from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
 
-class PipBreakSystemHandler(Handler):
+class PipBreakSystemHandler(PreToolUseHandlerBase):
     """Block pip install --break-system-packages commands.
 
     This flag was introduced in pip 22.1 to bypass PEP 668 externally-managed
@@ -68,18 +67,18 @@ class PipBreakSystemHandler(Handler):
 
         return bool(re.search(pattern, command, re.IGNORECASE))
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block command and explain why --break-system-packages is dangerous.
 
         Args:
             hook_input: Hook input containing the dangerous command
 
         Returns:
-            HookResult with deny decision and explanation
+            GatingResult with deny decision and explanation
         """
         # Safety check: if command doesn't match, allow
         if not self.matches(hook_input):
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         command = hook_input.get("tool_input", {}).get("command", "")
 
@@ -111,7 +110,7 @@ SAFE alternatives:
 
 NEVER use --break-system-packages as default behavior."""
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=reason,
             context=[],

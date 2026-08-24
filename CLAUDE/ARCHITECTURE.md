@@ -547,15 +547,15 @@ These remain in individual projects due to project-specific logic:
 **Example**:
 
 ```python
-class DestructiveGitHandler(Handler):
+class DestructiveGitHandler(PreToolUseHandlerBase):
     def __init__(self):
         super().__init__(name="destructive-git", priority=10, terminal=True)
 
     def matches(self, hook_input: dict) -> bool:
         return "git reset --hard" in get_bash_command(hook_input)
 
-    def handle(self, hook_input: dict) -> HookResult:
-        return HookResult(decision="deny", reason="Destructive command blocked")
+    def handle(self, hook_input: dict) -> GatingResult:
+        return GatingResult(decision=Decision.DENY, reason="Destructive command blocked")
 ```
 
 ### Non-Terminal Handlers
@@ -570,15 +570,15 @@ class DestructiveGitHandler(Handler):
 **Example**:
 
 ```python
-class PlanWorkflowHandler(Handler):
+class PlanWorkflowHandler(PreToolUseHandlerBase):
     def __init__(self):
         super().__init__(name="plan-workflow", priority=45, terminal=False)
 
     def matches(self, hook_input: dict) -> bool:
         return "CLAUDE/Plan/" in get_file_path(hook_input)
 
-    def handle(self, hook_input: dict) -> HookResult:
-        return HookResult(
+    def handle(self, hook_input: dict) -> GatingResult:
+        return GatingResult(
             decision="allow",
             context="📋 Reminder: Follow PlanWorkflow.md conventions"
         )
@@ -648,18 +648,19 @@ class PlanWorkflowHandler(Handler):
 1. **Create Handler Class**:
 
 ```python
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
-class CustomHandler(Handler):
+class CustomHandler(PreToolUseHandlerBase):
     def __init__(self):
         super().__init__(name="custom-handler", priority=50)
 
     def matches(self, hook_input: dict) -> bool:
         return "pattern" in get_bash_command(hook_input)
 
-    def handle(self, hook_input: dict) -> HookResult:
-        return HookResult(decision="deny", reason="Blocked")
+    def handle(self, hook_input: dict) -> GatingResult:
+        return GatingResult(decision=Decision.DENY, reason="Blocked")
 ```
 
 2. **Register via Configuration**:

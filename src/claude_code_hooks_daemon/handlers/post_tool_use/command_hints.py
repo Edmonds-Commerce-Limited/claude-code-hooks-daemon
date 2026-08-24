@@ -51,7 +51,8 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
@@ -270,7 +271,7 @@ def _parse_raw_hints(raw: Any) -> list[CommandHint]:
     return parsed
 
 
-class CommandHintsHandler(Handler):
+class CommandHintsHandler(PostToolUseHandlerBase):
     """Inject a rate-limited advisory HINT when a configured command is detected.
 
     Generic and config-driven: ONE handler, a config object mapping command
@@ -354,19 +355,21 @@ class CommandHintsHandler(Handler):
             if any(self._compiled_patterns[hint.id].match(segment) for segment in segments)
         ]
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Fire any due hints as advisory context. Always ALLOW — never blocks."""
         command = get_bash_command(hook_input) or ""
         session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or "unknown")
 
         matched = self._matching_hints(command)
         if not matched:
-            return HookResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         fired = [hint for hint in matched if self._should_fire(session_id, hint)]
         if not fired:
-            return HookResult(decision=Decision.ALLOW)
-        return HookResult(decision=Decision.ALLOW, context=[self._render(hint) for hint in fired])
+            return BlockingResult(decision=Decision.ALLOW)
+        return BlockingResult(
+            decision=Decision.ALLOW, context=[self._render(hint) for hint in fired]
+        )
 
     def _should_fire(self, session_id: str, hint: CommandHint) -> bool:
         """Apply the TTL (+ optional count) gate; records a firing when it fires."""

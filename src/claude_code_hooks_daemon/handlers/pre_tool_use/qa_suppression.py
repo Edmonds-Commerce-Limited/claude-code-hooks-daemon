@@ -17,7 +17,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.strategies.qa_suppression import (
     QaSuppressionStrategyRegistry,
@@ -33,7 +34,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 _MAX_ISSUES_SHOWN = 5
 
 
-class QaSuppressionHandler(Handler):
+class QaSuppressionHandler(PreToolUseHandlerBase):
     """Block QA suppression comments across all supported languages.
 
     Uses Strategy Pattern: delegates ALL language-specific decisions to
@@ -149,19 +150,19 @@ class QaSuppressionHandler(Handler):
             project_patterns=self._project_exclude_paths,
         )
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Check content for QA suppression patterns, deny if found."""
         file_path = get_file_path(hook_input)
         if not file_path:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         strategy = self._registry.get_strategy(file_path)
         if strategy is None:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         content = self._get_content(hook_input)
         if not content:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         # Find all matching forbidden patterns
         issues: list[str] = []
@@ -170,7 +171,7 @@ class QaSuppressionHandler(Handler):
                 issues.append(match.group(0))
 
         if not issues:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         return self._build_deny_result(file_path, strategy, issues)
 
@@ -179,7 +180,7 @@ class QaSuppressionHandler(Handler):
         file_path: str,
         strategy: QaSuppressionStrategy,
         issues: list[str],
-    ) -> HookResult:
+    ) -> GatingResult:
         """Build a DENY result with language-appropriate error message."""
         # Build resources section from strategy
         resources_text = "\n".join(
@@ -189,7 +190,7 @@ class QaSuppressionHandler(Handler):
 
         issues_text = "\n".join(f"  - {issue}" for issue in issues[:_MAX_ISSUES_SHOWN])
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=(
                 f"QA SUPPRESSION BLOCKED: {strategy.language_name} QA suppression "

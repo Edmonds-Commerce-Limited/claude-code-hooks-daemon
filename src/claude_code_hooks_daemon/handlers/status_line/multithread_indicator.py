@@ -34,7 +34,8 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.constants.protocol import HookInputField
-from claude_code_hooks_daemon.core import Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
+from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.handlers.status_line.thread_registry import (
     _REGISTRY_SUBDIR,
     compute_indicator,
@@ -45,7 +46,7 @@ from claude_code_hooks_daemon.handlers.status_line.thread_registry import (
 logger = logging.getLogger(__name__)
 
 
-class MultithreadIndicatorHandler(Handler):
+class MultithreadIndicatorHandler(StatusLineHandlerBase):
     """Show this thread's rank among live Agent-View threads (``🧵 Y/X``)."""
 
     def __init__(self) -> None:
@@ -60,14 +61,14 @@ class MultithreadIndicatorHandler(Handler):
         """Run on every status event (heartbeat write is cheap and idempotent)."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Upsert this session's heartbeat and render its ``🧵 Y/X`` segment.
 
         Args:
             hook_input: Status event payload (session identity + agent fields).
 
         Returns:
-            HookResult carrying a single ``| 🧵 Y/X`` segment when two or more
+            AdvisoryResult carrying a single ``| 🧵 Y/X`` segment when two or more
             threads are live, else an empty context (silent when alone, and on
             any registry failure).
         """
@@ -80,15 +81,15 @@ class MultithreadIndicatorHandler(Handler):
             # backgrounded+forked one — report agent_type=None. Excluding these
             # here means a spare never writes a heartbeat, so it can never
             # inflate a real session's count (the "🧵 1/2 with one thread" bug).
-            return HookResult(context=[])
+            return AdvisoryResult(context=[])
 
         session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or "")
         session_name = hook_input.get(HookInputField.SESSION_NAME)
 
         segment = self._render_segment(session_id, session_name, agent_type)
         if segment:
-            return HookResult(context=[f"| {segment}"])
-        return HookResult(context=[])
+            return AdvisoryResult(context=[f"| {segment}"])
+        return AdvisoryResult(context=[])
 
     def _render_segment(
         self,

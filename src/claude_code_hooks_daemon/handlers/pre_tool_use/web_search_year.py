@@ -11,14 +11,15 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 
 # First year considered an "outdated" year for a web-search query. Years from
 # this value up to (but excluding) the current year trigger the advisory.
 _OLDEST_TRACKED_YEAR = 2020
 
 
-class WebSearchYearHandler(Handler):
+class WebSearchYearHandler(PreToolUseHandlerBase):
     """Validate WebSearch queries don't use outdated years."""
 
     @property
@@ -53,11 +54,11 @@ class WebSearchYearHandler(Handler):
         years = "|".join(str(year) for year in range(_OLDEST_TRACKED_YEAR, self.CURRENT_YEAR))
         return re.compile(rf"\b(?:{years})\b")
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Provide guidance about outdated year in WebSearch."""
         query = hook_input.get(HookInputField.TOOL_INPUT, {}).get("query", "")
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.ALLOW,
             context=[
                 f"WebSearch query contains outdated year: {query}",

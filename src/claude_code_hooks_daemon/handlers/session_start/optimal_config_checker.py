@@ -22,7 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 DOCS_URL = "https://code.claude.com/docs/en/settings"
 
 
-class OptimalConfigCheckerHandler(Handler):
+class OptimalConfigCheckerHandler(SessionStartHandlerBase):
     """Check Claude Code environment for optimal configuration on session start.
 
     Advisory handler that runs on new sessions only (not resumes). On session
@@ -361,7 +362,7 @@ class OptimalConfigCheckerHandler(Handler):
 
         return written
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Run config checks and return advisory context.
 
         Also enforces that critical settings (effortLevel, alwaysThinkingEnabled)
@@ -372,7 +373,7 @@ class OptimalConfigCheckerHandler(Handler):
             hook_input: SessionStart hook input
 
         Returns:
-            HookResult with ALLOW decision and config check results
+            AdvisoryResult with ALLOW decision and config check results
         """
         # Lean SessionStart (Plan 00128): do NOT emit the full config audit here.
         # It is verbose and rarely actionable on every session; the full
@@ -386,7 +387,7 @@ class OptimalConfigCheckerHandler(Handler):
         if enforced:
             lines.append(f"CONFIG SYNC: Auto-set {', '.join(enforced)} in ~/.claude/settings.json")
 
-        return HookResult(decision=Decision.ALLOW, context=lines)
+        return AdvisoryResult(decision=Decision.ALLOW, context=lines)
 
     def get_claude_md(self) -> str | None:
         return None

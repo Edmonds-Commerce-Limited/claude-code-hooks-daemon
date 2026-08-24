@@ -23,7 +23,8 @@ from __future__ import annotations
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
@@ -51,7 +52,7 @@ def _validate_cmd() -> str:
     return daemon_cli_command(_VALIDATE_SUBCOMMAND)
 
 
-class ProjectHandlerLoadCheckerHandler(Handler):
+class ProjectHandlerLoadCheckerHandler(SessionStartHandlerBase):
     """Loudly alert at session start when project handlers failed to load.
 
     Reads the persisted load-failure state and injects a high-visibility
@@ -101,19 +102,19 @@ class ProjectHandlerLoadCheckerHandler(Handler):
         """
         return bool(self._read_state().is_degraded)
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Inject the loud degraded-protection alert.
 
         Args:
             hook_input: Hook input dictionary
 
         Returns:
-            HookResult with ALLOW decision and the alert as advisory context.
+            AdvisoryResult with ALLOW decision and the alert as advisory context.
         """
         state = self._read_state()
         if not state.is_degraded:
             # Lean SessionStart: say nothing on a healthy project.
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         failed_count = state.failed_count
         lines: list[str] = [
@@ -136,7 +137,7 @@ class ProjectHandlerLoadCheckerHandler(Handler):
             ]
         )
 
-        return HookResult(decision=Decision.ALLOW, context=lines)
+        return AdvisoryResult(decision=Decision.ALLOW, context=lines)
 
     def get_claude_md(self) -> str | None:
         """Return agent-facing guidance for the degraded-protection alert."""

@@ -19,7 +19,8 @@ import re
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
@@ -79,7 +80,7 @@ _ANCESTRY_SEVERING_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 _WARN_GUIDANCE_HEADER = "WARNING: ancestry-severing merge detected"
 
 
-class AncestryPreservingMergeHandler(Handler):
+class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
     """Block (or, in warn mode, advise against) ancestry-severing merges.
 
     Modes:
@@ -164,17 +165,17 @@ class AncestryPreservingMergeHandler(Handler):
             "  gh pr merge --merge <number>"
         )
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block or warn about the ancestry-severing merge, based on mode."""
         command = get_bash_command(hook_input)
         if not command:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         label = self._match_label(command) or "ancestry-severing merge"
         mode = getattr(self, "_mode", _MODE_BLOCK)
 
         if mode == _MODE_WARN:
-            return HookResult(
+            return GatingResult(
                 decision=Decision.ALLOW,
                 context=[
                     _WARN_GUIDANCE_HEADER,
@@ -184,7 +185,7 @@ class AncestryPreservingMergeHandler(Handler):
                 guidance=self._warn_guidance(label),
             )
 
-        return HookResult(decision=Decision.DENY, reason=self._block_reason(label))
+        return GatingResult(decision=Decision.DENY, reason=self._block_reason(label))
 
     def get_claude_md(self) -> str | None:
         return (

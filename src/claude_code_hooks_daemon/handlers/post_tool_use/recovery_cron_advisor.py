@@ -45,7 +45,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 
 # ─── Lifecycle phase ──────────────────────────────────────────────────────────
@@ -351,7 +352,7 @@ def _detect_lifecycle_phase(hook_input: dict[str, Any]) -> LifecyclePhase | None
 # ─── Handler ─────────────────────────────────────────────────────────────────
 
 
-class RecoveryCronAdvisorHandler(Handler):
+class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
     """Advisory handler that manages failsafe recovery cron across plan lifecycle.
 
     Fires on three lifecycle moments:
@@ -485,7 +486,7 @@ class RecoveryCronAdvisorHandler(Handler):
         _, plan_folder = _is_plan_path(file_path)
         return plan_folder or _MKPLAN_SENTINEL_KEY
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Inject advisory context appropriate for the detected lifecycle phase.
 
         Phase routing:
@@ -496,30 +497,30 @@ class RecoveryCronAdvisorHandler(Handler):
         - PROGRESS   → advise on every Nth progress edit per plan.
 
         Returns:
-            HookResult with ALLOW decision, and context[] when advising.
+            BlockingResult with ALLOW decision, and context[] when advising.
         """
         phase = self._resolve_phase(hook_input)
         if phase is None:
-            return HookResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         if phase == LifecyclePhase.CREATION:
             plan_folder = self._resolve_plan_folder(hook_input)
             if not self._should_advise_once(self._creation_seen, plan_folder):
-                return HookResult(decision=Decision.ALLOW)
-            return HookResult(decision=Decision.ALLOW, context=[_CREATION_GUIDANCE])
+                return BlockingResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW, context=[_CREATION_GUIDANCE])
 
         if phase == LifecyclePhase.COMPLETION:
             plan_folder = self._resolve_plan_folder(hook_input)
             if not self._should_advise_once(self._completion_seen, plan_folder):
-                return HookResult(decision=Decision.ALLOW)
-            return HookResult(decision=Decision.ALLOW, context=[_COMPLETION_GUIDANCE])
+                return BlockingResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW, context=[_COMPLETION_GUIDANCE])
 
         # PROGRESS — advise on every Nth progress edit for this plan.
         plan_folder = self._resolve_plan_folder(hook_input)
         if not self._should_advise_progress(plan_folder):
-            return HookResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
-        return HookResult(decision=Decision.ALLOW, context=[_PROGRESS_GUIDANCE])
+        return BlockingResult(decision=Decision.ALLOW, context=[_PROGRESS_GUIDANCE])
 
     def get_claude_md(self) -> str | None:
         """Return CLAUDE.md guidance about this handler.

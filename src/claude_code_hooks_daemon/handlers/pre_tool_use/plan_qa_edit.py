@@ -27,7 +27,8 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import record_new_plan_document
 from claude_code_hooks_daemon.plan_qa.context import edit_context
@@ -55,7 +56,7 @@ _MARKDOWN_SUFFIX: Final[str] = ".md"
 _JOURNAL_MODE_OFF: Final[str] = "off"
 
 
-class PlanQaEditHandler(Handler):
+class PlanQaEditHandler(PreToolUseHandlerBase):
     """Blocking/advisory edit-time lint for plan documents."""
 
     def __init__(self) -> None:
@@ -131,7 +132,7 @@ class PlanQaEditHandler(Handler):
             return False
         return path.parent.name == Path(plan_dir_rel).name
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         file_path = Path(tool_input.get(_FIELD_FILE_PATH, ""))
         exists_before = file_path.is_file()
@@ -140,7 +141,7 @@ class PlanQaEditHandler(Handler):
         if content is None:
             # Edit on a missing file / unmatched old_string: the tool call
             # itself will fail with its own error — nothing to lint.
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return GatingResult(decision=Decision.ALLOW, context=[])
 
         if not exists_before:
             self._record_allocation(file_path)
@@ -158,11 +159,11 @@ class PlanQaEditHandler(Handler):
         )
         findings = run_stage(Stage.EDIT, context)
         if not findings:
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return GatingResult(decision=Decision.ALLOW, context=[])
 
         blockers = [finding for finding in findings if finding.level == Level.BLOCK]
         if blockers and self._plan_qa.edit_mode == _EDIT_MODE_BLOCK:
-            return HookResult(decision=Decision.DENY, reason=format_block_reason(blockers))
+            return GatingResult(decision=Decision.DENY, reason=format_block_reason(blockers))
         return self._advisory_result(findings)
 
     def _record_allocation(self, file_path: Path) -> None:
@@ -220,8 +221,8 @@ class PlanQaEditHandler(Handler):
         return current.replace(old_string, new_string, _SINGLE_REPLACEMENT)
 
     @staticmethod
-    def _advisory_result(findings: list[Finding]) -> HookResult:
-        return HookResult(decision=Decision.ALLOW, context=[format_advisory(findings)])
+    def _advisory_result(findings: list[Finding]) -> GatingResult:
+        return GatingResult(decision=Decision.ALLOW, context=[format_advisory(findings)])
 
     def get_claude_md(self) -> str | None:
         return (

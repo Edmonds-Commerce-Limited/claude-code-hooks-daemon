@@ -31,9 +31,8 @@ from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision
-from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 
 # The daemon is long-lived, so per-session state must be bounded or it grows for
 # the life of the process. These caps are generous for real sessions while
@@ -49,7 +48,7 @@ _UNKNOWN_SESSION = "<no-session-id>"
 _CONFIG_KEY_PATH = "handlers.pre_tool_use.write_clobber_guard.enabled"
 
 
-class WriteClobberGuardHandler(Handler):
+class WriteClobberGuardHandler(PreToolUseHandlerBase):
     """Deny ``Write`` to an existing file that was not read this session.
 
     Priority: 16 -- deliberately after the blocking safety handlers, because a
@@ -137,7 +136,7 @@ class WriteClobberGuardHandler(Handler):
 
         return not self._is_known(hook_input, path)
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Record a Read, or deny a Write that would clobber unread content.
 
         Args:
@@ -148,18 +147,18 @@ class WriteClobberGuardHandler(Handler):
         """
         path = self._file_path(hook_input)
         if path is None:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         if hook_input.get("tool_name") == ToolName.READ:
             self._record(hook_input, path)
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         if not self.matches(hook_input):
             # A Write we are not blocking still teaches this session the file's
             # contents, so a later rewrite of the same path is not blocked.
             if hook_input.get("tool_name") == ToolName.WRITE:
                 self._record(hook_input, path)
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         line_count = self._count_lines(path)
         reason = f"""🚫 BLOCKED: this Write would destroy a file you have not read
@@ -182,7 +181,7 @@ in this session is not blocked either.
 
 To disable: {_CONFIG_KEY_PATH}: false"""
 
-        return HookResult(decision=Decision.DENY, reason=reason, context=[], guidance=None)
+        return GatingResult(decision=Decision.DENY, reason=reason, context=[], guidance=None)
 
     @staticmethod
     def _count_lines(path: str) -> int:

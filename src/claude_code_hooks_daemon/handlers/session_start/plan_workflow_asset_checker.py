@@ -19,7 +19,8 @@ import logging
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.install.plan_workflow import (
     AGENTS_DIR_PARTS,
@@ -52,7 +53,7 @@ def _deploy_cli_hint() -> str:
     return daemon_cli_command(_DEPLOY_SUBCOMMAND)
 
 
-class PlanWorkflowAssetCheckerHandler(Handler):
+class PlanWorkflowAssetCheckerHandler(SessionStartHandlerBase):
     """Advise when plan_workflow is enabled but its assets are not provisioned."""
 
     def __init__(self) -> None:
@@ -76,22 +77,22 @@ class PlanWorkflowAssetCheckerHandler(Handler):
         # None => plan workflow disabled in config => nothing to check.
         return self._track_plans_in_project is not None
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         plan_dir_rel = self._track_plans_in_project
         if plan_dir_rel is None:  # pragma: no cover - matches() gates this
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         try:
             project_root = ProjectContext.project_root()
         except RuntimeError:
             logger.debug("ProjectContext not initialised; skipping plan asset check")
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         plan_dir = project_root / plan_dir_rel
         mkplan = plan_dir / MKPLAN_SCRIPT_NAME
         if mkplan.exists():
             # Daemon-owned scaffolder present => provisioning is intact.
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         # mkplan.bash is missing — the plan tooling is broken. Name every core
         # asset that is also absent so a single deploy fixes them all.
@@ -132,7 +133,7 @@ class PlanWorkflowAssetCheckerHandler(Handler):
             "",
             f"  {_deploy_cli_hint()}",
         ]
-        return HookResult(decision=Decision.ALLOW, context=context)
+        return AdvisoryResult(decision=Decision.ALLOW, context=context)
 
     def get_claude_md(self) -> str | None:
         return (

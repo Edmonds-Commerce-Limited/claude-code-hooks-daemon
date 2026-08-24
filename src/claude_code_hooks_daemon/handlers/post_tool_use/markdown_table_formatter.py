@@ -28,7 +28,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
@@ -172,7 +173,7 @@ def _build_reformat_message(file_name: str, labels: list[str]) -> str:
     return f"Reformatted markdown in {file_name}: {', '.join(labels)}"
 
 
-class MarkdownTableFormatterHandler(Handler):
+class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
     """Auto-format markdown tables after Write/Edit of .md files.
 
     Triggers on PostToolUse events for the Write and Edit tools when the target
@@ -218,15 +219,15 @@ class MarkdownTableFormatterHandler(Handler):
         # PostToolUse runs after the write, so the file must exist on disk.
         return Path(file_path).exists()
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Reformat the markdown file in place if its content changes."""
         file_path = get_file_path(hook_input)
         if not file_path:
-            return HookResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         path = Path(file_path)
         if not path.exists():
-            return HookResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         try:
             before = path.read_text(encoding="utf-8")
@@ -235,7 +236,7 @@ class MarkdownTableFormatterHandler(Handler):
             # FAIL SAFE: mdformat can raise many parser/IO/unicode errors.
             # Never crash the PostToolUse dispatch chain — surface the error
             # as advisory context and allow the write through unchanged.
-            return HookResult(
+            return BlockingResult(
                 decision=Decision.ALLOW,
                 context=[
                     f"markdown_table_formatter failed on {path.name}: {exc}",
@@ -243,7 +244,7 @@ class MarkdownTableFormatterHandler(Handler):
             )
 
         if formatted == before:
-            return HookResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         # Re-read immediately before writing. `formatted` derives from the
         # snapshot taken above, and a PostToolUse dispatch can lag well behind
@@ -253,7 +254,7 @@ class MarkdownTableFormatterHandler(Handler):
         # write raises its own PostToolUse event and gets formatted by it.
         try:
             if path.read_text(encoding="utf-8") != before:
-                return HookResult(
+                return BlockingResult(
                     decision=Decision.ALLOW,
                     context=[
                         f"{path.name} changed while it was being formatted — skipped "
@@ -264,7 +265,7 @@ class MarkdownTableFormatterHandler(Handler):
             # FAIL SAFE, consistent with the read above: never crash the
             # dispatch chain. Unable to confirm the file is unchanged means we
             # must not write.
-            return HookResult(
+            return BlockingResult(
                 decision=Decision.ALLOW,
                 context=[
                     f"markdown_table_formatter could not re-read {path.name}: {exc}",
@@ -273,7 +274,7 @@ class MarkdownTableFormatterHandler(Handler):
 
         path.write_text(formatted, encoding="utf-8")
         labels = classify_markdown_changes(before, formatted)
-        return HookResult(
+        return BlockingResult(
             decision=Decision.ALLOW,
             context=[_build_reformat_message(path.name, labels)],
         )

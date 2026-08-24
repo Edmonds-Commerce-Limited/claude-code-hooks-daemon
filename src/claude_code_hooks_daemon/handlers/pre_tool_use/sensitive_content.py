@@ -25,7 +25,8 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
 from claude_code_hooks_daemon.utils.path_exclusion import (
@@ -103,7 +104,7 @@ def _compiled_public_pattern(pattern: str) -> "re.Pattern[str] | None":
     return compiled
 
 
-class SensitiveContentHandler(Handler):
+class SensitiveContentHandler(PreToolUseHandlerBase):
     """Block Write/Edit content matching configured public patterns or a secret word list.
 
     Configuration options (``handlers.pre_tool_use.sensitive_content.options``):
@@ -348,7 +349,7 @@ class SensitiveContentHandler(Handler):
             # normal scanning rather than failing open on the whole check.
             return False
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         haystacks = self._haystacks_for(hook_input)
         subject = self._subject(hook_input)
 
@@ -368,7 +369,7 @@ class SensitiveContentHandler(Handler):
                 # keep it out of: moving the leak, not closing it.
                 return self._deny_secret_term(sr.redact_text(subject, terms), index, len(terms))
 
-        return HookResult(decision=Decision.ALLOW)
+        return GatingResult(decision=Decision.ALLOW)
 
     @staticmethod
     def _subject(hook_input: dict[str, Any]) -> str:
@@ -383,11 +384,11 @@ class SensitiveContentHandler(Handler):
         return str(tool_input.get(_FIELD_FILE_PATH, ""))
 
     @staticmethod
-    def _deny_public_pattern(subject: str, match: dict[str, str]) -> HookResult:
+    def _deny_public_pattern(subject: str, match: dict[str, str]) -> GatingResult:
         name = match.get(_PATTERN_KEY_NAME, "unnamed")
         description = match.get(_PATTERN_KEY_DESCRIPTION, "")
         matched_text = match.get("_matched", "")
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=(
                 "SENSITIVE CONTENT BLOCKED: content matches a configured public pattern\n\n"
@@ -399,8 +400,8 @@ class SensitiveContentHandler(Handler):
         )
 
     @staticmethod
-    def _deny_secret_term(subject: str, index: int, total: int) -> HookResult:
-        return HookResult(
+    def _deny_secret_term(subject: str, index: int, total: int) -> GatingResult:
+        return GatingResult(
             decision=Decision.DENY,
             reason=(
                 "SENSITIVE CONTENT BLOCKED: content matches a configured blocked term "

@@ -610,7 +610,7 @@ Use this template when creating new handlers for hook events.
 ## Handler Specification
 
 ```python
-class [HandlerName]Handler(Handler):
+class [HandlerName]Handler([Event]HandlerBase):
     def __init__(self) -> None:
         super().__init__(
             name="[handler-name]",
@@ -622,10 +622,12 @@ class [HandlerName]Handler(Handler):
         # Pattern matching logic
         pass
 
-    def handle(self, hook_input: dict) -> HookResult:
+    def handle(self, hook_input: dict) -> [Event]Result:
         # Handler behaviour
         pass
 ```
+
+The base and result type are chosen by the event: `PreToolUseHandlerBase`/`GatingResult`, `PostToolUseHandlerBase`/`BlockingResult`, or `<Event>HandlerBase`/`AdvisoryResult` for everything else.
 
 ## Success Criteria
 

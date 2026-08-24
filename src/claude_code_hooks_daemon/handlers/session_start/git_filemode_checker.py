@@ -14,7 +14,8 @@ from claude_code_hooks_daemon.constants import (
     HandlerTag,
     Priority,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
@@ -26,7 +27,7 @@ _GIT_CONFIG_KEY = "core.fileMode"
 _FILEMODE_FALSE = "false"
 
 
-class GitFilemodeCheckerHandler(Handler):
+class GitFilemodeCheckerHandler(SessionStartHandlerBase):
     """Warn when git core.fileMode=false is detected.
 
     Advisory handler that runs on new sessions only (not resumes).
@@ -74,14 +75,14 @@ class GitFilemodeCheckerHandler(Handler):
         """
         return not is_resume_session(hook_input)
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Check git core.fileMode and warn if disabled.
 
         Args:
             hook_input: SessionStart hook input
 
         Returns:
-            HookResult with ALLOW decision and advisory context
+            AdvisoryResult with ALLOW decision and advisory context
         """
         filemode = self._get_filemode_setting()
 
@@ -112,7 +113,7 @@ class GitFilemodeCheckerHandler(Handler):
                 "core.fileMode=false strips it on checkout."
             )
 
-        return HookResult(decision=Decision.ALLOW, context=lines)
+        return AdvisoryResult(decision=Decision.ALLOW, context=lines)
 
     def get_claude_md(self) -> str | None:
         return None

@@ -6,7 +6,8 @@ import re
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
@@ -22,7 +23,7 @@ _COMMENTS_FLAG = "--comments"
 _JSON_FLAG = "--json"
 
 
-class GhPrCommentsHandler(Handler):
+class GhPrCommentsHandler(PreToolUseHandlerBase):
     """Ensure gh pr view commands always include --comments flag.
 
     Review comments and general conversation on GitHub pull requests often
@@ -115,11 +116,11 @@ class GhPrCommentsHandler(Handler):
                 return command.replace(f"{prefix}{fields}", f"{prefix}{new_fields}", 1)
         return f"{command} --comments"
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block and suggest adding --comments flag."""
         command = get_bash_command(hook_input)
         if not command:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         suggested_command = self._compute_suggested_command(command)
 
@@ -134,7 +135,7 @@ class GhPrCommentsHandler(Handler):
             f"  {suggested_command}\n"
         )
 
-        return HookResult(decision=Decision.DENY, reason=reason)
+        return GatingResult(decision=Decision.DENY, reason=reason)
 
     def get_claude_md(self) -> str | None:
         return (

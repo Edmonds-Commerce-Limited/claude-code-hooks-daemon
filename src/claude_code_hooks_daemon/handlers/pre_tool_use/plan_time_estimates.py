@@ -11,12 +11,13 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
 
 
-class PlanTimeEstimatesHandler(Handler):
+class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
     """Block time estimates in plan documents."""
 
     ESTIMATE_PATTERNS: ClassVar[list[str]] = [
@@ -135,11 +136,11 @@ class PlanTimeEstimatesHandler(Handler):
         """Return True if the line contains a technical-term exemption."""
         return any(re.search(pattern, line, re.IGNORECASE) for pattern in self.TECHNICAL_PATTERNS)
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block time estimates."""
         file_path = get_file_path(hook_input)
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=(
                 "🚫 BLOCKED: Time estimates not allowed in plan documents\n\n"

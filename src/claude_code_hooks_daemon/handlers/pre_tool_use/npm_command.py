@@ -8,7 +8,8 @@ import re
 from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
@@ -38,7 +39,7 @@ def _truncate_command(command: str) -> str:
     return command[:_MAX_ECHOED_COMMAND_CHARS] + _TRUNCATION_SUFFIX
 
 
-class NpmCommandHandler(Handler):
+class NpmCommandHandler(PreToolUseHandlerBase):
     """Enforce llm: prefixed npm commands and block direct npx tool usage."""
 
     ALLOWED_COMMANDS: ClassVar[list[str]] = ["clean", "dev:permissive"]
@@ -109,18 +110,18 @@ class NpmCommandHandler(Handler):
 
         return False
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block non-llm npm commands, npx tools, and piped commands with suggestion."""
         command = get_bash_command(hook_input)
         if not command:
-            return HookResult(decision=Decision.ALLOW, reason="No command found in hook input")
+            return GatingResult(decision=Decision.ALLOW, reason="No command found in hook input")
 
         # Check if command is being piped (exclude || logical OR)
         pipe_match = re.search(r"\b(npm\s+run|npx)\s+([a-z:]+).*?\s*(?<!\|)\|(?!\|)", command)
         if pipe_match:
             pipe_match.group(1)
             cmd_name = pipe_match.group(2)
-            return HookResult(
+            return GatingResult(
                 decision=Decision.DENY,
                 reason=(
                     f"🚫 BLOCKED: Piping npm/npx commands is pointless\n\n"
@@ -154,12 +155,14 @@ class NpmCommandHandler(Handler):
                 blocked_cmd = f"npx {tool_name}"
             else:
                 # Fallback if pattern doesn't match
-                return HookResult(decision=Decision.ALLOW, reason="Could not parse npm/npx command")
+                return GatingResult(
+                    decision=Decision.ALLOW, reason="Could not parse npm/npx command"
+                )
 
         # Advisory mode: no llm: commands in package.json
         if not self.has_llm_commands:
             guide_path = get_llm_command_guide_path()
-            return HookResult(
+            return GatingResult(
                 decision=Decision.ALLOW,
                 context=[
                     f"⚠️  ADVISORY: Consider creating llm: prefixed npm commands\n\n"
@@ -192,7 +195,7 @@ class NpmCommandHandler(Handler):
             f"No need for grep/awk/sed post-processing!"
         )
 
-        return HookResult(decision=Decision.DENY, reason=reason)
+        return GatingResult(decision=Decision.DENY, reason=reason)
 
     def get_claude_md(self) -> str | None:
         return (

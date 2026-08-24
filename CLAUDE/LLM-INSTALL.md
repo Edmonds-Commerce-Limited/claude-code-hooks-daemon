@@ -499,9 +499,10 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "hooks-daemon/src"))
 
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 
-class MyHandler(Handler):
+class MyHandler(PreToolUseHandlerBase):
     def __init__(self) -> None:
         super().__init__(name="my-handler", priority=50, terminal=True)
 
@@ -509,8 +510,8 @@ class MyHandler(Handler):
         command = hook_input.get("tool_input", {}).get("command", "")
         return "npm" in command
 
-    def handle(self, hook_input: dict) -> HookResult:
-        return HookResult(decision="deny", reason="Use project script instead")
+    def handle(self, hook_input: dict) -> GatingResult:
+        return GatingResult(decision=Decision.DENY, reason="Use project script instead")
 ```
 
 **4. Register in config:**

@@ -35,7 +35,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, ToolName
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.transcript_reader import (
     ContentBlock,
@@ -204,7 +205,7 @@ def _transcript_last_is_assistant(reader: TranscriptReader) -> bool:
     return bool(messages) and messages[-1].role == "assistant"
 
 
-class AutoContinueStopHandler(Handler):
+class AutoContinueStopHandler(StopHandlerBase):
     """Intercept Stop events and enforce explicit stop reasons or auto-continue.
 
     This handler intercepts Stop events, reads the transcript to detect
@@ -356,7 +357,7 @@ class AutoContinueStopHandler(Handler):
 
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Route to the appropriate auto-continue branch.
 
         Branch 1 - QA failure:
@@ -378,14 +379,14 @@ class AutoContinueStopHandler(Handler):
             hook_input: Hook input with transcript_path
 
         Returns:
-            HookResult with DENY or ALLOW decision
+            BlockingResult with DENY or ALLOW decision
         """
         reader = get_transcript_reader(hook_input)
 
         # Branch 1: QA failure
         if reader and self._is_qa_failure(reader):
             logger.info("QA failure detected - instructing Claude to fix and continue")
-            result = HookResult(decision=Decision.DENY, reason=_QA_FAIL_REASON)
+            result = BlockingResult(decision=Decision.DENY, reason=_QA_FAIL_REASON)
             self._log_stop_event(hook_input, Decision.DENY, _QA_FAIL_REASON)
             return result
 
@@ -404,7 +405,7 @@ class AutoContinueStopHandler(Handler):
                         "Rhetorical continue question inside STOPPING BECAUSE: stop"
                         " - hard-blocking"
                     )
-                    result = HookResult(
+                    result = BlockingResult(
                         decision=Decision.DENY, reason=_RHETORICAL_CONTINUE_BLOCK_REASON
                     )
                     self._log_stop_event(
@@ -412,7 +413,7 @@ class AutoContinueStopHandler(Handler):
                     )
                     return result
                 logger.info("STOPPING BECAUSE: prefix detected - allowing stop")
-                result = HookResult(decision=Decision.ALLOW)
+                result = BlockingResult(decision=Decision.ALLOW)
                 self._log_stop_event(hook_input, Decision.ALLOW, "")
                 return result
 
@@ -424,7 +425,7 @@ class AutoContinueStopHandler(Handler):
         # stop after a tool error.
         if reader and reader.last_tool_result_was_error():
             logger.info("tool_use_error detected with no recovery - emitting recovery reason")
-            result = HookResult(decision=Decision.DENY, reason=_TOOL_ERROR_RECOVERY_REASON)
+            result = BlockingResult(decision=Decision.DENY, reason=_TOOL_ERROR_RECOVERY_REASON)
             self._log_stop_event(hook_input, Decision.DENY, _TOOL_ERROR_RECOVERY_REASON)
             return result
 
@@ -447,7 +448,7 @@ class AutoContinueStopHandler(Handler):
 
                 if is_confirmation and "?" in last_message:
                     logger.info("Confirmation question detected - will auto-continue")
-                    result = HookResult(
+                    result = BlockingResult(
                         decision=Decision.DENY, reason=_CONFIRMATION_CONTINUE_REASON
                     )
                     self._log_stop_event(hook_input, Decision.DENY, _CONFIRMATION_CONTINUE_REASON)
@@ -457,13 +458,13 @@ class AutoContinueStopHandler(Handler):
         force_explanation = self._force_explanation
         if force_explanation:
             logger.info("No stop explanation provided - requiring STOPPING BECAUSE: or continue")
-            result = HookResult(decision=Decision.DENY, reason=_EXPLAIN_OR_CONTINUE_REASON)
+            result = BlockingResult(decision=Decision.DENY, reason=_EXPLAIN_OR_CONTINUE_REASON)
             self._log_stop_event(hook_input, Decision.DENY, _EXPLAIN_OR_CONTINUE_REASON)
             return result
 
         # force_explanation=False: allow stop without explanation
         logger.info("force_explanation=False - allowing stop without explanation")
-        result = HookResult(decision=Decision.ALLOW)
+        result = BlockingResult(decision=Decision.ALLOW)
         self._log_stop_event(hook_input, Decision.ALLOW, "")
         return result
 

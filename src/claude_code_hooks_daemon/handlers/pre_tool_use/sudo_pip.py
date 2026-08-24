@@ -10,9 +10,8 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
-from claude_code_hooks_daemon.core import Decision
-from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, SUDO_INVOCATION
 
@@ -28,7 +27,7 @@ from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, SUDO_I
 _SUDO_PIP_PATTERN = SUDO_INVOCATION + OPTIONAL_PATH + r"(?:pip3?|python3?\s+-m\s+pip)\s+install\b"
 
 
-class SudoPipHandler(Handler):
+class SudoPipHandler(PreToolUseHandlerBase):
     """Block sudo pip install commands.
 
     System-wide pip installs using sudo can:
@@ -76,18 +75,18 @@ class SudoPipHandler(Handler):
 
         return bool(re.search(_SUDO_PIP_PATTERN, command, re.IGNORECASE))
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block command and explain why sudo pip install is dangerous.
 
         Args:
             hook_input: Hook input containing the dangerous command
 
         Returns:
-            HookResult with deny decision and explanation
+            GatingResult with deny decision and explanation
         """
         # Safety check: if command doesn't match, allow
         if not self.matches(hook_input):
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         command = hook_input.get("tool_input", {}).get("command", "")
 
@@ -117,7 +116,7 @@ SAFE alternatives:
 
 NEVER use sudo pip install as default behavior."""
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=reason,
             context=[],

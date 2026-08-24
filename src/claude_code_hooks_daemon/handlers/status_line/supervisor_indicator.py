@@ -74,8 +74,9 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
+from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +177,7 @@ _STATE_BACKGROUND: dict[_SupervisorState, str] = {
 }
 
 
-class SupervisorIndicatorHandler(Handler):
+class SupervisorIndicatorHandler(StatusLineHandlerBase):
     """Show whether the ccy PTY supervisor is overseeing the session."""
 
     def __init__(self) -> None:
@@ -222,7 +223,7 @@ class SupervisorIndicatorHandler(Handler):
         """Always run for status line events."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Return the supervisor-indicator segment, failing safe on any error.
 
         A transient supervisor message (Ctrl+Z notice, etc.) is rendered
@@ -251,12 +252,12 @@ class SupervisorIndicatorHandler(Handler):
             # the current state colour (falling back to orange if unknown). Text
             # is forced black so it is legible on any of these backgrounds.
             msg_bg = _BG_ORANGE if level == _MESSAGE_LEVEL_WARNING else (background or _BG_ORANGE)
-            return HookResult(context=[f"| {msg_bg}{_FG_BLACK} {_ICON} {text} {_ANSI_RESET}"])
+            return AdvisoryResult(context=[f"| {msg_bg}{_FG_BLACK} {_ICON} {text} {_ANSI_RESET}"])
 
         if background is None:
             # NOT_CONFIGURED and no message — no supervisor status file, render nothing.
-            return HookResult(context=[])
-        return HookResult(context=[f"| {background} {_ICON} {_ANSI_RESET}"])
+            return AdvisoryResult(context=[])
+        return AdvisoryResult(context=[f"| {background} {_ICON} {_ANSI_RESET}"])
 
     def _safe_active_message(self) -> tuple[str, str] | None:
         """Return ``(text, level)`` for the current unexpired message, or None.

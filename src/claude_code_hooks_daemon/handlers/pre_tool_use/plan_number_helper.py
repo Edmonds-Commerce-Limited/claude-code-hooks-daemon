@@ -31,8 +31,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core import GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     PLAN_NUMBER_WIDTH,
@@ -69,7 +69,7 @@ _TRUNCATE_TO_LAST_PATTERN: Final[str] = r"tail\s+(-n\s*)?-?\d+"
 _MKDIR_COMMAND: Final[str] = "mkdir"
 
 
-class PlanNumberHelperHandler(Handler):
+class PlanNumberHelperHandler(PreToolUseHandlerBase):
     """Detect bash commands attempting to discover plan numbers and provide correct answer."""
 
     def __init__(self) -> None:
@@ -148,13 +148,13 @@ class PlanNumberHelperHandler(Handler):
 
         return candidate
 
-    def _deny_hand_rolled_creation(self, plan_folder: str) -> HookResult:
+    def _deny_hand_rolled_creation(self, plan_folder: str) -> GatingResult:
         """Redirect a hand-rolled plan-folder creation to the scaffolder."""
         folder_name = plan_folder.rsplit("/", 1)[-1]
         name_match = re.match(rf"\d{{1,{PLAN_NUMBER_WIDTH}}}-(.+)$", folder_name)
         kebab_name = name_match.group(1) if name_match else folder_name
 
-        return HookResult.deny(
+        return GatingResult.deny(
             reason=(
                 f"🚫 BLOCKED: `{_MKDIR_COMMAND} {plan_folder}` hand-creates a plan folder.\n\n"
                 "The number is claimed the moment the folder appears, but nothing "
@@ -407,14 +407,14 @@ class PlanNumberHelperHandler(Handler):
 
         return False
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block broken command and provide correct next plan number.
 
         Args:
             hook_input: Hook input data
 
         Returns:
-            HookResult with DENY decision and helpful reason
+            GatingResult with DENY decision and helpful reason
         """
         # Precondition: matches() ensures _track_plans_in_project is not None
         assert self._track_plans_in_project is not None, "Handler called without matches check"
@@ -449,7 +449,7 @@ class PlanNumberHelperHandler(Handler):
                         f"\n📖 See `{self._plan_workflow_docs}` for plan structure and conventions."
                     )
 
-            return HookResult.deny(reason=reason_message)
+            return GatingResult.deny(reason=reason_message)
 
         except Exception as e:
             # Gracefully handle errors - still block the broken command
@@ -459,7 +459,7 @@ class PlanNumberHelperHandler(Handler):
                 f"Starting from 00001 if this is a new project."
             )
 
-            return HookResult.deny(reason=reason_message)
+            return GatingResult.deny(reason=reason_message)
 
     def get_claude_md(self) -> str | None:
         return (

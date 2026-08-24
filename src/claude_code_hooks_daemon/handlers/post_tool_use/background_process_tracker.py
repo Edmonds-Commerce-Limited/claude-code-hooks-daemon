@@ -29,7 +29,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
@@ -208,7 +209,7 @@ def _advisory() -> str:
     )
 
 
-class BackgroundProcessTrackerHandler(Handler):
+class BackgroundProcessTrackerHandler(PostToolUseHandlerBase):
     """Track backgrounded Bash processes and advise on watchdog/harvest (never kills)."""
 
     def __init__(self) -> None:
@@ -265,7 +266,7 @@ class BackgroundProcessTrackerHandler(Handler):
         self._session_counts[session_id] = count
         return (count - _COUNT_START) % _ADVISE_INTERVAL == 0
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         command = get_bash_command(hook_input) or ""
         tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
         session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or "unknown")
@@ -283,8 +284,8 @@ class BackgroundProcessTrackerHandler(Handler):
             )
 
         if not self._should_advise(session_id):
-            return HookResult(decision=Decision.ALLOW)
-        return HookResult(decision=Decision.ALLOW, context=[_advisory()])
+            return BlockingResult(decision=Decision.ALLOW)
+        return BlockingResult(decision=Decision.ALLOW, context=[_advisory()])
 
     def get_claude_md(self) -> str | None:
         return (

@@ -9,9 +9,8 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
-from claude_code_hooks_daemon.core import Decision
-from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
 # World-writable OCTAL modes: any mode whose "other" (last) digit has the write bit
@@ -31,7 +30,7 @@ _DANGEROUS_PERMISSIONS_PATTERN = (
 )
 
 
-class DangerousPermissionsHandler(Handler):
+class DangerousPermissionsHandler(PreToolUseHandlerBase):
     """Block chmod 777 and dangerous permission commands.
 
     Blocks patterns like:
@@ -87,18 +86,18 @@ class DangerousPermissionsHandler(Handler):
 
         return bool(re.search(_DANGEROUS_PERMISSIONS_PATTERN, command))
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block command and explain why 777 permissions are dangerous.
 
         Args:
             hook_input: Hook input containing the dangerous command
 
         Returns:
-            HookResult with deny decision and explanation
+            GatingResult with deny decision and explanation
         """
         # Safety check: if command doesn't match, allow
         if not self.matches(hook_input):
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         command = hook_input.get("tool_input", {}).get("command", "")
 
@@ -130,7 +129,7 @@ CORRECT permissions:
 If you need broader access, ask the human user for the specific use case.
 The correct solution is almost never 777."""
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=reason,
             context=[],

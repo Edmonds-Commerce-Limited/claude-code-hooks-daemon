@@ -10,17 +10,24 @@ Copy this to .claude/project-handlers/pre_tool_use/ and adapt to your project.
 import re
 from typing import Any
 
-from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
+from claude_code_hooks_daemon.core import AcceptanceTest, GatingResult, TestType
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
 
-class VendorChangesReminderHandler(Handler):
+class VendorChangesReminderHandler(PreToolUseHandlerBase):
     """Remind about vendor commit workflow when staging/committing vendor files.
 
     First-party vendor packages must be committed and pushed in their own
     vendor directory first, then the dependency manager updated in the
     main project.
+
+    This handler only ever advises, but `PreToolUse` is a GATING event — it
+    can deny or ask, not just add context — so subclassing
+    `PreToolUseHandlerBase` narrows `handle()` to `GatingResult` rather than
+    the advisory-only tier. The narrowing tracks what the EVENT can deliver,
+    not what this particular handler happens to do with it.
     """
 
     def __init__(self) -> None:
@@ -38,9 +45,9 @@ class VendorChangesReminderHandler(Handler):
             return False
         return bool(re.search(r"\bgit\s+(add|commit)\b", command)) and "vendor/" in command
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Provide reminder about vendor workflow."""
-        return HookResult(
+        return GatingResult(
             decision=Decision.ALLOW,
             context=[
                 "VENDOR WORKFLOW REMINDER:",

@@ -14,12 +14,11 @@ from typing import Any, ClassVar
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision
-from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 
 
-class LockFileEditBlockerHandler(Handler):
+class LockFileEditBlockerHandler(PreToolUseHandlerBase):
     """Block direct editing of package manager lock files.
 
     Lock files are generated artifacts that capture exact dependency versions and
@@ -120,18 +119,18 @@ class LockFileEditBlockerHandler(Handler):
         file_path_lower = file_path.lower()
         return any(file_path_lower.endswith(lock_file.lower()) for lock_file in self.LOCK_FILES)
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block operation and explain why lock files must not be edited.
 
         Args:
             hook_input: Hook input containing the operation to block
 
         Returns:
-            HookResult with deny decision and explanation
+            GatingResult with deny decision and explanation
         """
         # Safety check: if doesn't match, allow
         if not self.matches(hook_input):
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         tool_input = hook_input.get("tool_input", {})
         file_path = tool_input.get("file_path", "")
@@ -181,7 +180,7 @@ These commands will:
 
 NEVER manually edit lock files with Write or Edit tools."""
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=reason,
             context=[],

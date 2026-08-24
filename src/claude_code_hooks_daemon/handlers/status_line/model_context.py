@@ -76,7 +76,8 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
     _CONTEXT_TIER_200K_CRITICAL_PCT,
     _CONTEXT_TIER_200K_ORANGE_PCT,
@@ -133,7 +134,7 @@ _EFFORT_MIN_MAJOR_VERSION = 4
 _MODEL_VERSION_PATTERN = re.compile(r"claude-(?:opus|sonnet|haiku)-(\d+)-")
 
 
-class ModelContextHandler(Handler):
+class ModelContextHandler(StatusLineHandlerBase):
     """Format model name with effort level and colour-coded context percentage."""
 
     def __init__(self) -> None:
@@ -157,14 +158,14 @@ class ModelContextHandler(Handler):
         """Always run for status events."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Generate model, effort level, and context percentage status text.
 
         Args:
             hook_input: Status event input with model and context_window data
 
         Returns:
-            HookResult with formatted status text in context list
+            AdvisoryResult with formatted status text in context list
         """
         # Extract data with safe defaults
         model_data = hook_input.get("model", {})
@@ -199,7 +200,7 @@ class ModelContextHandler(Handler):
         # Format: "🤖 Model ▌▌▌ | ◔ XX%" with colored icon and percentage
         status = f"{model_part} | {icon_color}{ctx_icon}{reset} {pct_color}{used_pct:.1f}%{reset}"
 
-        return HookResult(context=[status])
+        return AdvisoryResult(context=[status])
 
     def _get_effort_suffix(self, hook_input: dict[str, Any], model_id: str, reset: str) -> str:
         """Get effort level signal bars for Claude 4+ models.

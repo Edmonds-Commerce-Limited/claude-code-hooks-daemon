@@ -10,7 +10,8 @@ from claude_code_hooks_daemon.constants import (
     HookInputField,
     Priority,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
@@ -26,7 +27,7 @@ _MAX_SUPPRESSION_SECONDS = 900.0
 _MAX_TRACKED_SESSIONS = 32
 
 
-class GitContextInjectorHandler(Handler):
+class GitContextInjectorHandler(UserPromptSubmitHandlerBase):
     """Inject current git status as context when user submits a prompt.
 
     Provides awareness of repository state (branch, uncommitted changes) to help
@@ -88,7 +89,7 @@ class GitContextInjectorHandler(Handler):
         """
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Inject git status as context, but only when it has something to say.
 
         The duty — git state informs decisions — is why this handler exists.
@@ -101,7 +102,7 @@ class GitContextInjectorHandler(Handler):
             hook_input: Hook input dictionary from Claude Code
 
         Returns:
-            HookResult with git status context, or a silent allow when git is
+            AdvisoryResult with git status context, or a silent allow when git is
             unavailable or the status is unchanged since this session's last
             injection
         """
@@ -122,7 +123,7 @@ class GitContextInjectorHandler(Handler):
 
             # If git command failed (not a repo, git not installed, etc.), silent allow
             if result.returncode != 0:
-                return HookResult(decision=Decision.ALLOW)
+                return AdvisoryResult(decision=Decision.ALLOW)
 
             # Build context message
             context = "Current git repository status:\n\n"
@@ -132,15 +133,15 @@ class GitContextInjectorHandler(Handler):
 
             session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or "")
             if not self._should_inject(session_id, context):
-                return HookResult(decision=Decision.ALLOW)
+                return AdvisoryResult(decision=Decision.ALLOW)
 
-            return HookResult(decision=Decision.ALLOW, context=[context])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[context])
 
         except OSError:
             # `run_git` reports an absent git or a timeout as a non-zero
             # returncode rather than raising, so the only thing left that can
             # raise here is resolving the fallback cwd — silent allow either way.
-            return HookResult(decision=Decision.ALLOW)
+            return AdvisoryResult(decision=Decision.ALLOW)
 
     def get_claude_md(self) -> str | None:
         return None

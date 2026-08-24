@@ -15,7 +15,8 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PermissionRequestHandlerBase
 from claude_code_hooks_daemon.utils.permission_mode import is_bypass_mode
 
 # Read-only tools that are safe to auto-approve
@@ -26,7 +27,7 @@ _READ_ONLY_TOOLS: tuple[str, ...] = (
 )
 
 
-class AutoApproveReadsHandler(Handler):
+class AutoApproveReadsHandler(PermissionRequestHandlerBase):
     """Auto-approve read-only tool permission requests.
 
     Automatically approves permission requests for read-only operations
@@ -66,22 +67,22 @@ class AutoApproveReadsHandler(Handler):
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         return tool_name in _READ_ONLY_TOOLS
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Auto-approve read-only tools, deny everything else.
 
         Args:
             hook_input: Hook input dictionary from Claude Code
 
         Returns:
-            HookResult with allow for read-only tools, deny for others
+            GatingResult with allow for read-only tools, deny for others
         """
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
 
         if tool_name in _READ_ONLY_TOOLS:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         # Defensive: deny non-read tools that somehow reach handle()
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=(
                 f"BLOCKED: Permission request for non-read tool '{tool_name}'\n\n"

@@ -25,9 +25,8 @@ from typing import Any
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision
-from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 
 # The tool's read-only mode. Enumerating existing artefacts discloses nothing
 # new, so it is the one action deliberately left allowed.
@@ -38,7 +37,7 @@ _LIST_ACTION = "list"
 _CONFIG_KEY_PATH = "handlers.pre_tool_use.artifact_publish_blocker.enabled"
 
 
-class ArtifactPublishBlockerHandler(Handler):
+class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
     """Deny artefact publishing; allow read-only enumeration.
 
     Priority: 14 (grouped with ``sensitive_content`` and
@@ -83,17 +82,17 @@ class ArtifactPublishBlockerHandler(Handler):
 
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny the publish and explain who can lift the block.
 
         Args:
             hook_input: Hook input for the artefact call.
 
         Returns:
-            HookResult denying the call, or allowing it when it does not match.
+            GatingResult denying the call, or allowing it when it does not match.
         """
         if not self.matches(hook_input):
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         reason = f"""🚫 BLOCKED: publishing an artefact
 
@@ -122,7 +121,7 @@ hatch, unlike guards whose consequences stay inside the repository.
 STILL ALLOWED: listing existing artefacts (`action: "list"`) — enumerating
 discloses nothing new."""
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=reason,
             context=[],

@@ -4,11 +4,12 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
+from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 
 
-class WorkingDirectoryHandler(Handler):
+class WorkingDirectoryHandler(StatusLineHandlerBase):
     """Display working directory when it differs from project root."""
 
     def __init__(self) -> None:
@@ -23,14 +24,14 @@ class WorkingDirectoryHandler(Handler):
         """Always run for status line events."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Return working directory path if different from project root.
 
         Args:
             hook_input: Status event input with workspace data
 
         Returns:
-            HookResult with formatted working directory path, or empty if same as project root
+            AdvisoryResult with formatted working directory path, or empty if same as project root
         """
         workspace = hook_input.get("workspace", {})
         current_dir = workspace.get("current_dir")
@@ -38,7 +39,7 @@ class WorkingDirectoryHandler(Handler):
 
         # Return empty if either path is missing
         if not current_dir or not project_dir:
-            return HookResult(context=[])
+            return AdvisoryResult(context=[])
 
         # Normalize paths for comparison
         current_path = Path(current_dir)
@@ -46,7 +47,7 @@ class WorkingDirectoryHandler(Handler):
 
         # Return empty if current directory equals project directory
         if current_path == project_path:
-            return HookResult(context=[])
+            return AdvisoryResult(context=[])
 
         # Calculate relative path
         try:
@@ -54,10 +55,10 @@ class WorkingDirectoryHandler(Handler):
             # Display path in orange to make it visually distinct
             orange = "\033[38;5;208m"
             reset = "\033[0m"
-            return HookResult(context=[f"| 📁 {orange}{relative_path}{reset}"])
+            return AdvisoryResult(context=[f"| 📁 {orange}{relative_path}{reset}"])
         except ValueError:
             # current_dir is not relative to project_dir (e.g., different drive on Windows)
-            return HookResult(context=[])
+            return AdvisoryResult(context=[])
 
     def get_claude_md(self) -> str | None:
         return None

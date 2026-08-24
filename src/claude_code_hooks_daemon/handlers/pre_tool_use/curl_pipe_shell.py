@@ -10,9 +10,8 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
-from claude_code_hooks_daemon.core import Decision
-from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, OPTIONAL_SUDO
 
@@ -39,7 +38,7 @@ _CURL_PIPE_SHELL_PATTERN = (
 )
 
 
-class CurlPipeShellHandler(Handler):
+class CurlPipeShellHandler(PreToolUseHandlerBase):
     """Block curl/wget piped to shell commands.
 
     Blocks patterns like:
@@ -96,18 +95,18 @@ class CurlPipeShellHandler(Handler):
 
         return bool(re.search(_CURL_PIPE_SHELL_PATTERN, command, re.IGNORECASE))
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block command and explain why piping to shell is dangerous.
 
         Args:
             hook_input: Hook input containing the dangerous command
 
         Returns:
-            HookResult with deny decision and explanation
+            GatingResult with deny decision and explanation
         """
         # Safety check: if command doesn't match, allow
         if not self.matches(hook_input):
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         command = hook_input.get("tool_input", {}).get("command", "")
 
@@ -135,7 +134,7 @@ SAFE alternative:
 
 NEVER pipe network content directly to a shell."""
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=reason,
             context=[],

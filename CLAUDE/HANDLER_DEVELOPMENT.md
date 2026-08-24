@@ -105,10 +105,11 @@ For complex validation, use `.claude/hooks.json` with agent-based hooks:
 ## Quick Start
 
 ```python
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
-class MyHandler(Handler):
+class MyHandler(PreToolUseHandlerBase):
     """One-line description of what this handler does."""
 
     def __init__(self):
@@ -123,20 +124,63 @@ class MyHandler(Handler):
         command = get_bash_command(hook_input)
         return command and "dangerous-pattern" in command
 
-    def handle(self, hook_input: dict) -> HookResult:
+    def handle(self, hook_input: dict) -> GatingResult:
         """Execute handler logic, return result."""
-        return HookResult(
-            decision="deny",
+        return GatingResult.deny(
             reason="This operation is not allowed because..."
         )
 ```
+
+## Subclass your event's base, not `Handler`
+
+**Your handler's base class is chosen by the event it answers**, and it decides
+which decisions you are allowed to return.
+
+This is not a style preference. `PreToolUse` carries a refusal as
+`permissionDecision: deny`; `Stop` carries one as `decision: block`;
+`SessionStart` has no way to express a refusal at all. A DENY on an event that
+cannot carry one is **silently dropped on the wire** — the handler believes it
+blocked and nothing blocked. Subclassing the event's base makes that
+unwritable: mypy rejects the decision, and Pydantic rejects it again at runtime.
+
+| Tier         | Decisions it can return    | Events                          | Base class           | Result type      |
+| ------------ | -------------------------- | ------------------------------- | -------------------- | ---------------- |
+| **Gating**   | allow, continue, deny, ask | PreToolUse, PermissionRequest   | `<Event>HandlerBase` | `GatingResult`   |
+| **Blocking** | allow, continue, deny      | PostToolUse, Stop, SubagentStop | `<Event>HandlerBase` | `BlockingResult` |
+| **Advisory** | allow, continue            | every other wired event         | `<Event>HandlerBase` | `AdvisoryResult` |
+
+**Every wired event has a base named after it** — `SessionStartHandlerBase`,
+`PostToolUseHandlerBase`, `StatusLineHandlerBase`, and so on, in
+`claude_code_hooks_daemon.core.handler_bases`. Use your event's name and you do
+not need to know which tier it is in; that is the whole point. (The names are
+aliases of the three tier classes, so `SessionStartHandlerBase is AdvisoryHandler` — which is why an event's base cannot drift from its tier.)
+
+Build results through the result type, not `HookResult`:
+
+```python
+return AdvisoryResult.allow(context=["FYI: ..."])   # advisory tier
+return BlockingResult.deny(reason="Lint failed")    # blocking tier
+return GatingResult.ask(reason="Confirm?")          # gating tier
+```
+
+`AdvisoryResult.deny(...)` does not compile — `deny` is inherited from
+`HookResult` and returns the wide type, so your declared `-> AdvisoryResult`
+rejects it. That is deliberate, and it is the error you want.
+
+**A pseudo-event handler is the one exception.** Its decision is delivered under
+whichever REAL event triggered it, and triggers are per-project configuration —
+so no fixed tier is correct. Those subclass `Handler` directly and are clamped
+at merge time instead.
 
 ## Handler Pattern
 
 ### 1. Class Definition
 
+Subclass the base named after your event — see
+[Subclass your event's base](#subclass-your-events-base-not-handler) above.
+
 ```python
-class MyHandler(Handler):
+class MyHandler(PreToolUseHandlerBase):
     """Docstring explaining what this handler does and why."""
 ```
 
@@ -191,19 +235,23 @@ def matches(self, hook_input: dict) -> bool:
 ### 4. Handle Logic
 
 ```python
-def handle(self, hook_input: dict) -> HookResult:
+def handle(self, hook_input: dict) -> GatingResult:
     """Execute the handler logic.
+
+    The return type is your EVENT's result type, not `HookResult` — widening it
+    back is rejected by mypy, which is what stops a handler returning a decision
+    its event silently drops.
 
     Args:
         hook_input: Same dict passed to matches()
 
     Returns:
-        HookResult with decision and optional reason/context
+        A result of this event's tier, with decision and optional reason/context
     """
     command = get_bash_command(hook_input)
 
-    return HookResult(
-        decision="deny",  # "allow", "deny", or "ask"
+    return GatingResult(
+        decision=Decision.DENY,  # ALLOW, DENY or ASK — the gating tier carries all three
         reason=(
             "🚫 BLOCKED: Dangerous command detected\n\n"
             f"Command: {command}\n\n"
@@ -226,7 +274,7 @@ Handlers can be tagged with metadata that enables categorization and filtering. 
 Tags are specified in the handler's `__init__` method:
 
 ```python
-class MyHandler(Handler):
+class MyHandler(PreToolUseHandlerBase):
     def __init__(self) -> None:
         super().__init__(
             name="my-handler",
@@ -418,12 +466,12 @@ Choose priority based on handler type:
 **Use when**: You need to **block or enforce**
 
 ```python
-class BlockingHandler(Handler):
+class BlockDangerousBashHandler(PreToolUseHandlerBase):
     def __init__(self):
-        super().__init__(name="blocking", priority=10, terminal=True)
+        super().__init__(name="block-dangerous-bash", priority=10, terminal=True)
 
-    def handle(self, hook_input: dict) -> HookResult:
-        return HookResult(decision="deny", reason="Blocked!")
+    def handle(self, hook_input: dict) -> GatingResult:
+        return GatingResult.deny(reason="Blocked!")
 ```
 
 **Behaviour**:
@@ -437,14 +485,13 @@ class BlockingHandler(Handler):
 **Use when**: You want to **warn or guide** without blocking
 
 ```python
-class AdvisoryHandler(Handler):
+class SpellingAdviceHandler(PreToolUseHandlerBase):
     def __init__(self):
-        super().__init__(name="advisory", priority=60, terminal=False)
+        super().__init__(name="spelling-advice", priority=60, terminal=False)
 
-    def handle(self, hook_input: dict) -> HookResult:
-        return HookResult(
-            decision="allow",  # Ignored for non-terminal
-            context="⚠️  Warning: This might cause issues..."
+    def handle(self, hook_input: dict) -> GatingResult:
+        return GatingResult.allow(
+            context=["⚠️  Warning: This might cause issues..."]
         )
 ```
 
@@ -455,46 +502,51 @@ class AdvisoryHandler(Handler):
 - Decision is ignored (always treated as allow)
 - Context accumulated into final result
 
-## HookResult Options
+## Result Options
 
-### 1. Allow (silent)
+The class you construct is your event's tier — `AdvisoryResult`,
+`BlockingResult` or `GatingResult`. Options 1-3 work on every tier; option 4
+needs blocking or gating; option 5 needs gating. Using one your tier does not
+carry is a mypy error, which is the point.
+
+### 1. Allow (silent) — any tier
 
 ```python
-return HookResult(decision="allow")
+return AdvisoryResult(decision=Decision.ALLOW)
 ```
 
-### 2. Allow with context
+### 2. Allow with context — any tier
 
 ```python
-return HookResult(
-    decision="allow",
-    context="📋 Reminder: Don't forget to update documentation"
+return AdvisoryResult(
+    decision=Decision.ALLOW,
+    context=["📋 Reminder: Don't forget to update documentation"]
 )
 ```
 
-### 3. Allow with guidance
+### 3. Allow with guidance — any tier
 
 ```python
-return HookResult(
-    decision="allow",
+return AdvisoryResult(
+    decision=Decision.ALLOW,
     guidance="Consider using X instead of Y for better performance"
 )
 ```
 
-### 4. Deny (block)
+### 4. Deny (block) — blocking or gating tier only
 
 ```python
-return HookResult(
-    decision="deny",
+return GatingResult(
+    decision=Decision.DENY,
     reason="Clear explanation of why operation is blocked"
 )
 ```
 
-### 5. Ask (request approval)
+### 5. Ask (request approval) — gating tier only
 
 ```python
-return HookResult(
-    decision="ask",
+return GatingResult(
+    decision=Decision.ASK,
     reason="This operation requires user approval because..."
 )
 ```
@@ -567,7 +619,7 @@ def write_input(file_path: str, content: str) -> dict:
 ```python
 import re
 
-class RegexHandler(Handler):
+class RegexHandler(PreToolUseHandlerBase):
     def __init__(self):
         super().__init__(name="regex", priority=20)
         # Compile patterns once in __init__
@@ -587,7 +639,7 @@ class RegexHandler(Handler):
 ### Pattern 2: File Extension Checking
 
 ```python
-class FileTypeHandler(Handler):
+class FileTypeHandler(PreToolUseHandlerBase):
     EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx']
 
     def matches(self, hook_input: dict) -> bool:
@@ -604,7 +656,7 @@ class FileTypeHandler(Handler):
 ### Pattern 3: Content Scanning
 
 ```python
-class ContentHandler(Handler):
+class ContentHandler(PreToolUseHandlerBase):
     FORBIDDEN = ["password", "secret", "api_key"]
 
     def matches(self, hook_input: dict) -> bool:
@@ -622,7 +674,7 @@ class ContentHandler(Handler):
 ### Pattern 4: Multi-Tool Matching
 
 ```python
-class MultiToolHandler(Handler):
+class MultiToolHandler(PreToolUseHandlerBase):
     def matches(self, hook_input: dict) -> bool:
         tool_name = hook_input.get("tool_name")
 
@@ -644,14 +696,14 @@ class MultiToolHandler(Handler):
 ❌ Bad:
 
 ```python
-return HookResult(decision="deny", reason="Command blocked")
+return GatingResult(decision=Decision.DENY, reason="Command blocked")
 ```
 
 ✅ Good:
 
 ```python
-return HookResult(
-    decision="deny",
+return GatingResult(
+    decision=Decision.DENY,
     reason=(
         "🚫 BLOCKED: Destructive git command\n\n"
         f"Command: {command}\n\n"
@@ -707,18 +759,18 @@ def matches(self, hook_input: dict) -> bool:
 For strict handlers, provide escape hatch:
 
 ````python
-class StrictHandler(Handler):
+class StrictHandler(PreToolUseHandlerBase):
     ESCAPE_HATCH = "I CONFIRM THIS IS NECESSARY"
 
-    def handle(self, hook_input: dict) -> HookResult:
+    def handle(self, hook_input: dict) -> GatingResult:
         command = get_bash_command(hook_input)
 
         # Check for escape hatch phrase
         if self.ESCAPE_HATCH in command:
-            return HookResult(decision="allow")
+            return GatingResult(decision=Decision.ALLOW)
 
-        return HookResult(
-            decision="deny",
+        return GatingResult(
+            decision=Decision.DENY,
             reason=(
                 "Command blocked. If absolutely necessary, include:\n"
                 f'"{self.ESCAPE_HATCH}"'
@@ -741,7 +793,7 @@ class StrictHandler(Handler):
 
 **Example**: PostToolUse handler
 ```python
-def handle(self, hook_input: dict) -> HookResult:
+def handle(self, hook_input: dict) -> BlockingResult:
     # ✅ No need to check if tool_response exists - validation guarantees it
     tool_response = hook_input["tool_response"]
 
@@ -750,9 +802,9 @@ def handle(self, hook_input: dict) -> HookResult:
 
     # ❌ Still need business logic
     if "error" in stderr.lower():
-        return HookResult(decision="deny", reason="Command failed")
+        return BlockingResult(decision=Decision.DENY, reason="Command failed")
 
-    return HookResult(decision="allow")
+    return BlockingResult(decision=Decision.ALLOW)
 ````
 
 **When validation is disabled**: Handlers should still defensively check for required fields using `.get()` with defaults
@@ -921,9 +973,10 @@ plugins:
 1. **Create handler** in `.claude/hooks/handlers/pre_tool_use/project_rules.py`:
 
 ```python
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 
-class ProjectRulesHandler(Handler):
+class ProjectRulesHandler(PreToolUseHandlerBase):
     def __init__(self) -> None:
         super().__init__(name="project-rules", priority=40, terminal=True)
 
@@ -931,8 +984,8 @@ class ProjectRulesHandler(Handler):
         # Your project-specific logic
         return True
 
-    def handle(self, hook_input: dict) -> HookResult:
-        return HookResult(decision="allow", context="✅ Project rules OK")
+    def handle(self, hook_input: dict) -> GatingResult:
+        return GatingResult.allow(context=["✅ Project rules OK"])
 ```
 
 2. **Register in config** (`.claude/hooks-daemon.yaml`):
@@ -958,12 +1011,12 @@ plugins:
 
 ```python
 # .claude/hooks/handlers/pre_tool_use/my_handlers.py
-class Handler1(Handler):
+class Handler1(PreToolUseHandlerBase):
     def __init__(self) -> None:
         super().__init__(name="handler-1", priority=30)
     # ... implementation
 
-class Handler2(Handler):
+class Handler2(PreToolUseHandlerBase):
     def __init__(self) -> None:
         super().__init__(name="handler-2", priority=40)
     # ... implementation
@@ -1021,11 +1074,12 @@ Project-level handlers are the recommended approach for project-specific handler
 ```python
 # .claude/project-handlers/post_tool_use/build_asset_watcher.py
 from typing import Any
-from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
+from claude_code_hooks_daemon.core import AcceptanceTest, BlockingResult, TestType
+from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.utils import get_file_path
 
-class BuildAssetWatcherHandler(Handler):
+class BuildAssetWatcherHandler(PostToolUseHandlerBase):
     """Remind to rebuild assets after editing TS/SCSS sources."""
 
     def __init__(self) -> None:
@@ -1042,8 +1096,8 @@ class BuildAssetWatcherHandler(Handler):
             return False
         return "assets/ts/" in file_path or "assets/scss/" in file_path
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        return HookResult(
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
+        return BlockingResult(
             decision=Decision.ALLOW,
             context=["ASSET BUILD REMINDER: Run 'yarn build' to rebuild compiled assets."],
         )

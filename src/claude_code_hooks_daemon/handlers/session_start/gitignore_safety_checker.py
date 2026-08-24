@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
@@ -56,7 +57,7 @@ _CACHE_FILE_NAME = "gitignore_safety_cache.json"
 _GITIGNORE_NEGATION_PREFIX = "!"
 
 
-class GitignoreSafetyCheckerHandler(Handler):
+class GitignoreSafetyCheckerHandler(SessionStartHandlerBase):
     """Warn when required .claude/ paths are absent from .gitignore.
 
     Advisory handler — runs on new sessions only, caches by gitignore content hash
@@ -208,11 +209,11 @@ class GitignoreSafetyCheckerHandler(Handler):
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return not is_resume_session(hook_input)
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Check gitignore safety, using content-hash cache to minimise I/O."""
         project_root = self._get_project_root()
         if project_root is None:
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         cache_file = self._get_cache_file()
         current_hash = self._compute_gitignore_hash(project_root)
@@ -227,10 +228,10 @@ class GitignoreSafetyCheckerHandler(Handler):
         self._write_cache(cache_file, current_hash, missing)
         return self._build_result(missing)
 
-    def _build_result(self, missing: list[str]) -> HookResult:
-        """Build HookResult from missing entries list."""
+    def _build_result(self, missing: list[str]) -> AdvisoryResult:
+        """Build AdvisoryResult from missing entries list."""
         if not missing:
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         context = [
             "⚠️  GITIGNORE SAFETY: Required .claude/ paths are not gitignored",
@@ -253,7 +254,7 @@ class GitignoreSafetyCheckerHandler(Handler):
             "",
             "These paths are managed by Claude Code and must never be committed.",
         ]
-        return HookResult(decision=Decision.ALLOW, context=context)
+        return AdvisoryResult(decision=Decision.ALLOW, context=context)
 
     def get_claude_md(self) -> str | None:
         return None

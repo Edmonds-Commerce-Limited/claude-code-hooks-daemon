@@ -10,7 +10,8 @@ import time
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
+from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ _status_reader: MtimeCachedFile[dict[str, Any]] = MtimeCachedFile(
 )
 
 
-class StartupCleanupHandler(Handler):
+class StartupCleanupHandler(StatusLineHandlerBase):
     """Show 🧹 briefly after daemon startup to indicate stale-file cleanup ran."""
 
     def __init__(self) -> None:
@@ -70,7 +71,7 @@ class StartupCleanupHandler(Handler):
         """Always run for status events."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Show cleanup indicator briefly after daemon startup.
 
         - First 5 seconds:  | 🧹  (startup phase — brush icon only)
@@ -78,7 +79,7 @@ class StartupCleanupHandler(Handler):
         - After 30 seconds: nothing
 
         Returns:
-            HookResult with cleanup context, or empty if outside display window
+            AdvisoryResult with cleanup context, or empty if outside display window
         """
         try:
             status_file = ProjectContext.daemon_untracked_dir() / _STATUS_FILENAME
@@ -88,16 +89,16 @@ class StartupCleanupHandler(Handler):
             elapsed = time.time() - timestamp
 
             if elapsed < _STARTUP_PHASE_SECONDS:
-                return HookResult(context=["| 🧹"])
+                return AdvisoryResult(context=["| 🧹"])
             elif elapsed < _DISPLAY_WINDOW_SECONDS and count > 0:
-                return HookResult(context=[f"| 🧹 {count} stale"])
+                return AdvisoryResult(context=[f"| 🧹 {count} stale"])
 
         except (OSError, RuntimeError) as e:
             # The read itself is fail-silent (see MtimeCachedFile); what can
             # still raise here is resolving the daemon's untracked dir.
             logger.debug("Failed to read cleanup status: %s", e)
 
-        return HookResult(context=[])
+        return AdvisoryResult(context=[])
 
     def get_claude_md(self) -> str | None:
         return None

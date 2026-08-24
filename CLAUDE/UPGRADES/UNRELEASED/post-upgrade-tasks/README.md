@@ -85,9 +85,10 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-| File                                         | Type            | Severity | Applies to                   | One-line summary                                                                                                            |
-| -------------------------------------------- | --------------- | -------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `01-replace-removed-tool-output-constant.md` | workflow-change | optional | handlers using `TOOL_OUTPUT` | `HookInputField.TOOL_OUTPUT` named a field no event carries and is removed; use `TOOL_RESPONSE`, then check the dead logic. |
+| File                                                   | Type            | Severity    | Applies to                        | One-line summary                                                                                                                                    |
+| ------------------------------------------------------ | --------------- | ----------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `01-replace-removed-tool-output-constant.md`           | workflow-change | optional    | handlers using `TOOL_OUTPUT`      | `HookInputField.TOOL_OUTPUT` named a field no event carries and is removed; use `TOOL_RESPONSE`, then check the dead logic.                         |
+| `02-check-project-handler-refusals-are-deliverable.md` | audit           | recommended | any project with project handlers | `validate-project-handlers` can now see a refusal written as `HookResult.deny(...)`, so it may report a handler whose block has never taken effect. |
 
 <!-- END TASK INDEX -->
 

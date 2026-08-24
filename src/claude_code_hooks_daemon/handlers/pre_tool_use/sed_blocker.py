@@ -10,7 +10,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_content, get_file_path
 
 
@@ -68,7 +69,7 @@ _SED_VIA_XARGS = re.compile(
 _COMMAND_SEPARATOR = re.compile(r"[;&|]")
 
 
-class SedBlockerHandler(Handler):
+class SedBlockerHandler(PreToolUseHandlerBase):
     """Block sed used for file modification - Claude gets sed wrong and causes file destruction.
 
     PURPOSE: Prevent the LLM from running dangerous sed updates that cause
@@ -338,7 +339,7 @@ class SedBlockerHandler(Handler):
             f"  Good: Dispatch 10 haiku agents with Edit tool"
         )
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block the operation with clear explanation."""
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
 
@@ -361,7 +362,7 @@ class SedBlockerHandler(Handler):
         else:
             reason = self._verbose_reason(context_type, blocked_content)
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=reason,
         )

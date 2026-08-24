@@ -16,7 +16,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
@@ -124,7 +125,7 @@ def _parse_test_path_map(raw: Any) -> list[DeclaredTestDir]:
     return parsed
 
 
-class TddEnforcementHandler(Handler):
+class TddEnforcementHandler(PreToolUseHandlerBase):
     """Enforce TDD by blocking production file creation without corresponding test file.
 
     Uses Strategy Pattern: delegates ALL language-specific decisions to TddStrategy
@@ -246,15 +247,15 @@ class TddEnforcementHandler(Handler):
 
         return strategy.is_production_source(file_path)
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Check if test file exists in ANY valid location, deny if not."""
         source_path = get_file_path(hook_input)
         if not source_path:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         strategy = self._registry.get_strategy(source_path)
         if strategy is None:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         # Get multiple candidate test paths (checks mirror, current, fallback)
         candidate_paths = self._get_test_file_paths(source_path, strategy)
@@ -262,13 +263,13 @@ class TddEnforcementHandler(Handler):
         # Check if ANY candidate exists
         existing_test = next((path for path in candidate_paths if path.exists()), None)
         if existing_test:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         # None exist - block with helpful message showing all searched locations
         source_filename = Path(source_path).name
         test_filename = candidate_paths[0].name  # Show primary candidate
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=(
                 f"TDD REQUIRED: Cannot create {strategy.language_name} source file "

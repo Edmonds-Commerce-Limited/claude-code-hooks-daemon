@@ -33,7 +33,8 @@ from claude_code_hooks_daemon.constants import (
     HandlerTag,
     Priority,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils import git_sync
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
@@ -53,7 +54,7 @@ _UNMERGED_MARK = "⚠"
 _FAST_FORWARD_DETAIL = "fast-forwarded"
 
 
-class GitUpstreamCheckerHandler(Handler):
+class GitUpstreamCheckerHandler(SessionStartHandlerBase):
     """Full-fetch + configurable pull policy when a branch is behind upstream."""
 
     def __init__(self) -> None:
@@ -101,7 +102,7 @@ class GitUpstreamCheckerHandler(Handler):
         """Run on new sessions only (skip resumes to avoid re-fetch churn)."""
         return not is_resume_session(hook_input)
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         root = self._get_project_root()
 
         gones: list[git_sync.GoneBranch] = []
@@ -124,7 +125,7 @@ class GitUpstreamCheckerHandler(Handler):
             context = [*context, "", *gone_ctx] if context else gone_ctx
 
         # Silent when up to date with no gone branches (or not a repo / detached).
-        return HookResult(decision=Decision.ALLOW, context=context)
+        return AdvisoryResult(decision=Decision.ALLOW, context=context)
 
     def _behind_context(self, root: Path, status: git_sync.UpstreamStatus) -> list[str]:
         """Dispatch the behind-upstream advisory according to the configured mode.

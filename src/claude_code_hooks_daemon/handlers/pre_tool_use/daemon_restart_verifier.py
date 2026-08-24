@@ -21,17 +21,17 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import (
     AcceptanceTest,
     Decision,
-    Handler,
-    HookResult,
+    GatingResult,
     ProjectContext,
     RecommendedModel,
     TestType,
 )
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.daemon.validation import is_hooks_daemon_repo
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 
 
-class DaemonRestartVerifierHandler(Handler):
+class DaemonRestartVerifierHandler(PreToolUseHandlerBase):
     """Verify daemon can restart before allowing git commits."""
 
     def __init__(self) -> None:
@@ -77,7 +77,7 @@ class DaemonRestartVerifierHandler(Handler):
 
         return False
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Nudge toward daemon restart verification before a commit.
 
         Deliberately a SINGLE short line, and nothing else. The commands, the
@@ -90,9 +90,9 @@ class DaemonRestartVerifierHandler(Handler):
             hook_input: Hook input data
 
         Returns:
-            HookResult with the one-line advisory nudge
+            GatingResult with the one-line advisory nudge
         """
-        return HookResult(
+        return GatingResult(
             decision=Decision.ALLOW,
             context=["💡 RECOMMENDED: Verify daemon restart before committing"],
         )

@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
+from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ _STATE_FILE_NAME = "statusline_suggestion_state.json"
 _SHOWN_COUNT_KEY = "shown_count"
 
 
-class SuggestStatusLineHandler(Handler):
+class SuggestStatusLineHandler(SessionStartHandlerBase):
     """Suggest setting up daemon-based statusline on session start."""
 
     def __init__(self) -> None:
@@ -140,17 +141,17 @@ class SuggestStatusLineHandler(Handler):
         # Don't keep pitching to a project that has quietly declined.
         return self._shown_count() < _MAX_SUGGESTIONS
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Generate status line setup suggestion.
 
         Args:
             hook_input: SessionStart event input (not used, but required by interface)
 
         Returns:
-            HookResult with suggestion context for setting up status line
+            AdvisoryResult with suggestion context for setting up status line
         """
         self._record_shown()
-        return HookResult(
+        return AdvisoryResult(
             context=[
                 "💡 **Status Line Available**: This project has a daemon-based status line.",
                 "",

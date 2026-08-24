@@ -8,12 +8,13 @@ import logging
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
+from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 
 logger = logging.getLogger(__name__)
 
 
-class GitRepoNameHandler(Handler):
+class GitRepoNameHandler(StatusLineHandlerBase):
     """Show git repository name at start of status line.
 
     Uses ProjectContext for authoritative repo name (calculated once at daemon startup).
@@ -31,17 +32,17 @@ class GitRepoNameHandler(Handler):
         """Always run for status events."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Return repository name from ProjectContext for status line.
 
         Args:
             hook_input: Status event input (not used)
 
         Returns:
-            HookResult with formatted repo name
+            AdvisoryResult with formatted repo name
         """
         repo_name = ProjectContext.git_repo_name()
-        return HookResult(context=[f"📁 {repo_name}"])
+        return AdvisoryResult(context=[f"📁 {repo_name}"])
 
     def get_claude_md(self) -> str | None:
         return None

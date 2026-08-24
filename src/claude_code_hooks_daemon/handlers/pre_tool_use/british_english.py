@@ -10,11 +10,12 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 
 
-class BritishEnglishHandler(Handler):
+class BritishEnglishHandler(PreToolUseHandlerBase):
     """Warn about American English spellings in content files (non-blocking)."""
 
     # Common American -> British spelling patterns
@@ -76,7 +77,7 @@ class BritishEnglishHandler(Handler):
         issues = self._check_british_english(content)
         return len(issues) > 0
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Warn about American spellings but allow operation."""
         file_path = get_file_path(hook_input)
         content = get_file_content(hook_input)
@@ -86,7 +87,7 @@ class BritishEnglishHandler(Handler):
             content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("new_string", "")
 
         if not content:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         issues = self._check_british_english(content)
 
@@ -108,7 +109,7 @@ class BritishEnglishHandler(Handler):
         )
 
         # Return allow with warning in context (advisory messages use context, not reason)
-        return HookResult(decision=Decision.ALLOW, context=["".join(warning_parts)])
+        return GatingResult(decision=Decision.ALLOW, context=["".join(warning_parts)])
 
     def _check_british_english(self, content: str) -> list[dict[str, Any]]:
         """Check content for American spellings, skipping code blocks.

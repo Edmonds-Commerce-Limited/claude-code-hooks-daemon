@@ -36,7 +36,8 @@ import re
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
 
@@ -73,7 +74,7 @@ _REMEDY_SINGLE_QUOTE = "git commit -m 'text with `backticks` stays literal'"
 _REMEDY_MESSAGE_FILE = "git commit -F <file>"
 
 
-class GitMessageBacktickHandler(Handler):
+class GitMessageBacktickHandler(PreToolUseHandlerBase):
     """Block a double-quoted git message whose backticks would be executed.
 
     Single-quoted messages, escaped backticks, and the ``-F`` file form are
@@ -100,9 +101,9 @@ class GitMessageBacktickHandler(Handler):
             for message in _DOUBLE_QUOTED_MESSAGE_PATTERN.findall(command)
         )
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny, naming the substitution and both concrete remedies."""
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=(
                 "🚫 BLOCKED: backticks inside a double-quoted git message are "

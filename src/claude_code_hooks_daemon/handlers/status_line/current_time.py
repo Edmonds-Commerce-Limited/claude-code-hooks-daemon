@@ -4,11 +4,12 @@ from datetime import datetime
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
+from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 
 
-class CurrentTimeHandler(Handler):
+class CurrentTimeHandler(StatusLineHandlerBase):
     """Display current local time in status line (24-hour format, no seconds)."""
 
     def __init__(self) -> None:
@@ -23,12 +24,12 @@ class CurrentTimeHandler(Handler):
         """Always run for status line events."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Return current time in 24-hour format without seconds."""
         now = datetime.now()
         time_str = now.strftime("%H:%M")  # 24-hour format, no seconds
 
-        return HookResult(context=[f"| 🕐 {time_str}"])
+        return AdvisoryResult(context=[f"| 🕐 {time_str}"])
 
     def get_claude_md(self) -> str | None:
         return None

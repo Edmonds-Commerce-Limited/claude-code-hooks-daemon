@@ -210,3 +210,72 @@ truth_changes:
       `validate_eslint_on_write` (both inert without `llm:` scripts in
       package.json). Calling those BLOCKING would overstate what a default
       installation does, which is the same untruth pointed the other way.
+  - was: >
+      A handler subclasses `Handler` and returns `HookResult`, one
+      event-agnostic type shared by all 31 wired events. Nothing at the type
+      level tied a handler to the decisions its event can actually deliver, so
+      a `SessionStart` handler could construct a DENY and every checker stayed
+      silent — the refusal was then dropped on the wire and the handler
+      believed it had blocked.
+    now: >
+      Each event has a base class named after it —
+      `SessionStartHandlerBase`, `PreToolUseHandlerBase`, `StopHandlerBase`,
+      and so on, in `claude_code_hooks_daemon.core.handler_bases` (Plan
+      00265). Each narrows `handle()` to the result type its event can carry:
+      `GatingResult` (allow/continue/deny/ask), `BlockingResult`
+      (allow/continue/deny) or `AdvisoryResult` (allow/continue). 82 of the 84
+      built-in handlers now subclass their event's base; the two exceptions are
+      the pseudo-event handlers, for the reason given at the end of this entry.
+
+      SUBCLASSING `Handler` DIRECTLY STILL WORKS AND IS NOT DEPRECATED, so no
+      existing project handler breaks. What changed is that a better option
+      exists: if your project runs mypy, the event base turns a silent
+      production misfire into a compile error, which is the only place the
+      mistake can be caught before it ships. Build results through the tier —
+      `AdvisoryResult.allow(...)`, `BlockingResult.deny(...)` — rather than
+      `HookResult`.
+
+      Two boundaries worth knowing. `AdvisoryResult.deny(...)` does NOT
+      type-check: `deny` is inherited from `HookResult` and deliberately
+      returns the wide type, so a handler declared `-> AdvisoryResult` is
+      rejected for using it. And a PSEUDO-EVENT handler has no fixed tier —
+      its decision is delivered under whichever real event triggered it, and
+      triggers are per-project config — so those stay on plain `Handler` and
+      are clamped at merge time instead.
+  - was: >
+      `hooks-daemon validate-project-handlers` reported a handler returning a
+      decision its event cannot deliver. In practice it only recognised the
+      decision written as `Decision.DENY`, so a handler refusing through the
+      FACTORY — `HookResult.deny(...)`, which names neither the enum nor the
+      member, and is how most handlers actually refuse — passed the check in
+      silence.
+    now: >
+      The scan recognises `<Something>Result.allow|deny|ask(...)` as well
+      (Plan 00265), matched by the `Result` suffix so your own `HookResult`
+      subclass is covered too.
+
+      YOUR PROJECT HANDLERS MAY NOW REPORT A WARNING THAT PREVIOUSLY PASSED
+      CLEAN. Read it rather than working around it: it means that handler
+      refuses on an event that cannot carry a refusal, so the block it thinks
+      it performs has never happened. Fix the handler, or move it to an event
+      that can refuse.
+
+      Measured across this repository's own 84 handlers before the fix,
+      exactly one refused invisibly — and it cost nothing only because it sits
+      on `PreToolUse`, which can deny. The population this actually protects is
+      project handlers, which no test in the daemon repository can see.
+  - was: >
+      `merge_pseudo_results(real, pseudo_results)` took two arguments and
+      merged a pseudo-event's decision into the real chain result unchanged.
+    now: >
+      It takes a third, required argument: the wire name of the REAL event the
+      response will be serialised under (Plan 00265). A pseudo-event has no
+      response of its own, so what it may decide is decided by the TRIGGER; an
+      unknown event name now raises rather than being guessed. A decision the
+      trigger's event cannot carry is CLAMPED — not written — with its reason
+      delivered as context instead and the clamp logged at ERROR.
+
+      This is dispatch plumbing, not a documented extension point, so a
+      project is unlikely to call it. It is recorded because the symbol is
+      exported from `claude_code_hooks_daemon.core`: if you do call it, add the
+      event name.

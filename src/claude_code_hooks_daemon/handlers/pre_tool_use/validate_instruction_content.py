@@ -10,12 +10,13 @@ from typing import Any, ClassVar
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Handler
+from claude_code_hooks_daemon.core import GatingResult
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest, RecommendedModel, TestType
-from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.hook_result import Decision
 
 
-class ValidateInstructionContentHandler(Handler):
+class ValidateInstructionContentHandler(PreToolUseHandlerBase):
     """Validates content being written to CLAUDE.md and README.md files.
 
     Blocks ephemeral content like implementation logs, status indicators,
@@ -82,7 +83,7 @@ class ValidateInstructionContentHandler(Handler):
         # Check if file is CLAUDE.md or README.md (case-insensitive, any directory)
         return bool(file_path.upper().endswith(("CLAUDE.MD", "README.MD")))
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Validate content being written to instruction files.
 
         Returns DENY if blocked patterns are found outside code blocks.
@@ -97,7 +98,7 @@ class ValidateInstructionContentHandler(Handler):
         elif tool_name == ToolName.EDIT:
             content = tool_input.get("new_string", "")
         else:
-            return HookResult(
+            return GatingResult(
                 decision=Decision.ALLOW,
                 reason="Tool type not handled by validator",
             )
@@ -106,7 +107,7 @@ class ValidateInstructionContentHandler(Handler):
         blocked_category = self._find_blocked_pattern(content)
         if blocked_category:
             file_path = tool_input.get("file_path", "unknown")
-            return HookResult(
+            return GatingResult(
                 decision=Decision.DENY,
                 reason=f"🚫 BLOCKED: Detected {blocked_category} in {file_path}",
                 guidance=(
@@ -125,7 +126,7 @@ class ValidateInstructionContentHandler(Handler):
                 ),
             )
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.ALLOW,
             context=["Content validated - no ephemeral patterns detected"],
         )

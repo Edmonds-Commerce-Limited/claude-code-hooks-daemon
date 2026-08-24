@@ -19,7 +19,8 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.constants.paths import ProjectPath
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
+from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
@@ -27,7 +28,7 @@ from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 logger = logging.getLogger(__name__)
 
 
-class ValidateEslintOnWriteHandler(Handler):
+class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
     """Run ESLint validation on TypeScript/TSX files after write."""
 
     VALIDATE_EXTENSIONS: ClassVar[list[str]] = [".ts", ".tsx"]
@@ -91,11 +92,13 @@ class ValidateEslintOnWriteHandler(Handler):
         """Check if writing TypeScript/TSX file that needs validation."""
         return bool(self._checkable_paths(hook_input))
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Run ESLint on the file and block if errors found."""
         paths = self._checkable_paths(hook_input)
         if not paths:
-            return HookResult(decision=Decision.ALLOW, reason="No file path found in hook input")
+            return BlockingResult(
+                decision=Decision.ALLOW, reason="No file path found in hook input"
+            )
 
         # One command can author several files; the first failure is reported,
         # matching how `handle` has always returned a single verdict.
@@ -105,7 +108,7 @@ class ValidateEslintOnWriteHandler(Handler):
         # Advisory mode: no llm: commands in package.json - skip validation
         if not self.has_llm_commands:
             guide_path = get_llm_command_guide_path()
-            return HookResult(
+            return BlockingResult(
                 decision=Decision.ALLOW,
                 context=[
                     f"⚠️  ESLint advisory: {file_path_obj.name} written - consider adding llm:lint",
@@ -186,18 +189,18 @@ class ValidateEslintOnWriteHandler(Handler):
                     "   Or:  npm run lint -- --fix\n"
                 )
 
-                return HookResult(decision=Decision.DENY, reason=error_message)
+                return BlockingResult(decision=Decision.DENY, reason=error_message)
 
             logger.info("ESLint validation passed for %s", file_path_obj.name)
-            return HookResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         except subprocess.TimeoutExpired:
-            return HookResult(
+            return BlockingResult(
                 decision=Decision.DENY,
                 reason=f"ESLint timed out after {Timeout.ESLINT_CHECK} seconds",
             )
         except Exception as e:
-            return HookResult(decision=Decision.DENY, reason=f"Failed to run ESLint: {e!s}")
+            return BlockingResult(decision=Decision.DENY, reason=f"Failed to run ESLint: {e!s}")
 
     def get_claude_md(self) -> str | None:
         return """## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES

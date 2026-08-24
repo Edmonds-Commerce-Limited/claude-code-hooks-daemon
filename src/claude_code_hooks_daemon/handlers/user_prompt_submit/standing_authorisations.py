@@ -37,7 +37,8 @@ that framing is both a worse prompt and a mechanism that should not exist.
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 
 # ── Config keys (mirrors command_hints' `_KEY_*` style) ────────────────────
 _KEY_ID: Final[str] = "id"
@@ -123,7 +124,7 @@ _MAX_TRACKED_SESSIONS: Final[int] = 512
 _UNKNOWN_SESSION: Final[str] = "unknown"
 
 
-class StandingAuthorisationsHandler(Handler):
+class StandingAuthorisationsHandler(UserPromptSubmitHandlerBase):
     """Inject the authorisations a project has recorded in its config.
 
     ADVISORY ONLY: never blocks, never denies, never terminal. Silent unless a
@@ -187,7 +188,7 @@ class StandingAuthorisationsHandler(Handler):
         """Match any prompt-bearing UserPromptSubmit event."""
         return isinstance(hook_input.get("prompt"), str)
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Return the enabled authorisations, decaying to a short form.
 
         The decay NEVER skips a prompt (Task 3.3). A skipped prompt would be a
@@ -195,12 +196,12 @@ class StandingAuthorisationsHandler(Handler):
         SessionStart failure Phase 1 measured. Only the wording shortens.
         """
         if not self._enabled_ids():
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or _UNKNOWN_SESSION)
         deliveries = self._record_delivery(session_id)
         short = deliveries > _FULL_TEXT_DELIVERIES
-        return HookResult(decision=Decision.ALLOW, context=self._resolve_entries(short=short))
+        return AdvisoryResult(decision=Decision.ALLOW, context=self._resolve_entries(short=short))
 
     def get_claude_md(self) -> str | None:
         """Document the SETTING, deliberately without restating the authorisations.

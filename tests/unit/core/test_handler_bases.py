@@ -175,6 +175,86 @@ class TestTheAliasesDoNotCollideWithConcreteHandlers:
         assert not collisions, f"base name collides with a concrete handler: {collisions}"
 
 
+class TestEveryHandlerDescendsFromItsEventBase:
+    """A base nothing inherits from protects nothing.
+
+    Phase 2 added the bases; this is what makes them binding. Without it a new
+    handler can subclass ``Handler`` directly and silently opt out of the whole
+    guarantee — no error, no warning, just a handler that can construct a
+    decision its event drops.
+
+    The check is derived from the handler PACKAGES, so a handler added later is
+    covered on the commit that adds it rather than when someone remembers.
+    """
+
+    def test_the_sweep_is_not_vacuous(self) -> None:
+        """Every assertion below passes trivially on an empty population."""
+        assert len(_handlers_with_event_names()) > 50
+
+    def test_each_handler_subclasses_its_events_base(self) -> None:
+        failures: list[str] = []
+        for name, handler_class, event_name in _handlers_with_event_names():
+            base = handler_base_for_event(event_name)
+            if not issubclass(handler_class, base):
+                failures.append(
+                    f"{name} answers {event_name} but does not descend from " f"{base.__name__}"
+                )
+
+        assert not failures, (
+            "these handlers subclass Handler directly, so nothing stops them "
+            "returning a decision their event cannot deliver:\n  " + "\n  ".join(failures)
+        )
+
+    def test_each_handlers_declared_return_matches_its_tier(self) -> None:
+        """Inheriting the base is not enough if ``handle`` re-widens the return.
+
+        mypy rejects that as an ``[override]``, but only for code mypy checks —
+        and this repository's own QA is the only place that runs. Asserting it
+        here means the property holds for the shipped classes themselves.
+        """
+        failures: list[str] = []
+        for name, handler_class, event_name in _handlers_with_event_names():
+            declared = get_type_hints(handler_class.handle).get("return")
+            expected = result_type_for_event(event_name)
+            if declared is not expected:
+                failures.append(
+                    f"{name} on {event_name} declares "
+                    f"{getattr(declared, '__name__', declared)}, expected {expected.__name__}"
+                )
+
+        assert not failures, "handle() re-widened past its event's tier:\n  " + "\n  ".join(
+            failures
+        )
+
+
+class TestThePseudoEventHandlersAreDeliberatelyExempt:
+    """``nitpick`` handlers have no event of their own, so no fixed tier.
+
+    A pseudo-event's decision is delivered under whichever REAL event triggered
+    it, and triggers are per-project CONFIG — the same handler is gating under
+    one project's config and advisory under another's. There is no single base
+    that is correct for it, so these stay on plain ``Handler``.
+
+    What protects them instead is ``merge_pseudo_results``, which clamps to the
+    trigger event's tier at dispatch time (Phase 4), plus the trigger sweep in
+    ``test_every_handler_response_validates.py``. Recorded as a test rather than
+    a comment so the exemption cannot quietly grow to cover something else.
+    """
+
+    def test_nitpick_handlers_are_not_reparented(self) -> None:
+        for name, handler_class in _concrete_handlers_in("nitpick"):
+            assert not issubclass(
+                handler_class, (AdvisoryHandler, BlockingHandler, GatingHandler)
+            ), (
+                f"{name} was given a fixed tier, but its deliverability depends "
+                "on a per-project trigger. Clamp at merge time instead."
+            )
+
+    def test_the_exemption_names_a_package_that_exists(self) -> None:
+        """A stale exemption would silently excuse nothing at all."""
+        assert _concrete_handlers_in("nitpick")
+
+
 class TestTheNarrowingIsRealAtTheBase:
     """A base returning plain HookResult would constrain nothing."""
 

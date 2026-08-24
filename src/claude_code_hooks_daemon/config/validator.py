@@ -93,8 +93,11 @@ class ConfigValidator:
                 ConfigValidator._handler_cache[event_type] = handlers
                 return handlers
 
-            # Import Handler base class for isinstance check
-            from claude_code_hooks_daemon.core.handler import Handler
+            # The SAME predicate discovery uses. Its own copy here omitted the
+            # abstract check, which cost nothing until handler modules began
+            # importing their event's base — at which point an abstract base
+            # would be validated as a configurable handler name.
+            from claude_code_hooks_daemon.handlers.registry import is_discoverable_handler
 
             # Walk through all modules in the package
             for _importer, modname, ispkg in pkgutil.walk_packages(
@@ -108,12 +111,7 @@ class ConfigValidator:
                     module = importlib.import_module(modname)
                     for attr_name in dir(module):
                         attr = getattr(module, attr_name)
-                        if (
-                            isinstance(attr, type)
-                            and issubclass(attr, Handler)
-                            and attr is not Handler
-                            and not attr.__name__.startswith("_")
-                        ):
+                        if is_discoverable_handler(attr):
                             # Convert class name to snake_case config key
                             handler_config_name = ConfigValidator._to_snake_case(attr.__name__)
                             handlers.add(handler_config_name)

@@ -19,10 +19,10 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import (
     Decision,
-    Handler,
-    HookResult,
+    GatingResult,
     get_data_layer,
 )
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.strategies.pipe_blocker.common import UNIVERSAL_WHITELIST_PATTERNS
 from claude_code_hooks_daemon.strategies.pipe_blocker.registry import PipeBlockerStrategyRegistry
@@ -260,7 +260,7 @@ def _segment_binary(command: str, index: int) -> str:
     return words[0].rpartition(_PATH_SEPARATOR)[2]
 
 
-class PipeBlockerHandler(Handler):
+class PipeBlockerHandler(PreToolUseHandlerBase):
     """Block expensive commands piped to tail/head to prevent information loss.
 
     Three-tier decision system:
@@ -884,7 +884,7 @@ class PipeBlockerHandler(Handler):
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block with blacklisted or unknown message based on pattern match and block count."""
         command = get_bash_command(hook_input) or "unknown command"
         # Extract the segment from a message-blanked copy so a fake pipe
@@ -910,7 +910,7 @@ class PipeBlockerHandler(Handler):
         # template is what turned a defensible block into an embarrassing
         # one (Plan 00209 §1).
         if self._looks_like_prose(source_segment):
-            return HookResult(decision=Decision.DENY, reason=self._prose_reason())
+            return GatingResult(decision=Decision.DENY, reason=self._prose_reason())
 
         block_count = self._get_block_count()
 
@@ -926,7 +926,7 @@ class PipeBlockerHandler(Handler):
             else:
                 reason = self._unknown_terse_reason(source_segment, command)
 
-        return HookResult(decision=Decision.DENY, reason=reason)
+        return GatingResult(decision=Decision.DENY, reason=reason)
 
     def get_claude_md(self) -> str | None:
         """Return CLAUDE.md guidance about the pipe blocker."""

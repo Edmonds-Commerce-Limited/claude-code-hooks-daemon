@@ -17,7 +17,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     Timeout,
 )
-from claude_code_hooks_daemon.core import Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
+from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
@@ -51,7 +52,7 @@ _GITHUB_REPO_URL: Final[str] = (
 _REMOTE_ONLY_CWD: Final[Path] = Path("/")
 
 
-class VersionCheckHandler(Handler):
+class VersionCheckHandler(SessionStartHandlerBase):
     """Check daemon version against latest GitHub release on new sessions.
 
     Only runs on new sessions (not resume) to avoid annoying users.
@@ -185,11 +186,11 @@ class VersionCheckHandler(Handler):
         # Only run on new sessions (not resume)
         return not is_resume_session(hook_input)
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Check daemon version and advise upgrade if outdated.
 
         Returns:
-            HookResult with upgrade notice if outdated, empty if up-to-date
+            AdvisoryResult with upgrade notice if outdated, empty if up-to-date
         """
         try:
             cache_file = self._get_cache_file()
@@ -199,7 +200,7 @@ class VersionCheckHandler(Handler):
                 cached = self._get_cached_result(cache_file)
                 if cached and not cached.get("is_outdated", False):
                     # Cache says we're up to date
-                    return HookResult(decision=Decision.ALLOW, reason=None, context=[])
+                    return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=[])
 
             # Fetch latest version
             latest_version = self._get_latest_version()
@@ -207,7 +208,7 @@ class VersionCheckHandler(Handler):
             if latest_version is None:
                 # Failed to check - fail silently
                 logger.debug("Could not check daemon version")
-                return HookResult(decision=Decision.ALLOW, reason=None, context=[])
+                return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=[])
 
             # Compare versions
             current = __version__
@@ -224,7 +225,7 @@ class VersionCheckHandler(Handler):
 
             if not is_outdated:
                 # Up to date - no message
-                return HookResult(decision=Decision.ALLOW, reason=None, context=[])
+                return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=[])
 
             # Outdated - show upgrade notice
             context = [
@@ -238,11 +239,11 @@ class VersionCheckHandler(Handler):
                 "💡 New features and fixes available in the latest version.",
             ]
 
-            return HookResult(decision=Decision.ALLOW, reason=None, context=context)
+            return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=context)
 
         except Exception as e:
             logger.error("Version check failed: %s", e, exc_info=True)
-            return HookResult(decision=Decision.ALLOW, reason=None, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=[])
 
     def _compare_versions(self, current: str, latest: str) -> bool:
         """Compare semantic versions.

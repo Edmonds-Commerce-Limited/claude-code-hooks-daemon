@@ -10,13 +10,12 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
-from claude_code_hooks_daemon.core import Decision
-from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
 
-class GlobalNpmAdvisorHandler(Handler):
+class GlobalNpmAdvisorHandler(PreToolUseHandlerBase):
     """Advise on global npm/yarn package installations.
 
     Provides non-blocking advice for patterns like:
@@ -69,18 +68,18 @@ class GlobalNpmAdvisorHandler(Handler):
 
         return bool(re.search(pattern, command, re.IGNORECASE))
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Provide advice about npx alternative (non-blocking).
 
         Args:
             hook_input: Hook input containing the command
 
         Returns:
-            HookResult with allow decision and advisory context
+            GatingResult with allow decision and advisory context
         """
         # Safety check: if command doesn't match, allow silently
         if not self.matches(hook_input):
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         command = hook_input.get("tool_input", {}).get("command", "")
 
@@ -115,7 +114,7 @@ Global installs are sometimes necessary for:
 
 Proceeding with global install..."""
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.ALLOW,
             reason="",
             context=[advisory],

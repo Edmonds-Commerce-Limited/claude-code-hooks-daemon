@@ -103,9 +103,9 @@ class HandlerStatusReporter:
     def discover_handlers(self) -> dict[str, list[dict[str, Any]]]:
         """Discover all available handlers using HandlerRegistry."""
         try:
-            from claude_code_hooks_daemon.core.handler import Handler
             from claude_code_hooks_daemon.handlers.registry import (
                 EVENT_TYPE_MAPPING,
+                is_discoverable_handler,
             )
         except ImportError as e:
             print(f"ERROR: Cannot import daemon modules: {e}", file=sys.stderr)
@@ -129,11 +129,11 @@ class HandlerStatusReporter:
                     module = importlib.import_module(mod)
                     for attr_name in dir(module):
                         attr = getattr(module, attr_name)
-                        if (
-                            isinstance(attr, type)
-                            and issubclass(attr, Handler)
-                            and attr is not Handler
-                        ):
+                        # The SAME predicate discovery uses. This copy lacked
+                        # the abstract check AND instantiates immediately, so an
+                        # abstract base imported into a handler module would
+                        # raise TypeError rather than simply be skipped.
+                        if is_discoverable_handler(attr):
                             instance = attr()
                             handlers.append(
                                 {

@@ -208,6 +208,12 @@ class ProjectHandlerLoader:
             # Before giving a generic error, check if there are abstract Handler
             # subclasses — this happens when an upgrade added a new abstract method
             # that the user's handler doesn't implement yet.
+            # DEFINED here, not merely imported. A handler subclasses its
+            # event's base, and that base is an abstract Handler subclass
+            # sitting in the module namespace — without this check the error
+            # below would tell the client their handler is missing `handle`,
+            # `matches` and everything else, naming a daemon-internal class
+            # they cannot edit instead of their own.
             abstract_handler_classes: list[type] = [
                 getattr(module, attr_name)
                 for attr_name in dir(module)
@@ -215,6 +221,7 @@ class ProjectHandlerLoader:
                 and issubclass(getattr(module, attr_name), Handler)
                 and getattr(module, attr_name) is not Handler
                 and not getattr(module, attr_name).__name__.startswith("_")
+                and getattr(module, attr_name).__module__ == module.__name__
                 and inspect.isabstract(getattr(module, attr_name))
             ]
 

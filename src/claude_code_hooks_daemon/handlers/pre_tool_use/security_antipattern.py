@@ -19,7 +19,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.strategies.security.common import should_skip
 from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
@@ -34,7 +35,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 _CONFIG_HINT_HANDLER = "handlers.pre_tool_use.security_antipattern"
 
 
-class SecurityAntipatternHandler(Handler):
+class SecurityAntipatternHandler(PreToolUseHandlerBase):
     """Block Write/Edit of files containing security antipatterns.
 
     Scans content being written for security antipatterns defined by
@@ -108,23 +109,23 @@ class SecurityAntipatternHandler(Handler):
         # so matches() and handle() can never disagree on which files are scanned.
         return bool(self._find_all_violations(content, file_path))
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny write if content contains security antipatterns, allow otherwise."""
         file_path = get_file_path(hook_input)
         tool_name = hook_input.get(HookInputField.TOOL_NAME, "")
 
         if not file_path:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         content = self._get_new_content(hook_input, tool_name)
         if not content:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         issues = self._find_all_violations(content, file_path)
         if not issues:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=self._format_reason(issues, file_path),
         )

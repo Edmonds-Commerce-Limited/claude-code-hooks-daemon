@@ -12,13 +12,13 @@ Detects `git add`/`git commit` commands that include vendor paths and provides a
 
 **Pattern**: Bash command matching with regex, advisory context injection.
 
-### 2. Branch Naming Enforcer (SessionStart, Blocking)
+### 2. Branch Naming Enforcer (SessionStart, Advisory)
 
 **File**: `session_start/branch_naming_enforcer.py`
 
-Checks the current git branch name against allowed patterns at session start. Denies sessions on branches that do not follow naming conventions. Terminal (blocking).
+Checks the current git branch name against allowed patterns at session start and reports a non-conforming branch as context. Non-terminal (advisory only).
 
-**Pattern**: SessionStart check with subprocess, blocking enforcement.
+**Pattern**: SessionStart check with subprocess, advisory context injection — and a worked example of matching the decision to what the EVENT can deliver. `SessionStart` cannot carry a refusal, so this handler subclasses `SessionStartHandlerBase`, which narrows `handle()` to `AdvisoryResult` and makes a dropped refusal a compile error rather than a silent no-op. To BLOCK work on a badly-named branch, put the check on `PreToolUse` instead.
 
 ### 3. Build Asset Watcher (PostToolUse, Advisory)
 
@@ -38,14 +38,20 @@ Detects writes to TypeScript/SCSS source files and reminds to rebuild compiled a
 
 ## Handler Anatomy
 
-Every project handler follows this structure:
+Every project handler follows this structure. The base class you subclass
+depends on the EVENT, not on whether your handler happens to block: each
+wired event has a matching base in `core.handler_bases` (`PreToolUseHandlerBase`
+below is one of them) that narrows `handle()` to the result type that event
+can actually deliver — plain `Handler`/`HookResult` still works, but it
+cannot catch a decision the event will silently drop on the wire.
 
 ```python
 from typing import Any
-from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
+from claude_code_hooks_daemon.core import AcceptanceTest, GatingResult, TestType
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 
-class MyHandler(Handler):
+class MyHandler(PreToolUseHandlerBase):
     """Docstring explaining what this handler does."""
 
     def __init__(self) -> None:
@@ -60,7 +66,7 @@ class MyHandler(Handler):
         """Return True if this handler should process the event."""
         ...
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Execute handler logic, return decision + context."""
         ...
 

@@ -24,7 +24,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
 # Stable fragment of git's hint that a hook was skipped for lacking +x.
@@ -52,7 +53,7 @@ _READ_BITS_MASK = 0o444  # owner/group/other read bits
 _READ_TO_EXEC_SHIFT = 2  # read bit -> execute bit (r=4, x=1; shift right by 2)
 
 
-class GitHooksExecutableFixerHandler(Handler):
+class GitHooksExecutableFixerHandler(PostToolUseHandlerBase):
     """Detect git's "not set as executable" hint and fix the hooks automatically.
 
     Non-terminal: it remediates as a side effect and reports what it changed via
@@ -77,7 +78,7 @@ class GitHooksExecutableFixerHandler(Handler):
             return False
         return _WARNING_SIGNATURE in self._combined_output(hook_input).lower()
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Make non-executable git hook files executable; report what changed."""
         cwd = hook_input.get(HookInputField.CWD)
 
@@ -88,7 +89,7 @@ class GitHooksExecutableFixerHandler(Handler):
         # returncode, which _parse_hooks_dir already treats as "no answer".
         repo = self._repo_root(cwd)
         if repo is None:
-            return HookResult(
+            return BlockingResult(
                 decision=Decision.ALLOW,
                 context=[
                     "git reported a hook is not set as executable, but no project "
@@ -101,7 +102,7 @@ class GitHooksExecutableFixerHandler(Handler):
 
         hooks_dir = self._parse_hooks_dir(git_result.returncode, git_result.stdout, cwd)
         if hooks_dir is None or not hooks_dir.is_dir():
-            return HookResult(
+            return BlockingResult(
                 decision=Decision.ALLOW,
                 context=[
                     "git reported a hook is not set as executable, but the hooks "
@@ -111,10 +112,10 @@ class GitHooksExecutableFixerHandler(Handler):
 
         fixed = self._make_hooks_executable(hooks_dir)
         if not fixed:
-            return HookResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         listing = ", ".join(sorted(fixed))
-        return HookResult(
+        return BlockingResult(
             decision=Decision.ALLOW,
             context=[
                 "🔧 Auto-fixed non-executable git hook(s) so they will no longer "

@@ -9,12 +9,13 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.remedy import remedy_markdown_list
 
 
-class PlanWorkflowHandler(Handler):
+class PlanWorkflowHandler(PreToolUseHandlerBase):
     """Provide guidance when creating plan files."""
 
     def __init__(self) -> None:
@@ -44,7 +45,7 @@ class PlanWorkflowHandler(Handler):
         normalized = file_path.replace("\\", "/")
         return "CLAUDE/Plan/" in normalized and normalized.lower().endswith("/plan.md")
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Provide guidance about plan workflow."""
         file_path = get_file_path(hook_input)
 
@@ -58,7 +59,7 @@ class PlanWorkflowHandler(Handler):
             "See CLAUDE/PlanWorkflow.md for full guidelines."
         )
 
-        return HookResult(decision=Decision.ALLOW, context=[guidance])
+        return GatingResult(decision=Decision.ALLOW, context=[guidance])
 
     def get_claude_md(self) -> str | None:
         return (

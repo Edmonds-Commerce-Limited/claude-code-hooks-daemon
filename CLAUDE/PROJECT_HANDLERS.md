@@ -52,12 +52,13 @@ Create a Python file in the appropriate event-type subdirectory. The file name b
 
 from typing import Any
 
-from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
+from claude_code_hooks_daemon.core import AcceptanceTest, BlockingResult, TestType
+from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.utils import get_file_path
 
 
-class MigrationReminderHandler(Handler):
+class MigrationReminderHandler(PostToolUseHandlerBase):
     """Remind to create migrations after editing Entity classes."""
 
     def __init__(self) -> None:
@@ -75,9 +76,9 @@ class MigrationReminderHandler(Handler):
             return False
         return "/src/Entity/" in file_path and file_path.endswith(".php")
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Provide reminder about database migrations."""
-        return HookResult(
+        return BlockingResult(
             decision=Decision.ALLOW,
             context=[
                 "MIGRATION REMINDER:",
@@ -220,10 +221,37 @@ class TestMigrationReminderHandler:
 
 ### Handler Base Class
 
-All project handlers must subclass `Handler` from `claude_code_hooks_daemon.core`:
+**Subclass the base named after your event**, from
+`claude_code_hooks_daemon.core.handler_bases`:
 
 ```python
-from claude_code_hooks_daemon.core import Handler
+from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+```
+
+Every wired event has one — `PreToolUseHandlerBase`, `SessionStartHandlerBase`,
+`StopHandlerBase`, and so on. Each declares the result type its event can
+actually deliver, so a decision the event would silently drop cannot be written.
+
+| Tier         | Decisions it can return    | Events                          | Result type      |
+| ------------ | -------------------------- | ------------------------------- | ---------------- |
+| **Gating**   | allow, continue, deny, ask | PreToolUse, PermissionRequest   | `GatingResult`   |
+| **Blocking** | allow, continue, deny      | PostToolUse, Stop, SubagentStop | `BlockingResult` |
+| **Advisory** | allow, continue            | every other wired event         | `AdvisoryResult` |
+
+**Why this matters more for a project handler than for a built-in one.** A
+`SessionStart` handler returning DENY produces a schema-VALID response with the
+refusal quietly removed: the handler believes it blocked and nothing blocked.
+This repository's own handlers are swept by its test suite; yours are not — no
+test here can see your repository.
+
+`Handler` itself still works and is not deprecated. But if your project runs
+mypy, the event base turns a silent production misfire into a compile error, and
+that is the only place the mistake can be caught before it ships. If it does
+not, `hooks-daemon validate-project-handlers` reports the same problem — run it
+after any change to a handler's decisions:
+
+```bash
+.claude/hooks-daemon/bin/hooks-daemon validate-project-handlers
 ```
 
 #### `__init__` Parameters
@@ -240,8 +268,10 @@ from claude_code_hooks_daemon.core import Handler
 **`matches(self, hook_input: dict[str, Any]) -> bool`**
 Return `True` if this handler should process the event. Called for every event of the handler's type.
 
-**`handle(self, hook_input: dict[str, Any]) -> HookResult`**
-Execute handler logic. Return a `HookResult` with a decision and optional context/reason.
+**`handle(self, hook_input: dict[str, Any]) -> <YourEvent's result type>`**
+Execute handler logic. Return your event's result type (see the tier table
+above) with a decision and optional context/reason. Widening this back to
+`HookResult` is rejected by mypy — that is the guard working, not an obstacle.
 
 **`get_acceptance_tests(self) -> list[AcceptanceTest]`**
 Return at least one acceptance test definition. Used for playbook generation and validation.
@@ -256,37 +286,55 @@ Return at least one acceptance test definition. Used for playbook generation and
 | 60-79 | Advisory     | British English warnings, hints         |
 | 80-99 | Logging      | Analytics, audit trails                 |
 
-### HookResult
+### Results and decisions
+
+Import your event's result type — `GatingResult`, `BlockingResult` or
+`AdvisoryResult` (see the tier table above) — not `HookResult`:
 
 ```python
-from claude_code_hooks_daemon.core import HookResult
+from claude_code_hooks_daemon.core import GatingResult   # PreToolUse / PermissionRequest
 from claude_code_hooks_daemon.core.hook_result import Decision
 ```
 
-| Decision         | Behaviour              | Use Case                                 |
-| ---------------- | ---------------------- | ---------------------------------------- |
-| `Decision.ALLOW` | Operation proceeds     | Advisory reminders, context injection    |
-| `Decision.DENY`  | Operation blocked      | Safety enforcement, convention violation |
-| `Decision.ASK`   | User approval required | Risky but sometimes needed operations    |
+| Decision         | Behaviour              | Available on                                     |
+| ---------------- | ---------------------- | ------------------------------------------------ |
+| `Decision.ALLOW` | Operation proceeds     | every tier                                       |
+| `Decision.DENY`  | Operation blocked      | gating and blocking tiers only                   |
+| `Decision.ASK`   | User approval required | gating tier only (PreToolUse, PermissionRequest) |
 
-**Common patterns**:
+**Common patterns** — the class name is the tier, so it changes per event:
 
 ```python
-# Advisory (non-terminal) - context injected, operation continues
-HookResult(decision=Decision.ALLOW, context=["REMINDER: Do X after Y"])
+# Advisory - context injected, operation continues. Valid on EVERY event.
+AdvisoryResult(decision=Decision.ALLOW, context=["REMINDER: Do X after Y"])
 
-# Blocking (terminal) - operation denied
-HookResult(decision=Decision.DENY, reason="Branch name does not match convention")
+# Blocking - operation denied. Only on an event that can carry a refusal.
+GatingResult(decision=Decision.DENY, reason="Command is not permitted here")
 
-# Allow silently
-HookResult.allow()
+# Allow silently / with context
+AdvisoryResult.allow()
+AdvisoryResult.allow(context=["INFO: Something to know"])
 
 # Deny with reason
-HookResult.deny(reason="Blocked because...")
-
-# Allow with context
-HookResult.allow(context=["INFO: Something to know"])
+GatingResult.deny(reason="Blocked because...")
 ```
+
+**`AdvisoryResult.deny(...)` deliberately does not type-check.** `deny` is
+inherited from `HookResult` and returns the wide type, so a handler declared
+`-> AdvisoryResult` is rejected for using it.
+
+That restriction is the whole point, so it is worth seeing what it prevents. A
+`SessionStart` handler that returned
+`HookResult(decision=Decision.DENY, reason="Branch name does not match convention")`
+would emit a schema-VALID response with the refusal stripped out: the handler
+believes it blocked the session, and the session starts anyway. That is not
+hypothetical — it shipped in this project's own `branch_naming_enforcer`
+example, and its unit test asserted `Decision.DENY` and passed, because the
+decision really is set on the object and is only lost later, on the wire.
+
+If a check must actually stop something, put it on `PreToolUse`. If it should
+inform, return an allow with `context=[...]` — the message still reaches
+Claude, and now it says what it means.
 
 ### Utility Functions
 
@@ -517,7 +565,7 @@ Project handlers that define `get_acceptance_tests()` are automatically included
 Provide context without blocking. The most common project handler pattern.
 
 ```python
-class ReminderHandler(Handler):
+class ReminderHandler(PostToolUseHandlerBase):
     def __init__(self) -> None:
         super().__init__(
             handler_id="my-reminder",
@@ -525,8 +573,8 @@ class ReminderHandler(Handler):
             terminal=False,  # Advisory - don't block
         )
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        return HookResult(
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
+        return BlockingResult(
             decision=Decision.ALLOW,
             context=["REMINDER: Do something important after this operation."],
         )
@@ -537,7 +585,7 @@ class ReminderHandler(Handler):
 Block operations that violate conventions.
 
 ```python
-class EnforcerHandler(Handler):
+class EnforcerHandler(PreToolUseHandlerBase):
     def __init__(self) -> None:
         super().__init__(
             handler_id="my-enforcer",
@@ -545,10 +593,10 @@ class EnforcerHandler(Handler):
             terminal=True,  # Blocking
         )
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         if self._is_valid():
-            return HookResult.allow()
-        return HookResult.deny(reason="Convention violated: ...")
+            return GatingResult.allow()
+        return GatingResult.deny(reason="Convention violated: ...")
 ```
 
 ### Pattern 3: File Path Matching (PostToolUse)
@@ -580,7 +628,7 @@ def matches(self, hook_input: dict[str, Any]) -> bool:
 Run a check when a session begins (e.g., branch naming).
 
 ```python
-class SessionCheckHandler(Handler):
+class SessionCheckHandler(SessionStartHandlerBase):
     def __init__(self) -> None:
         super().__init__(
             handler_id="session-check",
@@ -591,10 +639,11 @@ class SessionCheckHandler(Handler):
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return True  # Always match on session start
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        # Run check (e.g., subprocess to get branch name)
-        # Return allow/deny based on result
-        ...
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
+        # Run the check (e.g., subprocess to get the branch name) and surface
+        # the finding as CONTEXT. SessionStart cannot refuse anything — the
+        # base is what stops you writing a deny that would be dropped.
+        return AdvisoryResult.allow(context=["Branch name looks wrong: ..."])
 ```
 
 ---

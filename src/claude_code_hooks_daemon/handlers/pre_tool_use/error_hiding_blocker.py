@@ -18,7 +18,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.strategies.error_hiding.protocol import (
     ErrorHidingPattern,
@@ -47,7 +48,7 @@ _DEFAULT_EXCLUDE_GLOBS: Final[tuple[str, ...]] = (
 )
 
 
-class ErrorHidingBlockerHandler(Handler):
+class ErrorHidingBlockerHandler(PreToolUseHandlerBase):
     """Block error-hiding patterns in code written via Write or Edit tools.
 
     Inspects the content of any Write or Edit tool call. If the new content
@@ -137,24 +138,24 @@ class ErrorHidingBlockerHandler(Handler):
             defaults=_DEFAULT_EXCLUDE_GLOBS,
         )
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny write if content contains an error-hiding pattern, allow otherwise."""
         file_path = get_file_path(hook_input)
         tool_name = hook_input.get(HookInputField.TOOL_NAME, "")
 
         if not file_path:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         strategy = self._registry.get_strategy(file_path)
         if strategy is None:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         content = self._get_new_content(hook_input, tool_name)
         violation = self._find_violation(content or "", strategy)
         if violation is None:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=self._format_reason(violation, strategy.language_name, file_path),
         )

@@ -354,10 +354,11 @@ plugins:
 Create a Python file in `.claude/hooks/handlers/<event_type>/`:
 
 ```python
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 
-class MyHandler(Handler):
+class MyHandler(PreToolUseHandlerBase):
     def __init__(self) -> None:
         super().__init__(
             name="my-handler",
@@ -373,14 +374,18 @@ class MyHandler(Handler):
         command = hook_input.get("tool_input", {}).get("command", "")
         return "dangerous_pattern" in command
 
-    def handle(self, hook_input: dict) -> HookResult:
-        return HookResult(
+    def handle(self, hook_input: dict) -> GatingResult:
+        return GatingResult(
             decision=Decision.DENY,
             reason="This operation is not allowed."
         )
 ```
 
 **Important:** The directory path (e.g., `pre_tool_use/`) is a convention only. Your handler's `matches()` method must check `hook_event_name` to filter by event type.
+
+**Pick the base class that matches your event.** Every event has one in `claude_code_hooks_daemon.core.handler_bases`, named after it — `PreToolUseHandlerBase`, `SessionStartHandlerBase`, `PostToolUseHandlerBase`, and so on. Each narrows `handle()` to the decisions its event can actually deliver: `GatingResult` (allow/deny/ask) for `PreToolUse` and `PermissionRequest`, `BlockingResult` (allow/deny) for `PostToolUse`, `Stop` and `SubagentStop`, and `AdvisoryResult` (allow only) for every other event.
+
+This matters because an event that cannot express a refusal drops one silently — a `DENY` returned from a `SessionStart` handler produces a valid response with the refusal removed, so the handler believes it blocked and nothing blocked. Subclassing `Handler` directly still works and is not deprecated, but the event base lets a type-checker catch that mistake before it ships.
 
 ### Plugin Search Paths
 

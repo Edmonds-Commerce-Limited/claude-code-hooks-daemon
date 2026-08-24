@@ -16,7 +16,8 @@ from datetime import date
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.plan_qa.context import sweep_context
 from claude_code_hooks_daemon.plan_qa.report import format_advisory
@@ -41,7 +42,7 @@ def _cli_hint() -> str:
     return "Full report / re-check after fixing: " + daemon_cli_command("plan-qa", "--sweep")
 
 
-class PlanQaSweepHandler(Handler):
+class PlanQaSweepHandler(SessionStartHandlerBase):
     """Advisory SessionStart sweep over the plan tree (silent when clean)."""
 
     def __init__(self) -> None:
@@ -69,10 +70,10 @@ class PlanQaSweepHandler(Handler):
             return False
         return bool(policy.sweep_mode == _SWEEP_MODE_ADVISE)
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         plan_dir_rel = self._track_plans_in_project
         if plan_dir_rel is None:  # pragma: no cover - matches() gates this
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         project_root = ProjectContext.project_root()
         try:
@@ -84,7 +85,7 @@ class PlanQaSweepHandler(Handler):
             )
         except FileNotFoundError:
             # Structural finding, not a crash: the configured plan dir is gone.
-            return HookResult(
+            return AdvisoryResult(
                 decision=Decision.ALLOW,
                 context=[
                     f"⚠️  PLAN QA: configured plan directory {plan_dir_rel}/ does not exist.",
@@ -95,9 +96,9 @@ class PlanQaSweepHandler(Handler):
 
         findings = run_stage(Stage.SWEEP, context)
         if not findings:
-            return HookResult(decision=Decision.ALLOW, context=[])
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
-        return HookResult(
+        return AdvisoryResult(
             decision=Decision.ALLOW,
             context=[format_advisory(findings), "", _cli_hint()],
         )

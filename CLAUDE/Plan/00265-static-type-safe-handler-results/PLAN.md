@@ -124,14 +124,22 @@ the emitted response:
 
 ### Phase 3: Reparent the handlers
 
-- [ ] ⬜ **Task 3.1**: Reparent the advisory-tier packages (the ones that gain
+- [x] ✅ **Task 3.0** (unplanned, and it gates the rest): the FACTORIES decide
+  whether a narrowed handler is writable at all. They construct via `cls(...)`
+  so the runtime type was always right, but were annotated `-> "HookResult"`.
+  `allow` now returns `Self`; `deny`/`ask` stay WIDE on the base so
+  `AdvisoryResult.deny(...)` is rejected, with `Self` overrides only on the
+  tiers that can refuse. A second mypy fixture pins both directions.
+- [x] ✅ **Task 3.1**: Reparent the advisory-tier packages (the ones that gain
   real protection): `session_start`, `pre_compact`, `status_line`,
   `user_prompt_submit`, `worktree_create`, `worktree_remove`
-- [ ] ⬜ **Task 3.2**: Reparent the blocking-tier packages: `post_tool_use`, `stop`
-- [ ] ⬜ **Task 3.3**: Reparent the gating-tier packages: `pre_tool_use`,
+- [x] ✅ **Task 3.2**: Reparent the blocking-tier packages: `post_tool_use`, `stop`
+- [x] ✅ **Task 3.3**: Reparent the gating-tier packages: `pre_tool_use`,
   `permission_request`
-- [ ] ⬜ **Task 3.4**: Add a test that every concrete handler descends from its
-  event's base, so a new handler cannot bypass the hierarchy
+- [x] ✅ **Task 3.4**: Add a test that every concrete handler descends from its
+  event's base, so a new handler cannot bypass the hierarchy — and that each
+  `handle()` still DECLARES its event's tier, since inheriting the base is not
+  enough if the override re-widens. `nitpick` is exempt by recorded decision.
 
 ### Phase 4: Close the mutation path
 
@@ -147,14 +155,18 @@ the emitted response:
 
 ### Phase 5: Project handlers and documentation
 
-- [ ] ⬜ **Task 5.1**: Decide and record whether project handlers must use the
-  event bases (they are not type-checked by this repo's QA, so the CLI guard
-  remains their real protection)
-- [ ] ⬜ **Task 5.2**: Update `CLAUDE/HANDLER_DEVELOPMENT.md` and
-  `CLAUDE/PROJECT_HANDLERS.md` with the base-class requirement
-- [ ] ⬜ **Task 5.3**: Add a truth-changes manifest entry — "handlers subclass
-  `Handler`" becomes "handlers subclass their event's base"
-- [ ] ⬜ **Task 5.4**: Add a post-upgrade task for client projects with handlers
+- [x] ✅ **Task 5.1**: Decide and record whether project handlers must use the
+  event bases — see Decision 3. RECOMMENDED, not required; `Handler` stays
+  supported and undeprecated, and `validate-project-handlers` remains their
+  real protection.
+- [x] ✅ **Task 5.2**: Update `CLAUDE/HANDLER_DEVELOPMENT.md` and
+  `CLAUDE/PROJECT_HANDLERS.md` with the base-class guidance
+- [x] ✅ **Task 5.3**: Add truth-changes manifest entries — "handlers subclass
+  `Handler`" becomes "handlers subclass their event's base"; plus the two
+  consequences a reader would otherwise meet as a surprise (the factory-form
+  fix can surface NEW validator warnings, and `merge_pseudo_results` gained a
+  required argument)
+- [x] ✅ **Task 5.4**: Add a post-upgrade task for client projects with handlers
 
 ## Technical Decisions
 
@@ -179,6 +191,30 @@ failure mode this plan exists to remove.
 never be type-checked; `to_json` enforcement and `validate-project-handlers` are
 their only protection. Static typing raises the floor for THIS repo's handlers;
 it does not reach a client's.
+
+### Decision 3: Event bases are RECOMMENDED for project handlers, not required
+
+**Context**: Task 5.1. This repository's handlers are now reparented and mypy
+enforces the tier. Project handlers live in a client's own repository, and the
+question is whether the documentation should require the same of them.
+**Options considered**:
+
+1. **Require it** — document `Handler` as deprecated for project handlers and
+   have `validate-project-handlers` warn on a direct subclass.
+2. **Recommend it** — document the bases as the better default, keep `Handler`
+   fully supported, and leave the CLI guard as the enforcement.
+
+**Decision**: Option 2. A static guard only pays off where a type-checker
+actually runs, and most client projects do not run mypy over
+`.claude/project-handlers/`. Requiring the base there would trade a real
+protection (the CLI guard, which works regardless) for a cosmetic one, while
+breaking every existing project handler on upgrade for no runtime benefit.
+The post-upgrade task therefore *offers* the base as an improvement rather than
+demanding a migration.
+
+**Consequence worth stating**: this is the one population the static work in
+this plan does not reach, which is exactly why Decision 2 keeps every runtime
+guard.
 
 ## Success Criteria
 

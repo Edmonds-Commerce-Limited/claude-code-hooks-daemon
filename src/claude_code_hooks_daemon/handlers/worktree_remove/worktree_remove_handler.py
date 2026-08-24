@@ -24,8 +24,8 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult
+from claude_code_hooks_daemon.core.handler_bases import WorktreeRemoveHandlerBase
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
 _WORKTREE_REMOVE_PRIORITY = 50
@@ -35,7 +35,7 @@ _KEY_CWD = "cwd"
 _PATH_KEYS = ("worktree_path", "path")
 
 
-class WorktreeRemoveHandler(Handler):
+class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
     """Prune stale worktree registrations (and remove a named worktree)."""
 
     def __init__(self) -> None:
@@ -49,7 +49,7 @@ class WorktreeRemoveHandler(Handler):
         """Handle every WorktreeRemove event (no matcher filtering)."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Best-effort cleanup; always a clean allow (WorktreeRemove is safe)."""
         cwd = hook_input.get(_KEY_CWD)
         if cwd:
@@ -59,7 +59,7 @@ class WorktreeRemoveHandler(Handler):
             # Prune last so registrations for just-removed / externally-deleted
             # worktrees are dropped regardless of how the directory went away.
             self._run_git(str(cwd), "worktree", "prune")
-        return HookResult()
+        return AdvisoryResult()
 
     @staticmethod
     def _extract_path(hook_input: dict[str, Any]) -> Path | None:

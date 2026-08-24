@@ -388,6 +388,47 @@ class SecondHandler(Handler):
             "2.30.0" in error_message
         ), f"Error should include the version that introduced the method, got: {error_message}"
 
+    def test_an_imported_base_is_not_blamed_for_the_missing_method(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The incomplete-handler error must name the USER's class, not ours.
+
+        Once a project handler subclasses its event's base, that base is an
+        abstract ``Handler`` subclass sitting in the module namespace. The
+        diagnostic that lists abstract classes would otherwise pick it up and
+        tell the client their handler is missing ``handle``, ``matches`` and
+        everything else — pointing at a daemon-internal class they cannot fix.
+        """
+        handler_code = '''"""Handler that forgot get_claude_md."""
+from typing import Any
+from claude_code_hooks_daemon.core import AcceptanceTest, GatingResult, TestType
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+
+class IncompleteHandler(PreToolUseHandlerBase):
+    def __init__(self) -> None:
+        super().__init__(handler_id="incomplete", priority=50)
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        return False
+
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
+        return GatingResult.allow()
+
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        return []
+'''
+        handler_file = tmp_path / "incomplete_handler.py"
+        handler_file.write_text(handler_code)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            ProjectHandlerLoader.load_handler_from_file(handler_file)
+
+        error_message = str(exc_info.value)
+        assert "IncompleteHandler" in error_message
+        assert "PreToolUseHandlerBase" not in error_message
+        assert "GatingHandler" not in error_message
+
     def test_load_handler_applies_default_priority_when_none(
         self,
         tmp_path: Path,

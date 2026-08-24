@@ -22,8 +22,8 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult
+from claude_code_hooks_daemon.core.handler_bases import WorktreeCreateHandlerBase
 from claude_code_hooks_daemon.core.worktree_naming import worktree_dir_name, worktree_path
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
@@ -37,7 +37,7 @@ _KEY_PROMPT_ID = "prompt_id"
 _KEY_SESSION_ID = "session_id"
 
 
-class WorktreeCreateHandler(Handler):
+class WorktreeCreateHandler(WorktreeCreateHandlerBase):
     """Create a git worktree at a semantic path and return its absolute path."""
 
     def __init__(self) -> None:
@@ -51,7 +51,7 @@ class WorktreeCreateHandler(Handler):
         """Handle every WorktreeCreate event (no matcher filtering)."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Create (or reuse) the worktree and return its absolute path."""
         cwd = str(hook_input.get(_KEY_CWD) or Path.cwd())
         name = hook_input.get(_KEY_NAME)
@@ -66,7 +66,7 @@ class WorktreeCreateHandler(Handler):
             branch = worktree_dir_name(name, prompt_id, session_id)
             self._git_worktree_add(cwd, path, branch)
 
-        return HookResult(worktree_path=str(path))
+        return AdvisoryResult(worktree_path=str(path))
 
     @staticmethod
     def _git_worktree_add(cwd: str, path: Path, branch: str) -> None:

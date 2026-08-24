@@ -10,11 +10,11 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import (
+    AdvisoryResult,
     Decision,
-    Handler,
-    HookResult,
     get_data_layer,
 )
+from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.daemon.controller import get_controller
 
 psutil: ModuleType | None
@@ -26,7 +26,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class DaemonStatsHandler(Handler):
+class DaemonStatsHandler(StatusLineHandlerBase):
     """Show daemon health: uptime, memory, last error, log level."""
 
     def __init__(self) -> None:
@@ -51,14 +51,14 @@ class DaemonStatsHandler(Handler):
         """Always run for status events."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Generate daemon statistics for status line.
 
         Args:
             hook_input: Status event input (not used, but required by interface)
 
         Returns:
-            HookResult with formatted daemon stats, or empty if stats unavailable
+            AdvisoryResult with formatted daemon stats, or empty if stats unavailable
         """
         parts = []
 
@@ -111,7 +111,7 @@ class DaemonStatsHandler(Handler):
             logger.debug(f"Failed to get daemon stats: {e}")
             # Fail silently - don't break status line
 
-        return HookResult(context=parts)
+        return AdvisoryResult(context=parts)
 
     def get_claude_md(self) -> str | None:
         return None

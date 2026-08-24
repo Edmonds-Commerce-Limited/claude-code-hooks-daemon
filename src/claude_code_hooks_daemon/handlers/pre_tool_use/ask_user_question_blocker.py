@@ -30,7 +30,8 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 
 # Defaults / option keys — no magic strings
 DEFAULT_REQUIRED_PREFIX = "ASKING BECAUSE:"
@@ -75,7 +76,7 @@ _ADVISORY_GUIDANCE_TEMPLATE = (
 )
 
 
-class AskUserQuestionBlockerHandler(Handler):
+class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
     """Allow AskUserQuestion only when every question is prefix-justified.
 
     Strict mode (default): denies the call when any ``question`` lacks the
@@ -95,7 +96,7 @@ class AskUserQuestionBlockerHandler(Handler):
         """Return True only for AskUserQuestion tool calls."""
         return hook_input.get(HookInputField.TOOL_NAME) == ToolName.ASK_USER_QUESTION
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Allow if every question carries the required prefix; otherwise act per mode."""
         prefix = getattr(self, "_required_prefix", DEFAULT_REQUIRED_PREFIX)
         mode = getattr(self, "_mode", MODE_STRICT)
@@ -103,11 +104,11 @@ class AskUserQuestionBlockerHandler(Handler):
         all_justified = self._all_questions_justified(hook_input, prefix)
 
         if all_justified:
-            return HookResult(decision=Decision.ALLOW)
+            return GatingResult(decision=Decision.ALLOW)
 
         if mode == MODE_ADVISORY:
             advisory_text = _ADVISORY_GUIDANCE_TEMPLATE.format(prefix=prefix)
-            return HookResult(
+            return GatingResult(
                 decision=Decision.ALLOW,
                 context=[
                     f"WARNING: AskUserQuestion without `{prefix}` prefix",
@@ -117,7 +118,7 @@ class AskUserQuestionBlockerHandler(Handler):
                 guidance=advisory_text,
             )
 
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason=_DENY_REASON_TEMPLATE.format(prefix=prefix),
         )

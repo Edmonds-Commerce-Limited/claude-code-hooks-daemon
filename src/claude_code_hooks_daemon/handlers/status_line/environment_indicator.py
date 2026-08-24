@@ -9,8 +9,9 @@ refresh, so this handler does no per-render probing.
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
+from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 
 # ANSI colours — each environment renders in a distinct colour so the runtime
 # is identifiable at a glance. Desktop is red (you are on the host); container
@@ -42,7 +43,7 @@ _UNKNOWN_RUNTIME_ICON = "📦"
 _UNKNOWN_RUNTIME_COLOR = _COLOR_GREY
 
 
-class EnvironmentIndicatorHandler(Handler):
+class EnvironmentIndicatorHandler(StatusLineHandlerBase):
     """Show 💻 (desktop/host) or a container icon (🐳 docker / 📦 podman / 🧊 lxc)."""
 
     def __init__(self) -> None:
@@ -62,7 +63,7 @@ class EnvironmentIndicatorHandler(Handler):
         """Always run for status line events."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Return the environment-indicator segment from the cached runtime."""
         runtime = ProjectContext.container_runtime()
         if runtime is None:
@@ -71,7 +72,7 @@ class EnvironmentIndicatorHandler(Handler):
             icon, label, color = _RUNTIME_DISPLAY.get(
                 runtime, (_UNKNOWN_RUNTIME_ICON, runtime, _UNKNOWN_RUNTIME_COLOR)
             )
-        return HookResult(context=[f"| {color}{icon} {label}{_COLOR_RESET}"])
+        return AdvisoryResult(context=[f"| {color}{icon} {label}{_COLOR_RESET}"])
 
     def get_claude_md(self) -> str | None:
         return None
