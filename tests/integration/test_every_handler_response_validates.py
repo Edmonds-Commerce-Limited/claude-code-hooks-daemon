@@ -22,19 +22,29 @@ through ``_format_system_message_response``, which cannot express DENY or ASK. I
 signals that by DELIBERATELY emitting ``{"decision": ...}`` so schema validation
 rejects it — "This will fail schema validation as expected", in its own words.
 
-That tripwire only ever fires where validation runs. ``validate_response`` is not
-called in production (only ``server.py``'s docstring mentions the module), so a
-handler returning DENY on such an event would today be silently DOWNGRADED: the
-deny is dropped from the wire response, the handler believes it blocked, and
+That tripwire only ever fires where validation runs. ``validate_response`` was
+not called in production at all — only ``server.py``'s docstring mentioned the
+module — so a handler returning DENY on such an event was silently DOWNGRADED:
+the deny dropped from the wire response, the handler believing it blocked, and
 nothing blocked. That is the same class as the fixed defect where five blocking
 handlers advertised themselves as advisory, pointed at the wire format instead of
 at the docs.
 
-**Method.** Decisions are read from the class's own AST rather than from a
-declaration, so a handler cannot pass by describing itself accurately while doing
-something else. ``get_acceptance_tests`` is excluded: its ``expected_decision=``
-values are assertions about behaviour, not decisions the handler returns — both
-worktree handlers name ``Decision.ALLOW`` only there.
+``to_json`` now enforces the contract at runtime, so that particular downgrade
+can no longer reach Claude Code silently. **This test is not thereby redundant**:
+runtime enforcement fires when the response is already being built for a live
+event, which is far too late to be a development signal, and its substitute —
+though never weaker than what the handler asked for — is still not what the
+handler intended. A failure here is a real defect to fix in the handler.
+
+**Method.** Decisions are read from the class's own AST by
+``core.decision_capability``, so a handler cannot pass by describing itself
+accurately while doing something else. That module is shared with
+``validate-project-handlers``, which applies the same question to a CLIENT's
+project handlers — the one population no test in this repository can sweep.
+``get_acceptance_tests`` is excluded there: its ``expected_decision=`` values are
+assertions about behaviour, not decisions the handler returns — both worktree
+handlers name ``Decision.ALLOW`` only there.
 
 **Known limit, stated rather than hidden.** A decision reached through a helper
 defined OUTSIDE the class body is not seen. The scan covers every method of the
@@ -43,11 +53,9 @@ would evade it. That is a narrower gap than a 12-entry list, not the absence of
 one.
 """
 
-import ast
 import importlib
 import inspect
 import pkgutil
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -59,17 +67,11 @@ from claude_code_hooks_daemon.constants.events import (
     EventID,
     EventIDMeta,
 )
+from claude_code_hooks_daemon.core.decision_capability import decisions_referenced_by
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.response_schemas import RESPONSE_SCHEMAS, validate_response
-
-#: Decision references here describe what a test EXPECTS, not what the handler
-#: returns. Scanning it would attribute ALLOW to handlers that never return it.
-_NON_RETURNING_METHOD = "get_acceptance_tests"
-
-#: The name the Decision enum is referenced by in handler source.
-_DECISION_ENUM = "Decision"
 
 
 def _project_root() -> Path:
@@ -92,33 +94,6 @@ def _event_name_for_config_key(config_key: str) -> str | None:
                 return str(STATUS_SCHEMA_KEY)
             return str(meta.json_key)
     return None
-
-
-def _decisions_returned_by(handler_class: type[Handler]) -> set[Decision]:
-    """Decisions the class's own methods reference, excluding test expectations."""
-    try:
-        source = inspect.getsource(handler_class)
-    except OSError:
-        return set()
-
-    # dedent, NOT cleandoc: cleandoc normalises DOCSTRING indentation and
-    # corrupts the surrounding code, so the parse fails outright.
-    tree = ast.parse(textwrap.dedent(source))
-    found: set[Decision] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == _NON_RETURNING_METHOD:
-            continue
-        if isinstance(node, ast.FunctionDef) and node.name != _NON_RETURNING_METHOD:
-            for inner in ast.walk(node):
-                if (
-                    isinstance(inner, ast.Attribute)
-                    and isinstance(inner.value, ast.Name)
-                    and inner.value.id == _DECISION_ENUM
-                ):
-                    member = getattr(Decision, inner.attr, None)
-                    if isinstance(member, Decision):
-                        found.add(member)
-    return found
 
 
 def _handlers_with_event_names() -> list[tuple[str, type[Handler], str]]:
@@ -168,7 +143,7 @@ class TestDiscoveryIsNotVacuous:
         with_decisions = [
             name
             for name, cls, _event in _handlers_with_event_names()
-            if _decisions_returned_by(cls)
+            if decisions_referenced_by(cls)
         ]
 
         assert len(with_decisions) > 40, (
@@ -196,7 +171,7 @@ class TestEveryReachableDecisionSerialisesValidly:
         """
         failures: list[str] = []
 
-        for decision in sorted(_decisions_returned_by(handler_class), key=lambda d: d.value):
+        for decision in sorted(decisions_referenced_by(handler_class), key=lambda d: d.value):
             result = HookResult(
                 decision=decision,
                 reason=f"{handler_name} reason" if decision != Decision.ALLOW else None,

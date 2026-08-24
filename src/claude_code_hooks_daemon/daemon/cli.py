@@ -3416,6 +3416,7 @@ def cmd_validate_project_handlers(args: argparse.Namespace) -> int:
         return 1
 
     # Discover handlers using ProjectHandlerLoader
+    from claude_code_hooks_daemon.core.decision_capability import undeliverable_decisions
     from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
     from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
 
@@ -3465,6 +3466,16 @@ def cmd_validate_project_handlers(args: argparse.Namespace) -> int:
                     print(f"    - Acceptance tests: {len(tests)}")
             except Exception as e:
                 print(f"    - WARNING: get_acceptance_tests() failed: {e}")
+                total_warnings += 1
+
+            # A decision the event cannot deliver is DROPPED on the wire: the
+            # handler believes it blocked and nothing blocked. The runtime guard
+            # in `to_json` logs it, but only once the handler has shipped and a
+            # live event has fired. This is the surface a developer runs WHILE
+            # writing the handler, and project handlers are the one population
+            # no test in the daemon's own repository can sweep.
+            for problem in undeliverable_decisions(type(handler), event_type.value):
+                print(f"    - WARNING: {problem}")
                 total_warnings += 1
 
             print("    - Status: OK")

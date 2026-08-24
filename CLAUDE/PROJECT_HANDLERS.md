@@ -454,7 +454,36 @@ Discover and validate all project handlers without starting the daemon.
 - Contains a concrete `Handler` subclass
 - Handler can be instantiated
 - `get_acceptance_tests()` returns non-empty list
+- **Every decision the handler returns can be DELIVERED by its event type**
 - Reports count per event type
+
+#### Undeliverable decisions
+
+Not every event can express every decision. `SessionStart`, `SessionEnd`,
+`PreCompact`, `Notification` and both worktree events cannot refuse anything at
+all; `Stop`, `SubagentStop` and `PostToolUse` express `block` but have no `ask`;
+`Status` renders a status line and expresses nothing. A handler that returns one
+of these gets a response that is **schema-valid and silently missing the
+decision** — it believes it blocked, and nothing blocked.
+
+The daemon logs this at ERROR when it happens at runtime, but by then the
+handler has shipped. `validate-project-handlers` answers the same question
+before that, reporting each case as a WARNING:
+
+```text
+- WARNING: returns 'deny' but SessionStart cannot carry it on the wire,
+  so the decision is silently DROPPED and nothing is enforced
+```
+
+**Fix the handler, do not ignore the warning** — usually by moving the logic to
+an event that can refuse (`PreToolUse` for tool calls, `Stop` to interrupt a
+stop), or by returning `Decision.ALLOW` with `context` if the intent was
+advisory all along.
+
+It is reported as a warning rather than a failure because the check reads the
+handler's source: a handler that merely *compares* against `Decision.DENY` can
+look like one that returns it. Exit code 1 stays reserved for a handler that
+genuinely could not be loaded.
 
 ### test-project-handlers
 

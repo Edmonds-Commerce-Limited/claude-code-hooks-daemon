@@ -33,7 +33,7 @@ import logging
 import pytest
 
 from claude_code_hooks_daemon.core.hook_result import (
-    _REFUSAL_CAPABLE_EVENTS,
+    REFUSAL_CAPABLE_EVENTS,
     Decision,
     HookResult,
 )
@@ -114,7 +114,7 @@ class TestTheCommonPathStaysSilent:
 class TestTheCapabilityTableMatchesTheSchemas:
     """Guard the guard — a hand-written table is exactly what goes stale.
 
-    ``_REFUSAL_CAPABLE_EVENTS`` decides whether a dropped refusal is reported.
+    ``REFUSAL_CAPABLE_EVENTS`` decides whether a dropped refusal is reported.
     If it drifts from the schemas it either goes quiet on a real drop or cries
     wolf on a hot path, and nothing else would notice.
     """
@@ -122,7 +122,7 @@ class TestTheCapabilityTableMatchesTheSchemas:
     def test_every_listed_event_can_really_carry_that_decision(self) -> None:
         """Each claim in the table must be true of the emitted response."""
         wrong: list[str] = []
-        for decision, events in _REFUSAL_CAPABLE_EVENTS.items():
+        for decision, events in REFUSAL_CAPABLE_EVENTS.items():
             for event_name in events:
                 response = str(HookResult(decision=decision, reason="x").to_json(event_name))
                 if decision.value not in response and "block" not in response:
@@ -138,7 +138,7 @@ class TestTheCapabilityTableMatchesTheSchemas:
         unknown = sorted(
             {
                 event_name
-                for events in _REFUSAL_CAPABLE_EVENTS.values()
+                for events in REFUSAL_CAPABLE_EVENTS.values()
                 for event_name in events
                 if event_name not in RESPONSE_SCHEMAS
             }

@@ -58,7 +58,12 @@ _WORKTREE_PATH_KEY = "worktreePath"
 # appears in no handler here) but NOT unreachable for a client, whose project
 # handlers are a supported extension point that no test in this repo sweeps.
 # Kept honest by tests that assert every claim against the emitted response.
-_REFUSAL_CAPABLE_EVENTS: Final[dict[Decision, frozenset[str]]] = {
+#
+# Public because ``core.decision_capability`` answers the same question ahead of
+# time for project handlers, which no test in this repository can sweep. One
+# table, two surfaces, so a client's pre-flight check cannot drift from what the
+# serialiser actually does at runtime.
+REFUSAL_CAPABLE_EVENTS: Final[dict[Decision, frozenset[str]]] = {
     Decision.DENY: frozenset(
         {
             "PreToolUse",  # permissionDecision: deny
@@ -351,9 +356,9 @@ class HookResult(BaseModel):
         error into it would put noise on every prompt forever. The gap is the
         absence of a RECORD, so a record is what this adds.
         """
-        if self.decision not in _REFUSAL_CAPABLE_EVENTS:
+        if self.decision not in REFUSAL_CAPABLE_EVENTS:
             return
-        if event_name in _REFUSAL_CAPABLE_EVENTS[self.decision]:
+        if event_name in REFUSAL_CAPABLE_EVENTS[self.decision]:
             return
 
         logger.error(

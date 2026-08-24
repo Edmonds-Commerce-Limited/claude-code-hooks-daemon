@@ -125,6 +125,12 @@ Integration tests verify handler works with daemon components.
    there is welcome and optional; the derived guard above is what guarantees
    coverage.
 
+   **Project handlers are the one population this sweep cannot reach** — they
+   live in a client's own repository. They get the same check from
+   `bin/hooks-daemon validate-project-handlers`, which shares the underlying
+   primitive (`core/decision_capability.py`) so the two cannot drift. See
+   @CLAUDE/PROJECT_HANDLERS.md.
+
 2. **FrontController Integration** (if complex):
    Create `tests/integration/test_{handler}_integration.py` if handler has:
 
