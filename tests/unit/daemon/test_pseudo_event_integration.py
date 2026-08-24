@@ -10,8 +10,9 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.core.chain import ChainExecutionResult
 from claude_code_hooks_daemon.core.event import EventType, HookEvent, HookInput
-from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.daemon.controller import DaemonController
 
 
@@ -124,17 +125,20 @@ class TestControllerPseudoEventDispatch:
     """Test pseudo-event dispatch during process_event()."""
 
     def test_pseudo_event_context_merged_into_result(self) -> None:
-        """Pseudo-event context is appended to real chain result."""
+        """Pseudo-event context is appended to real chain result.
+
+        The chain result is a REAL ``ChainExecutionResult`` rather than a
+        ``MagicMock``. A mock accepts any operation the merge performs, so it
+        cannot tell a working merge from a broken one — and the merge now
+        rebuilds the result through its own model rather than mutating it,
+        which a mock would have absorbed silently.
+        """
         controller = DaemonController()
 
-        # Set up a mock dispatcher that returns advisory context
         mock_dispatcher = MagicMock()
-        mock_pseudo_result = MagicMock()
-        mock_pseudo_result.decision = Decision.ALLOW
-        mock_pseudo_result.context = ["Hedging language detected"]
-        mock_pseudo_result.handlers_matched = ["nitpick-hedging-language"]
-        mock_pseudo_result.reason = None
-        mock_dispatcher.check_and_fire.return_value = [mock_pseudo_result]
+        mock_dispatcher.check_and_fire.return_value = [
+            HookResult.allow(context=["Hedging language detected"])
+        ]
 
         controller._pseudo_dispatcher = mock_dispatcher
         controller._initialised = True
@@ -150,13 +154,9 @@ class TestControllerPseudoEventDispatch:
         )
 
         with patch("claude_code_hooks_daemon.core.router.EventRouter.route") as mock_route:
-            mock_chain_result = MagicMock()
-            mock_chain_result.result.decision = Decision.ALLOW
-            mock_chain_result.result.context = ["Real context"]
-            mock_chain_result.result.handlers_matched = []
-            mock_chain_result.result.reason = None
-            mock_chain_result.handlers_matched = []
-            mock_route.return_value = mock_chain_result
+            mock_route.return_value = ChainExecutionResult(
+                result=HookResult.allow(context=["Real context"])
+            )
 
             result = controller.process_event(event)
 
@@ -167,8 +167,43 @@ class TestControllerPseudoEventDispatch:
             "test-session",
         )
 
-        # Verify context was merged
         assert "Hedging language detected" in result.result.context
+        assert "Real context" in result.result.context
+
+    def test_a_pseudo_refusal_is_clamped_to_what_the_real_event_can_carry(self) -> None:
+        """The controller must hand the merge the event it will SERIALISE under.
+
+        A wrong event name here is invisible in unit tests of the merge itself:
+        the same handler is deliverable under one event and dropped under
+        another, so only the controller can get this pairing wrong.
+        """
+        controller = DaemonController()
+
+        mock_dispatcher = MagicMock()
+        mock_dispatcher.check_and_fire.return_value = [
+            HookResult.deny(reason="Dismissive language")
+        ]
+
+        controller._pseudo_dispatcher = mock_dispatcher
+        controller._initialised = True
+        controller._degraded = False
+
+        event = HookEvent(
+            event_type=EventType.SESSION_START,
+            hook_input=HookInput(session_id="test-session"),
+        )
+
+        with patch("claude_code_hooks_daemon.core.router.EventRouter.route") as mock_route:
+            mock_route.return_value = ChainExecutionResult(result=HookResult.allow())
+
+            result = controller.process_event(event)
+
+        # An exception inside process_event returns an ALLOW error result, so
+        # assert the merge actually ran rather than reading a swallowed crash
+        # as a successful clamp.
+        assert not any("hooks daemon encountered" in line for line in result.result.context)
+        assert result.result.decision == Decision.ALLOW
+        assert any("Dismissive language" in line for line in result.result.context)
 
     def test_no_dispatch_when_no_pseudo_events(self) -> None:
         """No pseudo-event dispatch when dispatcher is None."""

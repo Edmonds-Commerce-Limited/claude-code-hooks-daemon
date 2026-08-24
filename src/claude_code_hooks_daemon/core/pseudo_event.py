@@ -18,12 +18,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.core.result_types import decisions_of, result_type_for_event
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.handler import Handler
@@ -326,42 +327,117 @@ class PseudoEventDispatcher:
             return None
 
 
+def _promoted_decision(current: Decision, incoming: Decision) -> Decision | None:
+    """The decision a pseudo result would raise ``current`` to, or None.
+
+    Decision priority: DENY > ASK > ALLOW. Returns None when the incoming
+    decision does not outrank what the real chain already decided, which is
+    also the "nothing to clamp" case.
+
+    Args:
+        current: The decision the merged result holds so far.
+        incoming: The pseudo-event handler's decision.
+
+    Returns:
+        The promoted decision, or None if no promotion applies.
+    """
+    if incoming == Decision.DENY and current != Decision.DENY:
+        return Decision.DENY
+    if incoming == Decision.ASK and current == Decision.ALLOW:
+        return Decision.ASK
+    return None
+
+
 def merge_pseudo_results(
     real: ChainExecutionResult,
     pseudo_results: list[HookResult],
+    event_name: str,
 ) -> ChainExecutionResult:
     """Merge pseudo-event results into the real chain result.
 
-    Decision priority: DENY > ASK > ALLOW.
-    Context always accumulates.
+    Decision priority: DENY > ASK > ALLOW. Context always accumulates.
+
+    **A pseudo-event's decision is delivered under the REAL event's response**,
+    because a pseudo-event has no response of its own. So what it may decide is
+    decided by the TRIGGER — and triggers are per-project configuration, which
+    means the same handler is deliverable under one project's config and dropped
+    under another's. ``event_name`` is therefore required, and an unknown one
+    raises rather than defaulting: guessing a tier either forbids a legal
+    decision or writes one the event silently drops.
+
+    A promotion the event cannot carry is CLAMPED — not written — and the
+    refusal's reason is appended to context instead, because context is what
+    such an event can actually deliver. The clamp is logged at ERROR: the
+    guidance still reaches Claude, so nothing visibly breaks, which is exactly
+    why a misbound refusing handler needs a record rather than silence.
+
+    The merged result is CONSTRUCTED, not mutated into place. A handler returns
+    its event's narrowed result type, and those reject an out-of-tier decision
+    on assignment as well as construction — an in-place write would raise where
+    the old code degraded quietly. Rebuilding through ``type(real.result)``
+    keeps that narrowing (a plain ``HookResult`` would widen it away) and
+    re-validates, so this function cannot produce a result its own type forbids.
 
     Args:
-        real: Result from the real handler chain
-        pseudo_results: Results from pseudo-event handler chains
+        real: Result from the real handler chain.
+        pseudo_results: Results from pseudo-event handler chains.
+        event_name: Wire name of the REAL event this response is serialised
+            under — the one whose capability the decisions are clamped to.
 
     Returns:
-        The real ChainExecutionResult with merged decisions and context
+        A new ChainExecutionResult with merged decisions and context. ``real``
+        and its result are left untouched.
+
+    Raises:
+        ValueError: If ``event_name`` is not a known event.
     """
     if not pseudo_results:
         return real
 
+    # Via the TIER rather than the capability table directly: same answer, but
+    # this raises on an unknown event instead of quietly resolving it to
+    # {ALLOW, CONTINUE} — a typo would otherwise clamp every refusal in silence.
+    deliverable = decisions_of(result_type_for_event(event_name))
+    context = list(real.result.context)
+    handlers_matched = list(real.result.handlers_matched)
+    decision = real.result.decision
+    reason = real.result.reason
+
     for pseudo in pseudo_results:
-        # Accumulate context
-        real.result.context.extend(pseudo.context)
-
-        # Merge handlers
+        context.extend(pseudo.context)
         for handler_name in pseudo.handlers_matched:
-            if handler_name not in real.result.handlers_matched:
-                real.result.handlers_matched.append(handler_name)
+            if handler_name not in handlers_matched:
+                handlers_matched.append(handler_name)
 
-        # Decision priority: DENY > ASK > ALLOW
-        if pseudo.decision == Decision.DENY:
-            if real.result.decision != Decision.DENY:
-                real.result.decision = Decision.DENY
-                real.result.reason = pseudo.reason
-        elif pseudo.decision == Decision.ASK:
-            if real.result.decision == Decision.ALLOW:
-                real.result.decision = Decision.ASK
-                real.result.reason = pseudo.reason
+        promoted = _promoted_decision(decision, pseudo.decision)
+        if promoted is None:
+            continue
 
-    return real
+        if promoted not in deliverable:
+            logger.error(
+                "CLAMPED PSEUDO-EVENT REFUSAL on %s: a pseudo-event handler returned "
+                "'%s', which this event cannot carry on the wire. The refusal was NOT "
+                "enforced; its reason is delivered as context instead. Bind this "
+                "handler to a trigger whose event can refuse, or stop it refusing. "
+                "Reason given: %s",
+                event_name,
+                promoted.value,
+                pseudo.reason or "(none)",
+            )
+            if pseudo.reason:
+                context.append(pseudo.reason)
+            continue
+
+        decision = promoted
+        reason = pseudo.reason
+
+    merged = type(real.result).model_validate(
+        {
+            **real.result.model_dump(),
+            "decision": decision,
+            "reason": reason,
+            "context": context,
+            "handlers_matched": handlers_matched,
+        }
+    )
+    return replace(real, result=merged)

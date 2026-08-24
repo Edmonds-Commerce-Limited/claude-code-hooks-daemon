@@ -135,11 +135,15 @@ the emitted response:
 
 ### Phase 4: Close the mutation path
 
-- [ ] ⬜ **Task 4.1**: Write a failing test that `merge_pseudo_results` cannot
+- [x] ✅ **Task 4.1**: Write a failing test that `merge_pseudo_results` cannot
   write a decision the trigger's event cannot carry
-- [ ] ⬜ **Task 4.2**: Restructure it to construct rather than mutate, clamping
-  to the trigger event's tier
-- [ ] ⬜ **Task 4.3**: Verify the existing pseudo-event sweep still passes
+- [x] ✅ **Task 4.2**: Restructure it to construct rather than mutate, clamping
+  to the trigger event's tier. `event_name` is now a REQUIRED argument — the
+  merge cannot be done correctly without it, and an unknown one raises rather
+  than resolving to the advisory tier. A clamped refusal is not discarded: its
+  reason is delivered as context (what such an event CAN carry) and the clamp
+  is logged at ERROR.
+- [x] ✅ **Task 4.3**: Verify the existing pseudo-event sweep still passes
 
 ### Phase 5: Project handlers and documentation
 

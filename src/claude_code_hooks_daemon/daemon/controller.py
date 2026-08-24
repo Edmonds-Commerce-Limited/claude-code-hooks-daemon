@@ -772,7 +772,10 @@ class DaemonController:
                     session_id,
                 )
                 if pseudo_results:
-                    result = merge_pseudo_results(result, pseudo_results)
+                    # The pseudo-event's decision is delivered under the REAL
+                    # event's response, so pass the name the response will be
+                    # serialised under (to_json takes the same value below).
+                    result = merge_pseudo_results(result, pseudo_results, event.event_type.value)
 
             # Check if a handler crashed (strict mode creates error result with context)
             if any("Handler exception:" in ctx for ctx in result.result.context):

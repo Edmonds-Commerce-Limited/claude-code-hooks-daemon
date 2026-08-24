@@ -477,14 +477,20 @@ class TestPseudoEventDispatcherMultiTrigger:
 
 
 class TestMergePseudoResults:
-    """Test merging pseudo-event results into real chain results."""
+    """Test merging pseudo-event results into real chain results.
+
+    These cover the promotion ladder (DENY > ASK > ALLOW) and use ``PreToolUse``
+    throughout because it is the one event that can carry every decision — so
+    the ladder is observable without the trigger-event clamp interfering.
+    ``TestMergeClampsToTheTriggerEvent`` below covers the clamp itself.
+    """
 
     def test_allow_plus_allow_stays_allow(self) -> None:
         """Allow from both real and pseudo stays allow."""
         real = ChainExecutionResult(result=HookResult.allow())
         pseudo = [HookResult.allow(context=["pseudo context"])]
 
-        merged = merge_pseudo_results(real, pseudo)
+        merged = merge_pseudo_results(real, pseudo, "PreToolUse")
         assert merged.result.decision == Decision.ALLOW
         assert "pseudo context" in merged.result.context
 
@@ -493,7 +499,7 @@ class TestMergePseudoResults:
         real = ChainExecutionResult(result=HookResult.allow(context=["real context"]))
         pseudo = [HookResult.deny(reason="Dismissive language")]
 
-        merged = merge_pseudo_results(real, pseudo)
+        merged = merge_pseudo_results(real, pseudo, "PreToolUse")
         assert merged.result.decision == Decision.DENY
         assert merged.result.reason == "Dismissive language"
         assert "real context" in merged.result.context
@@ -503,7 +509,7 @@ class TestMergePseudoResults:
         real = ChainExecutionResult(result=HookResult.deny(reason="Real denial"))
         pseudo = [HookResult.allow(context=["pseudo context"])]
 
-        merged = merge_pseudo_results(real, pseudo)
+        merged = merge_pseudo_results(real, pseudo, "PreToolUse")
         assert merged.result.decision == Decision.DENY
         assert merged.result.reason == "Real denial"
         assert "pseudo context" in merged.result.context
@@ -513,7 +519,7 @@ class TestMergePseudoResults:
         real = ChainExecutionResult(result=HookResult.allow())
         pseudo = [HookResult.ask(reason="Please confirm")]
 
-        merged = merge_pseudo_results(real, pseudo)
+        merged = merge_pseudo_results(real, pseudo, "PreToolUse")
         assert merged.result.decision == Decision.ASK
         assert merged.result.reason == "Please confirm"
 
@@ -522,7 +528,7 @@ class TestMergePseudoResults:
         real = ChainExecutionResult(result=HookResult.ask(reason="Ask first"))
         pseudo = [HookResult.deny(reason="Blocked")]
 
-        merged = merge_pseudo_results(real, pseudo)
+        merged = merge_pseudo_results(real, pseudo, "PreToolUse")
         assert merged.result.decision == Decision.DENY
         assert merged.result.reason == "Blocked"
 
@@ -534,7 +540,7 @@ class TestMergePseudoResults:
             HookResult.allow(context=["pseudo-2"]),
         ]
 
-        merged = merge_pseudo_results(real, pseudo)
+        merged = merge_pseudo_results(real, pseudo, "PreToolUse")
         assert "real" in merged.result.context
         assert "pseudo-1" in merged.result.context
         assert "pseudo-2" in merged.result.context
@@ -546,7 +552,7 @@ class TestMergePseudoResults:
             handlers_executed=["handler-a"],
         )
 
-        merged = merge_pseudo_results(real, [])
+        merged = merge_pseudo_results(real, [], "PreToolUse")
         assert merged.result.decision == Decision.ALLOW
         assert merged.result.context == ["real"]
 
@@ -558,6 +564,159 @@ class TestMergePseudoResults:
             HookResult.deny(reason="Second denial"),
         ]
 
-        merged = merge_pseudo_results(real, pseudo)
+        merged = merge_pseudo_results(real, pseudo, "PreToolUse")
         assert merged.result.decision == Decision.DENY
         assert merged.result.reason == "First denial"
+
+
+# ─── Clamping to the trigger event (Plan 00265 Phase 4) ───
+
+
+class TestMergeClampsToTheTriggerEvent:
+    """A pseudo handler's refusal is merged into the REAL event's response.
+
+    So its deliverability is decided by the TRIGGER's event type, and triggers
+    are per-project configuration — the same handler is deliverable under one
+    project's config and dropped under another's. Before this, the merge wrote
+    the refusal in regardless and left ``to_json`` to notice at the very last
+    moment.
+
+    Two things make that worse than it sounds. The merged result CLAIMS to have
+    denied, so anything reading ``decision`` downstream is reading a block that
+    never happened. And once handlers return their event's narrowed result type,
+    writing DENY into an ``AdvisoryResult`` raises ``ValidationError`` — dispatch
+    would start crashing where it previously degraded quietly.
+    """
+
+    def test_a_deny_is_not_written_into_an_event_that_cannot_carry_it(self) -> None:
+        real = ChainExecutionResult(result=HookResult.allow())
+        pseudo = [HookResult.deny(reason="Dismissive language")]
+
+        merged = merge_pseudo_results(real, pseudo, "SessionStart")
+
+        assert merged.result.decision == Decision.ALLOW
+
+    def test_the_refusals_reason_is_still_delivered(self) -> None:
+        """Clamping must not DISCARD the message — the event can carry context."""
+        real = ChainExecutionResult(result=HookResult.allow())
+        pseudo = [HookResult.deny(reason="Dismissive language")]
+
+        merged = merge_pseudo_results(real, pseudo, "SessionStart")
+
+        assert any("Dismissive language" in line for line in merged.result.context)
+
+    def test_an_ask_is_not_written_into_an_event_with_no_ask(self) -> None:
+        """Stop and PostToolUse express ``block`` but have no ``ask``."""
+        real = ChainExecutionResult(result=HookResult.allow())
+        pseudo = [HookResult.ask(reason="Please confirm")]
+
+        merged = merge_pseudo_results(real, pseudo, "Stop")
+
+        assert merged.result.decision == Decision.ALLOW
+        assert any("Please confirm" in line for line in merged.result.context)
+
+    def test_a_deny_still_lands_on_an_event_that_can_carry_it(self) -> None:
+        """The clamp must not break the case it is protecting."""
+        real = ChainExecutionResult(result=HookResult.allow())
+        pseudo = [HookResult.deny(reason="Blocked")]
+
+        merged = merge_pseudo_results(real, pseudo, "PostToolUse")
+
+        assert merged.result.decision == Decision.DENY
+        assert merged.result.reason == "Blocked"
+
+    def test_an_ask_still_lands_on_a_gating_event(self) -> None:
+        real = ChainExecutionResult(result=HookResult.allow())
+        pseudo = [HookResult.ask(reason="Please confirm")]
+
+        merged = merge_pseudo_results(real, pseudo, "PreToolUse")
+
+        assert merged.result.decision == Decision.ASK
+
+    def test_a_clamped_decision_does_not_downgrade_a_real_refusal(self) -> None:
+        """The real chain's own DENY is the event's business, not the clamp's."""
+        real = ChainExecutionResult(result=HookResult.deny(reason="Real denial"))
+        pseudo = [HookResult.ask(reason="Please confirm")]
+
+        merged = merge_pseudo_results(real, pseudo, "PostToolUse")
+
+        assert merged.result.decision == Decision.DENY
+        assert merged.result.reason == "Real denial"
+
+    def test_the_clamp_is_recorded_at_error(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A refusing handler bound to an event that cannot refuse is a DEFECT.
+
+        The guidance still reaches Claude, so nothing visibly breaks — which is
+        exactly why it needs a record rather than silence.
+        """
+        real = ChainExecutionResult(result=HookResult.allow())
+        pseudo = [HookResult.deny(reason="Dismissive language")]
+
+        with caplog.at_level("ERROR"):
+            merge_pseudo_results(real, pseudo, "SessionStart")
+
+        assert any(record.levelname == "ERROR" for record in caplog.records)
+        assert "SessionStart" in caplog.text
+
+    def test_an_unknown_event_fails_fast(self) -> None:
+        """Never guess a tier: a wrong guess drops a real block or writes a fake one."""
+        real = ChainExecutionResult(result=HookResult.allow())
+
+        with pytest.raises(ValueError, match="NoSuchEventXYZ"):
+            merge_pseudo_results(real, [HookResult.deny(reason="x")], "NoSuchEventXYZ")
+
+
+class TestMergeConstructsRatherThanMutates:
+    """Mutating the chain's result is what makes the narrowed types unusable."""
+
+    def test_the_original_result_is_left_alone(self) -> None:
+        original = HookResult.allow(context=["real context"])
+        real = ChainExecutionResult(result=original)
+
+        merged = merge_pseudo_results(real, [HookResult.deny(reason="Blocked")], "PostToolUse")
+
+        assert original.decision == Decision.ALLOW
+        assert original.context == ["real context"]
+        assert merged.result is not original
+
+    def test_a_narrowed_result_survives_the_merge(self) -> None:
+        """The Phase 3 crash this phase exists to prevent.
+
+        ``AdvisoryResult`` rejects DENY on assignment as well as construction,
+        so the old in-place write would raise here rather than degrade.
+        """
+        from claude_code_hooks_daemon.core.result_types import AdvisoryResult
+
+        real = ChainExecutionResult(result=AdvisoryResult(context=["real"]))
+
+        merged = merge_pseudo_results(real, [HookResult.deny(reason="Blocked")], "SessionStart")
+
+        assert isinstance(merged.result, AdvisoryResult)
+        assert merged.result.decision == Decision.ALLOW
+
+    def test_a_narrowed_result_keeps_its_type_when_the_decision_lands(self) -> None:
+        """Constructing must not silently widen the result back to ``HookResult``."""
+        from claude_code_hooks_daemon.core.result_types import BlockingResult
+
+        real = ChainExecutionResult(result=BlockingResult())
+
+        merged = merge_pseudo_results(real, [HookResult.deny(reason="Blocked")], "PostToolUse")
+
+        assert isinstance(merged.result, BlockingResult)
+        assert merged.result.decision == Decision.DENY
+
+    def test_every_other_field_survives_the_reconstruction(self) -> None:
+        """Rebuilding a result must not quietly drop the fields nobody asserts on."""
+        original = HookResult(
+            decision=Decision.ALLOW,
+            guidance="keep me",
+            worktree_path="/tmp/wt",
+            rule="some-rule",
+        )
+        real = ChainExecutionResult(result=original)
+
+        merged = merge_pseudo_results(real, [HookResult.allow(context=["c"])], "SessionStart")
+
+        assert merged.result.guidance == "keep me"
+        assert merged.result.worktree_path == "/tmp/wt"
+        assert merged.result.rule == "some-rule"
