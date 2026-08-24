@@ -1532,16 +1532,6 @@ A `Write`/`Edit` of ephemeral or session-specific content to `CLAUDE.md` or `REA
 
 Content inside markdown code blocks is exempt from validation.
 
-<!-- handler: command-hints -->
-
-## command_hints — advisory reminders after specific commands
-
-PostToolUse advisory (never blocks). When a configured command is detected in a Bash call, a HINT is injected reminding you of a follow-up action. Shipped default: running `agent-browser` reminds you to close the browser session when finished.
-
-**Rate-limited per hint** — each hint has a `ttl_seconds` cooldown (tracked per session + hint id) so it does not repeat on every matching command; state resets on daemon restart, so a hint may fire once more after a restart.
-
-**Configure** via `handlers.post_tool_use.command_hints.options`: `mode: additive` (default) appends your `hints` list to the built-in set — a project entry whose `id` matches a built-in one overrides it; `mode: replace` discards the built-in set entirely and uses only your list. Each hint: `id`, `pattern` (a literal command name, matched at the start of a shell segment — path-qualified and `env`-prefixed spellings are recognised, but it never fires on the word appearing as an unrelated argument), `hint` (the reminder text), `ttl_seconds`, and optional `min_calls_between` (secondary count-based gate). Disable with `handlers.post_tool_use.command_hints.enabled: false`.
-
 <!-- handler: background-process-tracker -->
 
 ## background_process_tracker — backgrounded processes are tracked
@@ -1560,31 +1550,21 @@ When you background a long-lived process:
 
 Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
 
-<!-- handler: validate-eslint-on-write -->
+<!-- handler: command-hints -->
 
-## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
+## command_hints — advisory reminders after specific commands
 
-A `Write`/`Edit` to a `.ts` or `.tsx` file is run through ESLint. Reported
-errors DENY the tool call.
+PostToolUse advisory (never blocks). When a configured command is detected in a Bash call, a HINT is injected reminding you of a follow-up action. Shipped default: running `agent-browser` reminds you to close the browser session when finished.
 
-**A Bash-authored `.ts`/`.tsx` file is checked too** — one written with `>`,
-`>>`, `tee` or a `cat <<EOF` heredoc. A file the command merely RELOCATES
-(`cp`, `mv`, `install`, `dd`) is not: those bytes were already on disk. Opt out
-with `handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes: false`, which leaves `Write`/`Edit` checking untouched.
+**Rate-limited per hint** — each hint has a `ttl_seconds` cooldown (tracked per session + hint id) so it does not repeat on every matching command; state resets on daemon restart, so a hint may fire once more after a restart.
 
-**The write has ALREADY landed on disk.** The denial is a failure report, not
-a rollback — the file exists with your content in it. Fix the reported problems
-with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
-sibling tool calls that were cancelled alongside the denied one.
+**Configure** via `handlers.post_tool_use.command_hints.options`: `mode: additive` (default) appends your `hints` list to the built-in set — a project entry whose `id` matches a built-in one overrides it; `mode: replace` discards the built-in set entirely and uses only your list. Each hint: `id`, `pattern` (a literal command name, matched at the start of a shell segment — path-qualified and `env`-prefixed spellings are recognised, but it never fires on the word appearing as an unrelated argument), `hint` (the reminder text), `ttl_seconds`, and optional `min_calls_between` (secondary count-based gate). Disable with `handlers.post_tool_use.command_hints.enabled: false`.
 
-**This is STRICTER than `lint_on_edit`, which covers the other languages.**
-That handler ALLOWs when its linter is missing or when the check times out;
-this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
-Do not carry "a missing linter never blocks" across to TypeScript.
+<!-- handler: git-hooks-executable-fixer -->
 
-**Enforcement is gated on `llm:` scripts in `package.json`.** With none
-present this handler only advises — and suggests adding `llm:lint` — so silence
-is not evidence that a `.ts` file is clean.
+## git_hooks_executable_fixer — auto-fixes non-executable git hooks
+
+When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
 
 <!-- handler: lint-on-edit -->
 
@@ -1655,12 +1635,6 @@ After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-
 ```
 bin/hooks-daemon format-markdown <path>
 ```
-
-<!-- handler: git-hooks-executable-fixer -->
-
-## git_hooks_executable_fixer — auto-fixes non-executable git hooks
-
-When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
 
 <!-- handler: recovery-cron-advisor -->
 
@@ -1735,6 +1709,47 @@ handlers:
       enabled: false
 ```
 
+<!-- handler: validate-eslint-on-write -->
+
+## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
+
+A `Write`/`Edit` to a `.ts` or `.tsx` file is run through ESLint. Reported
+errors DENY the tool call.
+
+**A Bash-authored `.ts`/`.tsx` file is checked too** — one written with `>`,
+`>>`, `tee` or a `cat <<EOF` heredoc. A file the command merely RELOCATES
+(`cp`, `mv`, `install`, `dd`) is not: those bytes were already on disk. Opt out
+with `handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes: false`, which leaves `Write`/`Edit` checking untouched.
+
+**The write has ALREADY landed on disk.** The denial is a failure report, not
+a rollback — the file exists with your content in it. Fix the reported problems
+with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
+sibling tool calls that were cancelled alongside the denied one.
+
+**This is STRICTER than `lint_on_edit`, which covers the other languages.**
+That handler ALLOWs when its linter is missing or when the check times out;
+this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
+Do not carry "a missing linter never blocks" across to TypeScript.
+
+**Enforcement is gated on `llm:` scripts in `package.json`.** With none
+present this handler only advises — and suggests adding `llm:lint` — so silence
+is not evidence that a `.ts` file is clean.
+
+<!-- handler: ccy-supervisor-integrity -->
+
+## ccy_supervisor_integrity — keep the ccy supervisor properly set up
+
+At session start this handler checks a ccy project (`.claude/ccy/`) whose supervisor is **armed** (`ccy.env` exports `CCY_CLAUDE_WRAPPER` referencing `claude-supervise.py`). It warns — never blocks — when the setup is brick-risky:
+
+- **`claude-supervise.py` missing** → the launcher's `exec` fails. Redeploy via a daemon upgrade or restore from git.
+- **not executable** → `chmod +x .claude/ccy/claude-supervise.py`.
+- **git-ignored** → it won't be committed; teammates get a broken supervisor. Add a `!claude-supervise.py` / `!ccy.env` whitelist line to `.claude/ccy/.gitignore` and commit the files.
+- **`ccy.deploy_supervisor: false` while armed+present** → the installer skips deploy on `false`, so upgrades never refresh `claude-supervise.py` and the project runs an increasingly stale supervisor. Set it to `true` (or disarm `CCY_CLAUDE_WRAPPER` if you truly want it off).
+
+It also detects a **stale running supervisor** (Plan 00164): when a daemon upgrade has put a NEWER `claude-supervise.py` on disk than the live process (compared by source fingerprint, not just version), it advises restarting ccy so the wrapper re-execs the updated supervisor. Nothing is broken meanwhile — the old supervisor keeps working until the session is relaunched.
+
+When you see this alert, fix the listed item(s) and commit the ccy files so the supervisor works for everyone.
+
 <!-- handler: git-upstream-checker -->
 
 ## git_upstream_checker — additive fetch + pull/cleanup advice on session start
@@ -1807,6 +1822,20 @@ The CLI exits 1 while findings remain (CI-able). Single-file lint:
 Policy lives under `plan_workflow.qa` in `.claude/hooks-daemon.yaml`
 (archive dir names, staleness window, legacy/collision allowlists).
 
+<!-- handler: plan-workflow-asset-checker -->
+
+## plan_workflow_asset_checker — plan tooling provisioning alert
+
+At session start, when the plan workflow is enabled but the daemon-owned `mkplan.bash` is missing from the plan directory, this advisory fires (it never blocks). A missing `mkplan.bash` means `CLAUDE.md` and `plan_number_helper` reference a scaffolder that does not exist and journalling is inert.
+
+**Fix**: (re)deploy the assets on demand —
+
+```
+bin/hooks-daemon deploy-plan-workflow
+```
+
+The deploy is idempotent (fills gaps only, never overwrites client-owned files). Silent when `mkplan.bash` is present or the workflow is disabled.
+
 <!-- handler: project-handler-load-checker -->
 
 ## project_handler_load_checker — project protection degraded alert
@@ -1822,34 +1851,11 @@ At session start this handler reports any **project handlers** (`.claude/project
 
 The handler is silent when every project handler loads, so seeing this alert always means real action is required.
 
-<!-- handler: plan-workflow-asset-checker -->
+<!-- handler: idle-housekeeping-advisory -->
 
-## plan_workflow_asset_checker — plan tooling provisioning alert
+## idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
 
-At session start, when the plan workflow is enabled but the daemon-owned `mkplan.bash` is missing from the plan directory, this advisory fires (it never blocks). A missing `mkplan.bash` means `CLAUDE.md` and `plan_number_helper` reference a scaffolder that does not exist and journalling is inert.
-
-**Fix**: (re)deploy the assets on demand —
-
-```
-bin/hooks-daemon deploy-plan-workflow
-```
-
-The deploy is idempotent (fills gaps only, never overwrites client-owned files). Silent when `mkplan.bash` is present or the workflow is disabled.
-
-<!-- handler: ccy-supervisor-integrity -->
-
-## ccy_supervisor_integrity — keep the ccy supervisor properly set up
-
-At session start this handler checks a ccy project (`.claude/ccy/`) whose supervisor is **armed** (`ccy.env` exports `CCY_CLAUDE_WRAPPER` referencing `claude-supervise.py`). It warns — never blocks — when the setup is brick-risky:
-
-- **`claude-supervise.py` missing** → the launcher's `exec` fails. Redeploy via a daemon upgrade or restore from git.
-- **not executable** → `chmod +x .claude/ccy/claude-supervise.py`.
-- **git-ignored** → it won't be committed; teammates get a broken supervisor. Add a `!claude-supervise.py` / `!ccy.env` whitelist line to `.claude/ccy/.gitignore` and commit the files.
-- **`ccy.deploy_supervisor: false` while armed+present** → the installer skips deploy on `false`, so upgrades never refresh `claude-supervise.py` and the project runs an increasingly stale supervisor. Set it to `true` (or disarm `CCY_CLAUDE_WRAPPER` if you truly want it off).
-
-It also detects a **stale running supervisor** (Plan 00164): when a daemon upgrade has put a NEWER `claude-supervise.py` on disk than the live process (compared by source fingerprint, not just version), it advises restarting ccy so the wrapper re-execs the updated supervisor. Nothing is broken meanwhile — the old supervisor keeps working until the session is relaunched.
-
-When you see this alert, fix the listed item(s) and commit the ccy files so the supervisor works for everyone.
+When the session is idle and caught up (repeated no-op failsafe-recovery ticks), this advisory suggests a bounded HOUSEKEEPING MODE: dispatch specialist housekeeping sub-agents that run read-only audits and write shareable **markdown report files** (default `untracked/reports/`). It is REPORT-ONLY — never auto-fix or auto-commit — and strictly lower priority than real work (a real user prompt aborts it). Off by default; enable via `handlers.user_prompt_submit.idle_housekeeping_advisory.enabled: true`. A project can point it at its own doc via the `custom_guidance_doc` option (`custom_guidance_mode: additive` appends it to the default, `replace` uses only the project doc). See docs/guides/CREATING_REPORTS.md.
 
 <!-- handler: standing-authorisations -->
 
@@ -1860,12 +1866,6 @@ Some instructions are conditional on the user having asked ("unless the user req
 Configured in `.claude/hooks-daemon.yaml` under `handlers.user_prompt_submit.standing_authorisations.options.authorisations`, as a list of `{id, enabled}` entries. Built-in ids: `subagent-delegation`, `workflow-orchestration`.
 
 **Every entry ships disabled.** The handler is enabled so the options are discoverable, but nothing is authorised until the project turns it on — the daemon must never assert consent that was not given. Enabling one is a deliberate act by whoever owns the repository, and removing it withdraws the authorisation.
-
-<!-- handler: idle-housekeeping-advisory -->
-
-## idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
-
-When the session is idle and caught up (repeated no-op failsafe-recovery ticks), this advisory suggests a bounded HOUSEKEEPING MODE: dispatch specialist housekeeping sub-agents that run read-only audits and write shareable **markdown report files** (default `untracked/reports/`). It is REPORT-ONLY — never auto-fix or auto-commit — and strictly lower priority than real work (a real user prompt aborts it). Off by default; enable via `handlers.user_prompt_submit.idle_housekeeping_advisory.enabled: true`. A project can point it at its own doc via the `custom_guidance_doc` option (`custom_guidance_mode: additive` appends it to the default, `replace` uses only the project doc). See docs/guides/CREATING_REPORTS.md.
 
 <!-- handler: auto-approve-reads -->
 
