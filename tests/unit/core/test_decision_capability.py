@@ -31,7 +31,8 @@ from claude_code_hooks_daemon.core.decision_capability import (
     decisions_referenced_by,
     undeliverable_decisions,
 )
-from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.core.result_types import AdvisoryResult
 
 
 class RefusingProbe:
@@ -81,6 +82,66 @@ class ExpectationOnlyProbe:
         return [{"expected_decision": Decision.DENY}]
 
 
+class FactoryRefusingProbe:
+    """Refuses through the FACTORY, naming no ``Decision`` member at all.
+
+    This is the shape most handlers actually use, and the scan was blind to it:
+    ``HookResult.deny(...)`` reaches the same wire decision as
+    ``Decision.DENY`` while mentioning neither the enum nor the member.
+    """
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult.deny(reason="blocked")
+
+
+class FactoryAskingProbe:
+    """Asks through the factory."""
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult.ask(reason="confirm?")
+
+
+class FactoryAllowingProbe:
+    """Allows through the factory."""
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult.allow(context=["fyi"])
+
+
+class NarrowedFactoryProbe:
+    """Uses a narrowed tier's inherited factory.
+
+    ``AdvisoryResult.deny(...)`` type-checks — ``deny`` is inherited — and only
+    Pydantic stops it, at runtime, when that handler first executes. The scan
+    is the surface that can say so beforehand.
+    """
+
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
+        return AdvisoryResult.deny(reason="blocked")
+
+
+class _NotAResult:
+    """Something unrelated that happens to have a ``deny`` method."""
+
+    def deny(self, reason: str) -> str:
+        return reason
+
+
+class FactoryLookalikeProbe:
+    """A same-named method on something that is NOT a result type.
+
+    The scan keys on the result classes by name, so an unrelated ``.deny(...)``
+    must not be mistaken for a refusal — that would report a defect that is not
+    there, in a diagnostic a client is asked to trust.
+    """
+
+    policy = _NotAResult()
+
+    def handle(self, hook_input: dict[str, Any]) -> Decision:
+        self.policy.deny(reason="not a HookResult")
+        return Decision.ALLOW
+
+
 #: One probe per Decision member, for the exhaustive cross-product below.
 _PROBES: dict[Decision, type] = {
     Decision.ALLOW: AllowingProbe,
@@ -88,6 +149,38 @@ _PROBES: dict[Decision, type] = {
     Decision.ASK: AskingProbe,
     Decision.CONTINUE: ContinuingProbe,
 }
+
+
+class TestTheFactoryFormIsSeenToo:
+    """``HookResult.deny(...)`` names no ``Decision`` member, and used to hide.
+
+    Measured across this repository's own handlers when the gap was found: one
+    built-in handler refuses this way and the scan saw nothing. It cost nothing
+    here only because that handler is on ``PreToolUse``, which can deny. For a
+    CLIENT it is the whole point — ``validate-project-handlers`` shares this
+    primitive, so a project handler refusing on ``SessionStart`` through the
+    factory passed the pre-flight check in silence.
+    """
+
+    def test_a_factory_deny_is_found(self) -> None:
+        assert Decision.DENY in decisions_referenced_by(FactoryRefusingProbe)
+
+    def test_a_factory_ask_is_found(self) -> None:
+        assert Decision.ASK in decisions_referenced_by(FactoryAskingProbe)
+
+    def test_a_factory_allow_is_found(self) -> None:
+        assert Decision.ALLOW in decisions_referenced_by(FactoryAllowingProbe)
+
+    def test_a_narrowed_tiers_inherited_factory_is_found(self) -> None:
+        assert Decision.DENY in decisions_referenced_by(NarrowedFactoryProbe)
+
+    def test_a_factory_refusal_is_reported_as_undeliverable(self) -> None:
+        problems = undeliverable_decisions(FactoryRefusingProbe, "SessionStart")
+
+        assert problems and "deny" in problems[0]
+
+    def test_a_same_named_method_on_another_type_is_ignored(self) -> None:
+        assert decisions_referenced_by(FactoryLookalikeProbe) == {Decision.ALLOW}
 
 
 class TestDecisionsAreReadFromTheSource:

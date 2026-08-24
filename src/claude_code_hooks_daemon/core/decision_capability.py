@@ -35,6 +35,25 @@ _NON_RETURNING_METHOD = "get_acceptance_tests"
 #: The name the Decision enum is referenced by in handler source.
 _DECISION_ENUM = "Decision"
 
+#: Result-class factories, and the wire decision each one produces. Most
+#: handlers refuse through these rather than by naming the enum, so a scan that
+#: looked only for ``Decision.DENY`` was blind to the commonest shape there is.
+#: ``error``/``configuration_error`` are deliberately absent: both are fail-open
+#: ALLOW, which every event can deliver, so naming them would add noise and
+#: never a finding.
+_FACTORY_DECISIONS: dict[str, Decision] = {
+    "allow": Decision.ALLOW,
+    "deny": Decision.DENY,
+    "ask": Decision.ASK,
+}
+
+#: A factory call counts only when the receiver NAMES a result class. Matched by
+#: suffix rather than a fixed list, so the narrowed tiers, a future tier, and a
+#: CLIENT's own ``HookResult`` subclass are all covered — and clients are the
+#: population this module exists for. A same-named method reached through an
+#: attribute (``self.policy.deny(...)``) is not a Name and never matches.
+_RESULT_CLASS_SUFFIX = "Result"
+
 
 def decisions_referenced_by(handler_class: type) -> set[Decision]:
     """Decisions the class's own methods reference.
@@ -77,7 +96,30 @@ def decisions_referenced_by(handler_class: type) -> set[Decision]:
                 member = getattr(Decision, inner.attr, None)
                 if isinstance(member, Decision):
                     found.add(member)
+                continue
+
+            factory = _factory_decision(inner)
+            if factory is not None:
+                found.add(factory)
     return found
+
+
+def _factory_decision(node: ast.AST) -> Decision | None:
+    """The decision a ``SomeResult.deny(...)``-style call produces, if any.
+
+    Args:
+        node: Any node from the walk.
+
+    Returns:
+        The decision the factory produces, or None if this is not one.
+    """
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        return None
+    if not isinstance(node.func.value, ast.Name):
+        return None
+    if not node.func.value.id.endswith(_RESULT_CLASS_SUFFIX):
+        return None
+    return _FACTORY_DECISIONS.get(node.func.attr)
 
 
 def undeliverable_decisions(handler_class: type, event_name: str) -> list[str]:
