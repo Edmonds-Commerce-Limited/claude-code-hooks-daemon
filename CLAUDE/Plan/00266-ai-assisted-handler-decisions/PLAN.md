@@ -51,16 +51,18 @@ the code rather than inferred (`RESEARCH-claude-code-native-hooks.md`):
 So native hooks are adoptable here, but not quite for free: one small
 validator fix comes first.
 
-**The decisive finding for what to build daemon-side**: native hooks cannot
-see a *prior daemon-side regex match* — they only get raw event JSON. That
-rules them out for the one design this plan's live evidence most directly
-motivates: **confirm-the-positive** (`DECISIONS.md` §3c) — run a model only
-after the existing regex has already flagged something, asking "is this a
-genuine use or a mention," downgrading a false-positive block to allow and
-falling back to today's exact behaviour on any model error. This is
-structurally the safest way found to let AI influence a shipping *blocking*
-handler (it can only ever remove a block, never add one), and it is not
-reachable via native hooks at comparable cost.
+**Phase 1's conclusions have now been tested live** — see `EXPERIMENTS.md`.
+A `prompt` hook was registered in this repository and triggered. It works;
+it also locked the session out of `Edit`/`Write` when its model answered in
+prose, because unparseable output FAILS CLOSED. Read that document before
+writing any native-hook config.
+
+**The decisive finding for what to build daemon-side**: native hooks see only
+raw event JSON, never a *prior daemon-side regex match*. That rules them out
+for **confirm-the-positive** (`DECISIONS.md` §3c) — the safest way found to
+let AI influence a shipping *blocking* handler, since it can only ever remove
+a block, never add one — which is also the design this plan's live evidence
+most directly motivates.
 
 ## Goals
 
@@ -202,13 +204,14 @@ brainstorm, mechanism mapping, and ranking.
   wording — the "every registered command routes through the daemon wrapper"
   rule applies to `type: command` entries only. Documentation-only.
 - [ ] ⬜ **Task 4.1**: Prototype `IDEAS.md` #3 (`validate_instruction_content`
-  classifier) as a native `prompt`/`agent` hook config, added ALONGSIDE
-  the daemon's existing wrapper for that event (never replacing it, per
-  the reconcile-is-additive-per-event footgun in `RESEARCH-...md`), and
-  specifically in **Layout B** — appended after the daemon command inside the
-  same entry's `hooks` list, the only layout measured clean. The cheapest way
-  to test whether the judgement is valuable before ever writing daemon
-  infrastructure for it (`DECISIONS.md` §4).
+  classifier) as a native `prompt` hook, added ALONGSIDE the daemon's existing
+  wrapper (never replacing it, per the reconcile-is-additive-per-event footgun
+  in `RESEARCH-...md`). Two hard constraints from `EXPERIMENTS.md`, both learnt
+  the hard way: it MUST carry a `matcher` narrow enough to leave `Edit`/`Write`
+  reachable — an unscoped hook that starts emitting prose denies the very tools
+  needed to remove it — and a matcher forces **Layout A**, which is why Task
+  4.0 is a prerequisite rather than a tidy-up. Prototype an ADVISORY judgement
+  only: Findings 9/10 show a native hook cannot deliver a readable block.
 - [ ] ⬜ **Task 4.2**: Evaluate the prototype; decide whether it earns
   daemon-side infrastructure or stays a native experiment.
 - [ ] ⬜ **Task 4.3**: Repeat for #4 and #13 if #3's prototype proves the
