@@ -129,6 +129,68 @@ is consumed rather than read.
 
 ---
 
+## Experiment 4 — Can a native hook's ALLOW override the daemon's DENY?
+
+This is the security question. If a `prompt` hook returning `{"ok": true}`
+could override a `command` hook's denial, then adding ANY native hook to this
+repository would silently weaken every protection the daemon ships — and the
+`deny > defer > ask > allow` ladder's applicability to prompt hooks was, until
+now, inference rather than measurement.
+
+### Setup
+
+A `prompt` hook (matcher `Bash`) that denies one sentinel — so its liveness is
+observable — and returns `{"ok": true}` for **everything else**. The liveness
+probe was denied with `ECHD_HOOK_IS_LIVE`, confirming the hook was loaded.
+
+Then, with that always-allow hook live, a command the daemon blocks:
+`echo "git reset --hard"`. Chosen because `destructive_git` matches the literal
+string anywhere in the command, and because if the deny were overridden the
+command is a harmless `echo` — zero risk either way.
+
+### Result: **the daemon's DENY wins**
+
+| #   | Finding                                                               | Evidence                                                                                                                 |
+| --- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 11  | A native hook's `allow` **cannot** override a `command` hook's `deny` | The daemon's `destructive_git` block fired verbatim, despite the live prompt hook returning `{"ok": true}` for that call |
+| 12  | Liveness was independently confirmed in the same configuration        | The sentinel probe was denied with `ECHD_HOOK_IS_LIVE` immediately before                                                |
+
+**So adding a native hook cannot weaken this daemon.** The two mechanisms
+compose in the safe direction: any denial, from either, is final. This removes
+the largest unquantified risk of native-hook adoption and means a native hook
+can be added to a protected event without auditing whether it creates a bypass.
+
+Note the asymmetry this establishes, taken with Finding 3: a native hook can
+only ever ADD denials — deliberately, or by failing to produce parseable JSON.
+It can never remove one. That is the opposite of the **confirm-the-positive**
+shape (`DECISIONS.md` §3c), which exists precisely to *remove* false-positive
+blocks — reconfirming that design is unreachable natively and must be
+daemon-side.
+
+---
+
+## Aside — does editing `settings.json` require restarting Claude Code?
+
+A reasonable and widely-held belief, and **it is not true in 2.1.241**. Every
+hook in Experiments 1, 3 and 4 was written into `.claude/settings.json`
+mid-session and fired **without any restart**.
+
+The trap is a propagation window of a few seconds. Experiment 1's first probe
+ran completely untouched, which read exactly like "hooks are snapshotted at
+session start" — that conclusion was drawn, and was wrong. The next tool call
+was denied by the very hook thought not to be loaded.
+
+The documentation agrees: the file watcher "normally picks up hook changes
+automatically", and a restart is offered only as the remedy when a change has
+not appeared "after a few seconds".
+
+**Practical consequence for anyone testing hooks**: a single negative result
+immediately after editing `settings.json` proves nothing. Re-test, or use a
+liveness sentinel (as Experiment 4 did) so the loaded/not-loaded question is
+answered separately from the behaviour under test.
+
+---
+
 ## What this changes in the plan
 
 1. `RESEARCH-...md`'s "adoptable today" framing is confirmed for *mechanism*
@@ -163,10 +225,12 @@ is consumed rather than read.
 - **Token/billing cost per invocation.** Still undocumented and still
   unmeasured; it remains the plan's largest open unknown, and Finding 10
   (the whole prompt echoed per denial) suggests the context cost is not small.
-- **How a prompt hook's verdict combines with a DISAGREEING `command` hook.**
-  Both ran and both allowed; a genuine disagreement was never staged. Worth
-  doing, since it is the one case where the `deny > defer > ask > allow`
-  ladder's applicability to prompt hooks stops being inference.
+- **The reverse disagreement: a native DENY against a daemon ALLOW.**
+  Experiment 4 settled native-allow vs daemon-deny (the deny wins). The mirror
+  case is already implied by Experiment 3 — the sentinel denial fired on a
+  command the daemon was happy with — so both directions now point the same
+  way: any denial is final. Worth one explicit confirmation if a design ever
+  depends on it.
 - **Whether `validate_hook_commands` warns about Layout A in a live session.**
   Experiment 3 ran Layout A and the warning is a `SessionStart` advisory, so
   this session never saw it. The isolated measurement in `RESEARCH-...md`
