@@ -67,7 +67,10 @@ from claude_code_hooks_daemon.constants.events import (
     EventID,
     EventIDMeta,
 )
-from claude_code_hooks_daemon.core.decision_capability import decisions_referenced_by
+from claude_code_hooks_daemon.core.decision_capability import (
+    decisions_referenced_by,
+    undeliverable_decisions,
+)
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -125,6 +128,145 @@ def _handlers_with_event_names() -> list[tuple[str, type[Handler], str]]:
 
 def _handler_ids() -> list[str]:
     return [f"{name}[{event}]" for name, _cls, event in _handlers_with_event_names()]
+
+
+#: Handler directories deliberately outside the wire-event sweep, with the
+#: reason. Pseudo-event handlers answer no event of their own; their decisions
+#: are merged into the REAL triggering event, so they are swept against their
+#: configured trigger events instead.
+_NON_EVENT_PACKAGES = {"nitpick"}
+
+
+def _concrete_handlers_in(package_dir: str) -> list[tuple[str, type[Handler]]]:
+    """Every concrete handler class under one ``handlers/<dir>/`` package."""
+    found: list[tuple[str, type[Handler]]] = []
+    for _finder, module_name, _ispkg in pkgutil.walk_packages(
+        handlers_pkg.__path__, prefix=handlers_pkg.__name__ + "."
+    ):
+        parts = module_name.split(".")
+        if len(parts) < 4 or parts[2] != package_dir:
+            continue
+        module = importlib.import_module(module_name)
+        for attribute_name, attribute in vars(module).items():
+            if (
+                inspect.isclass(attribute)
+                and issubclass(attribute, Handler)
+                and attribute is not Handler
+                and attribute.__module__ == module.__name__
+                and not getattr(attribute, "__abstractmethods__", None)
+            ):
+                found.append((attribute_name, attribute))
+    return found
+
+
+def _handler_package_dirs() -> set[str]:
+    """Every ``handlers/<dir>/`` package that contains a concrete handler."""
+    return {
+        module_name.split(".")[2]
+        for _finder, module_name, _ispkg in pkgutil.walk_packages(
+            handlers_pkg.__path__, prefix=handlers_pkg.__name__ + "."
+        )
+        if len(module_name.split(".")) >= 4 and _concrete_handlers_in(module_name.split(".")[2])
+    }
+
+
+def _pseudo_event_handlers() -> list[tuple[str, type[Handler], str]]:
+    """Pseudo-event handlers paired with each REAL event their triggers bind to.
+
+    A pseudo-event handler's decision does not get its own response.
+    ``merge_pseudo_results`` promotes a DENY (or an ASK over an ALLOW) into the
+    REAL chain result, which is then serialised under the real event. So its
+    deliverability is decided by the trigger's event type — and triggers are
+    per-project configuration, not a property of the handler.
+    """
+    from claude_code_hooks_daemon.config import Config
+    from claude_code_hooks_daemon.core.pseudo_event import PseudoEventTrigger
+
+    config = Config.load(_project_root() / ".claude" / "hooks-daemon.yaml")
+    collected: list[tuple[str, type[Handler], str]] = []
+    for pseudo_name, pseudo_config in (config.pseudo_events or {}).items():
+        handlers = _concrete_handlers_in(pseudo_name)
+        for trigger_notation in pseudo_config.get("triggers", []):
+            trigger = PseudoEventTrigger.from_string(trigger_notation)
+            event_name = _event_name_for_config_key(trigger.event_type.name.lower())
+            if event_name is None or event_name not in RESPONSE_SCHEMAS:
+                continue
+            collected.extend((name, cls, event_name) for name, cls in handlers)
+    return collected
+
+
+class TestNothingIsSilentlySkipped:
+    """A sweep that skips quietly loses coverage without anyone noticing.
+
+    ``_handlers_with_event_names`` maps a handler DIRECTORY to a wire event and
+    ``continue``s when it cannot. That silence hid the ``nitpick`` package: two
+    shipped handlers that the sweep never examined and never mentioned. Adding
+    a pseudo-event would shrink coverage the same way, invisibly.
+    """
+
+    def test_every_handler_package_is_either_swept_or_justified(self) -> None:
+        swept = {
+            cls.__module__.split(".")[2] for _name, cls, _event in _handlers_with_event_names()
+        }
+        unaccounted = sorted(_handler_package_dirs() - swept - _NON_EVENT_PACKAGES)
+
+        assert not unaccounted, (
+            f"these handler packages contain concrete handlers that no sweep "
+            f"examines, and were skipped without a word: {unaccounted}. Map the "
+            "directory to its wire event, or record why it is exempt."
+        )
+
+    def test_the_justified_list_names_only_real_packages(self) -> None:
+        """A stale entry would silently re-open the hole it was excusing."""
+        stale = sorted(_NON_EVENT_PACKAGES - _handler_package_dirs())
+
+        assert not stale, f"exemption names a package with no concrete handlers: {stale}"
+
+
+class TestPseudoEventDecisionsAreDeliverableByTheirTriggers:
+    """A pseudo handler's refusal is merged into the REAL event's response.
+
+    ``merge_pseudo_results`` promotes DENY (and ASK over an ALLOW) into the real
+    chain result. So a pseudo handler bound to ``session_start`` returning DENY
+    is dropped exactly as a SessionStart handler would be — except that no sweep
+    looked at it, because its directory maps to no event.
+
+    Both shipped nitpick handlers return only ALLOW, so this passes today. It is
+    the binding that makes it fragile: triggers are per-project CONFIG, so the
+    same handler is deliverable under one project's config and dropped under
+    another's. That is precisely the kind of correctness nobody re-derives by
+    hand.
+    """
+
+    def test_the_pseudo_sweep_is_not_vacuous(self) -> None:
+        """Green-on-arrival, so it must prove it looked at something."""
+        discovered = _pseudo_event_handlers()
+
+        assert discovered, (
+            "no pseudo-event handler/trigger pairs discovered, so the check " "below proves nothing"
+        )
+
+    def test_each_pseudo_decision_survives_its_trigger_event(self) -> None:
+        failures: list[str] = []
+        for handler_name, handler_class, event_name in _pseudo_event_handlers():
+            for decision in sorted(decisions_referenced_by(handler_class), key=lambda d: d.value):
+                problems = undeliverable_decisions(handler_class, event_name)
+                if problems:
+                    failures.append(f"{handler_name} on trigger {event_name}: {problems}")
+                    break
+                result = HookResult(
+                    decision=decision,
+                    reason=f"{handler_name} reason" if decision != Decision.ALLOW else None,
+                )
+                errors = validate_response(event_name, result.to_json(event_name))
+                if errors:
+                    failures.append(f"{handler_name} on trigger {event_name}: {errors}")
+
+        assert not failures, (
+            "a pseudo-event handler returns a decision its TRIGGER event cannot "
+            "deliver. merge_pseudo_results promotes it into that event's "
+            "response, where it is silently dropped:\n  " + "\n  ".join(failures)
+        )
 
 
 class TestDiscoveryIsNotVacuous:
