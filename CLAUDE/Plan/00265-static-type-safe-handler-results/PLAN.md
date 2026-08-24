@@ -95,13 +95,18 @@ the emitted response:
 
 ### Phase 1: Result type hierarchy
 
-- [ ] ⬜ **Task 1.1**: Write failing tests for the three narrowed result types
-  - [ ] ⬜ Construction of an out-of-tier decision raises
-  - [ ] ⬜ Assignment of an out-of-tier decision raises
-  - [ ] ⬜ Each tier accepts every decision it should
-- [ ] ⬜ **Task 1.2**: Add `AdvisoryResult`, `BlockingResult`, `GatingResult`
-- [ ] ⬜ **Task 1.3**: Derive the tier membership from `REFUSAL_CAPABLE_EVENTS`
+- [x] ✅ **Task 1.1**: Write failing tests for the three narrowed result types
+  - [x] ✅ Construction of an out-of-tier decision raises
+  - [x] ✅ Assignment of an out-of-tier decision raises
+  - [x] ✅ Each tier accepts every decision it should
+- [x] ✅ **Task 1.2**: Add `AdvisoryResult`, `BlockingResult`, `GatingResult`
+- [x] ✅ **Task 1.3**: Derive the tier membership from `REFUSAL_CAPABLE_EVENTS`
   rather than restating it, and add a test that the two cannot drift
+- [x] ✅ **Task 1.4**: Prove the STATIC half is really enforced — a fixture of
+  deliberate violations checked by a real mypy run, with the fixture's own
+  `VIOLATION:` markers as the expectations, so adding a case extends the test
+  automatically. Verified non-vacuous by widening a tier and confirming the
+  guard named exactly the two violations that stopped being caught.
 
 ### Phase 2: Per-event handler bases
 

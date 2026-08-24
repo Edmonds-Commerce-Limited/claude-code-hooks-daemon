@@ -152,6 +152,7 @@ extend-exclude = '''
   | dist
   | build
   | tests/fixtures/project_handlers_error_cases
+  | tests/fixtures/type_safety_violations
 )
 | tests/fixtures/plugins/syntax_error_handler\.py
 '''
@@ -160,7 +161,7 @@ extend-exclude = '''
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-extend-exclude = ["tests/fixtures/plugins/syntax_error_handler.py", "tests/fixtures/project_handlers_error_cases/**/*.py"]
+extend-exclude = ["tests/fixtures/plugins/syntax_error_handler.py", "tests/fixtures/project_handlers_error_cases/**/*.py", "tests/fixtures/type_safety_violations/**/*.py"]
 
 [tool.ruff.lint]
 select = [
@@ -227,6 +228,12 @@ enable_error_code = ["truthy-bool", "redundant-expr", "unused-awaitable"]
 exclude = [
     'tests/fixtures/plugins/syntax_error_handler\.py$',
     'tests/fixtures/project_handlers_error_cases/.*\.py$',
+    # Plan 00265: deliberately-invalid code proving the narrowed result types
+    # are enforced STATICALLY. tests/integration/test_static_type_safety_is_
+    # enforced.py runs mypy over it and asserts each planted error is reported,
+    # so it must fail type-checking — excluded here only so the QA run does not
+    # report the very errors that test requires.
+    'tests/fixtures/type_safety_violations/.*\.py$',
 ]
 
 [[tool.mypy.overrides]]
