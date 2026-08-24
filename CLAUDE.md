@@ -551,21 +551,36 @@ src/claude_code_hooks_daemon/
 
 ### Handler Skeleton
 
-`Handler` is an ABC with **four** abstract methods. Implementing only
-`matches`/`handle` gives a class that cannot be instantiated.
+**Subclass the base named after your EVENT, not `Handler`.** Every wired event
+has one in `core.handler_bases` — `PreToolUseHandlerBase`,
+`SessionStartHandlerBase`, `StatusLineHandlerBase`, and so on. Each narrows
+`handle()` to the result type its event can actually deliver, so a decision the
+event would silently drop becomes a mypy error instead of a production no-op.
+An integration test enforces this for every handler in `src/`.
+
+| Tier         | Decisions                  | Events                          | Result type      |
+| ------------ | -------------------------- | ------------------------------- | ---------------- |
+| **Gating**   | allow, continue, deny, ask | PreToolUse, PermissionRequest   | `GatingResult`   |
+| **Blocking** | allow, continue, deny      | PostToolUse, Stop, SubagentStop | `BlockingResult` |
+| **Advisory** | allow, continue            | every other wired event         | `AdvisoryResult` |
+
+Use your event's name and you never need to know which tier it is in. The base
+is an ABC with **four** abstract methods — implementing only `matches`/`handle`
+gives a class that cannot be instantiated.
 
 ```python
-from claude_code_hooks_daemon.core import AcceptanceTest, Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 
-class MyHandler(Handler):
+class MyHandler(PreToolUseHandlerBase):
     def __init__(self) -> None:
         super().__init__(handler_id="my-handler", priority=50, terminal=True)
 
     def matches(self, hook_input: dict) -> bool:
         return "pattern" in hook_input.get("tool_input", {})
 
-    def handle(self, hook_input: dict) -> HookResult:
-        return HookResult(decision=Decision.DENY, reason="Blocked")
+    def handle(self, hook_input: dict) -> GatingResult:
+        return GatingResult(decision=Decision.DENY, reason="Blocked")
 
     def get_claude_md(self) -> str | None:
         """Resident guidance, or None if this handler needs none."""
@@ -575,6 +590,10 @@ class MyHandler(Handler):
         """Tests rendered into the release playbook."""
         return []
 ```
+
+The DENY above is only valid because this example is on `PreToolUse`. On
+`SessionStart` the same line would not compile — which is the point: that
+refusal used to be writable, and was dropped on the wire at runtime.
 
 **See CLAUDE/HANDLER_DEVELOPMENT.md for complete guide**
 
