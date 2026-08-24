@@ -35,7 +35,7 @@ treat it as lax/advisory — ALLOW-equivalent. Excluding it would break nothing
 today but would be a gratuitous incompatibility for a client handler naming it.
 """
 
-from typing import Final, Literal, get_args
+from typing import Final, Literal, Self, get_args
 
 from claude_code_hooks_daemon.core.hook_result import REFUSAL_CAPABLE_EVENTS, Decision, HookResult
 
@@ -66,6 +66,24 @@ class BlockingResult(HookResult):
 
     decision: Literal[Decision.ALLOW, Decision.CONTINUE, Decision.DENY] = Decision.ALLOW
 
+    @classmethod
+    def deny(cls, reason: str, *, context: list[str] | None = None) -> Self:
+        """Create a deny result of THIS tier.
+
+        Overrides the base only to narrow the return type: the base returns the
+        wide ``HookResult`` on purpose, so that a tier which cannot refuse is
+        rejected for calling it. This tier can, so it gets its own type back and
+        is usable from a handler declared to return it.
+
+        Args:
+            reason: Reason for denial (required)
+            context: Optional context lines
+
+        Returns:
+            A result of the calling class, with the deny decision.
+        """
+        return cls(decision=Decision.DENY, reason=reason, context=context or [])
+
 
 class GatingResult(HookResult):
     """For an event that gates an action and can deny or ask.
@@ -77,6 +95,32 @@ class GatingResult(HookResult):
     decision: Literal[Decision.ALLOW, Decision.CONTINUE, Decision.DENY, Decision.ASK] = (
         Decision.ALLOW
     )
+
+    @classmethod
+    def deny(cls, reason: str, *, context: list[str] | None = None) -> Self:
+        """Create a deny result of THIS tier. See ``BlockingResult.deny``.
+
+        Args:
+            reason: Reason for denial (required)
+            context: Optional context lines
+
+        Returns:
+            A result of the calling class, with the deny decision.
+        """
+        return cls(decision=Decision.DENY, reason=reason, context=context or [])
+
+    @classmethod
+    def ask(cls, reason: str, *, context: list[str] | None = None) -> Self:
+        """Create an ask result of THIS tier — the only tier that can.
+
+        Args:
+            reason: Reason for asking (required)
+            context: Optional context lines
+
+        Returns:
+            A result of the calling class, with the ask decision.
+        """
+        return cls(decision=Decision.ASK, reason=reason, context=context or [])
 
 
 #: Narrowest first, so ``result_type_for_event`` never returns a wider tier

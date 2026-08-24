@@ -9,7 +9,7 @@ import inspect
 import logging
 import pkgutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 from claude_code_hooks_daemon.constants import ConfigKey
 from claude_code_hooks_daemon.constants.handlers import HandlerID
@@ -61,6 +61,43 @@ EVENT_TYPE_MAPPING: dict[str, EventType] = {
     "elicitation_result": EventType.ELICITATION_RESULT,
     "message_display": EventType.MESSAGE_DISPLAY,
 }
+
+
+#: A private class is a helper or a test double, never a shipped handler.
+_PRIVATE_PREFIX = "_"
+
+
+def is_discoverable_handler(attr: object) -> TypeGuard[type[Handler]]:
+    """Is this module attribute a handler class discovery should register?
+
+    The single definition of that question. It was previously written out three
+    times in this module and twice more in test helpers, and two of those copies
+    had drifted: one omitted the abstract check, the other substituted a
+    name-based ``"Base" not in attr.__name__`` heuristic. That heuristic cannot
+    work — a per-event ALIAS does not change ``__name__``, so
+    ``PreCompactHandlerBase`` still reports itself as ``AdvisoryHandler``.
+
+    Neither copy cost anything until a handler module first imported another
+    ``Handler`` subclass (its event's base), at which point both began reporting
+    an abstract base as a shipped handler.
+
+    ``inspect.isabstract`` is the load-bearing condition: a base that re-declares
+    ``handle`` as abstract cannot be instantiated, so it can never be a handler,
+    whatever it is called or wherever it is imported.
+
+    Args:
+        attr: Any attribute read off a scanned module.
+
+    Returns:
+        True if this is a concrete, public ``Handler`` subclass.
+    """
+    return (
+        isinstance(attr, type)
+        and issubclass(attr, Handler)
+        and attr is not Handler
+        and not attr.__name__.startswith(_PRIVATE_PREFIX)
+        and not inspect.isabstract(attr)
+    )
 
 
 class HandlerRegistry:
@@ -116,13 +153,7 @@ class HandlerRegistry:
                 module = importlib.import_module(modname)
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
-                    if (
-                        isinstance(attr, type)
-                        and issubclass(attr, Handler)
-                        and attr is not Handler
-                        and not attr.__name__.startswith("_")
-                        and not inspect.isabstract(attr)
-                    ):
+                    if is_discoverable_handler(attr):
                         self._handlers[attr.__name__] = attr
                         count += 1
                         logger.debug("Discovered handler: %s", attr.__name__)
@@ -233,13 +264,7 @@ class HandlerRegistry:
 
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
-                    if (
-                        isinstance(attr, type)
-                        and issubclass(attr, Handler)
-                        and attr is not Handler
-                        and not attr.__name__.startswith("_")
-                        and not inspect.isabstract(attr)
-                    ):
+                    if is_discoverable_handler(attr):
                         config_key = _get_config_key(attr.__name__)
                         handler_config = event_config.get(config_key, {})
                         if handler_config.get(ConfigKey.ENABLED, True):
@@ -291,13 +316,7 @@ class HandlerRegistry:
                 # Find Handler subclasses in the module
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
-                    if (
-                        isinstance(attr, type)
-                        and issubclass(attr, Handler)
-                        and attr is not Handler
-                        and not attr.__name__.startswith("_")
-                        and not inspect.isabstract(attr)
-                    ):
+                    if is_discoverable_handler(attr):
                         # Check handler-specific config (use config key from HandlerID constant)
                         config_key = _get_config_key(attr.__name__)
                         handler_config = event_config.get(config_key, {})

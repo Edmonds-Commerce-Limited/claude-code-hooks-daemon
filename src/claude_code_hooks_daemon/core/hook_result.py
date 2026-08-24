@@ -749,15 +749,20 @@ class HookResult(BaseModel):
         *,
         context: list[str] | None = None,
         guidance: str | None = None,
-    ) -> "HookResult":
+    ) -> Self:
         """Create an allow result.
+
+        Returns ``Self``, so a narrowed subclass gets its OWN type back and can
+        use this from a handler declared to return that type. Safe on the base
+        precisely because ALLOW is deliverable on every event — unlike ``deny``
+        and ``ask`` below, which stay wide on purpose.
 
         Args:
             context: Optional context lines
             guidance: Optional guidance text
 
         Returns:
-            HookResult with allow decision
+            A result of the calling class, with the allow decision
         """
         return cls(
             decision=Decision.ALLOW,
@@ -768,6 +773,15 @@ class HookResult(BaseModel):
     @classmethod
     def deny(cls, reason: str, *, context: list[str] | None = None) -> "HookResult":
         """Create a deny result.
+
+        Returns the WIDE type deliberately, NOT ``Self``. Every subclass
+        inherits this, including the tiers whose event cannot refuse — and if it
+        returned ``Self``, ``AdvisoryResult.deny(...)`` would type-check. Kept
+        wide, that call yields a ``HookResult`` and a handler declared
+        ``-> AdvisoryResult`` is rejected for returning the wrong type.
+
+        The tiers that CAN refuse override this with a ``Self`` return, so they
+        are unaffected. See ``core/result_types.py``.
 
         Args:
             reason: Reason for denial (required)
@@ -785,6 +799,10 @@ class HookResult(BaseModel):
     @classmethod
     def ask(cls, reason: str, *, context: list[str] | None = None) -> "HookResult":
         """Create an ask result (prompt user for confirmation).
+
+        Wide for the same reason as ``deny`` above: only ``GatingResult``
+        overrides it with a ``Self`` return, so every other tier is rejected by
+        its own return annotation for using it.
 
         Args:
             reason: Reason for asking (required)

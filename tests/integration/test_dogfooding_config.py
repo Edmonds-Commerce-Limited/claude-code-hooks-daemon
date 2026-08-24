@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from claude_code_hooks_daemon.core.handler import Handler
+from claude_code_hooks_daemon.handlers.registry import is_discoverable_handler
 
 
 def discover_all_production_handlers() -> dict[str, list[str]]:
@@ -61,13 +61,12 @@ def discover_all_production_handlers() -> dict[str, list[str]]:
                 )
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
-                    if (
-                        isinstance(attr, type)
-                        and issubclass(attr, Handler)
-                        and attr is not Handler
-                        and not attr.__name__.startswith("_")
-                        and "Base" not in attr.__name__
-                    ):
+                    # The production predicate, not a copy of it. This helper's
+                    # own copy filtered bases by NAME (`"Base" not in ...`),
+                    # which cannot work: a per-event alias shares the class
+                    # object, so `PreCompactHandlerBase` reports itself as
+                    # `AdvisoryHandler`. Abstractness is the real question.
+                    if is_discoverable_handler(attr):
                         handlers_by_event[event_dir].append(attr.__name__)
             except Exception:
                 pass

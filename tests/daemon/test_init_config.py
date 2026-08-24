@@ -11,11 +11,11 @@ import pytest
 import yaml
 
 from claude_code_hooks_daemon.config.validator import ConfigValidator
-from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.daemon.init_config import (
     ConfigTemplate,
     generate_config,
 )
+from claude_code_hooks_daemon.handlers.registry import is_discoverable_handler
 
 
 def _to_snake_case(name: str) -> str:
@@ -66,12 +66,11 @@ def _discover_all_handlers() -> dict[str, list[str]]:
                 )
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
-                    if (
-                        isinstance(attr, type)
-                        and issubclass(attr, Handler)
-                        and attr is not Handler
-                        and not attr.__name__.startswith("_")
-                    ):
+                    # The production predicate, not a copy of it. This helper's
+                    # own copy omitted the abstract check, so once handler
+                    # modules began importing their event's base it reported an
+                    # abstract base as a missing config entry.
+                    if is_discoverable_handler(attr):
                         config_key = _to_snake_case(attr.__name__)
                         handlers_by_event[event_dir].append(config_key)
             except Exception:

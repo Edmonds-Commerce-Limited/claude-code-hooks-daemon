@@ -22,7 +22,8 @@ import time
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import PreCompactHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ _SESSION_ID_FALLBACK = "unknown"
 _UNSAFE_SESSION_CHARS = re.compile(r"[^A-Za-z0-9_.-]")
 
 
-class CompactionSignalHandler(Handler):
+class CompactionSignalHandler(PreCompactHandlerBase):
     """Write a ``<session>.compacting`` signal on PreCompact for the supervisor."""
 
     def __init__(self) -> None:
@@ -59,11 +60,11 @@ class CompactionSignalHandler(Handler):
         """Signal on every compaction."""
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Write the compaction signal; never block compaction."""
         session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or "")
         self._write_signal(session_id)
-        return HookResult(decision=Decision.ALLOW)
+        return AdvisoryResult(decision=Decision.ALLOW)
 
     def _write_signal(self, session_id: str) -> None:
         """Atomically write the compaction-signal marker file.

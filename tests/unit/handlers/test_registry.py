@@ -16,6 +16,7 @@ from claude_code_hooks_daemon.handlers.registry import (
     HandlerRegistry,
     _to_snake_case,
     get_registry,
+    is_discoverable_handler,
 )
 
 
@@ -650,3 +651,49 @@ class TestGetRegistry:
 
         # Cleanup
         registry_module._registry = None
+
+
+class TestIsDiscoverableHandler:
+    """One predicate, because four hand-copied ones drifted.
+
+    The same four-condition test was written out three times in this module and
+    a fourth and fifth time in two test helpers. Two of those copies had already
+    diverged — one omitted the abstract check entirely, the other substituted a
+    name-based ``"Base" not in attr.__name__`` heuristic, which cannot work: a
+    per-event ALIAS does not change ``__name__``, so ``PreCompactHandlerBase``
+    still reports itself as ``AdvisoryHandler``.
+
+    Neither cost anything until a handler module first imported another
+    ``Handler`` subclass, at which point both started reporting an abstract base
+    as a shipped handler.
+    """
+
+    def test_a_concrete_handler_is_discoverable(self) -> None:
+        assert is_discoverable_handler(MockHandler)
+
+    def test_an_abstract_tier_base_is_not(self) -> None:
+        """The case that broke: a base imported into a handler module."""
+        from claude_code_hooks_daemon.core.handler_bases import AdvisoryHandler
+
+        assert not is_discoverable_handler(AdvisoryHandler)
+
+    def test_an_aliased_base_is_not_either(self) -> None:
+        """An alias shares the class object, so this must not key on the name."""
+        from claude_code_hooks_daemon.core.handler_bases import PreCompactHandlerBase
+
+        assert not is_discoverable_handler(PreCompactHandlerBase)
+
+    def test_the_handler_abc_itself_is_not(self) -> None:
+        assert not is_discoverable_handler(Handler)
+
+    def test_a_private_handler_is_not(self) -> None:
+        class _PrivateHandler(MockHandler):
+            pass
+
+        assert not is_discoverable_handler(_PrivateHandler)
+
+    def test_a_non_class_is_not(self) -> None:
+        assert not is_discoverable_handler("HandlerLookingString")
+
+    def test_an_unrelated_class_is_not(self) -> None:
+        assert not is_discoverable_handler(dict)

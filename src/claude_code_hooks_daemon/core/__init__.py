@@ -16,6 +16,12 @@ from claude_code_hooks_daemon.core.error_response import generate_daemon_error_r
 from claude_code_hooks_daemon.core.event import EventType, HookEvent, HookInput, ToolInput
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
+from claude_code_hooks_daemon.core.handler_bases import (
+    AdvisoryHandler,
+    BlockingHandler,
+    GatingHandler,
+    handler_base_for_event,
+)
 from claude_code_hooks_daemon.core.handler_history import HandlerDecisionRecord, HandlerHistory
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.mode import ModeManager
@@ -25,6 +31,12 @@ from claude_code_hooks_daemon.core.pseudo_event import (
     PseudoEventDispatcher,
     PseudoEventTrigger,
     merge_pseudo_results,
+)
+from claude_code_hooks_daemon.core.result_types import (
+    AdvisoryResult,
+    BlockingResult,
+    GatingResult,
+    result_type_for_event,
 )
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.core.session_state import SessionState
@@ -37,6 +49,10 @@ from claude_code_hooks_daemon.core.transcript_reader import (
 
 __all__ = [
     "AcceptanceTest",
+    "AdvisoryHandler",
+    "AdvisoryResult",
+    "BlockingHandler",
+    "BlockingResult",
     "ChainExecutionResult",
     "CliAcceptanceTest",
     "ContentBlock",
@@ -45,6 +61,8 @@ __all__ = [
     "EventRouter",
     "EventType",
     "FrontController",
+    "GatingHandler",
+    "GatingResult",
     "Handler",
     "HandlerChain",
     "HandlerDecisionRecord",
@@ -66,6 +84,8 @@ __all__ = [
     "TranscriptReader",
     "generate_daemon_error_response",
     "get_data_layer",
+    "handler_base_for_event",
     "merge_pseudo_results",
     "reset_data_layer",
+    "result_type_for_event",
 ]
