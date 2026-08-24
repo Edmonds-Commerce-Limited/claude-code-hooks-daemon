@@ -14,10 +14,11 @@ deterministic pattern matching, to decide hook outcomes — but had no concrete
 use-case in mind, only the belief that "Claude Code itself supports LLM driven
 hooks somehow." Phase 1 answers that factual question and enumerates every
 real mechanism available. That answer then sharpens the question: Claude
-Code's native `prompt`/`agent` hooks are real, adoptable with no code change,
-and run in parallel with this daemon's own hooks on the same event — costs
-nothing to adopt, but (see the Headline finding below) still costs seconds
-per invocation, so the question is no longer "can we have AI-driven hooks"
+Code's native `prompt`/`agent` hooks are real, adoptable with almost no code,
+and run in parallel with this daemon's own hooks on the same event — cheap to
+adopt (one validator fix, Task 4.0), but (see the Headline finding below)
+still costing seconds per invocation, so the question is no longer
+"can we have AI-driven hooks"
 but "given that native hooks already exist, does a daemon-side AI handler
 earn its cost at all, and for which specific judgements" (`DECISIONS.md` §4).
 
@@ -36,27 +37,19 @@ official docs, and confirmed to run **in parallel** with this daemon's own
 COMPOUND, not that the latency is free: the tool call still blocks on the
 slowest hook, so a `prompt` hook on `PreToolUse` still costs seconds.
 
-Two claims made earlier in this plan's life were checked and did not survive,
-and are corrected here rather than left to mislead:
+**Two constraints govern adopting a native hook here**, both measured against
+the code rather than inferred (`RESEARCH-claude-code-native-hooks.md`):
 
-- `.claude/hooks.json` was described as "a file that does not exist in this
-  checkout". It is worse than that: it does not exist in Claude Code at all.
-  Hooks live in the `settings.json` family plus skill/subagent frontmatter;
-  the real `hooks/hooks.json` belongs to PLUGINS, which is the likely source
-  of the error. `CLAUDE/ARCHITECTURE.md` and `CLAUDE/HANDLER_DEVELOPMENT.md`
-  both pointed contributors at the wrong path and have been fixed.
-- `hook_registration_checker` was said to "enforce the opposite policy". Its
-  CODE does not: `detect_legacy_hook_commands` reads `command_entry.get("command", "")` and skips entries without a `command` key, which is
-  exactly the shape of a `prompt`/`agent` hook, and `reconcile_settings_hooks`
-  leaves any event key that already exists untouched. The conflict is in that
-  handler's GUIDANCE WORDING, not its behaviour — a one-line clarification,
-  not an architectural blocker. Native hooks are adoptable here today with no
-  code change.
+- `reconcile_settings_hooks` is additive per EVENT, not per entry. A native
+  hook must be added ALONGSIDE the daemon wrapper — replace it and the
+  wrapper is never restored, and every handler on that event goes dark.
+- `validate_hook_commands` misreports two of the three layouts for doing that
+  as registration faults. Only Layout B (appended after the daemon command,
+  same entry) is clean today, which is why Task 4.0 fixes the validator
+  before Task 4.1 prototypes anything.
 
-The genuine footgun in that area: reconcile is additive per EVENT, not per
-entry, so a native hook must be added ALONGSIDE the daemon wrapper — replace
-it and the wrapper will not be restored. See
-`RESEARCH-claude-code-native-hooks.md`.
+So native hooks are adoptable here, but not quite for free: one small
+validator fix comes first.
 
 **The decisive finding for what to build daemon-side**: native hooks cannot
 see a *prior daemon-side regex match* — they only get raw event JSON. That
@@ -200,17 +193,22 @@ brainstorm, mechanism mapping, and ranking.
 
 ### Phase 4: Prototype native-hook-eligible ideas (no daemon infrastructure)
 
-- [ ] ⬜ **Task 4.0**: Clarify `hook_registration_checker.get_claude_md()`'s
-  wording — state explicitly that the "every registered command routes
-  through the daemon wrapper" rule applies to `type: command` entries, not
-  to `type: prompt`/`type: agent` entries the code already permits
-  (`RESEARCH-...md`). Documentation-only; no behaviour change.
+- [ ] ⬜ **Task 4.0**: Fix `validate_hook_commands` so a native hook is not
+  misreported as a duplicate registration — see the measured layout table in
+  `RESEARCH-...md`. TDD, one regression test per layout. **Prerequisite for
+  4.1**, not a follow-up: a prototype that warns every session trains people
+  to ignore the checker.
+- [ ] ⬜ **Task 4.0b**: Clarify `hook_registration_checker.get_claude_md()`'s
+  wording — the "every registered command routes through the daemon wrapper"
+  rule applies to `type: command` entries only. Documentation-only.
 - [ ] ⬜ **Task 4.1**: Prototype `IDEAS.md` #3 (`validate_instruction_content`
   classifier) as a native `prompt`/`agent` hook config, added ALONGSIDE
   the daemon's existing wrapper for that event (never replacing it, per
-  the reconcile-is-additive-per-event footgun in `RESEARCH-...md`) — the
-  cheapest way to test whether the judgement is valuable before ever
-  writing daemon infrastructure for it (`DECISIONS.md` §4).
+  the reconcile-is-additive-per-event footgun in `RESEARCH-...md`), and
+  specifically in **Layout B** — appended after the daemon command inside the
+  same entry's `hooks` list, the only layout measured clean. The cheapest way
+  to test whether the judgement is valuable before ever writing daemon
+  infrastructure for it (`DECISIONS.md` §4).
 - [ ] ⬜ **Task 4.2**: Evaluate the prototype; decide whether it earns
   daemon-side infrastructure or stays a native experiment.
 - [ ] ⬜ **Task 4.3**: Repeat for #4 and #13 if #3's prototype proves the

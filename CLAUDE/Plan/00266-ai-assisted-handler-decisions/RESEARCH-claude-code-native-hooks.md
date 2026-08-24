@@ -244,13 +244,44 @@ docs page" above: hooks live in the `settings.json` family, not a bespoke
 are now corrected), and the registration-checker collision does not exist
 at the code level, below.
 
-**`hook_registration_checker` does NOT flag a native hook — that claim was
-checked against the code and is false.** `detect_legacy_hook_commands`
-(`utils/hook_registration.py:149`) reads `command_entry.get("command", "")`
+**`detect_legacy_hook_commands` does NOT flag a native hook.**
+(`utils/hook_registration.py:149`) It reads `command_entry.get("command", "")`
 and `continue`s on an empty value; a `type: prompt`/`type: agent` entry has
 no `command` key at all, so it is skipped and never reported. And
 `reconcile_settings_hooks` is additive per EVENT (`if json_key in new_hooks: continue`), with a docstring stating that client-added custom entries are
 left untouched — so a native hook added alongside survives auto-repair.
+
+**But `hook_registration_checker` runs a SECOND validator, and that one DOES
+flag a native hook in two of the three ways you might add it.** The handler
+calls `validate_hook_commands` as well
+(`handlers/session_start/hook_registration_checker.py:186`). Measured by
+running both validators directly against each layout, not by reading the code:
+
+| Layout for adding a native hook to an event                                     | `validate_hook_commands`                                                        |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| **A** — as a separate matcher entry in the event array                          | ❌ `PreToolUse has 2 hook entries (expected 1) — likely duplicate registration` |
+| **B** — appended AFTER the daemon command, inside the same entry's `hooks` list | ✅ no issues                                                                    |
+| **C** — placed BEFORE the daemon command in that same list                      | ❌ `PreToolUse command does not end with /.claude/hooks/pre-tool-use: got ''`   |
+
+Two mechanisms cause this: `validate_hook_commands` treats `len(event_hooks) > 1`
+as a duplicate registration (Layout A), and it only ever inspects
+`inner_hooks[0]`, so a native entry sitting first yields an empty `command`
+that fails the `endswith` suffix check (Layout C).
+
+**So Layout B is the only clean way to add a native hook to an event this
+daemon already registers**, and any Phase 4 prototype must use it. This does
+not block adoption — the checker is advisory and never blocks — but it would
+emit a misleading session-start warning every session, which is exactly the
+kind of false alarm that trains people to ignore a real one.
+
+**This is also a latent defect in `validate_hook_commands` itself**, not just a
+constraint to work around: a legitimate native hook is not a "duplicate
+registration", and the `inner_hooks[0]`-only inspection means the validator
+cannot see a daemon wrapper that is present but not first. It is latent rather
+than live because no native hook exists in this repository yet. Fixing it —
+scan all of `inner_hooks` for the daemon command rather than assuming index 0,
+and count only `type: command` entries toward the duplicate check — is a
+prerequisite for Phase 4, not a follow-up to it.
 
 What IS true is that the handler's `get_claude_md()` guidance says "Every
 registered command must end with `/.claude/hooks/{event}`. Anything else...
