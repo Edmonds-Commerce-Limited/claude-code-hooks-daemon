@@ -202,6 +202,37 @@ def detect_legacy_hook_commands(settings: dict[str, object]) -> list[str]:
     return issues
 
 
+def _collect_command_hook_commands(event_hooks: list[object]) -> list[str]:
+    """Return the command string of every ``type: command`` hook for one event.
+
+    Walks all entries and all inner hooks, because an event may legally carry
+    several of each. A hook with no ``command`` key is a native
+    ``prompt``/``agent`` hook and is deliberately skipped — it is not a daemon
+    registration and must not be counted as one.
+
+    Every level is isinstance-guarded (mirroring ``detect_legacy_hook_commands``)
+    so a malformed settings.json is diagnosed rather than crashing the validator
+    that exists to diagnose it.
+    """
+    commands: list[str] = []
+    for hook_entry in event_hooks:
+        if not isinstance(hook_entry, dict):
+            continue
+        inner_hooks = hook_entry.get("hooks", [])
+        if not inner_hooks or not isinstance(inner_hooks, list):
+            continue
+        for command_entry in inner_hooks:
+            if not isinstance(command_entry, dict):
+                continue
+            if _HOOK_COMMAND_KEY not in command_entry:
+                continue  # a native prompt/agent hook, not a daemon registration
+            command = command_entry.get(_HOOK_COMMAND_KEY)
+            if not isinstance(command, str):
+                continue
+            commands.append(command)
+    return commands
+
+
 def validate_hook_commands(settings: dict[str, object]) -> list[str]:
     """Validate that hook commands point to the correct scripts.
 
@@ -224,34 +255,37 @@ def validate_hook_commands(settings: dict[str, object]) -> list[str]:
         if not event_hooks or not isinstance(event_hooks, list):
             continue  # Missing hooks are caught by validate_settings_hooks
 
-        # Check for multiple hook entries (suspicious — usually a duplicate)
-        if len(event_hooks) > 1:
+        # Collect every COMMAND hook across every entry. An event may legally
+        # carry more than one entry and more than one inner hook: Claude Code
+        # supports `prompt`/`agent` hooks that run in parallel with ours, and a
+        # `matcher` applies per entry, so a scoped native hook is forced into an
+        # entry of its own. Those carry no `command` key at all, which is what
+        # distinguishes them here. Counting ENTRIES (or reading only
+        # `inner_hooks[0]`) misread both arrangements as faults, while missing a
+        # real double registration nested inside one entry — Plan 00266.
+        commands = _collect_command_hook_commands(event_hooks)
+
+        if len(commands) > 1:
             issues.append(
-                f"{json_key} has {len(event_hooks)} hook entries "
+                f"{json_key} has {len(commands)} daemon command hooks "
                 f"(expected 1) — likely duplicate registration"
             )
             continue
 
-        # Extract the command from the single hook entry. Guard every level
-        # with isinstance checks (mirroring detect_legacy_hook_commands) so a
-        # malformed settings.json is diagnosed rather than crashing the
-        # validator with an AttributeError.
-        hook_entry = event_hooks[0]
-        if not isinstance(hook_entry, dict):
-            continue
-        inner_hooks = hook_entry.get("hooks", [])
-        if not inner_hooks or not isinstance(inner_hooks, list):
-            continue
-
-        command_entry = inner_hooks[0]
-        if not isinstance(command_entry, dict):
-            continue
-        command = command_entry.get("command", "")
-        if not isinstance(command, str):
+        if not commands:
+            # Native hooks may sit ALONGSIDE the wrapper but must never replace
+            # it: reconcile_settings_hooks is additive per EVENT, so once the
+            # event key exists the self-heal will not restore a wrapper it no
+            # longer sees, and every handler on that event goes silently dark.
+            issues.append(
+                f"{json_key} has no daemon command hook — a prompt/agent hook "
+                f"must be added alongside the wrapper, never in place of it"
+            )
             continue
 
         # Check that the command ends with the expected script name
         expected_suffix = f"/.claude/hooks/{expected_bash_key}"
+        command = commands[0]
         if not command.endswith(expected_suffix):
             issues.append(
                 f"{json_key} command does not end with {expected_suffix}: " f"got {command!r}"
@@ -273,6 +307,11 @@ def validate_hook_commands(settings: dict[str, object]) -> list[str]:
 # reconciler only fills in MISSING events, never rewrites present ones.
 
 _HOOK_COMMAND_TYPE = "command"
+# The dict KEY that marks an inner hook as a shell-command registration. Shares
+# its spelling with _HOOK_COMMAND_TYPE but is a different concept: native
+# `prompt`/`agent` hooks have a `type` and no `command` key at all, and that
+# absence is how they are told apart from a daemon registration.
+_HOOK_COMMAND_KEY = "command"
 _HOOK_COMMAND_TEMPLATE = 'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash_key}'
 _DEFAULT_HOOK_TIMEOUT_SECONDS = 60
 # PreToolUse / PostToolUse carry an explicit per-invocation timeout; all other

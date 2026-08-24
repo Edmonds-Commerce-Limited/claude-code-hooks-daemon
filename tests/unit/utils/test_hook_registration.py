@@ -255,6 +255,99 @@ class TestValidateHookCommands:
         assert isinstance(issues, list)
 
 
+class TestValidateHookCommandsWithNativeHooks:
+    """A native ``prompt``/``agent`` hook alongside the daemon wrapper is legal.
+
+    Plan 00266 measured this validator misreporting two of the three layouts for
+    adding one. Claude Code supports ``type: prompt`` and ``type: agent`` hooks,
+    which carry no ``command`` key at all, and documents that all matching hooks
+    run in parallel — so coexisting with the daemon's own ``command`` hook is
+    the supported arrangement, not a misconfiguration.
+    """
+
+    @staticmethod
+    def _native() -> dict:
+        """A native prompt hook: note there is no ``command`` key."""
+        return {"type": "prompt", "prompt": "Is this allowed? $ARGUMENTS"}
+
+    @staticmethod
+    def _daemon() -> dict:
+        return {
+            "type": "command",
+            "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/stop',
+        }
+
+    def test_native_hook_in_separate_entry_is_not_a_duplicate(self) -> None:
+        """Layout A: a native hook as its own matcher entry.
+
+        This is the layout a scoped native hook is FORCED into, because a
+        matcher applies per entry. It was reported as
+        'Stop has 2 hook entries (expected 1) — likely duplicate registration'.
+        """
+        settings = _build_settings_with_all_hooks()
+        settings["hooks"]["Stop"] = [
+            {"hooks": [self._daemon()]},
+            {"matcher": "Bash", "hooks": [self._native()]},
+        ]
+        assert validate_hook_commands(settings) == []
+
+    def test_native_hook_before_daemon_command_is_not_flagged(self) -> None:
+        """Layout C: native hook first inside the same entry.
+
+        Only ``inner_hooks[0]`` was inspected, so the native hook's absent
+        ``command`` yielded '' and failed the suffix check, reporting
+        "command does not end with /.claude/hooks/stop: got ''".
+        """
+        settings = _build_settings_with_all_hooks()
+        settings["hooks"]["Stop"] = [{"hooks": [self._native(), self._daemon()]}]
+        assert validate_hook_commands(settings) == []
+
+    def test_native_hook_after_daemon_command_is_not_flagged(self) -> None:
+        """Layout B: the one layout that was already clean. Guards it."""
+        settings = _build_settings_with_all_hooks()
+        settings["hooks"]["Stop"] = [{"hooks": [self._daemon(), self._native()]}]
+        assert validate_hook_commands(settings) == []
+
+    def test_two_daemon_commands_across_entries_still_flagged(self) -> None:
+        """The real duplicate this check exists for must still be caught.
+
+        Relaxing the entry count must not blind the validator to an actual
+        double registration of the daemon wrapper, which fires every hook twice.
+        """
+        settings = _build_settings_with_all_hooks()
+        settings["hooks"]["Stop"] = [
+            {"hooks": [self._daemon()]},
+            {"hooks": [self._daemon()]},
+        ]
+        issues = validate_hook_commands(settings)
+        assert len(issues) == 1
+        assert "Stop" in issues[0]
+
+    def test_two_daemon_commands_in_one_entry_still_flagged(self) -> None:
+        """The same duplicate, nested in a single entry, is equally real."""
+        settings = _build_settings_with_all_hooks()
+        settings["hooks"]["Stop"] = [{"hooks": [self._daemon(), self._daemon()]}]
+        issues = validate_hook_commands(settings)
+        assert len(issues) == 1
+        assert "Stop" in issues[0]
+
+    def test_native_hook_replacing_daemon_wrapper_is_reported(self) -> None:
+        """A native hook must sit ALONGSIDE the wrapper, never replace it.
+
+        ``reconcile_settings_hooks`` is additive per EVENT, so once an event
+        key exists the daemon's self-heal will not restore a wrapper it no
+        longer sees — every handler on that event goes silently dark. The
+        previous message for this case blamed a malformed command; it is
+        really a missing daemon registration.
+        """
+        settings = _build_settings_with_all_hooks()
+        settings["hooks"]["Stop"] = [{"hooks": [self._native()]}]
+        issues = validate_hook_commands(settings)
+        assert len(issues) == 1
+        assert "Stop" in issues[0]
+        assert "no daemon" in issues[0].lower()
+
+
 class TestDetectLocalHooksMisplacement:
     """Tests for detect_local_hooks_misplacement().
 

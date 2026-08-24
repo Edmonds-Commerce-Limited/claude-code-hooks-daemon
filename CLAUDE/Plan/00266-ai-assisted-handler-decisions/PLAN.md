@@ -172,14 +172,14 @@ brainstorm, mechanism mapping, and ranking.
 
 ### Phase 4: Prototype native-hook-eligible ideas (no daemon infrastructure)
 
-- [ ] ⬜ **Task 4.0**: Fix `validate_hook_commands` so a native hook is not
-  misreported as a duplicate registration — see the measured layout table in
-  `RESEARCH-...md`. TDD, one regression test per layout. **Prerequisite for
-  4.1**, not a follow-up: a prototype that warns every session trains people
-  to ignore the checker.
-- [ ] ⬜ **Task 4.0b**: Clarify `hook_registration_checker.get_claude_md()`'s
-  wording — the "every registered command routes through the daemon wrapper"
-  rule applies to `type: command` entries only. Documentation-only.
+- [x] ✅ **Task 4.0**: Fixed `validate_hook_commands` — walks every entry and
+  inner hook, counts only `type: command` registrations, and reports a
+  native-only event as a MISSING wrapper. Writing the tests exposed a second
+  latent defect: two daemon commands nested in ONE entry were never detected,
+  because only `inner_hooks[0]` was read.
+- [x] ✅ **Task 4.0b**: `hook_registration_checker.get_claude_md()` now scopes
+  its wrapper rule to `type: command` hooks and states that native hooks are
+  permitted alongside, never in place of, the wrapper.
 - [ ] ⬜ **Task 4.1**: Prototype `IDEAS.md` #3 (`validate_instruction_content`
   classifier) as a native `prompt` hook, added ALONGSIDE the daemon's existing
   wrapper (never replacing it, per the reconcile-is-additive-per-event footgun
