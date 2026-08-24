@@ -162,7 +162,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
   - Depends on Plan 00032 orchestration infrastructure
 
-- [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - In Progress (Claude Code natively supports `type: prompt` / `type: agent` hooks, so the real question is whether a daemon-side AI handler earns its place; 15 candidates ranked, most rejected, and a hallucinated deny made unconstructible by pinning to `AdvisoryResult`)
+- [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
 
