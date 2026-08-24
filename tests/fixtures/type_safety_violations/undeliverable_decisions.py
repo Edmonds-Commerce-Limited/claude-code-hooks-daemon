@@ -19,7 +19,14 @@ error. If it does drift, the test fails loudly in both directions at once —
 passing.
 """
 
-from claude_code_hooks_daemon.core.hook_result import Decision
+from typing import Any
+
+from claude_code_hooks_daemon.core import AcceptanceTest
+from claude_code_hooks_daemon.core.handler_bases import (
+    SessionStartHandlerBase,
+    StopHandlerBase,
+)
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.result_types import (
     AdvisoryResult,
     BlockingResult,
@@ -52,3 +59,51 @@ def mutate_a_deny_into_an_advisory_result() -> AdvisoryResult:
 def widen_an_advisory_result_back() -> AdvisoryResult:
     """Returning a wider tier where a narrow one is declared."""
     return GatingResult(decision=Decision.DENY, reason="wrong tier")  # VIOLATION: return-value
+
+
+class DenyingSessionStartHandler(SessionStartHandlerBase):
+    """The whole point: the constraint is INHERITED, nothing was declared."""
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        return True
+
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
+        return AdvisoryResult(decision=Decision.DENY, reason="no block")  # VIOLATION: arg-type
+
+    def get_claude_md(self) -> str | None:
+        return None
+
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        return []
+
+
+class WideningSessionStartHandler(SessionStartHandlerBase):
+    """Escaping by widening the signature must not work either."""
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        return True
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:  # VIOLATION: override
+        return HookResult(decision=Decision.DENY, reason="smuggled past the tier")
+
+    def get_claude_md(self) -> str | None:
+        return None
+
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        return []
+
+
+class AskingStopHandler(StopHandlerBase):
+    """Stop expresses `block` but has no `ask`."""
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        return True
+
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
+        return BlockingResult(decision=Decision.ASK, reason="cannot ask")  # VIOLATION: arg-type
+
+    def get_claude_md(self) -> str | None:
+        return None
+
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        return []

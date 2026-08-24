@@ -110,11 +110,17 @@ the emitted response:
 
 ### Phase 2: Per-event handler bases
 
-- [ ] ⬜ **Task 2.1**: Write failing tests that a handler subclassing an event
-  base cannot return an out-of-tier decision, and cannot widen the override
-- [ ] ⬜ **Task 2.2**: Add one base class per event package, narrowing `handle()`
-- [ ] ⬜ **Task 2.3**: Add a test that every event package HAS a base and that
-  its tier matches the capability table
+- [x] ✅ **Task 2.1**: Write failing tests that a handler subclassing an event
+  base cannot return an out-of-tier decision, and cannot widen the override —
+  both now in the mypy fixture, caught at `[arg-type]` and `[override]`
+- [x] ✅ **Task 2.2**: Add the bases, narrowing `handle()`. Three real tier
+  classes plus a one-line alias per event: mypy enforces a narrowed return type
+  identically through an alias, so an event costs a line rather than a class
+  body. Named `{Event}HandlerBase` because `WorktreeCreateHandler` and
+  `WorktreeRemoveHandler` are already concrete handler class names.
+- [x] ✅ **Task 2.3**: Add a test that every WIRED EVENT — not merely every
+  existing package — has a base whose tier matches the capability table, so an
+  event that gains its first handler later already has one
 
 ### Phase 3: Reparent the handlers
 
