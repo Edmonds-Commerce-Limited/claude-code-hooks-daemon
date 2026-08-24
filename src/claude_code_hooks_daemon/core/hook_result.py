@@ -8,7 +8,7 @@ import logging
 import re
 import unicodedata
 from enum import StrEnum
-from typing import Any, Self
+from typing import Any, Final, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -47,6 +47,34 @@ _STATUS_ROW_SEPARATOR = "\n"
 # the raw path (Claude Code parses the WorktreeCreate hook's stdout as a path).
 _WORKTREE_CREATE_EVENT_NAME = "WorktreeCreate"
 _WORKTREE_PATH_KEY = "worktreePath"
+
+# Which events can actually CARRY each refusal on the wire. Anything absent here
+# drops that decision, and the resulting response is still schema-VALID — so the
+# contract check cannot see it. Stop and PostToolUse express `block` but have no
+# `ask`; Status renders a status line and expresses nothing at all.
+#
+# Without this table those drops are silent: a handler asks to interrupt, gets
+# `{}`, and believes it succeeded. Unreachable in this repository (Decision.ASK
+# appears in no handler here) but NOT unreachable for a client, whose project
+# handlers are a supported extension point that no test in this repo sweeps.
+# Kept honest by tests that assert every claim against the emitted response.
+_REFUSAL_CAPABLE_EVENTS: Final[dict[Decision, frozenset[str]]] = {
+    Decision.DENY: frozenset(
+        {
+            "PreToolUse",  # permissionDecision: deny
+            "PostToolUse",  # decision: block
+            "Stop",  # decision: block
+            "SubagentStop",  # decision: block
+            "PermissionRequest",  # decision.behavior: deny
+        }
+    ),
+    Decision.ASK: frozenset(
+        {
+            "PreToolUse",  # permissionDecision: ask
+            "PermissionRequest",  # decision.behavior: ask
+        }
+    ),
+}
 # Matches ANSI SGR/CSI escape sequences so colour codes are excluded from the
 # DISPLAYED width when wrapping (they occupy zero visible columns).
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -286,6 +314,7 @@ class HookResult(BaseModel):
 
         errors = validate_response(event_name, response)
         if not errors:
+            self._report_dropped_refusal(event_name)
             return response
 
         logger.error(
@@ -307,6 +336,34 @@ class HookResult(BaseModel):
                 f"{substitute} -> {remaining}"
             )
         return substitute
+
+    def _report_dropped_refusal(self, event_name: str) -> None:
+        """Log a refusal this event drops even though the response is VALID.
+
+        The schema check cannot catch these: ``Stop`` and ``PostToolUse`` express
+        ``block`` but have no ``ask``, and ``Status`` expresses nothing, so an
+        ASK on the first two and any refusal on the last serialise to a
+        perfectly valid ``{}`` or ``{"text": ...}``. Enforcement sees nothing
+        wrong, and the handler is left believing it interrupted something.
+
+        Nothing is substituted, because the response is already the best the
+        event permits — a status line genuinely cannot refuse, and injecting an
+        error into it would put noise on every prompt forever. The gap is the
+        absence of a RECORD, so a record is what this adds.
+        """
+        if self.decision not in _REFUSAL_CAPABLE_EVENTS:
+            return
+        if event_name in _REFUSAL_CAPABLE_EVENTS[self.decision]:
+            return
+
+        logger.error(
+            "DROPPED REFUSAL on %s: a handler returned '%s', which this event "
+            "cannot carry on the wire. The response is valid but the refusal was "
+            "NOT enforced. Reason given: %s",
+            event_name,
+            self.decision.value,
+            self.reason or "(none)",
+        )
 
     def _safe_substitute_response(self, event_name: str) -> dict[str, Any]:
         """Build a schema-valid response that does not weaken a refusal.
