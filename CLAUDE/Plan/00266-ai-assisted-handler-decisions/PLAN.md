@@ -12,59 +12,109 @@
 The user wants a way for this daemon's handlers to use AI judgement, not just
 deterministic pattern matching, to decide hook outcomes — but had no concrete
 use-case in mind, only the belief that "Claude Code itself supports LLM driven
-hooks somehow." This plan's Phase 1 answers that factual question, enumerates
-every real mechanism available (native Claude Code hooks, a daemon handler
-calling a model itself, and a third mechanism this codebase already uses —
-prompting the *current* agent session to self-judge), confronts the latency
-and determinism costs those mechanisms carry against a daemon whose entire
-premise is a ~45ms round trip, and brainstorms + ranks concrete candidate
-use-cases against that reality.
+hooks somehow." Phase 1 answers that factual question and enumerates every
+real mechanism available. That answer then sharpens the question: Claude
+Code's native `prompt`/`agent` hooks are real, adoptable with no code change,
+and run in parallel with this daemon's own hooks on the same event — costs
+nothing to adopt, but (see the Headline finding below) still costs seconds
+per invocation, so the question is no longer "can we have AI-driven hooks"
+but "given that native hooks already exist, does a daemon-side AI handler
+earn its cost at all, and for which specific judgements" (`DECISIONS.md` §4).
 
-**Headline finding**: Claude Code does support this natively — `"type": "prompt"` and `"type": "agent"` hooks, confirmed against the official docs —
-but this project's own `CLAUDE/ARCHITECTURE.md` already half-describes this
-mechanism via a `.claude/hooks.json` file that does not exist anywhere in
-this checkout, and the project's own `hook_registration_checker` currently
-enforces the opposite policy ("every hook command routes through the daemon
-wrapper"). See `RESEARCH-claude-code-native-hooks.md` for the full mechanism
-reference and the specific gaps the docs left unanswered.
+Two real false positives surfaced *while this plan was being written* —
+`nitpick.hedging_language` flagging honest uncertainty that named its own
+resolution path, and `qa_suppression` blocking a comment that argued
+*against* a suppression it happened to name — and both are used as the
+concrete, evidenced motivation for what to build, rather than a hypothetical
+(`DECISIONS.md` §0).
+
+**Headline finding**: Claude Code does support AI-driven hooks natively —
+`"type": "prompt"` (30s timeout) and `"type": "agent"` (60s timeout, Read/
+Grep/Glob tool access, no Bash, "experimental") hooks, confirmed against the
+official docs, and confirmed to run **in parallel** with this daemon's own
+`command` hooks on the same event — though parallel means the hooks do not
+COMPOUND, not that the latency is free: the tool call still blocks on the
+slowest hook, so a `prompt` hook on `PreToolUse` still costs seconds.
+
+Two claims made earlier in this plan's life were checked and did not survive,
+and are corrected here rather than left to mislead:
+
+- `.claude/hooks.json` was described as "a file that does not exist in this
+  checkout". It is worse than that: it does not exist in Claude Code at all.
+  Hooks live in the `settings.json` family plus skill/subagent frontmatter;
+  the real `hooks/hooks.json` belongs to PLUGINS, which is the likely source
+  of the error. `CLAUDE/ARCHITECTURE.md` and `CLAUDE/HANDLER_DEVELOPMENT.md`
+  both pointed contributors at the wrong path and have been fixed.
+- `hook_registration_checker` was said to "enforce the opposite policy". Its
+  CODE does not: `detect_legacy_hook_commands` reads `command_entry.get("command", "")` and skips entries without a `command` key, which is
+  exactly the shape of a `prompt`/`agent` hook, and `reconcile_settings_hooks`
+  leaves any event key that already exists untouched. The conflict is in that
+  handler's GUIDANCE WORDING, not its behaviour — a one-line clarification,
+  not an architectural blocker. Native hooks are adoptable here today with no
+  code change.
+
+The genuine footgun in that area: reconcile is additive per EVENT, not per
+entry, so a native hook must be added ALONGSIDE the daemon wrapper — replace
+it and the wrapper will not be restored. See
+`RESEARCH-claude-code-native-hooks.md`.
+
+**The decisive finding for what to build daemon-side**: native hooks cannot
+see a *prior daemon-side regex match* — they only get raw event JSON. That
+rules them out for the one design this plan's live evidence most directly
+motivates: **confirm-the-positive** (`DECISIONS.md` §3c) — run a model only
+after the existing regex has already flagged something, asking "is this a
+genuine use or a mention," downgrading a false-positive block to allow and
+falling back to today's exact behaviour on any model error. This is
+structurally the safest way found to let AI influence a shipping *blocking*
+handler (it can only ever remove a block, never add one), and it is not
+reachable via native hooks at comparable cost.
 
 ## Goals
 
 - Establish, with evidence, what Claude Code's native LLM-driven hook support
-  actually is, and how it relates to this daemon (`RESEARCH-...md`).
+  actually is, how it relates to this daemon, and whether it coexists with
+  this daemon's own hooks (`RESEARCH-...md`).
 - Confront the latency and determinism costs of AI-driven hook decisions
   honestly against this project's own stated performance premise and testing
-  discipline (`DECISIONS.md`).
+  discipline, and test the "advisory = free" intuition rather than assume it
+  (`DECISIONS.md` §1, §1b).
 - Produce a ranked, concrete brainstorm of candidate use-cases, each scored
   on why a regex cannot do the job, which event it would live on, whether
-  that event tolerates the latency, and what mechanism fits it
-  (`IDEAS.md`).
-- Decide, and build, the smallest defensible first AI-assisted handler —
-  Phase 2 below — so the pattern is proven in production rather than left as
-  a brainstorm no one acted on.
+  that event tolerates the latency, and which mechanism (native / daemon-side
+  / self-audit) actually fits it (`IDEAS.md`).
+- Decide, and build, the smallest defensible daemon-side AI handlers,
+  grounded in the live false positives this plan itself surfaced — Phases 2
+  and 3 below — so the pattern is proven in production rather than left as a
+  brainstorm no one acted on.
 
 ## Non-Goals
 
-- Not building every idea in `IDEAS.md` — most are explicitly rejected or
-  deferred; see that document's ranking section for the reasoning.
+- Not building every idea in `IDEAS.md` — most are explicitly rejected,
+  deferred to Mechanism C, or marked native-hook-eligible instead; see that
+  document's ranking section for the reasoning.
 - Not touching `security_antipattern`'s data-flow gaps (SQLi, path
   traversal, weak hashing) — that is `Plan 00204`'s question to answer
-  first, and `IDEAS.md` #8 explains why an AI judge is the wrong tool for
-  that specific hot, security-critical path regardless.
-- Not adopting native Claude Code `prompt`/`agent` hooks project-wide, and
-  not changing `hook_registration_checker`'s policy, as part of this plan —
-  that tension is recorded in `RESEARCH-...md` for a human to resolve
-  separately if a project-specific use-case for native hooks ever arises.
+  first, and `IDEAS.md` #8 explains why an AI judge needs the wrong
+  (recall, not precision) filter shape for that specific hot,
+  security-critical path regardless.
+- Not adopting native Claude Code `prompt`/`agent` hooks project-wide as
+  policy — code verification found no actual conflict with
+  `hook_registration_checker` (`RESEARCH-...md`; only its guidance wording
+  needed a fix, tracked as Task 4.0). Phase 4 below only *prototypes* native
+  hooks for ideas that don't need daemon state; broader adoption is a
+  separate decision.
 - Not resolving the `gh` comment-quality idea (`IDEAS.md` #11) — it belongs
   to `Plan 00264`, which already owns that surface.
 
 ## Context & Background
 
-See `RESEARCH-claude-code-native-hooks.md` for the mechanism reference,
-`DECISIONS.md` for the latency/determinism/mechanism trade-off analysis
-(including the `AdvisoryResult` type-level safety pattern from Plan 00265
-that a first AI handler should adopt), and `IDEAS.md` for the full
-15-candidate brainstorm and ranking.
+See `RESEARCH-claude-code-native-hooks.md` for the mechanism reference
+(including hook coexistence and model-determinism findings), `DECISIONS.md`
+for the full latency/determinism/mechanism trade-off analysis — including
+the concrete live evidence in §0, the `AdvisoryResult` type-level safety
+pattern from Plan 00265 (§2), and the confirm-the-positive vs second-opinion
+filter distinction (§3c) — and `IDEAS.md` for the full 16-candidate
+brainstorm, mechanism mapping, and ranking.
 
 ## Tasks
 
@@ -85,91 +135,157 @@ that a first AI handler should adopt), and `IDEAS.md` for the full
   discipline, and identify the type-level safety pattern
   (`AdvisoryResult`) a first AI handler should be pinned to
   (`DECISIONS.md` §2).
-- [x] ✅ **Task 1.5**: Brainstorm and score 10-15 concrete candidate
-  use-cases, each against: what it judges, why a regex cannot, which
-  event, latency tolerance, advisory-vs-blocking, mechanism, and cost
-  (`IDEAS.md`).
-- [x] ✅ **Task 1.6**: Rank the candidates and select the smallest
-  defensible first build (`IDEAS.md` ranking section).
+- [x] ✅ **Task 1.5**: Brainstorm and score concrete candidate use-cases,
+  each against: what it judges, why a regex cannot, which event, latency
+  tolerance, advisory-vs-blocking, mechanism, and cost (`IDEAS.md`).
+- [x] ✅ **Task 1.6**: Capture the two live false positives that surfaced
+  during this plan's own writing as concrete, evidenced motivation, and
+  fold in `comment_changelog`'s documented demoted-signal history as
+  supporting evidence of the same root cause (`DECISIONS.md` §0).
+- [x] ✅ **Task 1.7**: Resolve whether native hooks make daemon-side AI
+  handlers redundant; verify the `hook_registration_checker` tension
+  against its actual CODE, not just its prose (no conflict found — see
+  `RESEARCH-...md`); identify the confirm-the-positive design as the
+  concrete case native hooks structurally cannot reach; map every
+  candidate idea to its best-fit mechanism (`DECISIONS.md` §3c, §4;
+  `IDEAS.md` mapping).
+- [x] ✅ **Task 1.8**: Rank the candidates and select the first builds
+  (`IDEAS.md` ranking section).
 
-### Phase 2: Build the first AI-assisted handler (nitpick semantic upgrade)
+### Phase 2: Build the nitpick semantic upgrade
 
 - [ ] ⬜ **Task 2.1**: Design the model-call boundary as an injectable
-  dependency (mirroring how `TranscriptReader`/`NitpickSetup` are
-  already structured) so unit tests mock the call rather than hitting a
-  real API, per `DECISIONS.md` §2.
-- [ ] ⬜ **Task 2.2**: Write failing unit tests first (TDD) for a nitpick
-  handler that classifies assistant-message dismissiveness/hedging via
-  a model call, pinned to `AdvisoryResult` so a hallucinated "deny" is
-  unwritable rather than merely disciplined-against.
-- [ ] ⬜ **Task 2.3**: Implement the handler; wire it into the existing
-  `pseudo_events.nitpick` chain on the `Stop` trigger only for the
-  first cut (defer sampled `PreToolUse` firing until Stop-only proves
-  out).
+  dependency (mirroring how `TranscriptReader`/`NitpickSetup` are already
+  structured) so unit tests mock the call rather than hitting a real API.
+- [ ] ⬜ **Task 2.2**: Design the deferred/async surfacing mechanism — the
+  model call must not run synchronously inside the `Stop` response the
+  user is waiting on; the finding surfaces on a *later* event
+  (`DECISIONS.md` §1b). This is new daemon infrastructure (background
+  task, per-session results cache, cleanup policy) — do not skip it in
+  favour of a synchronous call that merely feels less bad than
+  `PreToolUse`.
+- [ ] ⬜ **Task 2.3**: TDD a nitpick handler that classifies assistant-message
+  dismissiveness/hedging via a model call, pinned to `AdvisoryResult` so a
+  hallucinated "deny" is unwritable. Include Example A (`DECISIONS.md` §0)
+  as a fixed regression case.
 - [ ] ⬜ **Task 2.4**: Implement fail-open behaviour for every external
-  failure mode (no credential configured, timeout, network error, rate
-  limit) — must degrade to no-opinion/ALLOW, never block or crash, per
-  `DECISIONS.md` §2.
-- [ ] ⬜ **Task 2.5**: Decide and document the cost/rate-limit posture
-  (reuse the existing `stop:1/1` trigger, or introduce a coarser
-  sample) before enabling by default.
-- [ ] ⬜ **Task 2.6**: Full QA, daemon restart verification, dogfood in this
-  repo's own config, acceptance tests reflecting decision-class
-  stability rather than exact wording (`DECISIONS.md` §2).
+  failure mode (no credential, timeout, network error, rate limit) —
+  degrade to no-opinion, never block or crash.
+- [ ] ⬜ **Task 2.5**: Full QA, daemon restart verification, dogfood in this
+  repo's own config, acceptance tests asserting decision-class stability
+  rather than exact wording.
 
-### Phase 3: Build the second AI-assisted handler (validate_instruction_content classifier)
+### Phase 3: Build the confirm-the-positive filter (qa_suppression, comment_changelog)
 
-- [ ] ⬜ **Task 3.1**: Confirm scope stays limited to `CLAUDE.md`/`README.md`
-  writes only, per `IDEAS.md` #3.
-- [ ] ⬜ **Task 3.2**: TDD the classifier with mocked model responses;
-  decide the fail-open default for an unreachable model on a *blocking*
-  PreToolUse path (this is the one candidate where blocking is
-  defensible, so the fail-open direction needs explicit sign-off, not
-  just fail-open-to-allow by default).
-- [ ] ⬜ **Task 3.3**: Implement, QA, daemon restart, dogfood, acceptance
-  tests.
+- [ ] ⬜ **Task 3.1**: Design the filter as a post-match hook invoked only
+  when the existing regex has already found a candidate span, returning
+  either "confirmed" (today's block stands) or "mention, not use"
+  (downgrade); falling back to "confirmed" — today's exact behaviour — on
+  any model error, per `DECISIONS.md` §3c.
+- [ ] ⬜ **Task 3.2**: Verify the design does not break the acceptance-test
+  strategy `CLAUDE.md`'s "Blocking Handler False Positives" section
+  documents as intentional (literal dangerous strings embedded in safe
+  commands, e.g. `echo "git reset --hard"`, must still be blocked) —
+  confirm this filter's judgement question ("use vs mention") is a
+  different axis from that strategy's judgement question ("is this
+  string in a command position"), so the two do not collide.
+- [ ] ⬜ **Task 3.3**: TDD with mocked model responses; include Example B
+  (`DECISIONS.md` §0) as a fixed regression case for `qa_suppression`, and
+  the four documented demoted signals as regression cases for
+  `comment_changelog`.
+- [ ] ⬜ **Task 3.4**: Implement for `qa_suppression` first (the handler with
+  the live evidence); extend to `comment_changelog` once proven.
+- [ ] ⬜ **Task 3.5**: Full QA, daemon restart verification, dogfood,
+  acceptance tests.
+
+### Phase 4: Prototype native-hook-eligible ideas (no daemon infrastructure)
+
+- [ ] ⬜ **Task 4.0**: Clarify `hook_registration_checker.get_claude_md()`'s
+  wording — state explicitly that the "every registered command routes
+  through the daemon wrapper" rule applies to `type: command` entries, not
+  to `type: prompt`/`type: agent` entries the code already permits
+  (`RESEARCH-...md`). Documentation-only; no behaviour change.
+- [ ] ⬜ **Task 4.1**: Prototype `IDEAS.md` #3 (`validate_instruction_content`
+  classifier) as a native `prompt`/`agent` hook config, added ALONGSIDE
+  the daemon's existing wrapper for that event (never replacing it, per
+  the reconcile-is-additive-per-event footgun in `RESEARCH-...md`) — the
+  cheapest way to test whether the judgement is valuable before ever
+  writing daemon infrastructure for it (`DECISIONS.md` §4).
+- [ ] ⬜ **Task 4.2**: Evaluate the prototype; decide whether it earns
+  daemon-side infrastructure or stays a native experiment.
+- [ ] ⬜ **Task 4.3**: Repeat for #4 and #13 if #3's prototype proves the
+  pattern useful; otherwise stop here — a native experiment nobody found
+  useful is not evidence to build more.
+
+### Phase 5: Extend idle_housekeeping_advisory (near-zero-cost)
+
+- [ ] ⬜ **Task 5.1**: Add "deny-reason actionability" (`IDEAS.md` #6) and
+  "guidance context-cost" (`IDEAS.md` #7) to `idle_housekeeping_advisory`'s
+  suggested audit topics — no new handler, config-only change.
 
 ## Technical Decisions
 
-See `DECISIONS.md` for full reasoning. Summary of the load-bearing calls:
+See `DECISIONS.md` for full reasoning (§2-4). Summary of the load-bearing calls:
 
-- **Mechanism**: a daemon `Handler` calling a model itself (Mechanism B),
-  not native Claude Code `prompt`/`agent` hooks (Mechanism A) and not a
-  daemon advisory that asks the current agent to self-judge (Mechanism C) —
-  because the first two candidates are both cases where an *independent*
-  judge matters (self-policing language, or a narrow well-scoped file
-  check), not a self-audit Mechanism C would suit.
-- **Event**: `Stop` for the first build — the one place on the latency table
-  where 1-3 seconds of model latency is least likely to be felt, and where
-  the existing nitpick trigger (`stop:1/1`) already fires.
-- **Safety boundary**: pin the handler's return type to `AdvisoryResult`
-  (Plan 00265's per-event-capability type hierarchy) so a model "deciding"
-  to deny is unwritable, not merely a convention to remember.
-- **Fail-open**: any model-call failure (timeout, missing credential, rate
-  limit, network error) must degrade to no-opinion, never to a block or a
-  crash — an explicit, written exception to Core Standard 6's "fail fast"
-  posture, scoped to this one class of *external service* dependency.
+- **`AdvisoryResult` is the decision that makes this defensible.** Its
+  `decision` field is `Literal[Decision.ALLOW, Decision.CONTINUE]`
+  (mypy + Pydantic runtime-enforced) — a hallucinated "deny" is
+  **unconstructible**, not merely disciplined against. The single fact
+  letting a non-deterministic handler ship in a project that otherwise
+  asserts exact decisions in acceptance tests. Phase 2 is pinned to it
+  directly.
+- **Confirm-the-positive earns the equivalent guarantee for a *blocking*
+  handler differently**: Phase 3's filter only ever downgrades an existing
+  regex match to allow, never originates a block, and falls back to today's
+  exact shipped behaviour on any model failure — no new silent failure mode.
+- **Mechanism is chosen per idea, not project-wide.** Verified against
+  `hook_registration_checker`'s actual CODE (not prose): native
+  `prompt`/`agent` hooks coexist with this daemon's hooks today, zero code
+  changes needed (`RESEARCH-...md`). Daemon-side is forced only where a
+  judgement needs state a native hook cannot reach (`NitpickSetup`'s
+  transcript cursor, or a prior regex match); a standalone judgement
+  (`IDEAS.md` #3/#4/#13) is cheaper to prototype natively first (Phase 4).
+- **Fail-open is mandatory**: any model-call error degrades to no-opinion
+  (Phase 2) or today's existing behaviour (Phase 3), never a new block or a
+  crash — an explicit, scoped exception to Core Standard 6 for this one
+  class of external-service dependency.
+- **"Advisory" does not mean "free" — this changes what Phase 2 must
+  build.** A synchronous model call inside `Stop`'s own response still adds
+  a perceptible end-of-turn pause; wrong-block risk is zero, perceived-
+  latency risk is not (`DECISIONS.md` §1b). Task 2.2's deferred/async design
+  (return immediately, surface the finding on a *later* event) is what
+  actually delivers that intuition — a synchronous same-turn call would ship
+  something slower than intended, with no test able to catch it.
 
 ## Success Criteria
 
 - [ ] `RESEARCH-claude-code-native-hooks.md`, `DECISIONS.md` and `IDEAS.md`
-  answer the user's original question with evidence, not speculation,
-  and honestly flag what could not be verified from documentation alone.
-- [ ] The first AI-assisted handler (Phase 2) ships advisory-only, fails
-  open on every external error mode, cannot construct a DENY at the
-  type level, and passes this project's full QA + acceptance gates.
-- [ ] The second handler (Phase 3) ships with an explicit, reviewed decision
-  on its fail-open direction given it is the one blocking candidate.
+  answer the user's original question with evidence, not speculation, and
+  honestly flag what could not be verified from documentation alone.
+- [ ] The nitpick upgrade (Phase 2) ships advisory-only, deferred (not
+  synchronous on `Stop`), fails open on every external error mode, cannot
+  construct a DENY at the type level, and passes this project's full QA +
+  acceptance gates.
+- [ ] The confirm-the-positive filter (Phase 3) ships for at least
+  `qa_suppression`, can only ever downgrade a block, falls back to today's
+  exact behaviour on any model error, and does not regress the
+  false-positive-tolerant acceptance-test strategy.
+- [ ] Phase 4's native-hook prototypes are evaluated and a stop/continue
+  decision recorded before any daemon infrastructure is built for them.
+- [ ] Per-invocation cost for any model call (daemon-side or native) is
+  MEASURED before default-on rollout, never estimated — the docs state
+  nothing about `prompt`/`agent` hook cost/billing at all
+  (`RESEARCH-...md`).
 
 ## Risks & Mitigations
 
-| Risk                                                                                                     | Impact                                                                  | Probability                                         | Mitigation                                                                                                                                                        |
-| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A model call blocks a hot-path event and the daemon "feels slow"                                         | High — regresses the daemon's core value proposition                    | Medium if scope creeps past `Stop`/rare-file events | Restrict Phase 2/3 strictly to the events `DECISIONS.md` §1 rates as latency-tolerant; do not extend to `PreToolUse` at full sampling without a separate decision |
-| An AI handler's non-determinism breaks the acceptance-test/QA discipline                                 | Medium — erodes trust in "green QA" meaning what it has always meant    | Medium                                              | Mock the model call in unit tests; assert decision-class stability (not exact wording) in acceptance tests, per `DECISIONS.md` §2                                 |
-| A model-call failure blocks or crashes instead of failing open                                           | High — an external service hiccup takes down protection or blocks users | Low if built with explicit tests for this           | Task 2.4/3.2 require dedicated failure-mode tests before either handler ships                                                                                     |
-| Native `prompt`/`agent` hook adoption elsewhere in the project collides with `hook_registration_checker` | Low — no such adoption is in this plan's scope                          | Low                                                 | Documented in `RESEARCH-...md` for whoever revisits Mechanism A later                                                                                             |
+| Risk                                                                     | Impact                           | Probability                                                           | Mitigation                                                                                                                  |
+| ------------------------------------------------------------------------ | -------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| A model call blocks a hot-path event, daemon "feels slow"                | High — regresses core value prop | Medium if scope creeps past the deferred/confirm-the-positive designs | Restrict Phases 2-3 to `DECISIONS.md` §1b/§3c's designs; no synchronous same-turn shortcut                                  |
+| An AI handler's non-determinism breaks acceptance-test/QA discipline     | Medium                           | Medium                                                                | Mock the model call in unit tests; assert decision-class stability, not exact wording; use Examples A/B as regression cases |
+| A model-call failure blocks or crashes instead of failing open           | High                             | Low if tested explicitly                                              | Tasks 2.4/3.1 require dedicated failure-mode tests before either handler ships                                              |
+| Confirm-the-positive filter weakens a block the acceptance tests rely on | Medium                           | Low if Task 3.2 is explicit                                           | Task 3.2 confirms the filter's axis ("use vs mention") differs from the tests' axis                                         |
 
 ## Delivery & Milestones
 
-- Phase 1 (research) delivered in this plan's initial commit.
+- Phase 1 delivered across this plan's initial commits.

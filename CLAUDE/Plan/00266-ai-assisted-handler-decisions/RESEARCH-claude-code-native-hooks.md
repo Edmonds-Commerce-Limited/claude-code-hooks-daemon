@@ -9,9 +9,11 @@ this daemon?
 **Yes — confirmed via the official docs page (`code.claude.com/docs/en/hooks`,
 fetched 2026-08-24) and cross-checked by web search.** Claude Code's hook
 system supports **five** hook types, registered per-event in the same `hooks`
-JSON structure used today (this project's own `.claude/settings.json`, or a
-project's `.claude/hooks.json` — see "Where this repo already half-describes
-it" below):
+JSON structure used today — the `settings.json` family (`~/.claude/`,
+`.claude/settings.json`, `.claude/settings.local.json`), managed policy
+settings, and skill/subagent frontmatter. There is no `.claude/hooks.json`;
+see "Where this repo already half-describes it" below for how that wrong path
+got into this repository's own docs:
 
 | `type`     | What runs                                                                     | Default timeout                                                       |
 | ---------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------- |
@@ -27,7 +29,12 @@ is a **separate mechanism from this daemon** — it is evaluated by Claude Code
 itself, not dispatched through `FrontController`, and does not go through
 `Handler`/`HookResult`/the priority system/the config YAML/the QA or
 acceptance-test machinery this project has built. A `prompt` or `agent` hook
-is configured as JSON sitting alongside (or instead of) a `command` hook.
+is configured as JSON sitting alongside a `command` hook — and in THIS project
+it must only ever be alongside. Replacing the daemon's wrapper with a
+`prompt`/`agent` entry is not a supported swap: `reconcile_settings_hooks` is
+additive per **event**, not per entry, so once an event carries any hook the
+daemon's self-heal will not restore the wrapper it no longer sees, and every
+`command`-dispatched handler on that event goes silently dark.
 
 ### `prompt` type — schema and behaviour
 
@@ -129,6 +136,61 @@ does not have this problem in the same way, because the model choice is a
 line in *this* project's own code, reviewed and changed deliberately like
 anything else.
 
+### Settled by a direct re-fetch of the docs page
+
+Four of the five gaps below were closed by fetching
+`code.claude.com/docs/en/hooks` again with the questions asked directly.
+Recorded here rather than edited into the text above, so the difference
+between what the first pass found and what a targeted second pass found stays
+visible.
+
+- **There is no `.claude/hooks.json`.** The page lists `~/.claude/settings.json`,
+  `.claude/settings.json`, `.claude/settings.local.json`, managed policy
+  settings, skill frontmatter and subagent frontmatter — and a PLUGIN
+  `hooks/hooks.json`, which is almost certainly where this repo's incorrect
+  `.claude/hooks.json` came from. `CLAUDE/ARCHITECTURE.md` and
+  `CLAUDE/HANDLER_DEVELOPMENT.md` have been corrected.
+
+- **Coexistence is confirmed and better than assumed**: "All matching hooks
+  run in parallel." So a native `prompt`/`agent` hook and this daemon's
+  `command` hook both run, concurrently — a slow LLM hook does NOT serialise
+  behind the daemon's dispatch. Also: "If you define the same handler in more
+  than one settings file, it runs once", and hook entries MERGE across
+  settings levels rather than replacing each other.
+
+  **But parallel is not free, and it would be easy to misread it that way.**
+  Parallelism means the hooks do not COMPOUND — the cost is the slowest hook,
+  not the sum — while the tool call still blocks on that slowest one. So
+  adding a `prompt` hook to `PreToolUse` still turns a ~45 ms round trip into
+  a multi-second one for that event. The finding removes the fear that a
+  native hook would degrade the DAEMON's latency; it does not weaken the
+  event-selection argument in `DECISIONS.md` at all.
+
+- **No per-event restriction is stated.** For skill/subagent frontmatter the
+  page says "All hook events are supported". No allowlist or denylist for
+  `prompt`/`agent` appears anywhere.
+
+- **Timeouts are fully specified**: 600s for `command`/`http`/`mcp_tool`
+  (lowered to 30s for `UserPromptSubmit` and 10s for `MessageDisplay`), 30s
+  for `prompt`, 60s for `agent`.
+
+- **`agent` is still experimental**, verbatim: "Agent hooks are experimental
+  and may change."
+
+**Still genuinely unanswered, and it is the one that matters most for this
+project**: cost, billing and rate-limit consumption for `prompt`/`agent`
+hooks is *not stated on the page at all*. A design that fires a model call per
+event cannot be costed from the documentation, so any proposal must treat
+per-invocation cost as an unknown to be measured, not estimated. The
+introduction version is likewise unannotated, so no minimum Claude Code
+version can be asserted.
+
+Note also that no precedence rule is given for hooks that DISAGREE — the page
+says only that they all run in parallel. So the `deny > defer > ask > allow`
+ladder cited above remains the general multi-hook rule, and whether a
+`prompt` hook's verdict folds into it identically is inference, not
+documentation.
+
 ### What still could not be settled from documentation
 
 1. **No stated introduction version** for `prompt`/`agent` hooks (unlike
@@ -167,40 +229,47 @@ before committing to a design, the questions to put to it are:
 
 `CLAUDE/ARCHITECTURE.md` (§"Use Claude Code Native Agent Hooks For (Complex
 Evaluation)") already draws exactly this line — daemon handlers for
-deterministic pattern matching, "Native Agent Hooks" via `.claude/hooks.json`
-for anything needing multi-turn reasoning or file inspection — and gives a
-worked example (`"type": "agent"`, a `prompt` field, blocking `git tag`
-against `RELEASING.md`). Its JSON shape is consistent with the real,
-documented schema above (it just omits the `model`/`timeout` fields).
+deterministic pattern matching, native agent hooks (now correctly pointing
+at `.claude/settings.json`, see below) for anything needing multi-turn
+reasoning or file inspection — and gives a worked example (`"type": "agent"`,
+a `prompt` field, blocking `git tag` against `RELEASING.md`). Its JSON shape
+is consistent with the real, documented schema above.
 
-**But this is pure aspiration, never implemented in this repository:**
+**Historical note**: an earlier draft of this section treated the
+`.claude/hooks.json` filename and a `hook_registration_checker` policy
+collision as open problems this plan would have to resolve. Neither was —
+the filename was a doc-truth bug (see "Settled by a direct re-fetch of the
+docs page" above: hooks live in the `settings.json` family, not a bespoke
+`.claude/hooks.json`; both `ARCHITECTURE.md` and `HANDLER_DEVELOPMENT.md`
+are now corrected), and the registration-checker collision does not exist
+at the code level, below.
 
-- `.claude/hooks.json` does not exist anywhere in this checkout (`find`
-  confirmed zero matches).
+**`hook_registration_checker` does NOT flag a native hook — that claim was
+checked against the code and is false.** `detect_legacy_hook_commands`
+(`utils/hook_registration.py:149`) reads `command_entry.get("command", "")`
+and `continue`s on an empty value; a `type: prompt`/`type: agent` entry has
+no `command` key at all, so it is skipped and never reported. And
+`reconcile_settings_hooks` is additive per EVENT (`if json_key in new_hooks: continue`), with a docstring stating that client-added custom entries are
+left untouched — so a native hook added alongside survives auto-repair.
 
-- `"type": "agent"` and `hooks.json` appear in exactly two files in the whole
-  tree: `ARCHITECTURE.md` itself and `HANDLER_DEVELOPMENT.md` — i.e. only in
-  the documentation that describes the pattern, never in a config file that
-  uses it.
+What IS true is that the handler's `get_claude_md()` guidance says "Every
+registered command must end with `/.claude/hooks/{event}`. Anything else...
+is a legacy setup", which READS as forbidding what the code permits. That is
+a wording fix, not an exemption that needs implementing.
 
-- The project's own `hook_registration_checker` handler (SessionStart,
-  advisory, self-healing) actively enforces the *opposite* policy today:
-  "All hooks live in `settings.json`... Hook commands must invoke the daemon
-  wrapper... Every registered command must end with `/.claude/hooks/{event}`.
-  Anything else... is a legacy setup that bypasses the daemon entirely." A
-  native `prompt`/`agent` hook registered in `settings.json` (there is no
-  separate `hooks.json` actually read by Claude Code as far as this
-  repository's own tooling assumes — `hooks.json` may be an aspirational name
-  from the ARCHITECTURE.md author, not a distinct file Claude Code treats
-  specially versus `settings.json`'s own `hooks` block) would presently be
-  flagged by this checker as a "legacy-style command" bypassing the daemon,
-  unless the handler were taught an exemption for `type: prompt`/`type: agent` entries.
+The real footgun sits next door: because reconcile is additive per EVENT and
+not per ENTRY, replacing the daemon wrapper with a native hook means the
+wrapper is never restored — the key exists, so it is skipped. Add alongside,
+never replace.
 
-  This is a genuine, concrete tension the plan must resolve, not paper over:
-  **adopting native prompt/agent hooks anywhere in this project requires
-  either changing `hook_registration_checker`'s policy or deliberately
-  keeping native hooks and daemon hooks in two clearly-separated,
-  non-conflicting lanes.**
+**Net effect: there is no architectural tension to resolve.** Native
+`prompt`/`agent` hooks are adoptable in this project TODAY, alongside the
+daemon's own hooks, with zero code changes. What remains is a one-line
+documentation fix to `hook_registration_checker.get_claude_md()` (scope the
+"every command must route through the daemon wrapper" rule explicitly to
+`type: command` entries, so its wording stops reading as forbidding what
+the code already permits) — tracked as a task in `PLAN.md` — and remembering
+the additive-per-event footgun above when actually adding one.
 
 ## The two fundamentally different mechanisms on the table
 
@@ -210,7 +279,7 @@ documented schema above (it just omits the `model`/`timeout` fields).
 | Goes through `FrontController`/`Handler`/`HookResult`?                     | **No** — entirely outside this daemon's dispatch, config, priority and testing machinery                       | **Yes** — same `Handler` ABC, same `HookResult`/`AdvisoryResult` contract, same config YAML, same acceptance-test framework    |
 | Implementation cost in this repo                                           | ~Zero (it's Claude Code's own feature — just JSON config)                                                      | New infrastructure: a way to shell out to a model, timeout/error handling, mocking for tests, cost/rate-limit accounting       |
 | Engineering discipline (TDD, 95% coverage, deterministic acceptance tests) | **Bypassed entirely** — it's a prompt string in JSON, not testable the way this codebase tests everything else | Preserved — but testing a handler whose "correctness" depends on model output is a genuinely harder problem (see DECISIONS.md) |
-| Config/observability                                                       | Lives in `settings.json`/`hooks.json`, invisible to `hooks-daemon status`, `verdict_log`, `plan-qa`, etc.      | Fully observable via existing daemon tooling (verdict log, generate-docs, generate-playbook)                                   |
+| Config/observability                                                       | Lives in `settings.json`, invisible to `hooks-daemon status`, `verdict_log`, `plan-qa`, etc.                   | Fully observable via existing daemon tooling (verdict log, generate-docs, generate-playbook)                                   |
 | Portability across client projects                                         | Whatever Claude Code ships, works everywhere Claude Code runs — no daemon dependency                           | Only works where this daemon is installed and configured                                                                       |
 
 Neither option is free of the latency problem — see `DECISIONS.md` — because

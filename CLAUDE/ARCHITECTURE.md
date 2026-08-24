@@ -81,7 +81,30 @@ Claude Code Hooks Daemon is a reusable, configurable hook system for Claude Code
 | Hook Type          | Configuration File          | Purpose                                       |
 | ------------------ | --------------------------- | --------------------------------------------- |
 | Daemon Handlers    | `.claude/hooks-daemon.yaml` | Deterministic validation, reusable handlers   |
-| Native Agent Hooks | `.claude/hooks.json`        | Complex evaluation, project-specific workflow |
+| Native Agent Hooks | `.claude/settings.json`     | Complex evaluation, project-specific workflow |
+
+**There is no `.claude/hooks.json`.** This table named one until Plan 00266
+checked it against the Claude Code hook documentation: native hooks live in the
+same `settings.json` files the daemon's own registrations use (`~/.claude/`,
+`.claude/settings.json`, `.claude/settings.local.json`), plus skill and subagent
+frontmatter. The `hooks/hooks.json` filename is real but belongs to PLUGINS,
+which is the likely source of the error.
+
+A native hook therefore sits **alongside** this daemon's `command` hook in the
+same file, and both run: the documentation states that all matching hooks run
+in parallel, so a slow `agent` hook does not serialise behind the daemon's
+~1.8 ms dispatch.
+
+**Parallel does not mean free.** The hooks do not compound — the cost is the
+SLOWEST hook, not the sum — but the tool call still waits for that slowest
+one. Adding a `prompt` hook to a `PreToolUse` event turns a ~45 ms round trip
+into a multi-second one for that event, however fast the daemon is. Choose the
+event accordingly: `Stop` and `SessionStart` already keep the user waiting,
+whereas `PreToolUse` is the hot path this daemon exists to keep quick.
+
+Note also that `reconcile_settings_hooks` is additive per EVENT, not per
+entry — so add a native hook next to the daemon wrapper, never in place of it,
+or the wrapper will not be restored.
 
 ### Example: Release Workflow Protection
 
@@ -97,7 +120,7 @@ class ReleaseWorkflowHandler(Handler):
         pass
 ```
 
-**Correct Approach** (Native Agent Hook in `.claude/hooks.json`):
+**Correct Approach** (Native Agent Hook in `.claude/settings.json`):
 
 ```json
 {

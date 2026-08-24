@@ -59,7 +59,11 @@ Without debugging first, you're guessing which events to hook and what data is a
 
 ### Use Native Agent Hooks Instead
 
-For complex validation, use `.claude/hooks.json` with agent-based hooks:
+For complex validation, add an agent-based hook to `.claude/settings.json` —
+the same file the daemon's own registrations live in, alongside them rather
+than instead of them. (`type: agent` is documented as experimental and may
+change; `type: prompt` is the stable single-turn equivalent, with no tool
+access and a 30s default timeout against the agent hook's 60s.)
 
 ```json
 {

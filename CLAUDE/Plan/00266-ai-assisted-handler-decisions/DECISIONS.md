@@ -355,9 +355,10 @@ the surface (security) where this project is least willing to accept it.**
 ## 4. Does a daemon-side AI handler need to exist at all, given native hooks?
 
 `RESEARCH-claude-code-native-hooks.md` confirms native `prompt`/`agent`
-hooks are real, free (no code to write), and — per that document's
+hooks are real, adoptable with no code to write, and — per that document's
 follow-up research — **run in parallel with this daemon's own `command`
-hook on the same event** rather than replacing it. That changes the
+hook on the same event**, never as a replacement for it — see the
+reconcile-is-additive-per-event footgun there. That changes the
 question this plan has to answer. It is no longer "can we have AI-driven
 hooks" — it is "given Claude Code already has them natively, does building
 one inside this daemon earn its cost."
