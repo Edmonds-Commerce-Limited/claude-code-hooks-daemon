@@ -89,6 +89,46 @@ config_changes:
         calls batched in the same turn). If your project generates source files
         via heredoc or redirect and cannot make them lint-clean, set
         lint_bash_writes to false; Write/Edit linting is unaffected either way.
+    - key: handlers.worktree_create.worktree_create.options.seed
+      recommended: true
+      # NOT dormant in the usual sense -- worktree_create ships enabled: true
+      # and must (Claude Code parses its stdout as the worktree path). But the
+      # option has no shipped default and none is possible, so it does nothing
+      # until a project lists its own paths. That is what makes it recommended:
+      # the daemon cannot adopt this on anyone's behalf.
+      dormant: false
+      description: >-
+        NEW option (Plan 00267). Seeds a fresh git worktree from a
+        project-owned list of git-ignored paths. A worktree is a clean
+        CHECKOUT, so local env files, local settings and local secrets are
+        simply absent from it -- an isolation "worktree" agent then runs
+        against a different configuration from the session that spawned it,
+        and nothing surfaces the difference. Each entry is either SYMLINKED
+        (shared with the main checkout; one source of truth, but a write from
+        inside the worktree flows back) or COPIED (isolated; safe to
+        overwrite, may drift), chosen per entry with a block-level
+        default_mode. Files and directories both work; there is no glob
+        expansion, only explicit paths. Symlinks are always RELATIVE, so they
+        survive the same tree being viewed at two different absolute prefixes
+        -- a host path and a container bind-mount of the same project. A
+        configured path that does not exist ABORTS worktree creation BEFORE
+        the worktree is made, rather than handing an agent a quietly
+        under-seeded checkout it cannot know is incomplete; an existing
+        destination is never clobbered, and a re-fired event never re-seeds
+        over an agent's own edits. Ships with an EMPTY list, so nothing
+        changes until a project configures it.
+      migration_note: >-
+        No shipped default is possible here -- only your project knows which
+        of its git-ignored files a worktree needs. Run
+        `bin/hooks-daemon check-worktree-seed` (also run automatically at
+        install and upgrade): it scans the repository, names candidates, and
+        prints a paste-ready YAML block at the correct nesting. It REPORTS
+        only; it never edits your config, and it never reads the contents of
+        the files it names. Exit 0 clean, 1 drift, 2 error, so it is CI-able.
+        Choose `copy` for anything an agent may WRITE to -- a symlinked file
+        edited inside a worktree changes the main checkout. Worth checking for
+        a secret/word-list file specifically: absent from a worktree, a guard
+        that reads one does not fail, it goes silently inert.
     - key: handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes
       recommended: false
       # dormant for the same reason as lint_bash_writes: validate_eslint_on_write

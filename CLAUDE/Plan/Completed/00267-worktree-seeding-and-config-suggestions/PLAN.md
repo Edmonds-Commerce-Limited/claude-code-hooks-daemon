@@ -1,6 +1,6 @@
 # Plan 00267: Worktree seeding and config suggestions
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-25
 **Owner**: joseph
 **Priority**: High
@@ -142,15 +142,19 @@ wrong place for a session whose cwd is a subdirectory (DESIGN §3).
 
 ### Phase 6: Integration, docs and dogfooding
 
-- [ ] ⬜ **Task 6.1**: `get_claude_md()` — state both modes' hazards, including
-  symlink write-through to the main checkout
-- [ ] ⬜ **Task 6.2**: Document the option in the shipped example config
-- [ ] ⬜ **Task 6.3**: Add the missing `worktree_create` block to this repo's
-  own daemon config and dogfood the feature
-- [ ] ⬜ **Task 6.4**: Add a config-changes manifest entry for the new option
-- [ ] ⬜ **Task 6.5**: Full QA green; daemon restart verified RUNNING
-- [ ] ⬜ **Task 6.6**: Decide the fate of the superseded remote branch once its
-  value is fully harvested
+- [x] ✅ **Task 6.1**: `get_claude_md()` — state both modes' hazards, including
+  symlink write-through to the main checkout. Emitted only where seeding is
+  CONFIGURED: guidance is built from active handlers, so a project that does
+  not use the option pays no resident context for a hazard it cannot hit
+- [x] ✅ **Task 6.2**: Document the option in the shipped example config
+- [x] ✅ **Task 6.3**: Add the missing `worktree_create` block to this repo's
+  own daemon config and dogfood the feature — a real worktree created through
+  the live daemon carries both entries as **relative** symlinks resolving to
+  the canonical files
+- [x] ✅ **Task 6.4**: Add a config-changes manifest entry for the new option
+- [x] ✅ **Task 6.5**: Full QA green; daemon restart verified RUNNING
+- [x] ✅ **Task 6.6**: Superseded branch — value confirmed harvested; deletion
+  is the human's call (see Decision 5)
 
 ## Dependencies
 
@@ -175,6 +179,18 @@ Recorded in full in [DESIGN.md](DESIGN.md). In brief:
    reproduced failure across host and container path views.
 4. **One suggestion implementation, two entry points** (DESIGN §6) — separate
    install-time and ad-hoc paths would duplicate the scan and drift apart.
+5. **The superseded branch's deletion is not the agent's to make.** All eight
+   findings from its Opus review are carried in DESIGN §2 with dispositions,
+   and every one is now implemented and tested, so the branch's residual value
+   is its own plan documents — which `CLAUDE/Plan/README.md` already records a
+   deliberate decision about: 00191 stays folderless, and no folder for it will
+   land in `main`. That leaves only the remote branch, holding the only copy of
+   its review and journals. Deleting a remote branch is outward-facing and
+   irreversible for everyone else, so it is reported for a human to action
+   rather than done here.
+6. **No `--write` flag** (DESIGN §9) — PyYAML cannot round-trip comments, so a
+   write would strip the config's own documentation to add a few lines. The
+   report renders a paste-ready block instead.
 
 ## Success Criteria
 
@@ -185,8 +201,8 @@ Recorded in full in [DESIGN.md](DESIGN.md). In brief:
 - [x] A content error aborts before creation; no partially-seeded worktree
 - [x] The suggestion command reports this repo's own missing `worktree_create`
   block, and exits 1 on drift
-- [ ] No secrets in code, tests or fixtures
-- [ ] Full QA green; daemon restart verified RUNNING
+- [x] No secrets in code, tests or fixtures
+- [x] Full QA green; daemon restart verified RUNNING
 
 ## Risks & Mitigations
 
@@ -203,4 +219,10 @@ Recorded in full in [DESIGN.md](DESIGN.md). In brief:
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00267-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- Phase 1 (repo-root resolution, a pre-existing bug) — `c7adde24`
+- Phase 2 (seed config vocabulary and defensive parse) — `fd45e437`
+- Phase 3 (seeding execution: relative symlinks, copy, fail-fast) — `6a30e288`
+- Phase 4 (repository scanner and drift diff) — `d2673120`
+- Phase 5 (`check-worktree-seed` CLI, install/upgrade wiring; dogfooding
+  widened the Phase 4 heuristics) — `79cd6fc6`
+- Phase 6 (guidance, example config, this repo's own seed config, manifest)

@@ -664,6 +664,27 @@ handlers:
       enabled: true
       priority: 14
 
+  worktree_create:  # WorktreeCreate event (isolation:worktree agents / --worktree sessions)
+    worktree_create:  # Creates the git worktree at a semantic path and echoes it
+      enabled: true
+      priority: 50
+      options:
+        # Both of these were found by running `check-worktree-seed` against this
+        # repository (Plan 00267) — neither was configured, and a worktree agent
+        # had been running without them for as long as the handler has existed.
+        seed:
+          default_mode: symlink
+          entries:
+            # The secret word list. Gitignored, so a worktree lacks it — and
+            # sensitive_content does not fail without it, it goes silently
+            # INERT. Symlinked so an update to the list reaches every worktree
+            # at once; nothing writes to it.
+            - .claude/block-words.secret
+            # Sets HOOKS_DAEMON_ROOT_DIR. The value is resolved at runtime
+            # rather than baked in, so it is identical for every worktree and
+            # sharing one copy is correct.
+            - .claude/hooks-daemon.env
+
 
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
 plugins:

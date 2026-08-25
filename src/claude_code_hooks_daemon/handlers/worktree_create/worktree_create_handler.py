@@ -26,7 +26,12 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.handler_bases import WorktreeCreateHandlerBase
 from claude_code_hooks_daemon.core.worktree_naming import worktree_dir_name, worktree_path
-from claude_code_hooks_daemon.core.worktree_seed import SeedEntry, parse_seed_config
+from claude_code_hooks_daemon.core.worktree_seed import (
+    SEED_MODE_COPY,
+    SEED_MODE_SYMLINK,
+    SeedEntry,
+    parse_seed_config,
+)
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
 from claude_code_hooks_daemon.utils.worktree_seeding import seed_worktree, validate_seed_sources
 
@@ -148,7 +153,14 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             )
 
     def get_claude_md(self) -> str | None:
-        """Guidance injected into the project CLAUDE.md."""
+        """Guidance injected into the project CLAUDE.md.
+
+        Guidance is collected from ACTIVE handlers, so this runs with the
+        project's options already applied. The seeding section is therefore
+        emitted only where seeding is configured: the write-through hazard is a
+        real footgun for a project that uses it, and pure resident noise for one
+        that does not.
+        """
         return (
             "## worktree_create — semantic worktree naming\n\n"
             'When Claude Code creates a worktree (an `isolation: "worktree"` agent '
@@ -157,8 +169,53 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             "path. Name an agent semantically (the Agent tool's `name:`) to get a "
             "readable worktree directory (e.g. `refactor-auth-4f2a1c9b`) instead of "
             "an opaque `wf_<hash>`. The short hash suffix keeps identically-named "
-            "agents from colliding."
+            "agents from colliding." + self._seeding_guidance()
         )
+
+    def _seeding_guidance(self) -> str:
+        """Return the seeding section, or nothing when seeding is unconfigured."""
+        entries = self._seed_entries()
+        if not entries:
+            return ""
+
+        linked = [entry.path for entry in entries if entry.mode == SEED_MODE_SYMLINK]
+        copied = [entry.path for entry in entries if entry.mode == SEED_MODE_COPY]
+
+        lines = [
+            "\n\n**A fresh worktree is a clean checkout**, so this project's "
+            "git-ignored local files would be absent from it — an agent would "
+            "silently run against a different configuration from the session that "
+            "spawned it. The daemon seeds them on creation, and HOW it does so "
+            "decides whether your edits inside a worktree are isolated:",
+        ]
+
+        if linked:
+            lines.append(
+                f"\n\n- **`{SEED_MODE_SYMLINK}` mode — shared, NOT isolated**: "
+                + ", ".join(f"`{path}`" for path in linked)
+                + ". These point at the main checkout, so editing one from inside "
+                "a worktree changes the file every other session is using. Read "
+                "them freely; treat writing to one as writing to the main "
+                "checkout, because it is."
+            )
+
+        if copied:
+            lines.append(
+                f"\n\n- **`{SEED_MODE_COPY}` mode — copied, isolated, may go stale**: "
+                + ", ".join(f"`{path}`" for path in copied)
+                + ". Yours to edit — nothing flows back. The tradeoff is the other "
+                "direction: a later change to the canonical file does not reach a "
+                "worktree already created."
+            )
+
+        lines.append(
+            "\n\nSeeding happens ONCE, at creation; a re-fired event never "
+            "re-seeds over an agent's own edits. A configured path that has since "
+            "disappeared ABORTS creation rather than handing you a quietly "
+            "under-seeded worktree — run `bin/hooks-daemon check-worktree-seed` to "
+            "see which entries are stale and which local files are not yet covered."
+        )
+        return "".join(lines)
 
     def get_acceptance_tests(self) -> list[Any]:
         """VERIFIED_BY_LOAD: WorktreeCreate fires only when Claude Code spawns a

@@ -306,3 +306,51 @@ class TestSeedingOnCreate:
         handler.handle(self._input(repo))
 
         assert seeded.read_text(encoding="utf-8") == "SECRET=agent-edited\n"
+
+
+class TestSeedingGuidance:
+    """Plan 00267 Phase 6: the resident guidance tracks the live config.
+
+    Guidance is collected from ACTIVE handlers, so it is built after options
+    are applied. That makes the seeding hazard statable only where it is real:
+    a project with no seed entries pays no resident context for a footgun it
+    cannot hit, and a project with them is told before it hits one.
+    """
+
+    def test_naming_guidance_is_always_present(self) -> None:
+        guidance = WorktreeCreateHandler().get_claude_md() or ""
+
+        assert "worktree_create" in guidance
+        assert "semantic" in guidance.lower()
+
+    def test_unconfigured_handler_says_nothing_about_seeding(self) -> None:
+        guidance = WorktreeCreateHandler().get_claude_md() or ""
+
+        assert "seed" not in guidance.lower()
+
+    def test_symlink_write_through_hazard_is_stated_when_configured(self) -> None:
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [".env.local"]}
+
+        guidance = handler.get_claude_md() or ""
+
+        assert ".env.local" in guidance
+        # The hazard an agent can actually trip: an edit inside the worktree is
+        # NOT isolated, it lands in the main checkout.
+        assert "symlink" in guidance.lower()
+        assert "main checkout" in guidance.lower()
+
+    def test_copy_drift_hazard_is_stated_when_a_copy_entry_is_configured(self) -> None:
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [{"path": ".secrets", "mode": SEED_MODE_COPY}]}
+
+        guidance = handler.get_claude_md() or ""
+
+        assert ".secrets" in guidance
+        assert "copy" in guidance.lower()
+
+    def test_guidance_names_the_reporting_command(self) -> None:
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [".env.local"]}
+
+        assert "check-worktree-seed" in (handler.get_claude_md() or "")

@@ -467,6 +467,33 @@ handlers:
       # worktree path, so a disabled/passthrough hook breaks worktree creation.
       enabled: true
       priority: 50
+      # options:
+      #   # A fresh worktree is a clean CHECKOUT, so your git-ignored local
+      #   # files are simply absent from it — an agent working there runs
+      #   # against a different configuration from the session that spawned it,
+      #   # and nothing says so. List the paths to place into a new worktree.
+      #   #
+      #   # No default is shipped and none can be: only this project knows
+      #   # which of its git-ignored files matter. Run
+      #   #   bin/hooks-daemon check-worktree-seed
+      #   # to see what your repository suggests and what has gone stale. It
+      #   # reports; it never edits this file.
+      #   seed:
+      #     # Applies to any entry that does not name its own mode.
+      #     #   symlink — shared with the main checkout. One source of truth,
+      #     #             but a write from INSIDE a worktree flows back.
+      #     #   copy    — isolated. Safe to overwrite; may drift from the
+      #     #             canonical file after creation.
+      #     default_mode: symlink
+      #     entries:
+      #       # Repository-root-relative. Files or directories; no globs.
+      #       - .env.local
+      #       - path: .secrets       # anything an agent may WRITE to
+      #         mode: copy
+      #
+      #   # Seeding happens once, at creation. A re-fired event never re-seeds
+      #   # over an agent's own edits, and a listed path that does not exist
+      #   # ABORTS creation rather than yielding a quietly under-seeded worktree.
 
   worktree_remove:  # WorktreeRemove event (worktree teardown)
     worktree_remove:  # Prunes stale worktree registrations; removes a named worktree
