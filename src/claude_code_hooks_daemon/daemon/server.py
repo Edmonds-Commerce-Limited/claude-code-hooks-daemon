@@ -924,6 +924,11 @@ class HooksDaemon:
         self._active_requests += 1
         self.last_activity = time.time()
 
+        # Held outside the try so the dead-peer branch can tell an undelivered
+        # BLOCKING decision from an undelivered allow. Still None if the peer
+        # vanished before a response was produced.
+        response: dict[str, Any] | None = None
+
         try:
             # Read request (newline-delimited JSON)
             request_data = await reader.readline()
@@ -957,6 +962,17 @@ class HooksDaemon:
 
             logger.debug("Request processed in %.2fms", elapsed_ms)
 
+        except (BrokenPipeError, ConnectionResetError):
+            # A peer that hung up is not a daemon fault, and this is the common
+            # case on a restart or a forwarder timeout. Routing it through the
+            # generic handler below logged an ERROR with a traceback, and the
+            # attempt to report that failure back down the SAME dead socket
+            # added a second one — noise in the very channel the project's docs
+            # point at (`hooks-daemon logs | grep -i error`). Classified here
+            # instead: reported, never silently swallowed, and no error
+            # response is written to a socket already known to be gone.
+            self._log_lost_peer(response)
+
         except Exception as e:
             logger.exception("Error handling client: %s", e)
             error_response = {"error": str(e)}
@@ -973,6 +989,29 @@ class HooksDaemon:
             self._active_requests -= 1
             writer.close()
             await writer.wait_closed()
+
+    @staticmethod
+    def _log_lost_peer(response: dict[str, Any] | None) -> None:
+        """Report a client that vanished before its response was delivered.
+
+        The level carries the one thing that actually differs between these
+        disconnects. An undelivered ALLOW gated nothing, so it is routine. An
+        undelivered BLOCKING decision means Claude Code never received the
+        deny — the tool call was not gated by this daemon — which is worth
+        surfacing even though the daemon itself did nothing wrong.
+
+        Args:
+            response: The response that was being delivered, or ``None`` when
+                the peer went away before one existed.
+        """
+        if response is not None and is_blocking_response(response):
+            logger.warning(
+                "Client disconnected before receiving a BLOCKING response — the "
+                "decision was not delivered, so the tool call was not gated. "
+                "Usually a forwarder timeout or a daemon restart mid-request."
+            )
+        else:
+            logger.debug("Client disconnected before its response was delivered.")
 
     def _capture_payload_best_effort(self, event: str, hook_input: dict[str, Any]) -> None:
         """Capture the raw hook payload when dogfooding capture is enabled.
