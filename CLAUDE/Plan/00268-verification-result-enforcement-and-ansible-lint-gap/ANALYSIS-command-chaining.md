@@ -1,7 +1,9 @@
 # Should the hooks daemon enforce `&&` chaining?
 
-Written 2026-08-25, after a verification command failed, printed the correct diagnosis, and
-was ignored by the `git commit` that followed it in the same Bash invocation.
+An upstream feature request, generalised from a field report by a downstream project that
+uses this daemon. The originating incident's project-specific detail (filenames, directory
+layout, internal ticket references) has been removed — this repository is public, and none
+of it was needed for the argument.
 
 **Short answer: yes to the *idea*, no to the *rule as stated*.** Blanket `&&` enforcement
 would be both leaky (it would have missed the incident that prompted it) and noisy (it
@@ -12,17 +14,17 @@ building, and a different handler that would have caught this incident more reli
 
 ## 1. What actually happened
 
-Editing `play-gather-replica-io.yml`, I added an explanatory comment containing a
+While editing an Ansible playbook, the reporter added an explanatory comment containing a
 possessive apostrophe inside a `shell:` block. Ansible's `split_args` tokenises the raw
 block string at parse time — before a `#` is a comment — so one unbalanced quote aborts the
-whole play load with `failed at splitting arguments`. `service/CLAUDE.md` documents this
-trap **by name, with this exact error string**.
+whole play load with `failed at splitting arguments`. The project's own documentation names
+this trap, with that exact error string.
 
 The Bash invocation was, in essence:
 
 ```bash
-cd /workspace/service; ansible-lint ../…/play-gather-replica-io.yml > /tmp/al7.txt 2>&1; echo "lint exit=$?"; cat /tmp/al7.txt
-cd /workspace; git add …/play-gather-replica-io.yml
+ansible-lint <playbook> > /tmp/lint.txt 2>&1; echo "lint exit=$?"; cat /tmp/lint.txt
+git add <playbook>
 git commit -q -F - <<'EOF'
 …
 EOF
@@ -30,12 +32,12 @@ git log --oneline -1; git push 2>&1
 ```
 
 `ansible-lint` exited 2. The exit code was **captured and printed** (`lint exit=2`). The
-full diagnosis was **printed** (`cat /tmp/al7.txt`). Then `git add`, `git commit` and
-`git push` ran anyway. An unloadable play sat on `main` for one commit.
+full diagnosis was **printed**. Then `git add`, `git commit` and `git push` ran anyway. An
+unloadable play sat on the default branch for one commit.
 
-The failure is not that I did not check. It is that **nothing consumed the check's result.**
-A check whose outcome nothing acts on is not a check — it is decoration that produces the
-feeling of having verified something.
+The failure is not that the reporter did not check. It is that **nothing consumed the
+check's result.** A check whose outcome nothing acts on is not a check — it is decoration
+that produces the feeling of having verified something.
 
 ---
 
@@ -57,19 +59,19 @@ incident.
 ## 3. Why blanket `&&` enforcement is the wrong rule
 
 `&&` means "only if the previous command succeeded". A great deal of legitimate shell
-deliberately does not want that, and this session is full of examples:
+deliberately does not want that:
 
 | Shape                                              | Why `&&` breaks it                                                                                                                                                                              |
 | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `grep -q pattern file; echo done`                  | `grep` exits **1** when it matches nothing. That is a normal, expected result, not a failure. Chaining with `&&` aborts every search that finds nothing — which is often the answer you wanted. |
-| `echo "=== A ==="; cmd_a; echo "=== B ==="; cmd_b` | A diagnostic sweep wants **all** sections even when one probe fails. This is the `plan::gather_leg` pattern the plan library formalises, and R7 explicitly sanctions it for read-only runs.     |
+| `echo "=== A ==="; cmd_a; echo "=== B ==="; cmd_b` | A diagnostic sweep wants **all** sections even when one probe fails. This is the `plan_gather_leg` record-and-continue pattern the planlib formalises for read-only runs.                       |
 | `ls -1t dir_a; ls -1t dir_b`                       | Independent listings. One missing directory should not suppress the other.                                                                                                                      |
 | `cmd > file 2>&1; echo "exit=$?"`                  | The whole point is to observe a non-zero exit. `&&` would skip the observation precisely when it matters.                                                                                       |
 | `diff a b; echo "---"`                             | `diff` exits 1 on difference — the informative case.                                                                                                                                            |
 
 A handler that fired on all of these would be **mostly wrong**, and a handler that is mostly
-wrong gets disabled — which is the same failure mode the `#1288` backup gate was designed
-around (a gate that cries wolf gets switched off, leaving you worse off than no gate).
+wrong gets disabled — the same failure mode every noisy gate suffers: it cries wolf, someone
+switches it off, and you end up worse off than with no gate at all.
 
 There is also a correctness trap: `a && b; c` and `a && b && c` differ, and mechanical
 rewriting of `;` to `&&` changes semantics in ways that can be *less* safe (a cleanup step
@@ -85,12 +87,14 @@ The dangerous shape is not "`;` between commands". It is:
 
 That is high-precision and cheaply detectable. Concretely:
 
-**Verifiers** (a non-zero exit means "do not proceed"): `ansible-lint`, `ansible-playbook --syntax-check`, `shellcheck`, `bash -n`, `pytest`, `ruff`, `golangci-lint`, `go vet`, `php -l`, `mypy`, `npm test`, `yamllint`, `hooks-daemon plan-qa`, `*/qa-version-check.bash`.
+**Verifiers** (a non-zero exit means "do not proceed"): `ansible-lint`,
+`ansible-playbook --syntax-check`, `shellcheck`, `bash -n`, `pytest`, `ruff`,
+`golangci-lint`, `go vet`, `php -l`, `mypy`, `npm test`, `yamllint`,
+`hooks-daemon plan-qa`.
 
 **Mutators** (state-changing, outward-facing, or hard to reverse): `git add`, `git commit`,
 `git push`, `git tag`, `gh pr create`, `gh issue create`, `gh pr merge`,
-`ansible-playbook` (without `--check`), `*-ansible-playbook`, `deploy.bash`-shaped plan
-scripts.
+`ansible-playbook` (without `--check`), and deploy-shaped plan-folder scripts.
 
 **Fire when**: a verifier and a later mutator appear in the same Bash invocation, separated
 by `;` **or a newline**, with no `&&` linking them and no explicit exit-code gate between
@@ -123,15 +127,13 @@ The chaining rule defends the *syntax*. There is a gap one level down that defen
 
 Verified: `handlers/post_tool_use/lint_on_edit.py` contains no reference to `yaml`, `yml` or
 `ansible`. Its documented languages are Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin
-and Dart. `validate_eslint_on_write` covers TS/TSX. `plan_script_qa` lints plan-folder
-`*.yml` against **R14 only** (does this play converge durable state) — not against whether
-Ansible can load it.
+and Dart. `validate_eslint_on_write` covers TS/TSX.
 
-So this repo — whose primary artefact is Ansible playbooks — lints every language it
-touches **except the one it is written in.**
+So a project whose primary artefact is Ansible playbooks gets every language linted on write
+**except the one it is written in.**
 
 Had `lint_on_edit` run `ansible-lint` (or even just `ansible-playbook --syntax-check`) on
-the Edit, the write would have been **denied at the moment I made it**, with the correct
+the Edit, the write would have been **denied at the moment it was made**, with the correct
 diagnosis, before any commit was contemplated. No chaining rule needed, and it catches the
 much larger class of "never ran the lint at all" — which the chaining rule cannot touch,
 because there is nothing to chain.
@@ -140,11 +142,11 @@ because there is nothing to chain.
 
 - Only lint files that are plausibly Ansible: under `playbooks/`, `tasks/`, `roles/`, or a
   plan folder, or matching `play-*.yml` / `playbook-*.yml`. Do not lint arbitrary YAML —
-  `.github/workflows/`, `hooks-daemon.yaml`, inventory `hosts.yml` and vault files are not
+  `.github/workflows/`, `hooks-daemon.yaml`, inventory files and vault files are not
   playbooks and would produce noise or spurious failures.
-- Run from the right project directory (`service/` vs `cluster/`), since `ansible.cfg`,
-  `.ansible-lint` and the vendored collections all resolve relative to it. Getting this
-  wrong makes the linter fail for the wrong reason, which is worse than not running it.
+- Run from the correct project directory, since `ansible.cfg`, `.ansible-lint` and any
+  vendored collections all resolve relative to it. Getting this wrong makes the linter fail
+  for the wrong reason, which is worse than not running it.
 - `--syntax-check` alone is cheap and would have caught *this* bug (it is a load-time
   parse failure). Full `ansible-lint` is slower but catches `jinja[invalid]` and the rest.
   Consider syntax-check always, full lint at the `extended` tier — mirroring how
@@ -158,7 +160,7 @@ because there is nothing to chain.
 
 **(a) Require `set -e` on multi-command Bash invocations that contain a mutator.**
 One rule, no verifier/mutator taxonomy to maintain, and it fixes the entire class rather
-than the enumerated pairs — `set -euo pipefail` at the top of my command would have stopped
+than the enumerated pairs — `set -euo pipefail` at the top of the command would have stopped
 at the failing lint. Downside: it changes semantics for every command in the invocation,
 including the ones that legitimately expect non-zero (`grep`), so it trades one false-
 positive surface for another. Probably best offered as the *remedy text* in the §4 block
@@ -176,10 +178,10 @@ committed.
 ## 7. Recommendation, in priority order
 
 1. **Add Ansible YAML to `lint_on_edit`** (§5). Highest value, catches the largest class,
-   catches it earliest, and closes a genuinely surprising gap in an Ansible-first repo.
+   catches it earliest, and closes a genuinely surprising gap for Ansible-first projects.
 2. **Add the verifier-then-mutator chaining handler** (§4), in `warn` mode, **treating
    newlines as separators** (§2). Narrow, high-precision, and it generalises beyond Ansible
-   to every language the repo lints.
+   to every language the daemon lints.
 3. **Extend the commit gate to lint staged files** (§6b) as the backstop.
 
 Do **not** implement blanket `;` → `&&` enforcement (§3). It would have missed this
@@ -193,7 +195,5 @@ None of these would have prevented the *original* mistake — writing an apostro
 `shell:` block after having read the documentation that warns about it. They would have
 caught it in seconds instead of in a push.
 
-That is the right thing to optimise. The lesson from this plan, four times over now, is
-that re-reading code does not find this class of defect and **executing it does** — so the
-leverage is in making execution automatic and its result impossible to ignore, not in
-trying harder to notice.
+That is the right thing to optimise: the leverage is in making execution automatic and its
+result impossible to ignore, not in trying harder to notice.
