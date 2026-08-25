@@ -1,0 +1,192 @@
+# Plan 00268: Verification-result enforcement (verifier→mutator) and the Ansible/YAML lint gap
+
+**Status**: Not Started
+**Created**: 2026-08-25
+**Owner**: joseph
+**Priority**: Medium
+**Recommended Executor**: Sonnet
+**Execution Strategy**: Sub-Agent Orchestration
+
+## Overview
+
+A field report from a client project (an Ansible-first repo running this daemon)
+records an incident where a verification command failed, **printed its own correct
+diagnosis**, and was then ignored by a `git commit` in the same Bash invocation.
+`ansible-lint` exited 2, the exit code was captured and echoed, the full diagnosis
+was `cat`-ed — and `git add` / `git commit` / `git push` ran anyway. An unloadable
+play sat on `main` for one commit. The failure was not that the agent skipped the
+check; it is that **nothing consumed the check's result**. A check whose outcome
+nothing acts on is decoration that produces the feeling of having verified.
+
+The report's full analysis lives in
+[ANALYSIS-command-chaining.md](ANALYSIS-command-chaining.md) and is the durable
+reference for this plan — read it before implementing. Its headline conclusion is
+deliberately *against* the obvious rule: blanket `;` → `&&` enforcement would have
+**missed this very incident** (the dangerous separator was a NEWLINE, not a `;`)
+and would fire constantly on legitimate diagnostic shell (`grep -q x f; echo done`,
+`cmd > f 2>&1; echo "exit=$?"`, `diff a b; echo ---`). A handler that is mostly
+wrong gets disabled, which leaves the project worse off than no handler.
+
+Two changes are worth building, in the report's own priority order. First, close a
+genuinely surprising coverage gap: `lint_on_edit` lints Python, Shell, Go, PHP,
+Ruby, Rust, Swift, Kotlin and Dart, and **nothing lints Ansible YAML** — verified
+against `strategies/lint/`, which has no YAML strategy. Had the Edit been linted,
+the write would have been denied at the moment it was made, with the right
+diagnosis, before a commit was contemplated. Second, add a narrow, high-precision
+`verifier → mutator` handler that fires only when a verifier and a later mutator
+share one Bash invocation with nothing consuming the verifier's exit status.
+
+## Goals
+
+- Add an Ansible/YAML lint strategy to `lint_on_edit`, scoped to files that are
+  plausibly playbooks, so a load-time parse failure is reported at write time.
+- Ship a `verifier → mutator` PreToolUse handler in `warn` mode that names the
+  specific offending pair, treats a **newline as a separator equal to `;`**, and
+  does not fire when the result is genuinely consumed.
+- Reuse the existing shared scanner (`utils/shell_segmentation.split_unquoted`,
+  whose separator tuples already include `"\n"`) rather than growing a third
+  private bash scanner — the exact failure Plan 00200 Task 3.7 consolidated away.
+- Evaluate extending the commit gate to lint staged files as the backstop, so the
+  outcome is caught however the commit was invoked.
+
+## Non-Goals
+
+- **Blanket `;` → `&&` enforcement is explicitly rejected, not deferred.** The
+  report demonstrates it is simultaneously leaky (misses the motivating incident,
+  which used newline separation) and noisy (fires on `grep`-exits-1, diagnostic
+  sweeps, independent listings, deliberate exit-code observation). Mechanical
+  rewriting also changes semantics — `a && b; c` differs from `a && b && c`, and a
+  cleanup step that must always run silently stops running.
+- Enforcing `set -e` on multi-command invocations as a standalone rule. It fixes
+  the whole class with no taxonomy to maintain, but changes semantics for every
+  command in the invocation. Offer it as **remedy text in the block message**, not
+  as its own gate.
+- Linting arbitrary YAML. `.github/workflows/`, `hooks-daemon.yaml`, inventory
+  `hosts.yml` and vault files are not playbooks; linting them produces noise or
+  spurious failures.
+- Preventing the original mistake (writing an apostrophe into an Ansible `shell:`
+  block). Nothing here does that. The aim is to catch it in seconds rather than in
+  a push.
+
+## Context & Background
+
+Relevant existing infrastructure, verified in this codebase:
+
+- `utils/shell_segmentation.py` — the single quote-aware scanner. `split_unquoted`
+  already takes a separator tuple, and both callers (`pipe_blocker._CHAIN_SEPARATORS`,
+  `command_hints._SEGMENT_SEPARATORS`) already include `"\n"`. The report's most
+  important design point is therefore **already available** — the new handler must
+  use it, not reimplement it.
+- `utils/command_evasion.py` — recognises path-qualified and `env`-prefixed
+  invocation respellings; needed so `/usr/bin/ansible-lint` and `env X=1 git commit`
+  are matched as the tools they are.
+- `strategies/lint/` — the Strategy + Registry pattern a YAML strategy plugs into
+  (`protocol.py`, `registry.py`, `common.py`), with the cheap-syntax-check /
+  deeper-linter split already modelled.
+- `plan_qa_commit_gate` — proves the `git commit` hook point works for staged-tree
+  inspection, which is the pattern the Phase 3 backstop would follow.
+
+Precision is the binding constraint on both handlers. Plan 00204 records the same
+lesson for `security_antipattern`: a construct-level rule only earns its place if
+its false-positive rate stays low enough that nobody disables it.
+
+## Tasks
+
+### Phase 1: Ansible/YAML lint strategy for `lint_on_edit`
+
+- [ ] ⬜ **Task 1.1**: Confirm the gap and decide the detection rule for "this YAML
+  is plausibly an Ansible playbook" — path-based (`playbooks/`, `tasks/`,
+  `roles/`, plan folders, `play-*.yml` / `playbook-*.yml`) versus content
+  sniffing, and which exclusions are mandatory (`.github/workflows/`, daemon
+  config, inventories, vault files).
+- [ ] ⬜ **Task 1.2**: Decide the project-directory resolution rule. `ansible.cfg`,
+  `.ansible-lint` and vendored collections resolve relative to the project dir,
+  so running from the wrong one makes the linter fail for the wrong reason —
+  worse than not running it.
+- [ ] ⬜ **Task 1.3**: TDD the strategy: `ansible-playbook --syntax-check` as the
+  cheap default tier (it catches the motivating `split_args` failure) and
+  `ansible-lint` at the `extended` tier, mirroring the existing split.
+- [ ] ⬜ **Task 1.4**: Register in `strategies/lint/registry.py`, honour
+  `languages` / `command_overrides` / `exclude_paths`, and keep the
+  missing-linter leniency `lint_on_edit` already documents.
+- [ ] ⬜ **Task 1.5**: Write `get_claude_md()` guidance stating plainly that the
+  write has ALREADY landed — a PostToolUse denial is a failure report to repair
+  with `Edit`, not a rollback.
+- [ ] ⬜ **Task 1.6**: QA, daemon restart verification, and a client-mode check
+  (`scripts/dummy-client-repo.sh`) since this touches deployed strategy assets.
+
+### Phase 2: `verifier → mutator` PreToolUse handler (warn mode)
+
+- [ ] ⬜ **Task 2.1**: Settle the verifier and mutator taxonomies as named
+  constants, seeded from the report's lists, and decide whether they are
+  config-extensible per project.
+- [ ] ⬜ **Task 2.2**: TDD the detection using `split_unquoted` with a separator
+  tuple containing `"\n"`. A regression test must encode the motivating
+  incident verbatim: a multi-line command whose lint is on line 1 and whose
+  `git commit` is on line 3, with no `&&` between them.
+- [ ] ⬜ **Task 2.3**: TDD every non-firing case: `verifier && mutator`;
+  `verifier || { …; exit 1; }`; `rc=$?` followed by an `if`/`case`; `set -e` in
+  effect for the invocation; and a mutator that appears only inside a heredoc
+  body or a quoted string and is therefore never executed.
+- [ ] ⬜ **Task 2.4**: TDD the false-positive suite from the report's own table —
+  `grep -q p f; echo done`, `cmd > f 2>&1; echo "exit=$?"`, `diff a b; echo ---`,
+  independent `ls -1t` listings, and a labelled diagnostic sweep — all ALLOW.
+- [ ] ⬜ **Task 2.5**: Write the advisory text so it names the pair
+  ("`ansible-lint` can fail here and `git commit` would still run — gate it")
+  and shows the accepted forms. It must not read as a style opinion about `&&`.
+- [ ] ⬜ **Task 2.6**: Ship `mode: warn` by default with a documented ratchet to
+  `block`, mirroring `plan_qa_commit_gate`'s warn-first rollout.
+- [ ] ⬜ **Task 2.7**: Add `get_acceptance_tests()`, register in config, restart the
+  daemon, and dogfood the handler in this repo.
+
+### Phase 3: Staged-file lint backstop at `git commit`
+
+- [ ] ⬜ **Task 3.1**: Decide whether to extend the existing commit gate or add a
+  sibling handler, and bound the cost of linting staged files on every commit.
+- [ ] ⬜ **Task 3.2**: If approved, TDD it and ship warn-first; it catches the
+  outcome regardless of how the commit was invoked — chained, separate, or from
+  a later turn entirely.
+
+### Phase 4: Documentation and rollout
+
+- [ ] ⬜ **Task 4.1**: Update `docs/guides/HANDLER_REFERENCE.md` and the language
+  table in `CLAUDE.md` to include the new YAML/Ansible coverage.
+- [ ] ⬜ **Task 4.2**: Add `config-changes/` and, if a documented truth changed,
+  `truth-changes/` manifests under `CLAUDE/UPGRADES/UNRELEASED/` so both
+  features are actively promoted on upgrade rather than shipping dormant.
+
+## Dependencies
+
+- Related: Plan 00204 (precision constraint on construct-level rules), Plan 00129
+  (`lint_on_edit` / QA-wrapper adjacency). Neither blocks this plan.
+- Builds on completed Plans 00054 (lint strategy pattern), 00200 and 00222 (the
+  shared shell scanner), 00260 and 00263 (Bash write side-doors and tokenising).
+
+## Success Criteria
+
+- [ ] An Edit that writes an unloadable Ansible playbook is denied at write time
+  with the linter's own diagnosis.
+- [ ] The motivating multi-line incident command is flagged by the Phase 2 handler.
+- [ ] Every false-positive shape in the report's table is ALLOWed, proven by tests.
+- [ ] No private bash scanner is added — detection uses `split_unquoted`.
+- [ ] Blanket `;` → `&&` enforcement is not implemented, and the reason is recorded.
+- [ ] Full QA passes and the daemon restarts RUNNING after each phase.
+
+## Risks & Mitigations
+
+| Risk                                                                          | Impact | Probability | Mitigation                                                                                                |
+| ----------------------------------------------------------------------------- | ------ | ----------- | --------------------------------------------------------------------------------------------------------- |
+| Verifier/mutator lists cry wolf and the handler gets disabled                 | High   | Medium      | Ship `warn` first; test the report's false-positive table as ALLOW cases before enabling                  |
+| YAML strategy lints non-playbook YAML (workflows, inventories, vault)         | Medium | Medium      | Narrow path allowlist plus mandatory exclusions; default `exclude_paths`                                  |
+| `ansible-lint` runs from the wrong project dir and fails for the wrong reason | Medium | Medium      | Resolve the project dir explicitly (Task 1.2); treat a resolution failure as skip-with-advisory, not deny |
+| Full `ansible-lint` is slow enough to be disruptive on every write            | Medium | Medium      | `--syntax-check` at the default tier; full lint only at `extended`                                        |
+| Detection reimplements shell parsing and drifts from the shared scanner       | High   | Low         | Task 2.2 mandates `split_unquoted`; add a test asserting newline parity with `;`                          |
+| Staged-file lint makes every commit expensive                                 | Medium | Medium      | Phase 3 is gated on a cost decision (Task 3.1); it may be dropped                                         |
+
+## Delivery & Milestones
+
+<!-- Curated milestones + delivery commit hashes only (git is the SSoT for
+     "when" — do not add dates). The blow-by-blow activity log lives in
+     JOURNAL/00268-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
+
+- Not yet started.
