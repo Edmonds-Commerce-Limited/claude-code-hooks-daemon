@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.handler_bases import WorktreeCreateHandlerBase
 from claude_code_hooks_daemon.core.worktree_naming import worktree_dir_name, worktree_path
+from claude_code_hooks_daemon.core.worktree_seed import SeedEntry, parse_seed_config
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,20 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             priority=_WORKTREE_CREATE_PRIORITY,
             terminal=True,
         )
+        # The registry applies handler options by ``setattr`` AFTER __init__, so
+        # this holds raw YAML the daemon does not control and cannot be parsed
+        # here — a narrower annotation would be a lie about what can arrive.
+        # ``_resolved_seed`` memoises the validated form on first use.
+        self._seed: Any = None
+        self._resolved_seed: list[SeedEntry] | None = None
+
+    def _seed_entries(self) -> list[SeedEntry]:
+        """Return the validated seed entries, parsing the option once."""
+        resolved = self._resolved_seed
+        if resolved is None:
+            resolved = parse_seed_config(self._seed)
+            self._resolved_seed = resolved
+        return resolved
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Handle every WorktreeCreate event (no matcher filtering)."""

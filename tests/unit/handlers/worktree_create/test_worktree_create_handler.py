@@ -18,6 +18,11 @@ import pytest
 
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.worktree_seed import (
+    SEED_MODE_COPY,
+    SEED_MODE_SYMLINK,
+    SeedEntry,
+)
 from claude_code_hooks_daemon.handlers.worktree_create.worktree_create_handler import (
     WorktreeCreateHandler,
 )
@@ -188,3 +193,50 @@ class TestRepoRootResolution:
         handler = WorktreeCreateHandler()
         with pytest.raises(subprocess.CalledProcessError):
             handler.handle(self._input(outside))
+
+
+class TestSeedOptionPlumbing:
+    """Plan 00267 Phase 2: the ``seed`` option is parsed LAZILY.
+
+    The registry applies handler options by ``setattr`` *after* ``__init__``,
+    so a constructor that parsed its options would always parse the default and
+    never the project's configuration. These tests pin that the parse happens
+    on first use and is memoised thereafter.
+    """
+
+    def test_unconfigured_handler_has_no_seed_entries(self) -> None:
+        assert WorktreeCreateHandler()._seed_entries() == []
+
+    def test_option_applied_after_init_is_honoured(self) -> None:
+        handler = WorktreeCreateHandler()
+        # Exactly how the registry delivers it: setattr onto the private name.
+        handler._seed = {"entries": [".env.local"]}
+
+        assert handler._seed_entries() == [SeedEntry(path=".env.local", mode=SEED_MODE_SYMLINK)]
+
+    def test_per_entry_mode_survives_the_plumbing(self) -> None:
+        handler = WorktreeCreateHandler()
+        handler._seed = {
+            "default_mode": SEED_MODE_SYMLINK,
+            "entries": [".env.local", {"path": ".secrets", "mode": SEED_MODE_COPY}],
+        }
+
+        assert handler._seed_entries() == [
+            SeedEntry(path=".env.local", mode=SEED_MODE_SYMLINK),
+            SeedEntry(path=".secrets", mode=SEED_MODE_COPY),
+        ]
+
+    def test_parse_is_memoised(self) -> None:
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [".env.local"]}
+        first = handler._seed_entries()
+
+        # A later mutation is NOT re-read: the option is parsed once per
+        # handler instance, matching the house lazy-memo idiom.
+        handler._seed = {"entries": [".other"]}
+        assert handler._seed_entries() is first
+
+    def test_malformed_option_degrades_rather_than_raising(self) -> None:
+        handler = WorktreeCreateHandler()
+        handler._seed = ".env.local"  # the bare-string mistake
+        assert handler._seed_entries() == []

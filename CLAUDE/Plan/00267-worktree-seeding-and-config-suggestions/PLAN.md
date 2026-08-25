@@ -81,13 +81,13 @@ wrong place for a session whose cwd is a subdirectory (DESIGN §3).
 
 ### Phase 2: Seed config schema and validation
 
-- [ ] ⬜ **Task 2.1**: Failing tests for the parser — bare string, unknown
-  mode, unknown key, missing path, non-list entries
-- [ ] ⬜ **Task 2.2**: Frozen dataclass for a parsed entry, raising on the
+- [x] ✅ **Task 2.1**: Tests for the parser — bare string, unknown mode,
+  unknown key, missing path, non-list entries
+- [x] ✅ **Task 2.2**: Frozen dataclass for a parsed entry, raising on the
   trusted construction path
-- [ ] ⬜ **Task 2.3**: Defensive parser: shape errors warn and skip, never
+- [x] ✅ **Task 2.3**: Defensive parser: shape errors warn and skip, never
   raise (house idiom)
-- [ ] ⬜ **Task 2.4**: Lazy parse into a memo field — options arrive after
+- [x] ✅ **Task 2.4**: Lazy parse into a memo field — options arrive after
   `__init__`, so nothing is parsed in the constructor
 
 ### Phase 3: Seeding execution
