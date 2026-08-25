@@ -206,9 +206,21 @@ class LintOnEditHandler(PostToolUseHandlerBase):
             current = current.parent
         return None
 
-    # Map of language names to their module root marker files
+    # Map of language names to their module root marker files.
+    #
+    # Ansible needs this for the same reason Go does, but the failure is
+    # sneakier: ``ansible.cfg``, ``.ansible-lint``, ``roles/`` and vendored
+    # collections all resolve relative to the working directory, so running
+    # from the wrong one makes the linter fail for the WRONG REASON — a denial
+    # the author cannot act on, which is worse than not running it at all.
+    #
+    # One marker per language is a known limit (Plan 00268 DESIGN §4): a
+    # project with ``.ansible-lint`` but no ``ansible.cfg`` resolves no root and
+    # runs from the daemon's cwd, where ``--syntax-check`` on an absolute path
+    # still works and only role/collection resolution degrades.
     _MODULE_ROOT_MARKERS: ClassVar[dict[str, str]] = {
         "Go": "go.mod",
+        "Ansible": "ansible.cfg",
     }
 
     def _resolve_executable(self, executable: str) -> str | None:
@@ -339,6 +351,19 @@ class LintOnEditHandler(PostToolUseHandlerBase):
 
 Every `Write`/`Edit` to a Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin or
 Dart file is linted immediately. A lint failure DENIES the tool call.
+
+**Ansible YAML is covered too, and only Ansible YAML.** A `.yml`/`.yaml` file is
+linted when it is plausibly a playbook or a role task file — by Ansible's own
+conventions (`playbooks/`, `roles/`, `tasks/`, `handlers/`, `site.yml`,
+`play-*`, `playbook-*`) or by carrying a top-level `- hosts:` / `- import_playbook:`
+line wherever it sits. Everything else sharing the extension is left alone:
+`.github/workflows/`, `hooks-daemon.yaml`, `docker-compose*`, `group_vars/`,
+`host_vars/`, inventories, and any vault file (never read — it is encrypted).
+The cheap tier is `ansible-playbook --syntax-check`, which is what catches a
+play that will not LOAD: an unbalanced quote inside a `shell:` block aborts the
+whole play at parse time, before `#` means comment. Full `ansible-lint` runs at
+the `extended` tier. The linter runs from the nearest directory containing
+`ansible.cfg`, because roles and collections resolve relative to it.
 
 **Bash-authored files are linted too.** A file a command writes with `>`, `>>`,
 `tee` or a `cat <<EOF` heredoc gets the same treatment — so the heredoc route is

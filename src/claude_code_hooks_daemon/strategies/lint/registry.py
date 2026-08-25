@@ -1,6 +1,6 @@
 """Lint Strategy Registry - maps file extensions to strategy implementations."""
 
-from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
+from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy, NarrowsByPath
 
 
 class LintStrategyRegistry:
@@ -22,11 +22,24 @@ class LintStrategyRegistry:
             self._strategies[ext.lower()] = strategy
 
     def get_strategy(self, file_path: str) -> LintStrategy | None:
-        """Get the strategy for a file path based on its extension."""
+        """Get the strategy for a file path based on its extension.
+
+        A strategy may additionally NARROW its own extension match by
+        implementing :class:`NarrowsByPath`. That matters for an extension no
+        single language owns: ``.yml`` covers CI workflows, this daemon's own
+        config and inventories as well as Ansible playbooks, and handing all of
+        them to one linter reports failures their authors cannot act on.
+
+        A strategy that does not implement the capability is matched on
+        extension alone, exactly as before.
+        """
         file_path_lower = file_path.lower()
         for ext, strategy in self._strategies.items():
-            if file_path_lower.endswith(ext):
-                return strategy
+            if not file_path_lower.endswith(ext):
+                continue
+            if isinstance(strategy, NarrowsByPath) and not strategy.handles_file(file_path):
+                continue
+            return strategy
         return None
 
     def filter_by_languages(self, language_names: list[str]) -> None:
@@ -61,6 +74,7 @@ class LintStrategyRegistry:
     def create_default(cls) -> "LintStrategyRegistry":
         """Create registry with ALL built-in language strategies."""
         # Lazy imports to avoid circular dependencies
+        from claude_code_hooks_daemon.strategies.lint.ansible_strategy import AnsibleLintStrategy
         from claude_code_hooks_daemon.strategies.lint.dart_strategy import DartLintStrategy
         from claude_code_hooks_daemon.strategies.lint.go_strategy import GoLintStrategy
         from claude_code_hooks_daemon.strategies.lint.kotlin_strategy import KotlinLintStrategy
@@ -81,4 +95,5 @@ class LintStrategyRegistry:
         registry.register(DartLintStrategy())
         registry.register(KotlinLintStrategy())
         registry.register(SwiftLintStrategy())
+        registry.register(AnsibleLintStrategy())
         return registry

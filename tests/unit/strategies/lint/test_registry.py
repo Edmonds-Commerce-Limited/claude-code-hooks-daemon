@@ -144,6 +144,7 @@ class TestCreateDefault:
             "Dart",
             "Kotlin",
             "Swift",
+            "Ansible",
         }
         assert set(registry.registered_languages) == expected_languages
 

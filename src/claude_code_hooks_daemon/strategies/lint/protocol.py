@@ -55,3 +55,40 @@ class LintStrategy(Protocol):
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this language strategy."""
         ...
+
+
+@runtime_checkable
+class NarrowsByPath(Protocol):
+    """Optional capability: a strategy that does not want every file it matches.
+
+    The registry maps a file to a strategy by extension suffix alone, which is
+    the right answer for a language that OWNS its extension — a ``.py`` file is
+    Python. It is the wrong answer for YAML, where the same extension covers
+    CI workflows, this daemon's own config, inventories and Compose files as
+    well as Ansible playbooks. Claiming all of them would report failures the
+    author cannot act on, which is how a handler earns itself a
+    ``enabled: false``.
+
+    Deliberately SEPARATE from :class:`LintStrategy` rather than added to it
+    (Interface Segregation, and Plan 00268 DESIGN §2): eight strategies have no
+    use for this, and because ``LintStrategy`` is ``runtime_checkable`` — where
+    ``isinstance`` tests member PRESENCE — folding it in would break every
+    existing ``isinstance(strategy, LintStrategy)`` assertion until all eight
+    carried a ``return True`` stub. Mirrors ``HasClaudeMd`` in
+    ``core/claude_md_injector.py``, which expresses the same "some objects can
+    also do X" shape.
+    """
+
+    def handles_file(self, file_path: str) -> bool:
+        """Whether this strategy really wants a file its extension matched.
+
+        Args:
+            file_path: The file the registry is about to hand over. It may not
+                exist — the registry runs before the handler's existence check,
+                and a Bash-predicted target may never have been written — so an
+                implementation must decide from the path alone in that case.
+
+        Returns:
+            True to accept the file, False to leave it unlinted.
+        """
+        ...

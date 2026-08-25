@@ -104,17 +104,23 @@ its false-positive rate stays low enough that nobody disables it.
 - [x] ✅ **Task 1.2**: Resolution rule decided — reuse `_MODULE_ROOT_MARKERS`,
   the existing per-language marker walk that already gives Go its `go.mod`
   root, mapping `"Ansible": "ansible.cfg"`. No new mechanism (DESIGN §4)
-- [ ] ⬜ **Task 1.3**: TDD the strategy: `ansible-playbook --syntax-check` as the
-  cheap default tier (it catches the motivating `split_args` failure) and
-  `ansible-lint` at the `extended` tier, mirroring the existing split.
-- [ ] ⬜ **Task 1.4**: Register in `strategies/lint/registry.py`, honour
-  `languages` / `command_overrides` / `exclude_paths`, and keep the
-  missing-linter leniency `lint_on_edit` already documents.
-- [ ] ⬜ **Task 1.5**: Write `get_claude_md()` guidance stating plainly that the
-  write has ALREADY landed — a PostToolUse denial is a failure report to repair
-  with `Edit`, not a rollback.
-- [ ] ⬜ **Task 1.6**: QA, daemon restart verification, and a client-mode check
-  (`scripts/dummy-client-repo.sh`) since this touches deployed strategy assets.
+- [x] ✅ **Task 1.3**: `AnsibleLintStrategy` TDD'd with the tier split intact —
+  `ansible-playbook --syntax-check` as the cheap default, `ansible-lint` at
+  `extended`. The narrowing needed a new capability protocol, `NarrowsByPath`:
+  a member added to `LintStrategy` itself would break 13 existing
+  `isinstance(..., LintStrategy)` assertions, since a `runtime_checkable`
+  Protocol tests member PRESENCE
+- [x] ✅ **Task 1.4**: Registered in `strategies/lint/registry.py`, which now
+  honours `NarrowsByPath` so an extension match can be declined. The eight
+  strategies that do not implement it keep matching on extension alone, proven
+  by test. `languages` / `command_overrides` / `exclude_paths` and the
+  missing-linter leniency are inherited unchanged from the handler
+- [x] ✅ **Task 1.5**: `get_claude_md()` states which YAML is claimed and which
+  is left alone, names both tiers, and repeats that the write has ALREADY
+  landed — the denial is a failure report to repair with `Edit`, not a rollback
+- [ ] 🔄 **Task 1.6**: QA 23/23 and daemon RUNNING after restart. Client-mode
+  check still to run: the fixture installs from a detached worktree at `HEAD`,
+  so it can only see this work once it is committed.
 
 ### Phase 2: `verifier → mutator` PreToolUse handler (warn mode)
 
