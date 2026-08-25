@@ -112,14 +112,17 @@ wrong place for a session whose cwd is a subdirectory (DESIGN §3).
 
 ### Phase 4: Suggestion generator
 
-- [ ] ⬜ **Task 4.1**: Failing tests for the scanner — proposes git-ignored
+- [x] ✅ **Task 4.1**: Tests for the scanner — proposes git-ignored
   local-config shapes, excludes tracked files and build/vendor/cache dirs
-- [ ] ⬜ **Task 4.2**: Implement the scanner as a pure function over a repo
-  path, returning proposed entries
-- [ ] ⬜ **Task 4.3**: Failing tests for the diff — configured-but-absent,
-  present-but-unconfigured, mode mismatch
-- [ ] ⬜ **Task 4.4**: Implement the diff, reusing the existing dotted-path
-  lookup helpers and advisory dataclasses rather than reimplementing them
+- [x] ✅ **Task 4.2**: Implement the scanner over a repo path, asking **git**
+  what is ignored rather than reimplementing gitignore semantics
+- [x] ✅ **Task 4.3**: Tests for the diff — configured-but-absent and
+  present-but-unconfigured. **Mode mismatch was deliberately NOT implemented**
+  as drift: the mode is the choice this feature exists to give the project, so
+  flagging a deliberate `copy` against a suggested `symlink` would nag about a
+  decision already made. A test pins that it is not reported (DESIGN §8)
+- [x] ✅ **Task 4.4**: Implement the diff. The dotted-path config helpers were
+  **not** reused — see DESIGN §8; they answer a different question
 
 ### Phase 5: CLI command and install/upgrade entry point
 

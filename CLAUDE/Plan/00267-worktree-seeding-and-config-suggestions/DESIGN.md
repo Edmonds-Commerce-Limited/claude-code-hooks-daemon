@@ -154,3 +154,42 @@ This repo's own `.claude/hooks-daemon.yaml` has **no `worktree_create` block
 at all**, while `.claude/hooks-daemon.yaml.example` ships one. That is a live
 instance of exactly the drift the Phase 5 command is meant to surface, and it
 makes a natural first real-world test of the reporter.
+
+## 8. Two Phase 4 decisions that departed from the filed task list
+
+Both are recorded here because the plan's tasks named something else, and a
+silently-ticked task that did not do what it said is worse than an amended one.
+
+### A mode mismatch is NOT drift
+
+Task 4.3 listed "mode mismatch" as a third drift category. It was deliberately
+not built, and a test pins that it is not reported.
+
+The mode is *precisely* the choice this whole feature exists to give the
+project. Flagging a configured `copy` against a suggested `symlink` would be
+nagging about a decision already made deliberately — and the suggested mode is
+only a default the scanner has no information to vary. A report that nags about
+correct configuration is one people stop reading, which would then also cost
+them the two findings that DO matter:
+
+- **unconfigured** — a candidate present in the repo that the config does not
+  mention. Informational; the project may have decided against it.
+- **missing** — a configured entry whose source is gone. Urgent, because the
+  Phase 3 executor fails fast on exactly this, so it will abort the *next*
+  worktree creation.
+
+### The dotted-path config helpers were not reused
+
+The plan said to reuse `_key_present_in_config` / `_get_value_at_key` from
+`install/config_migrations.py`. On reading them they answer a different
+question: "is this dotted key set in the config mapping?" — a walk over config
+structure. Phase 4 compares a LIST of seed entries against a SCAN of the
+filesystem. There is no dotted path involved and no config mapping to walk.
+
+Reusing them would have meant reshaping the data to fit a helper that was not
+about this, which is a wrong abstraction rather than DRY. They stay the right
+tool for Phase 5, where a config key genuinely does need looking up.
+
+What Phase 4 does reuse is `run_git`, so **git** decides what is ignored.
+Reimplementing `.gitignore` semantics would drift from the tool that actually
+governs the answer.
