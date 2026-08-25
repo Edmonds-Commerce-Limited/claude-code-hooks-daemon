@@ -70,13 +70,13 @@ wrong place for a session whose cwd is a subdirectory (DESIGN §3).
 
 ### Phase 1: Resolve the repository root (pre-existing bug)
 
-- [ ] ⬜ **Task 1.1**: Failing test — a worktree created from a subdirectory
+- [x] ✅ **Task 1.1**: Failing test — a worktree created from a subdirectory
   cwd lands at the repo root, not under the subdirectory
-- [ ] ⬜ **Task 1.2**: Use the existing `GitRepo.resolve_for` helper in the
+- [x] ✅ **Task 1.2**: Use the existing `GitRepo.resolve_for` helper in the
   handler; introduce no new top-level resolver
-- [ ] ⬜ **Task 1.3**: Failing test + handling for the not-a-git-repo case
-  (the resolver returns nothing)
-- [ ] ⬜ **Task 1.4**: Record the existence-check idempotency limitation in the
+- [x] ✅ **Task 1.3**: Test + handling for the not-a-git-repo case — an
+  unresolvable root falls back to cwd, so git still refuses loudly
+- [x] ✅ **Task 1.4**: Record the existence-check idempotency limitation in the
   handler docstring (it is blind to git's own worktree registry)
 
 ### Phase 2: Seed config schema and validation

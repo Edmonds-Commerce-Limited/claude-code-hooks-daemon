@@ -110,3 +110,81 @@ class TestHandle:
         payload = self._input(repo, name="")
         result = handler.handle(payload)
         assert Path(result.worktree_path or "").name.startswith("worktree-")
+
+
+class TestRepoRootResolution:
+    """Plan 00267 Phase 1: anchor the worktree to the REPO ROOT, not to cwd.
+
+    The handler took ``hook_input["cwd"]`` verbatim and never asked git where
+    the repository root was. A session whose cwd is a subdirectory therefore
+    got its worktrees under that subdirectory — ``<subdir>/.claude/worktrees/``
+    — scattering them anywhere a session happened to be standing instead of
+    collecting them at one predictable place per repo.
+
+    Resolution failure deliberately falls back to the raw cwd: that is exactly
+    today's behaviour, so a repo where the root cannot be resolved is no worse
+    off than before, and only the resolvable case changes.
+    """
+
+    def _input(self, cwd: Path, name: str = "Refactor Auth") -> dict:
+        return {
+            "hook_event_name": EventType.WORKTREE_CREATE.value,
+            "cwd": str(cwd),
+            "name": name,
+            "prompt_id": "pid-123",
+            "session_id": "sid-456",
+        }
+
+    def test_subdirectory_cwd_anchors_worktree_at_repo_root(self, repo: Path) -> None:
+        subdir = repo / "src" / "deep"
+        subdir.mkdir(parents=True)
+
+        handler = WorktreeCreateHandler()
+        result = handler.handle(self._input(subdir))
+
+        path = Path(result.worktree_path or "")
+        assert str(path).startswith(f"{repo}/.claude/worktrees/")
+        assert "deep" not in str(path.parent), f"worktree nested under the cwd: {path}"
+
+    def test_subdirectory_cwd_registers_the_worktree_with_the_repo(self, repo: Path) -> None:
+        subdir = repo / "src"
+        subdir.mkdir()
+
+        handler = WorktreeCreateHandler()
+        result = handler.handle(self._input(subdir))
+
+        listing = subprocess.run(
+            ["git", "-C", str(repo), "worktree", "list"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert result.worktree_path in listing
+
+    def test_repo_root_cwd_is_unchanged(self, repo: Path) -> None:
+        """Regression guard: the already-correct case must not move."""
+        handler = WorktreeCreateHandler()
+        result = handler.handle(self._input(repo))
+        assert str(Path(result.worktree_path or "")).startswith(f"{repo}/.claude/worktrees/")
+
+    def test_two_subdirectories_share_one_worktrees_directory(self, repo: Path) -> None:
+        """The point of anchoring: placement stops depending on where you stood."""
+        first = repo / "src"
+        second = repo / "docs" / "guides"
+        first.mkdir()
+        second.mkdir(parents=True)
+
+        handler = WorktreeCreateHandler()
+        a = handler.handle(self._input(first, name="alpha"))
+        b = handler.handle(self._input(second, name="beta"))
+
+        assert Path(a.worktree_path or "").parent == Path(b.worktree_path or "").parent
+
+    def test_non_repo_cwd_still_fails_loudly(self, tmp_path: Path) -> None:
+        """Unresolvable root falls back to cwd, so git still refuses — loudly."""
+        outside = tmp_path / "not-a-repo"
+        outside.mkdir()
+
+        handler = WorktreeCreateHandler()
+        with pytest.raises(subprocess.CalledProcessError):
+            handler.handle(self._input(outside))

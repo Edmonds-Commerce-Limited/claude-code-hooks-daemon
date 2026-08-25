@@ -16,6 +16,7 @@ opaque ``wf_<hash>``.
 
 from __future__ import annotations
 
+import logging
 import subprocess  # nosec B404 — CalledProcessError typing only; run_git owns the spawn
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,9 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.handler_bases import WorktreeCreateHandlerBase
 from claude_code_hooks_daemon.core.worktree_naming import worktree_dir_name, worktree_path
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
+
+logger = logging.getLogger(__name__)
 
 # This handler is the only one on the WorktreeCreate event; priority is nominal.
 _WORKTREE_CREATE_PRIORITY = 50
@@ -58,15 +61,46 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         prompt_id = hook_input.get(_KEY_PROMPT_ID)
         session_id = hook_input.get(_KEY_SESSION_ID)
 
-        path = worktree_path(cwd, name, prompt_id, session_id)
+        path = worktree_path(self._repo_root(cwd), name, prompt_id, session_id)
 
         # Idempotent: a re-fired event for the same agent reuses the worktree.
+        #
+        # This checks the DIRECTORY, not git's worktree registry, so a stale
+        # directory that is not a registered worktree is accepted and echoed
+        # back as valid. Tightening it means reconciling against
+        # ``git worktree list``, which is out of scope here (Plan 00267 T1.4).
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             branch = worktree_dir_name(name, prompt_id, session_id)
             self._git_worktree_add(cwd, path, branch)
 
         return AdvisoryResult(worktree_path=str(path))
+
+    @staticmethod
+    def _repo_root(cwd: str) -> str:
+        """Return the repository root ``cwd`` sits in, else ``cwd`` unchanged.
+
+        The worktree belongs to the REPOSITORY, not to whatever directory the
+        session happened to be standing in. Anchoring to a raw ``cwd`` scatters
+        worktrees into ``<subdir>/.claude/worktrees/`` — a session in ``src/``
+        and one in ``docs/guides/`` of the same repo would not even share a
+        worktrees directory (Plan 00267 Phase 1).
+
+        Falling back to ``cwd`` when the root cannot be resolved is deliberate:
+        that is precisely the pre-existing behaviour, so an environment where
+        resolution fails is no worse off than before, and only the resolvable
+        case changes. A genuinely non-repo ``cwd`` still fails loudly, because
+        ``git worktree add`` refuses it either way.
+        """
+        repo = GitRepo.resolve_for(Path(cwd))
+        if repo is None:
+            logger.warning(
+                "Could not resolve a git repository root for %s — anchoring the "
+                "worktree to it directly, as before.",
+                cwd,
+            )
+            return cwd
+        return str(repo.root)
 
     @staticmethod
     def _git_worktree_add(cwd: str, path: Path, branch: str) -> None:
