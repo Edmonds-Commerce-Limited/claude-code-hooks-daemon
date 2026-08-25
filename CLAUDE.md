@@ -1965,6 +1965,12 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 
 When Claude Code creates a worktree (an `isolation: "worktree"` agent or `--worktree` session), the daemon creates it at a human-friendly path `.claude/worktrees/<slug-of-name>-<shorthash>/` and echoes that path. Name an agent semantically (the Agent tool's `name:`) to get a readable worktree directory (e.g. `refactor-auth-4f2a1c9b`) instead of an opaque `wf_<hash>`. The short hash suffix keeps identically-named agents from colliding.
 
+**A fresh worktree is a clean checkout**, so this project's git-ignored local files would be absent from it — an agent would silently run against a different configuration from the session that spawned it. The daemon seeds them on creation, and HOW it does so decides whether your edits inside a worktree are isolated:
+
+- **`symlink` mode — shared, NOT isolated**: `.claude/block-words.secret`, `.claude/hooks-daemon.env`. These point at the main checkout, so editing one from inside a worktree changes the file every other session is using. Read them freely; treat writing to one as writing to the main checkout, because it is.
+
+Seeding happens ONCE, at creation; a re-fired event never re-seeds over an agent's own edits. A configured path that has since disappeared ABORTS creation rather than handing you a quietly under-seeded worktree — run `bin/hooks-daemon check-worktree-seed` to see which entries are stale and which local files are not yet covered.
+
 <!-- handler: nitpick-dismissive-language -->
 
 ## nitpick.dismissive_language — do not deflect or prematurely halt
