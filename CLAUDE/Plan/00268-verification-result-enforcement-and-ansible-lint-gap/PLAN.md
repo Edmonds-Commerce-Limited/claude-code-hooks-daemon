@@ -1,6 +1,6 @@
 # Plan 00268: Verification-result enforcement (verifier→mutator) and the Ansible/YAML lint gap
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-25
 **Owner**: joseph
 **Priority**: Medium
@@ -94,15 +94,16 @@ its false-positive rate stays low enough that nobody disables it.
 
 ### Phase 1: Ansible/YAML lint strategy for `lint_on_edit`
 
-- [ ] ⬜ **Task 1.1**: Confirm the gap and decide the detection rule for "this YAML
-  is plausibly an Ansible playbook" — path-based (`playbooks/`, `tasks/`,
-  `roles/`, plan folders, `play-*.yml` / `playbook-*.yml`) versus content
-  sniffing, and which exclusions are mandatory (`.github/workflows/`, daemon
-  config, inventories, vault files).
-- [ ] ⬜ **Task 1.2**: Decide the project-directory resolution rule. `ansible.cfg`,
-  `.ansible-lint` and vendored collections resolve relative to the project dir,
-  so running from the wrong one makes the linter fail for the wrong reason —
-  worse than not running it.
+- [x] ✅ **Task 1.1**: Gap confirmed; detection rule decided — see
+  [DESIGN-ansible-lint.md](DESIGN-ansible-lint.md) §2–§3. Neither of the
+  obvious rules survives: a path allowlist misses `site.yml`, the canonical
+  Ansible entry point, and a parse-based content test cannot see the very file
+  this feature exists to catch, because the motivating incident was a file that
+  FAILED to parse. Accepts on path OR a crude text sniff that survives a broken
+  file; parse is confirmation, never a gate
+- [x] ✅ **Task 1.2**: Resolution rule decided — reuse `_MODULE_ROOT_MARKERS`,
+  the existing per-language marker walk that already gives Go its `go.mod`
+  root, mapping `"Ansible": "ansible.cfg"`. No new mechanism (DESIGN §4)
 - [ ] ⬜ **Task 1.3**: TDD the strategy: `ansible-playbook --syntax-check` as the
   cheap default tier (it catches the motivating `split_args` failure) and
   `ansible-lint` at the `extended` tier, mirroring the existing split.
