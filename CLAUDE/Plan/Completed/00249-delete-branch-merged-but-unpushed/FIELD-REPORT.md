@@ -26,28 +26,28 @@ Branch state — merged into `main` via PR, but one local commit ahead of its ow
 
 ```
 $ git branch -vv
-  feature/poc-sales-completion  f289086 [origin/feature/poc-sales-completion: ahead 1] Merge pull request #17 ...
-* feature/sandbox-account-onboarding b74d08c [origin/feature/sandbox-account-onboarding] ...
+  feature/example-one  f289086 [origin/feature/example-one: ahead 1] Merge pull request #17 ...
+* feature/example-two b74d08c [origin/feature/example-two] ...
   main                          70c9327 [origin/main] ...
 
-$ git merge-base --is-ancestor feature/poc-sales-completion HEAD && echo MERGED
+$ git merge-base --is-ancestor feature/example-one HEAD && echo MERGED
 MERGED
 ```
 
 `git branch -d` refuses first, and its warning states the exact condition:
 
 ```
-$ git branch -d feature/poc-sales-completion
-warning: not deleting branch 'feature/poc-sales-completion' that is not yet merged to
-         'refs/remotes/origin/feature/poc-sales-completion', even though it is merged to HEAD.
-error: The branch 'feature/poc-sales-completion' is not fully merged.
+$ git branch -d feature/example-one
+warning: not deleting branch 'feature/example-one' that is not yet merged to
+         'refs/remotes/origin/feature/example-one', even though it is merged to HEAD.
+error: The branch 'feature/example-one' is not fully merged.
 ```
 
 That refusal is what `CLAUDE.md` points at `delete-branch` to resolve, so the dry run is next:
 
 ```
-$ .claude/hooks-daemon/bin/hooks-daemon delete-branch --dry-run feature/poc-sales-completion
-  feature/poc-sales-completion: merged — tip is an ancestor of the protected ref — nothing can be lost
+$ .claude/hooks-daemon/bin/hooks-daemon delete-branch --dry-run feature/example-one
+  feature/example-one: merged — tip is an ancestor of the protected ref — nothing can be lost
 
 Dry run — nothing was deleted.
 ```
@@ -55,7 +55,7 @@ Dry run — nothing was deleted.
 The real run crashes:
 
 ```
-$ .claude/hooks-daemon/bin/hooks-daemon delete-branch feature/poc-sales-completion
+$ .claude/hooks-daemon/bin/hooks-daemon delete-branch feature/example-one
 Traceback (most recent call last):
   ...
   File ".../daemon/cli.py", line 4875, in main
@@ -67,7 +67,7 @@ Traceback (most recent call last):
   File ".../daemon/branch_safety.py", line 160, in _git
     return subprocess.run(  # nosec B603 B607 - trusted system tool, list form
 subprocess.CalledProcessError: Command '['git', '-C', '/workspace', 'branch', '--delete',
-'feature/poc-sales-completion']' returned non-zero exit status 1.
+'feature/example-one']' returned non-zero exit status 1.
 ```
 
 The branch still exists afterwards.
@@ -115,7 +115,7 @@ $ ls -la untracked/deleted-branches.bundle
 -rw------- 1 root root 1980726 Aug 17 13:10 untracked/deleted-branches.bundle
 
 $ git bundle list-heads untracked/deleted-branches.bundle
-f289086e01c1bf8f8494c36e115c912bf1b7a4d0 refs/heads/feature/poc-sales-completion
+f289086e01c1bf8f8494c36e115c912bf1b7a4d0 refs/heads/feature/example-one
 ```
 
 1.9 MB of recovery data for a branch that was never deleted. Anyone finding this file later would
@@ -148,6 +148,6 @@ Roughly in order of value:
 
 ## Impact on this repo
 
-Low. The branch (`feature/poc-sales-completion`, merged via PR #17) is harmless clutter and was left
+Low. The branch (`feature/example-one`, merged via PR #17) is harmless clutter and was left
 in place; `git branch -D` is blocked by the `destructive_git` handler and was not attempted, which is
 correct. The two artefacts a reader may notice are that branch and the orphaned bundle above.

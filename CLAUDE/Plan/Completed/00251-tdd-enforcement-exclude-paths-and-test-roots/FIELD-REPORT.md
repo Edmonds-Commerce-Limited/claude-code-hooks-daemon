@@ -26,15 +26,15 @@ not a TDD-feasibility problem. Details and options below.
 
 ```
 TDD REQUIRED: Cannot create PHP source file without test file
-Source file: EnumColumnMappingPolicy.php
-Missing test: EnumColumnMappingPolicyTest.php
+Source file: SampleColumnPolicy.php
+Missing test: SampleColumnPolicyTest.php
 Searched locations:
-  - /workspace/apps/app/qaConfig/tests/EnumColumnMappingPolicyTest.php      ← lowercase "tests"
-  - /workspace/apps/app/qaConfig/PHPStan/Rules/EnumColumnMappingPolicyTest.php   ← collocated
-  - /workspace/apps/app/qaConfig/PHPStan/Rules/__tests__/EnumColumnMappingPolicyTest.php
+  - /workspace/apps/app/qaConfig/tests/SampleColumnPolicyTest.php      ← lowercase "tests"
+  - /workspace/apps/app/qaConfig/PHPStan/Rules/SampleColumnPolicyTest.php   ← collocated
+  - /workspace/apps/app/qaConfig/PHPStan/Rules/__tests__/SampleColumnPolicyTest.php
 ```
 
-The real, house-convention test location — `qaConfig/Tests/EnumColumnMappingPolicyTest.php` (capital
+The real, house-convention test location — `qaConfig/Tests/SampleColumnPolicyTest.php` (capital
 `Tests`) — is **not** among the searched locations, so a correctly-placed test never satisfies the gate.
 
 ---
@@ -117,7 +117,7 @@ They aren't, in this repo. The established, working pattern is:
 - A thin reflection **`*Rule`** adapter → a **`RuleTestCase`** test that runs the real rule against
   committed fixture classes and asserts the exact errors + lines.
 
-`qaConfig/Tests/DeadNotScoredReasonRuleTest.php` is a full worked example (fixtures + `->analyse([...], [[msg, line], ...])`, red-half and green-half). So excluding rule files from TDD enforcement **forgoes
+`qaConfig/Tests/SampleScoringRuleTest.php` is a full worked example (fixtures + `->analyse([...], [[msg, line], ...])`, red-half and green-half). So excluding rule files from TDD enforcement **forgoes
 a TDD flow that genuinely works and is valuable** — it's a pragmatic trade, not a necessity. The
 blocker is purely the path mapping (Bugs A/B), plus the no-escape gap (Bug C).
 
@@ -215,7 +215,7 @@ this project's vendored copy.
   `error_hiding_blocker.py` all do).
 - `registry.py:387` injects `_project_exclude_paths` into every handler (available but unused by TDD).
 - `apps/app/qaConfig/phpunit.xml:73-75` — `qa-rules` suite scans only `../qaConfig/Tests`.
-- `apps/app/qaConfig/Tests/DeadNotScoredReasonRuleTest.php` — proof custom rules ARE TDD'd here.
+- `apps/app/qaConfig/Tests/SampleScoringRuleTest.php` — proof custom rules ARE TDD'd here.
 
 ---
 

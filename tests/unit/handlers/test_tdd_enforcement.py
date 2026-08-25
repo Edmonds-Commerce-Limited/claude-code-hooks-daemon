@@ -1534,8 +1534,8 @@ class TestDeclaredTestPathMap:
     hook-accepted alternative would never be executed).
     """
 
-    _RULE_REL = ("apps", "app", "qaConfig", "PHPStan", "Rules", "EnumColumnMappingPolicy.php")
-    _TEST_REL = ("apps", "app", "qaConfig", "Tests", "EnumColumnMappingPolicyTest.php")
+    _RULE_REL = ("apps", "app", "qaConfig", "PHPStan", "Rules", "SampleColumnPolicy.php")
+    _TEST_REL = ("apps", "app", "qaConfig", "Tests", "SampleColumnPolicyTest.php")
     _SOURCE_GLOB = "**/qaConfig/PHPStan/Rules/**"
     _TEST_DIR = "apps/app/qaConfig/Tests"
 
@@ -1545,7 +1545,7 @@ class TestDeclaredTestPathMap:
             "tool_name": "Write",
             "tool_input": {
                 "file_path": str(file_path),
-                "content": "<?php\n\nclass EnumColumnMappingPolicy {}\n",
+                "content": "<?php\n\nclass SampleColumnPolicy {}\n",
             },
         }
 
@@ -1572,7 +1572,7 @@ class TestDeclaredTestPathMap:
         """Create the correctly-placed test file the reporter already had."""
         test_path = root.joinpath(*self._TEST_REL)
         test_path.parent.mkdir(parents=True, exist_ok=True)
-        test_path.write_text("<?php\n\nclass EnumColumnMappingPolicyTest {}\n")
+        test_path.write_text("<?php\n\nclass SampleColumnPolicyTest {}\n")
         return test_path
 
     def _mapped(self) -> list[dict[str, str]]:
