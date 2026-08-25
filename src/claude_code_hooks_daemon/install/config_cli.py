@@ -7,6 +7,7 @@ Each function loads YAML files, performs the operation, and returns
 a JSON-serializable dictionary for easy consumption by callers.
 """
 
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,11 @@ from claude_code_hooks_daemon.install.config_migrations import (
     list_known_versions as _list_known_versions,
 )
 from claude_code_hooks_daemon.install.config_validator import ConfigValidator
+from claude_code_hooks_daemon.install.worktree_seed_report import (
+    build_seed_report,
+    format_report_for_llm,
+    suggested_yaml_block,
+)
 
 
 def _json_safe_value(value: Any) -> Any:
@@ -213,6 +219,53 @@ def list_known_versions(manifests_dir: Path | None = None) -> list[str]:
         Sorted list of version strings (oldest first)
     """
     return _list_known_versions(manifests_dir=manifests_dir)
+
+
+def run_check_worktree_seed(
+    root: Path,
+    user_config_path: Path,
+    output_format: str = "text",
+) -> dict[str, Any]:
+    """Report how a project's worktree seed config compares with its repository.
+
+    Unlike :func:`run_check_config_migrations` this takes no version range: the
+    question is "is my config current *now*?", answered by scanning the project
+    rather than by reading release manifests. The daemon's shipped default for
+    seed entries is necessarily empty, so no version-gated advisory could answer
+    it (Plan 00267 DESIGN section 6).
+
+    Nothing is written. The suggested YAML is rendered for a human or an agent
+    to place, because a PyYAML round-trip would strip every comment out of a
+    config file the project owns.
+
+    Args:
+        root: Repository root to scan.
+        user_config_path: Path to the project's hooks-daemon.yaml.
+        output_format: 'text' for human-readable, 'json' for machine-readable.
+
+    Returns:
+        Dictionary with the report (JSON-serializable). Keys: configured,
+        unconfigured, missing, seed_key_configured, has_drift, suggested_yaml,
+        and text (if format='text').
+
+    Raises:
+        FileNotFoundError: If the config file doesn't exist.
+        ValueError: If the config file is not a YAML mapping.
+    """
+    config = _load_yaml(user_config_path)
+    report = build_seed_report(root, config)
+
+    return {
+        "has_drift": report.has_drift,
+        "seed_key_configured": report.seed_key_configured,
+        "configured": [asdict(entry) for entry in report.configured],
+        "unconfigured": [asdict(entry) for entry in report.unconfigured],
+        "missing": [asdict(entry) for entry in report.missing],
+        "suggested_yaml": suggested_yaml_block(
+            report.unconfigured, seed_key_configured=report.seed_key_configured
+        ),
+        **({"text": format_report_for_llm(report)} if output_format == "text" else {}),
+    }
 
 
 def run_config_validate(

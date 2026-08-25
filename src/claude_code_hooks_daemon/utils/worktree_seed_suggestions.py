@@ -40,8 +40,17 @@ logger = logging.getLogger(__name__)
 _LOCAL_CONFIG_PATTERNS: Final[tuple[str, ...]] = (
     ".env",
     ".env.*",
+    # A dotfile is not the only shape a local env file takes: this daemon's own
+    # `.claude/hooks-daemon.env` ends in `.env` without starting with it, and a
+    # first pass that only matched the dotfile shapes missed it.
+    "*.env",
     "*.local",
     "*.local.*",
+    # A worktree missing a secret or word-list file does not fail loudly — the
+    # guard that reads it goes silently inert, which is the worse outcome.
+    "*.secret",
+    "*.secrets",
+    ".secrets",
 )
 
 # Directory names whose ignored contents are never local configuration —

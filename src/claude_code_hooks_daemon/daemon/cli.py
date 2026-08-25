@@ -183,6 +183,34 @@ def get_project_path(override_path: Path | None = None) -> Path:
     sys.exit(1)
 
 
+def resolve_tree_root(args: argparse.Namespace) -> Path | None:
+    """Resolve a project root for a command that needs a TREE, not an install.
+
+    :func:`get_project_path` additionally insists on a git remote and a loadable
+    config, and terminates the process when either is absent. That is right for
+    a command that talks to a daemon, and wrong for one that only reads a
+    directory: an operator who named a root explicitly has already answered the
+    question that validation exists to ask.
+
+    Args:
+        args: Parsed CLI arguments, optionally carrying ``project_root``.
+
+    Returns:
+        The resolved root, or ``None`` when an explicit override is not a
+        directory — the caller turns that into its own operational exit code,
+        because the error message belongs with the command's contract.
+    """
+    override = getattr(args, "project_root", None)
+    if override is None:
+        return get_project_path(None)
+
+    project_root = Path(override)
+    if not project_root.is_dir():
+        print(f"ERROR: Project root does not exist: {project_root}", file=sys.stderr)
+        return None
+    return project_root
+
+
 def _validate_installation(project_root: Path) -> Path:
     """Validate hooks daemon installation at project root.
 
@@ -2635,6 +2663,52 @@ def cmd_check_config_migrations(args: argparse.Namespace) -> int:
     return 1 if has_issues else 0
 
 
+def cmd_check_worktree_seed(args: argparse.Namespace) -> int:
+    """Report worktree seed config drift against the project's repository.
+
+    Answers "is my seed config current NOW?", which no version-gated advisory
+    can: the daemon's shipped default for seed entries is necessarily empty, so
+    suggestions have to come from scanning the project itself.
+
+    Reports only — nothing is written, because the config belongs to the project
+    and a PyYAML round-trip would strip its comments.
+
+    Args:
+        args: Parsed CLI arguments with config, format, and optional
+              project_root
+
+    Returns:
+        0 if the config is current, 1 if drift was found, 2 on error
+    """
+    from claude_code_hooks_daemon.install.config_cli import run_check_worktree_seed
+
+    output_format: str = args.format
+    project_path = resolve_tree_root(args)
+    if project_path is None:
+        return 2
+
+    config_path = (
+        Path(args.config) if args.config else project_path / ".claude" / "hooks-daemon.yaml"
+    )
+
+    try:
+        result = run_check_worktree_seed(
+            root=project_path,
+            user_config_path=config_path,
+            output_format=output_format,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+
+    if output_format == "json":
+        print(json.dumps(result, indent=2))
+    else:
+        print(result.get("text", ""))
+
+    return 1 if result["has_drift"] else 0
+
+
 def cmd_check_truth_changes(args: argparse.Namespace) -> int:
     """Show truth-changes (was → now) to reconcile across a version range.
 
@@ -3852,14 +3926,10 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
 
     # An explicit --project-root is trusted as-is (plan QA needs a plan tree,
     # not a validated daemon installation); otherwise auto-detect as usual.
-    override = getattr(args, "project_root", None)
-    if override is not None:
-        project_root = Path(override)
-        if not project_root.is_dir():
-            print(f"ERROR: Project root does not exist: {project_root}", file=sys.stderr)
-            return 2
-    else:
-        project_root = get_project_path(None)
+    resolved_root = resolve_tree_root(args)
+    if resolved_root is None:
+        return 2
+    project_root = resolved_root
     config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
     plan_cfg = config.plan_workflow
     if not plan_cfg.enabled:
@@ -4602,6 +4672,32 @@ def main() -> int:
         help="Override manifest directory (for testing)",
     )
     parser_check_migrations.set_defaults(func=cmd_check_config_migrations)
+
+    # check-worktree-seed command
+    parser_check_worktree_seed = subparsers.add_parser(
+        "check-worktree-seed",
+        help="Report worktree seed config drift against this repository (reports only)",
+    )
+    parser_check_worktree_seed.add_argument(
+        "--config",
+        metavar="PATH",
+        default=None,
+        help="Path to hooks-daemon.yaml (default: auto-detect from project root)",
+    )
+    parser_check_worktree_seed.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format: text (default) or json",
+    )
+    parser_check_worktree_seed.add_argument(
+        "--project-root",
+        type=Path,
+        metavar="PATH",
+        default=None,
+        help="Repository root to scan (default: auto-detect)",
+    )
+    parser_check_worktree_seed.set_defaults(func=cmd_check_worktree_seed)
 
     # check-truth-changes command
     parser_check_truth = subparsers.add_parser(

@@ -604,6 +604,38 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
     fi
 fi
 
+# ------------------------------------------------------------
+# Worktree seed config drift (Plan 00267)
+# ------------------------------------------------------------
+# Third mirror of the two blocks above. Unlike them this is NOT version-gated:
+# the daemon's shipped default for seed entries is necessarily empty, so no
+# manifest can tell a project which of ITS git-ignored local files a fresh
+# worktree ought to carry. The answer comes from scanning the repository, which
+# is why the same command an operator runs by hand runs here — one scan, one
+# implementation. Reports only; the daemon never edits the config.
+if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+    _seed_rc=0
+    if _seed_out="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
+        check-worktree-seed \
+        --project-root "$PROJECT_ROOT" \
+        --config "$PROJECT_ROOT/.claude/hooks-daemon.yaml" 2>&1)"; then
+        _seed_rc=0
+    else
+        _seed_rc=$?
+    fi
+
+    if [ "$_seed_rc" -eq 1 ]; then
+        echo ""
+        _info "${_BOLD}Worktree seed config${_NC}"
+        echo "$_seed_out"
+        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-worktree-seed"
+    elif [ "$_seed_rc" -eq 0 ]; then
+        _ok "Worktree seed config: up to date."
+    else
+        _warn "Worktree seed summary unavailable (check-worktree-seed exit $_seed_rc; older target?)."
+    fi
+fi
+
 # Emit the sentinel-wrapped block. Leading newline ensures the open sentinel
 # starts on its own line even if Layer 2's last output had no trailing \n.
 printf '\n<<<UPGRADE_METADATA\n'

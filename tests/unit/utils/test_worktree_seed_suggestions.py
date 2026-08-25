@@ -43,7 +43,12 @@ def repo(tmp_path: Path) -> Path:
     root.mkdir()
     _init_repo(
         root,
-        ".env.local\n.env.test.local\nsettings.local.json\nnode_modules/\ndist/\n*.log\n",
+        # The non-config entries at the end mirror what a real scan of this
+        # repository turns up alongside the genuine candidates, so the
+        # exclusion side of the heuristics is exercised against real shapes.
+        ".env.local\n.env.test.local\nsettings.local.json\n"
+        "node_modules/\ndist/\n*.log\n"
+        "*.env\n*.secret\n*.lock\ncoverage.xml\n.coverage\n",
     )
     return root
 
@@ -75,8 +80,14 @@ class TestSuggestSeedEntries:
         assert suggest_seed_entries(repo) == []
 
     def test_untracked_but_unignored_file_is_not_suggested(self, repo: Path) -> None:
-        """Not ignored means git will not withhold it — nothing to seed."""
-        (repo / "scratch.env").write_text("X=1\n", encoding="utf-8")
+        """Not ignored means git will not withhold it — nothing to seed.
+
+        The name matches a local-config shape deliberately: the fixture ignores
+        ``settings.local.json`` exactly, not by glob, so this sibling is the
+        candidate shape WITHOUT the ignored status, which is the one thing under
+        test here.
+        """
+        (repo / "settings.local.yaml").write_text("x: 1\n", encoding="utf-8")
         assert suggest_seed_entries(repo) == []
 
     def test_ignored_but_uninteresting_file_is_not_suggested(self, repo: Path) -> None:
@@ -89,6 +100,32 @@ class TestSuggestSeedEntries:
             directory = repo / excluded
             directory.mkdir()
             (directory / ".env.local").write_text("nested\n", encoding="utf-8")
+
+        assert suggest_seed_entries(repo) == []
+
+    def test_a_prefixed_env_file_is_suggested(self, repo: Path) -> None:
+        """A dotfile is not the only shape a local env file takes. This repo's
+        own ``.claude/hooks-daemon.env`` ends in ``.env`` without starting with
+        it, and the first pass of these heuristics missed it — found by running
+        the reporter against this repository rather than against a fixture."""
+        (repo / "app.env").write_text("A=1\n", encoding="utf-8")
+
+        assert suggest_seed_entries(repo) == [SeedEntry(path="app.env", mode=DEFAULT_SEED_MODE)]
+
+    def test_a_secret_file_is_suggested(self, repo: Path) -> None:
+        """A worktree missing a secret/word-list file does not fail loudly — the
+        guard that reads it goes silently inert, which is worse."""
+        (repo / "block-words.secret").write_text("word\n", encoding="utf-8")
+
+        assert suggest_seed_entries(repo) == [
+            SeedEntry(path="block-words.secret", mode=DEFAULT_SEED_MODE)
+        ]
+
+    def test_lock_and_coverage_artefacts_are_still_not_suggested(self, repo: Path) -> None:
+        """Guards the widened patterns above: the same real-repository scan also
+        turned up a scheduler lock and coverage output, and neither is config."""
+        for artefact in ("scheduled_tasks.lock", "coverage.xml", ".coverage"):
+            (repo / artefact).write_text("x\n", encoding="utf-8")
 
         assert suggest_seed_entries(repo) == []
 

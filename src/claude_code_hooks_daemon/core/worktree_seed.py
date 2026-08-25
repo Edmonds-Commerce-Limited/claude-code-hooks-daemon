@@ -38,6 +38,7 @@ failure this feature exists to prevent.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -55,6 +56,11 @@ VALID_SEED_MODES: Final[tuple[str, ...]] = (SEED_MODE_SYMLINK, SEED_MODE_COPY)
 # INSIDE a worktree flows back through the link — which is exactly why a project
 # can choose ``copy`` per entry for anything its agents may overwrite.
 DEFAULT_SEED_MODE: Final = SEED_MODE_SYMLINK
+
+# The handler option this module parses. Public because the config reporter has
+# to name the same key when it looks the option up and when it renders a
+# suggested block — two places that must never disagree about its spelling.
+SEED_OPTION_KEY: Final = "seed"
 
 # Recognised keys, so a typo is reported instead of silently ignored.
 _KEY_DEFAULT_MODE: Final = "default_mode"
@@ -94,6 +100,23 @@ class SeedEntry:
             raise ValueError("SeedEntry.path must be a non-empty string")
         if self.mode not in VALID_SEED_MODES:
             raise ValueError(f"SeedEntry.mode must be one of {VALID_SEED_MODES}; got {self.mode!r}")
+
+    def to_config(self, default_mode: str = DEFAULT_SEED_MODE) -> str | dict[str, str]:
+        """Render this entry as the YAML value a project would write.
+
+        The bare-string form is used whenever the mode already matches
+        ``default_mode``, because a suggestion should read like the config a
+        human would have written rather than restating a default on every line.
+
+        Args:
+            default_mode: The mode the surrounding block already establishes.
+
+        Returns:
+            The path alone, or a ``path``/``mode`` mapping when the mode differs.
+        """
+        if self.mode == default_mode:
+            return self.path
+        return {_KEY_PATH: self.path, _KEY_MODE: self.mode}
 
 
 def _resolve_default_mode(raw: dict[str, Any]) -> str:
@@ -153,6 +176,29 @@ def _parse_entry(entry: Any, index: int, default_mode: str) -> SeedEntry | None:
         return None
 
     return SeedEntry(path=path, mode=mode)
+
+
+def build_seed_config(
+    entries: Sequence[SeedEntry], default_mode: str = DEFAULT_SEED_MODE
+) -> dict[str, Any]:
+    """Render entries back into the ``seed`` mapping a project would write.
+
+    The inverse of :func:`parse_seed_config`, kept beside it so the two cannot
+    disagree about key names. Used to render a *suggestion*; nothing here writes
+    to a file.
+
+    Args:
+        entries: Validated entries to render.
+        default_mode: The mode to declare for the block, which also decides
+            which entries can be rendered as bare path strings.
+
+    Returns:
+        A mapping ready to serialise as YAML.
+    """
+    return {
+        _KEY_DEFAULT_MODE: default_mode,
+        _KEY_ENTRIES: [entry.to_config(default_mode) for entry in entries],
+    }
 
 
 def parse_seed_config(raw: Any) -> list[SeedEntry]:

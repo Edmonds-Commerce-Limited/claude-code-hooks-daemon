@@ -635,6 +635,24 @@ echo "  1. Review config:   vim $TARGET_CONFIG"
 echo "  2. Commit hooks:    git add .claude/hooks/ .claude/settings.json .claude/hooks-daemon.yaml"
 echo "  3. Hooks activate automatically on next tool use"
 echo ""
+# Worktree seed suggestions (Plan 00267). A fresh install is the single best
+# moment for this: the config was just written from a template that cannot know
+# which git-ignored local files THIS project has, so anything it finds is
+# genuinely unconfigured. Exit 1 means "found something", which is normal here
+# and must not fail the install — hence the guarded call.
+if [ -x "$VENV_PATH/bin/python" ]; then
+    _seed_rc=0
+    _seed_out="$("$VENV_PATH/bin/python" -m claude_code_hooks_daemon.daemon.cli \
+        check-worktree-seed \
+        --project-root "$PROJECT_ROOT" \
+        --config "$TARGET_CONFIG" 2>&1)" || _seed_rc=$?
+    if [ "$_seed_rc" -eq 1 ]; then
+        echo "Worktree seeding (agents run in fresh checkouts without your local files):"
+        echo "$_seed_out"
+        echo ""
+    fi
+fi
+
 echo "Customisation (edit $TARGET_CONFIG — it is the single source of truth):"
 echo "  Profiles:  HANDLER_PROFILE=recommended|strict seeds extra handlers at"
 echo "             FRESH-INSTALL time only; afterwards edit enabled: flags in config"

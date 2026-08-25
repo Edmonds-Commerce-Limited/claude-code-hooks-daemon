@@ -193,3 +193,49 @@ tool for Phase 5, where a config key genuinely does need looking up.
 What Phase 4 does reuse is `run_git`, so **git** decides what is ignored.
 Reimplementing `.gitignore` semantics would drift from the tool that actually
 governs the answer.
+
+## 9. Phase 5: there is no `--write` flag
+
+Task 5.2 called for "a dry-run default and an explicit-write flag". The dry-run
+default shipped; the write flag did **not**, and the reason is specific rather
+than a matter of taste.
+
+The daemon depends on PyYAML, which does not round-trip comments. A
+`hooks-daemon.yaml` is one of the most heavily-commented files in a client
+project — every handler block carries the explanation of what it does and what
+the alternatives are — so `yaml.safe_dump`ing a mutated config back over it
+would silently delete all of that to add four lines. A command whose stated
+premise is "the project owns its config" cannot be the thing that strips the
+config's documentation.
+
+The alternatives were considered and rejected:
+
+- **Add `ruamel.yaml`** for round-trip fidelity — a new runtime dependency on
+  every install, to serve one optional flag on one advisory command.
+- **Surgical text insertion** into the right nesting level — fragile against
+  formatting the daemon does not control, and precisely the "quick not proper"
+  the project's principles forbid.
+
+What ships instead is strictly more useful than a lossy write: the report
+renders a **paste-ready YAML block**, at the correct nesting, and the block is
+different depending on whether the project already has a `seed` key (contents
+only) or not (the full path from `handlers:` down). A human pastes it; an agent
+applies it with `Edit`, which preserves the file exactly. A test pins that the
+command does not modify the config.
+
+### The dogfood run changed the Phase 4 heuristics
+
+Running the finished command against **this** repository — the first real
+target, as opposed to a fixture — returned nothing, and that turned out to be a
+false negative. Two genuine local-config files were missed:
+
+| File                         | Why it was missed                      | Why it matters                                                                              |
+| ---------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `.claude/hooks-daemon.env`   | ends in `.env`, does not start with it | sets the daemon root dir; a worktree agent resolves a different one                         |
+| `.claude/block-words.secret` | no pattern covered `*.secret`          | the secret word list; absent, `sensitive_content` goes **silently inert** in every worktree |
+
+The second is the sharper one: a missing secret list does not fail, it just
+stops guarding. `*.env`, `*.secret`, `*.secrets` and `.secrets` were added, with
+a regression test pinning that the lock/coverage artefacts turned up by the same
+real scan are still **not** proposed. On this repository the widened set matches
+exactly those two files and nothing else.

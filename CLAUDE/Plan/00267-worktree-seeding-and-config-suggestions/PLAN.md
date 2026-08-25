@@ -126,14 +126,19 @@ wrong place for a session whose cwd is a subdirectory (DESIGN §3).
 
 ### Phase 5: CLI command and install/upgrade entry point
 
-- [ ] ⬜ **Task 5.1**: A `run_*` function in the install config CLI layer
+- [x] ✅ **Task 5.1**: A `run_*` function in the install config CLI layer
   returning a plain dict; zero logic in the argument parser module
-- [ ] ⬜ **Task 5.2**: Register the subcommand with a text/json format flag, a
-  dry-run default and an explicit-write flag
-- [ ] ⬜ **Task 5.3**: Exit-code contract — 0 clean, 1 drift, 2 operational
+- [x] ✅ **Task 5.2**: Register the subcommand with a text/json format flag and
+  a dry-run default. **No explicit-write flag was built** — PyYAML cannot
+  round-trip comments, so writing would strip the config's own documentation.
+  A paste-ready YAML block is rendered instead (DESIGN §9)
+- [x] ✅ **Task 5.3**: Exit-code contract — 0 clean, 1 drift, 2 operational
   error; a test for each
-- [ ] ⬜ **Task 5.4**: Invoke the **same** command from install/upgrade so the
+- [x] ✅ **Task 5.4**: Invoke the **same** command from install/upgrade so the
   scan has exactly one implementation
+- [x] ✅ **Task 5.5**: Dogfooding the finished command against this repository
+  exposed two false negatives in the Phase 4 heuristics; patterns widened with
+  a regression test for the non-config artefacts (DESIGN §9)
 
 ### Phase 6: Integration, docs and dogfooding
 
@@ -173,12 +178,12 @@ Recorded in full in [DESIGN.md](DESIGN.md). In brief:
 
 ## Success Criteria
 
-- [ ] A worktree created from a subdirectory cwd lands at the repo root
-- [ ] A fresh worktree contains the configured entries, symlinked or copied per
+- [x] A worktree created from a subdirectory cwd lands at the repo root
+- [x] A fresh worktree contains the configured entries, symlinked or copied per
   the project's per-entry choice, for both files and directories
-- [ ] Symlinks are relative and resolve after the tree is relocated
-- [ ] A content error aborts before creation; no partially-seeded worktree
-- [ ] The suggestion command reports this repo's own missing `worktree_create`
+- [x] Symlinks are relative and resolve after the tree is relocated
+- [x] A content error aborts before creation; no partially-seeded worktree
+- [x] The suggestion command reports this repo's own missing `worktree_create`
   block, and exits 1 on drift
 - [ ] No secrets in code, tests or fixtures
 - [ ] Full QA green; daemon restart verified RUNNING
