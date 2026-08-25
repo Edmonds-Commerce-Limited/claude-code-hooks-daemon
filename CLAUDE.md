@@ -203,6 +203,27 @@ Do NOT leave a report sitting in `untracked/` after acting on it. When in
 doubt, prefer tracking it in a plan folder over deletion — but never leave it
 in limbo.
 
+### Fate 2 requires GENERALISING the report first — this repository is PUBLIC
+
+A report written elsewhere describes *elsewhere*. Moving one into a plan folder
+publishes it, so before it is committed, read it in full and strip everything
+specific to the reporting project: filenames, directory layout, host and
+service names, internal ticket or issue numbers, script names, quoted user
+utterances, and paths. **Keep the reasoning, remove the identifiers** — the
+technical argument is why the report is worth tracking, and it never depends on
+them. Say in a header that it has been generalised, so the next reader does not
+assume it describes this repository.
+
+**Do not rely on `sensitive_content` or the `git_history` QA check to catch
+this.** Both match a configured deny-list and a secret word list, so they see
+only identifiers someone has already enumerated. A report from a project nobody
+has listed passes both cleanly — which has happened, with the report committed
+verbatim and pushed before anyone read it. The guard covers *recurrence* of
+known identifiers; reading the file is the only thing that covers new ones.
+
+The same applies to anything else arriving from outside: pasted transcripts,
+diagnostic dumps, screenshots of someone else's terminal.
+
 ---
 
 ## ⚠️ CRITICAL: Code Lifecycle (READ BEFORE MAKING CHANGES)
