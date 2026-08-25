@@ -118,9 +118,12 @@ its false-positive rate stays low enough that nobody disables it.
 - [x] ✅ **Task 1.5**: `get_claude_md()` states which YAML is claimed and which
   is left alone, names both tiers, and repeats that the write has ALREADY
   landed — the denial is a failure report to repair with `Edit`, not a rollback
-- [ ] 🔄 **Task 1.6**: QA 23/23 and daemon RUNNING after restart. Client-mode
-  check still to run: the fixture installs from a detached worktree at `HEAD`,
-  so it can only see this work once it is committed.
+- [x] ✅ **Task 1.6**: QA 23/23, daemon RUNNING, and the client fixture rebuilt
+  from the committed tree registers Ansible, resolves `ansible.cfg`, claims
+  `playbooks/` and `site.yml`, and declines workflows, Compose, inventories and
+  vault. Dogfooded against the live daemon: the motivating shape is DENIED at
+  write time with the linter's own `failed at splitting arguments` diagnosis,
+  and a workflow file returns `{}`
 
 ### Phase 2: `verifier → mutator` PreToolUse handler (warn mode)
 
@@ -181,14 +184,14 @@ its false-positive rate stays low enough that nobody disables it.
 
 ## Risks & Mitigations
 
-| Risk                                                                          | Impact | Probability | Mitigation                                                                                                |
-| ----------------------------------------------------------------------------- | ------ | ----------- | --------------------------------------------------------------------------------------------------------- |
-| Verifier/mutator lists cry wolf and the handler gets disabled                 | High   | Medium      | Ship `warn` first; test the report's false-positive table as ALLOW cases before enabling                  |
-| YAML strategy lints non-playbook YAML (workflows, inventories, vault)         | Medium | Medium      | Narrow path allowlist plus mandatory exclusions; default `exclude_paths`                                  |
-| `ansible-lint` runs from the wrong project dir and fails for the wrong reason | Medium | Medium      | Resolve the project dir explicitly (Task 1.2); treat a resolution failure as skip-with-advisory, not deny |
-| Full `ansible-lint` is slow enough to be disruptive on every write            | Medium | Medium      | `--syntax-check` at the default tier; full lint only at `extended`                                        |
-| Detection reimplements shell parsing and drifts from the shared scanner       | High   | Low         | Task 2.2 mandates `split_unquoted`; add a test asserting newline parity with `;`                          |
-| Staged-file lint makes every commit expensive                                 | Medium | Medium      | Phase 3 is gated on a cost decision (Task 3.1); it may be dropped                                         |
+| Risk                                                                          | Impact | Probability | Mitigation                                                                                                                                                                                                                               |
+| ----------------------------------------------------------------------------- | ------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Verifier/mutator lists cry wolf and the handler gets disabled                 | High   | Medium      | Ship `warn` first; test the report's false-positive table as ALLOW cases before enabling                                                                                                                                                 |
+| YAML strategy lints non-playbook YAML (workflows, inventories, vault)         | Medium | Medium      | Narrow path allowlist plus mandatory exclusions; default `exclude_paths`                                                                                                                                                                 |
+| `ansible-lint` runs from the wrong project dir and fails for the wrong reason | Medium | Medium      | Resolve the project dir explicitly (Task 1.2); treat a resolution failure as skip-with-advisory, not deny                                                                                                                                |
+| Full `ansible-lint` is slow enough to be disruptive on every write            | Medium | Medium      | Cheap `--syntax-check` runs first and short-circuits on failure. NOT opt-in: `extended` runs whenever the tool is installed, as it does for all nine other languages, so the opt-out is `command_overrides: {Ansible: {extended: null}}` |
+| Detection reimplements shell parsing and drifts from the shared scanner       | High   | Low         | Task 2.2 mandates `split_unquoted`; add a test asserting newline parity with `;`                                                                                                                                                         |
+| Staged-file lint makes every commit expensive                                 | Medium | Medium      | Phase 3 is gated on a cost decision (Task 3.1); it may be dropped                                                                                                                                                                        |
 
 ## Delivery & Milestones
 
