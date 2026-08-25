@@ -164,6 +164,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
+- [00267: Worktree seeding and config suggestions](00267-worktree-seeding-and-config-suggestions/PLAN.md) - In Progress (seed a fresh worktree from a project-owned list, symlink or copy chosen per entry; supersedes the never-merged Plan 00191 branch and carries its HIGH relative-symlink finding; Phase 1 fixes a pre-existing bug where the handler never resolves the repo root)
+
 ## Completed Plans
 
 - [00265: static type safe handler results](Completed/00265-static-type-safe-handler-results/PLAN.md) - Complete at `6fc2db3a` + the commit that archives it (an undeliverable decision is now unwritable, not merely detectable: per-event bases narrow `handle()` once and all 84 handlers inherit it; a shipped example whose `SessionStart` refusal had never blocked anything was found and fixed en route)
@@ -1235,31 +1237,41 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 266 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 267 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 218 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 35 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 35 + 218 + 6 = **259 folders**, spanning
-  **256 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 36 + 218 + 6 = **260 folders**, spanning
+  **257 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **10** of the
-  266 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  267 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258 — abandoned drafts, numbers burned by
   transient probes (00195 during the v3.51.0 acceptance run, 00258 during the
   v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a sub-agent
-  that then found Plan 00208 already covered the work). 256 + 10 = 266. ✅
+  that then found Plan 00208 already covered the work). 257 + 10 = 267. ✅
 
-- **Last reconciled by**: the Plan 00266 creation — one new folder in the plan
+  Note on **00191**: it stays folderless deliberately. The number was claimed
+  by a branch that renumbered itself and was never merged; Plan 00267
+  supersedes it, so no folder for 00191 will ever land in `main`.
+
+- **Last reconciled by**: the Plan 00267 creation — one new folder in the plan
   root and the counter advanced by `mkplan.bash`, so Total and Active each rose
   by one while Completed and Cancelled were untouched. Counts recounted from
-  disk at this commit (35 root, 218 `Completed/`, 6 `Cancelled/`, 256 distinct
+  disk at this commit (36 root, 218 `Completed/`, 6 `Cancelled/`, 257 distinct
+  numbers against a counter of 267).
+
+- **Before that**: the Plan 00266 creation — one new folder in the plan
+  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
+  by one while Completed and Cancelled were untouched. Counts recounted from
+  disk at that commit (35 root, 218 `Completed/`, 6 `Cancelled/`, 256 distinct
   numbers against a counter of 266).
 
 - **Before that**: the Plan 00265 closure — the folder moved from the
