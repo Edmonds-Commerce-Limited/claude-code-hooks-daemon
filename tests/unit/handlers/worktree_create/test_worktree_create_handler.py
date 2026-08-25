@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.core.worktree_seed import (
 from claude_code_hooks_daemon.handlers.worktree_create.worktree_create_handler import (
     WorktreeCreateHandler,
 )
+from claude_code_hooks_daemon.utils.worktree_seeding import WorktreeSeedError
 
 
 def _init_repo(root: Path) -> None:
@@ -240,3 +241,68 @@ class TestSeedOptionPlumbing:
         handler = WorktreeCreateHandler()
         handler._seed = ".env.local"  # the bare-string mistake
         assert handler._seed_entries() == []
+
+
+class TestSeedingOnCreate:
+    """Plan 00267 Phase 3: seeding is wired into creation, and fails before it."""
+
+    def _input(self, cwd: Path, name: str = "Refactor Auth") -> dict:
+        return {
+            "hook_event_name": EventType.WORKTREE_CREATE.value,
+            "cwd": str(cwd),
+            "name": name,
+            "prompt_id": "pid-123",
+            "session_id": "sid-456",
+        }
+
+    def test_configured_entries_are_seeded_into_a_fresh_worktree(self, repo: Path) -> None:
+        (repo / ".env.local").write_text("SECRET=canonical\n", encoding="utf-8")
+
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [".env.local"]}
+        result = handler.handle(self._input(repo))
+
+        seeded = Path(result.worktree_path or "") / ".env.local"
+        assert seeded.is_symlink()
+        assert seeded.read_text(encoding="utf-8") == "SECRET=canonical\n"
+
+    def test_copy_mode_is_honoured_end_to_end(self, repo: Path) -> None:
+        (repo / ".env.local").write_text("SECRET=canonical\n", encoding="utf-8")
+
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [{"path": ".env.local", "mode": SEED_MODE_COPY}]}
+        result = handler.handle(self._input(repo))
+
+        seeded = Path(result.worktree_path or "") / ".env.local"
+        assert not seeded.is_symlink()
+        assert seeded.read_text(encoding="utf-8") == "SECRET=canonical\n"
+
+    def test_unconfigured_creation_seeds_nothing_and_still_works(self, repo: Path) -> None:
+        handler = WorktreeCreateHandler()
+        result = handler.handle(self._input(repo))
+        assert Path(result.worktree_path or "").is_dir()
+
+    def test_an_unusable_entry_aborts_before_the_worktree_is_created(self, repo: Path) -> None:
+        """No partial state: the directory must not exist after the failure."""
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [".env.missing"]}
+
+        with pytest.raises(WorktreeSeedError, match=r"\.env\.missing"):
+            handler.handle(self._input(repo))
+
+        worktrees = repo / ".claude" / "worktrees"
+        assert not worktrees.exists() or not any(worktrees.iterdir())
+
+    def test_refire_does_not_reseed_over_the_agents_own_edits(self, repo: Path) -> None:
+        (repo / ".env.local").write_text("SECRET=canonical\n", encoding="utf-8")
+
+        handler = WorktreeCreateHandler()
+        handler._seed = {"entries": [{"path": ".env.local", "mode": SEED_MODE_COPY}]}
+        first = handler.handle(self._input(repo))
+
+        seeded = Path(first.worktree_path or "") / ".env.local"
+        seeded.write_text("SECRET=agent-edited\n", encoding="utf-8")
+
+        handler.handle(self._input(repo))
+
+        assert seeded.read_text(encoding="utf-8") == "SECRET=agent-edited\n"

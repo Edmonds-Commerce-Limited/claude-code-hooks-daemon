@@ -92,20 +92,22 @@ wrong place for a session whose cwd is a subdirectory (DESIGN §3).
 
 ### Phase 3: Seeding execution
 
-- [ ] ⬜ **Task 3.1**: Failing tests for symlink mode
-  - [ ] ⬜ link is **relative** and survives tree relocation to a new prefix
-  - [ ] ⬜ edits to the canonical file are visible through the link
-  - [ ] ⬜ an entry nested one directory deep creates its parent directories
-- [ ] ⬜ **Task 3.2**: Failing tests for copy mode
-  - [ ] ⬜ a copied file is independent — editing the source does not change it
-  - [ ] ⬜ a copied directory is recursive
-- [ ] ⬜ **Task 3.3**: Failing tests for fail-fast content errors — absent
-  source, absolute path, parent traversal — each raising **before**
-  creation
-- [ ] ⬜ **Task 3.4**: Failing tests for never-clobber (including a *dangling*
+- [x] ✅ **Task 3.1**: Tests for symlink mode
+  - [x] ✅ link is **relative** and survives tree relocation to a new prefix
+  - [x] ✅ edits to the canonical file are visible through the link
+  - [x] ✅ an entry nested one directory deep creates its parent directories
+- [x] ✅ **Task 3.2**: Tests for copy mode
+  - [x] ✅ a copied file is independent — editing the source does not change it
+  - [x] ✅ a copied directory is recursive
+  - [x] ✅ writing the copy does not touch the main checkout
+- [x] ✅ **Task 3.3**: Tests for fail-fast content errors — absent source,
+  absolute path, parent traversal — each raising **before** creation, with
+  every offending entry named in one message
+- [x] ✅ **Task 3.4**: Tests for never-clobber (including a *dangling*
   destination symlink) and no re-seed on idempotent re-fire
-- [ ] ⬜ **Task 3.5**: Implement seeding to pass Tasks 3.1–3.4
-- [ ] ⬜ **Task 3.6**: Containment check — the resolved target stays under the
+- [x] ✅ **Task 3.5**: Implement seeding to pass Tasks 3.1–3.4, in
+  `utils/worktree_seeding.py`, and wire it into the handler
+- [x] ✅ **Task 3.6**: Containment check — the resolved target stays under the
   repo root, guarding a symlinked path component
 
 ### Phase 4: Suggestion generator

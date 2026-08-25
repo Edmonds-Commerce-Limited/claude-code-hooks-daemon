@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.core.handler_bases import WorktreeCreateHandlerBas
 from claude_code_hooks_daemon.core.worktree_naming import worktree_dir_name, worktree_path
 from claude_code_hooks_daemon.core.worktree_seed import SeedEntry, parse_seed_config
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
+from claude_code_hooks_daemon.utils.worktree_seeding import seed_worktree, validate_seed_sources
 
 logger = logging.getLogger(__name__)
 
@@ -76,18 +77,29 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
         prompt_id = hook_input.get(_KEY_PROMPT_ID)
         session_id = hook_input.get(_KEY_SESSION_ID)
 
-        path = worktree_path(self._repo_root(cwd), name, prompt_id, session_id)
+        root = self._repo_root(cwd)
+        path = worktree_path(root, name, prompt_id, session_id)
 
-        # Idempotent: a re-fired event for the same agent reuses the worktree.
+        # Idempotent: a re-fired event for the same agent reuses the worktree,
+        # and deliberately does NOT re-seed — whatever the agent has done to
+        # those files inside its worktree is its own.
         #
         # This checks the DIRECTORY, not git's worktree registry, so a stale
         # directory that is not a registered worktree is accepted and echoed
         # back as valid. Tightening it means reconciling against
         # ``git worktree list``, which is out of scope here (Plan 00267 T1.4).
         if not path.exists():
+            entries = self._seed_entries()
+            # BEFORE creation: an unusable entry must abandon the whole
+            # operation rather than leave a worktree missing files its agent
+            # cannot know are absent. Both calls no-op on an empty list.
+            validate_seed_sources(Path(root), entries)
+
             path.parent.mkdir(parents=True, exist_ok=True)
             branch = worktree_dir_name(name, prompt_id, session_id)
             self._git_worktree_add(cwd, path, branch)
+
+            seed_worktree(Path(root), path, entries)
 
         return AdvisoryResult(worktree_path=str(path))
 
