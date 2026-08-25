@@ -351,6 +351,31 @@ block shared by all three surfaces and the CLI -- see
 held to advise-only via `legacy_plan_allowlist` (plan numbers), and historic
 duplicate numbers are tolerated via `collision_allowlist`.
 
+### Truth is enforced on LIVE plans, never on the historical record
+
+Plan QA keeps **active** plans grounded in current truth. It does **not** try to
+keep the archive matching today's tree, and no one should.
+
+- **A live plan must state present truth.** It is read in full at the start of
+  every session that touches it, so a task citing a path, command or option
+  that has since moved actively misleads the next reader. If a live plan's
+  current task text has gone stale, **fix it** — that is squarely in scope.
+- **An archived plan is a RECORD of what was true when it was written.**
+  Completed, Cancelled and Superseded plans are not maintained against the
+  present. Editing one so it matches today's tree does not make it more
+  accurate; it **falsifies the record** of what the work actually faced.
+- **The same applies to a dated historical block inside a live plan** — an
+  "assumed defaults (from the audit)" list, an incident write-up, a findings
+  table stamped with a date. That block is a record of a moment, not a claim
+  about now, and it stays as written.
+
+**Consequence for `path-existence`.** The check cannot tell a live reference
+from historical prose, so it will flag backticked `src/...` paths in both. On
+an archived plan, or inside a dated block, that finding is **expected noise —
+leave the prose alone**. And never un-backtick a path to silence it: that
+games the check without changing anything a reader sees. Only a stale path in
+a live plan's current text is a real finding.
+
 ---
 
 ## TDD Integration
