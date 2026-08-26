@@ -1115,6 +1115,62 @@ handlers:
 
 ---
 
+#### bash_safe_mode
+
+| Property       | Value                                |
+| -------------- | ------------------------------------ |
+| **Config key** | `bash_safe_mode`                     |
+| **Priority**   | 36                                   |
+| **Type**       | Blocking (ships disabled + advisory) |
+| **Event**      | PreToolUse                           |
+
+**Description:** Opt-in bash safe-mode forcer (Plan 00270) — the counterpart
+Plan 00268 deferred. When enabled, a Bash invocation with multiple sequenced
+statements (`;` or newline separated) must declare the required `set` safety
+flags — by default `set -e` (errexit) and `set -o pipefail` (`set -euo pipefail` satisfies both). A command already carrying a satisfying prelude, a
+single statement, and a pure `&&` chain (which splits to one statement) are
+never flagged. The message and resident guidance teach `set -e`'s blind spots
+(disabled inside `if`/`while` conditions and under `!`; non-final `&&`/`||`
+operands; `local x=$(fail)` masking; SIGPIPE under `pipefail`) so the prelude
+is never mistaken for a guarantee. Complementary to
+`verification_result_gate`, which stands down when a prelude is present — the
+two never double-fire.
+
+`mode: inject` (auto-prepending the prelude via PreToolUse `updatedInput`) is
+reserved but NOT implemented: the daemon's PreToolUse response schema does not
+model the field. The value is rejected at config load with a message naming
+that gap.
+
+**Escape hatch** for commands that must run every statement (diagnostic
+sweeps, exit-code observers): `MUST_SKIP_SAFE_MODE_BECAUSE="explain why"; <command>`.
+
+**Options:**
+
+| Option              | Type        | Default                   | Description                                                                    |
+| ------------------- | ----------- | ------------------------- | ------------------------------------------------------------------------------ |
+| `mode`              | `str`       | `warn`                    | `warn` injects advisory context; `block` denies. `inject` is rejected at load. |
+| `require`           | `list[str]` | `["errexit", "pipefail"]` | Flags to demand: `errexit`, `pipefail`, `nounset`. `nounset` is off-default.   |
+| `min_statements`    | `int`       | `2`                       | Sequenced-statement threshold; single statements are never flagged.            |
+| `only_with_mutator` | `bool`      | `false`                   | Scope to commands containing an entry from the shared mutator table.           |
+| `exempt_patterns`   | `list[str]` | `[]`                      | Additive regexes matched against the whole command.                            |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    bash_safe_mode:
+      enabled: true          # ships OFF; enabling is a per-project policy act
+      priority: 36
+      options:
+        mode: warn
+        require: [errexit, pipefail]
+        min_statements: 2
+        only_with_mutator: false
+```
+
+---
+
 #### security_antipattern
 
 | Property       | Value                  |
@@ -2528,6 +2584,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | -------------------------- | ---------------- | -------- | ------------------------------------------- |
 | `daemon_restart_verifier`  | PreToolUse       | 10       | Suggests daemon restart before commits      |
 | `verification_result_gate` | PreToolUse       | 34       | Verifier result unconsumed before a mutator |
+| `bash_safe_mode`           | PreToolUse       | 36       | Opt-in safe-prelude forcer (ships disabled) |
 | `staged_lint_gate`         | PreToolUse       | 43       | Cheap syntax check over staged files        |
 | `global_npm_advisor`       | PreToolUse       | 40       | Suggests npx over global installs           |
 | `plan_workflow`            | PreToolUse       | 45       | Guidance for plan creation                  |
