@@ -22,7 +22,6 @@ class TestConstants:
         assert constants.DEFAULT_MAX_CLUSTERS > 0
         assert constants.MAX_PAYLOAD_CHARS > 0
         assert constants.REPRESENTATIVE_MAX_CHARS > 0
-        assert constants.MODEL_TIMEOUT_SECONDS > 0
 
     def test_jaccard_threshold_is_decision_4_value(self) -> None:
         assert constants.JACCARD_THRESHOLD == 0.5
@@ -30,4 +29,3 @@ class TestConstants:
     def test_defaults_match_config_surface(self) -> None:
         assert constants.DEFAULT_CHECK_INTERVAL_DAYS == 7
         assert constants.DEFAULT_TRANSCRIPT_WINDOW_DAYS == 14
-        assert constants.DEFAULT_MODEL == "haiku"

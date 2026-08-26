@@ -1,8 +1,9 @@
 """Pipeline orchestration for the skill-opportunity scan (Plan 00274).
 
-Extraction → clustering → digest → model → report. The model stage is
-injected (``ModelInvoker``) and every external boundary is fail-open: a
-model failure yields a partial report, an empty window a no-op report.
+Extraction → clustering → digest → report. The judging stage is NOT run
+here: the report embeds the ready-to-judge rubric prompt and the agent
+dispatches an in-session subagent at it (PLAN.md Decision 9 — no headless
+model shell-out).
 """
 
 from __future__ import annotations
@@ -21,11 +22,6 @@ from claude_code_hooks_daemon.skill_scan.extraction import (
     derive_transcript_dir,
     extract_prompts,
 )
-from claude_code_hooks_daemon.skill_scan.invoker import (
-    ModelInvoker,
-    ModelSuggestions,
-    parse_model_output,
-)
 from claude_code_hooks_daemon.skill_scan.models import ScanStats, SkillScanOptions
 from claude_code_hooks_daemon.skill_scan.report import write_report
 
@@ -37,14 +33,14 @@ class ScanResult:
     stats: ScanStats
     digest: str
     report_path: Path | None
-    model_error: str | None
-    suggestions: ModelSuggestions | None
+    #: The ready-to-judge rubric prompt embedded in the report for the
+    #: in-session subagent (``None`` on a dry run).
+    judging_prompt: str | None
 
 
 def run_scan(
     project_root: Path,
     options: SkillScanOptions,
-    invoker: ModelInvoker,
     report_dir: Path,
     secret_terms: tuple[str, ...],
     today: date,
@@ -56,11 +52,10 @@ def run_scan(
     Args:
         project_root: Project whose transcripts and skill inventory apply.
         options: The shared handler/CLI config surface.
-        invoker: The model stage (injectable; mocked in tests).
         report_dir: Where the dated report is written.
         secret_terms: Secret word list terms; redacted everywhere.
         today: Report date (injected for testability).
-        dry_run: Stages 1-2 only; print-ready digest, no model, no report.
+        dry_run: Stages 1-2 only; print-ready digest, no report.
         window_days: Override of ``options.transcript_window_days``.
     """
     transcript_dir = (
@@ -81,39 +76,22 @@ def run_scan(
     digest = build_digest(clusters, secret_terms, max_clusters=options.max_prompts)
 
     if dry_run:
-        return ScanResult(
-            stats=stats, digest=digest, report_path=None, model_error=None, suggestions=None
-        )
+        return ScanResult(stats=stats, digest=digest, report_path=None, judging_prompt=None)
 
     existing = existing_skill_names(project_root)
-    suggestions: ModelSuggestions | None = None
-    raw_output: str | None = None
-    model_error: str | None = None
-    if prompts:
-        model_prompt = build_model_prompt(digest, existing)
-        output, model_error = invoker.invoke(model_prompt)
-        if output is not None:
-            suggestions = parse_model_output(output)
-            if suggestions is None:
-                raw_output = output
-    else:
-        model_error = "nothing to scan in the transcript window"
-
+    judging_prompt = build_model_prompt(digest, existing)
     report_path = write_report(
         report_dir=report_dir,
         clusters=clusters,
         stats=stats,
         terms=secret_terms,
-        suggestions=suggestions,
-        raw_model_output=raw_output,
-        model_error=model_error,
         existing=existing,
+        judging_prompt=judging_prompt,
         today=today,
     )
     return ScanResult(
         stats=stats,
         digest=digest,
         report_path=report_path,
-        model_error=model_error,
-        suggestions=suggestions,
+        judging_prompt=judging_prompt,
     )

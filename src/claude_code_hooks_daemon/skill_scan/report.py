@@ -4,6 +4,10 @@ Reports follow docs/guides/CREATING_REPORTS.md conventions
 (``untracked/reports/YYYY-MM-DD-skill-opportunities.md``, PLAN.md Decision
 6) with a standing privacy header — this content is derived from private
 session transcripts. Everything rendered passes through secret redaction.
+
+The report is the subagent's briefing (PLAN.md Decision 9): it embeds the
+judging rubric and the redacted digest, and the dispatching agent appends
+the subagent's findings under ``## Findings``.
 """
 
 from __future__ import annotations
@@ -16,7 +20,6 @@ from claude_code_hooks_daemon.skill_scan.constants import (
     MAX_REPORT_CLUSTERS,
     REPORT_FILE_SUFFIX,
 )
-from claude_code_hooks_daemon.skill_scan.invoker import ModelSuggestions, Suggestion
 from claude_code_hooks_daemon.skill_scan.models import Cluster, ScanStats
 from claude_code_hooks_daemon.utils.secret_redaction import redact_text
 
@@ -29,28 +32,13 @@ _PRIVACY_HEADER = (
 _NO_INVENTORY = "(none)"
 
 
-def _render_suggestions(title: str, note: str, suggestions: tuple[Suggestion, ...]) -> list[str]:
-    lines = [f"## {title}", "", note, ""]
-    if not suggestions:
-        lines.append("_No candidates proposed._")
-        lines.append("")
-        return lines
-    for suggestion in suggestions:
-        evidence = ", ".join(str(idx) for idx in suggestion.evidence_cluster_ids) or "-"
-        lines.append(f"- **{suggestion.name}** — {suggestion.purpose} (clusters: {evidence})")
-    lines.append("")
-    return lines
-
-
 def write_report(
     report_dir: Path,
     clusters: list[Cluster],
     stats: ScanStats,
     terms: tuple[str, ...],
-    suggestions: ModelSuggestions | None,
-    raw_model_output: str | None,
-    model_error: str | None,
     existing: list[str],
+    judging_prompt: str,
     today: date,
 ) -> Path:
     """Write the dated report file and return its path."""
@@ -88,43 +76,24 @@ def write_report(
             f"{idx}. **{len(cluster.prompts)}x / {cluster.distinct_sessions} session(s)** — "
             f"`{rep}`"
         )
-    lines.append("")
-
-    if suggestions is not None:
-        lines.extend(
-            _render_suggestions(
-                "Repeated workloads (skill candidates)",
-                "Each entry is a proposed `.claude/skills/` skill.",
-                suggestions.workloads,
-            )
-        )
-        lines.extend(
-            _render_suggestions(
-                "Recurring corrections/confusion (doc candidates)",
-                "These usually want a doc/CLAUDE.md/rules line rather than a skill.",
-                suggestions.corrections,
-            )
-        )
-    elif raw_model_output is not None:
-        lines.extend(
-            [
-                "## Unparsed model notes",
-                "",
-                "_The model's answer was not valid JSON; raw notes follow._",
-                "",
-                redact_text(raw_model_output, terms),
-                "",
-            ]
-        )
-    else:
-        lines.extend(
-            [
-                "## Model suggestions",
-                "",
-                f"_Model stage skipped: {model_error or 'dry run'}_",
-                "",
-            ]
-        )
+    lines.extend(
+        [
+            "",
+            "## Judging (subagent task)",
+            "",
+            "Dispatch a subagent with the prompt below. Append its answer under",
+            "`## Findings`. Report-only: never create a skill without human sign-off.",
+            "",
+            "```text",
+            redact_text(judging_prompt, terms),
+            "```",
+            "",
+            "## Findings",
+            "",
+            "_Pending subagent judging._",
+            "",
+        ]
+    )
 
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return report_path

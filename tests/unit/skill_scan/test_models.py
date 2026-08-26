@@ -55,7 +55,6 @@ class TestSkillScanOptions:
         options = SkillScanOptions.from_dict({})
         assert options.check_interval_days == 7
         assert options.transcript_window_days == 14
-        assert options.model == "haiku"
         assert options.max_prompts == 100
         assert options.extra_exclude_patterns == ()
         assert options.transcript_dir is None
@@ -65,7 +64,6 @@ class TestSkillScanOptions:
             {
                 "check_interval_days": 3,
                 "transcript_window_days": 30,
-                "model": "sonnet",
                 "max_prompts": 50,
                 "extra_exclude_patterns": ["<custom-marker>"],
                 "transcript_dir": "/tmp/x",
@@ -73,7 +71,6 @@ class TestSkillScanOptions:
         )
         assert options.check_interval_days == 3
         assert options.transcript_window_days == 30
-        assert options.model == "sonnet"
         assert options.max_prompts == 50
         assert options.extra_exclude_patterns == ("<custom-marker>",)
         assert options.transcript_dir == "/tmp/x"

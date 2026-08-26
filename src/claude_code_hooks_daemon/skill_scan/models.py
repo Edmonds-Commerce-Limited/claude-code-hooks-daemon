@@ -8,7 +8,6 @@ from typing import Any
 from claude_code_hooks_daemon.skill_scan.constants import (
     DEFAULT_CHECK_INTERVAL_DAYS,
     DEFAULT_MAX_CLUSTERS,
-    DEFAULT_MODEL,
     DEFAULT_TRANSCRIPT_WINDOW_DAYS,
     REPRESENTATIVE_MAX_CHARS,
 )
@@ -65,17 +64,12 @@ def _as_int(value: Any, default: int) -> int:
     return default
 
 
-def _as_str(value: Any, default: str) -> str:
-    return value if isinstance(value, str) and value else default
-
-
 @dataclass(frozen=True)
 class SkillScanOptions:
     """The handler/CLI shared config surface (BRAINSTORM.md section 6)."""
 
     check_interval_days: int = DEFAULT_CHECK_INTERVAL_DAYS
     transcript_window_days: int = DEFAULT_TRANSCRIPT_WINDOW_DAYS
-    model: str = DEFAULT_MODEL
     max_prompts: int = DEFAULT_MAX_CLUSTERS
     extra_exclude_patterns: tuple[str, ...] = ()
     transcript_dir: str | None = None
@@ -102,7 +96,6 @@ class SkillScanOptions:
             transcript_window_days=_as_int(
                 options.get("transcript_window_days"), DEFAULT_TRANSCRIPT_WINDOW_DAYS
             ),
-            model=_as_str(options.get("model"), DEFAULT_MODEL),
             max_prompts=_as_int(options.get("max_prompts"), DEFAULT_MAX_CLUSTERS),
             extra_exclude_patterns=patterns,
             transcript_dir=transcript_dir,

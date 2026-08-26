@@ -2,9 +2,10 @@
 
 Advisory delegation (PLAN.md Decision 1): this handler ONLY checks the TTL
 state file and, when a scan is due, injects an advisory telling the agent to
-run ``bin/hooks-daemon skill-scan``. The pipeline (and its model call) lives
-entirely in the CLI, outside every hook path. Ships disabled upstream — a
-project enabling it is the explicit opt-in (Decision 2).
+run ``bin/hooks-daemon skill-scan``. The pipeline lives entirely in the CLI,
+outside every hook path; judging is done by an in-session subagent dispatched
+at the report (Decision 9). Ships disabled upstream — a project enabling it
+is the explicit opt-in (Decision 2).
 """
 
 from __future__ import annotations
@@ -83,16 +84,14 @@ class SkillOpportunityDetectorHandler(SessionStartHandlerBase):
             context = [
                 "🔍 A skill-opportunity scan is due "
                 f"(cadence: every {options.check_interval_days} days).",
-                "Run: `bin/hooks-daemon skill-scan` — it mines recent session",
-                "transcripts for repeated workloads and recurring confusion, and",
-                "files a report of skill-creation suggestions under",
-                "untracked/reports/ for HUMAN review. Report-only: never create a",
-                "skill from it without human sign-off. `--dry-run` previews the",
-                "exact redacted digest that would be sent to the model (the",
-                "privacy audit view); `--force` bypasses the cadence gate. Every",
-                "failure (no `claude` CLI, no auth, offline, timeout) is",
-                "fail-open: the report notes the skip and the scan retries later —",
-                "do not work around a failed model stage.",
+                "1. Run `bin/hooks-daemon skill-scan` — mines recent transcripts",
+                "and writes a report under untracked/reports/ with a judging",
+                "prompt embedded.",
+                "2. Dispatch a subagent at that report: it answers the prompt",
+                "under '## Judging'; append its answer under '## Findings'.",
+                "Report-only: human sign-off before creating any skill.",
+                "`--dry-run` previews the redacted digest; `--force` bypasses",
+                "the cadence gate.",
             ]
             return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=context)
         except Exception as exc:
@@ -107,8 +106,8 @@ class SkillOpportunityDetectorHandler(SessionStartHandlerBase):
         Same verdict as the other SessionStart advisories (T4 in
         ``tests/integration/test_claude_md_guidance_coverage.py``): the
         advisory fires once per cadence with the CLI invocation, the
-        report-only contract, the privacy audit flag and the fail-open rule
-        all in the message itself.
+        subagent dispatch step, the report-only contract and the privacy
+        audit flag all in the message itself.
         """
         return None
 

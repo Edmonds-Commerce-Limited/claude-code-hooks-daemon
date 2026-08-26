@@ -25,3 +25,14 @@ config_changes:
         know is safe, fix the listed issue (gitignore it, untrack it, or
         chmod 600 it) -- there is no per-finding suppression, matching
         secret_file_guard's own no-escape-hatch doctrine for protected paths.
+  removed:
+    - key: handlers.session_start.skill_opportunity_detector.options.model
+      description: >-
+        The skill-scan model shell-out is gone (Plan 00274 Decision 9): the
+        CLI no longer invokes headless `claude -p`, so the `model` option has
+        nothing to configure. `bin/hooks-daemon skill-scan` now writes the
+        report with the judging rubric embedded, and an in-session subagent
+        dispatched at the report does the judging.
+      migration_note: >-
+        Delete any `options.model` line under skill_opportunity_detector; it
+        is ignored. No auth is needed for the scan any more.

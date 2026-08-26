@@ -4183,9 +4183,10 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
     """Run the skill-opportunity scan pipeline (Plan 00274).
 
     Mines Claude Code session transcripts for repeated workloads and
-    recurring points of confusion, and writes a report of skill-creation
-    suggestions to ``untracked/reports/``. The model stage is headless
-    ``claude -p`` (Decision 5: CLI-auth only); every failure is fail-open.
+    recurring points of confusion, and writes a report to
+    ``untracked/reports/`` embedding the judging rubric. The judging is done
+    by an in-session subagent dispatched at the report (Decision 9) — this
+    command never invokes a model.
 
     Works with the ``skill_opportunity_detector`` handler disabled — a
     manual run is consent by definition; ``enabled`` gates only the
@@ -4204,7 +4205,6 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
         STATE_FILE_NAME,
     )
     from claude_code_hooks_daemon.skill_scan.extraction import derive_transcript_dir
-    from claude_code_hooks_daemon.skill_scan.invoker import ClaudeCliInvoker
     from claude_code_hooks_daemon.skill_scan.models import SkillScanOptions
     from claude_code_hooks_daemon.skill_scan.pipeline import run_scan
     from claude_code_hooks_daemon.skill_scan.state import (
@@ -4262,7 +4262,6 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
     result = run_scan(
         project_root=project_root,
         options=options,
-        invoker=ClaudeCliInvoker(model=options.model),
         report_dir=project_root / "untracked" / REPORTS_DIR_NAME,
         secret_terms=secret_terms,
         today=date.today(),
@@ -4296,14 +4295,15 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
             "Not recording a completed scan; the advisory will retry."
         )
         record_attempt(state_path)
-    elif result.model_error is not None:
-        print(f"Model stage skipped: {result.model_error}")
-        record_attempt(state_path)
-    else:
-        if result.report_path is not None:
-            record_success(state_path, report_path=str(result.report_path))
+    elif result.report_path is not None:
+        record_success(state_path, report_path=str(result.report_path))
     if result.report_path is not None:
         print(f"Report written: {result.report_path}")
+        print(
+            "Next: dispatch a subagent at this report — it judges the prompt "
+            "under '## Judging' and its answer is appended under '## Findings'. "
+            "Human review before any skill is created."
+        )
     return 0
 
 

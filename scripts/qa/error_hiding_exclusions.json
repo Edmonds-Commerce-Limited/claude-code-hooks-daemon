@@ -297,12 +297,6 @@
       "reason": "Version check: log-and-continue on cache write failure. Already logged. Version checking is advisory."
     },
     {
-      "file": "skill_scan/invoker.py",
-      "function": "parse_model_output",
-      "rule": "return-none-on-error",
-      "reason": "Skill-scan model stage (Plan 00274): None on unparseable model output is the documented degrade-to-raw-notes contract — the caller appends the raw text to the report as unparsed model notes. Fail-open is mandatory for model calls (Plan 00266)."
-    },
-    {
       "file": "skill_scan/state.py",
       "function": "_write_state",
       "rule": "log-and-continue",

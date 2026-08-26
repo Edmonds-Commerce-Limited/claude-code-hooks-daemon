@@ -54,16 +54,9 @@ DEFAULT_MAX_CLUSTERS: Final[int] = 100
 MAX_PAYLOAD_CHARS: Final[int] = 50_000
 MAX_REPORT_CLUSTERS: Final[int] = 25
 
-#: Model invocation.
-CLAUDE_CLI_BINARY: Final[str] = "claude"
-MODEL_TIMEOUT_SECONDS: Final[int] = 300
-MODEL_ERROR_DETAIL_MAX_CHARS: Final[int] = 500
-NOT_LOGGED_IN_MARKER: Final[str] = "Not logged in"
-
 #: Option defaults (config surface, BRAINSTORM.md section 6).
 DEFAULT_CHECK_INTERVAL_DAYS: Final[int] = 7
 DEFAULT_TRANSCRIPT_WINDOW_DAYS: Final[int] = 14
-DEFAULT_MODEL: Final[str] = "haiku"
 
 #: State file (version_check TTL pattern) under the daemon untracked dir.
 STATE_FILE_NAME: Final[str] = "skill_scan_state.json"
