@@ -555,7 +555,7 @@ handlers:
       priority: 60
 
     skill_opportunity_detector:  # TTL-gated advisory: run `bin/hooks-daemon skill-scan` (Plan 00274)
-      enabled: false             # Dogfood enablement is a deliberate main-thread act (Task 5.2)
+      enabled: true              # Dogfood-enabled 2026-08-26 (Task 5.2); ships disabled upstream
       priority: 61
 
   # PreCompact handlers (run before conversation compaction)
