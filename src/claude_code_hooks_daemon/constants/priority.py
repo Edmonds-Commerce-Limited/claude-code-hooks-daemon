@@ -83,6 +83,11 @@ class Priority:
     # sets (merge/gh-pr-merge vs stash).
     ANCESTRY_PRESERVING_MERGE = 19
 
+    # Plan 00275: safety-band guard on git messages, beside git_message_backtick
+    # (20) and the git-workflow opinions at 19-20. Matches a disjoint hazard
+    # (auto-closing keyword references), so relative order changes no verdict.
+    GITHUB_AUTO_CLOSE_KEYWORDS = 18
+
     # Plan 00219: deliberately BELOW destructive_git (10) and the other
     # full-string matchers. When a backticked span holds a dangerous command,
     # those deny first and their reason is the more useful one -- naming the

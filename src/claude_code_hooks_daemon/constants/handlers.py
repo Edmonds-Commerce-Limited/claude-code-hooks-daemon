@@ -234,6 +234,14 @@ class HandlerID:
     # Backtick substitution in a git message (Plan 00219): backticks inside a
     # DOUBLE-quoted -m are executed by bash, not quoted, so the span is
     # replaced by the command's stdout and the text is silently lost.
+    # GitHub auto-closing keyword references in a git message (Plan 00275):
+    # "Fixes #123" auto-closes the issue when the commit reaches the default
+    # branch, cannot be disabled repo-side, and is written accidentally.
+    GITHUB_AUTO_CLOSE_KEYWORDS = HandlerIDMeta(
+        class_name="GithubAutoCloseKeywordsHandler",
+        config_key="github_auto_close_keywords",
+        display_name="block-github-auto-close-keywords",
+    )
     GIT_MESSAGE_BACKTICK = HandlerIDMeta(
         class_name="GitMessageBacktickHandler",
         config_key="git_message_backtick",
