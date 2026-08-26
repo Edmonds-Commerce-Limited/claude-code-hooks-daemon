@@ -153,6 +153,7 @@ class ConfigTemplate:
             "    qa_suppression: {enabled: true, priority: 30}  # Unified multi-language QA suppression blocker (11 languages)\n"
             "    comment_changelog: {enabled: true, priority: 31}  # Block changelog narrative in code comments (12 languages)\n"
             "    comment_size: {enabled: true, priority: 33}  # Cap comment length; only growing an over-limit comment is blocked\n"
+            "    verification_result_gate: {enabled: true, priority: 34}  # Advise when a verifier's result is never consumed before a mutator\n"
             "    plan_number_helper: {enabled: true, priority: 30}  # Provide correct next plan number\n"
             "    markdown_organization:  # Plan tracking and markdown organization\n"
             "      enabled: true\n"

@@ -127,26 +127,26 @@ its false-positive rate stays low enough that nobody disables it.
 
 ### Phase 2: `verifier → mutator` PreToolUse handler (warn mode)
 
-- [ ] ⬜ **Task 2.1**: Settle the verifier and mutator taxonomies as named
+- [x] ✅ **Task 2.1**: Settle the verifier and mutator taxonomies as named
   constants, seeded from the report's lists, and decide whether they are
   config-extensible per project.
-- [ ] ⬜ **Task 2.2**: TDD the detection using `split_unquoted` with a separator
+- [x] ✅ **Task 2.2**: TDD the detection using `split_unquoted` with a separator
   tuple containing `"\n"`. A regression test must encode the motivating
   incident verbatim: a multi-line command whose lint is on line 1 and whose
   `git commit` is on line 3, with no `&&` between them.
-- [ ] ⬜ **Task 2.3**: TDD every non-firing case: `verifier && mutator`;
+- [x] ✅ **Task 2.3**: TDD every non-firing case: `verifier && mutator`;
   `verifier || { …; exit 1; }`; `rc=$?` followed by an `if`/`case`; `set -e` in
   effect for the invocation; and a mutator that appears only inside a heredoc
   body or a quoted string and is therefore never executed.
-- [ ] ⬜ **Task 2.4**: TDD the false-positive suite from the report's own table —
+- [x] ✅ **Task 2.4**: TDD the false-positive suite from the report's own table —
   `grep -q p f; echo done`, `cmd > f 2>&1; echo "exit=$?"`, `diff a b; echo ---`,
   independent `ls -1t` listings, and a labelled diagnostic sweep — all ALLOW.
-- [ ] ⬜ **Task 2.5**: Write the advisory text so it names the pair
+- [x] ✅ **Task 2.5**: Write the advisory text so it names the pair
   ("`ansible-lint` can fail here and `git commit` would still run — gate it")
   and shows the accepted forms. It must not read as a style opinion about `&&`.
-- [ ] ⬜ **Task 2.6**: Ship `mode: warn` by default with a documented ratchet to
+- [x] ✅ **Task 2.6**: Ship `mode: warn` by default with a documented ratchet to
   `block`, mirroring `plan_qa_commit_gate`'s warn-first rollout.
-- [ ] ⬜ **Task 2.7**: Add `get_acceptance_tests()`, register in config, restart the
+- [x] ✅ **Task 2.7**: Add `get_acceptance_tests()`, register in config, restart the
   daemon, and dogfood the handler in this repo.
 
 ### Phase 3: Staged-file lint backstop at `git commit`

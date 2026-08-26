@@ -162,6 +162,16 @@ handlers:
       #   max_comment_block_lines: 40
       #   mode: block               # block | warn
 
+    verification_result_gate:  # Flags a verifier whose exit status nothing consumes
+      enabled: false       # Enable to be told when a lint could fail and a commit still run
+      priority: 34
+      # options:
+      #   mode: warn              # warn | block — ships advisory
+      #   extra_verifiers:        # additive; literal command names, never regexes
+      #     - "my-project-check"
+      #   extra_mutators:
+      #     - "terraform apply"
+
     tdd_enforcement:       # Enforces test-first development
       enabled: false       # Enable for strict TDD workflow
       priority: 32

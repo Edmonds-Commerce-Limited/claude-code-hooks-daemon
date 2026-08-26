@@ -250,6 +250,11 @@ class HandlerID:
         config_key="qa_suppression",
         display_name="qa-suppression-blocker",
     )
+    VERIFICATION_RESULT_GATE = HandlerIDMeta(
+        class_name="VerificationResultGateHandler",
+        config_key="verification_result_gate",
+        display_name="verification-result-gate",
+    )
     PLAN_NUMBER_HELPER = HandlerIDMeta(
         class_name="PlanNumberHelperHandler",
         config_key="plan_number_helper",

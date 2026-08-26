@@ -76,6 +76,11 @@ _EXEMPT_FROM_BLOCKING_TAG: dict[str, str] = {
         "which is the same class of untruth this guard exists to prevent, pointed "
         "the other way."
     ),
+    "VerificationResultGateHandler": (
+        "denies only under `mode: block`, and the shipped default is `warn` -- "
+        "the same deliberate warn-first rollout as PlanQaCommitGateHandler. "
+        "Rendering it BLOCKING would overstate what a default installation does."
+    ),
     "NpmCommandHandler": (
         "its deny paths require `llm:` scripts in package.json; with none present "
         "the handler is advisory by design and says so in its own guidance. The "

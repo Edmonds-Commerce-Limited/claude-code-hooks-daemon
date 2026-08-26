@@ -122,6 +122,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "PlanNumberHelperHandler": "T2 fires on the folder scan that should never have run",
     "PlanQaCommitGateHandler": "T2 fires on the commit whose contents are already staged",
     "PlanWorkflowHandler": "T2 the document shape is chosen before the write",
+    "VerificationResultGateHandler": "T2 the gating (&&/set -e) must be written before the command runs",
     "WorktreeCreateHandler": "T2 the agent name that becomes the path is already chosen",
     # -- Test 3: standing policy that decays after one delivery ----------
     "BackgroundProcessTrackerHandler": "T3 watchdog protocol outlives the command",

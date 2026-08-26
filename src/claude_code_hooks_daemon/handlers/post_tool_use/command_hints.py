@@ -54,7 +54,7 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH
+from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 logger = logging.getLogger(__name__)
@@ -80,9 +80,6 @@ _DEFAULT_MIN_CALLS_BETWEEN: Final[int] = 0  # 0 = no secondary count gate
 # background_process_tracker._session_counts, sized larger because this map
 # is keyed on TWO axes (session x hint) rather than one.
 _MAX_TRACKED_FIRE_STATES: Final[int] = 512
-
-# An optional `env ` prefix before the command name (e.g. `env agent-browser`).
-_ENV_PREFIX: Final[str] = r"(?:env\s+)?"
 
 # Shell separators that start a NEW command position. A pattern only ever
 # matches at the START of one of these segments, never mid-argument — this is
@@ -182,19 +179,14 @@ def _segment_commands(command: str) -> list[str]:
 def _compile_hint_pattern(pattern: str) -> re.Pattern[str]:
     """Compile ``pattern`` into a segment-start-anchored command-name regex.
 
-    Recognises the same invocation respellings the shared ``command_evasion``
-    fragments defend against: an optional ``env `` prefix and an optional
-    path qualifier (``/usr/local/bin/agent-browser``, ``./agent-browser``).
-
-    Uses a ``(?=\\s|$)`` lookahead rather than ``\\b`` after the literal
-    (Plan 00212 Technical Decision 2): a hyphenated command name like
-    ``agent-browser`` ends on a non-word character to Python ``re``, so a
-    trailing ``\\b`` would also match ``agent-browser-extra-tool`` — the
-    boundary between ``r`` and ``-`` is itself a word/non-word transition.
-    Requiring whitespace or end-of-segment instead closes that false
-    positive.
+    Delegates to the shared ``command_evasion`` helper, which owns the
+    respellings (``env`` prefix, ``VAR=value`` assignments, path qualifier)
+    and the ``(?=\\s|$)`` lookahead that keeps ``agent-browser`` from matching
+    ``agent-browser-extra-tool``. The rule moved there when Plan 00268 Phase 2
+    needed the same question answered — a second private copy is where drift
+    starts.
     """
-    return re.compile(rf"^{_ENV_PREFIX}{OPTIONAL_PATH}{re.escape(pattern)}(?=\s|$)")
+    return compile_command_name_pattern(pattern)
 
 
 def _parse_hint_entry(entry: Any, index: int) -> CommandHint | None:

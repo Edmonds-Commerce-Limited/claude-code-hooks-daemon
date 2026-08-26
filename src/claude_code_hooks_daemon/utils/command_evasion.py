@@ -80,6 +80,11 @@ OPTIONAL_SUDO = rf"(?:{SUDO_INVOCATION})?"
 # swallows a preceding argument.
 OPTIONAL_PATH = r"(?:\S*/)?"
 
+# `env`, optionally carrying VAR=value assignments, in front of the real
+# command: `env ansible-lint`, `env ANSIBLE_CONFIG=x ansible-lint`. Bare
+# `VAR=value cmd` (no `env`) is covered by the same run of assignments.
+ENV_PREFIX = r"(?:env\s+)?(?:\w+=\S*\s+)*"
+
 # Git global options that take their value as a SEPARATE token. Everything else
 # is either self-contained (`--git-dir=<path>`) or valueless (`--no-pager`), so
 # these are the only ones whose value could be mistaken for the subcommand —
@@ -125,6 +130,38 @@ def normalise_line_continuations(command: str) -> str:
     guard to look at more text, never less.
     """
     return _LINE_CONTINUATION_PATTERN.sub(" ", command)
+
+
+def compile_command_name_pattern(name: str) -> re.Pattern[str]:
+    r"""Compile ``name`` into a pattern anchored at a shell segment's START.
+
+    Answers "is this segment an invocation of ``name``?" rather than "does
+    ``name`` appear anywhere?" — the difference between recognising
+    ``ansible-lint site.yml`` and mistaking ``grep ansible-lint notes.md`` for
+    it. The caller supplies one segment from
+    :func:`~claude_code_hooks_daemon.utils.shell_segmentation.split_unquoted`.
+
+    Recognises the respellings this module exists for: an optional ``env``
+    prefix, any run of ``VAR=value`` assignments, and a path qualifier.
+
+    ``name`` may be several words (``go vet``, ``npm test``); the gap between
+    them matches any run of whitespace, since the shell does not care.
+
+    The literal is followed by ``(?=\s|$)`` rather than ``\b`` (Plan 00212
+    Technical Decision 2, kept when this moved here): a hyphenated name like
+    ``ansible-lint`` ends on a non-word character, so a trailing ``\b`` also
+    matches ``ansible-lint-extra`` — the ``t``/``-`` boundary is itself a
+    word/non-word transition.
+
+    Args:
+        name: A LITERAL command name, not a regex. Regex metacharacters in it
+            are escaped, so a caller cannot smuggle a pattern through config.
+
+    Returns:
+        A compiled pattern to ``search`` against one stripped segment.
+    """
+    literal = r"\s+".join(re.escape(word) for word in name.split())
+    return re.compile(rf"^\s*{ENV_PREFIX}{OPTIONAL_PATH}{literal}(?=\s|$)")
 
 
 def git_subcommand_index(tokens: Sequence[str], git_index: int) -> int | None:

@@ -127,6 +127,12 @@ class Priority:
     COMMENT_CHANGELOG = 31
     COMMENT_SIZE = 33
 
+    # Plan 00268: "a verification result must be consumed" is QA enforcement,
+    # so it sits in this band rather than with the safety blockers. Advisory by
+    # default, and non-terminal either way, so its exact slot only decides the
+    # order its context appears in.
+    VERIFICATION_RESULT_GATE = 34
+
     MARKDOWN_ORGANIZATION = 35
 
     # LSP enforcement (Priority: 38)

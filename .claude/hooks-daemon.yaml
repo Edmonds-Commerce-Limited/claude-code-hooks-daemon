@@ -288,6 +288,16 @@ handlers:
       #   max_comment_block_lines: 40
       #   mode: block               # block | warn
 
+    verification_result_gate:  # Flags a verifier whose result nothing consumes (Plan 00268)
+      enabled: true
+      priority: 34
+      # options:
+      #   mode: warn              # warn | block — ships advisory while the tables settle
+      #   extra_verifiers:        # additive; literal command names, never regexes
+      #     - "my-project-check"
+      #   extra_mutators:
+      #     - "terraform apply"
+
     tdd_enforcement:       # Enforces test-first development
       enabled: true
       priority: 35

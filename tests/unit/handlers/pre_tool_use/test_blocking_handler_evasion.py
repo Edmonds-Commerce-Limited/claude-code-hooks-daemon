@@ -69,6 +69,18 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             f"git \\\n  -C {_SAFE_PATH} \\\n  reset --hard HEAD",
         ),
     ),
+    "VerificationResultGateHandler": (
+        "ansible-lint site.yml\ngit commit -m x",
+        (
+            # matches() is a cheap head-word prefilter; the discriminating
+            # verifier/mutator matching in _find() compiles through
+            # command_evasion (ENV_PREFIX / OPTIONAL_PATH / GIT_INVOCATION)
+            # and is proven against respellings in its own unit suite.
+            f"ansible-lint site.yml\ngit -C {_SAFE_PATH} commit -m x",
+            "ansible-lint site.yml\nenv git commit -m x",
+            "ansible-lint site.yml\ngit \\\n  commit -m x",
+        ),
+    ),
     "GitMessageBacktickHandler": (
         'git commit -m "now allows `git branch` here"',
         (
@@ -172,6 +184,12 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
         "git restore --staged src/app.py",
         "git stash list",
         "git push origin main",
+    ),
+    "VerificationResultGateHandler": (
+        # No mutator head word anywhere: matches() must stand down entirely.
+        "pytest tests/ -q",
+        "ansible-lint site.yml",
+        "ls -la untracked/",
     ),
     "GitMessageBacktickHandler": (
         # Single quotes suppress substitution, so backticks are literal —

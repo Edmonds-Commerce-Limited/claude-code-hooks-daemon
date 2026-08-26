@@ -178,3 +178,63 @@ class TestOptionalPath:
         Otherwise `cat /etc/sed.conf` would read as an invocation of `sed`.
         """
         assert re.search(r"\|\s*" + OPTIONAL_PATH + r"bash\b", "curl x | cat /opt/bash") is None
+
+
+class TestCompileCommandNamePattern:
+    """A command name anchored at a segment start (Plan 00268 Phase 2).
+
+    Extracted from ``command_hints`` because a SECOND handler now needs the
+    same question answered. Two private copies is where the drift that Plan
+    00200 Task 3.7 consolidated away begins again.
+    """
+
+    @pytest.mark.parametrize(
+        "segment",
+        [
+            "ansible-lint site.yml",
+            "/usr/bin/ansible-lint site.yml",
+            "./ansible-lint site.yml",
+            "env ANSIBLE_CONFIG=x ansible-lint site.yml",
+            "env ansible-lint site.yml",
+            "ansible-lint",
+        ],
+    )
+    def test_matches_every_respelling_of_the_invocation(self, segment: str) -> None:
+        from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
+
+        assert compile_command_name_pattern("ansible-lint").search(segment) is not None
+
+    def test_does_not_match_the_name_as_an_argument(self) -> None:
+        """The whole point of anchoring: `grep` is the command here."""
+        from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
+
+        assert (
+            compile_command_name_pattern("ansible-lint").search("grep ansible-lint notes") is None
+        )
+
+    def test_does_not_match_a_longer_hyphenated_name(self) -> None:
+        """A trailing ``\\b`` would match here: the boundary between ``t`` and
+        ``-`` is itself a word/non-word transition."""
+        from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
+
+        assert compile_command_name_pattern("ansible-lint").search("ansible-lint-extra x") is None
+
+    def test_matches_a_multi_word_name(self) -> None:
+        from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
+
+        pattern = compile_command_name_pattern("go vet")
+
+        assert pattern.search("go vet ./...") is not None
+        assert pattern.search("go build ./...") is None
+
+    def test_tolerates_extra_whitespace_between_words(self) -> None:
+        from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
+
+        assert compile_command_name_pattern("go vet").search("go  vet ./...") is not None
+
+    def test_leading_whitespace_in_the_segment_is_tolerated(self) -> None:
+        """Segments arrive stripped in practice, but a caller that forgets
+        should not silently get a non-match."""
+        from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
+
+        assert compile_command_name_pattern("pytest").search("   pytest tests/") is not None
