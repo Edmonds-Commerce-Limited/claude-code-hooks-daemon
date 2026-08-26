@@ -1021,6 +1021,26 @@ pytest tests/ 2>&1 | /…/scripts/echd-capture 20
 - Regular files: `chmod 644` (owner rw, group/other r)
 - Private files: `chmod 600` (owner rw only)
 
+<!-- handler: block-github-auto-close-keywords -->
+
+## github_auto_close_keywords — closing keywords in git messages are blocked
+
+A `git commit` (or `git merge -m` / `git tag -m`) whose message contains a GitHub closing keyword followed by an issue reference is DENIED. `Fixes #123`, `closes octo-org/octo-repo#42`, `Resolved GH-7`, or a keyword before a full issue URL all auto-close that issue the moment the commit reaches the default branch — GitHub offers no repo-side switch to turn this off. The nine keywords are close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved, case-insensitive, with or without a colon.
+
+**The keyword alone is fine.** `fixes the race condition` is prose and never matches; only keyword+reference forms trigger. A bare `#123` without a keyword is also fine.
+
+**Both message routes are checked**: an inline `-m` value (any quoting, any of several `-m` paragraphs) AND the content of a `-F <file>` / `--file=<file>` scratch file, which is read at check time. A missing `-F` file is allowed — the commit fails on its own. `-t`/`--template` is not a message source.
+
+**Use a non-closing reference instead**: `Addresses #123`, `Refs #123`, `See #123` — GitHub links these but does not close.
+
+**Escape hatch** (when auto-closing is genuinely intended):
+
+```
+MUST_AUTO_CLOSE_BECAUSE="explain why"; git commit -m 'Fixes #123'
+```
+
+Configure via `handlers.pre_tool_use.github_auto_close_keywords.options.mode: warn` for advisory-only mode.
+
 <!-- handler: block-ancestry-severing-merge -->
 
 ## ancestry_preserving_merge — ancestry-severing merges are blocked by default
@@ -1650,11 +1670,91 @@ When you background a long-lived process:
 
 Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
 
+<!-- handler: command-hints -->
+
+## command_hints — advisory reminders after specific commands
+
+PostToolUse advisory (never blocks). When a configured command is detected in a Bash call, a HINT is injected reminding you of a follow-up action. Shipped default: running `agent-browser` reminds you to close the browser session when finished.
+
+**Rate-limited per hint** — each hint has a `ttl_seconds` cooldown (tracked per session + hint id) so it does not repeat on every matching command; state resets on daemon restart, so a hint may fire once more after a restart.
+
+**Configure** via `handlers.post_tool_use.command_hints.options`: `mode: additive` (default) appends your `hints` list to the built-in set — a project entry whose `id` matches a built-in one overrides it; `mode: replace` discards the built-in set entirely and uses only your list. Each hint: `id`, `pattern` (a literal command name, matched at the start of a shell segment — path-qualified and `env`-prefixed spellings are recognised, but it never fires on the word appearing as an unrelated argument), `hint` (the reminder text), `ttl_seconds`, and optional `min_calls_between` (secondary count-based gate). Disable with `handlers.post_tool_use.command_hints.enabled: false`.
+
 <!-- handler: git-hooks-executable-fixer -->
 
 ## git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
 When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
+
+<!-- handler: goal-injection -->
+
+## goal_injection — plan-start goal signal for the ccy supervisor
+
+PostToolUse advisory (never blocks; ships disabled). When a `PLAN.md` Write/Edit under `CLAUDE/Plan/` (never `Completed/`) results in `**Status**: In Progress`, the daemon writes a `<session>.goal-intent` signal; the ccy PTY supervisor — if armed and watching — types a single-line `/goal 🤖 [ccy-supervisor] ...` message into the foreground chat. Fires once per plan per session (state-based: the first qualifying edit in a NEW session re-fires, re-establishing the goal after a restart). Manual fallback / debug tool: `bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` in the environment, i.e. run it from the session to be targeted).
+
+**An injected goal is machine-generated** — it always opens with the machine-origin marker and a 'NOT human authorisation' clause, and can never satisfy any human-gated rule (release publishing, artefact publishing, unproven branch deletion).
+
+**Configure** via `handlers.post_tool_use.goal_injection.options`: `mode: additive` (default) merges your `lines` (`{id, text, enabled}`) onto the built-in set — a matching `id` overrides in place; `mode: replace` uses only your lines. The fixed header marker line is never overridable or removable. Placeholders: `{plan_number}`, `{plan_title}`, `{plan_path}` (closed set — an unknown token skips the line). Optional authorisation lines (`subagents-encouraged`, `qa-review-subagents`) ship disabled; their vetted text points at `standing_authorisations` rather than asserting fresh consent — enable them only as a deliberate repository-owner act.
+
+<!-- handler: lint-on-edit -->
+
+## lint_on_edit — source writes are linted, and a failure DENIES
+
+Every `Write`/`Edit` to a Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin or
+Dart file is linted immediately. A lint failure DENIES the tool call.
+
+**Ansible YAML is covered too, and only Ansible YAML.** A `.yml`/`.yaml` file is
+linted when it is plausibly a playbook or a role task file — by Ansible's own
+conventions (`playbooks/`, `roles/`, `tasks/`, `handlers/`, `site.yml`,
+`play-*`, `playbook-*`) or by carrying a top-level `- hosts:` / `- import_playbook:`
+line wherever it sits. Everything else sharing the extension is left alone:
+`.github/workflows/`, `hooks-daemon.yaml`, `docker-compose*`, `group_vars/`,
+`host_vars/`, inventories, and any vault file (never read — it is encrypted).
+The cheap tier is `ansible-playbook --syntax-check`, which is what catches a
+play that will not LOAD: an unbalanced quote inside a `shell:` block aborts the
+whole play at parse time, before `#` means comment. Full `ansible-lint` runs at
+the `extended` tier. The linter runs from the nearest directory containing
+`ansible.cfg`, because roles and collections resolve relative to it.
+
+**Bash-authored files are linted too.** A file a command writes with `>`, `>>`,
+`tee` or a `cat <<EOF` heredoc gets the same treatment — so the heredoc route is
+no longer the quiet way to land unparseable source. A command can author several
+files at once (`tee a.py b.py`); each is linted and the first failure is
+reported. Two boundaries are deliberate:
+
+- **Relocation is NOT linted.** `cp`, `mv`, `install` and `dd` move bytes that
+  were already on disk, so denying them would report a defect the command did
+  not introduce and leave you repairing a file you never wrote.
+- **A target that does not exist is NOT linted.** The path is inferred from the
+  command text, so a command that failed leaves nothing to check.
+
+Opt out with `handlers.post_tool_use.lint_on_edit.options.lint_bash_writes: false`, which leaves `Write`/`Edit` linting untouched.
+
+**The write has ALREADY landed on disk.** A PostToolUse denial is a failure
+report, not a rollback — the file exists, with your content in it. Fix the
+reported problems with `Edit`. Do NOT re-`Write` the file from scratch: that
+rewrites content already on disk from memory, and loses anything you no longer
+have in hand.
+
+A denial also cancels every sibling tool call batched in the same turn, so
+re-issue those separately.
+
+Each language runs a cheap syntax check first (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) and then an optional deeper linter (`ruff`,
+`shellcheck`, `golangci-lint`, `rubocop`, …). Tools are resolved from the
+daemon's venv before `PATH`.
+
+**A linter that is not installed never blocks.** You get an advisory saying it
+was not found and the write stands — so that message means the check was
+SKIPPED, not that it passed. That leniency is specific to THIS handler:
+`.ts`/`.tsx` files are handled by `validate_eslint_on_write`, which denies on
+a timeout and on any failure to run ESLint.
+
+Narrow it under `handlers.post_tool_use.lint_on_edit.options`: `languages`
+restricts which languages are checked, `command_overrides` replaces a
+language's `default`/`extended` command (set `extended: null` to run only the
+syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
+globs. The project-wide `daemon.exclude_paths` applies here too; the two are
+additive and neither overrides the other.
 
 <!-- handler: markdown-table-formatter -->
 
@@ -1778,86 +1878,6 @@ Do not carry "a missing linter never blocks" across to TypeScript.
 present this handler only advises — and suggests adding `llm:lint` — so silence
 is not evidence that a `.ts` file is clean.
 
-<!-- handler: lint-on-edit -->
-
-## lint_on_edit — source writes are linted, and a failure DENIES
-
-Every `Write`/`Edit` to a Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin or
-Dart file is linted immediately. A lint failure DENIES the tool call.
-
-**Ansible YAML is covered too, and only Ansible YAML.** A `.yml`/`.yaml` file is
-linted when it is plausibly a playbook or a role task file — by Ansible's own
-conventions (`playbooks/`, `roles/`, `tasks/`, `handlers/`, `site.yml`,
-`play-*`, `playbook-*`) or by carrying a top-level `- hosts:` / `- import_playbook:`
-line wherever it sits. Everything else sharing the extension is left alone:
-`.github/workflows/`, `hooks-daemon.yaml`, `docker-compose*`, `group_vars/`,
-`host_vars/`, inventories, and any vault file (never read — it is encrypted).
-The cheap tier is `ansible-playbook --syntax-check`, which is what catches a
-play that will not LOAD: an unbalanced quote inside a `shell:` block aborts the
-whole play at parse time, before `#` means comment. Full `ansible-lint` runs at
-the `extended` tier. The linter runs from the nearest directory containing
-`ansible.cfg`, because roles and collections resolve relative to it.
-
-**Bash-authored files are linted too.** A file a command writes with `>`, `>>`,
-`tee` or a `cat <<EOF` heredoc gets the same treatment — so the heredoc route is
-no longer the quiet way to land unparseable source. A command can author several
-files at once (`tee a.py b.py`); each is linted and the first failure is
-reported. Two boundaries are deliberate:
-
-- **Relocation is NOT linted.** `cp`, `mv`, `install` and `dd` move bytes that
-  were already on disk, so denying them would report a defect the command did
-  not introduce and leave you repairing a file you never wrote.
-- **A target that does not exist is NOT linted.** The path is inferred from the
-  command text, so a command that failed leaves nothing to check.
-
-Opt out with `handlers.post_tool_use.lint_on_edit.options.lint_bash_writes: false`, which leaves `Write`/`Edit` linting untouched.
-
-**The write has ALREADY landed on disk.** A PostToolUse denial is a failure
-report, not a rollback — the file exists, with your content in it. Fix the
-reported problems with `Edit`. Do NOT re-`Write` the file from scratch: that
-rewrites content already on disk from memory, and loses anything you no longer
-have in hand.
-
-A denial also cancels every sibling tool call batched in the same turn, so
-re-issue those separately.
-
-Each language runs a cheap syntax check first (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) and then an optional deeper linter (`ruff`,
-`shellcheck`, `golangci-lint`, `rubocop`, …). Tools are resolved from the
-daemon's venv before `PATH`.
-
-**A linter that is not installed never blocks.** You get an advisory saying it
-was not found and the write stands — so that message means the check was
-SKIPPED, not that it passed. That leniency is specific to THIS handler:
-`.ts`/`.tsx` files are handled by `validate_eslint_on_write`, which denies on
-a timeout and on any failure to run ESLint.
-
-Narrow it under `handlers.post_tool_use.lint_on_edit.options`: `languages`
-restricts which languages are checked, `command_overrides` replaces a
-language's `default`/`extended` command (set `extended: null` to run only the
-syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
-globs. The project-wide `daemon.exclude_paths` applies here too; the two are
-additive and neither overrides the other.
-
-<!-- handler: command-hints -->
-
-## command_hints — advisory reminders after specific commands
-
-PostToolUse advisory (never blocks). When a configured command is detected in a Bash call, a HINT is injected reminding you of a follow-up action. Shipped default: running `agent-browser` reminds you to close the browser session when finished.
-
-**Rate-limited per hint** — each hint has a `ttl_seconds` cooldown (tracked per session + hint id) so it does not repeat on every matching command; state resets on daemon restart, so a hint may fire once more after a restart.
-
-**Configure** via `handlers.post_tool_use.command_hints.options`: `mode: additive` (default) appends your `hints` list to the built-in set — a project entry whose `id` matches a built-in one overrides it; `mode: replace` discards the built-in set entirely and uses only your list. Each hint: `id`, `pattern` (a literal command name, matched at the start of a shell segment — path-qualified and `env`-prefixed spellings are recognised, but it never fires on the word appearing as an unrelated argument), `hint` (the reminder text), `ttl_seconds`, and optional `min_calls_between` (secondary count-based gate). Disable with `handlers.post_tool_use.command_hints.enabled: false`.
-
-<!-- handler: goal-injection -->
-
-## goal_injection — plan-start goal signal for the ccy supervisor
-
-PostToolUse advisory (never blocks; ships disabled). When a `PLAN.md` Write/Edit under `CLAUDE/Plan/` (never `Completed/`) results in `**Status**: In Progress`, the daemon writes a `<session>.goal-intent` signal; the ccy PTY supervisor — if armed and watching — types a single-line `/goal 🤖 [ccy-supervisor] ...` message into the foreground chat. Fires once per plan per session (state-based: the first qualifying edit in a NEW session re-fires, re-establishing the goal after a restart). Manual fallback / debug tool: `bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` in the environment, i.e. run it from the session to be targeted).
-
-**An injected goal is machine-generated** — it always opens with the machine-origin marker and a 'NOT human authorisation' clause, and can never satisfy any human-gated rule (release publishing, artefact publishing, unproven branch deletion).
-
-**Configure** via `handlers.post_tool_use.goal_injection.options`: `mode: additive` (default) merges your `lines` (`{id, text, enabled}`) onto the built-in set — a matching `id` overrides in place; `mode: replace` uses only your lines. The fixed header marker line is never overridable or removable. Placeholders: `{plan_number}`, `{plan_title}`, `{plan_path}` (closed set — an unknown token skips the line). Optional authorisation lines (`subagents-encouraged`, `qa-review-subagents`) ship disabled; their vetted text points at `standing_authorisations` rather than asserting fresh consent — enable them only as a deliberate repository-owner act.
-
 <!-- handler: ccy-supervisor-integrity -->
 
 ## ccy_supervisor_integrity — keep the ccy supervisor properly set up
@@ -1890,6 +1910,25 @@ On each new session the daemon runs an **additive** `git fetch --all` (never `--
 **If local branches track a remote branch that was deleted**, it lists them (marked merged = safe vs not-merged = has unique commits) and asks you to clean up AFTER checking: `git branch -d <name>` for merged branches, ask the human for the rest, and optionally `git fetch --prune` the stale remote-tracking refs. The daemon never prunes or deletes a branch itself; never use `git branch -D`.
 
 It is silent when up to date with no gone branches, not in a git repo, on a detached HEAD, or without an upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
+
+<!-- handler: hook-registration-checker -->
+
+## hook_registration_checker — hooks configuration policy
+
+On every new session this handler audits hook configuration across `.claude/settings.json` and `.claude/settings.local.json`. When it reports issues, fix them — do not ignore the warning.
+
+### Policy
+
+1. **All hooks live in `settings.json`.** That file is tracked in version control, visible to teammates, and is the single source of truth for the daemon.
+2. **`settings.local.json` must contain ZERO `hooks` entries.** It exists for per-developer `permissions` and IDE state only. A `hooks` block there is either (a) invisible to the rest of the team, or (b) duplicated with `settings.json` — in which case the hook fires twice per event.
+3. **Hook commands must invoke the daemon wrapper.** Every registered `type: command` hook must end with `/.claude/hooks/{event}`. Anything else (inline Python, custom shell scripts, bespoke paths) is a legacy setup that bypasses the daemon entirely. This rule is about COMMAND hooks only: Claude Code's native `type: prompt` and `type: agent` hooks carry no command at all and are permitted, provided they sit ALONGSIDE the wrapper and never replace it — registration repair is additive per EVENT, so a wrapper that is removed is never restored and every handler on that event goes dark.
+
+### Remediation
+
+- **Hooks in `settings.local.json`**: move each `hooks` entry to `settings.json`, then delete the `hooks` key from `settings.local.json`. Confirm no duplicates remain.
+- **Legacy-style commands**: replace them with a project-level handler. Run `bin/hooks-daemon init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
+- **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
+- **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry and remove the duplicate in `settings.local.json`.
 
 <!-- handler: plan-qa-sweep -->
 
@@ -1954,25 +1993,6 @@ At session start this handler reports any **project handlers** (`.claude/project
 4. **Restart the daemon** (`bin/hooks-daemon restart`). The alert reflects the *running* daemon, so it clears only after a restart reloads the fixed handlers — fixing the file alone is not enough.
 
 The handler is silent when every project handler loads, so seeing this alert always means real action is required.
-
-<!-- handler: hook-registration-checker -->
-
-## hook_registration_checker — hooks configuration policy
-
-On every new session this handler audits hook configuration across `.claude/settings.json` and `.claude/settings.local.json`. When it reports issues, fix them — do not ignore the warning.
-
-### Policy
-
-1. **All hooks live in `settings.json`.** That file is tracked in version control, visible to teammates, and is the single source of truth for the daemon.
-2. **`settings.local.json` must contain ZERO `hooks` entries.** It exists for per-developer `permissions` and IDE state only. A `hooks` block there is either (a) invisible to the rest of the team, or (b) duplicated with `settings.json` — in which case the hook fires twice per event.
-3. **Hook commands must invoke the daemon wrapper.** Every registered `type: command` hook must end with `/.claude/hooks/{event}`. Anything else (inline Python, custom shell scripts, bespoke paths) is a legacy setup that bypasses the daemon entirely. This rule is about COMMAND hooks only: Claude Code's native `type: prompt` and `type: agent` hooks carry no command at all and are permitted, provided they sit ALONGSIDE the wrapper and never replace it — registration repair is additive per EVENT, so a wrapper that is removed is never restored and every handler on that event goes dark.
-
-### Remediation
-
-- **Hooks in `settings.local.json`**: move each `hooks` entry to `settings.json`, then delete the `hooks` key from `settings.local.json`. Confirm no duplicates remain.
-- **Legacy-style commands**: replace them with a project-level handler. Run `bin/hooks-daemon init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
-- **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
-- **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry and remove the duplicate in `settings.local.json`.
 
 <!-- handler: idle-housekeeping-advisory -->
 
