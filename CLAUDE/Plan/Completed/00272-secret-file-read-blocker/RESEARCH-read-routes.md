@@ -323,6 +323,32 @@ vendored contract; every BEHAVIOUR question (Bash stdout capture, honouring of
 the rewrite, LSP/Skill/MCP/WebFetch payload contents) needs a live
 main-session capture and is not answerable from a subagent.
 
+### Live probe round 2 (2026-08-26, MAIN SESSION — resolves the Task 1.3 deferrals)
+
+Driven from the main Claude Code session (not a subagent), against a
+freshly-rebuilt fixture at the same path. These close the routes the subagent
+could not reach.
+
+| Route                                                      | Tool         | Verdict                           | Leaked?  | Class        | Notes                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------------------------------- | ------------ | --------------------------------- | -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Grep` tool, `path` = protected file                       | Grep         | UNWIRED-THIS-SESSION              | —        | —            | The `Grep` tool is not available in this session's toolset either (main OR subagent) — Claude Code routes content search to `grep` via Bash here. A `grep` **Bash command** naming the path is denied by the guard's command scan (class-(b)); the `Grep` **tool**'s `path`-field coverage stays unit-test-verified via `_touches_protected_path`. No live-drivable surface exists in this environment. |
+| `WebFetch` `file://<path>`                                 | WebFetch     | REJECTED BY TOOL (`Invalid URL`)  | no       | out-of-scope | **New finding:** WebFetch accepts only http/https (http is upgraded to https) and rejects a `file://` URL before any hook sees it. WebFetch therefore cannot read a local file at all — it is NOT a guard gap and NOT a class-(d) residual; it is simply not a local-read route. The guard's field set (which does not include `url`) is correct to omit it.                                            |
+| `Edit` on protected path                                   | Edit         | DENIED (PreToolUse)               | no       | (b)          | Re-confirmed from round 1 probe #11 — denied before `old_string` can echo back.                                                                                                                                                                                                                                                                                                                         |
+| `NotebookEdit`                                             | NotebookEdit | DENIED (field match)              | no       | (b)          | `_touches_protected_path` inspects `notebook_path`; a NotebookEdit on a protected path is denied by the same field-match as Read/Edit. Not separately live-drivable (the fixture is not a notebook, and authoring one at the protected path is itself denied).                                                                                                                                          |
+| LSP hover/documentSymbol                                   | LSP          | N/A (out-of-scope)                | no       | (d)/n-a      | LSP operates on files a language server loads; a `.vault-password` file is not a code file, so no LSP server opens it. If a protected path ever WERE a code file, the LSP call is not PreToolUse-visible in this daemon — class-(d), OS-controls only.                                                                                                                                                  |
+| MCP file-reading tool                                      | MCP          | UNWIRED-THIS-SESSION              | —        | (d)          | No file-reading MCP tool is wired in this session; if a project wires one that is NOT routed through PreToolUse, it is class-(d) (documented residual).                                                                                                                                                                                                                                                 |
+| Artifact `upload_asset` of protected file                  | Artifact     | DENIED (artifact_publish_blocker) | no       | (b)          | Every Artifact publish/update — `upload_asset` included — is a terminal deny by `artifact_publish_blocker`, ahead of any read.                                                                                                                                                                                                                                                                          |
+| Auto-inlining (`@`-import, `.claude/rules/` `paths:` glob) | none         | class-(d) config condition        | possible | (d)          | No tool call fires; Claude Code inlines the file directly. Closeable only as a SESSION-START configuration advisory (does any `@`-import / rules glob cover a protected path?) — documented as a follow-up candidate in Task 6.1, NOT shipped in v1.                                                                                                                                                    |
+
+**Task 1.3 resolution:** every route in the inventory now has a verdict. The
+only "open" surfaces (`Grep` tool, MCP) are unwired in this environment rather
+than unverified — there is no live surface to drive, and their field/command
+coverage is unit-test-verified. WebFetch `file://` is resolved as out-of-scope
+(tool-level rejection). LSP and auto-inlining are documented class-(d) with
+their OS-level / session-start-advisory mitigations named. No new leak was
+found in this round (the only class-(c) leak, G2, was already fixed under
+Decision 12).
+
 ### Task 1.2 result
 
 **Subagent PreToolUse coverage CONFIRMED.** The very first probe (creating the

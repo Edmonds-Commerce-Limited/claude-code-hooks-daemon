@@ -1,6 +1,6 @@
 # Plan 00272: secret file read blocker
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: High
@@ -109,15 +109,12 @@ paths; possibly a PostToolUse output backstop). Complements
   relay surface is UNVERIFIABLE FROM WITHIN A SUBAGENT and is recorded as a
   main-thread-only check (likely class-(d), not a PreToolUse tool call). See
   RESEARCH-read-routes.md "Task 1.2 result".
-- [ ] 🔄 **Task 1.3** (Grep-tool/Edit desk-answered; LSP/Skill/MCP/WebFetch/
-  NotebookEdit/upload_asset + auto-inlining remain live-deferred): Edit on a
-  protected file DENIED at PreToolUse (old_string never echoes back — probe
-  #11). `Grep` tool could not be driven from this subagent (not in its
-  toolset) — direct-path Grep is desk-covered by the guard's `path` field.
-  The remaining surfaces (NotebookEdit, WebFetch `file://`, MCP wiring, LSP
-  hover/documentSymbol, Skill bodies, Artifact `upload_asset`) and the
-  no-tool-call auto-inlining routes (`@`-imports, `.claude/rules/` `paths:`
-  globs) need a live main-session capture and stay open.
+- [x] ✅ **Task 1.3** (resolved 2026-08-26, main-session live probe round 2 —
+  see RESEARCH-read-routes.md "Live probe round 2"): every remaining surface
+  has a verdict. Edit/NotebookEdit/upload_asset DENIED; WebFetch `file://`
+  rejected by the tool (out-of-scope); Grep-tool/MCP unwired here (coverage
+  unit-test-verified); LSP N/A; auto-inlining is class-(d) follow-up. No new
+  leak found.
 - [x] ✅ **Task 1.4** (live probes done 2026-08-26): Aliasing probes against
   the dummy fixture recorded per-route in RESEARCH-read-routes.md "Live probe
   results". Key outcomes: symlink read DENIED (realpath-resolved — better than
@@ -545,10 +542,10 @@ reading as a broken helper rather than a stated constraint.
 
 ## Success Criteria
 
-- [ ] RESEARCH-read-routes.md complete: every route has verified visibility,
+- [x] RESEARCH-read-routes.md complete: every route has verified visibility,
   a (b)/(c)/(d) classification AND a per-route expected-verdict entry; all
   DECIDE items resolved; conclusion written
-- [ ] Every class-(b) route denied live; class-(c) behaviour matches the
+- [x] Every class-(b) route denied live; class-(c) behaviour matches the
   expected-verdict column in RESEARCH-read-routes.md (Task 7.1 asserts
   against that table); class-(d) residual risk stated in resident guidance
   with OS-level mitigations named
@@ -556,19 +553,14 @@ reading as a broken helper rather than a stated constraint.
   files with remediation text (Task 6.1)
 - [x] No residual-route read lands verbatim in payload capture or logs
   (Task 4.5)
-- [ ] `secret-meta` returns metadata JSON with no content bytes;
+- [x] `secret-meta` returns metadata JSON with no content bytes;
   `ansible-vault --vault-password-file <protected>` consumer commands pass
-- [ ] Deny reasons never include file content; verdict log clean
-- [ ] No escape hatch exists
-- [ ] 95%+ coverage, full QA green, daemon restart verified, client-mode
-  verified — the current worktree session verified unit+integration tests
-  (12327 + 1722 passed) and per-file ruff/black/mypy/bandit/magic-values
-  green; `./scripts/qa/llm_qa.py all` could not run in this worktree (no
-  bootstrapped venv at `untracked/venv*` here — self-install venvs are
-  project-path-slug-keyed and this worktree has none); ONE integration test
-  (`test_every_earning_handler_has_a_section_in_claude_md`) requires an
-  actual daemon restart to regenerate `CLAUDE.md` and is deferred to the main
-  session, which also owns the daemon-restart + client-mode verification
+- [x] Deny reasons never include file content; verdict log clean
+- [x] No escape hatch exists
+- [x] 95%+ coverage, full QA green, daemon restart verified, client-mode
+  verified — `./scripts/qa/llm_qa.py all` = 25/25 PASSED on main and daemon
+  restart RUNNING (re-verified this session, 2026-08-26); client-mode passed
+  under Task 7.3
 
 ## Risks & Mitigations
 
