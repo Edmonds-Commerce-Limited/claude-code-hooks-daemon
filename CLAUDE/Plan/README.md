@@ -36,8 +36,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00272: secret file read blocker](00272-secret-file-read-blocker/PLAN.md) - Not Started (deny-by-default PreToolUse guard so a protected secret file's CONTENT can never enter context by any wired route; `secret-meta` helper returns keyed-hash metadata instead; no agent escape hatch; Phase 1 research classifies every read route by blockability; brainstorm + research scaffold ready for human review)
 
-- [00271: hook contract alignment](00271-hook-contract-alignment/PLAN.md) - In Progress (DBF-first: vendored contract + network-free `hook_contract` QA check + `contract_staleness` advisory landed; all 9 load-bearing drifts fixed with the guard green; burn-down/docs in flight)
-
 ### Status Line / Agent View
 
 - [00175: statusline refreshInterval first-class default + startup validation](00175-statusline-refresh-interval-first-class/PLAN.md) - Dormant, part-shipped (root-caused the Ctrl+Z notice lag to `statusLine.refreshInterval: 10` — Claude Code re-runs the status command only on events (Ctrl+Z is not one) plus this optional timer whose minimum is 1s, so an …)
@@ -175,6 +173,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00271: hook contract alignment](Completed/00271-hook-contract-alignment/PLAN.md) - Complete at merge `18d35ba2` + the commit that archives it (DBF-first: vendored hook contracts + network-free `hook_contract` QA check landed RED against 59 findings, all 9 load-bearing drifts fixed, allowlist burned to 29 reasoned KEPT gaps; follow-ups in Plan 00273)
 
 - [00270: bash safe mode forcer](Completed/00270-bash-safe-mode-forcer/PLAN.md) - Complete at merge `0f96b7ea` + the commit that archives it (opt-in `bash_safe_mode` handler enforcing `set -e`/`-o pipefail` preludes on multi-statement Bash invocations; shared `utils/bash_flags.py` scanner with an end-of-options guard, `verification_result_gate` refactored onto it; code-reviewed, dogfooded warn-mode scoped to mutator sequences)
 
@@ -1251,15 +1251,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 273 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 220 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 221 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 40 + 220 + 6 = **266 folders**, spanning
+- **Folder-to-number reconciliation**: 39 + 221 + 6 = **266 folders**, spanning
   **263 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1274,7 +1274,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00271 merge (40 root, 220 `Completed/`,
+- **Last reconciled at**: the Plan 00271 archival (39 root, 221 `Completed/`,
   6 `Cancelled/`, 263 distinct numbers against a counter of 273). The index
   carries NO reconciliation history — it states current truth only; every
   earlier recount is in git, and per-plan narrative belongs in that plan's

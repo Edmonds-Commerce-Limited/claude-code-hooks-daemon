@@ -1,6 +1,6 @@
 # Plan 00271: Hook Contract Alignment
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: High
@@ -192,7 +192,7 @@ allowlist entry so the guard enforces the fix.
   `hook_result.py:639-652`); add `updatedPermissions` and `interrupt` to
   the schema (`response_schemas.py:105-135`) and result model, or
   allowlist them with linked follow-up if deliberately unsupported.
-- [ ] 🔄 **Task 2.7**: SessionStart live verification then migration
+- [x] ✅ **Task 2.7**: SessionStart live verification then migration
   (audit item 6): use `scripts/debug_hooks.sh` against the installed
   Claude Code to establish what `systemMessage` vs
   `hookSpecificOutput.additionalContext` actually do on SessionStart;
@@ -201,7 +201,9 @@ allowlist entry so the guard enforces the fix.
   `hookSpecificOutput.additionalContext`, keeping `systemMessage` only
   for genuinely user-facing warnings. `initialUserMessage`,
   `sessionTitle`, `watchPaths`, `reloadSkills` become expressible or
-  allowlisted with reasons.
+  allowlisted with reasons. (Delivered as DUAL-channel emission pending
+  live rendering observation; live daemon dispatch verified on merged
+  main. Which single channel to retire is Plan 00273 Task 1.5.)
 - [x] ✅ **Task 2.8**: Add `DirectoryAdded` to `constants/events.py`
   (audit item 8) per the file's own tracked-gap rule (`wired=False` +
   `EXPECTED_UNWIRED` if not wired now).
