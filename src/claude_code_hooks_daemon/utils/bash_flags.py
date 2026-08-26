@@ -54,6 +54,10 @@ _OPTION_NAMES: Final[dict[str, str]] = {
 _DASH: Final = "-"
 _OPTION_LETTER: Final = "o"
 
+#: End-of-options marker: everything after a bare ``--`` is a positional
+#: operand (``set -- -e foo`` sets ``$1=-e``), never a flag.
+_END_OF_OPTIONS: Final = "--"
+
 
 def split_statements(command: str) -> list[str]:
     """Split ``command`` into stripped, non-empty sequenced statements.
@@ -87,6 +91,12 @@ def detect_safe_mode_flags(statements: Iterable[str]) -> frozenset[str]:
             continue
         expect_option_name = False
         for token in match.group("args").split():
+            if token == _END_OF_OPTIONS:
+                # `set -- -e foo` assigns positional parameters; anything
+                # after `--` is an operand, never a flag. Reading on would
+                # report errexit that was never enabled — and stand down
+                # verification_result_gate on a genuinely ungated command.
+                break
             if expect_option_name:
                 flag = _OPTION_NAMES.get(token)
                 if flag is not None:

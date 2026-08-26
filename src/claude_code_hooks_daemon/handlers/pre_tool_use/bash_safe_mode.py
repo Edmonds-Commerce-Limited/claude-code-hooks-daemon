@@ -200,7 +200,7 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         )
 
     def _missing_flags(self, command: str) -> tuple[str, ...]:
-        """Required flags the command does not declare, or () when in scope-free."""
+        """Required flags the command does not declare, or () when out of scope."""
         if _ESCAPE_HATCH in command:
             return ()
         if self._matches_exempt_pattern(command):

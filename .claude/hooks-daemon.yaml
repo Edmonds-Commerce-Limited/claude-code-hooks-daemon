@@ -291,11 +291,15 @@ handlers:
     bash_safe_mode:  # Opt-in safe-prelude forcer (Plan 00270); dogfooded here in warn mode
       enabled: true
       priority: 36
-      # options:
+      options:
+        # Scoped to mutator-bearing commands for the first dogfood cycle:
+        # unscoped, it fires on essentially every multi-statement Bash call
+        # with a large advisory and no rate limiting. Widen to false once the
+        # advisory volume is measured and acceptable.
+        only_with_mutator: true
       #   mode: warn              # warn | block (inject is reserved and rejected at load)
       #   require: [errexit, pipefail]  # nounset available but off-default
       #   min_statements: 2
-      #   only_with_mutator: false
       #   exempt_patterns: []
     verification_result_gate:  # Flags a verifier whose result nothing consumes (Plan 00268)
       enabled: true

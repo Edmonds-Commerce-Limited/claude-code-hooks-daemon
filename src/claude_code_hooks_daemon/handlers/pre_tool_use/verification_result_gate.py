@@ -190,6 +190,8 @@ def statements_contain_mutator(statements: Iterable[str]) -> bool:
     scope filter must agree with THIS handler's mutator taxonomy — a second
     copy of the table would drift. Verifier signatures beat mutator ones per
     span, so ``ansible-playbook --syntax-check`` never counts as a mutator.
+    A project's ``extra_mutators`` config deliberately does NOT widen
+    ``only_with_mutator``'s scope — only the built-in table is consulted here.
     """
     return any(
         VerificationResultGateHandler._classify(statement, _COMPILED_MUTATORS, _COMPILED_VERIFIERS)

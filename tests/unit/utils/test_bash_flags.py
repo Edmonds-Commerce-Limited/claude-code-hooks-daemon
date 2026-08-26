@@ -53,6 +53,11 @@ class TestDetectSafeModeFlags:
             ("set -u", {FLAG_NOUNSET}),
             ("set -o errexit -o pipefail", {FLAG_ERREXIT, FLAG_PIPEFAIL}),
             ("  set -e", {FLAG_ERREXIT}),
+            # Bug-fixes over the old Plan 00268 single-regex detection, which
+            # required errexit in the FIRST flag cluster:
+            ("set -x -e", {FLAG_ERREXIT}),
+            ("set -f -e", {FLAG_ERREXIT}),
+            ("set -o pipefail -o errexit", {FLAG_PIPEFAIL, FLAG_ERREXIT}),
         ],
     )
     def test_recognised_spellings(self, statement: str, expected: set[str]) -> None:
@@ -68,6 +73,10 @@ class TestDetectSafeModeFlags:
             "echo set -e",
             "setter -e",
             "pytest tests/",
+            # `set -- -e foo` assigns positional parameters ($1=-e); the -e
+            # after `--` is an operand, not errexit. Counting it would stand
+            # down verification_result_gate on an ungated command.
+            "set -- -e foo",
         ],
     )
     def test_non_matching_statements_detect_nothing(self, statement: str) -> None:
