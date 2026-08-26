@@ -287,9 +287,7 @@ def write_goal_signal(
     try:
         target_dir = ProjectContext.daemon_untracked_dir() / _SIGNAL_SUBDIR
         target_dir.mkdir(parents=True, exist_ok=True)
-        stem = (
-            _UNSAFE_SESSION_CHARS.sub("_", session_id) if session_id else _SESSION_ID_FALLBACK
-        )
+        stem = _UNSAFE_SESSION_CHARS.sub("_", session_id) if session_id else _SESSION_ID_FALLBACK
         final_path = target_dir / f"{stem}{_SIGNAL_SUFFIX}"
         tmp_path = target_dir / f".{stem}.{os.getpid()}.tmp"
         payload = {

@@ -2363,9 +2363,7 @@ def decide_once(
                 if facts.idle and not facts.input_line_empty:
                     deferred_log = f"{_DEFERRED_LOG_PREFIX} (goal injection pending)"
                 else:
-                    noop_reason_log = (
-                        f"{_NOOP_LOG_PREFIX}: goal signal pending but session busy"
-                    )
+                    noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal signal pending but session busy"
             elif machine.goal_injections >= _MAX_GOAL_INJECTIONS:
                 noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal injection cap reached"
             else:

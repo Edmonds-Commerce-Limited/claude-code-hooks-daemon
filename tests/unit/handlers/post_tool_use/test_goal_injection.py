@@ -272,9 +272,7 @@ class TestGoalInjectionHandler:
         assert handler.matches(self._hook_input(other)) is False
 
     def test_no_match_bash_tool(self, handler: GoalInjectionHandler) -> None:
-        assert (
-            handler.matches({"tool_name": "Bash", "tool_input": {"command": "ls"}}) is False
-        )
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": "ls"}}) is False
 
     # ---- handle ---------------------------------------------------------
 
@@ -290,9 +288,7 @@ class TestGoalInjectionHandler:
         assert joined.startswith(_HEADER_TEXT)
         assert "\n" not in joined
 
-    def test_non_in_progress_status_writes_nothing(
-        self, handler: GoalInjectionHandler
-    ) -> None:
+    def test_non_in_progress_status_writes_nothing(self, handler: GoalInjectionHandler) -> None:
         plan = self._write_plan(status="Not Started")
         result = handler.handle(self._hook_input(plan))
         assert result.decision == Decision.ALLOW
@@ -341,8 +337,7 @@ class TestGoalInjectionHandler:
     ) -> None:
         plan = self._write_plan()
         monkeypatch.setattr(
-            "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
-            "write_goal_signal",
+            "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection." "write_goal_signal",
             lambda *a, **k: None,
         )
         result = handler.handle(self._hook_input(plan))

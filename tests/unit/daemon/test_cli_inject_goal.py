@@ -70,9 +70,7 @@ def test_writes_cli_sourced_signal(project: Path, capsys) -> None:
     assert str(_signal_path(project)) in capsys.readouterr().out
 
 
-def test_refuses_without_session_id(
-    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
+def test_refuses_without_session_id(project: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
     rc = cli.cmd_inject_goal(_args(project))
     assert rc == 1

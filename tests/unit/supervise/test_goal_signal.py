@@ -30,9 +30,7 @@ _HEADER = (
 _JOINED = _HEADER + " — Work on Plan 00269 (title) at CLAUDE/Plan/00269-x until completion."
 
 
-def _facts(
-    now: float = _NOW, *, idle: bool = True, input_line_empty: bool = True
-) -> object:
+def _facts(now: float = _NOW, *, idle: bool = True, input_line_empty: bool = True) -> object:
     return _mod.TickFacts(
         now_wall=now,
         idle=idle,
@@ -239,9 +237,7 @@ def test_compaction_signal_resume_wins_over_pending_goal(tmp_path: Path) -> None
     sidecar_dir = tmp_path / "context-sidecar"
     _write_goal(sidecar_dir)
     compacting = sidecar_dir / f"{_SESSION}.compacting"
-    compacting.write_text(
-        json.dumps({"ts": _NOW - 1.0, "session_id": _SESSION}), encoding="utf-8"
-    )
+    compacting.write_text(json.dumps({"ts": _NOW - 1.0, "session_id": _SESSION}), encoding="utf-8")
     outcome = _decide(sidecar_dir, dry_run=False)
     assert outcome.decision_value == "would-continue"
     assert outcome.consume_signal_path == str(compacting)
