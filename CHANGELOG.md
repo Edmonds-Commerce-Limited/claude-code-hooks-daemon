@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`github_auto_close_keywords` (Plan 00275) — enabled by default.** A new
   PreToolUse safety handler that denies `git commit` (and `git merge -m` /
   `git tag -m`, plus `gh pr create`/`gh pr edit` bodies) whose message contains
-  a GitHub closing keyword followed by an issue reference — `Fixes #123`,
-  `closes octo-org/octo-repo#42`, `Resolved GH-7`. These auto-close the
+  a GitHub closing keyword followed by an issue reference — `Fixes #NNN`,
+  `closes owner/repo#NNN`, `Resolved GH-NNN`. These auto-close the
   referenced issue/PR the moment the commit reaches the default branch, with
   no repository-side switch to disable it, and agents write such messages
   routinely without realising the side effect. There is deliberately **no
