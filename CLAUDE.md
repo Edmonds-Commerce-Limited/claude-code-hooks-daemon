@@ -1356,6 +1356,16 @@ If using `--json`, include `comments` in the field list instead of adding `--com
 
 If using `--json`, include `comments` in the field list instead of adding `--comments`.
 
+<!-- handler: staged-lint-gate -->
+
+## staged_lint_gate — staged files are syntax-checked at git commit
+
+Every staged Added/Copied/Modified file is run through the SAME cheap syntax check `lint_on_edit` uses (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) at the moment of `git commit` — never the deeper `extended` linter, and never more than `max_files` (default 20) files, which stands the whole check down with an advisory naming how many were skipped rather than linting a subset silently.
+
+**This is a BACKSTOP, not a replacement for `lint_on_edit`.** `lint_on_edit` only ever sees a file at the moment `Write`/`Edit` touches it. A file that reaches the index by any OTHER route — `git add` of something written earlier in the session, a merge, a commit of pre-existing changes — is never linted before it lands. This handler catches that file's staleness at the one point that is guaranteed to see it: the commit itself.
+
+Ships `mode: warn` (advisory context naming each failing file and its first line of diagnosis); set `handlers.pre_tool_use.staged_lint_gate.options.mode: block` to deny the commit instead. Nested/vendor repos and other worktrees are exempt — this only checks the project's own staged tree.
+
 <!-- handler: plan-qa-commit-gate -->
 
 ## plan_qa_commit_gate — cross-file plan checks at git commit
