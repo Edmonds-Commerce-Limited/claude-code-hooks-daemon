@@ -40,7 +40,7 @@ One JSON object per line:
 | `handler`    | The handler that made this decision. `null` only for the synthetic override record below.                                                                                                                      |
 | `verdict`    | The handler's own decision: `allow`, `deny`, `ask`, `continue` — or the synthetic `override`.                                                                                                                  |
 | `rule`       | Optional, handler-set sub-classification (e.g. `pipe_blocker` distinguishes `"blacklisted"` vs `"unknown"`). `null` when a handler doesn't set one — most don't, and that's fine.                              |
-| `mode`       | Derived from `verdict`: `"block"` for deny/ask, `"advisory"` otherwise. This is NOT each handler's own configured block/warn option (no generic way to read that) — it is what actually happened on this call. |
+| `mode`       | Derived from `verdict`: `"block"` for deny/ask/defer (a defer is a postponement, not a refusal, but it still stops this call from proceeding), `"advisory"` otherwise. This is NOT each handler's own configured block/warn option (no generic way to read that) — it is what actually happened on this call. |
 | `overridden` | `true` only on the synthetic escape-hatch record (see below); `false` on every normal per-handler entry.                                                                                                       |
 
 ### Every matched handler gets its OWN verdict, not the chain's merged one

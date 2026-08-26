@@ -52,6 +52,14 @@ drift as an advisory rather than a block (inputs must stay fail-open).
   fail-open), if Task 1.2's static check leaves observable residue.
 - [ ] ⬜ **Task 1.4**: Triage the newly documented input fields listed in the
   Goals into consumed vs recorded-gap.
+- [ ] ⬜ **Task 1.5**: Retire the Plan 00271 dual-channel emissions once live
+  rendering is observed on the installed Claude Code: SessionStart advisory
+  context currently goes out on BOTH systemMessage and
+  hookSpecificOutput.additionalContext (the full advisory blob duplicated),
+  and a PermissionRequest deny explanation on BOTH decision.message and
+  hookSpecificOutput.additionalContext. Observe which channel actually
+  renders/delivers, keep that one, drop the other, and update the
+  corresponding ALLOWLIST.yaml entries.
 
 ## Success Criteria
 

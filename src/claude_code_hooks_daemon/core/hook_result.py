@@ -505,12 +505,15 @@ class HookResult(BaseModel):
 
         Different event types require different response structures:
         - Status: Plain text response {"text": "..."} (NOT JSON hookSpecificOutput)
-        - PreToolUse: hookSpecificOutput with permissionDecision
+        - PreToolUse: hookSpecificOutput with permissionDecision (+ updatedInput/defer)
         - PostToolUse: Top-level decision + hookSpecificOutput
-        - Stop/SubagentStop: Top-level decision only (NO hookSpecificOutput)
+        - Stop/SubagentStop: Top-level decision + hookSpecificOutput.additionalContext
         - PermissionRequest: hookSpecificOutput with nested decision.behavior
-        - UserPromptSubmit: hookSpecificOutput with context only (NO decision fields)
-        - SessionStart/SessionEnd/PreCompact/Notification: systemMessage ONLY (NO hookSpecificOutput)
+        - UserPromptSubmit: Top-level decision "block" + hookSpecificOutput context
+        - The wired-extra block events (incl. PreCompact): top-level decision "block"
+        - TeammateIdle/TaskCompleted: continue: false + stopReason
+        - SessionStart: systemMessage + hookSpecificOutput.additionalContext
+        - SessionEnd/Notification and other no-decision events: systemMessage ONLY
 
         Args:
             event_name: Hook event type (PreToolUse, PostToolUse, etc.)
@@ -595,8 +598,10 @@ class HookResult(BaseModel):
         elif event_name == "SessionStart":
             return self._format_session_start_response(event_name)
         else:
-            # SessionStart, SessionEnd, PreCompact, Notification: systemMessage ONLY
-            # These events do NOT support hookSpecificOutput in Claude Code
+            # SessionEnd, Notification and the other no-decision-control
+            # events: systemMessage only. (SessionStart and PreCompact used to
+            # be in this bucket; both now have their own branches above —
+            # Plan 00271 items 6 and 7.)
             return self._format_system_message_response()
 
     def _format_pre_tool_use_response(self, event_name: str) -> dict[str, Any]:
@@ -729,10 +734,18 @@ class HookResult(BaseModel):
                 # ("For deny only: tells Claude why the permission was
                 # denied") — Plan 00271 item 4. Context lines join it so a
                 # multi-line explanation survives on the documented channel.
+                # DUAL-CHANNEL: the same explanation is ALSO emitted below on
+                # the additionalContext extension the daemon previously used —
+                # the audit only says that channel "likely" delivers nothing,
+                # and a bare refusal is the exact incident it was added for.
+                # Retire one channel once live observation settles which
+                # renders (same approach as SessionStart).
                 explanation = [self.reason] if self.reason else []
                 explanation.extend(self.context)
                 if explanation:
-                    decision_object["message"] = "\n\n".join(explanation)
+                    joined_explanation = "\n\n".join(explanation)
+                    decision_object["message"] = joined_explanation
+                    hook_output["additionalContext"] = joined_explanation
             hook_output["decision"] = decision_object
 
         # Advisory context on ALLOW/ASK stays on the daemon's additionalContext

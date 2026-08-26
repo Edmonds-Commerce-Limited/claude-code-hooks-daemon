@@ -9,6 +9,13 @@ advises running the refresh procedure (``docs/guides/HOOK-CONTRACT-REFRESH.md``)
 Advisory by design, never an auto-refresh: extraction from prose docs must be
 verified, not trusted (a summarising fetch layer once fabricated a
 ``permissionDecision: "escalate"`` value — Plan 00271 Decision 3).
+
+Install-layout note: the vendored contract ships in the REPOSITORY
+(self-install mode, or a client's .claude/hooks-daemon/ clone), not in the
+Python package — a bare wheel/site-packages install has no
+``contracts/claude-code-hooks/``, so ``_read_meta`` finds nothing and the
+handler deliberately no-ops there (fail-safe; verified by
+``test_silent_when_meta_missing``).
 """
 
 import json

@@ -32,6 +32,23 @@ class TestDenyMessage:
         assert "no" in message
         assert "ask a human" in message
 
+    def test_deny_explanation_also_rides_additional_context(self) -> None:
+        """Dual-channel fallback until live observation settles which renders.
+
+        decision.message is the DOCUMENTED deny field, but the audit only says
+        the old additionalContext routing "likely" delivers nothing — and a
+        bare refusal is the exact incident that channel was added for. Emit on
+        BOTH until one is observed rendering (mirrors the SessionStart
+        dual-channel approach).
+        """
+        payload = HookResult(decision=Decision.DENY, reason="no", context=["ask a human"]).to_json(
+            _EVENT
+        )
+        fallback = payload["hookSpecificOutput"]["additionalContext"]
+        assert "no" in fallback
+        assert "ask a human" in fallback
+        assert validate_response(_EVENT, payload) == []
+
     def test_allow_carries_no_message(self) -> None:
         payload = HookResult(decision=Decision.ALLOW, context=["fyi"]).to_json(_EVENT)
         assert "message" not in payload["hookSpecificOutput"]["decision"]
