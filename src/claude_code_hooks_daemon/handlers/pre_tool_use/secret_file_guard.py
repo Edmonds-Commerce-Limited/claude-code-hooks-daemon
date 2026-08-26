@@ -326,11 +326,14 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 title="secret_file_guard - echo buys no exemption",
                 command=(
                     "echo would-run: ansible-playbook --vault-password-file "
-                    "/tmp/fixture.vault-pass site.yml"
+                    "/tmp/fixture.vault-password site.yml"
                 ),
                 description=(
                     "Unlike sed_blocker, wrapping a protected-path mention in "
-                    "`echo` is NOT exempt — this command is DENIED. (The bare "
+                    "`echo` is NOT exempt — this command is DENIED (the head is "
+                    "`echo`, not an allowlisted consumer, so flag position buys "
+                    "nothing). The fixture basename must match a default glob "
+                    "(`*.vault-password`) for the mention to register. (The bare "
                     "`ansible-playbook --vault-password-file <path> ...` form, "
                     "path in flag position, is the consumer-allowlist ALLOW "
                     "case; it needs ansible installed to run to completion.)"
