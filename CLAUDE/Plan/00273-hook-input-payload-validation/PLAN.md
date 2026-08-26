@@ -191,13 +191,13 @@ surviving channel delivers (Tasks 3.1–3.2).
 
 ## Success Criteria
 
-- [ ] A unit test mutates a vendored `input_example` (renames a field the
+- [x] A unit test mutates a vendored `input_example` (renames a field the
   daemon reads) and asserts the Task 1.2 checker reports it.
-- [ ] The checker runs in `llm_qa.py all` / `run_all.sh` and is green on the
+- [x] The checker runs in `llm_qa.py all` / `run_all.sh` and is green on the
   current tree.
-- [ ] `docs/guides/HOOK-CONTRACT-REFRESH.md` contains the input re-triage
+- [x] `docs/guides/HOOK-CONTRACT-REFRESH.md` contains the input re-triage
   step.
-- [ ] Phase 2 go/no-go decision recorded in `DECISIONS.md`; if go, the
+- [x] Phase 2 go/no-go decision recorded in `DECISIONS.md`; if go, the
   advisory's overhead measurement is on record and within budget, and no
   blocking behaviour exists on the dispatch path.
 - [ ] Phase 3: sentinel evidence recorded in JOURNAL/; redundant channels
