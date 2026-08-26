@@ -69,6 +69,43 @@ config_changes:
         the setting themselves. This does not affect a human publishing
         through the claude.ai UI -- the daemon sees tool calls, not browser
         clicks.
+    - key: handlers.pre_tool_use.secret_file_guard
+      recommended: true
+      dormant: false
+      description: >-
+        NEW terminal PreToolUse blocking handler (Plan 00272). Protected
+        files' CONTENTS must never enter agent context: Read/Write/Edit/
+        NotebookEdit/Grep on a protected path are denied, and so is ANY Bash
+        command whose text mentions one (cat, head, interpreter one-liners,
+        cp/mv relocation, command substitution, sourcing — deny-by-default in
+        the sed_blocker style, not a list of bad readers). Shipped default
+        globs: "*.secret*" (any name containing .secret, covering the
+        daemon's own .claude/block-words.secret), .vault-pass*,
+        *.vault-password, *vault_pass*, id_rsa, id_ed25519. Projects extend
+        via options.protected_paths under options.mode additive (default) or
+        replace. Presence and metadata stay available: Glob still finds the
+        file, and the new `hooks-daemon secret-meta <path>` CLI returns
+        existence, bucketed size, mtime, permissions (with a chmod 600
+        hygiene hint) and a keyed HMAC digest — never content; exact size and
+        plain sha256 only behind options.allow_plain_hash. Trusted consumers
+        keep working via options.allowed_consumers (shipped: the Ansible
+        family with --vault-password-file in flag position;
+        ansible-vault view|decrypt stay denied — they print secrets).
+        Authoring a SCRIPT that references a protected path is denied too
+        (write-then-execute route); options.exclude_paths scopes that content
+        scan only. Ships default-ON: a guard that must be discovered before
+        it protects anything protects nobody.
+      migration_note: >-
+        On by default; no action needed to adopt. If a legitimate file
+        matches a default glob, extend nothing — a HUMAN narrows the config
+        (options.mode replace with your own list, or disable the handler).
+        There is deliberately NO agent-side escape hatch, same doctrine as
+        artifact_publish_blocker: an agent that can type its own
+        justification has self-authorised disclosure. Honest limit stated in
+        the resident guidance: this is defence in depth over an OS boundary
+        (chmod 600, separate user) the project must set independently —
+        string-assembled paths and pre-existing scripts that open the file
+        internally remain out of reach of command-text matching.
     - key: handlers.pre_tool_use.github_auto_close_keywords
       recommended: true
       dormant: false

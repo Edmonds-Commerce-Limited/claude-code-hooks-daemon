@@ -1284,8 +1284,10 @@ Two sources, with **deliberately different disclosure rules**:
 - **Secret word list** (`secret_word_list_path`) — a gitignored file of terms
   that must never be echoed. A matched term appears nowhere: not in the deny
   reason, not in any log, not in payload capture, not in an archived
-  transcript. The deny reason names only a position (`entry N of M in the secret word list`), which is meaningless without the gitignored file. Read
-  that file, or ask the operator — do not try to guess what matched.
+  transcript. The deny reason names only a position (`entry N of M in the secret word list`), which is meaningless without the gitignored file. Ask
+  the operator what the entry covers — do not try to guess what matched, and do
+  not open the file: it is itself read-protected by
+  [`secret_file_guard`](#secret_file_guard) (Plan 00272).
 
 A missing, empty or comments-only secret file makes that source silently inert
 by design, so a checkout without the file still works.
@@ -1316,6 +1318,67 @@ handlers:
 
 Add the secret list to `.gitignore` (`*.secret` covers it) so the terms it
 protects are never committed alongside the rule that blocks them.
+
+---
+
+#### secret_file_guard
+
+| Property       | Value               |
+| -------------- | ------------------- |
+| **Config key** | `secret_file_guard` |
+| **Priority**   | 14                  |
+| **Type**       | Blocking (terminal) |
+| **Event**      | PreToolUse          |
+
+**Description:** Denies any tool call that would put a protected file's
+CONTENTS into context (Plan 00272). `Read`, `Write`, `Edit`, `NotebookEdit`
+and `Grep` on a protected path are denied (Grep is a content oracle in every
+output mode), and so is ANY `Bash` command whose text mentions one — `cat`,
+`head`, interpreter one-liners, `cp`/`mv` relocation, command substitution,
+sourcing. **Deny-by-default, not a list of bad readers** (the `sed_blocker`
+framing); there is no echo exemption and no commit-message exemption.
+Authoring a SCRIPT that references a protected path is denied too (the
+write-then-execute route); markdown/prose naming a protected file stays
+writable. `Glob` is never blocked — presence is the feature.
+
+Two sanctioned routes remain: the `hooks-daemon secret-meta <path>` CLI
+(existence, bucketed size, mtime, permissions with a `chmod 600` hygiene
+hint, and a keyed HMAC digest — never content), and allowlisted consumers
+with the path in flag position (`ansible-playbook --vault-password-file …`;
+`ansible-vault view|decrypt` stay denied — those subcommands print secrets).
+
+**No agent escape hatch** (same doctrine as `artifact_publish_blocker`): a
+human edits this config block to lift protection. Honest limit: this is
+defence in depth over an OS boundary the project must set independently —
+string-assembled paths, cross-invocation shell state and pre-existing
+scripts that open the file internally are outside command-text matching.
+
+**Options:**
+
+| Option              | Type         | Default        | Description                                                                                                                                                                                                                                                        |
+| ------------------- | ------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `protected_paths`   | `list[str]`  | `[]`           | Gitignore-style globs, combined with the defaults per `mode`.                                                                                                                                                                                                      |
+| `mode`              | `str`        | `additive`     | `additive` merges `protected_paths` onto the defaults (`*.secret*`, `.vault-pass*`, `*.vault-password`, `*vault_pass*`, `id_rsa`, `id_ed25519`); `replace` uses only the project list. An unknown mode behaves as `additive` (fail closed toward more protection). |
+| `allowed_consumers` | `list[dict]` | Ansible family | Additive entries: `{command, path_flags, denied_subcommands}`.                                                                                                                                                                                                     |
+| `allow_plain_hash`  | `bool`       | `false`        | When true, `secret-meta` also reports exact `size_bytes` and plain `sha256`. Config-only — the CLI has no flag, so an agent cannot self-grant it.                                                                                                                  |
+| `exclude_paths`     | `list[str]`  | `[]`           | Scopes ONLY the authored-script content scan (a protected path itself is never excludable). Unioned with `daemon.exclude_paths`.                                                                                                                                   |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    secret_file_guard:
+      enabled: true
+      priority: 14
+      options:
+        mode: additive
+        protected_paths:
+          - "secrets/prod-token"
+        allowed_consumers:
+          - command: "my-deploy-tool"
+            path_flags: ["--secret-file"]
+```
 
 ---
 

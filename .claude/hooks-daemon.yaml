@@ -203,6 +203,27 @@ handlers:
           - 'src/claude_code_hooks_daemon/handlers/pre_tool_use/sensitive_content.py'
           - 'tests/unit/handlers/pre_tool_use/test_sensitive_content.py'
 
+    # Plan 00272: protected files' CONTENTS never enter context. Default globs
+    # (*.secret*, .vault-pass*, ...) cover .claude/block-words.secret; use
+    # `bin/hooks-daemon secret-meta <path>` for presence/metadata. No agent
+    # escape hatch — this block is the only lift, and it is a human's edit.
+    secret_file_guard:
+      enabled: true
+      priority: 14
+      options:
+        # exclude_paths scopes ONLY the authored-script content scan; a
+        # protected path itself is never excludable. This handler's own
+        # source/tests (and its matching core + docs generator fixtures)
+        # necessarily NAME protected paths to test them.
+        exclude_paths:
+          - 'src/claude_code_hooks_daemon/handlers/pre_tool_use/secret_file_guard.py'
+          - 'src/claude_code_hooks_daemon/utils/secret_file_matching.py'
+          - 'src/claude_code_hooks_daemon/utils/secret_meta.py'
+          - 'tests/unit/handlers/pre_tool_use/test_secret_file_guard.py'
+          - 'tests/unit/utils/test_secret_file_matching.py'
+          - 'tests/unit/utils/test_secret_meta.py'
+          - 'tests/unit/daemon/test_cli_secret_meta.py'
+
     root_recursion_guard:  # Blocks recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME
       enabled: true
       priority: 15

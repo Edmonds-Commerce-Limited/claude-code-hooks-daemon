@@ -407,9 +407,10 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 "SENSITIVE CONTENT BLOCKED: content matches a configured blocked term "
                 f"(entry {index} of {total} in the secret word list).\n\n"
                 f"{_SUBJECT_LABEL}: {subject}\n\n"
-                "The term is deliberately not shown. Check "
-                f"`{sr.DEFAULT_SECRET_WORD_LIST_PATH}` to see what is blocked, "
-                "then remove it from the content."
+                "The term is deliberately not shown, and the word list file "
+                f"(`{sr.DEFAULT_SECRET_WORD_LIST_PATH}`) is itself read-protected "
+                "by secret_file_guard — do not try to open it. Ask the user what "
+                "entry N covers, then remove the matching text from the content."
             ),
         )
 
@@ -427,9 +428,10 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             "not in the deny reason, not in any log, not in payload capture, not in a "
             "transcript archive. The deny reason names only an index "
             "(`entry N of M in the secret word list`), which is meaningless without the "
-            "gitignored file. **Do NOT try to guess or work around the block** — open "
-            "the secret word list file (if you have access) to see what matched, or ask "
-            "the user. Only the ADDED text is checked on `Edit` (`new_string`) — removing "
+            "gitignored file. **Do NOT try to guess or work around the block, and do NOT "
+            "open the secret word list file** — it is itself read-protected by "
+            "`secret_file_guard` (Plan 00272); ask the user what the entry covers. "
+            "Only the ADDED text is checked on `Edit` (`new_string`) — removing "
             "sensitive content is never blocked.\n\n"
             "**Git metadata is checked too.** File contents and file PATHS are only "
             "two of the seven places a term can enter a repository — the other five are "

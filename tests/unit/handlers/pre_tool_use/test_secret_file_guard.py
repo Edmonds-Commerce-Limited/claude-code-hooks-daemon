@@ -137,6 +137,27 @@ class TestContentScan:
         )
         assert not handler.matches(hook_input)
 
+    def test_excluded_path_content_scan_is_skipped(self) -> None:
+        """The guard's own source/tests legitimately NAME protected paths —
+        the dogfood config excludes them (sensitive_content precedent)."""
+        handler = _handler()
+        handler._exclude_paths = ["tests/unit/handlers/**"]
+        hook_input = _hook_input(
+            "Write",
+            {
+                "file_path": "/proj/tests/unit/handlers/test_x.py",
+                "content": "assert guard('cat .vault-pass')",
+            },
+        )
+        assert not handler.matches(hook_input)
+
+    def test_exclusion_never_exempts_a_protected_path_itself(self) -> None:
+        """exclude_paths scopes the CONTENT scan only — a protected file stays
+        protected even if a glob would exclude it."""
+        handler = _handler()
+        handler._exclude_paths = ["**/*"]
+        assert handler.matches(_hook_input("Read", {"file_path": "/proj/.vault-pass"}))
+
     def test_clean_script_is_allowed(self) -> None:
         handler = _handler()
         hook_input = _hook_input(

@@ -1,6 +1,30 @@
 version: "UNRELEASED"
 truth_changes:
   - was: >
+      When `sensitive_content` denied a write with "entry N of M in the
+      secret word list", the documented remediation was to OPEN the secret
+      word list file (if you have access) to see what matched. Reading a
+      secret file's contents — the word list, a vault password file, key
+      material — was an ordinary tool call nothing restricted.
+    now: >
+      Reading a protected file's CONTENTS is BLOCKED (Plan 00272). The new
+      `secret_file_guard` PreToolUse handler denies Read/Write/Edit/
+      NotebookEdit/Grep on a protected path and ANY Bash command mentioning
+      one, with default globs covering "*.secret*" (including
+      `.claude/block-words.secret`), vault-password shapes and SSH key
+      names. The `sensitive_content` remediation is REVERSED: do not open
+      the word list — ask the user what entry N covers. Presence and
+      metadata remain available via `hooks-daemon secret-meta <path>`
+      (existence, bucketed size, mtime, permissions, keyed digest — never
+      content), and allowlisted consumers such as
+      `ansible-playbook --vault-password-file <path>` keep working.
+
+      IF YOUR PROJECT'S DOCS OR SKILLS TELL AN AGENT TO OPEN A SECRET FILE
+      (the word list included), THOSE INSTRUCTIONS ARE NOW FALSE — rewrite
+      them to use `secret-meta` or to ask the user. There is deliberately NO
+      agent-side escape hatch; a HUMAN edits
+      `handlers.pre_tool_use.secret_file_guard` to lift protection.
+  - was: >
       Publishing an artefact is an ordinary step an agent can take on its own
       initiative. A project's own documentation and skills could instruct an
       agent to render a report as an artefact and hand the user the resulting

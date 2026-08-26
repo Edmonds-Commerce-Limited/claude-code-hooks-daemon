@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
 
 _FIELD_FILE_PATH: Final[str] = "file_path"
 _FIELD_NOTEBOOK_PATH: Final[str] = "notebook_path"
@@ -97,6 +98,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         self._protected_paths: list[str] | None = None
         self._mode: str | None = None
         self._allowed_consumers: list[dict[str, Any]] | None = None
+        self._exclude_paths: list[str] | None = None
 
     def _patterns(self) -> tuple[str, ...]:
         return sfm.resolve_protected_patterns(self._mode, self._protected_paths)
@@ -135,17 +137,26 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             return self._script_content_mention(path, tool_input, patterns)
         return None
 
-    @staticmethod
     def _script_content_mention(
-        path: str, tool_input: dict[str, Any], patterns: tuple[str, ...]
+        self, path: str, tool_input: dict[str, Any], patterns: tuple[str, ...]
     ) -> str | None:
         """Protected mention inside authored SCRIPT content (Task 4.3), or None.
 
         Closes the write-then-execute route: a script that references a
         protected path cannot be authored via Write/Edit. Only the ADDED text
         is checked on Edit — removing a reference is never blocked.
+
+        ``exclude_paths`` (handler option + project-wide ``daemon.exclude_paths``)
+        scopes THIS surface only: the guard's own source and tests legitimately
+        name protected paths. A protected path itself is never excludable.
         """
         if not any(path.endswith(extension) for extension in _SCRIPT_EXTENSIONS):
+            return None
+        if handler_excludes_path(
+            path,
+            handler_patterns=self._exclude_paths,
+            project_patterns=self._project_exclude_paths,
+        ):
             return None
         content = str(tool_input.get(_FIELD_CONTENT, "") or tool_input.get(_FIELD_NEW_STRING, ""))
         return sfm.find_protected_mention(content, patterns)
