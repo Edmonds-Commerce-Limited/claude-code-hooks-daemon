@@ -34,6 +34,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00270: bash safe mode forcer](00270-bash-safe-mode-forcer/PLAN.md) - Not Started (the OPT-IN counterpart Plan 00268 deferred: a ships-disabled handler enforcing `set -e`/`-o pipefail`/`-u` preludes on multi-statement Bash invocations, inheriting 00268's cry-wolf objections as design constraints; brainstorm ready for human review)
 
+- [00272: secret file read blocker](00272-secret-file-read-blocker/PLAN.md) - Not Started (deny-by-default PreToolUse guard so a protected secret file's CONTENT can never enter context by any wired route; `secret-meta` helper returns keyed-hash metadata instead; no agent escape hatch; Phase 1 research classifies every read route by blockability; brainstorm + research scaffold ready for human review)
+
 - [00271: hook contract alignment](00271-hook-contract-alignment/PLAN.md) - Not Started (DBF-first: vendor the documented Claude Code hooks contract as tracked JSON with a network-free QA diff + staleness advisory, then fix the 21 audited response-schema drifts — 9 load-bearing, incl. PreToolUse `updatedInput`/`defer` and UserPromptSubmit blocking; audit in-folder)
 
 ### Status Line / Agent View
@@ -1245,33 +1247,33 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 271 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 272 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 219 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 39 + 219 + 6 = **264 folders**, spanning
-  **261 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 40 + 219 + 6 = **265 folders**, spanning
+  **262 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **10** of the
-  271 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  272 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258 — abandoned drafts, numbers burned by
   transient probes (00195 during the v3.51.0 acceptance run, 00258 during the
   v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a sub-agent
-  that then found Plan 00208 already covered the work). 261 + 10 = 271. ✅
+  that then found Plan 00208 already covered the work). 262 + 10 = 272. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00271 creation (39 root, 219 `Completed/`,
-  6 `Cancelled/`, 261 distinct numbers against a counter of 271). The index
+- **Last reconciled at**: the Plan 00272 creation (40 root, 219 `Completed/`,
+  6 `Cancelled/`, 262 distinct numbers against a counter of 272). The index
   carries NO reconciliation history — it states current truth only; every
   earlier recount is in git, and per-plan narrative belongs in that plan's
   `JOURNAL/`.
