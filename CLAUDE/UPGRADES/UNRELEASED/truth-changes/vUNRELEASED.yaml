@@ -279,3 +279,33 @@ truth_changes:
       project is unlikely to call it. It is recorded because the symbol is
       exported from `claude_code_hooks_daemon.core`: if you do call it, add the
       event name.
+  - was: >
+      `lint_on_edit` covered Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin
+      and Dart. A `.yml`/`.yaml` file was never linted on write, so an Ansible
+      playbook that would not even LOAD — an unbalanced quote inside a
+      `shell:` block aborts the whole play at parse time — reached disk in
+      silence and was discovered only when the playbook ran.
+    now: >
+      Ansible YAML is a lint_on_edit language (Plan 00268). A `.yml`/`.yaml`
+      file is linted when it is plausibly a playbook or role task file — by
+      Ansible's own path conventions (`playbooks/`, `roles/`, `tasks/`,
+      `handlers/`, `site.yml`, `play-*`, `playbook-*`) or by carrying a
+      top-level `- hosts:` / `- import_playbook:` line wherever it sits. The
+      cheap tier is `ansible-playbook --syntax-check`; full `ansible-lint`
+      runs at the `extended` tier, and the linter runs from the nearest
+      directory containing `ansible.cfg` because roles and collections resolve
+      relative to it.
+
+      DELIBERATELY LEFT ALONE, because they share the extension but are not
+      plays: `.github/workflows/`, `docker-compose*`, `group_vars/`,
+      `host_vars/`, inventories, and vault files (never read — encrypted).
+
+      This changes behaviour only where `lint_on_edit` is enabled AND the
+      Ansible tooling is installed — a linter that is not installed never
+      blocks, it advises that the check was SKIPPED. Where both hold, a write
+      that lands an unloadable play is now DENIED with the linter's own
+      diagnosis (the write has already landed; repair with `Edit`). Opt a
+      project out per language with `options.languages`, or reduce to the
+      syntax check only with `command_overrides: {Ansible: {extended: null}}`
+      — the extended tier is NOT opt-in and runs whenever ansible-lint is
+      installed, as for every other language.

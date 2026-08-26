@@ -1063,6 +1063,58 @@ handlers:
 
 ---
 
+#### verification_result_gate
+
+| Property       | Value                      |
+| -------------- | -------------------------- |
+| **Config key** | `verification_result_gate` |
+| **Priority**   | 34                         |
+| **Type**       | Blocking (ships advisory)  |
+| **Event**      | PreToolUse                 |
+
+**Description:** Flags a **verifier** (`ansible-lint`, `shellcheck`, `pytest`,
+`ruff`, `mypy`, `yamllint`, `go vet`, `bash -n`, `php -l`, `golangci-lint`,
+`npm test`, `ansible-playbook --syntax-check`, …) followed by a **mutator**
+(`git add`/`commit`/`push`/`tag`, `gh pr create`/`gh issue create`/`gh pr merge`, a real `ansible-playbook` run) in the SAME Bash invocation with
+nothing consuming the verifier's exit status. A NEWLINE separates commands
+exactly as `;` does — the motivating incident put the lint on one line and the
+commit on the next, so the lint failed and the commit ran anyway.
+
+Any of these stands the handler down: `verifier && mutator`; `verifier || { …; exit 1; }`; `rc=$?` followed by an `if`/`case` on it; `set -euo pipefail`
+at the top of the invocation. Printing `$?` is NOT consuming it.
+`ansible-playbook` appears on both tables and is classified by its flags —
+`--syntax-check`/`--check` make it a verifier, their absence a mutator.
+
+This is not a style rule about `;` versus `&&`: statements with no mutator
+(no-match `grep -q`, labelled diagnostic sweeps, `echo "exit=$?"` observers)
+never fire.
+
+**Options:**
+
+| Option            | Type        | Default | Description                                                                    |
+| ----------------- | ----------- | ------- | ------------------------------------------------------------------------------ |
+| `mode`            | `str`       | `warn`  | `warn` injects advisory context naming the pair; `block` denies the tool call. |
+| `extra_verifiers` | `list[str]` | `[]`    | Additive literal command names treated as verifiers (never regexes).           |
+| `extra_mutators`  | `list[str]` | `[]`    | Additive literal command names treated as mutators. Tables cannot be replaced. |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    verification_result_gate:
+      enabled: true
+      priority: 34
+      options:
+        mode: warn
+        extra_verifiers:
+          - "my-project-check"
+        extra_mutators:
+          - "terraform apply"
+```
+
+---
+
 #### security_antipattern
 
 | Property       | Value                  |
@@ -1931,6 +1983,18 @@ handlers:
 
 **Bash-authored files**: as for `validate_eslint_on_write` above — authoring routes are linted, relocation routes are not. A command that authors several files (`tee a.py b.py`) has each linted, and the first failure is reported.
 
+**Ansible YAML** (Plan 00268): a `.yml`/`.yaml` file is linted when it is
+plausibly a playbook or role task file — by Ansible's own path conventions
+(`playbooks/`, `roles/`, `tasks/`, `handlers/`, `site.yml`, `play-*`,
+`playbook-*`) or by carrying a top-level `- hosts:` / `- import_playbook:`
+line wherever it sits. Everything else sharing the extension is left alone
+(`.github/workflows/`, `docker-compose*`, `group_vars/`, `host_vars/`,
+inventories, vault files — never read). The cheap tier is
+`ansible-playbook --syntax-check`, which catches a play that will not LOAD
+(e.g. an unbalanced quote inside a `shell:` block); full `ansible-lint` runs
+at the `extended` tier. The linter runs from the nearest directory containing
+`ansible.cfg`, because roles and collections resolve relative to it.
+
 | Option              | Values         | Default | Effect                                                                                          |
 | ------------------- | -------------- | ------- | ----------------------------------------------------------------------------------------------- |
 | `lint_bash_writes`  | `true`/`false` | `true`  | Lint files authored by a Bash command. `false` restricts the handler to `Write`/`Edit` only.    |
@@ -2408,22 +2472,23 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 
 ### All Advisory Handlers
 
-| Config Key                 | Event            | Priority | What It Does                           |
-| -------------------------- | ---------------- | -------- | -------------------------------------- |
-| `daemon_restart_verifier`  | PreToolUse       | 10       | Suggests daemon restart before commits |
-| `global_npm_advisor`       | PreToolUse       | 40       | Suggests npx over global installs      |
-| `plan_workflow`            | PreToolUse       | 45       | Guidance for plan creation             |
-| `web_search_year`          | PreToolUse       | 55       | Warns about outdated search years      |
-| `british_english`          | PreToolUse       | 60       | Warns about American spellings         |
-| `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes      |
-| `command_hints`            | PostToolUse      | 29       | Config-driven reminder after a command |
-| `optimal_config_checker`   | SessionStart     | 52       | Audits Claude Code settings            |
-| `git_filemode_checker`     | SessionStart     | 53       | Warns when core.fileMode=false         |
-| `suggest_status_line`      | SessionStart     | 55       | Suggests status line setup             |
-| `version_check`            | SessionStart     | 55       | Checks for daemon updates              |
-| `plan_qa_sweep`            | SessionStart     | 57       | Reports plan-tree drift once a session |
-| `git_context_injector`     | UserPromptSubmit | 20       | Injects git status context             |
-| `nitpick.hedging_language` | Nitpick          | 20       | Detects guessing language per turn     |
+| Config Key                 | Event            | Priority | What It Does                                |
+| -------------------------- | ---------------- | -------- | ------------------------------------------- |
+| `daemon_restart_verifier`  | PreToolUse       | 10       | Suggests daemon restart before commits      |
+| `verification_result_gate` | PreToolUse       | 34       | Verifier result unconsumed before a mutator |
+| `global_npm_advisor`       | PreToolUse       | 40       | Suggests npx over global installs           |
+| `plan_workflow`            | PreToolUse       | 45       | Guidance for plan creation                  |
+| `web_search_year`          | PreToolUse       | 55       | Warns about outdated search years           |
+| `british_english`          | PreToolUse       | 60       | Warns about American spellings              |
+| `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes           |
+| `command_hints`            | PostToolUse      | 29       | Config-driven reminder after a command      |
+| `optimal_config_checker`   | SessionStart     | 52       | Audits Claude Code settings                 |
+| `git_filemode_checker`     | SessionStart     | 53       | Warns when core.fileMode=false              |
+| `suggest_status_line`      | SessionStart     | 55       | Suggests status line setup                  |
+| `version_check`            | SessionStart     | 55       | Checks for daemon updates                   |
+| `plan_qa_sweep`            | SessionStart     | 57       | Reports plan-tree drift once a session      |
+| `git_context_injector`     | UserPromptSubmit | 20       | Injects git status context                  |
+| `nitpick.hedging_language` | Nitpick          | 20       | Detects guessing language per turn          |
 
 ---
 

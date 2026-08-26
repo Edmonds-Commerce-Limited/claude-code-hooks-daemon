@@ -129,6 +129,34 @@ config_changes:
         edited inside a worktree changes the main checkout. Worth checking for
         a secret/word-list file specifically: absent from a worktree, a guard
         that reads one does not fail, it goes silently inert.
+    - key: handlers.pre_tool_use.verification_result_gate
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PreToolUse handler (Plan 00268), ships enabled in `mode: warn`.
+        Flags a verifier (ansible-lint, shellcheck, pytest, ruff, mypy,
+        yamllint, go vet, bash -n, php -l, golangci-lint, npm test,
+        ansible-playbook --syntax-check) followed by a mutator (git
+        add/commit/push/tag, gh pr create, gh issue create, gh pr merge, a
+        real ansible-playbook run) in the SAME Bash invocation with nothing
+        consuming the verifier's exit status. A newline separates commands
+        exactly as `;` does — the motivating field incident put the lint on
+        one line and the commit on the next, so the lint FAILED, its exit code
+        was printed, and the commit ran anyway, landing an unloadable file on
+        a default branch. Gating shapes stand it down: `&&`, `|| { …; exit 1;
+        }`, `rc=$?` consumed by an `if`/`case`, or `set -e`/`set -o errexit`
+        at the top of the invocation. Printing `$?` is not consuming it.
+        `ansible-playbook` sits on both tables and is classified by its flags
+        (dry-run flags make it a verifier). Deliberately NOT a style rule
+        about `;` versus `&&`: statements with no mutator (no-match grep,
+        labelled diagnostic sweeps, exit-code observers) never fire, and every
+        such shape from the field report is a tested ALLOW case.
+      migration_note: >-
+        Advisory by default; no action needed to adopt. Ratchet to
+        `options.mode: block` once the tables fit your project. Extend
+        additively with `options.extra_verifiers` / `options.extra_mutators`
+        (literal command names); the built-in tables cannot be replaced, so a
+        project cannot silently empty the mutator table.
     - key: handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes
       recommended: false
       # dormant for the same reason as lint_bash_writes: validate_eslint_on_write

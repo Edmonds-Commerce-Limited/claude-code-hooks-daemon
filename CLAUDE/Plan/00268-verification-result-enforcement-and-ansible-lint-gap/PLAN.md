@@ -151,17 +151,25 @@ its false-positive rate stays low enough that nobody disables it.
 
 ### Phase 3: Staged-file lint backstop at `git commit`
 
-- [ ] ⬜ **Task 3.1**: Decide whether to extend the existing commit gate or add a
+- [x] ✅ **Task 3.1**: Decide whether to extend the existing commit gate or add a
   sibling handler, and bound the cost of linting staged files on every commit.
+  **Decision: sibling PreToolUse handler `staged_lint_gate`, priority 43.**
+  Extending `plan_qa_commit_gate` was rejected: plan-tree QA and source lint are
+  different responsibilities (SRP) with different options, failure modes and
+  rollout schedules. Cost bounds: cheap/syntax tier ONLY (never the extended
+  linter); only staged Added/Copied/Modified files that a lint strategy
+  handles; a `max_files` cap (default 20) above which the handler stands down
+  with an advisory naming how many were skipped; per-file timeout; nested and
+  foreign repos exempt (mirroring `plan_qa_commit_gate`). Ships `mode: warn`.
 - [ ] ⬜ **Task 3.2**: If approved, TDD it and ship warn-first; it catches the
   outcome regardless of how the commit was invoked — chained, separate, or from
   a later turn entirely.
 
 ### Phase 4: Documentation and rollout
 
-- [ ] ⬜ **Task 4.1**: Update `docs/guides/HANDLER_REFERENCE.md` and the language
+- [x] ✅ **Task 4.1**: Update `docs/guides/HANDLER_REFERENCE.md` and the language
   table in `CLAUDE.md` to include the new YAML/Ansible coverage.
-- [ ] ⬜ **Task 4.2**: Add `config-changes/` and, if a documented truth changed,
+- [ ] 🔄 **Task 4.2**: Add `config-changes/` and, if a documented truth changed,
   `truth-changes/` manifests under `CLAUDE/UPGRADES/UNRELEASED/` so both
   features are actively promoted on upgrade rather than shipping dormant.
 

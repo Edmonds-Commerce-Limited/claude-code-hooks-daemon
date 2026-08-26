@@ -445,19 +445,20 @@ unset HOSTNAME → daemon-work.local.sock   # from socket.gethostname() / `hostn
 
 The following languages have strategy implementations across handler domains (QA suppression, security antipatterns, TDD, pipe blocker, lint-on-edit):
 
-| Language              | Extensions                   | Strategy Domains                                  |
-| --------------------- | ---------------------------- | ------------------------------------------------- |
-| Python                | `.py`                        | QA suppression, Security, TDD, Pipe blocker, Lint |
-| JavaScript/TypeScript | `.js`, `.jsx`, `.ts`, `.tsx` | QA suppression, Security, TDD, Pipe blocker, Lint |
-| PHP                   | `.php`                       | QA suppression, Security, TDD, Lint               |
-| Go                    | `.go`                        | QA suppression, Security, TDD, Pipe blocker, Lint |
-| Ruby                  | `.rb`                        | QA suppression, Security, TDD, Pipe blocker, Lint |
-| Java                  | `.java`                      | QA suppression, Security, TDD, Pipe blocker, Lint |
-| Kotlin                | `.kt`, `.kts`                | QA suppression, Security, TDD, Lint               |
-| C#                    | `.cs`                        | QA suppression, Security, TDD, Lint               |
-| Rust                  | `.rs`                        | QA suppression, Security, TDD, Pipe blocker, Lint |
-| Swift                 | `.swift`                     | QA suppression, Security, TDD, Lint               |
-| Dart                  | `.dart`                      | QA suppression, Security, TDD, Lint               |
+| Language              | Extensions                                      | Strategy Domains                                                    |
+| --------------------- | ----------------------------------------------- | ------------------------------------------------------------------- |
+| Python                | `.py`                                           | QA suppression, Security, TDD, Pipe blocker, Lint                   |
+| JavaScript/TypeScript | `.js`, `.jsx`, `.ts`, `.tsx`                    | QA suppression, Security, TDD, Pipe blocker, Lint                   |
+| PHP                   | `.php`                                          | QA suppression, Security, TDD, Lint                                 |
+| Go                    | `.go`                                           | QA suppression, Security, TDD, Pipe blocker, Lint                   |
+| Ruby                  | `.rb`                                           | QA suppression, Security, TDD, Pipe blocker, Lint                   |
+| Java                  | `.java`                                         | QA suppression, Security, TDD, Pipe blocker, Lint                   |
+| Kotlin                | `.kt`, `.kts`                                   | QA suppression, Security, TDD, Lint                                 |
+| C#                    | `.cs`                                           | QA suppression, Security, TDD, Lint                                 |
+| Rust                  | `.rs`                                           | QA suppression, Security, TDD, Pipe blocker, Lint                   |
+| Swift                 | `.swift`                                        | QA suppression, Security, TDD, Lint                                 |
+| Dart                  | `.dart`                                         | QA suppression, Security, TDD, Lint                                 |
+| Ansible YAML          | `.yml`, `.yaml` (playbook/role task files only) | Lint (Plan 00268; syntax-check tier + `ansible-lint` extended tier) |
 
 Adding a new language: create a strategy class per domain, register in the domain's registry, add tests. Zero handler modifications needed.
 
