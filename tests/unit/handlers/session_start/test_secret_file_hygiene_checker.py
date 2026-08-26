@@ -175,3 +175,97 @@ class TestAcceptanceTests:
     def test_returns_at_least_one_test(self, handler: Any) -> None:
         tests = handler.get_acceptance_tests()
         assert len(tests) >= 1
+
+
+class TestNonGitFallback:
+    """Plan 00272 code review: a non-repo directory must never silently
+    read as 'nothing is ignored' -- gitignore/tracked checks are skipped
+    outright, permissions are still checked, and the skip is stated."""
+
+    def test_not_a_repo_notice_when_clean(self, handler: Any, tmp_path: Path) -> None:
+        not_a_repo = tmp_path / "plain-dir"
+        not_a_repo.mkdir()
+
+        with _patched_root(not_a_repo), _patched_patterns():
+            result = handler.handle({"source": "startup"})
+        assert result.decision == Decision.ALLOW
+        rendered = " ".join(result.context)
+        assert "not a git repository" in rendered
+
+    def test_permissions_still_checked_outside_a_repo(self, handler: Any, tmp_path: Path) -> None:
+        not_a_repo = tmp_path / "plain-dir"
+        not_a_repo.mkdir()
+        target = not_a_repo / "fixture.dummy-fixture-glob"
+        target.write_text("x")
+        target.chmod(0o640)
+
+        with _patched_root(not_a_repo), _patched_patterns():
+            result = handler.handle({"source": "startup"})
+        rendered = " ".join(result.context)
+        assert "fixture.dummy-fixture-glob" in rendered
+        assert "chmod 600" in rendered
+        # per-file gitignore/tracked findings are meaningless without git and
+        # must not appear (the module-level notice mentioning "gitignore" in
+        # passing is fine and is asserted separately).
+        assert hygiene_module._ISSUE_NOT_GITIGNORED not in rendered
+        assert "untrack" not in rendered.lower()
+
+    def test_never_reads_content_outside_a_repo(self, handler: Any, tmp_path: Path) -> None:
+        not_a_repo = tmp_path / "plain-dir"
+        not_a_repo.mkdir()
+        target = not_a_repo / "fixture.dummy-fixture-glob"
+        target.write_text("do-not-leak-this-content")
+        target.chmod(0o640)
+
+        with _patched_root(not_a_repo), _patched_patterns():
+            result = handler.handle({"source": "startup"})
+        rendered = " ".join(result.context)
+        assert "do-not-leak-this-content" not in rendered
+
+    def test_truncated_fallback_scan_says_so(self, handler: Any, tmp_path: Path) -> None:
+        """A capped non-git walk must report the cap, never a silent clean bill."""
+        not_a_repo = tmp_path / "plain-dir"
+        not_a_repo.mkdir()
+        (not_a_repo / "some_unrelated_file.txt").write_text("x")
+
+        with (
+            _patched_root(not_a_repo),
+            _patched_patterns(),
+            patch.object(hygiene_module.sfm, "DIRECTORY_SCAN_MAX_ENTRIES", 0),
+        ):
+            result = handler.handle({"source": "startup"})
+        assert result.decision == Decision.ALLOW
+        rendered = " ".join(result.context)
+        assert "INCOMPLETE" in rendered
+
+
+class TestGitNativeEnumeration:
+    """The enumeration route itself: git-native, not a blind ``os.walk``."""
+
+    def test_finds_a_protected_file_nested_deep_in_a_large_sibling_tree(
+        self, handler: Any, repo: Path
+    ) -> None:
+        """A blind capped walk can exhaust its cap in an unrelated subtree
+        before ever reaching the protected file -- the git-native route must
+        not have that failure mode."""
+        noise_dir = repo / "unrelated_bulk"
+        noise_dir.mkdir()
+        for index in range(50):
+            (noise_dir / f"file_{index}.txt").write_text("noise\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "bulk noise")
+
+        target = repo / "fixture.dummy-fixture-glob"
+        target.write_text("x")
+        target.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+        with (
+            _patched_root(repo),
+            _patched_patterns(),
+            patch.object(hygiene_module.sfm, "DIRECTORY_SCAN_MAX_ENTRIES", 10),
+        ):
+            result = handler.handle({"source": "startup"})
+        # The git-native route ignores the walk-only bound entirely.
+        rendered = " ".join(result.context)
+        assert "fixture.dummy-fixture-glob" in rendered
+        assert "gitignore" in rendered.lower()

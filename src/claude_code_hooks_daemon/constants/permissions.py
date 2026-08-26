@@ -53,3 +53,14 @@ class FileMode:
     # that produced this defect in the first place.
     PRIVATE_FILE: Final[int] = 0o600
     PRIVATE_DIR: Final[int] = 0o700
+
+    # Same bit pattern as ``DAEMON_UMASK`` (any group/other permission bit),
+    # purpose-named for the OTHER use of this mask: testing whether an
+    # EXISTING file (one the daemon did not itself create, e.g. a protected
+    # secret file being audited for hygiene) is group- or world-readable.
+    # ``DAEMON_UMASK`` is a mask applied at process startup to shape what
+    # `os.umask()` clears on every future create; a permission AUDIT of an
+    # already-existing file reads more naturally under its own name than
+    # under the umask one, even though the bits are identical by design
+    # (Plan 00272 code review).
+    GROUP_OTHER_MASK: Final[int] = 0o077
