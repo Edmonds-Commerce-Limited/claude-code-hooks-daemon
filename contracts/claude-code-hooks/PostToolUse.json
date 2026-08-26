@@ -1,0 +1,46 @@
+{
+  "event": "PostToolUse",
+  "block_mechanism": "top-level-decision",
+  "can_block": true,
+  "ask_capable": false,
+  "top_level_output_fields": [
+    "continue",
+    "stopReason",
+    "suppressOutput",
+    "systemMessage",
+    "terminalSequence",
+    "decision",
+    "reason"
+  ],
+  "top_level_decision_enum": [
+    "block"
+  ],
+  "hook_specific_output_fields": {
+    "additionalContext": {},
+    "classifierContext": {
+      "note": "requires Claude Code >= 2.1.236"
+    },
+    "updatedToolOutput": {},
+    "updatedMCPToolOutput": {}
+  },
+  "discarded_fields": [],
+  "notes": "decision: 'block' adds reason next to the tool result.",
+  "input_example": {
+    "session_id": "abc123",
+    "transcript_path": "/Users/.../.claude/projects/.../00893aaf-19fa-41d2-8238-13269b9b3ca0.jsonl",
+    "cwd": "/Users/...",
+    "permission_mode": "default",
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Write",
+    "tool_input": {
+      "file_path": "/path/to/file.txt",
+      "content": "file content"
+    },
+    "tool_response": {
+      "filePath": "/path/to/file.txt",
+      "success": true
+    },
+    "tool_use_id": "toolu_01ABC123...",
+    "duration_ms": 12
+  }
+}

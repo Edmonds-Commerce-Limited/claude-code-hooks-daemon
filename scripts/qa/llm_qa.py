@@ -315,6 +315,14 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="project_handlers.json",
         jq_hint="jq '.tests[] | {name, outcome}'",
     ),
+    # Diffs the daemon's schemas/claim tables against the vendored Claude Code
+    # hooks contract (Plan 00271). Network-free; staleness is the
+    # contract_staleness SessionStart advisory's job.
+    "hook_contract": ToolConfig(
+        command=_python("check_hook_contract.py", "--json"),
+        json_file="hook_contract.json",
+        jq_hint="jq '.violations[] | {rule, event, subject, message}'",
+    ),
     # smoke_test MUST stay last: it probes the live daemon, so it belongs
     # after every static check has had its say. Pinned by
     # test_smoke_test_is_last_in_registry -- three tools were appended below
@@ -501,6 +509,13 @@ def _summarize_project_handlers(data: QaReport) -> str:
     return line + " | " + ", ".join(names[:_MAX_NAMED_FAILURES])
 
 
+def _summarize_hook_contract(data: QaReport) -> str:
+    summary = data.get("summary", {})
+    total = summary.get("total_violations", 0)
+    allowlisted = summary.get("allowlisted", 0)
+    return f"{total} violations ({allowlisted} allowlisted gaps recorded)"
+
+
 SUMMARIZERS: dict[str, Summarizer] = {
     "magic_values": _summarize_magic_values,
     "format": _summarize_format,
@@ -525,6 +540,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "british_english": _summarize_british_english,
     "semgrep": _summarize_semgrep,
     "project_handlers": _summarize_project_handlers,
+    "hook_contract": _summarize_hook_contract,
 }
 
 

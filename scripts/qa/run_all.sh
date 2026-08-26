@@ -297,6 +297,18 @@ else
 fi
 echo ""
 
+# Diffs response_schemas.py, REFUSAL_CAPABLE_EVENTS and constants/events.py
+# against the vendored Claude Code hooks contract (Plan 00271). Network-free.
+echo "23. Running Hook-Contract Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_hook_contract.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Hook-contract check FAILED"
+else
+    echo "✅ Hook-contract check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -332,6 +344,7 @@ results = {
     # suite's size.
     "Doc Snippets": "untracked/qa/doc_snippets.json",
     "Project Handlers": "untracked/qa/project_handlers.json",
+    "Hook Contract": "untracked/qa/hook_contract.json",
 }
 
 all_passed = True

@@ -1,6 +1,6 @@
 # Plan 00271: Hook Contract Alignment
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: High
@@ -93,7 +93,7 @@ automated summary.
 
 ### Phase 1: The Guard (DBF — before any fix)
 
-- [ ] ⬜ **Task 1.1**: Vendor the documented contract as tracked JSON under
+- [x] ✅ **Task 1.1**: Vendor the documented contract as tracked JSON under
   `contracts/claude-code-hooks/` — one file per documented event (30
   events incl. `DirectoryAdded`), each capturing: documented top-level
   output fields, `hookSpecificOutput` fields with enums (e.g.
@@ -102,11 +102,11 @@ automated summary.
   docs say are discarded (e.g. PreCompact `systemMessage`), and a
   representative input example. Source every claim from a fresh raw fetch
   of hooks.md, cross-checked against the audit's contract table.
-- [ ] ⬜ **Task 1.2**: Write `contracts/claude-code-hooks/META.json`: docs
+- [x] ✅ **Task 1.2**: Write `contracts/claude-code-hooks/META.json`: docs
   URL, fetch date, docs byte size/sha256, `last_audited_claude_code_version`
   (2.1.246 or the version current at execution), and a pointer to the
   refresh procedure doc.
-- [ ] ⬜ **Task 1.3**: TDD the contract-diff checker
+- [x] ✅ **Task 1.3**: TDD the contract-diff checker
   (`scripts/qa/check_hook_contract.py` + a supporting module with unit
   tests). Network-free. Per event it asserts:
   - every field/enum value in the daemon's bespoke schema exists in the
@@ -119,15 +119,15 @@ automated summary.
     either allowlisted or reported as a finding;
   - every vendored event name exists in `constants/events.py` (wired or
     tracked in `EXPECTED_UNWIRED`) — this alone catches `DirectoryAdded`.
-- [ ] ⬜ **Task 1.4**: Design and implement the reasoned allowlist
+- [x] ✅ **Task 1.4**: Design and implement the reasoned allowlist
   (tracked file beside the contracts, e.g.
   `contracts/claude-code-hooks/ALLOWLIST.yaml`): each entry names the
   event, the field/token, the reason, and a linked plan/task; the checker
   FAILS on an allowlist entry whose drift no longer exists (stale
   entries rot too).
-- [ ] ⬜ **Task 1.5**: Wire the checker into `scripts/qa/run_all.sh` and
+- [x] ✅ **Task 1.5**: Wire the checker into `scripts/qa/run_all.sh` and
   `scripts/qa/llm_qa.py` as a first-class QA check.
-- [ ] ⬜ **Task 1.6**: RED verification — run the checker against the
+- [x] ✅ **Task 1.6**: RED verification — run the checker against the
   current tree and confirm it reports every load-bearing drift from the
   audit (items 1–9) plus the moderate/cosmetic ones not yet allowlisted.
   Record the red output in this plan's JOURNAL/. Seed the allowlist with
@@ -138,7 +138,7 @@ automated summary.
   exceeds `META.json`'s `last_audited_claude_code_version`, advise running
   the refresh procedure. Enable it in `.claude/hooks-daemon.yaml` and
   `.example`, register constants, daemon restart verification.
-- [ ] ⬜ **Task 1.8**: Write the refresh procedure doc
+- [x] ✅ **Task 1.8**: Write the refresh procedure doc
   (`contracts/claude-code-hooks/REFRESH.md`): raw fetch of hooks.md to a
   scratch file (never a summarising fetch layer — record the fabrication
   incident as the rationale), manual/agent extraction with verbatim
