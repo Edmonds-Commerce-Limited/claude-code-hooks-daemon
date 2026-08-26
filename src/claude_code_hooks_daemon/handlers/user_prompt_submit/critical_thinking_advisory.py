@@ -10,7 +10,7 @@ import random
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import AdvisoryResult, Decision, get_data_layer
+from claude_code_hooks_daemon.core import BlockingResult, Decision, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 
 # Gate 1: Minimum prompt length to skip trivial prompts ("yes", "carry on", etc.)
@@ -77,7 +77,7 @@ class CriticalThinkingAdvisoryHandler(UserPromptSubmitHandlerBase):
             return False
         return len(prompt) >= _MIN_PROMPT_LENGTH
 
-    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Apply remaining gates and return advisory context if all pass.
 
         Gate 2 (Cooldown): Skip if fired within last _COOLDOWN_EVENTS events.
@@ -87,23 +87,23 @@ class CriticalThinkingAdvisoryHandler(UserPromptSubmitHandlerBase):
             hook_input: Hook input dictionary (unused beyond matches).
 
         Returns:
-            AdvisoryResult with ALLOW decision, optionally with advisory context.
+            BlockingResult with ALLOW decision, optionally with advisory context.
         """
         dl = get_data_layer()
         current_count = dl.history.total_count
 
         # Gate 2: Cooldown - skip if fired too recently
         if current_count - self._last_fired_count < _COOLDOWN_EVENTS:
-            return AdvisoryResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         # Gate 3: Random sampling - skip most of the time
         if self._rng.random() > _FIRE_PROBABILITY:
-            return AdvisoryResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         # All gates passed - fire advisory
         self._last_fired_count = current_count
         message = self._rng.choice(_ADVISORY_MESSAGES)
-        return AdvisoryResult(decision=Decision.ALLOW, context=[message])
+        return BlockingResult(decision=Decision.ALLOW, context=[message])
 
     def get_claude_md(self) -> str | None:
         return None

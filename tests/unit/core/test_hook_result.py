@@ -710,18 +710,17 @@ class TestHookResultContextOnlyDenyFormat:
     something invalid" to "emits something valid that still says what happened".
     """
 
-    def test_context_only_deny_is_surfaced_as_context(self):
-        """UserPromptSubmit cannot deny, so the attempt becomes visible context."""
+    def test_user_prompt_submit_deny_is_a_documented_block(self):
+        """UserPromptSubmit CAN deny (Plan 00271 item 5): top-level block."""
         result = HookResult(decision=Decision.DENY, reason="Blocked prompt")
         output = result.to_json("UserPromptSubmit")
 
-        assert "hookSpecificOutput" in output
-        assert "permissionDecision" not in output["hookSpecificOutput"]
-        assert "Blocked prompt" in output["hookSpecificOutput"]["additionalContext"]
+        assert output["decision"] == "block"
+        assert output["reason"] == "Blocked prompt"
 
-    def test_context_only_deny_names_the_event_that_cannot_enforce_it(self):
-        """The message must say WHICH event dropped the refusal, and that it did."""
-        result = HookResult(decision=Decision.DENY, reason="Blocked", guidance="Try something else")
+    def test_user_prompt_submit_ask_is_surfaced_as_context(self):
+        """ASK has no wire form on UserPromptSubmit, so it surfaces loudly."""
+        result = HookResult(decision=Decision.ASK, reason="Confirm?", guidance="Try again")
         output = result.to_json("UserPromptSubmit")
 
         context = output["hookSpecificOutput"]["additionalContext"]

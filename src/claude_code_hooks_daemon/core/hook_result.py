@@ -71,6 +71,7 @@ REFUSAL_CAPABLE_EVENTS: Final[dict[Decision, frozenset[str]]] = {
             "Stop",  # decision: block
             "SubagentStop",  # decision: block
             "PermissionRequest",  # decision.behavior: deny
+            "UserPromptSubmit",  # decision: block (Plan 00271 item 5)
         }
     ),
     Decision.ASK: frozenset(
@@ -395,6 +396,8 @@ class HookResult(BaseModel):
                 return self._format_permission_request_response(event_name)
             if event_name == "PreToolUse":
                 return self._format_pre_tool_use_response(event_name)
+            if event_name == "UserPromptSubmit" and self.decision == Decision.DENY:
+                return self._format_user_prompt_submit_response(event_name)
 
         detail = f": {self.reason}" if self.reason else ""
         if self.decision in (Decision.DENY, Decision.ASK):
@@ -521,8 +524,9 @@ class HookResult(BaseModel):
             # PreToolUse: hookSpecificOutput with permissionDecision
             return self._format_pre_tool_use_response(event_name)
         elif event_name == "UserPromptSubmit":
-            # UserPromptSubmit: hookSpecificOutput with context only
-            return self._format_context_only_response(event_name)
+            # UserPromptSubmit: documented top-level decision "block" + reason,
+            # plus hookSpecificOutput.additionalContext (Plan 00271 item 5).
+            return self._format_user_prompt_submit_response(event_name)
         else:
             # SessionStart, SessionEnd, PreCompact, Notification: systemMessage ONLY
             # These events do NOT support hookSpecificOutput in Claude Code
@@ -663,6 +667,38 @@ class HookResult(BaseModel):
             hook_output["guidance"] = self.guidance
 
         return {"hookSpecificOutput": hook_output} if len(hook_output) > 1 else {}
+
+    def _format_user_prompt_submit_response(self, event_name: str) -> dict[str, Any]:
+        """Format UserPromptSubmit: top-level block + hookSpecificOutput context.
+
+        The docs' decision-control table puts UserPromptSubmit in the
+        top-level ``decision: "block"`` group; ``reason`` is shown to the user
+        (not added to context). Context and guidance still travel in
+        ``hookSpecificOutput``. Same shape family as PostToolUse.
+        """
+        response: dict[str, Any] = {}
+        hook_output: dict[str, Any] = {"hookEventName": event_name}
+
+        if self.decision == Decision.DENY:
+            response["decision"] = "block"
+            if self.reason:
+                response["reason"] = self.reason
+        elif self.decision == Decision.ASK:
+            # No documented ask outcome on this event — emit the deliberately
+            # invalid marker so enforcement substitutes a loud advisory.
+            hook_output["permissionDecision"] = self.decision.value
+            if self.reason:
+                hook_output["permissionDecisionReason"] = self.reason
+            return {"hookSpecificOutput": hook_output}
+
+        if self.context:
+            hook_output["additionalContext"] = "\n\n".join(self.context)
+        if self.guidance:
+            hook_output["guidance"] = self.guidance
+
+        if len(hook_output) > 1:
+            response["hookSpecificOutput"] = hook_output
+        return response
 
     def _format_context_only_response(self, event_name: str) -> dict[str, Any]:
         """Format context-only response for SessionStart, SessionEnd, etc.

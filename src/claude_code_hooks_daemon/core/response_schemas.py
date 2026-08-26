@@ -186,6 +186,10 @@ PRE_COMPACT_SCHEMA: Final[dict[str, Any]] = {
 USER_PROMPT_SUBMIT_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "properties": {
+        # Documented top-level blocking: decision "block" + reason (shown to
+        # the user, not added to context) — Plan 00271 audit item 5.
+        "decision": {"type": "string", "const": "block"},
+        "reason": {"type": "string"},
         "hookSpecificOutput": {
             "type": "object",
             "properties": {

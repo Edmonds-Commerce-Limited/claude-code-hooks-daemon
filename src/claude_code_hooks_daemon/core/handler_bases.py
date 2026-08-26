@@ -116,6 +116,8 @@ PreToolUseHandlerBase = GatingHandler
 # documented decision.behavior enum is allow | deny only (Plan 00271 item 3).
 PermissionRequestHandlerBase = BlockingHandler
 PostToolUseHandlerBase = BlockingHandler
+# UserPromptSubmit: documented top-level decision "block" (Plan 00271 item 5).
+UserPromptSubmitHandlerBase = BlockingHandler
 StopHandlerBase = BlockingHandler
 SubagentStopHandlerBase = BlockingHandler
 
@@ -125,7 +127,6 @@ SessionEndHandlerBase = AdvisoryHandler
 PreCompactHandlerBase = AdvisoryHandler
 PostCompactHandlerBase = AdvisoryHandler
 NotificationHandlerBase = AdvisoryHandler
-UserPromptSubmitHandlerBase = AdvisoryHandler
 UserPromptExpansionHandlerBase = AdvisoryHandler
 StatusLineHandlerBase = AdvisoryHandler
 WorktreeCreateHandlerBase = AdvisoryHandler
