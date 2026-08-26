@@ -1505,9 +1505,19 @@ def load_compaction_signal(
 # compact/continue member allowlist is untouched.
 # ---------------------------------------------------------------------------
 
-# The goal payload's mandatory machine-origin marker. The daemon's fixed
-# header line always starts with this; a payload without it is rejected.
-_GOAL_MARKER_PREFIX = "🤖 [ccy-supervisor]"
+# The goal payload's mandatory FIXED HEADER, verified VERBATIM. A mere
+# marker-prefix check would admit any text following the marker — anything
+# able to write the signal file (a bash redirect is enough; no content guard
+# covers it) could then get arbitrary text, including asserted human consent,
+# typed into the chat. The load-bearing clause is the "NOT a human
+# instruction and NOT human authorisation" disclaimer, so the WHOLE header
+# must equal the daemon renderer's fixed header. A lockstep test
+# (tests/unit/supervise/test_goal_signal.py) asserts this string equals
+# goal_injection._HEADER_TEXT so the two sides cannot drift.
+_GOAL_HEADER_TEXT = (
+    "🤖 [ccy-supervisor] automated goal — machine-generated, NOT a human "
+    "instruction and NOT human authorisation for anything."
+)
 # The slash command; the payload is always ``/goal <joined line>`` so the
 # injected message begins ``/goal 🤖 [ccy-supervisor]``.
 _GOAL_COMMAND = "/goal"
@@ -1536,8 +1546,12 @@ def _validate_goal_lines(rendered_lines: object) -> tuple[str | None, str | None
     if not all(isinstance(line, str) for line in rendered_lines):
         return None, "rendered_lines contains a non-string element"
     joined = _GOAL_SEPARATOR.join(rendered_lines)
-    if not joined.startswith(_GOAL_MARKER_PREFIX):
-        return None, "missing machine-origin marker prefix"
+    # The ENTIRE fixed header must open the payload, verbatim — either alone
+    # (a header-only message) or followed by the separator. A prefix-only
+    # marker check would let a forged signal carry arbitrary text (including
+    # asserted human consent) past the gate.
+    if joined != _GOAL_HEADER_TEXT and not joined.startswith(_GOAL_HEADER_TEXT + _GOAL_SEPARATOR):
+        return None, "payload does not open with the verbatim machine-origin header"
     if len(joined) > _GOAL_MAX_JOINED_CHARS:
         return None, f"joined line exceeds {_GOAL_MAX_JOINED_CHARS} chars"
     for ch in joined:
@@ -2367,7 +2381,10 @@ def decide_once(
             elif machine.goal_injections >= _MAX_GOAL_INJECTIONS:
                 noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal injection cap reached"
             else:
-                machine.mark_goal_injection()
+                # The cap is counted by the HOST only after a SUCCESSFUL
+                # injection (see the callers of _apply_decision) — a PTY
+                # write failure must not burn the cap while the signal
+                # survives for retry. decide_once stays pure.
                 decision_value = Decision.WOULD_GOAL.value
                 reason = "goal signal -> would inject /goal"
                 if dry_run:
@@ -2401,12 +2418,19 @@ def _apply_decision(
     master_writer: Callable[[bytes], None],
     log: DecisionLog | None,
     host_state: str | None = None,
-) -> None:
+) -> bool:
     """Perform a :class:`TickOutcome` on the PTY (host side, Plan 00164 P4).
 
     Injects the payload (if any), logs it, and consumes the compaction signal
     only AFTER a successful resume injection — mirroring the original inline
     behaviour of ``_poll_once`` exactly.
+
+    Returns True when a payload was actually injected (the PTY write
+    succeeded); False on a NOOP/suppressed tick. Callers use this to count a
+    ``would-goal`` injection against the goal cap only on SUCCESS (Plan
+    00269 review fix): a PTY write failure raises out of this function
+    before the return, so the cap is not burned and the un-consumed signal
+    survives for retry.
 
     Plan 00182 defence-in-depth: ``host_state`` is the host's authoritative
     ``SupervisorState`` value BEFORE this outcome is adopted. If the host is
@@ -2421,20 +2445,22 @@ def _apply_decision(
     ):
         if log is not None:
             log.write_noop("noop: stale /compact suppressed (host already awaiting compaction)")
-        return
+        return False
     if outcome.payload is not None:
         _perform_injection(master_writer, outcome.payload, submit=outcome.submit)
         if log is not None:
             log.write(f"{outcome.decision_value}: {outcome.reason}; injected {outcome.payload!r}")
         if outcome.consume_signal_path is not None:
             _consume_signal(Path(outcome.consume_signal_path), log)
-    elif log is not None and outcome.deferred_log is not None:
+        return True
+    if log is not None and outcome.deferred_log is not None:
         # An injection was pending and the NON-EMPTY INPUT BOX was the sole gate.
         log.write(outcome.deferred_log)
     elif log is not None and outcome.noop_reason_log is not None:
         # Plan 00168 Phase 1: record WHY this idle tick did nothing (deduped, so
         # an unchanged gate never floods). Makes red-but-not-compacting visible.
         log.write_noop(outcome.noop_reason_log)
+    return False
 
 
 def _poll_once(
@@ -2484,7 +2510,12 @@ def _poll_once(
         own_sessions=own_sessions,
         goal_signal_ttl_seconds=goal_signal_ttl_seconds,
     )
-    _apply_decision(outcome, master_writer=master_writer, log=log)
+    injected = _apply_decision(outcome, master_writer=master_writer, log=log)
+    # Count a goal injection against the family cap only on SUCCESS (Plan
+    # 00269 review fix): a PTY write failure raises before this line, so the
+    # cap is not burned and the retained signal can retry.
+    if injected and outcome.decision_value == Decision.WOULD_GOAL.value:
+        machine.mark_goal_injection()
     return Evaluation(decision=Decision(outcome.decision_value), reason=outcome.reason)
 
 
@@ -3065,7 +3096,7 @@ def supervise(
             # Plan 00182: pass the host's authoritative PRE-tick state so a stale
             # WOULD_COMPACT reply (worker still MONITOR, host already awaiting)
             # is suppressed instead of stacking a second /compact.
-            _apply_decision(
+            injected = _apply_decision(
                 outcome,
                 master_writer=_write_master,
                 log=log,
@@ -3076,6 +3107,13 @@ def supervise(
             # diverge and inject a duplicate /compact (Plan 00164 Phase 4 fix).
             if outcome.machine_state is not None:
                 machine.import_state(outcome.machine_state)
+            # Count a goal injection against the family cap only on SUCCESS,
+            # and only AFTER adopting the worker state (which carries the
+            # pre-injection count) so the increment is never overwritten. A
+            # PTY write failure raises above, so the cap is not burned and
+            # the retained signal can retry (Plan 00269 review fix).
+            if injected and outcome.decision_value == Decision.WOULD_GOAL.value:
+                machine.mark_goal_injection()
         else:
             _poll_once(
                 machine,

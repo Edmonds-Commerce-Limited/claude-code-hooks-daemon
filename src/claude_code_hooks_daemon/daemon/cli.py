@@ -2914,13 +2914,20 @@ def cmd_inject_goal(args: argparse.Namespace) -> int:
         if isinstance(options, dict):
             mode = str(options.get("mode", mode))
             raw_lines = options.get("lines")
-        if not ProjectContext._initialized:
-            try:
-                ProjectContext.initialize(config_file)
-            except ValueError as e:
-                # Not fatal on its own: write_goal_signal reports its own
-                # failure if the untracked dir genuinely cannot be resolved.
-                print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
+
+    # Initialise the project context UNCONDITIONALLY (no private-state peeking):
+    # a repeat initialise raises RuntimeError, which simply means an earlier
+    # step in this process already did it. A ValueError (missing/invalid config,
+    # not a git repo) is remembered so a subsequent write failure can name the
+    # REAL cause instead of pointing at the daemon log.
+    context_init_error: str | None = None
+    try:
+        ProjectContext.initialize(config_file)
+    except RuntimeError:
+        logger.debug("inject-goal: project context already initialised; reusing it")
+    except ValueError as e:
+        context_init_error = str(e)
+        print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
 
     joined = render_goal_line(
         plan_number,
@@ -2934,7 +2941,12 @@ def cmd_inject_goal(args: argparse.Namespace) -> int:
         return 1
     written = write_goal_signal(session_id, plan_number, joined, _SOURCE_CLI)
     if written is None:
-        print("ERROR: goal signal could not be written (see daemon log)", file=sys.stderr)
+        detail = (
+            f" (project context unavailable: {context_init_error})"
+            if context_init_error is not None
+            else ""
+        )
+        print(f"ERROR: goal signal could not be written{detail}", file=sys.stderr)
         return 1
     print(f"Goal-intent signal written: {written}")
     print(f"Rendered goal line: {joined}")

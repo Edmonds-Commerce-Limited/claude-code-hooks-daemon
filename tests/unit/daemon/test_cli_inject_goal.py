@@ -111,6 +111,22 @@ def test_applies_config_options(project: Path) -> None:
     assert f"Motto for {_PLAN_NUMBER}." in data["rendered_lines"][0]
 
 
+def test_write_failure_names_context_init_error(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Review fix (Plan 00269): when the project context could not be
+    initialised (e.g. tmp dir is not a git repo) and the signal write then
+    fails, the CLI error names the REAL cause instead of 'see daemon log'."""
+    monkeypatch.setattr(
+        "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection.write_goal_signal",
+        lambda *a, **k: None,
+    )
+    rc = cli.cmd_inject_goal(_args(project))
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "project context unavailable" in err
+
+
 def test_completed_plan_folder_not_matched(project: Path, capsys) -> None:
     completed = project / "CLAUDE" / "Plan" / "Completed" / "00099-old-plan"
     completed.mkdir(parents=True)
