@@ -556,11 +556,7 @@ handlers:
 
 **Rewrite instead:** `Addresses #123`, `Refs #123`, `See #123` — GitHub links these but does not close.
 
-**Escape hatch** (when auto-closing is genuinely intended):
-
-```bash
-MUST_AUTO_CLOSE_BECAUSE="explain why"; git commit -m 'Fixes #123'
-```
+**No escape hatch — by design.** The only legitimate reason to want an auto-closing message is a project whose workflow deliberately uses closing keywords, and that project should set `enabled: false` (or `mode: warn`) instead. A per-command `MUST_..._BECAUSE` hatch existed briefly and was removed: it would normalise bypassing the guard one commit at a time.
 
 **Options:**
 

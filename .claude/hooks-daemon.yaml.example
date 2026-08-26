@@ -104,7 +104,7 @@ handlers:
     github_auto_close_keywords: # BLOCKS GitHub auto-closing keyword refs (Fixes #N,
       enabled: true             # closes GH-N, resolves owner/repo#N, issue URLs) in
       priority: 18              # git commit/merge/tag messages, incl. -F files.
-      # options:                # Escape hatch: MUST_AUTO_CLOSE_BECAUSE="reason"
+      # options:                # No escape hatch: disable if auto-close is wanted
       #   mode: block           # block (default) | warn (advisory only)
 
     git_message_backtick:  # BLOCKS backticks in a DOUBLE-quoted git -m/--message.

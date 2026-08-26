@@ -245,26 +245,15 @@ class TestGhPrBodies:
         assert not handler.matches(_bash(f"gh pr create --title 'x' --body-file {body}"))
 
 
-class TestEscapeHatch:
-    def test_declared_intent_allows(self) -> None:
-        handler = GithubAutoCloseKeywordsHandler()
-        assert not handler.matches(
-            _bash("MUST_AUTO_CLOSE_BECAUSE=\"issue is done\"; git commit -m 'Fixes #1'")
-        )
+class TestNoEscapeHatch:
+    """The hatch was removed deliberately: a project that wants auto-close
+    should disable the handler, not bypass it per-command."""
 
-    def test_empty_reason_does_not_allow(self) -> None:
-        handler = GithubAutoCloseKeywordsHandler()
-        assert handler.matches(_bash("MUST_AUTO_CLOSE_BECAUSE=\"\"; git commit -m 'Fixes #1'"))
-
-    def test_hatch_is_case_sensitive_like_its_siblings(self) -> None:
+    def test_declared_intent_no_longer_allows(self) -> None:
         handler = GithubAutoCloseKeywordsHandler()
         assert handler.matches(
-            _bash("must_auto_close_because=\"reason\"; git commit -m 'Fixes #1'")
+            _bash("MUST_AUTO_CLOSE_BECAUSE=\"issue is done\"; git commit -m 'Fixes #1'")
         )
-
-    def test_unquoted_reason_does_not_allow(self) -> None:
-        handler = GithubAutoCloseKeywordsHandler()
-        assert handler.matches(_bash("MUST_AUTO_CLOSE_BECAUSE=reason; git commit -m 'Fixes #1'"))
 
 
 class TestWarnMode:
@@ -298,14 +287,16 @@ class TestDenyMessage:
         assert "Fixes #123" in result.reason
         assert "Addresses #123" in result.reason
         assert "Refs" in result.reason
-        assert "MUST_AUTO_CLOSE_BECAUSE" in result.reason
+        assert "NO ESCAPE HATCH" in result.reason
+        assert "MUST_AUTO_CLOSE_BECAUSE" not in result.reason
 
 
 class TestGuidanceAndAcceptance:
-    def test_get_claude_md_names_the_hatch_and_rewrites(self) -> None:
+    def test_get_claude_md_states_no_hatch_and_names_rewrites(self) -> None:
         guidance = GithubAutoCloseKeywordsHandler().get_claude_md()
         assert guidance is not None
-        assert "MUST_AUTO_CLOSE_BECAUSE" in guidance
+        assert "NO escape hatch" in guidance
+        assert "MUST_AUTO_CLOSE_BECAUSE" not in guidance
         assert "Addresses" in guidance
 
     def test_acceptance_tests_exist_and_are_echo_safe(self) -> None:

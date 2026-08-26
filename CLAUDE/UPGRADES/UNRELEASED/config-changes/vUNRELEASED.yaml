@@ -94,9 +94,9 @@ config_changes:
       migration_note: >-
         On by default; no action needed to adopt. Rewrite denied messages
         with a non-closing reference ("Addresses #123", "Refs #123",
-        "See #123"). When auto-closing is genuinely intended, declare it:
-        MUST_AUTO_CLOSE_BECAUSE="reason"; git commit ... . Set
-        options.mode: warn for advisory-only, or enabled: false to opt out.
+        "See #123"). There is deliberately NO per-command escape hatch: a
+        project whose workflow genuinely uses closing keywords should set
+        enabled: false (or options.mode: warn for advisory-only) instead.
     - key: handlers.pre_tool_use.write_clobber_guard
       recommended: true
       dormant: false

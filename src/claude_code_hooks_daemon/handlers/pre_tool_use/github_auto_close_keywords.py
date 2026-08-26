@@ -129,13 +129,6 @@ _MESSAGE_FILE_PATTERN: Final[re.Pattern[str]] = re.compile(
 )
 _STDIN_MESSAGE_FILE: Final[str] = "-"
 
-# Escape hatch, matching the daemon's MUST_..._BECAUSE convention exactly:
-# case-sensitive like its git_stash/ancestry siblings' intent (the variable
-# name is the convention), and the reason must be non-empty and QUOTED.
-_ESCAPE_HATCH_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"""MUST_AUTO_CLOSE_BECAUSE=["']([^"']+)["']"""
-)
-
 _REWRITE_EXAMPLES: Final[str] = (
     '"Addresses #123", "Refs #123" or "See #123" — GitHub links these but ' "does not close"
 )
@@ -152,11 +145,13 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
     i.e. denies — deliberately stricter than git_stash, because this
     handler's whole purpose is stopping a silent outward-facing side
     effect):
-        - "block" (default): deny unless the escape hatch is declared
+        - "block" (default): deny
         - "warn": allow with advisory context
 
-    Escape hatch (reason must be non-empty and quoted):
-        MUST_AUTO_CLOSE_BECAUSE="reason"; git commit -m 'Fixes #123'
+    There is deliberately NO escape hatch: the only legitimate reason to
+    auto-close is a project whose workflow wants closing keywords, and that
+    project should disable the handler instead — a per-command hatch would
+    just normalise bypassing it.
     """
 
     def __init__(self) -> None:
@@ -229,8 +224,6 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
         command = get_bash_command(hook_input)
         if not command:
             return None
-        if _ESCAPE_HATCH_PATTERN.search(command):
-            return None
         for segment in self._message_segments(command):
             direct = _AUTO_CLOSE_PATTERN.search(segment)
             if direct:
@@ -288,13 +281,10 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
                 "USE A NON-CLOSING REFERENCE INSTEAD:\n"
                 f"  {_REWRITE_EXAMPLES}\n"
                 "  e.g. git commit -m 'Addresses #123: harden the retry path'\n\n"
-                "ESCAPE HATCH (when auto-closing is genuinely intended; the "
-                "reason must be non-empty and QUOTED):\n"
-                '  MUST_AUTO_CLOSE_BECAUSE="explain why"; git commit ...\n\n'
-                "IF THIS PROJECT GENUINELY WANTS AUTO-CLOSE COMMITS TO WORK "
-                "(closing keywords are part of its workflow), this handler "
-                "should be disabled — suggest that to the user rather than "
-                "using the escape hatch every time.\n"
+                "THERE IS NO ESCAPE HATCH. If this project genuinely wants "
+                "auto-close commits to work (closing keywords are part of its "
+                "workflow), this handler should be disabled — suggest that to "
+                "the user; do not try to work around the block.\n"
                 "To disable: handlers.pre_tool_use.github_auto_close_keywords"
             ),
         )
@@ -329,17 +319,12 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
             "**Use a non-closing reference instead**: `Addresses #123`, "
             "`Refs #123`, `See #123` — GitHub links these but does not "
             "close.\n\n"
-            "**Escape hatch** (when auto-closing is genuinely intended; the "
-            "reason must be non-empty and quoted):\n\n"
-            "```\n"
-            "MUST_AUTO_CLOSE_BECAUSE=\"explain why\"; git commit -m 'Fixes #123'\n"
-            "```\n\n"
-            "**If this project genuinely wants auto-close commits to work** — "
-            "closing keywords are a deliberate part of its workflow — this "
-            "handler should be DISABLED rather than escape-hatched on every "
-            "commit: suggest to the user that they set "
+            "**There is deliberately NO escape hatch.** If this project "
+            "genuinely wants auto-close commits to work — closing keywords "
+            "are a deliberate part of its workflow — the handler should be "
+            "DISABLED: suggest to the user that they set "
             "`handlers.pre_tool_use.github_auto_close_keywords.enabled: "
-            "false`. Reaching for the hatch repeatedly is the signal.\n\n"
+            "false`. Do not hunt for a bypass; rewrite the message or ask.\n\n"
             "Configure via "
             "`handlers.pre_tool_use.github_auto_close_keywords.options.mode: "
             "warn` for advisory-only mode."

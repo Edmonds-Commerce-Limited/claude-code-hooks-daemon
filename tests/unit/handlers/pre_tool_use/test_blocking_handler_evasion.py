@@ -239,7 +239,6 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
         "git commit -m 'fixes the race condition'",
         "git commit -m 'Addresses #123'",
         "git log --grep=fixes",
-        "MUST_AUTO_CLOSE_BECAUSE=\"issue verified done\"; git commit -m 'Fixes #1'",
     ),
     "GitMessageBacktickHandler": (
         # Single quotes suppress substitution, so backticks are literal —
