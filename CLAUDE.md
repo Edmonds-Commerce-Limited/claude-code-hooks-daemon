@@ -1039,6 +1039,8 @@ A `git commit` (or `git merge -m` / `git tag -m`, or a `gh pr create`/`gh pr edi
 MUST_AUTO_CLOSE_BECAUSE="explain why"; git commit -m 'Fixes #123'
 ```
 
+**If this project genuinely wants auto-close commits to work** — closing keywords are a deliberate part of its workflow — this handler should be DISABLED rather than escape-hatched on every commit: suggest to the user that they set `handlers.pre_tool_use.github_auto_close_keywords.enabled: false`. Reaching for the hatch repeatedly is the signal.
+
 Configure via `handlers.pre_tool_use.github_auto_close_keywords.options.mode: warn` for advisory-only mode.
 
 <!-- handler: block-ancestry-severing-merge -->
