@@ -197,7 +197,13 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
                 command='false && grep -rl "class X" /',
                 description="Blocks grep -rl rooted at / — steer to a scoped search",
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"BLOCKED", r"workspace", r"MUST_SCAN_ROOT_BECAUSE"],
+                expected_message_patterns=[
+                    r"BLOCKED",
+                    # The deny text scopes via "$CLAUDE_PROJECT_DIR", not an
+                    # expanded project path (v3.55.0 Test 64).
+                    r"CLAUDE_PROJECT_DIR",
+                    r"MUST_SCAN_ROOT_BECAUSE",
+                ],
                 safety_notes=(
                     "'false &&' short-circuits so grep never executes. Detection happens "
                     "at the PreToolUse hook stage before the shell runs anything, so a "

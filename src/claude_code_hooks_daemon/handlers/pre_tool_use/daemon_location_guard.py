@@ -135,7 +135,10 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
                 expected_message_patterns=[
                     r"hooks-daemon",
                     r"PROJECT ROOT",
-                    r"CORRECT USAGE",
+                    # Patterns must match the deny REASON — the guidance
+                    # channel (which carries "CORRECT USAGE") is not part of
+                    # the block text a tester observes (v3.55.0 Test 19).
+                    r"path confusion",
                 ],
                 safety_notes="Using echo to test blocking - safe command",
                 test_type=TestType.BLOCKING,

@@ -617,7 +617,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                     " still running (CronList) and recreate if missing."
                 ),
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"CronList", r"[Rr]ecreat"],
+                expected_message_patterns=[r"CronList", r"create one now"],
                 safety_notes="Uses /tmp path - safe.  Advisory handler allows edit and adds guidance.",
                 test_type=TestType.ADVISORY,
                 setup_commands=[

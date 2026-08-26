@@ -28,13 +28,20 @@ immediately after the release ships.
 
 ### Phase 1: Stale acceptance expectations (test metadata only)
 
-- [ ] ⬜ **Task 1.1**: `daemon_location_guard` playbook Test 19 expects
-  pattern `CORRECT USAGE`, absent from the actual deny message. Align the
-  `get_acceptance_tests()` expectation with the shipped message (or restore
-  the wording if it regressed — check git history first).
-- [ ] ⬜ **Task 1.2**: `recovery_cron_advisor` playbook Test 158 expects
-  `[Rr]ecreat`, but the shipped advisory says "create one now". Align the
-  expectation.
+- [x] ✅ **Task 1.1**: `daemon_location_guard` playbook Test 19 expected
+  `CORRECT USAGE`, which lives on the guidance channel, not in the deny
+  reason a tester observes. Fixed in-release: expectation now matches the
+  reason text.
+- [x] ✅ **Task 1.2**: `recovery_cron_advisor` playbook Test 158 expected
+  `[Rr]ecreat`; shipped advisory says "create one now". Fixed in-release.
+- [x] ✅ **Task 1.2b**: `root_recursion_guard` playbook Test 64 expected a
+  literal `workspace`; the deny text scopes via `$CLAUDE_PROJECT_DIR`.
+  Fixed in-release.
+- [x] ✅ **Task 1.2c**: `git_hooks_executable_fixer` playbook Test 139 was
+  unpassable in a healthy repo (hint echoed, nothing to fix, silent by
+  design). Converted in-release to an explicit negative control; the
+  positive fixing path stays unit-tested. FOLLOW-UP below (Task 3.3) for a
+  live positive-path test.
 - [ ] ⬜ **Task 1.3**: `error_hiding_blocker` allow-case sample snippets
   (playbook Tests 30/34) use undefined names, so `lint_on_edit` denies the
   write after the tested handler allows it. Make the samples lint-clean.
@@ -60,6 +67,19 @@ immediately after the release ships.
   the second segment of a compound command (`pkill ...; agent-browser --version`) though the docs say path-qualified/env-prefixed spellings in
   any shell segment are recognised. Confirm intended scope; fix handler or
   docs.
+- [ ] ⬜ **Task 3.3**: `git_hooks_executable_fixer` live positive-path test:
+  the event cwd always names the session repo, so a scratch-repo probe
+  cannot fire the fixer. Design a deliberate main-thread procedure (session
+  cwd moved into a fixture repo) or accept unit-test-only coverage and
+  record that ruling.
+- [ ] ⬜ **Task 3.4**: `validate_eslint_on_write` deny branch (playbook
+  Test 101) is unreachable in this repo (no `llm:` scripts in
+  package.json) — verify the deny branch in the dummy-client fixture with
+  an `llm:lint` script, and note the env-gating in the test description.
+- [ ] ⬜ **Task 3.5**: `pipe_blocker` attributes the producer to `[[` for a
+  plain-quoted-string comparison (`[[ "python -m pytest tests/ | tail -5" == 0 ]]`), yielding a non-runnable remediation; `$( )` shapes name pytest
+  correctly. Plan 00222's runnable-remediation intent is unmet for this
+  shape — fix attribution or record the boundary.
 
 ## Success Criteria
 

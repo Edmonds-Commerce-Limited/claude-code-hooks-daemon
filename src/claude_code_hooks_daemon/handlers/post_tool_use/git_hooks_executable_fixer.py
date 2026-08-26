@@ -226,12 +226,22 @@ class GitHooksExecutableFixerHandler(PostToolUseHandlerBase):
                     "because it's not set as executable.\""
                 ),
                 description=(
-                    "Recognises git's non-executable-hook hint in Bash output and "
-                    "reports remediation context"
+                    "NEGATIVE CONTROL: the hint is recognised, the handler checks "
+                    "the repo resolved from the EVENT's cwd, finds every hook "
+                    "already executable, and stays SILENT — no advisory is the "
+                    "expected outcome in a healthy repo. The fixing path (a "
+                    "genuinely non-executable hook gets chmod +x and an advisory "
+                    "naming it) cannot be provisioned from a probe command, "
+                    "because the event cwd is captured at invocation and always "
+                    "names the session repo; it is covered by unit tests "
+                    "(v3.55.0 Test 139 ruling)."
                 ),
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"executable"],
-                safety_notes="echo only prints text - no real hooks are modified",
+                expected_message_patterns=[],
+                safety_notes=(
+                    "echo only prints text; a healthy repo yields silence, which "
+                    "is the PASS condition"
+                ),
                 test_type=TestType.ADVISORY,
                 requires_event="PostToolUse after a Bash command emitting the git hint",
                 recommended_model=RecommendedModel.SONNET,
