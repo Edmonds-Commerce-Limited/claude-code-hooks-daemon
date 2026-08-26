@@ -1,0 +1,14 @@
+# Allowlisted input-contract findings (check_input_contract.py, Plan 00273).
+#
+# Each entry records a KNOWN, deliberate read of a top-level hook_input field
+# that no vendored input_example documents. Entries must carry id, reason and
+# a linked plan/task; a stale entry (whose finding no longer exists) fails QA.
+entries:
+  - id: "unknown-input-field:(shared):stopHookActive"
+    reason: >-
+      Deliberate defensive dual-read in utils/stop_hook_helpers.py: the
+      canonical snake_case stop_hook_active is read first and the camelCase
+      spelling is a legacy fallback for older Claude Code payloads. The
+      examples document only the snake_case form, so the fallback can never
+      appear in an input_example by design.
+    link: "CLAUDE/Plan/00273-hook-input-payload-validation/PLAN.md"

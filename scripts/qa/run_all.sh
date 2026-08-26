@@ -309,6 +309,18 @@ else
 fi
 echo ""
 
+# Diffs the daemon's top-level hook_input READ surface against the vendored
+# per-event input_examples (Plan 00273, superset rule). Network-free.
+echo "24. Running Input-Contract Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_input_contract.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Input-contract check FAILED"
+else
+    echo "✅ Input-contract check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -345,6 +357,7 @@ results = {
     "Doc Snippets": "untracked/qa/doc_snippets.json",
     "Project Handlers": "untracked/qa/project_handlers.json",
     "Hook Contract": "untracked/qa/hook_contract.json",
+    "Input Contract": "untracked/qa/input_contract.json",
 }
 
 all_passed = True
