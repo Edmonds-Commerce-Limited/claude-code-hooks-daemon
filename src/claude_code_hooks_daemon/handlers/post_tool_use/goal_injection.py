@@ -426,9 +426,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             logger.warning("goal_injection: ledger skipped (no project context): %s", e)
             return []
         plan_dir = plan_md_path.parent.parent
-        return GoalLedger(ledger_path).record_emission(
-            session_id, plan_number, joined, plan_dir
-        )
+        return GoalLedger(ledger_path).record_emission(session_id, plan_number, joined, plan_dir)
 
     def _read_plan(self, path: Path) -> str | None:
         """Read the just-written PLAN.md from disk; None when unreadable."""

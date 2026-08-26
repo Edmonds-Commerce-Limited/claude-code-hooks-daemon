@@ -261,7 +261,6 @@ class GoalLedger:
         live = {
             e.plan_number
             for e in entries
-            if e.retired_at is None
-            and _plan_status(plan_dir, e.plan_number) == _STATUS_IN_PROGRESS
+            if e.retired_at is None and _plan_status(plan_dir, e.plan_number) == _STATUS_IN_PROGRESS
         }
         return sorted(live)
