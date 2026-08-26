@@ -133,6 +133,12 @@ class Priority:
     # order its context appears in.
     VERIFICATION_RESULT_GATE = 34
 
+    # Plan 00270: the opt-in safe-prelude forcer sits right after its sibling
+    # verification_result_gate -- same QA-enforcement band, complementary
+    # rule, and the sibling must speak first so a specific verifier→mutator
+    # finding appears before the generic prelude advisory.
+    BASH_SAFE_MODE = 36
+
     MARKDOWN_ORGANIZATION = 35
 
     # LSP enforcement (Priority: 38)

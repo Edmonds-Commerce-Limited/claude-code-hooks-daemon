@@ -250,6 +250,11 @@ class HandlerID:
         config_key="qa_suppression",
         display_name="qa-suppression-blocker",
     )
+    BASH_SAFE_MODE = HandlerIDMeta(
+        class_name="BashSafeModeHandler",
+        config_key="bash_safe_mode",
+        display_name="bash-safe-mode",
+    )
     VERIFICATION_RESULT_GATE = HandlerIDMeta(
         class_name="VerificationResultGateHandler",
         config_key="verification_result_gate",
