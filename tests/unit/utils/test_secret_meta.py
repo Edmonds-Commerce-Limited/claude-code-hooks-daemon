@@ -7,8 +7,11 @@ behind ``allow_plain_hash``. The HMAC key is generated on first use with
 """
 
 import json
+import os
 import stat
 from pathlib import Path
+
+import pytest
 
 from claude_code_hooks_daemon.utils import secret_meta as sm
 
@@ -94,3 +97,48 @@ class TestCollect:
         secret = _secret(tmp_path)
         meta = sm.collect_secret_meta(secret, key_path=_key_path(tmp_path))
         assert meta["permissions_ok"] is True
+
+    def test_directory_target_reports_clean_error(self, tmp_path: Path) -> None:
+        """Review finding 7: a directory is reported, never a crash."""
+        meta = sm.collect_secret_meta(tmp_path, key_path=_key_path(tmp_path))
+        assert meta["exists"] is True
+        assert "directory" in meta["error"]
+
+    def test_unreadable_file_reports_clean_error(
+        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+    ) -> None:
+        """Review finding 7: a permission problem is what the tool exists to
+        report — metadata still present, error explicit, no crash."""
+        secret = _secret(tmp_path)
+
+        def _raise_permission(_self: Path) -> bytes:
+            raise PermissionError("denied")
+
+        monkeypatch.setattr(Path, "read_bytes", _raise_permission)
+        meta = sm.collect_secret_meta(secret, key_path=_key_path(tmp_path))
+        assert "permission denied" in meta["error"]
+        assert meta["mode"] == "0600"
+
+    def test_key_creation_race_adopts_winner_key(
+        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+    ) -> None:
+        """Review finding 7: an O_EXCL loser re-reads the winner's key."""
+        secret = _secret(tmp_path)
+        key_path = _key_path(tmp_path)
+        real_open = os.open
+        raced = {"done": False}
+
+        def _racing_open(path: str | Path, flags: int, mode: int = 0o777) -> int:
+            if not raced["done"] and os.O_EXCL & flags:
+                raced["done"] = True
+                key_path.parent.mkdir(parents=True, exist_ok=True)
+                descriptor = real_open(key_path, os.O_WRONLY | os.O_CREAT, 0o600)
+                os.write(descriptor, b"w" * 32)
+                os.close(descriptor)
+                raise FileExistsError(str(path))
+            return real_open(path, flags, mode)
+
+        monkeypatch.setattr(os, "open", _racing_open)
+        meta = sm.collect_secret_meta(secret, key_path=key_path)
+        assert meta["digest"] is not None
+        assert key_path.read_bytes() == b"w" * 32

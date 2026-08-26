@@ -78,6 +78,12 @@ class TestReadTools:
         handler = _handler()
         assert not handler.matches(_hook_input("Grep", {"pattern": "x", "path": "/proj/src"}))
 
+    def test_grep_rooted_at_dir_containing_protected_file_matches(self, tmp_path: Any) -> None:
+        """Review finding 2: directory-rooted Grep gets a bounded walk."""
+        (tmp_path / ".vault-pass").write_text("x\n")
+        handler = _handler()
+        assert handler.matches(_hook_input("Grep", {"pattern": "x", "path": str(tmp_path)}))
+
     def test_glob_tool_is_never_matched(self) -> None:
         """Names-only: presence is the feature, deliberately allowed."""
         handler = _handler()
@@ -115,6 +121,23 @@ class TestBash:
     def test_clean_command_is_allowed(self) -> None:
         handler = _handler()
         assert not handler.matches(_hook_input("Bash", {"command": "git status"}))
+
+    def test_replace_mode_pattern_denies_bare_positional_consumer_arg(self) -> None:
+        """Review finding 1 regression (verified bypass): under mode replace
+        the project pattern must reach the flag-position check, so a bare
+        positional argument to an allowlisted consumer is DENIED."""
+        handler = _handler()
+        handler._mode = "replace"
+        handler._protected_paths = ["*.mysecretfile"]
+        cmd = "ansible-playbook /x/prod.mysecretfile"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_replace_mode_pattern_still_exempts_flag_position(self) -> None:
+        handler = _handler()
+        handler._mode = "replace"
+        handler._protected_paths = ["*.mysecretfile"]
+        cmd = "ansible-playbook --vault-password-file /x/prod.mysecretfile site.yml"
+        assert not handler.matches(_hook_input("Bash", {"command": cmd}))
 
 
 class TestContentScan:

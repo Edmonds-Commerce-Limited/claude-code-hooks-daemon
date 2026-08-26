@@ -201,21 +201,25 @@ def _normalised_token_forms(token: str) -> list[str]:
     return forms
 
 
-def _pattern_literal_stems(patterns: tuple[str, ...]) -> list[str]:
-    """Best-effort literal names derived from patterns, for glob-token checks.
+def _pattern_literal_stems(patterns: tuple[str, ...]) -> list[tuple[str, str]]:
+    """Best-effort ``(stem, pattern)`` pairs, for glob-token checks.
 
     ``*.secret*`` -> ``.secret``; ``.vault-pass*`` -> ``.vault-pass``. Used to
     catch a GLOB-shaped command token (``cat .vault-p*``) that could expand to
     a protected name — the token-as-glob is matched against these stems.
+
+    Built as PAIRS in one pass (review finding 5): a pattern whose stem is
+    empty is dropped WITH its pattern, so the stem checked and the glob
+    reported in the deny reason can never desynchronise.
     """
-    stems: list[str] = []
+    pairs: list[tuple[str, str]] = []
     for pattern in patterns:
         stem = pattern
         for char in _GLOB_CHARS:
             stem = stem.replace(char, "")
         if stem:
-            stems.append(stem)
-    return stems
+            pairs.append((stem, pattern))
+    return pairs
 
 
 def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | None:
@@ -229,14 +233,14 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
     if not command or not patterns:
         return None
     project_root = resolve_project_root()
-    stems = _pattern_literal_stems(patterns)
+    stem_pairs = _pattern_literal_stems(patterns)
     for token in _tokenise(command):
         for form in _normalised_token_forms(token):
             for pattern in patterns:
                 if path_matches_globs(form, (pattern,), project_root=project_root):
                     return pattern
             if any(char in form for char in _GLOB_CHARS):
-                for stem, pattern in zip(stems, patterns, strict=False):
+                for stem, pattern in stem_pairs:
                     basename = form.rsplit("/", maxsplit=1)[-1]
                     stem_basename = stem.rsplit("/", maxsplit=1)[-1]
                     if fnmatch.fnmatch(stem_basename, basename):
@@ -263,13 +267,63 @@ def _realpath_if_resolvable(token: str) -> str | None:
     return None
 
 
-def is_exempt_invocation(command: str, consumers: tuple[ConsumerSpec, ...]) -> bool:
+# Bounded-walk cap for directory-rooted content-search checks. A PreToolUse
+# handler runs in the dispatch hot path, so the walk must have a hard ceiling;
+# a tree larger than this is NOT fully checked (documented residual — the
+# guidance names directory-rooted search as a limit for exactly this reason).
+DIRECTORY_SCAN_MAX_ENTRIES: Final[int] = 5000
+
+
+def directory_contains_protected(
+    directory: str, patterns: tuple[str, ...], max_entries: int = DIRECTORY_SCAN_MAX_ENTRIES
+) -> str | None:
+    """First protected glob matched by any file under ``directory``, else None.
+
+    Best-effort partial enforcement for directory-rooted content search
+    (review finding 2): a Grep rooted at an ancestor of a protected file
+    reads its content without ever naming it. The walk is BOUNDED by
+    ``max_entries`` — once the cap is hit the scan stops and answers None,
+    so a huge tree cannot stall dispatch; that residue is a documented
+    limit, not a guarantee.
+    """
+    if not patterns:
+        return None
+    root = Path(directory)
+    if not root.is_dir():
+        return None
+    project_root = resolve_project_root()
+    seen = 0
+    for current_dir, _subdirs, files in os.walk(root):
+        for name in files:
+            seen += 1
+            if seen > max_entries:
+                return None
+            full_path = str(Path(current_dir) / name)
+            for pattern in patterns:
+                if path_matches_globs(full_path, (pattern,), project_root=project_root):
+                    return pattern
+    return None
+
+
+def is_exempt_invocation(
+    command: str,
+    consumers: tuple[ConsumerSpec, ...],
+    patterns: tuple[str, ...] = DEFAULT_PROTECTED_PATTERNS,
+) -> bool:
     """True when ``command`` is one of the two sanctioned path-mention shapes.
 
     1. The metadata helper: ``.../hooks-daemon secret-meta <path> ...``.
     2. An allowlisted consumer whose subcommand is not disclosure-purposed,
        with every protected-looking argument in FLAG POSITION (immediately
        following a recognised path flag, or as ``--flag=path``).
+
+    ``patterns`` MUST be the caller's EFFECTIVE protected globs (review
+    finding 1): the flag-position check re-tests each bare argument against
+    them, and testing the shipped defaults instead would make every
+    project-configured pattern — all of them, under ``mode: replace`` —
+    invisible here, exempting ``ansible-playbook <protected-file>`` with the
+    path in POSITIONAL position. The default exists for callers that really
+    do run with the shipped defaults, not as a shortcut.
 
     An exemption applies only to a SINGLE command: any separator (``;``,
     ``&&``, ``||``, a pipe, a newline) or process substitution voids it —
@@ -297,7 +351,7 @@ def is_exempt_invocation(command: str, consumers: tuple[ConsumerSpec, ...]) -> b
             continue
         if _denied_subcommand_used(words, consumer):
             return False
-        return _paths_only_in_flag_position(words, consumer)
+        return _paths_only_in_flag_position(words, consumer, patterns)
     return False
 
 
@@ -310,14 +364,17 @@ def _denied_subcommand_used(words: list[str], consumer: ConsumerSpec) -> bool:
     return False
 
 
-def _paths_only_in_flag_position(words: list[str], consumer: ConsumerSpec) -> bool:
+def _paths_only_in_flag_position(
+    words: list[str], consumer: ConsumerSpec, patterns: tuple[str, ...]
+) -> bool:
     """True when no bare word other than a flag VALUE looks path-mention-risky.
 
     Conservative: every word is fine unless it follows nothing recognisable.
     The caller has already established the command mentions a protected path;
     this checks the mention sits directly after a recognised path flag (or in
     a ``--flag=value`` form). Any other placement voids the exemption — the
-    deny rule then applies.
+    deny rule then applies. ``patterns`` are the caller's EFFECTIVE globs —
+    see ``is_exempt_invocation`` for why the defaults must not be used here.
     """
     flag_value_positions: set[int] = set()
     for index, word in enumerate(words):
@@ -334,6 +391,6 @@ def _paths_only_in_flag_position(words: list[str], consumer: ConsumerSpec) -> bo
         bare = word.strip("\"'")
         if bare.startswith("-"):
             continue
-        if find_protected_mention(bare, DEFAULT_PROTECTED_PATTERNS) is not None:
+        if find_protected_mention(bare, patterns) is not None:
             return False
     return True

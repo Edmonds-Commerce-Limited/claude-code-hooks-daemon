@@ -5354,6 +5354,11 @@ def main() -> int:
         type=Path,
         help="Path of the protected file to inspect",
     )
+    parser_secret_meta.add_argument(
+        "--project-root",
+        type=Path,
+        help="Project root for config + key resolution (trusted as-is; auto-detected by default)",
+    )
     parser_secret_meta.set_defaults(func=cmd_secret_meta)
 
     # reconcile-settings (Plan 00185) — SSoT-derived settings.json hook merge

@@ -1348,10 +1348,19 @@ with the path in flag position (`ansible-playbook --vault-password-file …`;
 `ansible-vault view|decrypt` stay denied — those subcommands print secrets).
 
 **No agent escape hatch** (same doctrine as `artifact_publish_blocker`): a
-human edits this config block to lift protection. Honest limit: this is
-defence in depth over an OS boundary the project must set independently —
-string-assembled paths, cross-invocation shell state and pre-existing
-scripts that open the file internally are outside command-text matching.
+human edits this config block to lift protection. Honest limits: this is
+defence in depth over an OS boundary the project must set independently.
+A `Grep` rooted at a DIRECTORY gets a bounded protected-name walk (capped —
+a very large tree is not fully checked); NOT covered at all: a Bash
+recursive content search rooted at an ancestor directory (`grep -r`/`rg`
+over a tree containing the file), string-assembled paths, cross-invocation
+shell state, pre-existing hard links or copies made before the guard was
+enabled, pre-existing scripts that open the file internally, and a
+look-alike consumer created in-session (the allowlist matches the command
+BASENAME, so a local wrapper named `ansible` passes as the real one).
+`*.secret*` is intentionally broad: any Bash token containing `.secret`
+trips it — including repo-wide greps for that string; ask the user or have
+a human narrow the config when that bites.
 
 **Options:**
 

@@ -71,7 +71,12 @@ def _ensure_key(key_path: Path) -> bytes | None:
         return key_path.read_bytes()
     key_path.parent.mkdir(parents=True, exist_ok=True)
     key = secrets.token_bytes(_KEY_LENGTH_BYTES)
-    descriptor = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, _OWNER_ONLY_MODE)
+    try:
+        descriptor = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, _OWNER_ONLY_MODE)
+    except FileExistsError:
+        # Two concurrent first uses raced on O_EXCL; the loser adopts the
+        # winner's key so both report the same digest (review finding 7).
+        return _ensure_key(key_path)
     try:
         os.write(descriptor, key)
     finally:
@@ -94,6 +99,11 @@ def collect_secret_meta(
     result: dict[str, Any] = {"path": str(target), "exists": target.exists()}
     if not result["exists"]:
         return result
+    if target.is_dir():
+        # A directory has no content to digest; report it plainly rather
+        # than crashing on read_bytes (review finding 7).
+        result["error"] = "path is a directory, not a file"
+        return result
 
     file_stat = target.stat()
     mode = stat.S_IMODE(file_stat.st_mode)
@@ -104,7 +114,13 @@ def collect_secret_meta(
     if not permissions_ok:
         result["permissions_hint"] = _CHMOD_HINT
 
-    content = target.read_bytes()
+    try:
+        content = target.read_bytes()
+    except PermissionError:
+        # A permission problem is exactly what this tool exists to REPORT —
+        # the mode/permissions fields above still stand (review finding 7).
+        result["error"] = "permission denied reading the file (metadata above still valid)"
+        return result
     if allow_plain_hash:
         result["size_bytes"] = len(content)
         result["sha256"] = hashlib.sha256(content).hexdigest()

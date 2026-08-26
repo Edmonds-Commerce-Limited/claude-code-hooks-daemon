@@ -169,9 +169,53 @@ class TestExemptions:
         cmd = "ansible-playbook --vault-password-file .vault-pass s.yml; cat .vault-pass"
         assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
 
+    def test_flag_position_check_uses_effective_patterns(self) -> None:
+        """Review finding 1 regression: a project pattern (worst case:
+        mode replace) must be visible to the flag-position re-test, or a
+        BARE POSITIONAL consumer argument naming it is wrongly exempted."""
+        patterns = ("*.mysecretfile",)
+        cmd = "ansible-playbook /x/prod.mysecretfile"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS, patterns)
+
+    def test_flag_position_with_effective_patterns_still_exempts_flag_form(self) -> None:
+        patterns = ("*.mysecretfile",)
+        cmd = "ansible-playbook --vault-password-file /x/prod.mysecretfile site.yml"
+        assert sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS, patterns)
+
     def test_project_extends_consumers_via_config_shape(self) -> None:
         consumers = sfm.merge_allowed_consumers(
             [{"command": "my-deploy-tool", "path_flags": ["--secret-file"]}]
         )
         cmd = "my-deploy-tool --secret-file .vault-pass up"
         assert sfm.is_exempt_invocation(cmd, consumers)
+
+
+class TestDirectoryContainsProtected:
+    """Review finding 2: bounded partial enforcement for dir-rooted search."""
+
+    def test_directory_holding_protected_file_is_flagged(self, tmp_path: Path) -> None:
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / ".vault-pass").write_text("x\n")
+        matched = sfm.directory_contains_protected(str(tmp_path), sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert matched == ".vault-pass*"
+
+    def test_clean_directory_is_not_flagged(self, tmp_path: Path) -> None:
+        (tmp_path / "a.py").write_text("x\n")
+        assert (
+            sfm.directory_contains_protected(str(tmp_path), sfm.DEFAULT_PROTECTED_PATTERNS) is None
+        )
+
+    def test_non_directory_answers_none(self, tmp_path: Path) -> None:
+        target = tmp_path / "file.txt"
+        target.write_text("x\n")
+        assert sfm.directory_contains_protected(str(target), sfm.DEFAULT_PROTECTED_PATTERNS) is None
+
+    def test_cap_stops_the_walk(self, tmp_path: Path) -> None:
+        """Over-cap trees are NOT fully checked — the documented residual."""
+        for index in range(5):
+            (tmp_path / f"file{index}.txt").write_text("x\n")
+        (tmp_path / "zzz.vault-password").write_text("x\n")
+        result = sfm.directory_contains_protected(
+            str(tmp_path), sfm.DEFAULT_PROTECTED_PATTERNS, max_entries=2
+        )
+        assert result is None

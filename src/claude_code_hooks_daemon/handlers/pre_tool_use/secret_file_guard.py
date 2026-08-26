@@ -121,7 +121,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             mention = sfm.find_protected_mention(command, patterns)
             if mention is None:
                 return None
-            if sfm.is_exempt_invocation(command, self._consumers()):
+            # The EFFECTIVE patterns are passed through (review finding 1):
+            # the flag-position check re-tests bare consumer arguments, and
+            # testing the shipped defaults there would blind it to every
+            # project-configured pattern — all of them under mode: replace.
+            if sfm.is_exempt_invocation(command, self._consumers(), patterns):
                 return None
             return mention
 
@@ -132,6 +136,14 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         for pattern in patterns:
             if sfm.path_is_protected(path, (pattern,)):
                 return pattern
+
+        if tool_name == ToolName.GREP and path:
+            # Partial enforcement for directory-rooted content search
+            # (review finding 2): a Grep rooted at an ancestor of a
+            # protected file reads its content without naming it. Bounded
+            # walk — a tree over the cap is NOT fully checked, which the
+            # guidance names as a residual limit.
+            return sfm.directory_contains_protected(path, patterns)
 
         if tool_name in (ToolName.WRITE, ToolName.EDIT):
             return self._script_content_mention(path, tool_input, patterns)
@@ -222,13 +234,26 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "**Honest limits — this is defence in depth, not a sandbox.** "
             "Literal path mentions are reliably denied. Heuristics catch glob "
             "tokens (`cat .vault-p*`), `~`/`$HOME` spellings and symlink "
-            "aliases. NOT detectable at command-text level: string-assembled "
-            "paths, shell state carried across invocations, and pre-existing "
-            "scripts/binaries that open the file internally. **An unblocked "
-            "evasion is NOT permission** — the policy is that the contents never "
-            "enter context, by any route. Only OS-level controls (chmod 600, "
-            "separate user, encryption at rest) truly guarantee that; set them "
-            "too.\n\n"
+            "aliases; a `Grep` rooted at a DIRECTORY is checked by a bounded "
+            "walk (capped, so a very large tree is not fully checked). NOT "
+            "covered: a Bash recursive content search rooted at an ancestor "
+            "directory (`grep -r`/`rg` over a tree containing the file), "
+            "string-assembled paths, shell state carried across invocations, "
+            "pre-existing hard links or copies made before the guard was "
+            "enabled (realpath cannot see them), pre-existing scripts/binaries "
+            "that open the file internally, and a look-alike consumer created "
+            "in-session (the allowlist matches the command's BASENAME, so a "
+            "local wrapper named `ansible` is indistinguishable from the real "
+            "one). **An unblocked evasion is NOT permission** — the policy is "
+            "that the contents never enter context, by any route. Only "
+            "OS-level controls (chmod 600, separate user, encryption at rest) "
+            "truly guarantee that; set them too.\n\n"
+            "**`*.secret*` is intentionally broad** (a deliberate project "
+            "decision): any Bash token merely CONTAINING `.secret` trips it, "
+            "so a repo-wide grep for the string `.secret` can be denied. That "
+            "is the accepted cost. To work around a false positive: ask the "
+            "user, scope the search to exclude the protected file, or have a "
+            "human narrow the config (`mode: replace` with a tighter list).\n\n"
             "**Authoring a script that references a protected path is also "
             "denied** (the write-then-execute route). Markdown/prose naming a "
             "protected file stays writable.\n\n"
