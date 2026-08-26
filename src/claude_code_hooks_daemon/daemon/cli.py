@@ -2817,6 +2817,130 @@ def cmd_harvest_background(args: argparse.Namespace) -> int:
     return 1 if report["has_breaches"] else 0
 
 
+def cmd_inject_goal(args: argparse.Namespace) -> int:
+    """Write a ``<session>.goal-intent`` signal on demand (Plan 00269 Task 2.3).
+
+    Manual fallback / primary debugging tool for supervisor goal injection.
+    Writes the SAME signal the ``goal_injection`` PostToolUse handler writes,
+    with ``source: cli``. The signal file is session-keyed, so the target
+    session id is resolved from ``CLAUDE_CODE_SESSION_ID`` in the environment
+    (set when run from a Claude Code Bash tool — the same variable the
+    supervisor's own-session scan keys on); the command refuses with a clear
+    message when it is unset or the ACTIVE plan folder does not exist
+    (``Completed/`` plans are deliberately not matched — a goal for an
+    archived plan is always a mistake).
+
+    Returns:
+        0 on signal written, 1 on refusal/failure.
+    """
+    import yaml
+
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+    from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
+        _PLAN_NUMBER_RE,
+        _SOURCE_CLI,
+        extract_plan_title,
+        render_goal_line,
+        write_goal_signal,
+    )
+
+    plan_number = str(args.plan_number).strip()
+    if not _PLAN_NUMBER_RE.match(plan_number):
+        print(
+            f"ERROR: '{plan_number}' is not a 5-digit plan number (e.g. 00269)",
+            file=sys.stderr,
+        )
+        return 1
+
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    if not session_id:
+        print(
+            "ERROR: CLAUDE_CODE_SESSION_ID is not set. The goal signal is "
+            "session-keyed, so inject-goal must run INSIDE the Claude Code "
+            "session it should target (a Bash tool call sets the variable). "
+            "Cross-session retargeting is not supported.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if getattr(args, "project_root", None):
+        project_path = Path(args.project_root).resolve()
+    else:
+        project_path = get_project_path(None)
+
+    plan_root = project_path / "CLAUDE" / "Plan"
+    plan_dir = next(
+        (
+            candidate
+            for candidate in sorted(plan_root.glob(f"{plan_number}-*"))
+            if candidate.is_dir() and (candidate / "PLAN.md").is_file()
+        ),
+        None,
+    )
+    if plan_dir is None:
+        print(
+            f"ERROR: no active plan folder {plan_number}-* with a PLAN.md under "
+            f"{plan_root} (archived plans in Completed/ are deliberately not "
+            "matched)",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        plan_text = (plan_dir / "PLAN.md").read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"ERROR: could not read {plan_dir / 'PLAN.md'}: {e}", file=sys.stderr)
+        return 1
+
+    # Load the handler's configured options (mode/lines) so the CLI renders
+    # EXACTLY what the status-flip trigger would render.
+    mode = "additive"
+    raw_lines: object = None
+    config_file = project_path / ".claude" / "hooks-daemon.yaml"
+    if config_file.is_file():
+        try:
+            config_data = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as e:
+            print(f"WARNING: could not read {config_file}: {e}", file=sys.stderr)
+            config_data = {}
+        options = (
+            config_data.get("handlers", {})
+            .get("post_tool_use", {})
+            .get("goal_injection", {})
+            .get("options", {})
+            if isinstance(config_data, dict)
+            else {}
+        )
+        if isinstance(options, dict):
+            mode = str(options.get("mode", mode))
+            raw_lines = options.get("lines")
+        if not ProjectContext._initialized:
+            try:
+                ProjectContext.initialize(config_file)
+            except ValueError as e:
+                # Not fatal on its own: write_goal_signal reports its own
+                # failure if the untracked dir genuinely cannot be resolved.
+                print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
+
+    joined = render_goal_line(
+        plan_number,
+        extract_plan_title(plan_text),
+        str(plan_dir.relative_to(project_path)),
+        mode=mode,
+        raw_lines=raw_lines,
+    )
+    if joined is None:
+        print("ERROR: goal message could not be rendered (see daemon log)", file=sys.stderr)
+        return 1
+    written = write_goal_signal(session_id, plan_number, joined, _SOURCE_CLI)
+    if written is None:
+        print("ERROR: goal signal could not be written (see daemon log)", file=sys.stderr)
+        return 1
+    print(f"Goal-intent signal written: {written}")
+    print(f"Rendered goal line: {joined}")
+    return 0
+
+
 def _resolve_registered_handler_names(
     args: argparse.Namespace, project_path: Path
 ) -> list[str] | None:
@@ -4811,6 +4935,25 @@ def main() -> int:
         help="Output format: text (default) or json",
     )
     parser_harvest.set_defaults(func=cmd_harvest_background)
+
+    # inject-goal command (Plan 00269) — manual goal-intent signal fallback
+    parser_inject_goal = subparsers.add_parser(
+        "inject-goal",
+        help="Write a <session>.goal-intent signal for the ccy supervisor (manual fallback)",
+    )
+    parser_inject_goal.add_argument(
+        "plan_number",
+        metavar="NNNNN",
+        help="5-digit plan number of an ACTIVE plan (e.g. 00269)",
+    )
+    parser_inject_goal.add_argument(
+        "--project-root",
+        dest="project_root",
+        type=Path,
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_inject_goal.set_defaults(func=cmd_inject_goal)
 
     # verdicts command (Plan 00209): report on the handler decision log
     parser_verdicts = subparsers.add_parser(
