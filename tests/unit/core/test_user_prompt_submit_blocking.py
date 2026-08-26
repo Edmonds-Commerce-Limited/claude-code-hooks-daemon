@@ -42,8 +42,7 @@ class TestSerialisation:
         payload = result.to_json(_EVENT)
         assert payload["decision"] == "block"
         assert (
-            "policy: prompts must name a plan"
-            in payload["hookSpecificOutput"]["additionalContext"]
+            "policy: prompts must name a plan" in payload["hookSpecificOutput"]["additionalContext"]
         )
 
     def test_allow_with_context_is_unchanged(self) -> None:

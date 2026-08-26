@@ -206,18 +206,12 @@ def _is_permissive(schema: dict[str, Any]) -> bool:
 
 
 def _schema_top_fields(schema: dict[str, Any]) -> dict[str, Any]:
-    return {
-        k: v for k, v in schema.get(_PROPERTIES_KEY, {}).items() if k not in (_HSO_KEY,)
-    }
+    return {k: v for k, v in schema.get(_PROPERTIES_KEY, {}).items() if k not in (_HSO_KEY,)}
 
 
 def _schema_hso_fields(schema: dict[str, Any]) -> dict[str, Any]:
     hso = schema.get(_PROPERTIES_KEY, {}).get(_HSO_KEY, {})
-    return {
-        k: v
-        for k, v in hso.get(_PROPERTIES_KEY, {}).items()
-        if k != _HOOK_EVENT_NAME_KEY
-    }
+    return {k: v for k, v in hso.get(_PROPERTIES_KEY, {}).items() if k != _HOOK_EVENT_NAME_KEY}
 
 
 def _contract_hso_fields(contract: dict[str, Any]) -> dict[str, Any]:
@@ -284,9 +278,7 @@ def check_schema_fields(
             continue
         findings.extend(_check_enum(event, f"{_HSO_KEY}.{name}", spec, contract_spec))
         if name == _NESTED_DECISION_KEY and _FIELDS_KEY in contract_spec:
-            findings.extend(
-                _check_nested_decision(event, spec, contract_spec[_FIELDS_KEY])
-            )
+            findings.extend(_check_nested_decision(event, spec, contract_spec[_FIELDS_KEY]))
     return findings
 
 
@@ -325,9 +317,7 @@ def _check_nested_decision(
                     rule=RULE_UNDOCUMENTED_FIELD,
                     event=event,
                     subject=path,
-                    message=(
-                        f"schema accepts {path}, which the docs do not define for {event}"
-                    ),
+                    message=(f"schema accepts {path}, which the docs do not define for {event}"),
                 )
             )
             continue
@@ -388,9 +378,7 @@ def check_expressiveness(
                     rule=RULE_UNEXPRESSED,
                     event=event,
                     subject=f"{_HSO_KEY}.{name}",
-                    message=(
-                        f"documented hookSpecificOutput.{name} is inexpressible on {event}"
-                    ),
+                    message=(f"documented hookSpecificOutput.{name} is inexpressible on {event}"),
                 )
             )
             continue
@@ -466,11 +454,7 @@ def check_capability_claims(
                 ),
             )
         )
-    if (
-        not claimed_deny
-        and contract_can_block
-        and mechanism in _REFUSAL_EXPRESSIBLE_MECHANISMS
-    ):
+    if not claimed_deny and contract_can_block and mechanism in _REFUSAL_EXPRESSIBLE_MECHANISMS:
         findings.append(
             Finding(
                 rule=RULE_MISSING_REFUSAL,
@@ -651,9 +635,7 @@ def scan(root: Path) -> Report:
             previous_level = serialiser_logger.level
             serialiser_logger.setLevel(logging.CRITICAL)
             try:
-                payload = HookResult(decision=Decision.DENY, reason="contract probe").to_json(
-                    name
-                )
+                payload = HookResult(decision=Decision.DENY, reason="contract probe").to_json(name)
             finally:
                 serialiser_logger.setLevel(previous_level)
             probe = emitted_token_finding(name, contract, payload)

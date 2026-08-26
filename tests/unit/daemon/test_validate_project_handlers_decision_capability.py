@@ -111,7 +111,9 @@ class TestAnUndeliverableDecisionIsReported:
     """The gap this closes for client projects."""
 
     @pytest.mark.parametrize(
-        "event_dir", ["session_start", "session_end", "pre_compact", "notification"]
+        # pre_compact left this list when PreCompact gained its documented
+        # top-level block (Plan 00271 item 7).
+        "event_dir", ["session_start", "session_end", "notification"]
     )
     def test_a_deny_on_an_event_that_cannot_block_is_warned_about(
         self, event_dir: str, tmp_path: Path, capsys: Any

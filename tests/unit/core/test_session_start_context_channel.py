@@ -35,9 +35,9 @@ class TestContextChannels:
         assert HookResult(decision=Decision.ALLOW).to_json(_EVENT) == {}
 
     def test_guidance_joins_context(self) -> None:
-        payload = HookResult(
-            decision=Decision.ALLOW, context=["a"], guidance="do b"
-        ).to_json(_EVENT)
+        payload = HookResult(decision=Decision.ALLOW, context=["a"], guidance="do b").to_json(
+            _EVENT
+        )
         combined = payload["hookSpecificOutput"]["additionalContext"]
         assert "a" in combined and "do b" in combined
 

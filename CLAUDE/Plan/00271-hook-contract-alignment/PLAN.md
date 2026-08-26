@@ -192,7 +192,7 @@ allowlist entry so the guard enforces the fix.
   `hook_result.py:639-652`); add `updatedPermissions` and `interrupt` to
   the schema (`response_schemas.py:105-135`) and result model, or
   allowlist them with linked follow-up if deliberately unsupported.
-- [x] ✅ **Task 2.7**: SessionStart live verification then migration
+- [ ] 🔄 **Task 2.7**: SessionStart live verification then migration
   (audit item 6): use `scripts/debug_hooks.sh` against the installed
   Claude Code to establish what `systemMessage` vs
   `hookSpecificOutput.additionalContext` actually do on SessionStart;
@@ -303,5 +303,12 @@ Summary:
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00271-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Guard red-run verified at <commit-hash>
-- Load-bearing drifts closed at <commit-hash>
+- Guard red-run verified at 02a05c97 (worktree branch
+  `agent-a31082bd6ba927bc5-095ae460`; 59 findings, all nine load-bearing
+  audit items enumerated — see JOURNAL/00271-Journal-26-08-26.md).
+- Load-bearing drifts closed across the Phase 2 commits on that branch;
+  guard enforced incrementally (allowlist 59 → 29 kept entries).
+- REMAINING before Complete: Task 2.7's LIVE verification of the SessionStart
+  context channels (schema+serialiser migration is done, dual-emitting), plus
+  daemon restart verification — both deferred to the merge reviewer on main,
+  because a worktree must not restart the dogfood daemon.

@@ -73,9 +73,7 @@ class TestMatches:
 
 
 class TestHandle:
-    def test_silent_when_installed_matches_audited(
-        self, handler: ContractStalenessHandler
-    ) -> None:
+    def test_silent_when_installed_matches_audited(self, handler: ContractStalenessHandler) -> None:
         handler.installed_version_reader = lambda: "2.1.246"
         result = handler.handle(_hook_input())
         assert result.decision == Decision.ALLOW

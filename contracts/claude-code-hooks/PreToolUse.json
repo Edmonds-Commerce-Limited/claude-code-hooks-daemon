@@ -28,7 +28,7 @@
   "notes": "Four outcomes: allow/deny/ask/defer, plus updatedInput to rewrite the tool's input before execution (replaces the ENTIRE input object). Precedence across hooks: deny > defer > ask > allow. For 'defer', permissionDecisionReason, updatedInput and additionalContext are ignored.",
   "input_example": {
     "session_id": "abc123",
-    "prompt_id": "550e8400-e29b-41d4-a716-446655440000",
+    "prompt_id": "00000000-0000-0000-0000-000000000000",
     "transcript_path": "/home/user/.claude/projects/.../transcript.jsonl",
     "cwd": "/home/user/my-project",
     "permission_mode": "default",

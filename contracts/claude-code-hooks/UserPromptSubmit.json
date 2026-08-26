@@ -24,7 +24,7 @@
   "notes": "decision: 'block' prevents the prompt from being processed; reason is shown to the user, not added to context. suppressOriginalPrompt only meaningful with decision: 'block'.",
   "input_example": {
     "session_id": "abc123",
-    "transcript_path": "/Users/.../.claude/projects/.../00893aaf-19fa-41d2-8238-13269b9b3ca0.jsonl",
+    "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
     "cwd": "/Users/...",
     "permission_mode": "default",
     "hook_event_name": "UserPromptSubmit",

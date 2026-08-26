@@ -246,7 +246,7 @@ USER_PROMPT_SUBMIT_SCHEMA: Final[dict[str, Any]] = {
             },
             "required": ["hookEventName"],
             "additionalProperties": False,
-        }
+        },
     },
     "additionalProperties": False,
 }

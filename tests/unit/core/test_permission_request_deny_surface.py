@@ -25,9 +25,9 @@ class TestDenyMessage:
         assert validate_response(_EVENT, payload) == []
 
     def test_deny_context_joins_the_message(self) -> None:
-        payload = HookResult(
-            decision=Decision.DENY, reason="no", context=["ask a human"]
-        ).to_json(_EVENT)
+        payload = HookResult(decision=Decision.DENY, reason="no", context=["ask a human"]).to_json(
+            _EVENT
+        )
         message = payload["hookSpecificOutput"]["decision"]["message"]
         assert "no" in message
         assert "ask a human" in message
