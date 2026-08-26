@@ -1986,7 +1986,7 @@ When the session is idle and caught up (repeated no-op failsafe-recovery ticks),
 
 Some instructions are conditional on the user having asked ("unless the user requested it"). A request made in conversation does not survive the session, so this project can record one in config instead, and the daemon replays it on each prompt.
 
-Configured in `.claude/hooks-daemon.yaml` under `handlers.user_prompt_submit.standing_authorisations.options.authorisations`, as a list of `{id, enabled}` entries. Built-in ids: `subagent-delegation`, `workflow-orchestration`, `commit-push-cadence`.
+Configured in `.claude/hooks-daemon.yaml` under `handlers.user_prompt_submit.standing_authorisations.options.authorisations`, as a list of `{id, enabled}` entries. Built-in ids: `subagent-delegation`, `workflow-orchestration`.
 
 **Every entry ships disabled.** The handler is enabled so the options are discoverable, but nothing is authorised until the project turns it on — the daemon must never assert consent that was not given. Enabling one is a deliberate act by whoever owns the repository, and removing it withdraws the authorisation.
 

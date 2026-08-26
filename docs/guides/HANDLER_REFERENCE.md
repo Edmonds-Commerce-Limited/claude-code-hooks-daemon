@@ -2456,9 +2456,9 @@ It is a filing cabinet, not a countermand. A test asserts that no entry's text c
 
 **Options:**
 
-| Option           | Type | Default | Description                                                                                                                                 |
-| ---------------- | ---- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `authorisations` | list | `[]`    | List of `{id, enabled}` entries. Built-in ids: `subagent-delegation`, `workflow-orchestration`. An unrecognised id is ignored, never fatal. |
+| Option           | Type | Default | Description                                                                                                                                                        |
+| ---------------- | ---- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `authorisations` | list | `[]`    | List of `{id, enabled}` entries. Built-in ids: `subagent-delegation`, `workflow-orchestration`, `commit-push-cadence`. An unrecognised id is ignored, never fatal. |
 
 The two built-in ids are separate because the restrictions they answer are separate: authorising sub-agent delegation says nothing about authorising multi-agent workflow orchestration.
 

@@ -607,6 +607,10 @@ handlers:
             enabled: true
           - id: workflow-orchestration
             enabled: false
+          # Enabled 2026-08-26 on the user's explicit request: "commit and
+          # push atomically and regularly. git is your primary backup".
+          - id: commit-push-cadence
+            enabled: true
 
     # auto_continue:  # Auto-continues on 'continue' keyword
     #   enabled: false # Optional - enable for auto-continue behavior

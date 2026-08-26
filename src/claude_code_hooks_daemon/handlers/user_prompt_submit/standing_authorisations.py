@@ -45,11 +45,14 @@ _KEY_ID: Final[str] = "id"
 _KEY_ENABLED: Final[str] = "enabled"
 
 # ── Built-in authorisation ids ─────────────────────────────────────────────
-# Two, because Phase 1 found the system prompt carries TWO separate
-# restrictions and authorising delegation says nothing about authorising
-# workflow orchestration.
+# One id per distinct restriction: Phase 1 found the system prompt carries
+# separate restrictions, and authorising delegation says nothing about
+# authorising workflow orchestration — nor about push cadence, which exists
+# because "confirm before outward-facing actions" defaults hold pushes back
+# in projects that want git as their primary backup.
 AUTHORISATION_SUBAGENT_DELEGATION: Final[str] = "subagent-delegation"
 AUTHORISATION_WORKFLOWS: Final[str] = "workflow-orchestration"
+AUTHORISATION_COMMIT_PUSH_CADENCE: Final[str] = "commit-push-cadence"
 
 # Where a reader can audit and revoke any of this. Named in every entry's
 # text: an authorisation that cannot be found is not auditable, and one that
@@ -67,6 +70,19 @@ _SUBAGENT_DELEGATION_TEXT: Final[str] = (
     "risky change — without pausing to ask permission each time. Judgement "
     "still applies: delegate when it earns its cost, not by reflex, and "
     "prefer isolated worktrees when peers may touch the same git index. "
+    f"This request is recorded in {_CONFIG_LOCATION}, where it can be read "
+    "and withdrawn."
+)
+
+_COMMIT_PUSH_CADENCE_TEXT: Final[str] = (
+    "STANDING AUTHORISATION (on file for this project). A frequent "
+    "commit-and-push cadence is pre-requested here: after each logical unit "
+    "of work, commit AND push in the same step — git is the primary backup, "
+    "and a commit that only exists locally is not backed up, is invisible to "
+    "the humans and other sessions watching the remote, and is lost with the "
+    "workspace. Do not batch pushes behind long-running checks or milestones; "
+    "if a later check finds a problem, fix forward with a new commit. "
+    "Pushed history is never rewritten. "
     f"This request is recorded in {_CONFIG_LOCATION}, where it can be read "
     "and withdrawn."
 )
@@ -92,6 +108,12 @@ _SUBAGENT_DELEGATION_SHORT: Final[str] = (
     "helps, no need to ask. Recorded in .claude/hooks-daemon.yaml."
 )
 
+_COMMIT_PUSH_CADENCE_SHORT: Final[str] = (
+    "STANDING AUTHORISATION (on file): commit AND push after each logical "
+    "unit of work — git is the primary backup; never hold pushes behind "
+    "long checks. Recorded in .claude/hooks-daemon.yaml."
+)
+
 _WORKFLOWS_SHORT: Final[str] = (
     "STANDING AUTHORISATION (on file): multi-agent workflow orchestration is "
     "pre-requested for this project — treat the opt-in as standing. Recorded "
@@ -104,11 +126,13 @@ _WORKFLOWS_SHORT: Final[str] = (
 _BUILTIN_TEXTS: Final[dict[str, str]] = {
     AUTHORISATION_SUBAGENT_DELEGATION: _SUBAGENT_DELEGATION_TEXT,
     AUTHORISATION_WORKFLOWS: _WORKFLOWS_TEXT,
+    AUTHORISATION_COMMIT_PUSH_CADENCE: _COMMIT_PUSH_CADENCE_TEXT,
 }
 
 _BUILTIN_SHORT_TEXTS: Final[dict[str, str]] = {
     AUTHORISATION_SUBAGENT_DELEGATION: _SUBAGENT_DELEGATION_SHORT,
     AUTHORISATION_WORKFLOWS: _WORKFLOWS_SHORT,
+    AUTHORISATION_COMMIT_PUSH_CADENCE: _COMMIT_PUSH_CADENCE_SHORT,
 }
 
 # How many times per session the FULL text is delivered before decaying to the
@@ -220,7 +244,8 @@ class StandingAuthorisationsHandler(UserPromptSubmitHandlerBase):
             "Configured in `.claude/hooks-daemon.yaml` under "
             "`handlers.user_prompt_submit.standing_authorisations.options.authorisations`, "
             "as a list of `{id, enabled}` entries. Built-in ids: "
-            f"`{AUTHORISATION_SUBAGENT_DELEGATION}`, `{AUTHORISATION_WORKFLOWS}`.\n\n"
+            f"`{AUTHORISATION_SUBAGENT_DELEGATION}`, `{AUTHORISATION_WORKFLOWS}`, "
+            f"`{AUTHORISATION_COMMIT_PUSH_CADENCE}`.\n\n"
             "**Every entry ships disabled.** The handler is enabled so the "
             "options are discoverable, but nothing is authorised until the "
             "project turns it on — the daemon must never assert consent that "

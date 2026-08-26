@@ -432,6 +432,8 @@ handlers:
             enabled: false
           - id: workflow-orchestration
             enabled: false
+          - id: commit-push-cadence
+            enabled: false
 
   # Other hook events
   permission_request:

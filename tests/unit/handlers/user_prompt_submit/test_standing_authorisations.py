@@ -20,6 +20,7 @@ import pytest
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.user_prompt_submit.standing_authorisations import (
+    AUTHORISATION_COMMIT_PUSH_CADENCE,
     AUTHORISATION_SUBAGENT_DELEGATION,
     AUTHORISATION_WORKFLOWS,
     StandingAuthorisationsHandler,
@@ -98,6 +99,25 @@ class TestEnablingAnAuthorisation:
         _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION, AUTHORISATION_WORKFLOWS)
         assert len(handler.handle(_hook_input()).context) == 2
 
+    def test_commit_push_cadence_text_names_the_practice(self) -> None:
+        """The commit/push entry must name both halves and the backup rationale."""
+        handler = StandingAuthorisationsHandler()
+        _enable(handler, AUTHORISATION_COMMIT_PUSH_CADENCE)
+        text = " ".join(handler.handle(_hook_input()).context).lower()
+        assert "commit" in text
+        assert "push" in text
+        assert "backup" in text
+
+    def test_all_three_can_be_enabled_together(self) -> None:
+        handler = StandingAuthorisationsHandler()
+        _enable(
+            handler,
+            AUTHORISATION_SUBAGENT_DELEGATION,
+            AUTHORISATION_WORKFLOWS,
+            AUTHORISATION_COMMIT_PUSH_CADENCE,
+        )
+        assert len(handler.handle(_hook_input()).context) == 3
+
     def test_unknown_entry_id_is_ignored_not_crashed(self) -> None:
         handler = StandingAuthorisationsHandler()
         _enable(handler, "no-such-authorisation")
@@ -109,7 +129,11 @@ class TestTextIsARecordedRequestNeverACountermand:
 
     @pytest.mark.parametrize(
         "entry_id",
-        [AUTHORISATION_SUBAGENT_DELEGATION, AUTHORISATION_WORKFLOWS],
+        [
+            AUTHORISATION_SUBAGENT_DELEGATION,
+            AUTHORISATION_WORKFLOWS,
+            AUTHORISATION_COMMIT_PUSH_CADENCE,
+        ],
     )
     def test_no_entry_tells_the_agent_to_disregard_instructions(self, entry_id: str) -> None:
         handler = StandingAuthorisationsHandler()
@@ -120,7 +144,11 @@ class TestTextIsARecordedRequestNeverACountermand:
 
     @pytest.mark.parametrize(
         "entry_id",
-        [AUTHORISATION_SUBAGENT_DELEGATION, AUTHORISATION_WORKFLOWS],
+        [
+            AUTHORISATION_SUBAGENT_DELEGATION,
+            AUTHORISATION_WORKFLOWS,
+            AUTHORISATION_COMMIT_PUSH_CADENCE,
+        ],
     )
     def test_every_entry_attributes_the_request_to_the_project(self, entry_id: str) -> None:
         handler = StandingAuthorisationsHandler()

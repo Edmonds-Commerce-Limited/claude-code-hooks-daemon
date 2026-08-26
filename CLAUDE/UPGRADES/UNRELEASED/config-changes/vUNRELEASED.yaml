@@ -187,6 +187,23 @@ config_changes:
         `only_with_mutator: true`, which spares every diagnostic
         false-positive shape. Its sibling verification_result_gate stands
         down when a prelude is present, so the two never double-fire.
+    - key: handlers.user_prompt_submit.standing_authorisations.options.authorisations.commit-push-cadence
+      recommended: false
+      dormant: true
+      description: >-
+        NEW built-in standing-authorisation id `commit-push-cadence` (requested
+        by the daemon project's own user). When a project enables it, every
+        prompt carries a recorded request to commit AND push after each
+        logical unit of work — git as the primary backup — rather than
+        batching pushes behind long-running checks or milestones, with
+        fix-forward (never history rewrite) for problems found after a push.
+        Ships disabled like every standing authorisation: the daemon must
+        never assert consent nobody gave.
+      migration_note: >-
+        Opt in by adding `{id: commit-push-cadence, enabled: true}` to the
+        authorisations list. Only enable it where an always-push cadence is
+        genuinely wanted — it is a per-project policy statement, and pushing
+        constantly to a shared branch is not right for every workflow.
     - key: handlers.session_start.contract_staleness
       recommended: true
       dormant: false
