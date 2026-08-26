@@ -28,8 +28,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00205: destructive git synonym respellings](00205-destructive-git-synonym-respellings/PLAN.md) - Not Started (tracked follow-up captured by the v3.52.0 release gate per RELEASING.md "never drop a finding": v3.52.0 closed ten *invocation* respellings but not *synonym* ones — `git update-ref -d refs/heads/X` is an unguarded `git branch -D`, and `git push origin +main:main` an unguarded `git push --force`.)
 
-- [00268: verification-result enforcement and the Ansible/YAML lint gap](00268-verification-result-enforcement-and-ansible-lint-gap/PLAN.md) - In Progress (field report: a lint failed, printed its own diagnosis, and was ignored by a `git commit` on the next LINE of the same Bash invocation; the report rejects blanket `;` → `&&` enforcement as both leaky and noisy, and recommends a YAML/Ansible strategy for `lint_on_edit` plus a narrow verifier→mutator handler)
-
 - [00269: supervisor goal message injection](00269-supervisor-goal-message-injection/PLAN.md) - In Progress (goal_injection handler + inject-goal CLI + supervisor goal branch implemented, code-reviewed and merged at `78665b51`; only the live armed-supervisor `/goal` probes remain, which need a human-attended session)
 
 - [00273: hook input payload validation](00273-hook-input-payload-validation/PLAN.md) - Not Started (follow-up filed by Plan 00271: input-schema layer over the vendored contract's per-event input examples, so an input-field rename surfaces as a QA finding/advisory instead of handlers silently never matching)
@@ -173,6 +171,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00268: verification-result enforcement and the Ansible/YAML lint gap](Completed/00268-verification-result-enforcement-and-ansible-lint-gap/PLAN.md) - Complete at `24b4fb47` + `d3ebf1ba` (Ansible YAML strategy for `lint_on_edit`, the `verification_result_gate` verifier→mutator handler, and the `staged_lint_gate` commit-time backstop; blanket `;` → `&&` enforcement deliberately rejected)
 
 - [00271: hook contract alignment](Completed/00271-hook-contract-alignment/PLAN.md) - Complete at merge `18d35ba2` + the commit that archives it (DBF-first: vendored hook contracts + network-free `hook_contract` QA check landed RED against 59 findings, all 9 load-bearing drifts fixed, allowlist burned to 29 reasoned KEPT gaps; follow-ups in Plan 00273)
 
@@ -1251,15 +1251,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 273 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 221 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 222 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 38 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 39 + 221 + 6 = **266 folders**, spanning
+- **Folder-to-number reconciliation**: 38 + 222 + 6 = **266 folders**, spanning
   **263 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1274,7 +1274,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00271 archival (39 root, 221 `Completed/`,
+- **Last reconciled at**: the Plan 00268 archival (38 root, 222 `Completed/`,
   6 `Cancelled/`, 263 distinct numbers against a counter of 273). The index
   carries NO reconciliation history — it states current truth only; every
   earlier recount is in git, and per-plan narrative belongs in that plan's

@@ -1,6 +1,6 @@
 # Plan 00268: Verification-result enforcement (verifier→mutator) and the Ansible/YAML lint gap
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-25
 **Owner**: joseph
 **Priority**: Medium
@@ -182,13 +182,17 @@ its false-positive rate stays low enough that nobody disables it.
 
 ## Success Criteria
 
-- [ ] An Edit that writes an unloadable Ansible playbook is denied at write time
-  with the linter's own diagnosis.
-- [ ] The motivating multi-line incident command is flagged by the Phase 2 handler.
-- [ ] Every false-positive shape in the report's table is ALLOWed, proven by tests.
-- [ ] No private bash scanner is added — detection uses `split_unquoted`.
-- [ ] Blanket `;` → `&&` enforcement is not implemented, and the reason is recorded.
-- [ ] Full QA passes and the daemon restarts RUNNING after each phase.
+- [x] An Edit that writes an unloadable Ansible playbook is denied at write time
+  with the linter's own diagnosis (Ansible lint strategy, Phase 1).
+- [x] The motivating multi-line incident command is flagged by the Phase 2
+  handler — dogfooded live against the daemon socket.
+- [x] Every false-positive shape in the report's table is ALLOWed, proven by
+  tests (re-asserted again by Plan 00270's `only_with_mutator` suite).
+- [x] No private bash scanner is added — detection uses `split_unquoted`.
+- [x] Blanket `;` → `&&` enforcement is not implemented; the reason is recorded
+  in `DESIGN-verifier-mutator.md` and restated in the handler guidance.
+- [x] Full QA passes and the daemon restarts RUNNING after each phase
+  (24b4fb47 Phase 2; d3ebf1ba Phase 3/4, QA 23/23).
 
 ## Risks & Mitigations
 
