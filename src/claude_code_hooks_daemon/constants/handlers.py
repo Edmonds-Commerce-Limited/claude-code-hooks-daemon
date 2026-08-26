@@ -349,6 +349,13 @@ class HandlerID:
         config_key="version_check",
         display_name="version-check",
     )
+    # Skill-opportunity detector (SessionStart handler) — Plan 00274: TTL-gated
+    # advisory pointing at the `skill-scan` CLI pipeline
+    SKILL_OPPORTUNITY_DETECTOR = HandlerIDMeta(
+        class_name="SkillOpportunityDetectorHandler",
+        config_key="skill_opportunity_detector",
+        display_name="skill-opportunity-detector",
+    )
     CONTRACT_STALENESS = HandlerIDMeta(
         class_name="ContractStalenessHandler",
         config_key="contract_staleness",

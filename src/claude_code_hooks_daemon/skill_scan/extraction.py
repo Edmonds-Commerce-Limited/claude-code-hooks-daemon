@@ -72,7 +72,7 @@ def extract_prompts(
         Genuine human prompts, in file order. Missing directory returns [].
     """
     markers = EXCLUDE_CONTENT_MARKERS + extra_exclude_patterns
-    cutoff = time.time() - window_days * SECONDS_PER_DAY if window_days else None
+    cutoff = time.time() - window_days * SECONDS_PER_DAY if window_days is not None else None
     prompts: list[Prompt] = []
 
     if not transcript_dir.is_dir():
