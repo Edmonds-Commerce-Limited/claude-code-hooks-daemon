@@ -460,6 +460,14 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             "machine-origin marker and a 'NOT human authorisation' clause, and can "
             "never satisfy any human-gated rule (release publishing, artefact "
             "publishing, unproven branch deletion).\n\n"
+            "**Concurrent plans are tracked in a goal ledger** (Plan 00276): the "
+            "/goal slot holds ONE condition (last writer wins), so every emission "
+            "is recorded in `goal-ledger.json` under the daemon untracked dir. "
+            "Emitting a goal while another ledgered plan is still In Progress "
+            "injects a displacement advisory naming that plan, and the Stop hook "
+            "challenges unexplained stops on behalf of EVERY still-live ledgered "
+            "plan. Entries retire when their plan reaches a terminal status or is "
+            "archived.\n\n"
             "**Configure** via `handlers.post_tool_use.goal_injection.options`: "
             "`mode: additive` (default) merges your `lines` "
             "(`{id, text, enabled}`) onto the built-in set — a matching `id` "
@@ -494,6 +502,29 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
                 safety_notes=(
                     "Observe-only: writes a small JSON file under untracked/; "
                     "nothing is injected unless a supervisor is armed."
+                ),
+                test_type=TestType.CONTEXT,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="second In Progress plan advises goal displacement",
+                command=(
+                    "With one scratch plan already flipped to In Progress this "
+                    "session, use the Edit tool to flip a SECOND scratch plan's "
+                    "PLAN.md '**Status**:' line to 'In Progress', then verify a "
+                    "system-reminder advisory names the first plan as displaced."
+                ),
+                description=(
+                    "Plan 00276: emitting a goal while another ledgered plan is "
+                    "still In Progress marks the older ledger entry displaced and "
+                    "injects an advisory naming it."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"GOAL DISPLACED", r"\d{5}"],
+                safety_notes=(
+                    "Observe-only: writes goal-ledger.json under untracked/; "
+                    "never blocks the edit."
                 ),
                 test_type=TestType.CONTEXT,
                 recommended_model=RecommendedModel.SONNET,
