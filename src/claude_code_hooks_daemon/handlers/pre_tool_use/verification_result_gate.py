@@ -32,6 +32,7 @@ See ``CLAUDE/Plan/00268-*/DESIGN-verifier-mutator.md``.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -39,27 +40,22 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, 
 from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.bash_flags import (
+    SPAN_SEPARATORS as _SPAN_SEPARATORS,
+)
+from claude_code_hooks_daemon.utils.bash_flags import (
+    has_errexit,
+    split_statements,
+)
 from claude_code_hooks_daemon.utils.command_evasion import (
     ENV_PREFIX,
     GIT_INVOCATION,
     compile_command_name_pattern,
-    normalise_line_continuations,
 )
-from claude_code_hooks_daemon.utils.shell_segmentation import (
-    split_unquoted,
-    strip_quoted_heredoc_bodies,
-)
+from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 _MODE_WARN: Final = "warn"
 _MODE_BLOCK: Final = "block"
-
-# Statements run UNCONDITIONALLY with respect to each other. A newline is a
-# command terminator in shell exactly as `;` is -- see the module docstring.
-_STATEMENT_SEPARATORS: Final[tuple[str, ...]] = (";", "\n")
-
-# Within one statement, these separate the individual commands. Longest-first
-# per split_unquoted's contract, so `||` is never read as two `|`.
-_SPAN_SEPARATORS: Final[tuple[str, ...]] = ("||", "&&", "|")
 
 # A statement whose head opens one of these consumes whatever came before it.
 # This is what covers `rc=$?` followed by a branch, WITHOUT having to track the
@@ -75,12 +71,6 @@ _CHAIN_BREAKING_HEADS: Final[tuple[str, ...]] = (
 )
 _CHAIN_BREAKING_PATTERN: Final[re.Pattern[str]] = re.compile(
     rf"^\s*(?:{'|'.join(_CHAIN_BREAKING_HEADS)})\b"
-)
-
-# `set -e`, `set -euo pipefail`, `set -o errexit`. Any of these makes the WHOLE
-# invocation gated, so the handler stands down entirely.
-_ERREXIT_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^\s*set\s+(?:-[a-zA-Z]*e[a-zA-Z]*\b|-o\s+errexit\b)"
 )
 
 # The flags that turn `ansible-playbook` from a machine-changing MUTATOR into a
@@ -193,6 +183,23 @@ def _first_match(
     return None
 
 
+def statements_contain_mutator(statements: Iterable[str]) -> bool:
+    """True when any statement carries a built-in mutator signature.
+
+    Public for ``bash_safe_mode`` (Plan 00270), whose ``only_with_mutator``
+    scope filter must agree with THIS handler's mutator taxonomy — a second
+    copy of the table would drift. Verifier signatures beat mutator ones per
+    span, so ``ansible-playbook --syntax-check`` never counts as a mutator.
+    A project's ``extra_mutators`` config deliberately does NOT widen
+    ``only_with_mutator``'s scope — only the built-in table is consulted here.
+    """
+    return any(
+        VerificationResultGateHandler._classify(statement, _COMPILED_MUTATORS, _COMPILED_VERIFIERS)
+        is not None
+        for statement in statements
+    )
+
+
 @dataclass(frozen=True)
 class _Finding:
     """A verifier and the later mutator its result never gated."""
@@ -258,14 +265,9 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
         if not command:
             return None
 
-        normalised = strip_quoted_heredoc_bodies(normalise_line_continuations(command))
-        statements = [
-            statement.strip()
-            for statement in split_unquoted(normalised, _STATEMENT_SEPARATORS)
-            if statement.strip()
-        ]
+        statements = split_statements(command)
 
-        if any(_ERREXIT_PATTERN.match(statement) for statement in statements):
+        if has_errexit(statements):
             return None
 
         verifiers = _COMPILED_VERIFIERS + _compile_table(self._extra("_extra_verifiers"))

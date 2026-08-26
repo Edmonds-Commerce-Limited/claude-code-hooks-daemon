@@ -32,7 +32,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00269: supervisor goal message injection](00269-supervisor-goal-message-injection/PLAN.md) - Not Started (inject a machine-marked `/goal` message via the ccy PTY supervisor when plan execution starts, with a config-driven additive/replace line template; brainstorm ready for human review)
 
-- [00270: bash safe mode forcer](00270-bash-safe-mode-forcer/PLAN.md) - Not Started (the OPT-IN counterpart Plan 00268 deferred: a ships-disabled handler enforcing `set -e`/`-o pipefail`/`-u` preludes on multi-statement Bash invocations, inheriting 00268's cry-wolf objections as design constraints; brainstorm ready for human review)
+- [00270: bash safe mode forcer](00270-bash-safe-mode-forcer/PLAN.md) - In Progress (the OPT-IN counterpart Plan 00268 deferred: a ships-disabled `bash_safe_mode` handler enforcing `set -e`/`-o pipefail` preludes on multi-statement Bash invocations; implemented on a worktree branch, daemon-restart verification deferred to merge)
 
 - [00272: secret file read blocker](00272-secret-file-read-blocker/PLAN.md) - Not Started (deny-by-default PreToolUse guard so a protected secret file's CONTENT can never enter context by any wired route; `secret-meta` helper returns keyed-hash metadata instead; no agent escape hatch; Phase 1 research classifies every read route by blockability; brainstorm + research scaffold ready for human review)
 

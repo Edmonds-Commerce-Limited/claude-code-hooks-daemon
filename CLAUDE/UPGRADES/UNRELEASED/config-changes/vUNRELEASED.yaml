@@ -157,6 +157,36 @@ config_changes:
         additively with `options.extra_verifiers` / `options.extra_mutators`
         (literal command names); the built-in tables cannot be replaced, so a
         project cannot silently empty the mutator table.
+    - key: handlers.pre_tool_use.bash_safe_mode
+      recommended: false
+      dormant: true
+      description: >-
+        NEW opt-in PreToolUse handler (Plan 00270), ships `enabled: false` —
+        the opt-in counterpart Plan 00268 deferred. When a project enables it,
+        a Bash invocation with multiple sequenced statements (`;` or newline
+        separated; default threshold 2) must declare a `set` safety prelude —
+        by default errexit and pipefail (`set -euo pipefail` satisfies both;
+        `nounset` is available but off-default because `set -u` breaks the
+        common `$OPTIONAL_VAR` probing idiom). A command already carrying the
+        prelude, a single statement, and a pure `&&` chain are never flagged,
+        and `only_with_mutator: true` scopes enforcement to commands
+        containing an entry from the shared verifier-gate mutator table. The
+        fire-time message and resident guidance teach `set -e`'s blind spots
+        (disabled inside if/while conditions and under `!`; non-final
+        `&&`/`||` operands; `local x=$(fail)` masking; SIGPIPE under
+        pipefail) so the prelude is never mistaken for a guarantee.
+        `mode: inject` (auto-prepending the prelude) is reserved but rejected
+        at config load, because the daemon does not yet serialise PreToolUse
+        `updatedInput`. Escape hatch:
+        MUST_SKIP_SAFE_MODE_BECAUSE="reason"; <command>.
+      migration_note: >-
+        Deliberately NOT recommended: Plan 00268's cry-wolf analysis stands —
+        forced errexit changes the semantics of every command, so this is a
+        per-project policy act, never a default. If you enable it, start with
+        `mode: warn` (the default when enabled) and consider
+        `only_with_mutator: true`, which spares every diagnostic
+        false-positive shape. Its sibling verification_result_gate stands
+        down when a prelude is present, so the two never double-fire.
     - key: handlers.pre_tool_use.staged_lint_gate
       recommended: true
       dormant: false

@@ -69,6 +69,18 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             f"git \\\n  -C {_SAFE_PATH} \\\n  reset --hard HEAD",
         ),
     ),
+    "BashSafeModeHandler": (
+        "pytest tests/\ngit commit -m x",
+        (
+            # The trigger is the ABSENCE of a prelude on sequenced statements,
+            # not a command name -- but the prelude/escape-hatch detection must
+            # not be walked past by respelling the separators or padding the
+            # statements.
+            "pytest tests/; git commit -m x",
+            "pytest tests/ \\\n  -q\ngit commit -m x",
+            "  pytest tests/ ;  git commit -m x",
+        ),
+    ),
     "VerificationResultGateHandler": (
         "ansible-lint site.yml\ngit commit -m x",
         (
@@ -192,6 +204,14 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
         "git restore --staged src/app.py",
         "git stash list",
         "git push origin main",
+    ),
+    "BashSafeModeHandler": (
+        # Single statement, declared prelude, pure `&&` chain, escape hatch:
+        # each of the shapes the design promises never to flag.
+        "ls -la untracked/",
+        "ruff check src/ && git commit -m x",
+        "set -euo pipefail\npytest tests/\ngit commit -m x",
+        'MUST_SKIP_SAFE_MODE_BECAUSE="diagnostic sweep"; probe-one; probe-two',
     ),
     "VerificationResultGateHandler": (
         # No mutator head word anywhere: matches() must stand down entirely.

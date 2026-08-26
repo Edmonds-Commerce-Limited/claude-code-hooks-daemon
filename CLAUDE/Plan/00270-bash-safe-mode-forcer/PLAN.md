@@ -1,6 +1,6 @@
 # Plan 00270: bash safe mode forcer
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: Medium
@@ -78,39 +78,46 @@ Design space, false-positive management, and the tool-input-rewriting research
 
 ### Phase 1: Design ratification and shared-code extraction
 
-- [ ] ⬜ **Task 1.1**: Human review of [BRAINSTORM.md](BRAINSTORM.md); ratify
-  the config surface, defaults, and the open questions' answers into this
-  plan's Technical Decisions.
-- [ ] ⬜ **Task 1.2**: Extract the prelude-detection and statement-splitting
-  logic shared with `verification_result_gate` into a shared utility (e.g.
-  `utils/bash_flags.py`), TDD'd, with `verification_result_gate` refactored to
-  consume it and its full test suite still green.
+- [x] ✅ **Task 1.1**: Ratified via the dispatch instruction from main (see
+  JOURNAL 26-08-26): mode warn|block with inject reserved/load-rejected;
+  require default [errexit, pipefail] (nounset off-default); min_statements 2;
+  only_with_mutator (default false); MUST_SKIP_SAFE_MODE_BECAUSE hatch.
+- [x] ✅ **Task 1.2**: Extracted `utils/bash_flags.py` (split_statements,
+  detect_safe_mode_flags, has_errexit, shared separator constants), TDD'd;
+  `verification_result_gate` refactored to consume it and exposes
+  `statements_contain_mutator` for the shared mutator table; its full suite
+  stays green.
 
 ### Phase 2: TDD the handler (warn mode)
 
-- [ ] ⬜ **Task 2.1**: Write failing tests for `matches()` — Bash-only,
-  respects `min_statements`, stands down when a satisfying `set` prelude is
-  already present (including partial satisfaction per the `require` list).
-- [ ] ⬜ **Task 2.2**: Write failing tests for the ALLOW suite: every Plan
-  00268 §6 false-positive shape (`grep -q p f; echo done`, exit-code
-  observers, diagnostic sweeps), single-statement commands, and the
-  `MUST_SKIP_SAFE_MODE_BECAUSE=` escape hatch.
-- [ ] ⬜ **Task 2.3**: Implement the handler to pass; `mode: warn` default,
-  `mode: block` honoured; guidance text includes the blind-spot education and
-  the escape hatch.
-- [ ] ⬜ **Task 2.4**: `get_claude_md()` and `get_acceptance_tests()`; the
-  resident guidance states the handler is opt-in and what each flag does.
+- [x] ✅ **Task 2.1**: Failing tests for `matches()` written first —
+  Bash-only, `min_statements`, prelude stand-down incl. partial satisfaction
+  and prelude split across statements (`tests/unit/handlers/pre_tool_use/test_bash_safe_mode.py`).
+- [x] ✅ **Task 2.2**: ALLOW suite covers every Plan 00268 §6 shape (warn-mode
+  ALLOW decision; never flagged under `only_with_mutator: true`),
+  single-statement commands, pure `&&` chains, and the escape hatch.
+- [x] ✅ **Task 2.3**: Handler implemented; `mode: warn` default,
+  `mode: block` denies; `inject` and unknown modes raise at option-set time
+  (load-time rejection via the registry's instantiation guard); message
+  carries the blind-spot block and the escape hatch.
+- [x] ✅ **Task 2.4**: `get_claude_md()` (opt-in framing, flags, blind spots,
+  hatch, composition note) and two advisory `get_acceptance_tests()` entries.
 
 ### Phase 3: Integration and rollout
 
-- [ ] ⬜ **Task 3.1**: Register handler ID/priority constants, wire into config
-  schema with `enabled: false`, add to `.claude/hooks-daemon.yaml.example`;
-  document in `docs/guides/HANDLER_REFERENCE.md`.
-- [ ] ⬜ **Task 3.2**: Full QA, daemon restart RUNNING, dogfood by temporarily
-  enabling in this repo's config and exercising warn mode live.
-- [ ] ⬜ **Task 3.3**: Stage a `config-changes` manifest under
-  `CLAUDE/UPGRADES/UNRELEASED/` with `recommended: false`, so upgrades
-  disclose the option without promoting it.
+- [x] ✅ **Task 3.1**: HandlerID/Priority constants, `__init__` export,
+  `init_config.py` default (`enabled: false`), `.claude/hooks-daemon.yaml.example`
+  entry (disabled), dogfood `.claude/hooks-daemon.yaml` entry (enabled, warn),
+  `docs/guides/HANDLER_REFERENCE.md` section + summary row, four integration
+  classification tables, generated docs regenerated offline.
+- [ ] 🔄 **Task 3.2**: Full QA run in the worktree (see JOURNAL for exact
+  verdict). Daemon restart RUNNING + live warn-mode dogfooding are DEFERRED
+  to the merge reviewer on main — the dogfood daemon must not be touched from
+  this worktree. Registration/load path exercised offline via
+  `regenerate-docs --project-root <worktree>` (full controller initialise).
+- [x] ✅ **Task 3.3**: `config-changes` entry added to
+  `CLAUDE/UPGRADES/UNRELEASED/config-changes/vUNRELEASED.yaml` with
+  `recommended: false`, `dormant: true`.
 
 ## Dependencies
 
@@ -148,15 +155,16 @@ config-changes manifest; warn-first even when enabled.
 
 ## Success Criteria
 
-- [ ] Handler ships `enabled: false` and, when enabled, defaults to
+- [x] Handler ships `enabled: false` and, when enabled, defaults to
   `mode: warn`.
-- [ ] Every Plan 00268 false-positive shape is ALLOWed by test.
-- [ ] A command already carrying a satisfying `set` prelude is never flagged.
-- [ ] Detection uses the shared scanner and the extracted shared flag
+- [x] Every Plan 00268 false-positive shape is ALLOWed by test.
+- [x] A command already carrying a satisfying `set` prelude is never flagged.
+- [x] Detection uses the shared scanner and the extracted shared flag
   detection; `verification_result_gate`'s suite stays green after the
   extraction.
-- [ ] Guidance names the `set -e` blind spots verbatim.
-- [ ] Full QA passes; daemon restarts RUNNING.
+- [x] Guidance names the `set -e` blind spots verbatim.
+- [ ] Full QA passes; daemon restarts RUNNING. (QA run in the worktree; the
+  restart half is deferred to the merge reviewer on main — see Task 3.2.)
 
 ## Risks & Mitigations
 
@@ -173,4 +181,7 @@ config-changes manifest; warn-first even when enabled.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00270-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet started.
+- Phases 1-3 implemented on worktree branch `agent-a828d42fa31810843-e32d96f4`
+  (shared extraction 4f1196f6; handler TDD 62a2c3d3; registration/classification
+  42f7b654; docs + manifest 72bf63a5). Daemon restart verification deferred to
+  merge on main.

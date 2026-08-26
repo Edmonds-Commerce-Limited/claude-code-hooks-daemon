@@ -162,6 +162,18 @@ handlers:
       #   max_comment_block_lines: 40
       #   mode: block               # block | warn
 
+    bash_safe_mode:  # Opt-in: require a `set` safety prelude on sequenced Bash
+      enabled: false       # Ships OFF; enabling is a per-project policy act
+      priority: 36
+      # options:
+      #   mode: warn              # warn | block (inject is reserved and rejected at load)
+      #   require:                # each independently requirable
+      #     - errexit             # set -e
+      #     - pipefail            # set -o pipefail
+      #     # - nounset           # set -u; off-default (breaks $OPTIONAL_VAR probing)
+      #   min_statements: 2       # single statements and pure && chains never flagged
+      #   only_with_mutator: false  # true scopes to mutator-bearing commands
+      #   exempt_patterns: []     # additive regexes over the whole command
     verification_result_gate:  # Flags a verifier whose exit status nothing consumes
       enabled: false       # Enable to be told when a lint could fail and a commit still run
       priority: 34
