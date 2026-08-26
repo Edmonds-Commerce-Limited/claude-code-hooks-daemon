@@ -1,6 +1,6 @@
 # Plan 00272: secret file read blocker
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: High
@@ -93,7 +93,7 @@ paths; possibly a PostToolUse output backstop). Complements
 
 ### Phase 1: Read-route research (deliverable: RESEARCH-read-routes.md complete)
 
-- [ ] ⬜ **Task 1.1**: Output-side capability — vendored contracts FIRST
+- [ ] 🔄 **Task 1.1**: Output-side capability — vendored contracts FIRST
   (`contracts/claude-code-hooks/PostToolUse.json` lists `updatedToolOutput`,
   answering shape for free), then verify BEHAVIOUR live: does Claude Code
   honour `updatedToolOutput` for Bash, and does `tool_response` carry full
@@ -104,7 +104,7 @@ paths; possibly a PostToolUse output backstop). Complements
   Read/Bash hit the same PreToolUse chain) — confirm, do not assume; AND
   separately verify the `TaskOutput` relay surface, which the subagent
   probe does not cover
-- [ ] ⬜ **Task 1.3**: Record payload shapes (contract files first, live
+- [ ] 🔄 **Task 1.3**: Record payload shapes (contract files first, live
   capture only where contracts are silent) for Grep (output
   mode/path/root fields), Edit on a protected file (old_string echo-back /
   error leakage), NotebookEdit, WebFetch `file://`, MCP tool wiring, LSP
@@ -112,32 +112,32 @@ paths; possibly a PostToolUse output backstop). Complements
   Artifact `upload_asset`; plus the no-tool-call auto-inlining routes
   (`@`-imports, `.claude/rules/` `paths:` globs) as a session-start-checkable
   configuration condition
-- [ ] ⬜ **Task 1.4**: Live aliasing probes against a dummy protected
+- [ ] 🔄 **Task 1.4**: Live aliasing probes against a dummy protected
   fixture: symlink, hardlink, `cp` to an unprotected path then read,
   variable-expanded path (`P=x; cat $P` same- and cross-invocation),
   `$(<file)` / `$(cat file)`, interpreter one-liners — record per probe
   whether the proposed matcher would catch it or provably cannot
-- [ ] ⬜ **Task 1.5**: Classify every route in the inventory as
+- [x] ✅ **Task 1.5**: Classify every route in the inventory as
   (b)/(c)/(d) with visibility column filled; resolve the marked DECIDE
   items: later-turn variable indirection heuristic, bidirectional glob
   matching, find/xargs combos, directory-rooted content grep, git
   revision-syntax reads
-- [ ] ⬜ **Task 1.6**: Decide the output-side backstop: is daemon-side
+- [x] ✅ **Task 1.6**: Decide the output-side backstop: is daemon-side
   reading of the secret (in-memory, never emitted/logged) acceptable? Weigh
   against Task 1.1 — if `updatedToolOutput` is honoured, the secret in
   daemon memory buys PREVENTION (redacted substitution), not a report. The
   answer MUST be written as an amendment to `utils/secret_redaction.py`'s
   "exactly one code path" doctrine, not alongside it; internal digests stay
   unreachable from the `secret-meta` CLI (Decision 6)
-- [ ] ⬜ **Task 1.7**: Write the research conclusion — layer stack
+- [x] ✅ **Task 1.7**: Write the research conclusion — layer stack
   recommendation + residual risks only OS-level controls (permissions,
   separate user, sandboxing) can close
-- [ ] ⬜ **Task 1.8**: Map each Technical Decision to the research findings
+- [x] ✅ **Task 1.8**: Map each Technical Decision to the research findings
   it depends on; confirm, revise or retire every decision marked
   "provisional pending Phase 1" (the output-leak layer exists ONLY if Task
   1.1 shows PostToolUse sees stdout; the Bash-authored-script scan in Task
   4.3 exists ONLY if Task 1.3 confirms visibility)
-- [ ] ⬜ **Task 1.9**: Enumerate DAEMON-OWNED outputs as a route class
+- [x] ✅ **Task 1.9**: Enumerate DAEMON-OWNED outputs as a route class
   (payload capture, debug/error logs, transcript archives per
   `utils/secret_redaction.py`; `staged_lint_gate`/`lint_on_edit`
   diagnostics): confirm `daemon/payload_capture.py` captures a successful
@@ -147,7 +147,7 @@ paths; possibly a PostToolUse output backstop). Complements
 
 ### Phase 2: Design finalisation (human review of research + open questions)
 
-- [ ] ⬜ **Task 2.1**: Resolve open questions with human against the
+- [x] ✅ **Task 2.1** (via mid-execution user directives + adopted recommendations, Decisions 7-9): Resolve open questions with human against the
   completed research (default glob breadth incl. key material; keyed-HMAC
   vs opt-in plain hash; echo / git-commit-message exemption stance; which
   class-(c) heuristics to ship vs defer; secondary layers to include;
@@ -156,37 +156,37 @@ paths; possibly a PostToolUse output backstop). Complements
   disclosure path; see BRAINSTORM.md trusted-consumer section); (b)
   **metadata disclosure** — bucketed `size_bytes` default and HMAC key-file
   mode precondition (see BRAINSTORM.md finding-5 section)
-- [ ] ⬜ **Task 2.2**: Record decisions in Technical Decisions; update
+- [x] ✅ **Task 2.2**: Record decisions in Technical Decisions; update
   BRAINSTORM.md/RESEARCH doc where superseded
 
 ### Phase 3: TDD — matching core
 
-- [ ] ⬜ **Task 3.1**: Failing tests for protected-path glob matching
+- [x] ✅ **Task 3.1**: Failing tests for protected-path glob matching
   (defaults + config additive, canonicalisation of relative/`~`/`$HOME`
   spellings, symlink/realpath, worktree seeding case)
-- [ ] ⬜ **Task 3.2**: Failing tests for Bash path-mention detection across
+- [x] ✅ **Task 3.2**: Failing tests for Bash path-mention detection across
   the class-(b) and shipped class-(c) routes (direct readers, interpreter
   one-liners, cp/mv/ln/tar, substitution, sourcing, same-invocation
   variable indirection, glob-shaped mentions) and the exemptions
   (metadata helper; consumer + path_flags grammar)
-- [ ] ⬜ **Task 3.3**: Implement matching utilities (reuse gitignore-glob
+- [x] ✅ **Task 3.3**: Implement matching utilities (reuse gitignore-glob
   machinery; constants per NO MAGIC)
 
 ### Phase 4: TDD — handler
 
-- [ ] ⬜ **Task 4.1**: Failing tests for `SecretFileGuardHandler`
+- [x] ✅ **Task 4.1**: Failing tests for `SecretFileGuardHandler`
   (PreToolUseHandlerBase, GatingResult DENY, terminal, priority per Task
   2.1) across Read/Write/Edit/Grep/Bash (+ surfaces Phase 1 added); deny
   reason names the matched glob, never content, points at `secret-meta` +
   human-config-edit
-- [ ] ⬜ **Task 4.2**: Implement handler; register HandlerID/Priority
+- [x] ✅ **Task 4.2**: Implement handler; register HandlerID/Priority
   constants, wire into `handlers/pre_tool_use/__init__.py` and default +
   example configs
-- [ ] ⬜ **Task 4.3**: Secondary layer per research: Write/Edit content
+- [x] ✅ **Task 4.3** (Write/Edit content scan on script extensions; Bash-authored files deferred with Task 1.3): Secondary layer per research: Write/Edit content
   scan denying authorship of scripts that reference a protected path
   (closes the write-then-execute route); include Bash-authored files if
   Phase 1 confirmed feasibility
-- [ ] ⬜ **Task 4.4**: `get_claude_md()` guidance: deny-by-default framing,
+- [x] ✅ **Task 4.4**: `get_claude_md()` guidance: deny-by-default framing,
   exemptions, the (b)/(c)/(d) honest-limits summary, no-escape-hatch
   statement, OS-level-controls pointer, and the vault-payload scope
   boundary (protecting the password file does not protect vaulted vars)
@@ -198,31 +198,31 @@ paths; possibly a PostToolUse output backstop). Complements
 
 ### Phase 5: TDD — metadata helper
 
-- [ ] ⬜ **Task 5.1**: Failing tests for `secret-meta` core (exists/missing,
+- [x] ✅ **Task 5.1**: Failing tests for `secret-meta` core (exists/missing,
   bucketed size by default with exact size behind the plain-hash flag,
   mtime/mode, keyed HMAC digest with generated gitignored key, key file
   itself protected, refusal to emit a digest when the key file is
   group/world-readable, plain-hash flag per Task 2.1, and no CLI route to
   any backstop-internal digest — Decision 6)
-- [ ] ⬜ **Task 5.2**: Implement helper as CLI subcommand + `utils/` core;
+- [x] ✅ **Task 5.2**: Implement helper as CLI subcommand + `utils/` core;
   JSON output; never prints content
 
 ### Phase 6: Hygiene checks
 
-- [ ] ⬜ **Task 6.1**: Advisory (SessionStart or in-handler) that each
+- [ ] 🔄 **Task 6.1** (permissions/ownership half shipped in `secret-meta` output — `permissions_ok` + chmod 600 hint; SessionStart gitignore/tracked/auto-inlining advisory deferred): Advisory (SessionStart or in-handler) that each
   protected path is gitignored, not git-tracked, AND has safe
   permissions/ownership (flag group/world-readable modes via
   `constants/permissions.py` `FileMode`; `chmod 600` remediation) — the one
   cheaply shippable OS-boundary piece (BRAINSTORM.md OS-boundary section);
   include the Task 1.3 auto-inlining config check if feasible
-- [ ] ⬜ **Task 6.2**: Update `sensitive_content` guidance; stage
+- [x] ✅ **Task 6.2**: Update `sensitive_content` guidance; stage
   truth-changes + config-changes manifests in `UNRELEASED/`
 
 ### Phase 7: Integration & acceptance
 
-- [ ] ⬜ **Task 7.1**: `get_acceptance_tests()` using dummy fixture paths —
+- [x] ✅ **Task 7.1**: `get_acceptance_tests()` using dummy fixture paths —
   never a real secret; cover one test per route class shipped
-- [ ] ⬜ **Task 7.2**: Full QA (`./scripts/qa/llm_qa.py all`), daemon
+- [ ] 🔄 **Task 7.2** (QA run in worktree; daemon restart + dogfood verification must happen on main after merge): Full QA (`./scripts/qa/llm_qa.py all`), daemon
   restart verification, dogfood with `.claude/block-words.secret` protected
 - [ ] ⬜ **Task 7.3**: Client-mode verification (`dummy-client-repo.sh`);
   docs (`HANDLER_REFERENCE.md`, generate-docs)
@@ -286,6 +286,41 @@ would be a byte-by-byte extraction oracle (BRAINSTORM.md finding-5 section).
 **Decision**: The backstop's internal matching state and the helper's public
 keyed digest are separate by design — no CLI, config or log route exposes
 the former.
+**Date**: 2026-08-26
+
+### Decision 7: Shipped default globs include `*.secret*` (user directive)
+
+**Context**: Mid-execution human directive: the initial default glob set must
+cover any filename containing `.secret`.
+**Decision**: Ship `*.secret*` as a default protected pattern alongside the
+vault-password shapes and SSH key names. Conservative list:
+`*.secret*`, `.vault-pass*`, `*.vault-password`, `*vault_pass*`,
+`id_rsa`, `id_ed25519`. `*.pem`/`*.key` deliberately NOT shipped (public
+certs share the extension — Task 2.1 open question stands for a human).
+**Date**: 2026-08-26
+
+### Decision 8: Pattern list uses the `mode: additive | replace` convention (user directive)
+
+**Context**: Second mid-execution human directive: project extension must use
+the established `command_hints`/`goal_injection` config style.
+**Decision**: `options.mode: additive` (default) merges `protected_paths`
+onto the built-in defaults; `replace` uses only the project list. An unknown
+mode behaves as `additive` (fail-closed toward MORE protection, matching the
+command_hints precedent).
+**Date**: 2026-08-26
+
+### Decision 9: Phase-2 recommendations adopted as recorded defaults
+
+**Context**: Phase 2 named human-review items; the folded draft review already
+carried recommendations, adopted here so implementation can proceed (a human
+can revise any of them by config or follow-up).
+**Decision**: (a) keyed HMAC-SHA256 digest by default, plain sha256 + exact
+size only behind `allow_plain_hash: true`; (b) bucketed `size_bucket` by
+default; (c) NO echo exemption and NO git-commit-message exemption (match on
+shell WORD tokens only, so prose mentions rarely fire); (d) consumer
+allowlist is subcommand-aware — `ansible-vault view|decrypt` DENIED, the rest
+of the Ansible family allowed with the path in flag position; (e) priority 14
+(safety band, alongside sensitive_content/security_antipattern).
 **Date**: 2026-08-26
 
 ## Success Criteria

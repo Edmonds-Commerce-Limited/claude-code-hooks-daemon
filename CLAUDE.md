@@ -894,7 +894,7 @@ A `Write`/`Edit` whose content matches a configured public pattern or a gitignor
 
 **Public patterns** (`handlers.pre_tool_use.sensitive_content.options.public_patterns`): named regexes safe to name — the deny reason shows the pattern name and the exact matched text so you can fix it.
 
-**Secret word list** (`options.secret_word_list_path`, default `.claude/block-words.secret`, gitignored): a term never appears anywhere — not in the deny reason, not in any log, not in payload capture, not in a transcript archive. The deny reason names only an index (`entry N of M in the secret word list`), which is meaningless without the gitignored file. **Do NOT try to guess or work around the block** — open the secret word list file (if you have access) to see what matched, or ask the user. Only the ADDED text is checked on `Edit` (`new_string`) — removing sensitive content is never blocked.
+**Secret word list** (`options.secret_word_list_path`, default `.claude/block-words.secret`, gitignored): a term never appears anywhere — not in the deny reason, not in any log, not in payload capture, not in a transcript archive. The deny reason names only an index (`entry N of M in the secret word list`), which is meaningless without the gitignored file. **Do NOT try to guess or work around the block, and do NOT open the secret word list file** — it is itself read-protected by `secret_file_guard` (Plan 00272); ask the user what the entry covers. Only the ADDED text is checked on `Edit` (`new_string`) — removing sensitive content is never blocked.
 
 **Git metadata is checked too.** File contents and file PATHS are only two of the seven places a term can enter a repository — the other five are git metadata, and none of them is a file write. So a `Bash` command that records metadata is also checked: `git commit` (messages), `git tag` (names and messages), `git branch` / `checkout -b` / `switch -c` (branch names), `git config user.name|user.email` (author identity), `git merge -m`. A match denies the command.
 
@@ -905,6 +905,24 @@ A `Write`/`Edit` whose content matches a configured public pattern or a gitignor
 If a compound command is denied because an unrelated part of it carries a term (`grep <term> f && git commit -m 'clean'`), split it into two calls rather than trying to disguise the term.
 
 Missing/empty/comments-only secret file = this source is silently inert.
+
+<!-- handler: block-secret-file-read -->
+
+## secret_file_guard — protected files are never read into context
+
+Configured secret files (default globs: `*.secret*`, `.vault-pass*`, `*.vault-password`, `*vault_pass*`, `id_rsa`, `id_ed25519`; projects extend or replace via `handlers.pre_tool_use.secret_file_guard.options` — `protected_paths` plus `mode: additive|replace`) must never have their CONTENTS enter context. `Read`, `Write`, `Edit`, `NotebookEdit` and `Grep` on a protected path are DENIED, and so is ANY `Bash` command whose text mentions one — `cat`, `head`, interpreter one-liners, `cp`/`mv` relocation, command substitution, sourcing. **THE RULE IS DENY-BY-DEFAULT, NOT A LIST OF BAD READERS** — the `sed_blocker` framing. There is no echo exemption and no commit-message exemption.
+
+**Presence and metadata stay available** — that is the design, not a gap: `Glob` still finds the file, and `bin/hooks-daemon secret-meta <path>` returns existence, bucketed size, mtime, permissions and a keyed digest (never content). Use it for existence tests instead of `test -f`/`ls`.
+
+**Trusted consumers keep working.** The path may appear in FLAG position for allowlisted consumers: `ansible-playbook`/`ansible`/`ansible-vault` with `--vault-password-file <path>` (extend via `options.allowed_consumers`). `ansible-vault view|decrypt` are DENIED — those subcommands exist to print decrypted secrets. Note the scope boundary: protecting the vault password FILE does not protect the vaulted PAYLOAD — a playbook `debug:` task can still print vaulted vars.
+
+**Honest limits — this is defence in depth, not a sandbox.** Literal path mentions are reliably denied. Heuristics catch glob tokens (`cat .vault-p*`), `~`/`$HOME` spellings and symlink aliases; a `Grep` rooted at a DIRECTORY is checked by a bounded walk (capped, so a very large tree is not fully checked). NOT covered: a Bash recursive content search rooted at an ancestor directory (`grep -r`/`rg` over a tree containing the file), string-assembled paths, shell state carried across invocations, pre-existing hard links or copies made before the guard was enabled (realpath cannot see them), pre-existing scripts/binaries that open the file internally, and a look-alike consumer created in-session (the allowlist matches the command's BASENAME, so a local wrapper named `ansible` is indistinguishable from the real one). **An unblocked evasion is NOT permission** — the policy is that the contents never enter context, by any route. Only OS-level controls (chmod 600, separate user, encryption at rest) truly guarantee that; set them too.
+
+**`*.secret*` is intentionally broad** (a deliberate project decision): any Bash token merely CONTAINING `.secret` trips it, so a repo-wide grep for the string `.secret` can be denied. That is the accepted cost. To work around a false positive: ask the user, scope the search to exclude the protected file, or have a human narrow the config (`mode: replace` with a tighter list).
+
+**Authoring a script that references a protected path is also denied** (the write-then-execute route). Markdown/prose naming a protected file stays writable.
+
+**There is NO escape hatch** — no `MUST_..._BECAUSE`. An agent that can type its own justification has self-authorised disclosure. Only a HUMAN may lift protection, by editing the handler's config. Ask; do not work around the block.
 
 <!-- handler: prevent-worktree-file-copying -->
 

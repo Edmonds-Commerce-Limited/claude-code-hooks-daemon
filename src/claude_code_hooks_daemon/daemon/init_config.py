@@ -135,6 +135,11 @@ class ConfigTemplate:
             # guard. Read-only `action: "list"` stays allowed. Only a human may
             # lift this -- the handler deliberately has no agent-side hatch.
             "    artifact_publish_blocker: {enabled: true, priority: 14}  # Block publishing artefacts outside the project\n"
+            # Plan 00272: protected files (vault passwords, *.secret*, SSH keys)
+            # must never have their CONTENTS read into context by any route.
+            # Presence/metadata stay available via `hooks-daemon secret-meta`.
+            # No agent escape hatch — a human edits this block to lift it.
+            "    secret_file_guard: {enabled: true, priority: 14}  # Deny reads of protected secret files (contents never enter context)\n"
             # On by default (Plan 00261): Write replaces a file wholesale, and the
             # harness does not enforce its own documented read-before-overwrite
             # contract under bypassPermissions. New files are never blocked.

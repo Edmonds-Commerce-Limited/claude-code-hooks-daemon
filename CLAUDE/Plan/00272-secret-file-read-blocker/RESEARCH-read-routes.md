@@ -1,9 +1,11 @@
 # RESEARCH — Read Routes (Plan 00272)
 
-**Status of this document**: SCAFFOLD. Phase 1 of the plan fills in every
-`TBC` cell with VERIFIED findings (via `scripts/debug_hooks.sh` captures and
-live probes), not assumptions. Nothing here is a design commitment until the
-classification is complete.
+**Status of this document**: DESK-VERIFIED (implementation pass, 2026-08-26).
+Everything answerable from the vendored contracts and the daemon's own source
+is filled in below and marked **[desk]**. Items that can only be answered in
+a live main-session Claude Code run are marked **[DEFERRED-LIVE]** and listed
+again in the conclusion — the shipped v1 layer stack does NOT depend on any
+of them (no output-side backstop shipped; see conclusion).
 
 ## Purpose
 
@@ -188,7 +190,72 @@ advisory row rather than a shrug.
 8. Auto-inlining config check feasibility: `@`-imports and `.claude/rules/`
    `paths:` globs vs protected globs at session start.
 
-## Conclusion to be written after research
+## Conclusion (implementation pass, 2026-08-26)
 
-Summary classification table (counts of b/c/d), the recommended layer stack,
-and the plainly-stated residual risk that only OS-level controls close.
+### Desk-verified findings
+
+- **[desk] `updatedToolOutput` exists in the vendored contract**
+  (`contracts/claude-code-hooks/PostToolUse.json` lists `updatedToolOutput`
+  and `updatedMCPToolOutput` as hook-specific output fields), so PostToolUse
+  redaction is expressible in principle. **[DEFERRED-LIVE]** whether Claude
+  Code honours it for Bash, and whether `tool_response` carries full
+  stdout/stderr. The v1 design therefore ships NO output-side backstop —
+  Task 1.6's daemon-reads-the-secret question is moot until that behaviour
+  is verified, and `utils/secret_redaction.py`'s "exactly one code path"
+  doctrine stands unamended.
+- **[desk] Daemon-owned outputs (Task 1.9)**: `daemon/payload_capture.py`
+  redacts ONLY secret-word-list terms (`redact_structure(hook_input, secret_terms)`), so a residual-route read's payload would land verbatim.
+  Because v1 ships no output-side layer and DENIES every visible read route
+  pre-read, a successful protected read only occurs via class-(d) routes
+  that predate the guard — the same exposure as today, so the guard does not
+  WORSEN the artefact footprint. Extending `redact_structure` to protected
+  FILE CONTENT (Task 4.5) requires the daemon to read the secret, which is
+  exactly the Task 1.6 decision — both deferred together, tracked in the
+  plan as open follow-up.
+- **[desk] Grep tool is a content oracle in every output mode** (`-l`
+  answers "does this byte pattern occur"), so the handler denies Grep whose
+  `path` matches a protected glob regardless of mode. Directory-rooted
+  content grep over an ancestor is class (c), not shipped — documented
+  residual.
+- **[desk] Glob is names-only** — deliberately allowed; presence is the
+  feature.
+- **[desk] Subagents**: the same daemon socket serves subagent tool calls
+  (verified previously in this repository's acceptance work: subagents ARE
+  blocked by PreToolUse hooks). **[DEFERRED-LIVE]** re-confirmation plus the
+  separate `TaskOutput` relay surface.
+- **[DEFERRED-LIVE]** Edit old_string echo-back shape, WebFetch `file://`,
+  MCP wiring, LSP/Skill surfaces, auto-inlining session-start check
+  feasibility.
+
+### Classification summary (shipped v1)
+
+- **(b) reliably denied**: Read/Write/Edit/NotebookEdit/Grep on a protected
+  path (symlink + realpath both matched); Bash literal path mentions in any
+  position (readers, relocation, substitution, sourcing, assignments,
+  interpreter one-liners); `~`/`$HOME`/`$PWD` spellings.
+- **(c) heuristically denied**: glob-shaped tokens (`cat .vault-p*` — stem
+  intersection); authored scripts referencing a protected path (Write/Edit
+  content scan on script extensions).
+- **(d) documented residual, stated in resident guidance**: string-assembled
+  paths, cross-invocation shell state (variable set earlier, fd/fifo/tmux),
+  pre-existing scripts/binaries opening the file internally, git history if
+  the file was ever tracked, non-wired surfaces (MCP if unwired, pasted
+  content, auto-inlining), env vars exported before the guard.
+
+### Recommended layer stack (as shipped)
+
+1. `secret_file_guard` terminal PreToolUse deny (priority 14, safety band).
+2. `secret-meta` CLI as the sole sanctioned inspection route (keyed HMAC,
+   bucketed size, permissive-key refusal, chmod-600 hygiene hint — the
+   cheaply-shippable OS-boundary piece from Task 6.1 folded into its output).
+3. Consumer allowlist (Ansible family, subcommand-aware, flag-position only).
+4. Config: default-ON, `mode: additive|replace`, no agent escape hatch.
+
+### Residual risk only OS-level controls close
+
+Hook-level protection is DEFENCE IN DEPTH, not a sandbox. Class-(d) routes
+are closed only by: `chmod 600` + correct ownership on every protected file
+(the helper reports and hints this), running agents as a user that cannot
+read the file, encryption at rest (e.g. keeping the vault password outside
+the repo entirely), and never committing the file (gitignore + history
+hygiene). State this in project docs; do not overclaim the handler.

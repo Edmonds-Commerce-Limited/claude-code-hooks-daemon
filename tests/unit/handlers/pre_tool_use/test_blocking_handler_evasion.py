@@ -331,6 +331,13 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "ValidateInstructionContentHandler": "matches written content",
     "WebSearchYearHandler": "matches a WebSearch query",
     "MarkdownOrganizationHandler": "matches a markdown file path",
+    "SecretFileGuardHandler": (
+        "matches PROTECTED PATH MENTIONS (any token position, any tool), never a "
+        "command name - respelling the READER (cat vs \\cat vs python -c) changes "
+        "nothing because the reader is irrelevant; respelling the PATH is the "
+        "evasion surface, covered by its own unit tests (globs, ~/$HOME, symlinks) "
+        "and documented class-(c)/(d) limits"
+    ),
 }
 
 # Command-anchored, but not unit-testable here. Each states what blocks it, so

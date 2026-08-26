@@ -3921,6 +3921,45 @@ def cmd_format_markdown(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_secret_meta(args: argparse.Namespace) -> int:
+    """Report presence and safe metadata for a protected file — NEVER content.
+
+    Plan 00272: the one sanctioned way to inspect a protected file. Emits
+    JSON with existence, bucketed size, mtime, permissions (plus a hygiene
+    hint when group/world-readable) and a keyed HMAC digest. Exact size and
+    plain sha256 appear only when the ``secret_file_guard`` handler's
+    ``allow_plain_hash`` config option is true — there is no CLI override,
+    so an agent cannot self-grant the plainer disclosure.
+
+    Returns:
+        0 always (a missing file is a valid answer: ``exists: false``).
+    """
+    from claude_code_hooks_daemon.constants import HandlerID
+    from claude_code_hooks_daemon.daemon.validation import load_config_safe
+    from claude_code_hooks_daemon.utils.secret_meta import KEY_FILE_NAME, collect_secret_meta
+
+    # An explicit --project-root is trusted as-is (same precedent as plan-qa):
+    # the helper needs only a config file and an untracked dir, not a full
+    # ProjectContext initialisation.
+    override = getattr(args, "project_root", None)
+    project_root = Path(override) if override else Path(get_project_path(None))
+    config = load_config_safe(project_root) or {}
+    handler_options = (
+        config.get("handlers", {})
+        .get("pre_tool_use", {})
+        .get(HandlerID.SECRET_FILE_GUARD.config_key, {})
+        .get("options", {})
+    ) or {}
+    allow_plain_hash = bool(handler_options.get("allow_plain_hash", False))
+
+    key_path = _daemon_untracked_dir(project_root) / KEY_FILE_NAME
+    meta = collect_secret_meta(
+        Path(args.path), key_path=key_path, allow_plain_hash=allow_plain_hash
+    )
+    print(json.dumps(meta, indent=2))
+    return 0
+
+
 def cmd_reconcile_settings(args: argparse.Namespace) -> int:
     """Reconcile a settings.json's hook registrations against the SSoT.
 
@@ -5304,6 +5343,23 @@ def main() -> int:
         help="Dry-run mode: exit 1 if any file would be rewritten, do not modify files",
     )
     parser_format_md.set_defaults(func=cmd_format_markdown)
+
+    # secret-meta (Plan 00272) — protected-file metadata, never content
+    parser_secret_meta = subparsers.add_parser(
+        "secret-meta",
+        help="Report existence/size-bucket/mtime/mode/keyed-digest for a protected file (never content)",
+    )
+    parser_secret_meta.add_argument(
+        "path",
+        type=Path,
+        help="Path of the protected file to inspect",
+    )
+    parser_secret_meta.add_argument(
+        "--project-root",
+        type=Path,
+        help="Project root for config + key resolution (trusted as-is; auto-detected by default)",
+    )
+    parser_secret_meta.set_defaults(func=cmd_secret_meta)
 
     # reconcile-settings (Plan 00185) — SSoT-derived settings.json hook merge
     parser_reconcile = subparsers.add_parser(
