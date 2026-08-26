@@ -1,5 +1,34 @@
-version: "UNRELEASED"
+version: "3.55.0"
 truth_changes:
+  - was: >
+      A closing keyword followed by an issue reference in a git commit
+      message — "Fixes #123", "closes octo-org/octo-repo#42",
+      "Resolved GH-7" — was an ordinary, documented way to auto-close an
+      issue or PR from a commit message. A project's own docs or skills
+      could tell an agent to write one, and the commit would simply succeed.
+    now: >
+      Denied by default (Plan 00275). The new `github_auto_close_keywords`
+      PreToolUse handler, ON by default, denies a `git commit` (or
+      `git merge -m` / `git tag -m`, or a `gh pr create`/`gh pr edit` body)
+      whose message contains a closing keyword — close/closes/closed,
+      fix/fixes/fixed, resolve/resolves/resolved, case-insensitive, with or
+      without a colon — sharing a line with an issue reference. The keyword
+      alone, or a bare `#123` with no keyword, is unaffected; only the
+      combination is denied.
+
+      IF YOUR PROJECT'S DOCS OR SKILLS TELL AN AGENT TO WRITE A CLOSING
+      COMMIT MESSAGE, THOSE INSTRUCTIONS ARE NOW FALSE — rewrite them to use
+      a non-closing reference instead: "Addresses #123", "Refs #123",
+      "See #123". GitHub still links these without closing anything.
+
+      There is deliberately NO agent-side `MUST_..._BECAUSE` escape hatch,
+      unlike `git_stash` or `ancestry_preserving_merge`. If a project
+      genuinely wants auto-close commits as a deliberate part of its
+      workflow, a HUMAN either disables the handler outright
+      (`handlers.pre_tool_use.github_auto_close_keywords.enabled: false`) or
+      switches it to advisory-only
+      (`handlers.pre_tool_use.github_auto_close_keywords.options.mode: warn`).
+      An agent should not hunt for a way around the block; ask the user.
   - was: >
       When `sensitive_content` denied a write with "entry N of M in the
       secret word list", the documented remediation was to OPEN the secret

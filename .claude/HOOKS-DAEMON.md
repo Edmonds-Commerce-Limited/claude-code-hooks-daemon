@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-08-26 (v3.54.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-08-26 (v3.55.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (46 handlers)
+### PreToolUse (47 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -14,6 +14,7 @@
 | 12 | absolute_path | BLOCKING | Require absolute paths for Read/Write/Edit tool file_path parameters |
 | 13 | error_hiding_blocker | BLOCKING | Block error-hiding patterns in code written via Write or Edit tools |
 | 14 | artifact_publish_blocker | TERMINAL | Deny artefact publishing; allow read-only enumeration |
+| 14 | secret_file_guard | BLOCKING | Deny any tool call that would put a protected file's contents into context |
 | 14 | security_antipattern | BLOCKING | Block Write/Edit of files containing security antipatterns |
 | 14 | sensitive_content | BLOCKING | Block Write/Edit content matching configured public patterns or a secret word list |
 | 15 | root_recursion_guard | BLOCKING | Block recursive scanners (grep -r, find, fd, rg, ...) rooted at ``/``/home/etc |
@@ -68,7 +69,7 @@
 | 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
 | 31 | goal_injection | ADVISORY | Write a goal-intent signal when a plan flips to In Progress |
 
-### SessionStart (12 handlers)
+### SessionStart (13 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -84,6 +85,7 @@
 | 58 | ccy_supervisor_integrity | ADVISORY | Advisory: warn when the ccy supervisor is armed but its files are unsafe |
 | 59 | plan_workflow_asset_checker | ADVISORY | Advise when plan_workflow is enabled but its assets are not provisioned |
 | 60 | contract_staleness | ADVISORY | Advise a vendored-contract refresh when Claude Code has moved on |
+| 61 | skill_opportunity_detector | ADVISORY | TTL-gated advisory pointing at the ``skill-scan`` CLI |
 
 ### PreCompact (1 handler)
 

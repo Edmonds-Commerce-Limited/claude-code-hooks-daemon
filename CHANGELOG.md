@@ -5,6 +5,208 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.55.0] - 2026-08-26
+
+### Added
+
+- **`github_auto_close_keywords` (Plan 00275) — enabled by default.** A new
+  PreToolUse safety handler that denies `git commit` (and `git merge -m` /
+  `git tag -m`, plus `gh pr create`/`gh pr edit` bodies) whose message contains
+  a GitHub closing keyword followed by an issue reference — `Fixes #123`,
+  `closes octo-org/octo-repo#42`, `Resolved GH-7`. These auto-close the
+  referenced issue/PR the moment the commit reaches the default branch, with
+  no repository-side switch to disable it, and agents write such messages
+  routinely without realising the side effect. There is deliberately **no
+  escape hatch**: a project that genuinely wants auto-close commits as part of
+  its workflow disables the handler outright
+  (`handlers.pre_tool_use.github_auto_close_keywords.enabled: false`) rather
+  than being offered a self-declared bypass.
+- **`secret_file_guard` (Plan 00272) — enabled by default.** A terminal
+  PreToolUse handler that denies `Read`, `Write`, `Edit`, `NotebookEdit`,
+  `Grep`, and any `Bash` command mentioning a configured secret file
+  (default globs: `*.secret*`, `.vault-pass*`, `*.vault-password`,
+  `*vault_pass*`, `id_rsa`, `id_ed25519`) — so its CONTENTS can never enter
+  context via any route the daemon can see, including interpreter one-liners,
+  `cp`/`mv` relocation, command substitution, and sourcing. There is no
+  escape hatch and no self-declared-intent override; only a human editing
+  `.claude/hooks-daemon.yaml` can lift it. A new `secret-meta` CLI helper
+  exposes safe, non-secret metadata (a keyed HMAC digest, a bucketed size)
+  for tooling that needs to reason about a protected file without reading it.
+- **`skill_opportunity_detector` (Plan 00274) — ships disabled, opt-in.** A
+  SessionStart advisory that, at most once per `check_interval_days` (default
+  7), suggests a `bin/hooks-daemon skill-scan` when it is probably time to
+  create a new skill. The CLI mines this machine's own Claude Code session
+  transcripts for repeated near-identical requests and recurring points of
+  confusion (two-layer noise filter, token-set Jaccard clustering,
+  normalisation placeholders, secret-word-list redaction), sends one bounded
+  headless `claude -p --model haiku` call (CLI auth only — no API key in
+  v1), and writes a report to `untracked/reports/`. Report-only: no skill is
+  ever auto-created, and every failure mode (no CLI, no auth, offline,
+  timeout, garbage output) is fail-open. `--dry-run` shows exactly what would
+  be sent to the model. Recommended for development-heavy projects; enabling
+  it is an explicit opt-in to transcript mining.
+- **`goal_injection` (Plan 00269) — new handler, ships DISABLED, opt-in
+  twice over.** A PostToolUse advisory that, when a `PLAN.md` flips to
+  `**Status**: In Progress`, writes a `<session>.goal-intent` signal that the
+  ccy PTY supervisor — if armed and watching — consumes to type a
+  machine-marked `/goal` message into the foreground chat, giving Claude
+  Code's new `/goal` slash command a plan-aware trigger. Enabling it requires
+  two separate opt-ins: the handler itself, and an armed ccy supervisor to
+  actually act on the signal. A new `hooks-daemon inject-goal NNNNN` CLI
+  subcommand is the manual fallback/debug tool for firing a goal signal
+  directly (requires `CLAUDE_CODE_SESSION_ID` in the environment).
+- **Goal-stack concurrent tracking (Plan 00276) — refines `goal_injection`
+  above.** Claude Code's `/goal` system holds exactly one session-scoped
+  Stop-hook condition, so a second plan starting would silently clobber the
+  first plan's goal with no record that anything was displaced. `goal_injection`
+  now maintains a goal ledger and advises when an injection is about to
+  displace a still-live goal, and `auto_continue_stop` defends any live
+  ledgered goal at Stop time.
+- **`verification_result_gate` (Plan 00268) — warn-first, opt-in to block.**
+  Flags a Bash invocation that runs a verifier (`ansible-lint`, `shellcheck`,
+  `pytest`, `ruff`, `mypy`, `yamllint`, `go vet`, `bash -n`, `php -l`,
+  `golangci-lint`, `npm test`, `ansible-playbook --syntax-check`, …) followed
+  by a mutator (`git add`/`commit`/`push`/`tag`, `gh pr create`, a real
+  `ansible-playbook` run) in the same invocation with nothing consuming the
+  verifier's exit status — including across a newline, not just `;`. Prompted
+  by a client field report where an `ansible-lint` failure was printed,
+  diagnosed correctly, and ignored by the commit that followed on the next
+  line. Set `mode: block` to deny instead of advise.
+- **Ansible YAML lint tier (Plan 00268).** `lint_on_edit` now covers Ansible
+  playbook and role task files (identified by directory convention or a
+  top-level `- hosts:`/`- import_playbook:` line): a cheap
+  `ansible-playbook --syntax-check` tier catches a play that will not load,
+  with a full `ansible-lint` extended tier. Everything else sharing the
+  `.yml`/`.yaml` extension — CI workflows, `docker-compose*`, inventories,
+  vault files — is left untouched.
+- **`staged_lint_gate` (Plan 00268 Phase 3) — warn-first.** Runs the same
+  cheap syntax check `lint_on_edit` uses across every staged file at
+  `git commit` time (bounded to `max_files`, default 20), catching a file
+  that reached the index by a route other than `Write`/`Edit` — `git add` of
+  something written earlier, a merge, pre-existing changes — and so was never
+  linted before landing.
+- **`contract_staleness` (Plan 00271) — SessionStart advisory.** Advises a
+  vendored-contract refresh when the running Claude Code version has moved on
+  from the one the daemon's hooks-contract fixtures were captured against.
+- **Hook contract alignment (Plan 00271).** An audit against the raw Claude
+  Code hooks documentation found 21 drifts between the daemon's internal
+  model of the contract and the real one. `PermissionRequest` and
+  `UserPromptSubmit` move to the documented blocking tier; `PreToolUse` gains
+  expressible `Decision.DEFER` and `updatedInput`; `PermissionRequest` deny
+  reasons now route through the documented `decision.message` channel;
+  `SessionStart` context is emitted on the documented
+  `hookSpecificOutput.additionalContext` channel; documented block
+  serialisation is added for wired-extra events and `PreCompact`.
+- **Static type-safe handler results (Plan 00265).** New per-event abstract
+  handler bases (`PreToolUseHandlerBase`, `SessionStartHandlerBase`, …) narrow
+  `handle()`'s return type to exactly the decisions the event can express, so
+  a handler returning an out-of-tier decision (e.g. `DENY` on `SessionStart`)
+  is now a mypy error instead of a silently dropped refusal on the wire. All
+  built-in handlers were reparented onto their event's base; a coverage test
+  enforces this for every handler under `src/`. See the migration note below
+  for project handlers.
+- **`write_clobber_guard` (Plan 00261).** Denies a `Write` to an existing
+  file that has not been read this session — `Write` replaces a file's entire
+  contents, so an unread target cannot be safely overwritten and the loss
+  could not even be reported afterwards. Restores the `Write` tool's own
+  documented contract, which was found not to hold under `bypassPermissions`
+  after a clobbering write destroyed a tracked file in this repository.
+- **`artifact_publish_blocker` (Plan 00259) — enabled by default, no escape
+  hatch.** Denies `Artifact` tool publishing by default; enumeration
+  (`action: "list"`) is always allowed. Publishing takes content outside the
+  repository to a page the repository can neither audit nor retract, and only
+  a human editing config can lift the block.
+- **Worktree seeding and config suggestions (Plan 00267).** A fresh git
+  worktree previously started with none of a project's git-ignored local
+  files, running the same session under silently different configuration.
+  The daemon now seeds configured local files into a new worktree at
+  creation, and `bin/hooks-daemon check-worktree-seed` suggests entries by
+  scanning the repository for local files not yet covered.
+- **Input-payload validation (Plan 00273).** A new `input-contract` QA check
+  validates hook input payloads against a superset schema, closing the
+  companion gap to the daemon's existing response-contract validation — a
+  renamed or restructured input field previously surfaced only as handlers
+  silently never matching.
+- **`bash_safe_mode` (Plan 00270) — opt-in, ships disabled.** Requires a
+  declared safety prelude (`set -e`/`set -o pipefail`, optionally `set -u`) on
+  multi-statement Bash invocations, with an in-content escape hatch
+  (`MUST_SKIP_SAFE_MODE_BECAUSE=`) for commands that must run every statement.
+- **`hooks-daemon delete-branch` gains two more proof tiers extending Plan
+  00249/00253's coverage (Plan 00257 follow-through)**: further hardening of
+  the ancestry-proof path used before a force-style branch deletion.
+
+### Changed
+
+- **`sensitive_content`'s documented remediation is reversed.** It used to say
+  that a block naming "entry N of M in the secret word list" should be
+  resolved by OPENING the secret word list file to see what matched. Now that
+  `secret_file_guard` (see Added, above) read-protects that same file, opening
+  it is blocked — the remediation is to ask the user what entry N covers
+  instead.
+- Additive/replace config standard for handler list options documented in
+  `CLAUDE/HANDLER_DEVELOPMENT.md`, formalising the pattern already used by
+  several handlers' list-shaped options.
+- A `commit-push-cadence` standing authorisation entry added to
+  `standing_authorisations` (ships disabled, as all entries do).
+
+### Removed
+
+- **`HookInputField.TOOL_OUTPUT`** — a constant naming a field no real
+  PostToolUse event ever carries (`POST_TOOL_USE_INPUT_SCHEMA` requires
+  `tool_response` and explicitly rejects `tool_output`). Any handler that
+  read it was always reading nothing, silently. Replaced by
+  `HookInputField.TOOL_RESPONSE`, which names the field events actually
+  carry. See `CLAUDE/UPGRADES/v3/v3.54.0-to-v3.55.0/post-upgrade-tasks/` for
+  the project-handler migration note (severity: optional — the removal
+  converts a silent misread into a loud failure).
+
+### Fixed
+
+- **Five blocking handlers advertised themselves as advisory** in resident
+  guidance — corrected so `CLAUDE.md` accurately states which handlers can
+  deny a tool call.
+- **A Bash write side-door across the 21 Write/Edit-keyed handlers (Plan
+  00260).** Content-guard handlers keyed on the `Write`/`Edit` tools missed
+  files authored via Bash redirects, `tee`, and heredocs. `lint_on_edit` and
+  the stream-editor (`sed_blocker`) guidance now correctly describe and, where
+  applicable, cover the Bash-authored write surface; a shared write-target
+  accessor is used by every caller that needs to know what a Bash command
+  actually writes.
+- **A Bash tokeniser phantom-target bug (Plan 00263).** `get_bash_write_targets`
+  used non-POSIX `shlex`, which does not process backslash escapes — so an
+  escaped double-quote inside a quoted argument prematurely terminated the
+  quote and caused everything after it to be misread as live shell, including
+  redirects that were only ever data. Fixed with a differential test against
+  a real shell.
+- **QA runs were not isolated from each other (Plan 00262).** A second
+  concurrent `llm_qa.py`/`run_all.sh` run contended over the same coverage
+  file and test tree, so either run's verdict could be wrong in either
+  direction. QA runs are now serialised.
+- **The duplicate-registration check was blind to actual duplicates** and
+  the plan-QA "index-no-log" rule and `doc_truth` worktree-scope handling
+  were both corrected.
+- **A client hanging up was reported as a daemon error, with two
+  tracebacks.**
+- Several handler-response contract gaps closed as part of Plan 00265's
+  static-typing work: a refusal an event cannot carry no longer vanishes
+  without a trace, a `PermissionRequest` refusal now explains itself, the
+  safety substitute path no longer risked crashing the serialiser itself, and
+  the constants module no longer published a PostToolUse field name that is
+  always absent.
+
+### No breaking changes
+
+No handler was removed or renamed, and no `@abstractmethod` was added to the
+`Handler` base class (`core/handler.py`) — the new per-event tier bases added
+in Plan 00265 (`core/handler_bases.py`) are additive, opt-in-by-inheritance
+classes, not a change to the existing ABC. Existing project handlers continue
+to work unmodified; migrating onto the new tier bases is recommended but not
+required. The one item under Removed above (`HookInputField.TOOL_OUTPUT`) is
+not treated as breaking: the field it named was never present on any real
+event, so every reader of it was already reading nothing — see the
+`optional`-severity post-upgrade task for the (rare) project-handler case
+this could apply to.
+
 ## [3.54.0] - 2026-08-18
 
 ### Added
