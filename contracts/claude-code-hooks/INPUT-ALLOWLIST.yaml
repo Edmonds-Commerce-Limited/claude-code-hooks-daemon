@@ -12,3 +12,17 @@ entries:
       examples document only the snake_case form, so the fallback can never
       appear in an input_example by design.
     link: "CLAUDE/Plan/00273-hook-input-payload-validation/PLAN.md"
+  - id: "unknown-input-field:(shared):terminal_columns"
+    reason: >-
+      StatusLine-payload field read by core/front_controller.py while routing
+      the status-line surface. StatusLine is out-of-contract by design (Plan
+      00271 Task 3.2), so no vendored input_example can ever document it; the
+      read is deliberate and correct.
+    link: "CLAUDE/Plan/00273-hook-input-payload-validation/PLAN.md"
+  - id: "unknown-input-field:(shared):context_window"
+    reason: >-
+      StatusLine-payload field read by core/session_state.py to track context
+      usage. StatusLine is out-of-contract by design (Plan 00271 Task 3.2),
+      so no vendored input_example can ever document it; the read is
+      deliberate and correct.
+    link: "CLAUDE/Plan/00273-hook-input-payload-validation/PLAN.md"

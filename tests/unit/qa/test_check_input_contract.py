@@ -133,12 +133,16 @@ def _write_tree(
     handler_source: str,
     stop_example: dict[str, object],
     allowlist: str | None = None,
+    core_source: str | None = None,
 ) -> None:
     src = root / "src" / "claude_code_hooks_daemon"
     (src / "handlers" / "stop").mkdir(parents=True)
     (src / "handlers" / "stop" / "__init__.py").write_text("")
     (src / "handlers" / "stop" / "my_handler.py").write_text(handler_source)
     (src / "utils").mkdir(parents=True)
+    if core_source is not None:
+        (src / "core").mkdir(parents=True)
+        (src / "core" / "helper.py").write_text(core_source)
     (src / "constants").mkdir(parents=True)
     (src / "constants" / "protocol.py").write_text(
         'class HookInputField:\n    TRANSCRIPT_PATH = "transcript_path"\n'
@@ -219,6 +223,80 @@ class TestScan:
         with pytest.raises(FileNotFoundError):
             cic.scan(tmp_path)
 
+    def test_core_reads_join_the_shared_surface(self, tmp_path: Path) -> None:
+        # core/ holds genuine shared hook-payload readers (front_controller,
+        # mode_interceptor, session_state, utils) — its reads are SHARED.
+        _write_tree(
+            tmp_path,
+            handler_source=_CLEAN_HANDLER,
+            stop_example={"stop_hook_active": True},
+            core_source=(
+                "def f(hook_input: dict):\n" '    return hook_input.get("core_only_field")\n'
+            ),
+        )
+        report = cic.scan(tmp_path)
+        assert not report.passed
+        finding = report.violations[0]
+        assert finding.event == cic.SHARED_SURFACE
+        assert finding.subject == "core_only_field"
+
+    def test_malformed_allowlist_entry_missing_reason(self, tmp_path: Path) -> None:
+        allowlist = textwrap.dedent("""
+            entries:
+              - id: "unknown-input-field:Stop:stop_hook_active"
+                link: "CLAUDE/Plan/00273-hook-input-payload-validation/PLAN.md"
+            """)
+        _write_tree(
+            tmp_path,
+            handler_source=_CLEAN_HANDLER,
+            stop_example={"stop_active": True},
+            allowlist=allowlist,
+        )
+        report = cic.scan(tmp_path)
+        assert any(f.rule == "malformed-allowlist-entry" for f in report.violations)
+
+    def test_malformed_allowlist_entry_missing_link(self, tmp_path: Path) -> None:
+        allowlist = textwrap.dedent("""
+            entries:
+              - id: "unknown-input-field:Stop:stop_hook_active"
+                reason: "reason without a link"
+            """)
+        _write_tree(
+            tmp_path,
+            handler_source=_CLEAN_HANDLER,
+            stop_example={"stop_active": True},
+            allowlist=allowlist,
+        )
+        report = cic.scan(tmp_path)
+        assert any(f.rule == "malformed-allowlist-entry" for f in report.violations)
+
+    def test_scan_report_carries_read_surface_and_skipped_events(self, tmp_path: Path) -> None:
+        _write_tree(
+            tmp_path,
+            handler_source=_CLEAN_HANDLER,
+            stop_example={"stop_hook_active": True},
+        )
+        src = tmp_path / "src" / "claude_code_hooks_daemon" / "handlers" / "notification"
+        src.mkdir(parents=True)
+        (src / "h.py").write_text(
+            'def f(hook_input: dict):\n    return hook_input.get("message")\n'
+        )
+        report = cic.scan(tmp_path)
+        assert report.passed  # Notification has no vendored example here: skipped
+        assert "Stop" in report.read_surface
+        assert report.skipped_events == ["Notification"]
+
+    def test_malformed_contract_json_missing_event_key(self, tmp_path: Path) -> None:
+        _write_tree(
+            tmp_path,
+            handler_source=_CLEAN_HANDLER,
+            stop_example={"stop_hook_active": True},
+        )
+        contracts = tmp_path / "contracts" / "claude-code-hooks"
+        (contracts / "Broken.json").write_text(json.dumps({"input_example": {}}))
+        with pytest.raises(ValueError, match="Broken.json"):
+            cic.scan(tmp_path)
+
 
 # ── the real tree ─────────────────────────────────────────────────
 
@@ -269,6 +347,49 @@ class TestMain:
         artifact = tmp_path / "untracked" / "qa" / "input_contract.json"
         data = json.loads(artifact.read_text())
         assert data["summary"]["passed"] is True
+
+    def test_main_malformed_contract_exit_two(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _write_tree(
+            tmp_path,
+            handler_source=_CLEAN_HANDLER,
+            stop_example={"stop_hook_active": True},
+        )
+        contracts = tmp_path / "contracts" / "claude-code-hooks"
+        (contracts / "Broken.json").write_text(json.dumps({"input_example": {}}))
+        assert cic.main(["--root", str(tmp_path)]) == 2
+        assert "Broken.json" in capsys.readouterr().err
+
+    def test_main_report_stdout_prints_json(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _write_tree(
+            tmp_path,
+            handler_source=_CLEAN_HANDLER,
+            stop_example={"stop_hook_active": True},
+        )
+        assert cic.main(["--root", str(tmp_path), "--report-stdout"]) == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["summary"]["passed"] is True
+
+    def test_main_inventory_lists_skipped_events(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _write_tree(
+            tmp_path,
+            handler_source=_CLEAN_HANDLER,
+            stop_example={"stop_hook_active": True},
+        )
+        pkg = tmp_path / "src" / "claude_code_hooks_daemon" / "handlers" / "notification"
+        pkg.mkdir(parents=True)
+        (pkg / "h.py").write_text(
+            'def f(hook_input: dict):\n    return hook_input.get("message")\n'
+        )
+        assert cic.main(["--root", str(tmp_path), "--inventory"]) == 0
+        out = capsys.readouterr().out
+        assert "Notification" in out
+        assert "no vendored input example" in out
 
     def test_main_inventory_lists_read_surface(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
