@@ -147,11 +147,11 @@ cannot carry one is **silently dropped on the wire** — the handler believes it
 blocked and nothing blocked. Subclassing the event's base makes that
 unwritable: mypy rejects the decision, and Pydantic rejects it again at runtime.
 
-| Tier         | Decisions it can return           | Events                                                                                                                                                                   | Base class           | Result type      |
-| ------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------- | ---------------- |
-| **Gating**   | allow, continue, deny, ask, defer | PreToolUse                                                                                                                                                               | `<Event>HandlerBase` | `GatingResult`   |
+| Tier         | Decisions it can return           | Events                                                                                                                                                                                           | Base class           | Result type      |
+| ------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------- | ---------------- |
+| **Gating**   | allow, continue, deny, ask, defer | PreToolUse                                                                                                                                                                                       | `<Event>HandlerBase` | `GatingResult`   |
 | **Blocking** | allow, continue, deny             | PostToolUse, Stop, SubagentStop, PermissionRequest, UserPromptSubmit, PreCompact, UserPromptExpansion, PostToolUseFailure, PostToolBatch, TaskCreated, TaskCompleted, TeammateIdle, ConfigChange | `<Event>HandlerBase` | `BlockingResult` |
-| **Advisory** | allow, continue                   | every other wired event                                                                                                                                                  | `<Event>HandlerBase` | `AdvisoryResult` |
+| **Advisory** | allow, continue                   | every other wired event                                                                                                                                                                          | `<Event>HandlerBase` | `AdvisoryResult` |
 
 The tier assignments come from the DOCUMENTED hooks contract, vendored under
 `contracts/claude-code-hooks/` and enforced by the `hook_contract` QA check
@@ -820,6 +820,40 @@ def handle(self, hook_input: dict) -> BlockingResult:
 ````
 
 **When validation is disabled**: Handlers should still defensively check for required fields using `.get()` with defaults
+
+## Configurable list options — the additive/replace standard (MANDATORY)
+
+Every handler option that holds a LIST the handler ships defaults for
+(patterns, hints, lines, whitelists, path globs) MUST expose the same two-mode
+config surface, so projects extend or clobber any handler's defaults the same
+way:
+
+- **`mode: additive`** (the default, including when `mode` is unset or
+  unrecognised for list-merging purposes — but see fail-closed note below):
+  project-supplied entries are MERGED onto the built-in defaults. Where entries
+  carry an `id`, a project entry whose `id` matches a built-in one OVERRIDES it
+  in place (position preserved, content replaced).
+- **`mode: replace`**: the built-in defaults are discarded entirely and ONLY
+  the project's list is used.
+
+Reference implementations: `command_hints` (`_MODE_ADDITIVE`/`_MODE_REPLACE`
+constants, per-`id` override) and `goal_injection`. Follow their shape:
+
+- Name the constants `_MODE_ADDITIVE: Final[str] = "additive"` and
+  `_MODE_REPLACE: Final[str] = "replace"` — never inline the strings.
+- Where a wrong mode would WEAKEN a safety guard (e.g. a blocker's pattern
+  list), an unknown `mode` value must fail CLOSED (treat as `additive`, keep
+  the built-ins) rather than silently dropping defaults. Document the chosen
+  behaviour in the handler docstring and test it.
+- Test both modes plus the unset/unknown-mode path.
+- Document the option in `docs/guides/HANDLER_REFERENCE.md` and, if the
+  handler earns resident guidance, in `get_claude_md()` — using the same
+  `mode: additive` / `mode: replace` wording as the reference handlers.
+
+Historic extend-only options (`extra_whitelist`, `extra_verifiers`,
+`exclude_paths`) predate this standard and stay as-is for compatibility; new
+handlers use the two-mode surface, and a purely additive `extra_*` option is
+only acceptable when replacing the built-ins could never be legitimate.
 
 ## `get_claude_md()` — does your handler earn resident context?
 
