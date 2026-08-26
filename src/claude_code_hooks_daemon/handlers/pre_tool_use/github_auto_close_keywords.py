@@ -291,6 +291,10 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
                 "ESCAPE HATCH (when auto-closing is genuinely intended; the "
                 "reason must be non-empty and QUOTED):\n"
                 '  MUST_AUTO_CLOSE_BECAUSE="explain why"; git commit ...\n\n'
+                "IF THIS PROJECT GENUINELY WANTS AUTO-CLOSE COMMITS TO WORK "
+                "(closing keywords are part of its workflow), this handler "
+                "should be disabled — suggest that to the user rather than "
+                "using the escape hatch every time.\n"
                 "To disable: handlers.pre_tool_use.github_auto_close_keywords"
             ),
         )
@@ -330,6 +334,12 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
             "```\n"
             "MUST_AUTO_CLOSE_BECAUSE=\"explain why\"; git commit -m 'Fixes #123'\n"
             "```\n\n"
+            "**If this project genuinely wants auto-close commits to work** — "
+            "closing keywords are a deliberate part of its workflow — this "
+            "handler should be DISABLED rather than escape-hatched on every "
+            "commit: suggest to the user that they set "
+            "`handlers.pre_tool_use.github_auto_close_keywords.enabled: "
+            "false`. Reaching for the hatch repeatedly is the signal.\n\n"
             "Configure via "
             "`handlers.pre_tool_use.github_auto_close_keywords.options.mode: "
             "warn` for advisory-only mode."
