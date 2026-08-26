@@ -470,6 +470,75 @@ for the same inputs) is the correct fix, not architectural unification.
 above was either fixed or has a recorded reason it was not.
 **Date**: 2026-08-26
 
+### Decision 12: close the class-(c) trailing-wildcard glob gap (G2) by literal-edge overlap, not full glob intersection
+
+**Context**: the live probe (see the "Live probe results" table in
+RESEARCH-read-routes.md, row G2) found that `cat dummy.vault-p*` LEAKED a
+protected file matched by `*.vault-password`, while the near-identical
+`cat <dir>/*.vault-password` (G1) was correctly denied. The existing
+glob-token heuristic (`_token_literal_residue` + a single `fnmatch` check
+against each pattern's literal stem) requires the token's residue to be a
+literal SUBSTRING of the stem — true for G1 (whole suffix literally present)
+but false for G2, because the pattern's own arbitrary leading `*` means the
+real file's `dummy` prefix has no counterpart in the stem at all.
+
+**Options considered**:
+
+1. Filesystem `glob.glob()` expansion of the token against the real cwd,
+   deny if any expansion matches a protected pattern. Rejected: the Bash cwd
+   is not passed into `find_protected_mention`, and adding it would widen
+   the function's contract for every caller; also non-deterministic
+   (depends on what happens to exist on disk at check time).
+2. Full two-pattern glob LANGUAGE INTERSECTION (treat both the token and the
+   stem as globs with independent wildcards, ask whether any string
+   satisfies both). Rejected after tracing it by hand: for two patterns each
+   carrying an unconstrained `*`, an intersection can always be constructed
+   by splicing arbitrary filler between the two literal fragments — e.g.
+   `dummy.txt*` intersects `*.vault-password` via the (nonexistent, but
+   theoretically satisfying) filename `dummy.txt.vault-password`. That would
+   flag the required-ALLOWED negative control (a token sharing no real
+   relationship with the pattern) purely because both patterns contain `*`.
+3. **Chosen — literal-edge overlap** (`_glob_token_overlaps_stem`,
+   `_suffix_prefix_overlap_length`): the token's literal residue and the
+   pattern's literal stem must share a DIRECT boundary — the residue's
+   suffix equals the stem's prefix (or vice versa, for the mirrored
+   leading-wildcard-token case) with no filler spliced in between. This is
+   exactly the shape of a genuine truncation: a real filename is
+   `<arbitrary><fixed>`, and truncating it mid-`<fixed>` produces a token
+   whose literal tail IS the leading part of `<fixed>`, by construction —
+   not a coincidental resemblance manufactured by inserting text nothing
+   attests to.
+
+**Threshold**: overlap must be >= `_MIN_GLOB_OVERLAP_CHARS` (2) characters.
+A 1-character overlap is measurably too common in ordinary vocabulary (e.g.
+a token ending in `i` against the `id_rsa`/`id_ed25519` stems' leading `i`)
+to be worth flagging, and 2 is the smallest overlap the shipped default
+stems ever need for a real truncation (`dummy.v*` needs exactly the 2-char
+`.v` overlap against `.vault-pass`/`.vault-password`). This is not a special
+case tuned to one input: `d*` (asked for explicitly during this fix's TDD)
+cannot reach 2 characters of overlap against ANY shipped stem, by
+construction — its own literal residue is a single character — so it stays
+allowed as accepted residual, the same way an unrelated `dummy.txt*` stays
+allowed because no shipped stem shares a boundary with `.txt`.
+
+**Verified test matrix** (`tests/unit/utils/test_secret_file_matching.py`,
+`TestBashMentionsProtectedPath`): `dummy.vault-p*`, `dummy.vault-*`,
+`dummy.v*`, and a synthetic reverse-direction-only case (`*rsaXXX`) are all
+DENIED; `d*` and the genuinely-unrelated `dummy.txt*` both stay ALLOWED; all
+56 previously-passing cases (including the G1 shape and the bracket-class
+false-positive regression tests from the v3.55.0 release review) remain
+unchanged.
+
+**Also fixed in this pass** (same probe report, "Allowlist/secret-meta
+sequencing fragility" finding): `secret_file_guard`'s `get_claude_md()` now
+tells agents to run `secret-meta` and an allowlisted consumer command as
+their OWN standalone Bash statement — the exemption in
+`is_exempt_invocation` only ever covered a single command, and chaining
+`; echo done` after it (fail-closed, correct) was previously undocumented,
+reading as a broken helper rather than a stated constraint.
+
+**Date**: 2026-08-26
+
 ## Success Criteria
 
 - [ ] RESEARCH-read-routes.md complete: every route has verified visibility,
