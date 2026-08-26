@@ -210,7 +210,7 @@ class TestAnEventThatCannotDeliverIsReported:
 
     @pytest.mark.parametrize(
         "event_name",
-        ["SessionStart", "SessionEnd", "PreCompact", "Notification"],
+        ["SessionStart", "SessionEnd", "Notification"],
     )
     def test_a_deny_on_a_message_only_event_is_reported(self, event_name: str) -> None:
         assert undeliverable_decisions(
@@ -220,10 +220,11 @@ class TestAnEventThatCannotDeliverIsReported:
     def test_a_deny_on_a_permissive_schema_event_is_still_reported(self) -> None:
         """The case schema validation alone cannot catch.
 
-        ``TaskCreated`` has no bespoke schema, so any response validates. The
-        decision is dropped regardless.
+        ``Setup`` has no bespoke schema, so any response validates. The
+        decision is dropped regardless. (TaskCreated previously played this
+        role, but Plan 00271 item 9 gave it a real documented block.)
         """
-        assert undeliverable_decisions(RefusingProbe, "TaskCreated"), (
+        assert undeliverable_decisions(RefusingProbe, "Setup"), (
             "a DENY on a permissive-schema event validates but is still dropped, "
             "so schema conformance alone must not be the test"
         )

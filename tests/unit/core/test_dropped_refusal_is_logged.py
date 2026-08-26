@@ -124,7 +124,13 @@ class TestTheCapabilityTableMatchesTheSchemas:
         for decision, events in REFUSAL_CAPABLE_EVENTS.items():
             for event_name in events:
                 response = str(HookResult(decision=decision, reason="x").to_json(event_name))
-                if decision.value not in response and "block" not in response:
+                carried = (
+                    decision.value in response
+                    or "block" in response
+                    # TeammateIdle/TaskCompleted block via continue: false.
+                    or "'continue': False" in response
+                )
+                if not carried:
                     wrong.append(f"{decision.value} on {event_name}")
 
         assert not wrong, (

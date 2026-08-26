@@ -32,7 +32,7 @@ from claude_code_hooks_daemon.core.response_schemas import validate_response
 _DECISION_CAPABLE = ("PreToolUse", "PostToolUse", "Stop", "SubagentStop")
 
 #: Events that physically cannot express a refusal on the wire.
-_MESSAGE_ONLY = ("SessionStart", "SessionEnd", "PreCompact", "Notification")
+_MESSAGE_ONLY = ("SessionStart", "SessionEnd", "Notification")
 
 
 class TestEveryEmittedResponseSatisfiesItsSchema:

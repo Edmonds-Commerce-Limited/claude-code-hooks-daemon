@@ -49,9 +49,9 @@ _DECISION_FIELD: Final[str] = "decision"
 class AdvisoryResult(HookResult):
     """For an event that can neither deny nor ask — it can only add context.
 
-    ``SessionStart``, ``SessionEnd``, ``PreCompact``, ``Notification``, both
-    worktree events, ``Status`` and every newly-wired event route through
-    ``_format_system_message_response``, which has no way to express a refusal.
+    ``SessionStart``, ``SessionEnd``, ``Notification``, both worktree events,
+    ``Status`` and the other events with no documented decision control route
+    through formatters that have no way to express a refusal.
     """
 
     decision: Literal[Decision.ALLOW, Decision.CONTINUE] = Decision.ALLOW
@@ -60,8 +60,11 @@ class AdvisoryResult(HookResult):
 class BlockingResult(HookResult):
     """For an event that can block but has no ``ask``.
 
-    ``PostToolUse``, ``Stop`` and ``SubagentStop`` express a refusal as a
-    top-level ``decision: "block"``. There is no wire representation for ASK.
+    ``PostToolUse``, ``Stop``, ``SubagentStop``, ``UserPromptSubmit``,
+    ``PreCompact``, ``PermissionRequest`` (``decision.behavior``), the
+    wired-extra top-level-block events and the ``continue: false`` pair
+    (``TeammateIdle``/``TaskCompleted``). There is no wire representation for
+    ASK on any of them.
     """
 
     decision: Literal[Decision.ALLOW, Decision.CONTINUE, Decision.DENY] = Decision.ALLOW

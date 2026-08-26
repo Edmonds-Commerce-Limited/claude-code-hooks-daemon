@@ -754,13 +754,13 @@ class TestHookResultSystemMessageDenyFormat:
 
         assert output == {}
 
-    def test_pre_compact_deny_is_surfaced_not_dropped(self):
-        """Same contract as SessionStart."""
+    def test_pre_compact_deny_is_a_documented_block(self):
+        """PreCompact CAN block compaction (Plan 00271 item 7)."""
         result = HookResult(decision=Decision.DENY, reason="Compact rejected")
         output = result.to_json("PreCompact")
 
-        assert "decision" not in output
-        assert "Compact rejected" in output["systemMessage"]
+        assert output["decision"] == "block"
+        assert output["reason"] == "Compact rejected"
 
 
 class TestHookResultErrorFactory:

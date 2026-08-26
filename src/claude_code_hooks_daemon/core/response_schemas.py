@@ -167,14 +167,19 @@ SESSION_END_SCHEMA: Final[dict[str, Any]] = {
 
 # =============================================================================
 # PreCompact Hook Response Schema
-# CRITICAL: Claude Code does NOT accept hookSpecificOutput for PreCompact
-# Only systemMessage is valid
+# The docs put PreCompact in the top-level `decision: "block"` group (a hook
+# can block compaction — Plan 00271 audit item 7). `systemMessage` is
+# accepted but DISCARDED by Claude Code for this event (dead-letter, per the
+# docs); it stays declared because the advisory path still emits it, and the
+# dead letter is recorded in contracts/claude-code-hooks/ALLOWLIST.yaml.
 # =============================================================================
 
 PRE_COMPACT_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "properties": {
         "systemMessage": {"type": "string"},
+        "decision": {"type": "string", "const": "block"},
+        "reason": {"type": "string"},
     },
     "additionalProperties": False,
 }
@@ -272,6 +277,87 @@ WORKTREE_REMOVE_SCHEMA: Final[dict[str, Any]] = {
     "additionalProperties": False,
 }
 
+# =============================================================================
+# Wired-extra blockable events (Plan 00271 audit item 9)
+# =============================================================================
+# The docs give these events real blocking mechanisms. A DENY used to fall
+# through to the systemMessage formatter, emitting the undefined token
+# {"decision": "deny"} — which VALIDATED under the permissive fail-open schema
+# and was silently ignored by Claude Code. These bespoke schemas re-arm the
+# tripwire: "decision" is constrained to the documented "block" (or absent
+# entirely for the continue-false events), so the old token cannot validate.
+
+#: The five universal output fields the docs define on every event.
+_UNIVERSAL_OUTPUT_PROPERTIES: Final[dict[str, Any]] = {
+    "continue": {"type": "boolean"},
+    "stopReason": {"type": "string"},
+    "suppressOutput": {"type": "boolean"},
+    "systemMessage": {"type": "string"},
+    "terminalSequence": {"type": "string"},
+}
+
+
+def _top_level_block_schema(
+    event_name: str, *, discard: tuple[str, ...] = (), with_context: bool = False
+) -> dict[str, Any]:
+    """A bespoke schema for a documented top-level ``decision: "block"`` event.
+
+    Args:
+        event_name: The wire event name (for hookSpecificOutput.hookEventName).
+        discard: Universal fields the docs say Claude Code DISCARDS for this
+            event and the daemon never emits (left undeclared so an emission is
+            rejected rather than dead-lettered) — except ``systemMessage``,
+            which the daemon's advisory path still emits where accepted.
+        with_context: Whether the docs define hookSpecificOutput.additionalContext.
+    """
+    properties: dict[str, Any] = {
+        name: spec for name, spec in _UNIVERSAL_OUTPUT_PROPERTIES.items() if name not in discard
+    }
+    properties["decision"] = {"type": "string", "const": "block"}
+    properties["reason"] = {"type": "string"}
+    if with_context:
+        properties["hookSpecificOutput"] = {
+            "type": "object",
+            "properties": {
+                "hookEventName": {"type": "string", "const": event_name},
+                "additionalContext": {"type": "string"},
+            },
+            "required": ["hookEventName"],
+            "additionalProperties": False,
+        }
+    return {"type": "object", "properties": properties, "additionalProperties": False}
+
+
+#: TeammateIdle / TaskCompleted: blocking is ``continue: false`` + stopReason.
+#: No top-level ``decision`` exists for them, and additionalProperties: False is
+#: what rejects the historical ``{"decision": "deny"}`` shape.
+_CONTINUE_FALSE_SCHEMA: Final[dict[str, Any]] = {
+    "type": "object",
+    "properties": dict(_UNIVERSAL_OUTPUT_PROPERTIES),
+    "additionalProperties": False,
+}
+
+USER_PROMPT_EXPANSION_SCHEMA: Final[dict[str, Any]] = _top_level_block_schema(
+    "UserPromptExpansion", with_context=True
+)
+POST_TOOL_USE_FAILURE_SCHEMA: Final[dict[str, Any]] = _top_level_block_schema(
+    "PostToolUseFailure", with_context=True
+)
+POST_TOOL_BATCH_SCHEMA: Final[dict[str, Any]] = _top_level_block_schema(
+    "PostToolBatch", with_context=True
+)
+# TaskCreated: docs say continue is ignored, so it stays undeclared.
+TASK_CREATED_SCHEMA: Final[dict[str, Any]] = _top_level_block_schema(
+    "TaskCreated", discard=("continue",)
+)
+# ConfigChange: docs discard continue outright; systemMessage is accepted but
+# discarded (dead-letter) — kept declared because the advisory path emits it.
+CONFIG_CHANGE_SCHEMA: Final[dict[str, Any]] = _top_level_block_schema(
+    "ConfigChange", discard=("continue",)
+)
+TEAMMATE_IDLE_SCHEMA: Final[dict[str, Any]] = _CONTINUE_FALSE_SCHEMA
+TASK_COMPLETED_SCHEMA: Final[dict[str, Any]] = _CONTINUE_FALSE_SCHEMA
+
 RESPONSE_SCHEMAS: Final[dict[str, dict[str, Any]]] = {
     "PreToolUse": PRE_TOOL_USE_SCHEMA,
     "PostToolUse": POST_TOOL_USE_SCHEMA,
@@ -286,6 +372,13 @@ RESPONSE_SCHEMAS: Final[dict[str, dict[str, Any]]] = {
     "Status": STATUS_SCHEMA,
     "WorktreeCreate": WORKTREE_CREATE_SCHEMA,
     "WorktreeRemove": WORKTREE_REMOVE_SCHEMA,
+    "UserPromptExpansion": USER_PROMPT_EXPANSION_SCHEMA,
+    "PostToolUseFailure": POST_TOOL_USE_FAILURE_SCHEMA,
+    "PostToolBatch": POST_TOOL_BATCH_SCHEMA,
+    "TaskCreated": TASK_CREATED_SCHEMA,
+    "ConfigChange": CONFIG_CHANGE_SCHEMA,
+    "TeammateIdle": TEAMMATE_IDLE_SCHEMA,
+    "TaskCompleted": TASK_COMPLETED_SCHEMA,
 }
 
 

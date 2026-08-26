@@ -48,6 +48,30 @@ _STATUS_ROW_SEPARATOR = "\n"
 _WORKTREE_CREATE_EVENT_NAME = "WorktreeCreate"
 _WORKTREE_PATH_KEY = "worktreePath"
 
+# Wired-extra blockable events (Plan 00271 item 9). The docs give each a real
+# blocking mechanism; before this table a DENY on any of them fell through to
+# the systemMessage formatter and emitted the undefined {"decision": "deny"}.
+#: Events whose documented block is a top-level ``decision: "block"`` + reason.
+_TOP_LEVEL_BLOCK_EXTRA_EVENTS: Final[frozenset[str]] = frozenset(
+    {
+        "UserPromptExpansion",
+        "PostToolUseFailure",
+        "PostToolBatch",
+        "TaskCreated",
+        "ConfigChange",
+        # PreCompact: the docs put it in the same top-level block group
+        # (Plan 00271 item 7); its context channel stays systemMessage, which
+        # the docs describe as accepted-but-discarded for this event.
+        "PreCompact",
+    }
+)
+#: The subset of the above whose docs also define hookSpecificOutput.additionalContext.
+_HSO_CONTEXT_EXTRA_EVENTS: Final[frozenset[str]] = frozenset(
+    {"UserPromptExpansion", "PostToolUseFailure", "PostToolBatch"}
+)
+#: Events whose documented block is ``continue: false`` + ``stopReason``.
+_CONTINUE_FALSE_EVENTS: Final[frozenset[str]] = frozenset({"TeammateIdle", "TaskCompleted"})
+
 # Which events can actually CARRY each refusal on the wire. Anything absent here
 # drops that decision, and the resulting response is still schema-VALID — so the
 # contract check cannot see it. Stop and PostToolUse express `block` but have no
@@ -72,6 +96,15 @@ REFUSAL_CAPABLE_EVENTS: Final[dict[Decision, frozenset[str]]] = {
             "SubagentStop",  # decision: block
             "PermissionRequest",  # decision.behavior: deny
             "UserPromptSubmit",  # decision: block (Plan 00271 item 5)
+            # Wired-extra blockable events (Plan 00271 item 9):
+            "UserPromptExpansion",  # decision: block
+            "PostToolUseFailure",  # decision: block
+            "PostToolBatch",  # decision: block
+            "TaskCreated",  # exit 2 or decision: block
+            "ConfigChange",  # decision: block
+            "TeammateIdle",  # exit 2 or continue: false
+            "TaskCompleted",  # exit 2 or continue: false
+            "PreCompact",  # decision: block (Plan 00271 item 7)
         }
     ),
     Decision.ASK: frozenset(
@@ -398,6 +431,10 @@ class HookResult(BaseModel):
                 return self._format_pre_tool_use_response(event_name)
             if event_name == "UserPromptSubmit" and self.decision == Decision.DENY:
                 return self._format_user_prompt_submit_response(event_name)
+            if event_name in _TOP_LEVEL_BLOCK_EXTRA_EVENTS and self.decision == Decision.DENY:
+                return self._format_top_level_block_response(event_name)
+            if event_name in _CONTINUE_FALSE_EVENTS and self.decision == Decision.DENY:
+                return self._format_continue_false_response()
 
         detail = f": {self.reason}" if self.reason else ""
         if self.decision in (Decision.DENY, Decision.ASK):
@@ -527,6 +564,10 @@ class HookResult(BaseModel):
             # UserPromptSubmit: documented top-level decision "block" + reason,
             # plus hookSpecificOutput.additionalContext (Plan 00271 item 5).
             return self._format_user_prompt_submit_response(event_name)
+        elif event_name in _TOP_LEVEL_BLOCK_EXTRA_EVENTS:
+            return self._format_top_level_block_response(event_name)
+        elif event_name in _CONTINUE_FALSE_EVENTS:
+            return self._format_continue_false_response()
         else:
             # SessionStart, SessionEnd, PreCompact, Notification: systemMessage ONLY
             # These events do NOT support hookSpecificOutput in Claude Code
@@ -698,6 +739,63 @@ class HookResult(BaseModel):
 
         if len(hook_output) > 1:
             response["hookSpecificOutput"] = hook_output
+        return response
+
+    def _format_top_level_block_response(self, event_name: str) -> dict[str, Any]:
+        """Documented top-level ``decision: "block"`` for a wired-extra event.
+
+        Context travels in ``hookSpecificOutput.additionalContext`` where the
+        docs define it for the event, otherwise as a ``systemMessage`` (which
+        for ConfigChange the docs describe as accepted-but-discarded — the
+        dead letter is recorded in the contract ALLOWLIST rather than hidden).
+        An ASK has no documented form on any of these events and falls through
+        with the deliberately-invalid marker so enforcement substitutes loudly.
+        """
+        response: dict[str, Any] = {}
+        if self.decision == Decision.ASK:
+            response["decision"] = self.decision.value
+            if self.reason:
+                response["reason"] = self.reason
+            return response
+        if self.decision == Decision.DENY:
+            response["decision"] = "block"
+            if self.reason:
+                response["reason"] = self.reason
+
+        messages = [*self.context]
+        if self.guidance:
+            messages.append(self.guidance)
+        if messages:
+            joined = "\n\n".join(messages)
+            if event_name in _HSO_CONTEXT_EXTRA_EVENTS:
+                response["hookSpecificOutput"] = {
+                    "hookEventName": event_name,
+                    "additionalContext": joined,
+                }
+            else:
+                response["systemMessage"] = joined
+        return response
+
+    def _format_continue_false_response(self) -> dict[str, Any]:
+        """Documented ``continue: false`` block for TeammateIdle/TaskCompleted.
+
+        A DENY stops the teammate entirely (the docs' JSON form); the reason
+        travels as ``stopReason``, which is shown to the user. ASK has no
+        documented form and falls through deliberately invalid.
+        """
+        response: dict[str, Any] = {}
+        if self.decision == Decision.ASK:
+            return {"decision": self.decision.value}
+        if self.decision == Decision.DENY:
+            response["continue"] = False
+            if self.reason:
+                response["stopReason"] = self.reason
+
+        messages = [*self.context]
+        if self.guidance:
+            messages.append(self.guidance)
+        if messages:
+            response["systemMessage"] = "\n\n".join(messages)
         return response
 
     def _format_context_only_response(self, event_name: str) -> dict[str, Any]:
