@@ -190,11 +190,17 @@ paths; possibly a PostToolUse output backstop). Complements
   exemptions, the (b)/(c)/(d) honest-limits summary, no-escape-hatch
   statement, OS-level-controls pointer, and the vault-payload scope
   boundary (protecting the password file does not protect vaulted vars)
-- [ ] ⬜ **Task 4.5**: Close the Task 1.9 daemon-artefact seam BEFORE any
-  output-side layer: extend `redact_structure` (or exclude protected-path
-  payloads from capture) so a residual-route read never lands verbatim in
-  `payload-capture/` or logs; exclude protected paths from
-  `staged_lint_gate`/`lint_on_edit` diagnostics
+- [x] ✅ **Task 4.5** (approach: EXCLUDE, not redact — see Decision 10): closed
+  the Task 1.9 daemon-artefact seam. `daemon/payload_capture.capture_payload`
+  gained a `protected_patterns` param; when `hook_input` names or Bash-mentions
+  a protected path (via the SAME `secret_file_matching` primitives the guard
+  uses), the WHOLE event is excluded from the capture file rather than written
+  at all — redaction only removes known TERMS, and a protected path's globs
+  say nothing about its content, so there is nothing safe to write back for
+  the matched event. Wired at the one call site (`daemon/server.py`) via a new
+  cached cross-handler resolver, `secret_file_matching.resolve_configured_patterns()`.
+  `lint_on_edit`/`staged_lint_gate` now skip a protected path before running
+  any lint command, closing the syntax-error-quotes-source-line route.
 
 ### Phase 5: TDD — metadata helper
 
@@ -209,12 +215,25 @@ paths; possibly a PostToolUse output backstop). Complements
 
 ### Phase 6: Hygiene checks
 
-- [ ] 🔄 **Task 6.1** (permissions/ownership half shipped in `secret-meta` output — `permissions_ok` + chmod 600 hint; SessionStart gitignore/tracked/auto-inlining advisory deferred): Advisory (SessionStart or in-handler) that each
-  protected path is gitignored, not git-tracked, AND has safe
-  permissions/ownership (flag group/world-readable modes via
-  `constants/permissions.py` `FileMode`; `chmod 600` remediation) — the one
-  cheaply shippable OS-boundary piece (BRAINSTORM.md OS-boundary section);
-  include the Task 1.3 auto-inlining config check if feasible
+- [x] ✅ **Task 6.1** (permissions/ownership half shipped earlier in
+  `secret-meta` output — `permissions_ok` + chmod 600 hint; the deferred
+  SessionStart half shipped now, then fixed a review round — see
+  Decision 11): new `SecretFileHygieneCheckerHandler`
+  (`handlers/session_start/secret_file_hygiene_checker.py`, priority 62,
+  default-enabled) enumerates every path matching the effective
+  `secret_file_guard` globs via `git ls-files` (tracked, untracked-visible,
+  untracked-ignored — three index reads, deterministic, no filesystem walk),
+  and advises — never blocks — when a matched path is not gitignored, is
+  git-tracked, or is group/world-readable (`mode & FileMode.GROUP_OTHER_MASK`).
+  Outside a git repository (or when `git` is unavailable), gitignore/tracked
+  checks are skipped as meaningless and only permissions are checked via a
+  bounded fallback walk, which states explicitly in the advisory when its
+  cap was hit rather than presenting a truncated scan as a clean one.
+  Metadata only: no file content is ever opened. The Task 1.3 auto-inlining
+  config check (`@`-imports, `.claude/rules/` `paths:` globs) is NOT included
+  here: it is a distinct configuration-condition check unrelated to
+  protected-file hygiene, and bundling it would have doubled this handler's
+  scope for no shared code; left as a candidate for its own follow-up plan.
 - [x] ✅ **Task 6.2**: Update `sensitive_content` guidance; stage
   truth-changes + config-changes manifests in `UNRELEASED/`
 
@@ -325,6 +344,124 @@ of the Ansible family allowed with the path in flag position; (e) priority 14
 (safety band, alongside sensitive_content/security_antipattern).
 **Date**: 2026-08-26
 
+### Decision 10: Task 4.5 closes the payload-capture seam by EXCLUSION, not redaction
+
+**Context**: `redact_structure` removes known TERMS (the `sensitive_content`
+secret word list) from a payload before it is written. A protected path's
+GLOB tells us a file must never be read — it says nothing about what that
+file's content actually contains, so there is no term to redact even when a
+residual route slips a mention past the guard's deny rule.
+**Decision**: `daemon/payload_capture.capture_payload` gained a
+`protected_patterns` parameter; when the incoming `hook_input` names or
+Bash-mentions a matching path (checked with the SAME `secret_file_matching`
+primitives the guard itself uses — single source of truth, so this can never
+disagree with what the guard would have denied), the WHOLE event is dropped
+from the capture file rather than partially written. `lint_on_edit` and
+`staged_lint_gate` are closed the same way: a protected path is skipped
+before any lint command runs, because a syntax-error diagnostic can quote the
+offending source line verbatim.
+**Boundary (code review)**: `_touches_protected_path` inspects `tool_input`
+fields (`file_path`/`notebook_path`/`path`/`command`) ONLY — it does not
+recurse into arbitrary nested structures the way `redact_structure` does.
+This matches every route the guard itself inspects (Task 4.1's field set), so
+it closes exactly the seam Task 1.9 identified; a hypothetical future field
+carrying a bare path outside those keys would need the same field added here
+AND to the guard first, since the guard's own coverage is the ceiling this
+seam-closer tracks.
+**Residual gap (code review, accepted)**: `lint_on_edit`/`staged_lint_gate`
+now SILENTLY skip a protected-path file rather than linting it — a
+`*.secret*`-named source file (a real, if narrow, possibility given
+Decision 7's intentionally broad default) is therefore never syntax-checked
+by either surface, with no advisory noting the skip. This is the accepted
+cost of the fix: linting it would risk exactly the diagnostic-quotes-source
+leak the fix exists to close (a syntax error can echo the offending line),
+and an advisory naming the skipped file adds no actionable content beyond
+"this path is protected" (already known from `secret_file_guard`'s own
+deny). A future enhancement could emit a content-free advisory ("N protected
+file(s) excluded from lint") if the silent gap proves confusing in practice.
+**Date**: 2026-08-26
+
+### Decision 11: code-review fix round on Tasks 4.5/6.1 — findings and one rebuttal
+
+**Context**: a code review of the worktree branch returned REQUEST CHANGES
+with three mandatory findings and six advisory ones.
+
+**Fixed (mandatory)**:
+
+1. `secret_file_hygiene_checker`'s unfiltered `os.walk` + 5,000-entry cap
+   could exhaust the cap inside an unrelated large subtree before ever
+   reaching a protected file, silently reporting the tree clean. Replaced
+   with `git ls-files` (three cheap index reads: `--cached`, `--others --exclude-standard`, `--others --ignored --exclude-standard`) as the
+   primary route — deterministic, no walk. A non-git directory falls back to
+   the bounded walk for PERMISSIONS ONLY (gitignore/tracked checks are
+   meaningless there), and a hit cap is now stated explicitly in the
+   advisory rather than silently reported as clean.
+2. `resolve_configured_patterns`'s `except (OSError, RuntimeError)` did not
+   catch `yaml.YAMLError` (malformed YAML) or pydantic's `ValidationError`
+   (a `ValueError` subclass, schema-invalid config) — both propagated into
+   `LintOnEditHandler`/`StagedLintGateHandler` callers. Widened to
+   `(OSError, RuntimeError, ValueError, yaml.YAMLError)`, `import yaml`
+   moved to module top-level (a lazy import inside the `try` would leave the
+   `except` tuple's own `yaml.YAMLError` reference unbound on a failure
+   before the import line ran — caught in a follow-up coordinator note, not
+   the original review, and fixed the same way).
+3. Added tests for the resolver's try: block against a REAL config file
+   (mode: replace + custom protected_paths) — which caught a genuine bug:
+   `Config`'s own `coerce_handler_configs` validator turns every handler
+   entry into a `HandlerConfig` instance, not a plain dict, so the
+   `isinstance(handler_cfg, dict)` guard always failed and the resolver had
+   NEVER actually read a real project config, only ever the shipped
+   defaults. Fixed to check `isinstance(handler_cfg, HandlerConfig)` and use
+   `.options`. Added an equivalence test between the resolver and the
+   guard's registry-injected `_patterns()` for the same `mode`/
+   `protected_paths` pair.
+
+**Rebutted**: the review's PREFERRED fix for finding 3 was having
+`secret_file_guard` delegate to `resolve_configured_patterns()` so there is
+only one resolution route. Not done: the guard's options arrive through the
+registry's generic `setattr` injection (`registry.py`'s `register_all`),
+which is the SAME mechanism every handler in the daemon uses and which also
+applies tag filtering and `daemon.exclude_paths` inheritance the resolver
+does not replicate. Delegating one handler to instead read raw YAML directly
+via `resolve_configured_patterns()` would (a) diverge from that shared
+convention for no other handler, (b) silently stop responding to the
+registry-injection pattern every existing unit test for the guard already
+relies on (`handler._mode = ...`, `handler._protected_paths = ...`
+`setattr`-style, per Tasks 4.1–4.4), and (c) risk drift from the tag/exclude
+inheritance the registry provides. The two routes are not actually
+redundant — they read the SAME config through two different, already-tested
+mechanisms — so the equivalence test (proving they compute the same answer
+for the same inputs) is the correct fix, not architectural unification.
+
+**Fixed (advisory, cheap)**:
+
+- Added `FileMode.GROUP_OTHER_MASK`, a purpose-named alias for the existing
+  `DAEMON_UMASK` bit pattern, used by the hygiene checker's permission test.
+- Non-git directories: `_scan_repo` now detects git failure ONCE (any of the
+  three `ls-files` calls returning non-zero) and returns `None`, at which
+  point gitignore/tracked checks are skipped entirely (not run and reported
+  false) and only permissions are checked, with an explicit "not a git
+  repository" notice.
+- Added `ProjectContext.is_initialized()`, a public classmethod, and moved
+  `secret_file_matching.py`'s own check onto it.
+- Recorded the lint-skip residual gap in Decision 10 above (a protected
+  `.py`/`.sh`/etc. file is now silently never lint-checked) rather than
+  adding an advisory line — reasoned there as an accepted cost.
+- Stated the `_touches_protected_path` tool_input-field-only boundary in
+  Decision 10.
+- Registered the new handler in `daemon/init_config.py`'s generated template
+  (parity with `skill_opportunity_detector`) and staged
+  `CLAUDE/UPGRADES/UNRELEASED/config-changes/vUNRELEASED.yaml` with a
+  `recommended: true` entry (new default-enabled handler, per RELEASING.md
+  Step 7). This worktree branched before main's own Task 6.2 commit added a
+  `vUNRELEASED.yaml` with several other entries; the two will need merging
+  (not rebasing) when this branch lands — a plain content merge, since both
+  sides only ADD list entries.
+
+**Not rebutted, not yet done**: none — every mandatory and advisory finding
+above was either fixed or has a recorded reason it was not.
+**Date**: 2026-08-26
+
 ## Success Criteria
 
 - [ ] RESEARCH-read-routes.md complete: every route has verified visibility,
@@ -334,16 +471,23 @@ of the Ansible family allowed with the path in flag position; (e) priority 14
   expected-verdict column in RESEARCH-read-routes.md (Task 7.1 asserts
   against that table); class-(d) residual risk stated in resident guidance
   with OS-level mitigations named
-- [ ] Permissions/ownership advisory fires on group/world-readable protected
+- [x] Permissions/ownership advisory fires on group/world-readable protected
   files with remediation text (Task 6.1)
-- [ ] No residual-route read lands verbatim in payload capture or logs
+- [x] No residual-route read lands verbatim in payload capture or logs
   (Task 4.5)
 - [ ] `secret-meta` returns metadata JSON with no content bytes;
   `ansible-vault --vault-password-file <protected>` consumer commands pass
 - [ ] Deny reasons never include file content; verdict log clean
 - [ ] No escape hatch exists
 - [ ] 95%+ coverage, full QA green, daemon restart verified, client-mode
-  verified
+  verified — the current worktree session verified unit+integration tests
+  (12327 + 1722 passed) and per-file ruff/black/mypy/bandit/magic-values
+  green; `./scripts/qa/llm_qa.py all` could not run in this worktree (no
+  bootstrapped venv at `untracked/venv*` here — self-install venvs are
+  project-path-slug-keyed and this worktree has none); ONE integration test
+  (`test_every_earning_handler_has_a_section_in_claude_md`) requires an
+  actual daemon restart to regenerate `CLAUDE.md` and is deferred to the main
+  session, which also owns the daemon-restart + client-mode verification
 
 ## Risks & Mitigations
 

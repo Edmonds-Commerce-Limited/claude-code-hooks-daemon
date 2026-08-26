@@ -583,6 +583,10 @@ handlers:
       enabled: true              # Dogfood-enabled 2026-08-26 (Task 5.2); ships disabled upstream
       priority: 61
 
+    secret_file_hygiene_checker:  # On-disk hygiene for protected paths (Plan 00272 Task 6.1)
+      enabled: true                # gitignore/tracked/permissions -- never reads content
+      priority: 62
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     compaction_signal:  # Dogfood: drop <session>.compacting so the supervisor auto-continues

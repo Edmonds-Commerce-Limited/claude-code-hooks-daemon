@@ -23,16 +23,21 @@ level — see the plan's RESEARCH-read-routes.md class-(d) rows.
 """
 
 import fnmatch
+import logging
 import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
+import yaml
+
 from claude_code_hooks_daemon.utils.path_exclusion import (
     path_matches_globs,
     resolve_project_root,
 )
+
+logger = logging.getLogger(__name__)
 
 # ── Config modes (additive/replace paradigm, mirrors command_hints) ──────────
 MODE_ADDITIVE: Final[str] = "additive"
@@ -113,6 +118,68 @@ DEFAULT_ALLOWED_CONSUMERS: Final[tuple[ConsumerSpec, ...]] = (
     ConsumerSpec(command="ansible-playbook", path_flags=_ANSIBLE_VAULT_PASSWORD_FLAGS),
     ConsumerSpec(command="ansible", path_flags=_ANSIBLE_VAULT_PASSWORD_FLAGS),
 )
+
+
+# Process-lifetime cache for the live secret_file_guard config (Plan 00272
+# Task 4.5), mirroring ``secret_redaction._resolve_active_path``'s contract:
+# other daemon-owned outputs (payload capture, lint diagnostics) need the
+# SAME effective protected-path set without importing the handler directly,
+# and config changes in this daemon are only ever picked up on restart, so
+# re-deriving this on every hot-path call would be a real cost for no gain.
+_CONFIGURED_PATTERNS_RESOLVED: bool = False
+_CONFIGURED_PATTERNS: tuple[str, ...] = DEFAULT_PROTECTED_PATTERNS
+
+
+def resolve_configured_patterns() -> tuple[str, ...]:
+    """Effective protected globs from the live ``secret_file_guard`` config.
+
+    Fails open to the SHIPPED DEFAULTS (never an empty tuple) when
+    ``ProjectContext`` is not initialised or config cannot be loaded — this
+    is a residual-route seam-closer (payload capture, lint diagnostics), not
+    the guard itself, so a resolution failure must still protect the
+    defaults rather than silently disabling protection.
+    """
+    global _CONFIGURED_PATTERNS_RESOLVED, _CONFIGURED_PATTERNS
+    if _CONFIGURED_PATTERNS_RESOLVED:
+        return _CONFIGURED_PATTERNS
+
+    _CONFIGURED_PATTERNS_RESOLVED = True
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+    if not ProjectContext.is_initialized():
+        return _CONFIGURED_PATTERNS
+
+    try:
+        from claude_code_hooks_daemon.config.models import Config, HandlerConfig
+
+        config = Config.load_or_default(ProjectContext.config_path())
+        handler_cfg = config.handlers.pre_tool_use.get("secret_file_guard")
+        # ``Config``'s own ``coerce_handler_configs`` validator turns every
+        # entry into a ``HandlerConfig`` instance (not a plain dict) once the
+        # config has been loaded through the model -- ``.options`` is the
+        # correct access, and a stray ``isinstance(..., dict)`` guard here
+        # silently found nothing and fell through to the shipped defaults on
+        # every real config, never actually reading a project's settings.
+        options = handler_cfg.options if isinstance(handler_cfg, HandlerConfig) else {}
+        mode = options.get("mode")
+        project_patterns = options.get("protected_paths")
+        _CONFIGURED_PATTERNS = resolve_protected_patterns(mode, project_patterns)
+    except (OSError, RuntimeError, ValueError, yaml.YAMLError) as exc:
+        # OSError: unreadable config file. RuntimeError: ProjectContext-adjacent
+        # failures. ValueError: Config.load's own "unsupported format" AND
+        # pydantic's ValidationError (a ValueError subclass) for a
+        # schema-invalid config. yaml.YAMLError: malformed YAML -- Config.load
+        # calls yaml.safe_load directly and does not catch this itself. All
+        # four leave the SHIPPED DEFAULTS already set above in place.
+        logger.debug("Could not resolve secret_file_guard config, using defaults: %s", exc)
+    return _CONFIGURED_PATTERNS
+
+
+def reset_configured_patterns_cache() -> None:
+    """Clear the process-lifetime resolved-patterns cache. Test-only escape hatch."""
+    global _CONFIGURED_PATTERNS_RESOLVED, _CONFIGURED_PATTERNS
+    _CONFIGURED_PATTERNS_RESOLVED = False
+    _CONFIGURED_PATTERNS = DEFAULT_PROTECTED_PATTERNS
 
 
 def resolve_protected_patterns(

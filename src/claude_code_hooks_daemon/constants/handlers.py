@@ -380,6 +380,14 @@ class HandlerID:
         config_key="contract_staleness",
         display_name="contract-staleness",
     )
+    # Secret file hygiene checker (SessionStart handler) — Plan 00272 Task 6.1:
+    # advise when a configured protected path exists but is not gitignored,
+    # is git-tracked, or has group/world-readable permissions.
+    SECRET_FILE_HYGIENE_CHECKER = HandlerIDMeta(
+        class_name="SecretFileHygieneCheckerHandler",
+        config_key="secret_file_hygiene_checker",
+        display_name="secret-file-hygiene-checker",
+    )
     RECOVERY_CRON_ADVISOR = HandlerIDMeta(
         class_name="RecoveryCronAdvisorHandler",
         config_key="recovery_cron_advisor",

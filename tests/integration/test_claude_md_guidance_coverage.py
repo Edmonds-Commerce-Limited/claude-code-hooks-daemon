@@ -164,6 +164,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "ProjectHandlerLoadCheckerHandler": "T3 'your guardrails are OFF' must persist",
     "GitHooksExecutableFixerHandler": "T3 the daemon changed file permissions on your behalf",
     "MarkdownTableFormatterHandler": "T3 the daemon rewrites your .md files after every write",
+    "SecretFileHygieneCheckerHandler": "T3 the remediation commands must survive to be actioned",
 }
 
 # Handlers that correctly return None. The reason is the point: it is what a

@@ -60,3 +60,29 @@ class TestDaemonUmask:
     def test_start_lock_mode_survives_the_mask(self) -> None:
         """The daemon's one explicit-mode create must be unaffected."""
         assert _START_LOCK_MODE & ~FileMode.DAEMON_UMASK == _START_LOCK_MODE
+
+
+class TestGroupOtherMask:
+    """The purpose-named permission-AUDIT mask (Plan 00272 code review).
+
+    Same bits as ``DAEMON_UMASK`` by design; a separate name because auditing
+    an EXISTING file's mode is a different operation from shaping what a
+    future ``os.umask()`` clears, even though the bit pattern is identical.
+    """
+
+    def test_same_bit_pattern_as_daemon_umask(self) -> None:
+        assert FileMode.GROUP_OTHER_MASK == FileMode.DAEMON_UMASK
+
+    def test_flags_a_group_readable_file(self, tmp_path: Path) -> None:
+        target = tmp_path / "protected"
+        target.write_text("x")
+        target.chmod(0o640)
+        mode = stat.S_IMODE(target.stat().st_mode)
+        assert mode & FileMode.GROUP_OTHER_MASK != 0
+
+    def test_does_not_flag_an_owner_only_file(self, tmp_path: Path) -> None:
+        target = tmp_path / "protected"
+        target.write_text("x")
+        target.chmod(0o600)
+        mode = stat.S_IMODE(target.stat().st_mode)
+        assert mode & FileMode.GROUP_OTHER_MASK == 0

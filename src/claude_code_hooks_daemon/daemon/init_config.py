@@ -257,6 +257,7 @@ class ConfigTemplate:
             "    plan_workflow_asset_checker: {enabled: true, priority: 59}  # Advise when plan_workflow is enabled but its assets are missing\n"
             "    contract_staleness: {enabled: true, priority: 60}  # Advise a hooks-contract refresh when Claude Code outruns the vendored audit\n"
             "    skill_opportunity_detector: {enabled: false, priority: 61}  # TTL-gated advisory to run `skill-scan` (opt-in; reads transcripts)\n"
+            "    secret_file_hygiene_checker: {enabled: true, priority: 62}  # On-disk hygiene (gitignore/tracked/permissions) for protected paths\n"
             "\n"
             "  # SessionEnd - no handlers ship today (cleanup removed in Plan 00237)\n"
             "  session_end: {}\n"

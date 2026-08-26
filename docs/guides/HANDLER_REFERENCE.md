@@ -2440,6 +2440,31 @@ handlers:
 
 ---
 
+#### secret_file_hygiene_checker
+
+| Property       | Value                         |
+| -------------- | ----------------------------- |
+| **Config key** | `secret_file_hygiene_checker` |
+| **Priority**   | 62                            |
+| **Type**       | Advisory                      |
+| **Event**      | SessionStart                  |
+
+**Description:** Session-start half of the on-disk hygiene the `secret-meta` CLI already reports on demand for one path at a time (Plan 00272 Task 6.1). For every configured protected path (the effective `secret_file_guard` globs) that EXISTS on disk, advises — never blocks — when it is not gitignored, is git-tracked, or is group/world-readable. Uses `os.walk`, `git check-ignore`/`git ls-files` and `stat()` only; the file's contents are never opened.
+
+**Options:** none.
+
+**Config example:**
+
+```yaml
+handlers:
+  session_start:
+    secret_file_hygiene_checker:
+      enabled: true
+      priority: 62
+```
+
+---
+
 #### plan_qa_sweep
 
 | Property       | Value           |

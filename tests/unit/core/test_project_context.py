@@ -211,6 +211,26 @@ class TestProjectContextAccess:
         assert ProjectContext.git_repo_name() == "my-repo"
         assert ProjectContext.git_toplevel() == Path("/tmp/project")
 
+    def test_is_initialized_false_before_init(self) -> None:
+        assert ProjectContext.is_initialized() is False
+
+    def test_is_initialized_true_after_init(self, tmp_path: Path) -> None:
+        project_root = tmp_path / "project"
+        claude_dir = project_root / ".claude"
+        claude_dir.mkdir(parents=True)
+        config_path = claude_dir / "hooks-daemon.yaml"
+        config_path.write_text("version: 1.0\n")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="/tmp/project\n"),
+                MagicMock(returncode=0, stdout="https://github.com/org/my-repo.git\n"),
+                MagicMock(returncode=0, stdout="/tmp/project\n"),
+            ]
+            ProjectContext.initialize(config_path)
+
+        assert ProjectContext.is_initialized() is True
+
 
 class TestGitRepoNameParsing:
     """Test git remote URL parsing logic."""

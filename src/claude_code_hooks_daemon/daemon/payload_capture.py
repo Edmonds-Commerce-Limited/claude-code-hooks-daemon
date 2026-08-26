@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.secret_redaction import redact_structure
 
@@ -32,6 +33,39 @@ _SYSTEM_EVENT = "_system"
 
 # Subdirectory under the daemon untracked dir used when no explicit dir is set.
 _DEFAULT_SUBDIR = "payload-capture"
+
+# tool_input fields that may name a path, checked against the effective
+# protected-path globs (Plan 00272 Task 4-5). Mirrors the guard's own field
+# set so a residual-route read (one the guard's deny rule missed, or an
+# already-ALLOWed metadata/consumer exemption) never lands the protected
+# file's path -- let alone its content -- verbatim in this dogfooding
+# capture.
+_TOOL_INPUT_PATH_FIELDS: tuple[str, ...] = ("file_path", "notebook_path", "path")
+_TOOL_INPUT_KEY = "tool_input"
+_COMMAND_KEY = "command"
+
+
+def _touches_protected_path(hook_input: dict[str, Any], patterns: tuple[str, ...]) -> bool:
+    """True when ``hook_input`` names (or Bash-mentions) a protected path.
+
+    Deliberately conservative and cheap: reuses the SAME matching primitives
+    the guard itself uses (single source of truth), so this can never
+    disagree with what the guard would have denied. A false positive here
+    only means one MORE event is excluded from capture -- never a leak.
+    """
+    if not patterns:
+        return False
+    tool_input = hook_input.get(_TOOL_INPUT_KEY)
+    if not isinstance(tool_input, dict):
+        return False
+    for field in _TOOL_INPUT_PATH_FIELDS:
+        value = tool_input.get(field)
+        if isinstance(value, str) and value and sfm.path_is_protected(value, patterns):
+            return True
+    command = tool_input.get(_COMMAND_KEY)
+    if isinstance(command, str) and command:
+        return sfm.find_protected_mention(command, patterns) is not None
+    return False
 
 
 def resolve_capture_dir(configured_dir: str | None, untracked_dir: Path) -> Path:
@@ -65,6 +99,7 @@ def capture_payload(
     event: str,
     hook_input: dict[str, Any],
     secret_terms: tuple[str, ...] = (),
+    protected_patterns: tuple[str, ...] = (),
 ) -> Path | None:
     """Append ``hook_input`` as one JSON line to ``<capture_dir>/<event>.jsonl``.
 
@@ -81,10 +116,18 @@ def capture_payload(
             pasted into a Write/Edit payload can never survive into this
             dogfooding capture file. Empty (default) is a no-op, preserving
             prior behaviour for callers that do not pass it.
+        protected_patterns: The effective protected-path globs from the
+            guard's config (Plan 00272 Task 4-5). When ``hook_input`` names
+            or Bash-mentions a matching path, the WHOLE event is excluded
+            from capture (not written at all) rather than redacted — the
+            guard's own patterns tell us nothing about a file's CONTENT, so
+            there is nothing safe to write back for the matched event.
+            Empty (default) is a no-op, preserving prior behaviour.
 
     Returns:
-        The file written, or ``None`` when capture was disabled or the event was
-        skipped (``_system`` control channel, or not in the ``events`` allow-list).
+        The file written, or ``None`` when capture was disabled, the event was
+        skipped (``_system`` control channel, or not in the ``events``
+        allow-list), or the payload named a protected path.
 
     Raises:
         OSError: If the directory or file cannot be written. The caller decides
@@ -96,6 +139,8 @@ def capture_payload(
     if event == _SYSTEM_EVENT:
         return None
     if events and event not in events:
+        return None
+    if _touches_protected_path(hook_input, protected_patterns):
         return None
 
     payload = redact_structure(hook_input, secret_terms) if secret_terms else hook_input

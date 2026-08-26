@@ -236,3 +236,137 @@ class TestDirectoryContainsProtected:
             str(tmp_path), sfm.DEFAULT_PROTECTED_PATTERNS, max_entries=2
         )
         assert result is None
+
+
+class TestResolveConfiguredPatterns:
+    """Plan 00272 Task 4-5: the shared cross-handler pattern resolver."""
+
+    def setup_method(self) -> None:
+        sfm.reset_configured_patterns_cache()
+
+    def teardown_method(self) -> None:
+        sfm.reset_configured_patterns_cache()
+
+    def test_fails_open_to_defaults_when_uninitialised(self) -> None:
+        """No ProjectContext (unit test process) never returns an empty tuple."""
+        result = sfm.resolve_configured_patterns()
+        assert result == sfm.DEFAULT_PROTECTED_PATTERNS
+
+    def test_result_is_cached_across_calls(self) -> None:
+        first = sfm.resolve_configured_patterns()
+        second = sfm.resolve_configured_patterns()
+        assert first == second
+
+    def test_reset_clears_the_cache(self) -> None:
+        sfm.resolve_configured_patterns()
+        sfm.reset_configured_patterns_cache()
+        # No exception, and still resolves (fail-open) after reset.
+        assert sfm.resolve_configured_patterns() == sfm.DEFAULT_PROTECTED_PATTERNS
+
+    def test_failure_before_yaml_is_touched_does_not_raise_nameerror(self) -> None:
+        """``config_path()`` raising BEFORE the yaml import is ever reached
+        must still be caught -- ``yaml`` is a module-level import, so the
+        except tuple's ``yaml.YAMLError`` reference is always bound, even on
+        a failure that never gets near yaml parsing."""
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+        with (
+            patch.object(ProjectContext, "is_initialized", return_value=True),
+            patch.object(
+                ProjectContext, "config_path", side_effect=RuntimeError("not initialised")
+            ),
+        ):
+            result = sfm.resolve_configured_patterns()
+        assert result == sfm.DEFAULT_PROTECTED_PATTERNS
+
+    def test_widened_except_catches_malformed_yaml(self, tmp_path: Path) -> None:
+        """A malformed config file must fail OPEN to the shipped defaults.
+
+        ``Config.load`` calls ``yaml.safe_load`` directly and does not catch
+        its own parse errors -- the resolver's except clause must.
+        """
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+        config_path = tmp_path / "hooks-daemon.yaml"
+        config_path.write_text("handlers: [this is not: valid: yaml\n")
+
+        with (
+            patch.object(ProjectContext, "is_initialized", return_value=True),
+            patch.object(ProjectContext, "config_path", return_value=config_path),
+        ):
+            result = sfm.resolve_configured_patterns()
+        assert result == sfm.DEFAULT_PROTECTED_PATTERNS
+
+    def test_widened_except_catches_schema_invalid_config(self, tmp_path: Path) -> None:
+        """A schema-invalid config (pydantic ValidationError, a ValueError) fails open."""
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+        config_path = tmp_path / "hooks-daemon.yaml"
+        # `version` must match `^\\d+\\.\\d+$` -- this value fails schema validation.
+        config_path.write_text("version: not-a-version\n")
+
+        with (
+            patch.object(ProjectContext, "is_initialized", return_value=True),
+            patch.object(ProjectContext, "config_path", return_value=config_path),
+        ):
+            result = sfm.resolve_configured_patterns()
+        assert result == sfm.DEFAULT_PROTECTED_PATTERNS
+
+    def test_reads_a_real_config_with_mode_replace_and_custom_patterns(
+        self, tmp_path: Path
+    ) -> None:
+        """The resolver's try: block -- its only real job -- reads a live config."""
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+        config_path = tmp_path / "hooks-daemon.yaml"
+        config_path.write_text(
+            "version: '2.0'\n"
+            "handlers:\n"
+            "  pre_tool_use:\n"
+            "    secret_file_guard:\n"
+            "      options:\n"
+            "        mode: replace\n"
+            "        protected_paths:\n"
+            "          - '*.my-custom-secret-shape'\n"
+        )
+
+        with (
+            patch.object(ProjectContext, "is_initialized", return_value=True),
+            patch.object(ProjectContext, "config_path", return_value=config_path),
+        ):
+            result = sfm.resolve_configured_patterns()
+        assert result == ("*.my-custom-secret-shape",)
+
+    def test_equivalent_to_the_registry_injected_handler(self, tmp_path: Path) -> None:
+        """The resolver and the guard's own registry-injected options must agree.
+
+        Two routes reach the SAME effective pattern set: the resolver reads
+        the raw config dict directly; the handler receives its options via
+        the registry's setattr injection (``registry.py``'s
+        ``register_all``). This test proves they compute the identical
+        answer for the SAME `mode`/`protected_paths` pair, rather than just
+        asserting they can never disagree.
+        """
+        from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
+            SecretFileGuardHandler,
+        )
+
+        mode = "replace"
+        protected_paths = ["*.my-custom-secret-shape"]
+
+        via_resolver = sfm.resolve_protected_patterns(mode, protected_paths)
+
+        handler = SecretFileGuardHandler()
+        handler._mode = mode
+        handler._protected_paths = protected_paths
+        via_handler = handler._patterns()
+
+        assert via_resolver == via_handler == ("*.my-custom-secret-shape",)

@@ -545,6 +545,12 @@
       "reason": "Plan 00200 Task 5.4: path.stat() raising OSError for a missing secret-word-list file is cached via a documented sentinel (see docstring: 'A missing file is cached too... so repeated lookups for an absent file are a dict lookup, not a repeated stat()'). The feature is opt-in and inert until a project creates the file."
     },
     {
+      "file": "utils/secret_file_matching.py",
+      "function": "resolve_configured_patterns",
+      "rule": "log-and-continue",
+      "reason": "Plan 00272 Task 4-5: mirrors secret_redaction._resolve_active_path's sanctioned fail-open contract. A config-load failure here must still protect the SHIPPED DEFAULTS (the module-level fallback already set), never disable protection -- logged at debug, matching the sibling resolver."
+    },
+    {
       "file": "daemon/cli.py",
       "function": "cmd_start",
       "rule": "silent-fallback",

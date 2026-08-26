@@ -1,5 +1,6 @@
 """SessionStart event handlers."""
 
+from . import secret_file_hygiene_checker as _secret_file_hygiene_checker_module
 from .ccy_supervisor_integrity import CcySupervisorIntegrityHandler
 from .contract_staleness import ContractStalenessHandler
 from .git_filemode_checker import GitFilemodeCheckerHandler
@@ -13,6 +14,10 @@ from .skill_opportunity_detector import SkillOpportunityDetectorHandler
 from .suggest_statusline import SuggestStatusLineHandler
 from .version_check import VersionCheckHandler
 
+SecretFileHygieneCheckerHandler = (
+    _secret_file_hygiene_checker_module.SecretFileHygieneCheckerHandler
+)
+
 __all__ = [
     "CcySupervisorIntegrityHandler",
     "ContractStalenessHandler",
@@ -23,6 +28,7 @@ __all__ = [
     "OptimalConfigCheckerHandler",
     "PlanQaSweepHandler",
     "ProjectHandlerLoadCheckerHandler",
+    "SecretFileHygieneCheckerHandler",
     "SkillOpportunityDetectorHandler",
     "SuggestStatusLineHandler",
     "VersionCheckHandler",
