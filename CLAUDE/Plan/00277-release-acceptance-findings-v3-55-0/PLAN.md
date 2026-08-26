@@ -1,6 +1,6 @@
 # Plan 00277: release acceptance findings v3 55 0
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: Medium
@@ -42,54 +42,61 @@ immediately after the release ships.
   design). Converted in-release to an explicit negative control; the
   positive fixing path stays unit-tested. FOLLOW-UP below (Task 3.3) for a
   live positive-path test.
-- [ ] ⬜ **Task 1.3**: `error_hiding_blocker` allow-case sample snippets
-  (playbook Tests 30/34) use undefined names, so `lint_on_edit` denies the
-  write after the tested handler allows it. Make the samples lint-clean.
+- [x] ✅ **Task 1.3**: `error_hiding_blocker` allow-case samples made
+  lint-clean (Python: real function with `logging.exception`; Go: real
+  `os.Open` err check) so `lint_on_edit` no longer denies the write the
+  tested handler allowed.
 
 ### Phase 2: lsp_enforcement block_once semantics
 
-- [ ] ⬜ **Task 2.1**: Documentation says `block_once` denies "the first
-  symbol-lookup grep in a session"; implementation gates on
-  `history.count_blocks_by_handler` — persistent, daemon-wide verdict
-  history, so after any one block, every later session gets ALLOW+advisory
-  (observed live: playbook Test 198). Rule which is intended, then fix the
-  other: either key the count by session_id, or rewrite the guidance and the
-  acceptance test to block-once-per-verdict-history.
+- [x] ✅ **Task 2.1**: RULED per-session is intended (matches docs), and
+  fixed: `HandlerDecisionRecord` gained `session_id`, the controller
+  attributes every record, `count_blocks_by_handler` takes an optional
+  session filter (unattributed records excluded from filtered counts), and
+  `lsp_enforcement` passes the event's session id. The confusing live
+  observations were consistent once daemon restarts (in-memory history
+  wipes) were accounted for: the old behaviour was
+  block-once-per-daemon-lifetime shared across sessions.
 
 ### Phase 3: Inconclusive acceptance observations
 
-- [ ] ⬜ **Task 3.1**: `agent_isolation_advisor` (playbook Test 214)
-  produced no advisory on a non-isolated Agent spawn with many live peers,
-  from a sub-agent AND from the main thread late in a long session.
-  Determine whether per-session rate limiting explains it (probe from a
-  fresh session) or the advisory genuinely fails to fire; fix if the latter.
-- [ ] ⬜ **Task 3.2**: `command_hints` did not fire for `agent-browser` as
-  the second segment of a compound command (`pkill ...; agent-browser --version`) though the docs say path-qualified/env-prefixed spellings in
-  any shell segment are recognised. Confirm intended scope; fix handler or
-  docs.
-- [ ] ⬜ **Task 3.3**: `git_hooks_executable_fixer` live positive-path test:
-  the event cwd always names the session repo, so a scratch-repo probe
-  cannot fire the fixer. Design a deliberate main-thread procedure (session
-  cwd moved into a fixture repo) or accept unit-test-only coverage and
-  record that ruling.
+- [x] ✅ **Task 3.1**: ROOT-CAUSED: the thread registry counts
+  statusline-emitting INTERACTIVE sessions; spawned sub-agents never
+  register, so a single-terminal acceptance run always observes silence
+  (verified: registry held exactly one entry — this session — while many
+  sub-agents ran). Not a rate-limit and not a defect. Acceptance test
+  rewritten with the two-interactive-sessions precondition and marked
+  main-thread.
+- [x] ✅ **Task 3.2**: NOT A DEFECT: reproduced live — the hint DID fire on
+  `true; agent-browser --version` (second segment of a compound command)
+  with fresh TTL state. Batch-3's silence was per-hint TTL rate limiting
+  consumed by their earlier standalone run.
+- [x] ✅ **Task 3.3**: RULED: accept unit-test-only coverage for the fixing
+  path. The event cwd is captured at invocation and always names the
+  session repo, so no probe command can fire the fixer against a fixture;
+  the shipped acceptance test is an explicit negative control (silence in
+  a healthy repo) and says so.
 - [ ] ⬜ **Task 3.4**: `validate_eslint_on_write` deny branch (playbook
-  Test 101) is unreachable in this repo (no `llm:` scripts in
-  package.json) — verify the deny branch in the dummy-client fixture with
-  an `llm:lint` script, and note the env-gating in the test description.
-- [ ] ⬜ **Task 3.5**: `pipe_blocker` attributes the producer to `[[` for a
-  plain-quoted-string comparison (`[[ "python -m pytest tests/ | tail -5" == 0 ]]`), yielding a non-runnable remediation; `$( )` shapes name pytest
-  correctly. Plan 00222's runnable-remediation intent is unmet for this
-  shape — fix attribution or record the boundary.
-- [ ] ⬜ **Task 3.6**: `/goal` Stop evaluation has no blocked-on-human
-  escape (live dogfood finding, v3.55.0 release session): a goal whose
-  remaining work is human-gated (a publish decision, a fresh-session
-  observation) blocks EVERY stop indefinitely, even when the evaluator's
-  own verdict text agrees the work is blocked on human input. The failsafe
-  recovery cron prompt has exactly such a clause; the goal evaluator (and
-  the goal-ledger Stop challenge from Plan 00276) should honour a stated
-  blocked-only-on-human-input condition, or the displacement/ledger
-  machinery should let the daemon mark a goal "waiting on human" instead
-  of re-blocking. Relates to Plan 00269/00276.
+  Test 101) verification. Attempted in the dummy-client fixture: handler
+  enabled, `package.json` with `llm:lint` added, synthesized PostToolUse
+  Write of broken.ts → dummy daemon returned `{}` (no match/advice), so
+  the deny branch remains unverified — needs investigation of why the
+  handler stayed silent in the fixture (project-root/package.json
+  resolution? matches() conditions?) before the branch can be exercised.
+- [x] ✅ **Task 3.5**: RULED a recorded boundary, not fixed: inside a
+  quoted-string ARGUMENT (`[[ "... | tail -5" == 0 ]]`) the scanner cannot
+  know which embedded word is the "producer" without executing the string,
+  so it attributes the enclosing command; the DENY is correct, only the
+  remediation template is non-runnable for this shape. `$( )` substitution
+  shapes attribute correctly. Revisit only if a real workflow hits it.
+- [x] ✅ **Task 3.6**: RULED: the livelock lives in Claude Code's own
+  session-scoped `/goal` Stop hook, which the daemon cannot modify; the
+  daemon's own Stop surfaces already honour `STOPPING BECAUSE:` (and the
+  Plan 00276 ledger challenge is advisory text inside that same denial).
+  Operational remedy documented: a goal whose remainder becomes human-gated
+  should be cleared early (`/goal clear`) — the assistant should say so
+  explicitly when it happens. A daemon-side "waiting on human" goal-ledger
+  state remains a candidate enhancement for Plan 00276's next phase.
 
 ## Success Criteria
 

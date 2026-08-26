@@ -33,6 +33,8 @@ class HandlerDecisionRecord:
         tool_name: Tool involved in the event
         reason: Optional reason for the decision
         timestamp: Unix timestamp when decision was made
+        session_id: Claude Code session the decision belonged to, or None
+            when the event carried no session attribution
     """
 
     handler_id: str
@@ -41,6 +43,7 @@ class HandlerDecisionRecord:
     tool_name: str
     reason: str | None
     timestamp: float
+    session_id: str | None = None
 
 
 class HandlerHistory:
@@ -78,6 +81,7 @@ class HandlerHistory:
         decision: str,
         tool_name: str,
         reason: str | None = None,
+        session_id: str | None = None,
     ) -> None:
         """Record a handler decision.
 
@@ -87,6 +91,7 @@ class HandlerHistory:
             decision: Decision made (allow, deny, ask)
             tool_name: Tool involved in the event
             reason: Optional reason for the decision
+            session_id: Session the event belonged to (None when unattributed)
         """
         record = HandlerDecisionRecord(
             handler_id=handler_id,
@@ -95,6 +100,7 @@ class HandlerHistory:
             tool_name=tool_name,
             reason=reason,
             timestamp=time.time(),
+            session_id=session_id,
         )
         self._records.append(record)
         self._total_count += 1
@@ -131,17 +137,28 @@ class HandlerHistory:
         """
         return sum(1 for r in self._records if r.decision in ("deny", "ask"))
 
-    def count_blocks_by_handler(self, handler_id: str) -> int:
+    def count_blocks_by_handler(self, handler_id: str, session_id: str | None = None) -> int:
         """Count block decisions (deny + ask) from a specific handler.
 
         Args:
             handler_id: Handler ID to filter by
+            session_id: When given, count only decisions attributed to that
+                session. The daemon is shared across sessions (Plan 00127),
+                so an unfiltered count is daemon-lifetime-wide; per-session
+                behaviour (e.g. lsp_enforcement's block_once) must filter.
+                Records with NO session attribution are excluded from a
+                filtered count — counting them for every session would
+                reproduce the shared-consumption bug (Plan 00277 Task 2.1).
 
         Returns:
             Number of deny and ask decisions from the specified handler
         """
         return sum(
-            1 for r in self._records if r.handler_id == handler_id and r.decision in ("deny", "ask")
+            1
+            for r in self._records
+            if r.handler_id == handler_id
+            and r.decision in ("deny", "ask")
+            and (session_id is None or r.session_id == session_id)
         )
 
     def was_blocked(self, tool_name: str) -> bool:

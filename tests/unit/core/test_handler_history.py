@@ -319,6 +319,35 @@ class TestHandlerHistoryCountBlocksByHandler:
         )
         assert history.count_blocks_by_handler("pipe-blocker") == 1
 
+    def test_session_filter_counts_only_matching_session(self, history: HandlerHistory) -> None:
+        """Plan 00277 Task 2.1: block_once must be per-SESSION, not
+        per-daemon-lifetime — a block recorded for session A must not
+        consume session B's one-time deny."""
+        history.record(
+            handler_id="lsp-enforcement",
+            event_type="PreToolUse",
+            decision="deny",
+            tool_name=ToolName.BASH,
+            session_id="session-a",
+        )
+        assert history.count_blocks_by_handler("lsp-enforcement", session_id="session-a") == 1
+        assert history.count_blocks_by_handler("lsp-enforcement", session_id="session-b") == 0
+        # Unfiltered query keeps the old daemon-wide semantics.
+        assert history.count_blocks_by_handler("lsp-enforcement") == 1
+
+    def test_session_filter_excludes_unknown_session_records(self, history: HandlerHistory) -> None:
+        """A record with no session attribution must not count against any
+        specific session's filter — counting it for every session would
+        reproduce the shared-consumption bug."""
+        history.record(
+            handler_id="lsp-enforcement",
+            event_type="PreToolUse",
+            decision="deny",
+            tool_name=ToolName.BASH,
+        )
+        assert history.count_blocks_by_handler("lsp-enforcement", session_id="session-a") == 0
+        assert history.count_blocks_by_handler("lsp-enforcement") == 1
+
     def test_ignores_allow_decisions(self, history: HandlerHistory) -> None:
         """count_blocks_by_handler() should not count allow decisions."""
         history.record(

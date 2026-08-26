@@ -754,6 +754,7 @@ class DaemonController:
                     decision=result.result.decision.value,
                     tool_name=tool_name,
                     reason=result.result.reason,
+                    session_id=event.hook_input.session_id,
                 )
 
             # Persist the verdict log (Plan 00209): every matched handler's

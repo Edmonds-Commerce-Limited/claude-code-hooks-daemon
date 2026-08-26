@@ -72,8 +72,9 @@ class GoErrorHidingStrategy:
                 command=(
                     "Write(\n"
                     "  file_path='/tmp/acceptance-test-error-hiding/go/good.go',\n"
-                    '  content=\'package main\\nimport "fmt"\\n'
-                    "func main() {\\n  if err != nil { fmt.Println(err) }\\n}'\n"
+                    '  content=\'package main\\nimport ("fmt"; "os")\\n'
+                    'func main() {\\n  if _, err := os.Open(\\"f\\"); err != nil '
+                    "{ fmt.Println(err) }\\n}'\n"
                     ")"
                 ),
                 description=("Allows Go file with proper error handling via Write tool"),

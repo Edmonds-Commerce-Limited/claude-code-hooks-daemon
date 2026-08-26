@@ -150,17 +150,29 @@ class AgentIsolationAdvisorHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="Agent spawned without isolation while peers are live",
                 command=(
-                    "With more than one agent thread active, use the Agent tool "
-                    "without an isolation setting"
+                    "With TWO OR MORE interactive Claude Code sessions open on "
+                    "this checkout (the thread registry counts statusline-emitting "
+                    "sessions, NOT spawned sub-agents), use the Agent tool without "
+                    "an isolation setting"
                 ),
-                description="Advises worktree isolation when agents share a checkout",
+                description=(
+                    "Advises worktree isolation when agents share a checkout. "
+                    "PRECONDITION (v3.55.0 Test 214 ruling): 'live threads' are "
+                    "statusline-emitting interactive sessions in the thread "
+                    "registry — spawning sub-agents does NOT register peers, so "
+                    "a single-terminal acceptance run observes silence. Needs a "
+                    "second attended session; otherwise verify via unit tests."
+                ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"worktree", r"CONCURRENT AGENTS"],
-                safety_notes="Advisory only — never blocks. Silent for a single agent.",
+                safety_notes=(
+                    "Advisory only — never blocks. Silent below two registered "
+                    "interactive threads."
+                ),
                 test_type=TestType.ADVISORY,
                 requires_event="PreToolUse with Task tool",
                 recommended_model=RecommendedModel.SONNET,
-                requires_main_thread=False,
+                requires_main_thread=True,
             ),
             AcceptanceTest(
                 title="Agent spawned WITH worktree isolation (near-miss allow)",

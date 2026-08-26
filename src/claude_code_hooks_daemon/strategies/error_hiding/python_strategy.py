@@ -87,8 +87,10 @@ class PythonErrorHidingStrategy:
                 command=(
                     "Write(\n"
                     "  file_path='/tmp/acceptance-test-error-hiding/python/good.py',\n"
-                    "  content='try:\\n    do_something()\\n"
-                    "except ValueError as e:\\n    logger.error(e)\\n    raise\\n'\n"
+                    "  content='import logging\\n"
+                    "def run(task):\\n    try:\\n        task()\\n"
+                    '    except ValueError:\\n        logging.exception(\\"task failed\\")\\n'
+                    "        raise\\n'\n"
                     ")"
                 ),
                 description=("Allows Python file with proper exception handling via Write tool"),

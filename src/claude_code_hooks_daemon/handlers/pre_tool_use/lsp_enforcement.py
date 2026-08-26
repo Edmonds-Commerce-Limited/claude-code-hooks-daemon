@@ -181,8 +181,11 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
         """Check if LSP is configured via environment variable."""
         return bool(os.environ.get(_LSP_ENV_VAR))
 
-    def _get_block_count(self) -> int:
-        """Get number of previous blocks by this handler.
+    def _get_block_count(self, session_id: str | None = None) -> int:
+        """Get number of previous blocks by this handler in ``session_id``.
+
+        A ``None`` session falls back to the daemon-wide count (an
+        unattributed event cannot be scoped better than that).
 
         Returns 0 when the data layer is unavailable (RuntimeError raised by
         ProjectContext resolution). The failure is logged rather than silently
@@ -191,7 +194,9 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
         block_once gate to permanently-allow.
         """
         try:
-            return get_data_layer().history.count_blocks_by_handler(self.name)
+            return get_data_layer().history.count_blocks_by_handler(
+                self.name, session_id=session_id
+            )
         except RuntimeError as exc:
             logger.warning("LSP enforcement could not read block history: %s", exc)
             return 0
@@ -379,8 +384,11 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
         if mode == LspEnforcementMode.STRICT:
             return GatingResult(decision=Decision.DENY, reason=reason)
 
-        # block_once: deny first time, allow subsequent
-        block_count = self._get_block_count()
+        # block_once: deny first time IN THIS SESSION, allow subsequent.
+        # The daemon is shared across sessions (Plan 00127), so the count
+        # must be session-scoped or one session's block consumes every
+        # other session's one-time deny (Plan 00277 Task 2.1).
+        block_count = self._get_block_count(hook_input.get(HookInputField.SESSION_ID))
         if block_count == 0:
             return GatingResult(decision=Decision.DENY, reason=reason)
         return GatingResult(decision=Decision.ALLOW, context=[reason])
