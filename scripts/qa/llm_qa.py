@@ -323,6 +323,13 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="hook_contract.json",
         jq_hint="jq '.violations[] | {rule, event, subject, message}'",
     ),
+    # Diffs the daemon's top-level hook_input READ surface against the vendored
+    # per-event input_examples (Plan 00273, superset rule). Network-free.
+    "input_contract": ToolConfig(
+        command=_python("check_input_contract.py", "--json"),
+        json_file="input_contract.json",
+        jq_hint="jq '.violations[] | {rule, event, subject, message}'",
+    ),
     # smoke_test MUST stay last: it probes the live daemon, so it belongs
     # after every static check has had its say. Pinned by
     # test_smoke_test_is_last_in_registry -- three tools were appended below
@@ -541,6 +548,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "semgrep": _summarize_semgrep,
     "project_handlers": _summarize_project_handlers,
     "hook_contract": _summarize_hook_contract,
+    "input_contract": _summarize_hook_contract,
 }
 
 

@@ -53,9 +53,25 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
+
+try:
+    import contract_allowlist as _shared_allowlist
+except ModuleNotFoundError:
+    # Loaded by file path (e.g. importlib in tests): prime this script's own
+    # directory so the shared sibling module resolves, then import for real.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import contract_allowlist as _shared_allowlist
+
+# Shared allowlist protocol (contract_allowlist.py, Plan 00273) — re-exported
+# here so existing callers/tests keep addressing them via this module.
+Finding = _shared_allowlist.Finding
+Report = _shared_allowlist.Report
+apply_allowlist = _shared_allowlist.apply_allowlist
+load_allowlist_file = _shared_allowlist.load_allowlist_file
+RULE_STALE_ALLOWLIST: Final[str] = _shared_allowlist.RULE_STALE_ALLOWLIST
+RULE_MALFORMED_ALLOWLIST: Final[str] = _shared_allowlist.RULE_MALFORMED_ALLOWLIST
 
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent.parent.parent
 _SRC_DIR_NAME: Final[str] = "src"
@@ -108,8 +124,8 @@ RULE_UNEXPRESSED: Final[str] = "unexpressed-capability"
 RULE_UNEXPRESSED_ENUM: Final[str] = "unexpressed-enum-value"
 RULE_UNEXPRESSED_UNIVERSAL: Final[str] = "unexpressed-universal-fields"
 RULE_DEAD_LETTER: Final[str] = "dead-letter-field"
-RULE_STALE_ALLOWLIST: Final[str] = "stale-allowlist-entry"
-RULE_MALFORMED_ALLOWLIST: Final[str] = "malformed-allowlist-entry"
+# RULE_STALE_ALLOWLIST / RULE_MALFORMED_ALLOWLIST are imported from
+# contract_allowlist (shared with check_input_contract.py).
 
 #: Schema registry keys that are daemon-internal, not hooks events (statusline
 #: is a separate Claude Code feature with its own contract — audit, cosmetic).
@@ -122,52 +138,6 @@ _HOOK_EVENT_NAME_KEY: Final[str] = "hookEventName"
 _ENUM_KEY: Final[str] = "enum"
 _FIELDS_KEY: Final[str] = "fields"
 _PROPERTIES_KEY: Final[str] = "properties"
-
-
-@dataclass
-class Finding:
-    """One contract drift, identified stably for allowlisting."""
-
-    rule: str
-    event: str
-    subject: str
-    message: str
-
-    @property
-    def finding_id(self) -> str:
-        return f"{self.rule}:{self.event}:{self.subject}"
-
-    def to_dict(self) -> dict[str, str]:
-        return {
-            "id": self.finding_id,
-            "rule": self.rule,
-            "event": self.event,
-            "subject": self.subject,
-            "message": self.message,
-        }
-
-
-@dataclass
-class Report:
-    """Full check result: live violations, allowlisted gaps, stale entries."""
-
-    violations: list[Finding] = field(default_factory=list)
-    allowlisted: list[dict[str, Any]] = field(default_factory=list)
-
-    @property
-    def passed(self) -> bool:
-        return not self.violations
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "summary": {
-                "passed": self.passed,
-                "total_violations": len(self.violations),
-                "allowlisted": len(self.allowlisted),
-            },
-            "violations": [v.to_dict() for v in self.violations],
-            "allowlisted": self.allowlisted,
-        }
 
 
 def load_contracts(contracts_dir: Path) -> dict[str, dict[str, Any]]:
@@ -190,14 +160,7 @@ def load_contracts(contracts_dir: Path) -> dict[str, dict[str, Any]]:
 
 def load_allowlist(contracts_dir: Path) -> list[dict[str, Any]]:
     """Load ALLOWLIST.yaml entries; an absent file is an empty allowlist."""
-    path = contracts_dir / _ALLOWLIST_FILENAME
-    if not path.is_file():
-        return []
-    import yaml
-
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    entries = data.get("entries", [])
-    return list(entries) if isinstance(entries, list) else []
+    return load_allowlist_file(contracts_dir / _ALLOWLIST_FILENAME)
 
 
 def _is_permissive(schema: dict[str, Any]) -> bool:
@@ -523,56 +486,6 @@ def check_catalogue(contracts: dict[str, dict[str, Any]]) -> list[Finding]:
         for name in sorted(contracts)
         if name not in known
     ]
-
-
-def apply_allowlist(
-    findings: list[Finding], entries: list[dict[str, Any]]
-) -> tuple[list[Finding], list[dict[str, Any]], list[Finding]]:
-    """Split findings into (remaining, allowlisted) and validate the allowlist.
-
-    A stale entry (no matching finding) and a malformed entry (missing reason
-    or link) are themselves violations: a stale allowlist rots exactly like a
-    stale schema (Plan 00271 Decision 2).
-    """
-    by_id = {f.finding_id: f for f in findings}
-    remaining = dict(by_id)
-    allowlisted: list[dict[str, Any]] = []
-    problems: list[Finding] = []
-
-    for entry in entries:
-        entry_id = str(entry.get("id", ""))
-        reason = entry.get("reason")
-        link = entry.get("link")
-        if not entry_id or not reason or not link:
-            problems.append(
-                Finding(
-                    rule=RULE_MALFORMED_ALLOWLIST,
-                    event="-",
-                    subject=entry_id or "(missing id)",
-                    message=(
-                        "allowlist entry must carry id, reason and a linked "
-                        f"plan/task; got: {entry}"
-                    ),
-                )
-            )
-            continue
-        matched = remaining.pop(entry_id, None)
-        if matched is None:
-            problems.append(
-                Finding(
-                    rule=RULE_STALE_ALLOWLIST,
-                    event="-",
-                    subject=entry_id,
-                    message=(
-                        f"allowlist entry '{entry_id}' matches no current finding — "
-                        f"the drift it recorded no longer exists; delete the entry"
-                    ),
-                )
-            )
-            continue
-        allowlisted.append({**matched.to_dict(), "reason": reason, "link": link})
-
-    return list(remaining.values()), allowlisted, problems
 
 
 def _prime_sys_path() -> None:

@@ -47,6 +47,18 @@ VERBATIM in the raw markdown before it is recorded.
    finding into either a fix task (preferred) or an `ALLOWLIST.yaml` entry
    carrying a reason and a linked plan/task. Stale allowlist entries FAIL the
    check — delete entries whose drift no longer exists.
+7. Re-triage the INPUT side (Plan 00273): run
+   `./scripts/qa/llm_qa.py input_contract`, and diff the refreshed
+   `input_example`s against the daemon's current read surface
+   (`scripts/qa/check_input_contract.py --inventory`). Triage every new
+   finding into a fix task (preferred) or an `INPUT-ALLOWLIST.yaml` entry with
+   a reason and linked plan/task, and triage any NEWLY documented input field
+   into consumed vs recorded-gap (append the verdict to
+   `CLAUDE/Plan/00273-hook-input-payload-validation/INVENTORY.md` or its
+   successor). Note the superset rule cannot see a rename where BOTH the old
+   and new names appear across examples — this manual diff is the guard for
+   that case. Without this step the input half rots exactly as the output
+   half did.
 
 ## Contract JSON shape
 

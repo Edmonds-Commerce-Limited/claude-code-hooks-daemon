@@ -1,6 +1,6 @@
 # Plan 00273: Hook Input Payload Validation
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: Medium
@@ -75,45 +75,46 @@ drift as an advisory rather than a block (inputs must stay fail-open).
 
 ### Phase 1: Read-surface inventory and static guard
 
-- [ ] ⬜ **Task 1.1**: Inventory the top-level input fields the daemon reads
+- [x] ✅ **Task 1.1**: Inventory the top-level input fields the daemon reads
   per event (AST scan or declaration table) across
   `src/claude_code_hooks_daemon/handlers/` AND `src/claude_code_hooks_daemon/utils/`
   (`session_helpers.py`, `stop_hook_helpers.py`, `permission_mode.py` read
   `hook_input` on handlers' behalf). Exclude StatusLine and pseudo-event
   (`nitpick`) reads by construction. Record nested `tool_input` reads as a
   known-gap appendix, not as checkable entries.
-- [ ] ⬜ **Task 1.2**: TDD a QA check applying Technical Decision 1's
+- [x] ✅ **Task 1.2**: TDD a QA check applying Technical Decision 1's
   superset rule: flag only a field the daemon reads that appears in NO
   vendored `input_example` for that event; never flag absence. Wire into
   `run_all.sh` + `llm_qa.py`; keep the checker primitive reusable by
   `validate-project-handlers` later (see Non-Goals).
-- [ ] ⬜ **Task 1.3**: Triage the newly documented input fields into consumed
+- [x] ✅ **Task 1.3**: Triage the newly documented input fields into consumed
   vs recorded-gap: `prompt_id`, `agent_id`/`agent_type`,
   `last_assistant_message`, `permission_suggestions`; `effort` is already
   consumed by StatusLine, so its triage is "already consumed, different
   surface".
-- [ ] ⬜ **Task 1.4**: Add an input-field re-triage step to
+- [x] ✅ **Task 1.4**: Add an input-field re-triage step to
   `docs/guides/HOOK-CONTRACT-REFRESH.md` so refreshed examples are diffed
   against the Task 1.1 inventory — without it the input half rots exactly as
   the output half did.
 
 ### Phase 2: Runtime advisory (conditional)
 
-- [ ] ⬜ **Task 2.1**: Assess whether Task 1.2's static check leaves
+- [x] ✅ **Task 2.1**: Assess whether Task 1.2's static check leaves
   observable residue (drift only visible on live dispatches). Record the
   go/no-go decision with reasoning in this plan's `DECISIONS.md`. If no-go,
-  Phase 2 ends here.
-- [ ] ⬜ **Task 2.2**: If go: TDD the runtime missing-field detector —
+  Phase 2 ends here. — **Decision: NO-GO** (see `DECISIONS.md`); Tasks
+  2.2–2.4 are not executed.
+- [ ] ❌ **Task 2.2**: If go: TDD the runtime missing-field detector —
   fail-open, rate-limited, and inside a performance budget: per-dispatch
   overhead measured and kept under 5% of the ~1.8 ms daemon-side dispatch
   time (~0.09 ms), or sampled (first dispatch per event type per session) if
   full checking exceeds it. Include the measurement step in the task's QA.
-- [ ] ⬜ **Task 2.3**: If go: delivery surface — most events cannot carry
+- [ ] ❌ **Task 2.3**: If go: delivery surface — most events cannot carry
   `additionalContext`, and drift is typically detected on one that cannot
   advise. Record detections to the verdict log (`docs/guides/VERDICT_LOG.md`
   schema) at detection time and surface a per-session summary via a
   SessionStart advisory.
-- [ ] ⬜ **Task 2.4**: If go: ship the config option with a
+- [ ] ❌ **Task 2.4**: If go: ship the config option with a
   `CLAUDE/UPGRADES/UNRELEASED/config-changes/` manifest entry, a
   `get_claude_md()` verdict, and `get_acceptance_tests()` consideration;
   verify daemon restart (`bin/hooks-daemon restart` → RUNNING) per
@@ -190,13 +191,13 @@ surviving channel delivers (Tasks 3.1–3.2).
 
 ## Success Criteria
 
-- [ ] A unit test mutates a vendored `input_example` (renames a field the
+- [x] A unit test mutates a vendored `input_example` (renames a field the
   daemon reads) and asserts the Task 1.2 checker reports it.
-- [ ] The checker runs in `llm_qa.py all` / `run_all.sh` and is green on the
+- [x] The checker runs in `llm_qa.py all` / `run_all.sh` and is green on the
   current tree.
-- [ ] `docs/guides/HOOK-CONTRACT-REFRESH.md` contains the input re-triage
+- [x] `docs/guides/HOOK-CONTRACT-REFRESH.md` contains the input re-triage
   step.
-- [ ] Phase 2 go/no-go decision recorded in `DECISIONS.md`; if go, the
+- [x] Phase 2 go/no-go decision recorded in `DECISIONS.md`; if go, the
   advisory's overhead measurement is on record and within budget, and no
   blocking behaviour exists on the dispatch path.
 - [ ] Phase 3: sentinel evidence recorded in JOURNAL/; redundant channels
