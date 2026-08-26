@@ -1,0 +1,27 @@
+version: "UNRELEASED"
+date: "UNRELEASED"
+breaking: false
+config_changes:
+  added:
+    - key: handlers.session_start.secret_file_hygiene_checker
+      recommended: true
+      dormant: false
+      description: >-
+        NEW SessionStart advisory handler (Plan 00272 Task 6.1), ships
+        enabled. For every path matching the effective secret_file_guard
+        globs that exists on disk, advises (never blocks) when it is not
+        gitignored, is git-tracked, or is group/world-readable (chmod 600
+        remediation). This is the session-start half of the
+        permissions/ownership hygiene the secret-meta CLI already reports on
+        demand for a single path. Files are enumerated via git ls-files
+        (tracked, untracked-visible, untracked-ignored -- three cheap index
+        reads, no filesystem walk); outside a git repository (or when git is
+        unavailable) gitignore/tracked checks are skipped and only
+        permissions are checked via a bounded fallback walk, which reports
+        explicitly if its file-count bound is hit rather than presenting a
+        truncated scan as a clean one. Content is never read.
+      migration_note: >-
+        On by default; no action needed to adopt. If it advises on a file you
+        know is safe, fix the listed issue (gitignore it, untrack it, or
+        chmod 600 it) -- there is no per-finding suppression, matching
+        secret_file_guard's own no-escape-hatch doctrine for protected paths.
