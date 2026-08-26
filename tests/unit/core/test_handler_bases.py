@@ -68,7 +68,12 @@ _SUFFIX = "HandlerBase"
 
 
 def _wired_event_metas() -> list[EventIDMeta]:
-    return [meta for meta in vars(EventID).values() if isinstance(meta, EventIDMeta)]
+    # WIRED only, matching the name: an unwired catalogued event (DirectoryAdded,
+    # Plan 00271 item 8) has no response schema yet, so result_type_for_event
+    # correctly refuses to choose a tier for it.
+    return [
+        meta for meta in vars(EventID).values() if isinstance(meta, EventIDMeta) and meta.wired
+    ]
 
 
 def _schema_key(meta: EventIDMeta) -> str:

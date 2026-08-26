@@ -311,6 +311,19 @@ class EventID:
         category="session",
     )
 
+    DIRECTORY_ADDED = EventIDMeta(
+        enum_value="DIRECTORY_ADDED",
+        config_key="directory_added",
+        bash_key="directory-added",
+        json_key="DirectoryAdded",
+        can_block=False,
+        category="session",
+        # Documented (fires after /add-dir or an SDK register_repo_root) but
+        # not yet wired end-to-end; tracked in EXPECTED_UNWIRED per this
+        # file's tracked-gap rule (Plan 00271 audit item 8).
+        wired=False,
+    )
+
     FILE_CHANGED = EventIDMeta(
         enum_value="FILE_CHANGED",
         config_key="file_changed",
@@ -434,6 +447,7 @@ EventKey = Literal[
     "instructions_loaded",
     "config_change",
     "cwd_changed",
+    "directory_added",
     "file_changed",
     "worktree_create",
     "worktree_remove",

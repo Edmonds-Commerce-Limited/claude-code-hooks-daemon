@@ -147,6 +147,7 @@ SubagentStartHandlerBase = AdvisoryHandler
 StopFailureHandlerBase = AdvisoryHandler
 InstructionsLoadedHandlerBase = AdvisoryHandler
 CwdChangedHandlerBase = AdvisoryHandler
+DirectoryAddedHandlerBase = AdvisoryHandler
 FileChangedHandlerBase = AdvisoryHandler
 ElicitationHandlerBase = AdvisoryHandler
 ElicitationResultHandlerBase = AdvisoryHandler
