@@ -397,6 +397,17 @@ handlers:
       enabled: true      # Silent unless installed Claude Code > META.json last_audited_claude_code_version
       priority: 60
 
+    skill_opportunity_detector:  # TTL-gated advisory: run `bin/hooks-daemon skill-scan` (Plan 00274)
+      enabled: false             # Opt-in: the scan reads this machine's session transcripts
+      priority: 61
+      options:
+        check_interval_days: 7       # Advisory cadence floor; never advises more often
+        transcript_window_days: 14   # Only transcript files modified inside this window are read
+        model: haiku                 # Passed to headless `claude -p --model` (CLI auth only, v1)
+        max_prompts: 100             # Digest cluster cap (bounds model input tokens)
+        extra_exclude_patterns: []   # Additional content-level noise markers, additive
+        # transcript_dir: /path/override   # Test/unusual-layout override of ~/.claude/projects/<slug>
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     compaction_signal:  # Drops <session>.compacting for the PTY supervisor (opt-in)

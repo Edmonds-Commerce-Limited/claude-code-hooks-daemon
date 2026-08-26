@@ -9,6 +9,7 @@ from .hook_registration_checker import HookRegistrationCheckerHandler
 from .optimal_config_checker import OptimalConfigCheckerHandler
 from .plan_qa_sweep import PlanQaSweepHandler
 from .project_handler_load_checker import ProjectHandlerLoadCheckerHandler
+from .skill_opportunity_detector import SkillOpportunityDetectorHandler
 from .suggest_statusline import SuggestStatusLineHandler
 from .version_check import VersionCheckHandler
 
@@ -22,6 +23,7 @@ __all__ = [
     "OptimalConfigCheckerHandler",
     "PlanQaSweepHandler",
     "ProjectHandlerLoadCheckerHandler",
+    "SkillOpportunityDetectorHandler",
     "SuggestStatusLineHandler",
     "VersionCheckHandler",
 ]

@@ -2288,6 +2288,43 @@ handlers:
 
 ---
 
+#### skill_opportunity_detector
+
+| Property       | Value                        |
+| -------------- | ---------------------------- |
+| **Config key** | `skill_opportunity_detector` |
+| **Priority**   | 61                           |
+| **Type**       | Advisory                     |
+| **Event**      | SessionStart                 |
+
+**Description:** TTL-gated advisory that says when a skill-opportunity scan is due and points at the `bin/hooks-daemon skill-scan` CLI (Plan 00274). The handler itself does file-stat work only — the pipeline (transcript extraction, clustering, ONE bounded redacted model call via headless `claude -p`, report to `untracked/reports/YYYY-MM-DD-skill-opportunities.md`) lives entirely in the CLI, outside every hook path. Report-only: a skill is never auto-created. Ships **disabled** — enabling it is the project's explicit opt-in to transcript mining. The CLI works with the handler disabled (a manual run is consent by definition); `enabled` gates only the advisory. Runs on new sessions only; a corrupt or missing state file counts as "scan due"; a recent failed attempt quietens the advisory for a day so an offline box is not nagged every session.
+
+**Options:**
+
+| Option                   | Default  | Description                                                           |
+| ------------------------ | -------- | --------------------------------------------------------------------- |
+| `check_interval_days`    | `7`      | Advisory cadence floor; never advises more often                      |
+| `transcript_window_days` | `14`     | Only transcript files modified inside this window are read            |
+| `model`                  | `haiku`  | Passed to headless `claude -p --model` (CLI auth only in v1)          |
+| `max_prompts`            | `100`    | Digest cluster cap — bounds model input tokens regardless of volume   |
+| `extra_exclude_patterns` | `[]`     | Additional content-level noise markers, additive to the built-in list |
+| `transcript_dir`         | *(none)* | Override of `~/.claude/projects/<slug>` for tests or unusual layouts  |
+
+**Config example:**
+
+```yaml
+handlers:
+  session_start:
+    skill_opportunity_detector:
+      enabled: true
+      priority: 61
+      options:
+        check_interval_days: 7
+        transcript_window_days: 14
+```
+
+---
+
 #### plan_qa_sweep
 
 | Property       | Value           |

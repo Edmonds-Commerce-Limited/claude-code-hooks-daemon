@@ -3,6 +3,40 @@ date: "UNRELEASED"
 breaking: false
 config_changes:
   added:
+    - key: handlers.session_start.skill_opportunity_detector
+      recommended: true
+      # dormant: ships enabled: false — the scan reads this machine's session
+      # transcripts, so enabling it is an explicit per-project opt-in.
+      dormant: true
+      description: >-
+        NEW SessionStart advisory handler (Plan 00274), ships DISABLED. When a
+        project opts in, at most once per check_interval_days (default 7) a
+        new session carries an advisory that a skill-opportunity scan is due,
+        pointing at the new `bin/hooks-daemon skill-scan` CLI. The CLI mines
+        the machine's Claude Code session transcripts for repeated workloads
+        and recurring points of confusion, condenses them deterministically
+        (two-layer noise filter, token-set Jaccard clustering, normalisation
+        placeholders, secret-word-list redaction, hard digest caps), sends
+        ONE bounded model call via headless `claude -p --model haiku`
+        (CLI auth only in v1 — no API key), and writes a report of
+        skill-creation suggestions to
+        untracked/reports/YYYY-MM-DD-skill-opportunities.md. Report-only by
+        design: a skill is never auto-created, and the model call lives in
+        the CLI, outside every hook path. Every failure (no CLI, no auth,
+        offline, timeout, garbage output) is fail-open and retried later.
+        `--dry-run` prints exactly what would be sent to the model — the
+        privacy audit view.
+      migration_note: >-
+        Recommended for development-heavy projects where the same requests
+        and re-explanations recur across sessions — that buried evidence is
+        exactly what the scan surfaces. Enabling is an explicit opt-in to
+        transcript mining: only extracted HUMAN prompt text is ever read
+        (never tool results or assistant output), everything leaving the
+        machine is normalised, clustered, truncated and secret-redacted, and
+        reports live in git-ignored untracked/reports/. Note redaction is
+        list-based and cannot catch unlisted secrets. The CLI also runs with
+        the handler disabled (a manual `skill-scan --force` is consent by
+        definition); `enabled` gates only the SessionStart advisory.
     - key: handlers.pre_tool_use.artifact_publish_blocker
       recommended: true
       dormant: false

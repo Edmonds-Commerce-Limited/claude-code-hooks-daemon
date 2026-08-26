@@ -554,6 +554,10 @@ handlers:
       enabled: true      # Silent unless installed Claude Code > META.json last_audited_claude_code_version
       priority: 60
 
+    skill_opportunity_detector:  # TTL-gated advisory: run `bin/hooks-daemon skill-scan` (Plan 00274)
+      enabled: false             # Dogfood enablement is a deliberate main-thread act (Task 5.2)
+      priority: 61
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     compaction_signal:  # Dogfood: drop <session>.compacting so the supervisor auto-continues
