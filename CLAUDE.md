@@ -1872,6 +1872,8 @@ PostToolUse advisory (never blocks; ships disabled). When a `PLAN.md` Write/Edit
 
 **An injected goal is machine-generated** — it always opens with the machine-origin marker and a 'NOT human authorisation' clause, and can never satisfy any human-gated rule (release publishing, artefact publishing, unproven branch deletion).
 
+**Concurrent plans are tracked in a goal ledger** (Plan 00276): the /goal slot holds ONE condition (last writer wins), so every emission is recorded in `goal-ledger.json` under the daemon untracked dir. Emitting a goal while another ledgered plan is still In Progress injects a displacement advisory naming that plan, and the Stop hook challenges unexplained stops on behalf of EVERY still-live ledgered plan. Entries retire when their plan reaches a terminal status or is archived.
+
 **Configure** via `handlers.post_tool_use.goal_injection.options`: `mode: additive` (default) merges your `lines` (`{id, text, enabled}`) onto the built-in set — a matching `id` overrides in place; `mode: replace` uses only your lines. The fixed header marker line is never overridable or removable. Placeholders: `{plan_number}`, `{plan_title}`, `{plan_path}` (closed set — an unknown token skips the line). Optional authorisation lines (`subagents-encouraged`, `qa-review-subagents`) ship disabled; their vetted text points at `standing_authorisations` rather than asserting fresh consent — enable them only as a deliberate repository-owner act.
 
 <!-- handler: ccy-supervisor-integrity -->
