@@ -36,8 +36,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00269: supervisor goal message injection](00269-supervisor-goal-message-injection/PLAN.md) - In Progress (goal_injection handler + inject-goal CLI + supervisor goal branch implemented, code-reviewed and merged at `78665b51`; only the live armed-supervisor `/goal` probes remain, which need a human-attended session)
 
-- [00273: hook input payload validation](00273-hook-input-payload-validation/PLAN.md) - Not Started (follow-up filed by Plan 00271: input-schema layer over the vendored contract's per-event input examples, so an input-field rename surfaces as a QA finding/advisory instead of handlers silently never matching)
-
 - [00272: secret file read blocker](00272-secret-file-read-blocker/PLAN.md) - Not Started (deny-by-default PreToolUse guard so a protected secret file's CONTENT can never enter context by any wired route; `secret-meta` helper returns keyed-hash metadata instead; no agent escape hatch; Phase 1 research classifies every read route by blockability; brainstorm + research scaffold ready for human review)
 
 ### Status Line / Agent View
@@ -181,6 +179,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00275: github auto-close keyword blocker](Completed/00275-github-auto-close-keyword-blocker/PLAN.md) - Complete at merge `2bdafe05` (PreToolUse guard denying GitHub auto-closing keyword references in git commit/merge/tag and `gh pr` messages, inline or via `-F`/`--body-file`; enabled by default, `MUST_AUTO_CLOSE_BECAUSE` hatch)
 
 - [00268: verification-result enforcement and the Ansible/YAML lint gap](Completed/00268-verification-result-enforcement-and-ansible-lint-gap/PLAN.md) - Complete at `24b4fb47` + `d3ebf1ba` (Ansible YAML strategy for `lint_on_edit`, the `verification_result_gate` verifier→mutator handler, and the `staged_lint_gate` commit-time backstop; blanket `;` → `&&` enforcement deliberately rejected)
+
+- [00273: hook input payload validation](Completed/00273-hook-input-payload-validation/PLAN.md) - Complete at merge `e0f3dee9` + review fold `02957cb4` (input_contract QA check over the daemon's AST-derived read surface vs vendored input examples; Phase 2 runtime validation ruled NO-GO; Phase 3 channel question answered sentinel-free from transcript attachment typing — both SessionStart channels kept, each serving its own audience)
 
 - [00271: hook contract alignment](Completed/00271-hook-contract-alignment/PLAN.md) - Complete at merge `18d35ba2` + the commit that archives it (DBF-first: vendored hook contracts + network-free `hook_contract` QA check landed RED against 59 findings, all 9 load-bearing drifts fixed, allowlist burned to 29 reasoned KEPT gaps; follow-ups in Plan 00273)
 
@@ -1259,9 +1259,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 277 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 223 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 224 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 

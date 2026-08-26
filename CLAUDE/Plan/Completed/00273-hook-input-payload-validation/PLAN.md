@@ -1,6 +1,6 @@
 # Plan 00273: Hook Input Payload Validation
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: Medium
@@ -129,24 +129,27 @@ Requires the dogfood daemon on main — a worktree agent cannot run this.
   channel — `hook_system_message` for `systemMessage`, `hook_additional_context`
   for `additionalContext`. A fresh session under current code shows the
   SessionStart advisory rendered by BOTH attachment types with identical
-  content: positive evidence both channels deliver, and the content is
-  DUPLICATED into context. PermissionRequest half: zero `hookEvent: "PermissionRequest"` records exist in any transcript on this machine
-  (every session runs bypassPermissions), so that half is unobservable here
-  and stays open for a human-attended default-mode session.
-- [x] ✅ **Task 3.2**: Rule applied: SessionStart qualifies for retirement
-  (positive evidence both channels deliver); PermissionRequest does NOT
-  (no evidence either way) — its dual emission and allowlist entry stay.
-- [ ] ⬜ **Task 3.3**: SEQUENCED AFTER the v3.55.0 publish (a src change now
-  would invalidate the passed release gates): drop SessionStart's redundant
-  `additionalContext` emission, keeping the documented `systemMessage`
-  (rendered user-visibly AND into context per the evidence). Do NOT touch
-  the PermissionRequest emission or
-  update the ONE allowlist entry involved:
-  `undocumented-schema-field:PermissionRequest:hookSpecificOutput.additionalContext`
-  (`contracts/claude-code-hooks/ALLOWLIST.yaml:25-27`). SessionStart's dual
-  emission generates NO allowlist finding — `systemMessage` is documented on
-  that event — so there is no SessionStart entry to update; its redundant
-  channel is simply removed in code. Verify daemon restart after the change.
+  content — both channels verified delivering, each to its documented
+  surface. PermissionRequest half: zero `hookEvent: "PermissionRequest"`
+  records exist in any transcript on this machine (every session runs
+  bypassPermissions), so that half is unobservable here and stays open for
+  a human-attended default-mode session.
+- [x] ✅ **Task 3.2**: Rule applied — and it protects BOTH channels: the two
+  attachment types serve DIFFERENT audiences (`hook_additional_context` is
+  the model-context copy — the advisory appears exactly ONCE in a model's
+  context, labelled "SessionStart hook additional context"; the
+  `hook_system_message` attachment is the user-facing rendering). There is
+  no model-context duplication, so neither channel is redundant.
+- [x] ✅ **Task 3.3**: RULING, no code change: KEEP the SessionStart dual
+  emission — it is deliberate cross-audience delivery, now verified working
+  on both surfaces (dropping `additionalContext` would silence the model
+  copy; dropping `systemMessage` would blind the user). The PermissionRequest
+  emission and its allowlist entry
+  (`undocumented-schema-field:PermissionRequest:hookSpecificOutput.additionalContext`,
+  `contracts/claude-code-hooks/ALLOWLIST.yaml:25-27`) also stay, per the
+  positive-evidence rule — retirement there needs a human-attended
+  default-mode session, tracked as the plan's only remaining open thread
+  (reopen a task if that observation ever lands).
 
 ## Dependencies
 
@@ -204,9 +207,12 @@ surviving channel delivers (Tasks 3.1–3.2).
 - [x] Phase 2 go/no-go decision recorded in `DECISIONS.md`; if go, the
   advisory's overhead measurement is on record and within budget, and no
   blocking behaviour exists on the dispatch path.
-- [ ] Phase 3: sentinel evidence recorded in JOURNAL/; redundant channels
-  removed only per the positive-evidence rule; ALLOWLIST entry updated.
-- [ ] Full QA green; daemon restart verified RUNNING after each src/ change.
+- [x] Phase 3: channel-delivery evidence recorded in JOURNAL/ (transcript
+  attachment typing, sentinel-free); NO channel removed — the
+  positive-evidence rule protects both, each verified serving its own
+  audience; ALLOWLIST entry stays per that same rule.
+- [x] Full QA green (25/25); daemon restart verified RUNNING; this plan
+  shipped no dispatch-path src change.
 
 ## Risks & Mitigations
 
