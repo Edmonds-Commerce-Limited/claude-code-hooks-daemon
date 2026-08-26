@@ -1675,6 +1675,58 @@ handlers:
 
 ---
 
+#### staged_lint_gate
+
+| Property       | Value                     |
+| -------------- | ------------------------- |
+| **Config key** | `staged_lint_gate`        |
+| **Priority**   | 43                        |
+| **Type**       | Blocking (ships advisory) |
+| **Event**      | PreToolUse                |
+
+**Description:** On a `git commit` Bash command, runs the CHEAP/syntax tier of
+each staged Added/Copied/Modified file's `LintStrategy` (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) -- never the deeper `extended`
+linter. This is the backstop half of Plan 00268: `lint_on_edit` only ever sees
+a file at the moment `Write`/`Edit` touches it, so a file that reaches the
+index by any OTHER route (`git add` of something written earlier in the
+session, a merge, a commit of pre-existing changes) is never linted before it
+lands. This handler catches that at the one point guaranteed to see it -- the
+commit itself.
+
+**Fires when:** a Bash command's command string contains a `git commit`
+invocation in any segment (evasion-resistant via `GIT_INVOCATION`/`ENV_PREFIX`
+-- `git -C <path> commit`, `env git commit`, and line-continued spellings are
+all recognised). Commits inside nested/vendor repos or foreign worktrees are
+exempt.
+
+**Enforcement mode:** `mode: warn` (default) renders a failing file's cheap
+syntax diagnosis as advisory context; `mode: block` denies the commit with the
+same diagnosis as the reason. Above `max_files` staged lintable files (default
+20\) the WHOLE check stands down with an advisory naming how many files were
+skipped, rather than linting a subset silently.
+
+**Options:**
+
+| Option      | Type  | Default | Description                                                          |
+| ----------- | ----- | ------- | -------------------------------------------------------------------- |
+| `mode`      | `str` | `warn`  | `warn` injects advisory context naming each failure; `block` denies. |
+| `max_files` | `int` | `20`    | Stand down the whole check above this many staged lintable files.    |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    staged_lint_gate:
+      enabled: true
+      priority: 43
+      options:
+        mode: warn
+        max_files: 20
+```
+
+---
+
 #### plan_qa_commit_gate
 
 | Property       | Value                 |
@@ -2476,6 +2528,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | -------------------------- | ---------------- | -------- | ------------------------------------------- |
 | `daemon_restart_verifier`  | PreToolUse       | 10       | Suggests daemon restart before commits      |
 | `verification_result_gate` | PreToolUse       | 34       | Verifier result unconsumed before a mutator |
+| `staged_lint_gate`         | PreToolUse       | 43       | Cheap syntax check over staged files        |
 | `global_npm_advisor`       | PreToolUse       | 40       | Suggests npx over global installs           |
 | `plan_workflow`            | PreToolUse       | 45       | Guidance for plan creation                  |
 | `web_search_year`          | PreToolUse       | 55       | Warns about outdated search years           |

@@ -206,6 +206,13 @@ handlers:
       enabled: true
       priority: 42
 
+    staged_lint_gate:      # Cheap syntax-check backstop over staged files on git commit (Plan 00268)
+      enabled: false       # Enable to catch a file that reaches the index via a route Write/Edit never sees
+      priority: 43
+      # options:
+      #   mode: warn              # warn | block — ships advisory while the rollout settles
+      #   max_files: 20            # stand down (advisory only) above this many staged lintable files
+
     plan_qa_edit:          # Stage 1 plan QA lint on PLAN.md writes (Plan 00144)
       enabled: false       # Enable for projects using CLAUDE/Plan/; policy under plan_workflow.qa
       priority: 44

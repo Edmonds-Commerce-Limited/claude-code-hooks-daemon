@@ -81,6 +81,14 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             "ansible-lint site.yml\ngit \\\n  commit -m x",
         ),
     ),
+    "StagedLintGateHandler": (
+        "git commit -m x",
+        (
+            f"git -C {_SAFE_PATH} commit -m x",
+            "env git commit -m x",
+            "git \\\n  commit -m x",
+        ),
+    ),
     "GitMessageBacktickHandler": (
         'git commit -m "now allows `git branch` here"',
         (
@@ -190,6 +198,11 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
         "pytest tests/ -q",
         "ansible-lint site.yml",
         "ls -la untracked/",
+    ),
+    "StagedLintGateHandler": (
+        "git status",
+        "git diff --cached",
+        'gh pr create --title "x" --body "y"',
     ),
     "GitMessageBacktickHandler": (
         # Single quotes suppress substitution, so backticks are literal —

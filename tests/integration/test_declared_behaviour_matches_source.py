@@ -81,6 +81,12 @@ _EXEMPT_FROM_BLOCKING_TAG: dict[str, str] = {
         "the same deliberate warn-first rollout as PlanQaCommitGateHandler. "
         "Rendering it BLOCKING would overstate what a default installation does."
     ),
+    "StagedLintGateHandler": (
+        "denies only under `mode: block`, and the shipped default is `warn` -- "
+        "the same deliberate warn-first rollout as VerificationResultGateHandler "
+        "and PlanQaCommitGateHandler. Rendering it BLOCKING would overstate what "
+        "a default installation does."
+    ),
     "NpmCommandHandler": (
         "its deny paths require `llm:` scripts in package.json; with none present "
         "the handler is advisory by design and says so in its own guidance. The "

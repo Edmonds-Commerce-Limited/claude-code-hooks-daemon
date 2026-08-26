@@ -157,6 +157,27 @@ config_changes:
         additively with `options.extra_verifiers` / `options.extra_mutators`
         (literal command names); the built-in tables cannot be replaced, so a
         project cannot silently empty the mutator table.
+    - key: handlers.pre_tool_use.staged_lint_gate
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PreToolUse handler (Plan 00268 Phase 3), ships enabled in
+        `mode: warn`. Syntax-checks the files STAGED for a `git commit` —
+        cheap tier only, never the extended linter — and reports any staged
+        file that fails its language's syntax check. This is the batch
+        counterpart Core Standard 15's corollary demands for `lint_on_edit`:
+        a write-time guard cannot see files that predate it or that arrived
+        by `mv`, merge or relocation, so an unloadable file already on disk
+        could still reach a commit unexamined. Cost is bounded by contract:
+        only staged Added/Copied/Modified files with a lint strategy, a
+        `max_files` cap (default 20) above which it stands down with an
+        advisory naming how many were skipped, a per-file timeout, and
+        nested/foreign repos exempt.
+      migration_note: >-
+        Advisory by default; no action needed to adopt. Ratchet to
+        `options.mode: block` to deny commits carrying syntax-broken staged
+        files. A missing lint tool never blocks — the check is skipped for
+        that language, as for lint_on_edit.
     - key: handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes
       recommended: false
       # dormant for the same reason as lint_bash_writes: validate_eslint_on_write

@@ -22,6 +22,7 @@ from .qa_suppression import QaSuppressionHandler
 from .root_recursion_guard import RootRecursionGuardHandler
 from .security_antipattern import SecurityAntipatternHandler
 from .sed_blocker import SedBlockerHandler
+from .staged_lint_gate import StagedLintGateHandler
 from .tdd_enforcement import TddEnforcementHandler
 from .validate_instruction_content import ValidateInstructionContentHandler
 from .verification_result_gate import VerificationResultGateHandler
@@ -51,6 +52,7 @@ __all__ = [
     "RootRecursionGuardHandler",
     "SecurityAntipatternHandler",
     "SedBlockerHandler",
+    "StagedLintGateHandler",
     "TddEnforcementHandler",
     "ValidateInstructionContentHandler",
     "VerificationResultGateHandler",

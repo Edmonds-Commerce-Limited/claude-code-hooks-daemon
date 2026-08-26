@@ -193,6 +193,7 @@ class ConfigTemplate:
             "    gh_issue_comments: {enabled: true, priority: 40}  # Require --comments on gh issue view\n"
             "    gh_pr_comments: {enabled: true, priority: 40}    # Require --comments on gh pr view\n"
             "    plan_time_estimates: {enabled: true, priority: 40}  # Block time estimates in plans\n"
+            "    staged_lint_gate: {enabled: true, priority: 43}  # Cheap syntax-check backstop over staged files on git commit (warn-first)\n"
             "    plan_qa_edit: {enabled: true, priority: 44}      # Plan QA lint on PLAN.md writes\n"
             "    plan_qa_commit_gate: {enabled: true, priority: 44}  # Cross-file plan checks on git commit (warn-first)\n"
             "    global_npm_advisor: {enabled: true, priority: 40}  # Advise on npm install -g (non-blocking)\n"

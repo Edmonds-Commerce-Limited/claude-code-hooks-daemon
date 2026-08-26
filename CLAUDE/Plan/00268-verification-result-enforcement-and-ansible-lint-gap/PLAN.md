@@ -161,7 +161,7 @@ its false-positive rate stays low enough that nobody disables it.
   handles; a `max_files` cap (default 20) above which the handler stands down
   with an advisory naming how many were skipped; per-file timeout; nested and
   foreign repos exempt (mirroring `plan_qa_commit_gate`). Ships `mode: warn`.
-- [ ] ⬜ **Task 3.2**: If approved, TDD it and ship warn-first; it catches the
+- [x] ✅ **Task 3.2**: If approved, TDD it and ship warn-first; it catches the
   outcome regardless of how the commit was invoked — chained, separate, or from
   a later turn entirely.
 
@@ -169,7 +169,7 @@ its false-positive rate stays low enough that nobody disables it.
 
 - [x] ✅ **Task 4.1**: Update `docs/guides/HANDLER_REFERENCE.md` and the language
   table in `CLAUDE.md` to include the new YAML/Ansible coverage.
-- [ ] 🔄 **Task 4.2**: Add `config-changes/` and, if a documented truth changed,
+- [x] ✅ **Task 4.2**: Add `config-changes/` and, if a documented truth changed,
   `truth-changes/` manifests under `CLAUDE/UPGRADES/UNRELEASED/` so both
   features are actively promoted on upgrade rather than shipping dormant.
 

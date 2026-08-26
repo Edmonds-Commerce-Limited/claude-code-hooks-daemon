@@ -67,6 +67,13 @@ _EXEMPT_FROM_DENY_TEST: dict[str, str] = {
         "playbook running the default configuration cannot reach the deny path. "
         "The warn path IS covered by its advisory acceptance tests."
     ),
+    "StagedLintGateHandler": (
+        "denies only under `mode: block`; shipped default `warn` -- the same "
+        "warn-first rollout as VerificationResultGateHandler and "
+        "PlanQaCommitGateHandler, so a playbook running the default "
+        "configuration cannot reach the deny path. The warn path IS covered by "
+        "its advisory acceptance tests."
+    ),
     "AutoContinueStopHandler": (
         "the Stop hook's block is a session-lifecycle event, not a tool call, so "
         "it cannot be driven from a playbook step. It is covered instead by "

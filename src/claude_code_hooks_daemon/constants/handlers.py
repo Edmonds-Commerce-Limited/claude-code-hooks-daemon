@@ -515,6 +515,16 @@ class HandlerID:
         display_name="plan-qa-commit-gate",
     )
 
+    # Staged lint gate (PreToolUse handler) — Plan 00268 Task 3.2: cheap
+    # syntax-check backstop over staged Added/Copied/Modified files on git
+    # commit, so a file that reached the index by any route other than
+    # Write/Edit is still caught before it lands (warn-first)
+    STAGED_LINT_GATE = HandlerIDMeta(
+        class_name="StagedLintGateHandler",
+        config_key="staged_lint_gate",
+        display_name="staged-lint-gate",
+    )
+
     # Lint on edit (PostToolUse handler)
     LINT_ON_EDIT = HandlerIDMeta(
         class_name="LintOnEditHandler",

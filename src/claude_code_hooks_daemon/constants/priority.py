@@ -144,6 +144,11 @@ class Priority:
     PLAN_TIME_ESTIMATES = 40
     GLOBAL_NPM_ADVISOR = 40
 
+    # Plan 00268 Task 3.2: sits between the workflow-40s entries and the plan
+    # QA pair at 44 -- a sibling gate on the same `git commit` trigger, not an
+    # extension of either.
+    STAGED_LINT_GATE = 43
+
     PLAN_QA_EDIT = 44
     PLAN_QA_COMMIT_GATE = 44
     PLAN_WORKFLOW = 45

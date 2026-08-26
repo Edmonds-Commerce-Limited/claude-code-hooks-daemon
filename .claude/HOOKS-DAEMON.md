@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-08-20 (v3.54.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-08-26 (v3.54.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (42 handlers)
+### PreToolUse (44 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -34,11 +34,13 @@
 | 31 | comment_changelog | BLOCKING | Block Write/Edit content that writes historical narrative into a comment |
 | 33 | comment_size | BLOCKING | Block/advise on over-long comments, tiered like plan-doc-size |
 | 33 | plan_number_helper | BLOCKING | Detect bash commands attempting to discover plan numbers and provide correct answer |
+| 34 | verification_result_gate | NON-TERMINAL | Advise when a verifier's exit status is never consumed before a mutator |
 | 35 | tdd_enforcement | BLOCKING | Enforce TDD by blocking production file creation without corresponding test file |
 | 38 | lsp_enforcement | BLOCKING | Enforce LSP tool usage instead of Grep/Bash grep for symbol lookups |
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
 | 42 | global_npm_advisor | NON-TERMINAL | Advise on global npm/yarn package installations |
+| 43 | staged_lint_gate | NON-TERMINAL | Warn-first cheap-syntax-check backstop over staged files on git commit |
 | 44 | plan_qa_commit_gate | NON-TERMINAL | Warn-first cross-file plan QA gate on git commit |
 | 44 | plan_qa_edit | BLOCKING | Blocking/advisory edit-time lint for plan documents |
 | 45 | plan_time_estimates | BLOCKING | Block time estimates in plan documents |

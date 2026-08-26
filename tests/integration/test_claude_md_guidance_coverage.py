@@ -121,6 +121,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "NpmCommandHandler": "T2 the npm script name is already chosen",
     "PlanNumberHelperHandler": "T2 fires on the folder scan that should never have run",
     "PlanQaCommitGateHandler": "T2 fires on the commit whose contents are already staged",
+    "StagedLintGateHandler": "T2 fires on files whose staleness predates the commit",
     "PlanWorkflowHandler": "T2 the document shape is chosen before the write",
     "VerificationResultGateHandler": "T2 the gating (&&/set -e) must be written before the command runs",
     "WorktreeCreateHandler": "T2 the agent name that becomes the path is already chosen",
