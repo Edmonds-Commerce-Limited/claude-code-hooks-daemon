@@ -309,3 +309,41 @@ truth_changes:
       syntax check only with `command_overrides: {Ansible: {extended: null}}`
       — the extended tier is NOT opt-in and runs whenever ansible-lint is
       installed, as for every other language.
+  - was: >
+      Several documented Claude Code hook capabilities were inexpressible or
+      wrongly claimed by the daemon (Plan 00271 audit): a project handler on
+      UserPromptSubmit, PreCompact, UserPromptExpansion, PostToolUseFailure,
+      PostToolBatch, TaskCreated, TaskCompleted, TeammateIdle or ConfigChange
+      that returned DENY was silently dropped (or serialised as the undefined
+      token `{"decision": "deny"}` and ignored); PermissionRequest claimed an
+      `ask` outcome the contract does not define, and its deny reason was
+      routed into an undocumented `additionalContext` field; PreToolUse could
+      not express `updatedInput` or the documented `defer` decision;
+      SessionStart advisory context travelled only as `systemMessage`.
+    now: >
+      The daemon's wire format matches the documented hooks contract
+      (Plan 00271). A DENY on UserPromptSubmit, PreCompact, UserPromptExpansion,
+      PostToolUseFailure, PostToolBatch, TaskCreated or ConfigChange now emits
+      the documented top-level `decision: "block"` + `reason`; a DENY on
+      TeammateIdle/TaskCompleted emits `continue: false` + `stopReason` — so a
+      project handler's block on any of those events now actually blocks.
+      Those events moved from the advisory to the blocking handler tier: a
+      project handler on them should subclass its event's `<Event>HandlerBase`
+      and return `BlockingResult`. PermissionRequest moved to the blocking
+      tier too — its documented `decision.behavior` enum is allow|deny, so a
+      handler returning ASK there is now reported as undeliverable by
+      `validate-project-handlers` instead of silently ignored — and its deny
+      reason now reaches Claude via the documented `decision.message` field.
+      PreToolUse handlers can return `updatedInput` (rewrites the tool's input
+      before execution) and `GatingResult.defer()`. SessionStart advisory
+      context is emitted on BOTH the documented
+      `hookSpecificOutput.additionalContext` channel and `systemMessage`.
+      The contract itself is vendored under `contracts/claude-code-hooks/`
+      and enforced by the `hook_contract` QA check; the `contract_staleness`
+      SessionStart advisory flags when the installed Claude Code outruns the
+      last-audited version.
+
+      IF YOUR PROJECT HAS HANDLERS on the events above: re-run
+      `validate-project-handlers`. A handler that inherited the old advisory
+      base for these events should be updated to return `BlockingResult`
+      (an `AdvisoryResult` return now fails the base's type contract).
