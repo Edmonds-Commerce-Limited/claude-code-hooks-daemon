@@ -46,8 +46,23 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_file_path
+from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger
 
 logger = logging.getLogger(__name__)
+
+# ── Goal ledger + displacement advisory (Plan 00276) ───────────────────────
+# The /goal slot is last-writer-wins upstream; the ledger remembers every
+# emission so a displaced-but-unfinished plan is never silently forgotten.
+_DISPLACEMENT_ADVISORY_TEMPLATE: Final[str] = (
+    "⚠️ GOAL DISPLACED: the /goal slot is last-writer-wins, so any live /goal "
+    "condition for Plan(s) {plans} is now superseded by Plan {new_plan}'s "
+    "goal (a displaced condition set in an earlier session was already gone), "
+    "but {verb} still In Progress. "
+    "Claude Code's /goal slot holds only ONE condition (last writer wins); the "
+    "daemon's goal ledger still tracks the displaced plan(s) — their work "
+    "remains owed and the Stop hook will keep challenging stops on their "
+    "behalf until they reach a terminal status."
+)
 
 # ── Signal transport (same family as <session>.compacting) ─────────────────
 _SIGNAL_SUBDIR: Final[str] = "context-sidecar"
@@ -383,9 +398,37 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         if joined is None:
             return BlockingResult(decision=Decision.ALLOW)
         written = write_goal_signal(session_id, plan_number, joined, _SOURCE_STATUS_FLIP)
-        if written is not None:
-            self._record_latch(latch_key)
+        if written is None:
+            return BlockingResult(decision=Decision.ALLOW)
+        self._record_latch(latch_key)
+
+        displaced = self._ledger_record(session_id, plan_number, joined, Path(file_path))
+        if displaced:
+            plans = ", ".join(displaced)
+            verb = "it is" if len(displaced) == 1 else "they are"
+            advisory = _DISPLACEMENT_ADVISORY_TEMPLATE.format(
+                plans=plans, new_plan=plan_number, verb=verb
+            )
+            return BlockingResult(decision=Decision.ALLOW, context=[advisory])
         return BlockingResult(decision=Decision.ALLOW)
+
+    @staticmethod
+    def _ledger_record(
+        session_id: str, plan_number: str, joined: str, plan_md_path: Path
+    ) -> list[str]:
+        """Record the emission in the goal ledger; fail-open on any failure.
+
+        ``plan_md_path`` is ``.../CLAUDE/Plan/<folder>/PLAN.md``; its
+        grandparent is the active plan directory used for reconciliation.
+        Returns the plan numbers this emission newly displaced.
+        """
+        try:
+            ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
+        except RuntimeError as e:
+            logger.warning("goal_injection: ledger skipped (no project context): %s", e)
+            return []
+        plan_dir = plan_md_path.parent.parent
+        return GoalLedger(ledger_path).record_emission(session_id, plan_number, joined, plan_dir)
 
     def _read_plan(self, path: Path) -> str | None:
         """Read the just-written PLAN.md from disk; None when unreadable."""
@@ -417,6 +460,14 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             "machine-origin marker and a 'NOT human authorisation' clause, and can "
             "never satisfy any human-gated rule (release publishing, artefact "
             "publishing, unproven branch deletion).\n\n"
+            "**Concurrent plans are tracked in a goal ledger** (Plan 00276): the "
+            "/goal slot holds ONE condition (last writer wins), so every emission "
+            "is recorded in `goal-ledger.json` under the daemon untracked dir. "
+            "Emitting a goal while another ledgered plan is still In Progress "
+            "injects a displacement advisory naming that plan, and the Stop hook "
+            "challenges unexplained stops on behalf of EVERY still-live ledgered "
+            "plan. Entries retire when their plan reaches a terminal status or is "
+            "archived.\n\n"
             "**Configure** via `handlers.post_tool_use.goal_injection.options`: "
             "`mode: additive` (default) merges your `lines` "
             "(`{id, text, enabled}`) onto the built-in set — a matching `id` "
@@ -451,6 +502,29 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
                 safety_notes=(
                     "Observe-only: writes a small JSON file under untracked/; "
                     "nothing is injected unless a supervisor is armed."
+                ),
+                test_type=TestType.CONTEXT,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="second In Progress plan advises goal displacement",
+                command=(
+                    "With one scratch plan already flipped to In Progress this "
+                    "session, use the Edit tool to flip a SECOND scratch plan's "
+                    "PLAN.md '**Status**:' line to 'In Progress', then verify a "
+                    "system-reminder advisory names the first plan as displaced."
+                ),
+                description=(
+                    "Plan 00276: emitting a goal while another ledgered plan is "
+                    "still In Progress marks the older ledger entry displaced and "
+                    "injects an advisory naming it."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"GOAL DISPLACED", r"\d{5}"],
+                safety_notes=(
+                    "Observe-only: writes goal-ledger.json under untracked/; "
+                    "never blocks the edit."
                 ),
                 test_type=TestType.CONTEXT,
                 recommended_model=RecommendedModel.SONNET,

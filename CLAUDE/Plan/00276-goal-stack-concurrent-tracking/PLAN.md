@@ -1,6 +1,6 @@
 # Plan 00276: goal stack concurrent tracking
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: Medium
@@ -79,60 +79,64 @@ just the last writer.
 
 ### Phase 1: Research and ground truth
 
-- [ ] ⬜ **Task 1.1**: Read `goal_injection.py`, `auto_continue_stop`, and the
+- [x] ✅ **Task 1.1**: Read `goal_injection.py`, `auto_continue_stop`, and the
   supervisor's goal-signal consumption path; document the exact write points,
   the once-per-`(session, plan)` latch, and where a ledger write would slot in
-  without changing trigger semantics.
+  without changing trigger semantics (findings in JOURNAL/ 26-08-26 entry).
 - [ ] ⬜ **Task 1.2**: Reproduce the displacement shape from today's session
   (two plans flipped to In Progress in one session) against the live daemon
   and record the resulting signal-file history as the failing-behaviour
-  baseline.
-- [ ] ⬜ **Task 1.3**: Survey existing daemon state-file conventions under
+  baseline. (Deferred to main checkout: implemented worktree-side; the unit
+  displacement tests encode the same two-plan shape.)
+- [x] ✅ **Task 1.3**: Survey existing daemon state-file conventions under
   `ProjectContext.daemon_untracked_dir()` (context-sidecar signals,
   `background-processes.jsonl`, verdict log) and pick the ledger's format,
   location, and locking approach consistent with them.
 
 ### Phase 2: Design decisions
 
-- [ ] ⬜ **Task 2.1**: Finalise the ledger schema: per-entry plan number,
-  session id, rendered goal line, emitted timestamp, displacement record
-  (which entry displaced it, when), retirement record (terminal status or
-  archive move, when).
-- [ ] ⬜ **Task 2.2**: Specify retirement triggers: PLAN.md edit setting a
-  terminal status; `git mv` into `Completed/`/`Cancelled/` (visible only at
-  the next PLAN.md-surface event or session sweep — decide which surface
-  reconciles it).
-- [ ] ⬜ **Task 2.3**: Specify Stop-time behaviour: how `auto_continue_stop`
-  consults the ledger, what the challenge message names (every still-live
-  ledgered plan), and how it degrades when the ledger is missing/unreadable
-  (fail open, advisory).
-- [ ] ⬜ **Task 2.4**: Specify session-restart semantics: the ledger survives
-  under `untracked/`; the `/goal` condition does not. Decide whether a
-  SessionStart advisory lists still-live ledgered goals and suggests
-  re-arming (and whether `goal_injection`'s new-session re-fire already
-  covers the newest plan, leaving only the displaced ones to surface).
-- [ ] ⬜ **Task 2.5**: Reconcile with `goal_injection`'s existing cap and
-  once-per-plan latch: the ledger must record every EMISSION (including
-  re-fires after restart) without double-counting a live goal per plan.
+- [x] ✅ **Task 2.1**: Finalise the ledger schema (see Decision 3): plan
+  number, session id, rendered goal line, emitted timestamp, displacement
+  record (`displaced_by`/`displaced_at`), retirement record
+  (`retired_at`/`retired_reason`).
+- [x] ✅ **Task 2.2**: Retirement triggers specified: reconciliation runs on
+  every ledger read/write — a PLAN.md carrying a terminal status retires as
+  `terminal-status`; a folder absent from the active plan root (archive move)
+  retires as `archived`. No new event plumbing needed.
+- [x] ✅ **Task 2.3**: Stop-time behaviour specified: `auto_continue_stop`
+  appends a goal-ledger challenge naming every still-In-Progress ledgered
+  plan to the default explain-or-continue denial; any ledger failure fails
+  open to the unchanged default message.
+- [x] ✅ **Task 2.4**: Session-restart semantics decided (Decision 2 closed):
+  no SessionStart advisory — the ledger consult at Stop time is
+  session-agnostic and already surfaces displaced plans, and
+  `goal_injection`'s new-session re-fire re-arms the newest plan.
+- [x] ✅ **Task 2.5**: Latch reconciliation: the ledger records only
+  successful signal emissions; a re-emission for a plan with a live entry
+  refreshes that entry (session id, timestamp, clears displacement) rather
+  than double-counting.
 
 ### Phase 3: Increment 1 — displacement advisory (option c)
 
-- [ ] ⬜ **Task 3.1**: TDD: on emitting a goal while another ledgered goal's
+- [x] ✅ **Task 3.1**: TDD: on emitting a goal while another ledgered goal's
   plan is still In Progress, mark the older entry displaced and inject
-  advisory context ("goal displaced: Plan NNNNN still In Progress").
-- [ ] ⬜ **Task 3.2**: Ledger write/read module with tests (atomic writes,
-  corrupt-file tolerance, bounded growth/pruning of retired entries).
-- [ ] ⬜ **Task 3.3**: QA, daemon restart verification, dogfood with two
-  concurrent plans.
+  advisory context ("GOAL DISPLACED ... Plan NNNNN ... still In Progress").
+- [x] ✅ **Task 3.2**: Ledger write/read module
+  (`src/claude_code_hooks_daemon/utils/goal_ledger.py`) with tests (atomic
+  writes, corrupt-file tolerance, bounded growth/pruning of retired entries).
+- [ ] 🔄 **Task 3.3**: QA passed in worktree; daemon restart verification and
+  two-concurrent-plan dogfood deferred to the main checkout.
 
 ### Phase 4: Increment 2 — Stop-time defence (option a)
 
-- [ ] ⬜ **Task 4.1**: TDD: `auto_continue_stop` consults the ledger and
-  challenges a stop while any ledgered goal's plan is still In Progress.
-- [ ] ⬜ **Task 4.2**: Retirement on terminal-status flip and archive move,
-  with tests.
-- [ ] ⬜ **Task 4.3**: QA, daemon restart verification, acceptance tests via
-  `get_acceptance_tests()`, dogfood through a full two-plan pipeline.
+- [x] ✅ **Task 4.1**: TDD: `auto_continue_stop` consults the ledger and the
+  default explain-or-continue denial names every still-In-Progress ledgered
+  plan (`tests/unit/handlers/stop/test_goal_ledger_stop_defence.py`).
+- [x] ✅ **Task 4.2**: Retirement on terminal-status flip and archive move,
+  with tests (retirement persists; retired plans are no longer named).
+- [ ] 🔄 **Task 4.3**: QA passed in worktree; displacement acceptance test
+  added to `get_acceptance_tests()`; daemon restart verification and the
+  full two-plan live dogfood deferred to the main checkout.
 
 ## Technical Decisions
 
@@ -172,27 +176,78 @@ Claude Code layer; the ledger compensates daemon-side rather than fixing the
 slot.
 **Date**: 2026-08-26
 
-### Decision 2: Ledger durability vs the /goal condition (open)
+### Decision 2: Ledger durability vs the /goal condition (CLOSED)
 
 **Context**: the ledger under `untracked/` survives a session restart; the
-`/goal` condition does not. Options: SessionStart advisory listing still-live
-ledgered goals and suggesting re-arming; or rely on `goal_injection`'s
-new-session re-fire (which only re-establishes the plan whose PLAN.md is
-edited next). To be settled in Task 2.4.
+`/goal` condition does not.
+
+**Decision**: no SessionStart advisory. The Stop-time ledger consult is
+session-agnostic (keyed by plan, not session), so displaced/forgotten goals
+are surfaced at the exact choke point where they matter, and
+`goal_injection`'s new-session re-fire re-arms the `/goal` slot for whichever
+plan is touched next. A SessionStart listing would duplicate the Stop
+challenge with weaker (fading-context) delivery — YAGNI.
+**Date**: 2026-08-26
+
+### Decision 3: Ledger format, location, and concurrency
+
+**Context**: Task 1.3/2.1 — pick conventions consistent with existing state
+files (context-sidecar signals, `background-processes.jsonl`).
+
+**Decision**: a single JSON document `goal-ledger.json` under
+`ProjectContext.daemon_untracked_dir()` with an `entries` list
+(`plan_number`, `session_id`, `rendered_line`, `emitted_at`, `displaced_by`,
+`displaced_at`, `retired_at`, `retired_reason`). Writes are atomic
+(pid-suffixed tmp file + `replace`, the same idiom as the goal signal); no
+file locking — all writers run inside the single daemon process. Reads are
+fail-open (missing/corrupt → empty ledger, logged). Growth is bounded at 100
+entries, pruning oldest retired entries first. Reconciliation (terminal
+status → `terminal-status`; folder absent from the active plan root →
+`archived`) runs on every record and every live-plan query, so `git mv`
+archive moves are caught at the next Stop consult without new event plumbing.
+**Date**: 2026-08-26
+
+### Decision 4: Review-driven hardening (code review, 2026-08-26)
+
+**Context**: the branch code review returned FIX FIRST with three majors.
+
+**Decisions taken**:
+
+1. **Concurrency**: hook events dispatch on threads of one daemon process, so
+   every ledger read-modify-write holds an exclusive `flock` on a sibling
+   `.lock` file (daemon-start idiom) and the atomic-replace tmp file is
+   uuid-named, not pid-named. Lock acquisition is itself fail-open.
+2. **Retirement safety**: a nonexistent/unscannable plan dir reports
+   `unreadable` and never retires — only a plan dir that EXISTS but lacks the
+   folder retires as `archived`. The plan dir is resolved from the same
+   config source the plan-QA handlers use (`track_plans_in_project`, injected
+   via the `planning` tag; `PlanWorkflowConfig().directory` is the fallback),
+   shared through `goal_ledger.resolve_plan_dir()`. `goal_injection` keeps
+   deriving the plan dir from the edited PLAN.md's own path: for the emission
+   surface the event's path is ground truth, and it is identical to the
+   configured dir whenever the handler's matcher fired at all.
+3. **Status parsing**: delegated to `plan_qa.model.PlanDoc.parse` (handles
+   date qualifiers, trailing icons, fenced blocks) with `PlanStatus` /
+   `TERMINAL_STATUSES` as the vocabulary — no hand-rolled status regex.
+4. **Advisory wording**: softened to state the last-writer-wins mechanism
+   ("any live /goal condition ... is now superseded") rather than asserting
+   "has just been overwritten", which is untrue when the displaced goal was
+   set in an earlier session and had already expired with it.
+   **Date**: 2026-08-26
 
 ## Success Criteria
 
 - [ ] A ledger file exists under the daemon untracked dir recording every
   goal emission with plan number, session id, and timestamps; verified by
   unit tests and a live two-plan dogfood run.
-- [ ] Emitting a second goal while a prior ledgered plan is In Progress marks
+- [x] Emitting a second goal while a prior ledgered plan is In Progress marks
   the prior entry displaced AND injects an advisory naming it (Phase 3
   acceptance test).
-- [ ] With two ledgered In Progress plans, a Stop lacking `STOPPING BECAUSE:`
+- [x] With two ledgered In Progress plans, a Stop lacking `STOPPING BECAUSE:`
   is challenged with a message naming BOTH plans (Phase 4 test).
-- [ ] Flipping a plan to Complete (with its archive `git mv`) retires its
+- [x] Flipping a plan to Complete (with its archive `git mv`) retires its
   ledger entry; a subsequent Stop is not challenged on its behalf.
-- [ ] A missing or corrupt ledger never breaks a Stop event or a PLAN.md
+- [x] A missing or corrupt ledger never breaks a Stop event or a PLAN.md
   write (fail-open tests).
 - [ ] `./scripts/qa/llm_qa.py all` passes; daemon restart verified RUNNING.
 

@@ -43,6 +43,11 @@ from claude_code_hooks_daemon.core.transcript_reader import (
     TranscriptMessage,
     TranscriptReader,
 )
+from claude_code_hooks_daemon.utils.goal_ledger import (
+    LEDGER_FILENAME,
+    GoalLedger,
+    resolve_plan_dir,
+)
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.retention import cap_log_file
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
@@ -115,6 +120,17 @@ _TOOL_ERROR_RECOVERY_REASON = (
 
 # Prefix an assistant message uses to signal an intentional, explained stop.
 _STOP_EXPLANATION_PREFIX = "STOPPING BECAUSE:"
+
+# Plan 00276: goal-ledger Stop defence. Claude Code's /goal slot holds ONE
+# condition (last writer wins); the daemon-side goal ledger remembers every
+# emitted goal, so an unexplained stop is challenged on behalf of EVERY
+# ledgered plan still In Progress — not only the newest.
+_GOAL_LEDGER_CHALLENGE_TEMPLATE = (
+    "GOAL LEDGER (daemon-side): the following ledgered plan(s) are still "
+    "In Progress and their goals remain owed, even if the /goal condition "
+    "now shows only the newest one: Plan(s) {plans}. Continue that work, or "
+    "stop with STOPPING BECAUSE: naming why each listed plan cannot proceed."
+)
 
 # Verb group shared by the rhetorical-continue confirmation patterns. These are
 # "do the next obvious unit of work" verbs — a question built on them ("want me
@@ -309,6 +325,11 @@ class AutoContinueStopHandler(StopHandlerBase):
                 HandlerTag.AUTOMATION,
                 HandlerTag.YOLO_MODE,
                 HandlerTag.TERMINAL,
+                # Plan 00276: the PLANNING tag opts this handler into the
+                # registry's plan_workflow injection, so the goal-ledger
+                # consult resolves the CONFIGURED plan directory rather than
+                # hardcoding the default.
+                HandlerTag.PLANNING,
             ],
         )
         # Config flags — declared and initialised here so mypy can verify them
@@ -316,6 +337,9 @@ class AutoContinueStopHandler(StopHandlerBase):
         # than silently falling back to a getattr default (fail-fast).
         self._continue_on_errors: bool = True
         self._force_explanation: bool = True
+        # Injected by the registry for planning-tagged handlers
+        # (plan_workflow.directory); None falls back to the config default.
+        self._track_plans_in_project: str | None = None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Return True for all Stop events unless re-entry or AskUserQuestion.
@@ -458,8 +482,12 @@ class AutoContinueStopHandler(StopHandlerBase):
         force_explanation = self._force_explanation
         if force_explanation:
             logger.info("No stop explanation provided - requiring STOPPING BECAUSE: or continue")
-            result = BlockingResult(decision=Decision.DENY, reason=_EXPLAIN_OR_CONTINUE_REASON)
-            self._log_stop_event(hook_input, Decision.DENY, _EXPLAIN_OR_CONTINUE_REASON)
+            reason = _EXPLAIN_OR_CONTINUE_REASON
+            challenge = self._goal_ledger_challenge()
+            if challenge is not None:
+                reason = f"{reason}\n\n{challenge}"
+            result = BlockingResult(decision=Decision.DENY, reason=reason)
+            self._log_stop_event(hook_input, Decision.DENY, reason)
             return result
 
         # force_explanation=False: allow stop without explanation
@@ -467,6 +495,26 @@ class AutoContinueStopHandler(StopHandlerBase):
         result = BlockingResult(decision=Decision.ALLOW)
         self._log_stop_event(hook_input, Decision.ALLOW, "")
         return result
+
+    def _goal_ledger_challenge(self) -> str | None:
+        """Return a challenge naming every still-live ledgered goal, or None.
+
+        Plan 00276: the upstream /goal slot holds one condition (last writer
+        wins), so this consults the daemon-side goal ledger and names EVERY
+        ledgered plan still In Progress — including displaced ones the /goal
+        slot has forgotten. Fail-open: any failure (no project context,
+        unreadable ledger) returns None and the default reason stands.
+        """
+        try:
+            ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
+            plan_dir = resolve_plan_dir(ProjectContext.project_root(), self._track_plans_in_project)
+        except RuntimeError as e:
+            logger.warning("goal ledger consult skipped (no project context): %s", e)
+            return None
+        live = GoalLedger(ledger_path).live_plan_numbers(plan_dir)
+        if not live:
+            return None
+        return _GOAL_LEDGER_CHALLENGE_TEMPLATE.format(plans=", ".join(live))
 
     def _is_qa_failure(self, reader: TranscriptReader) -> bool:
         """Return True if the last QA Bash command's OWN result indicates failure.

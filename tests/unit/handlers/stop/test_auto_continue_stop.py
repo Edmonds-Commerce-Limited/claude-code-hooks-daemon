@@ -60,7 +60,9 @@ class TestAutoContinueStopHandlerInit:
 
     def test_init_has_correct_tags(self, handler: AutoContinueStopHandler) -> None:
         """Handler should have workflow, automation, yolo-mode, and terminal tags."""
-        expected_tags = ["workflow", "automation", "yolo-mode", "terminal"]
+        # "planning" (Plan 00276) opts the handler into the registry's
+        # plan_workflow injection for the goal-ledger consult.
+        expected_tags = ["workflow", "automation", "yolo-mode", "terminal", "planning"]
         assert set(handler.tags) == set(expected_tags)
 
 

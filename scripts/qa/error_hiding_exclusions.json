@@ -743,6 +743,36 @@
       "function": "cmd_inject_goal",
       "rule": "log-and-continue",
       "reason": "Plan 00269 review fix: ProjectContext.initialize() is called unconditionally (no private-state peeking), so a repeat call raises RuntimeError meaning 'already initialised earlier in this process' -- a benign, expected state where the existing context is exactly what the command needs. Logged at debug and execution continues; raising would break every inject-goal run performed after any other context-initialising step."
+    },
+    {
+      "file": "handlers/stop/auto_continue_stop.py",
+      "function": "_goal_ledger_challenge",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00276: the goal-ledger consult is a documented fail-open enrichment of the Stop denial. RuntimeError means ProjectContext is not initialised (unit tests, degraded startup); the contract is that a missing/unreadable ledger leaves the default explain-or-continue reason unchanged -- raising here would break Stop handling, the exact hazard the fail-open design exists to prevent. Logged at debug."
+    },
+    {
+      "file": "utils/goal_ledger.py",
+      "function": "_parse_entry",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00276: standard tolerant-JSON-record pattern (same shape as read_verdict_records). One malformed ledger entry -- e.g. a hand-edited or truncated record -- is logged and skipped so it cannot hide every other recorded goal; the ledger contract is explicitly fail-open."
+    },
+    {
+      "file": "utils/goal_ledger.py",
+      "function": "_optional_float",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00276 review fix (coerce optional ledger fields): a non-numeric displaced_at/retired_at in a hand-edited or corrupted ledger entry maps to None (field absent), consistent with the ledger's documented fail-open tolerant-record contract. Raising would let one malformed field hide every other recorded goal."
+    },
+    {
+      "file": "utils/goal_ledger.py",
+      "function": "_locked",
+      "rule": "log-and-continue",
+      "reason": "Plan 00276 review fix (flock around read-modify-write): the lock is a concurrency optimisation, not a correctness gate for the caller's tool call. If the lock file cannot be created/locked (read-only untracked dir), the ledger proceeds unlocked with a warning — failing the PostToolUse/Stop event over an advisory ledger would violate the documented fail-open contract. Unlock failure on the finally path is likewise logged; the fd close still runs."
+    },
+    {
+      "file": "utils/goal_ledger.py",
+      "function": "_save",
+      "rule": "log-and-continue",
+      "reason": "Plan 00276: ledger persistence is best-effort by contract -- it runs inside PostToolUse and Stop handling, and an unwritable untracked dir must never break the tool call or the Stop event. The OSError is logged at warning; behaviour degrades to an empty ledger, which the Stop consult treats as 'nothing to defend' (fail-open)."
     }
   ]
 }

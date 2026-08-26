@@ -2105,6 +2105,8 @@ The trigger is STATE-based (first qualifying write per plan per session), not tr
 
 **Placeholders** (closed set; an unknown `{token}` skips the line): `{plan_number}` (5 digits, validated), `{plan_title}` (first PLAN.md heading, sanitised, capped), `{plan_path}` (project-root-relative plan folder).
 
+**Goal ledger (Plan 00276):** every successful emission is also recorded in a daemon-side ledger (`goal-ledger.json` under the daemon untracked dir). Claude Code's `/goal` slot holds ONE condition (last writer wins), so when a new emission lands while another ledgered plan is still `In Progress`, the older entry is marked displaced and the handler injects an advisory naming the displaced plan(s). Entries retire automatically when their plan reaches a terminal status (Complete/Cancelled/Superseded) or leaves the active plan directory. The ledger is fail-open: a missing, corrupt, or unwritable ledger never affects the tool call. `auto_continue_stop` consults the same ledger at Stop time.
+
 | Option                      | Values                 | Default    | Effect                                                          |
 | --------------------------- | ---------------------- | ---------- | --------------------------------------------------------------- |
 | `mode`                      | `additive` / `replace` | `additive` | Merge project lines onto built-ins, or use only project lines   |
@@ -2445,6 +2447,8 @@ These handlers run when Claude stops generating a response.
 | **Event**      | Stop                 |
 
 **Description:** Enables true auto-continue without user input. Reads the conversation transcript to detect if Claude's last message was a confirmation question ("Would you like me to continue?", "Should I proceed?", etc.) and blocks the stop with an auto-continue instruction. Includes loop prevention via `stop_hook_active` check.
+
+**Goal-ledger Stop defence (Plan 00276):** on the default explain-or-continue denial, the handler consults the daemon-side goal ledger (`goal-ledger.json`, written by `goal_injection`) and appends a challenge naming EVERY ledgered plan still `In Progress` — including plans whose `/goal` condition was displaced by a later goal (the upstream slot is last-writer-wins). Entries retire when their plan reaches a terminal status or is archived, after which stops are no longer challenged on their behalf. Fail-open: a missing or unreadable ledger leaves the default message unchanged.
 
 **Options:**
 
