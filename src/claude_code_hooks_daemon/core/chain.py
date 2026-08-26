@@ -21,11 +21,13 @@ logger = logging.getLogger(__name__)
 # Decisions that restrict the tool call. Once any handler records one, later
 # laxer results (ALLOW/CONTINUE) must never overwrite it — the most
 # restrictive decision wins across the whole chain (Plan 00144).
-_RESTRICTIVE_DECISIONS: frozenset[Decision] = frozenset({Decision.DENY, Decision.ASK})
+_RESTRICTIVE_DECISIONS: frozenset[Decision] = frozenset(
+    {Decision.DENY, Decision.ASK, Decision.DEFER}
+)
 
 
 def _is_restrictive(decision: Decision | str | None) -> bool:
-    """True when ``decision`` restricts the tool call (deny/ask)."""
+    """True when ``decision`` restricts the tool call (deny/ask/defer)."""
     return decision in _RESTRICTIVE_DECISIONS
 
 

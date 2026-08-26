@@ -22,6 +22,9 @@ class Decision(StrEnum):
     DENY = "deny"
     ASK = "ask"
     CONTINUE = "continue"
+    # PreToolUse only: exit gracefully so the tool can be resumed later
+    # (Plan 00271 item 2). The docs ignore reason/updatedInput/context on it.
+    DEFER = "defer"
 
 
 # Universal suffix appended to all PreToolUse DENY reasons.
@@ -117,6 +120,11 @@ REFUSAL_CAPABLE_EVENTS: Final[dict[Decision, frozenset[str]]] = {
             "PreToolUse",  # permissionDecision: ask
         }
     ),
+    Decision.DEFER: frozenset(
+        {
+            "PreToolUse",  # permissionDecision: defer (Plan 00271 item 2)
+        }
+    ),
 }
 # Matches ANSI SGR/CSI escape sequences so colour codes are excluded from the
 # DISPLAYED width when wrapping (they occupy zero visible columns).
@@ -198,6 +206,10 @@ class HookResult(BaseModel):
     # decision), so the handler carries the absolute path here and to_json emits
     # {"worktreePath": ...} which the forwarder prints raw.
     worktree_path: str | None = Field(default=None)
+    # PreToolUse updatedInput (Plan 00271 item 1): replaces the tool's ENTIRE
+    # input object before execution. Emitted only on PreToolUse, and only for
+    # allow/ask/deny — the docs ignore it on defer.
+    updated_input: dict[str, Any] | None = Field(default=None)
     # Optional sub-classification of WHICH internal check/pattern produced this
     # decision (Plan 00209 verdict log). Purely internal metadata consumed by
     # the verdict-log writer — never part of the Claude Code hook response, so
@@ -542,8 +554,14 @@ class HookResult(BaseModel):
         if event_name == _WORKTREE_CREATE_EVENT_NAME and self.worktree_path:
             return {_WORKTREE_PATH_KEY: self.worktree_path}
 
-        # Silent allow with no context - valid for all events
-        if self.decision == Decision.ALLOW and not self.context and not self.guidance:
+        # Silent allow with no context - valid for all events. An allow that
+        # carries updatedInput is NOT silent: the rewrite is the payload.
+        if (
+            self.decision == Decision.ALLOW
+            and not self.context
+            and not self.guidance
+            and self.updated_input is None
+        ):
             return {}
 
         # Event-specific formatting
@@ -581,6 +599,12 @@ class HookResult(BaseModel):
         """
         output: dict[str, Any] = {"hookEventName": event_name}
 
+        if self.decision == Decision.DEFER:
+            # The docs ignore permissionDecisionReason, updatedInput and
+            # additionalContext when the decision is defer — emit none of them.
+            output["permissionDecision"] = self.decision.value
+            return {"hookSpecificOutput": output}
+
         if self.decision in (Decision.DENY, Decision.ASK):
             output["permissionDecision"] = self.decision.value
             if self.reason:
@@ -588,6 +612,9 @@ class HookResult(BaseModel):
                 if self.decision == Decision.DENY:
                     reason = reason + _DENY_CONTINUATION_SUFFIX
                 output["permissionDecisionReason"] = reason
+
+        if self.updated_input is not None:
+            output["updatedInput"] = self.updated_input
 
         if self.context:
             output["additionalContext"] = "\n\n".join(self.context)

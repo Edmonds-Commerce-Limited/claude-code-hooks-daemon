@@ -71,7 +71,7 @@ VERDICT_LOG_FILENAME = "verdicts.jsonl"
 # this is a DERIVED classification, not each handler's own configured
 # block/warn option (no uniform way to read that generically), but it is
 # accurate for the two decisions that matter: a DENY/ASK always blocked.
-_BLOCKING_DECISIONS = frozenset({Decision.DENY, Decision.ASK})
+_BLOCKING_DECISIONS = frozenset({Decision.DENY, Decision.ASK, Decision.DEFER})
 _MODE_BLOCK = "block"
 _MODE_ADVISORY = "advisory"
 

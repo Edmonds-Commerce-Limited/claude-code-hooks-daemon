@@ -50,7 +50,13 @@ from claude_code_hooks_daemon.core.result_types import (
 _TIERS: dict[type[HookResult], set[Decision]] = {
     AdvisoryResult: {Decision.ALLOW, Decision.CONTINUE},
     BlockingResult: {Decision.ALLOW, Decision.CONTINUE, Decision.DENY},
-    GatingResult: {Decision.ALLOW, Decision.CONTINUE, Decision.DENY, Decision.ASK},
+    GatingResult: {
+        Decision.ALLOW,
+        Decision.CONTINUE,
+        Decision.DENY,
+        Decision.ASK,
+        Decision.DEFER,
+    },
 }
 
 

@@ -72,6 +72,13 @@ class ContinuingProbe:
         return Decision.CONTINUE
 
 
+class DeferringProbe:
+    """Returns the PreToolUse-only graceful-defer decision (Plan 00271)."""
+
+    def handle(self, hook_input: dict[str, Any]) -> Decision:
+        return Decision.DEFER
+
+
 class ExpectationOnlyProbe:
     """Names a decision ONLY in an acceptance-test expectation."""
 
@@ -148,6 +155,7 @@ _PROBES: dict[Decision, type] = {
     Decision.DENY: RefusingProbe,
     Decision.ASK: AskingProbe,
     Decision.CONTINUE: ContinuingProbe,
+    Decision.DEFER: DeferringProbe,
 }
 
 

@@ -97,9 +97,9 @@ class GatingResult(HookResult):
     (Plan 00271 audit item 3).
     """
 
-    decision: Literal[Decision.ALLOW, Decision.CONTINUE, Decision.DENY, Decision.ASK] = (
-        Decision.ALLOW
-    )
+    decision: Literal[
+        Decision.ALLOW, Decision.CONTINUE, Decision.DENY, Decision.ASK, Decision.DEFER
+    ] = Decision.ALLOW
 
     @classmethod
     def deny(cls, reason: str, *, context: list[str] | None = None) -> Self:
@@ -126,6 +126,20 @@ class GatingResult(HookResult):
             A result of the calling class, with the ask decision.
         """
         return cls(decision=Decision.ASK, reason=reason, context=context or [])
+
+    @classmethod
+    def defer(cls) -> Self:
+        """Create a defer result — exit gracefully so the tool resumes later.
+
+        No arguments by design: the docs ignore ``permissionDecisionReason``,
+        ``updatedInput`` and ``additionalContext`` when the decision is defer
+        (Plan 00271 item 2), so accepting them would promise delivery the wire
+        cannot make.
+
+        Returns:
+            A result of the calling class, with the defer decision.
+        """
+        return cls(decision=Decision.DEFER)
 
 
 #: Narrowest first, so ``result_type_for_event`` never returns a wider tier

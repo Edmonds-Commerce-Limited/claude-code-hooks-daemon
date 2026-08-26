@@ -45,6 +45,7 @@ _FACTORY_DECISIONS: dict[str, Decision] = {
     "allow": Decision.ALLOW,
     "deny": Decision.DENY,
     "ask": Decision.ASK,
+    "defer": Decision.DEFER,
 }
 
 #: A factory call counts only when the receiver NAMES a result class. Matched by

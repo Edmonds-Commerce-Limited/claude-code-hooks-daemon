@@ -29,9 +29,12 @@ PRE_TOOL_USE_SCHEMA: Final[dict[str, Any]] = {
                 "hookEventName": {"type": "string", "const": "PreToolUse"},
                 "permissionDecision": {
                     "type": "string",
-                    "enum": ["allow", "deny", "ask"],
+                    "enum": ["allow", "deny", "ask", "defer"],
                 },
                 "permissionDecisionReason": {"type": "string"},
+                # Replaces the tool's ENTIRE input object before execution
+                # (Plan 00271 item 1).
+                "updatedInput": {"type": "object", "additionalProperties": True},
                 "additionalContext": {"type": "string"},
                 "guidance": {"type": "string"},
             },
