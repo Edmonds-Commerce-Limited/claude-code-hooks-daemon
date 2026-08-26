@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (44 handlers)
+### PreToolUse (45 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -36,6 +36,7 @@
 | 33 | plan_number_helper | BLOCKING | Detect bash commands attempting to discover plan numbers and provide correct answer |
 | 34 | verification_result_gate | NON-TERMINAL | Advise when a verifier's exit status is never consumed before a mutator |
 | 35 | tdd_enforcement | BLOCKING | Enforce TDD by blocking production file creation without corresponding test file |
+| 36 | bash_safe_mode | NON-TERMINAL | Require a bash safety prelude on multi-statement Bash invocations |
 | 38 | lsp_enforcement | BLOCKING | Enforce LSP tool usage instead of Grep/Bash grep for symbol lookups |
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |

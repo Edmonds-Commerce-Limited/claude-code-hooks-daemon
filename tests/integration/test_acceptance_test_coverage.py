@@ -67,6 +67,12 @@ _EXEMPT_FROM_DENY_TEST: dict[str, str] = {
         "playbook running the default configuration cannot reach the deny path. "
         "The warn path IS covered by its advisory acceptance tests."
     ),
+    "BashSafeModeHandler": (
+        "denies only under `mode: block`; shipped default `warn` -- and the "
+        "handler additionally ships `enabled: false`, so a playbook running "
+        "the default configuration cannot reach the deny path at all. The "
+        "warn path IS covered by its advisory acceptance tests."
+    ),
     "StagedLintGateHandler": (
         "denies only under `mode: block`; shipped default `warn` -- the same "
         "warn-first rollout as VerificationResultGateHandler and "

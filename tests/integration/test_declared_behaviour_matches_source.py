@@ -81,6 +81,13 @@ _EXEMPT_FROM_BLOCKING_TAG: dict[str, str] = {
         "the same deliberate warn-first rollout as PlanQaCommitGateHandler. "
         "Rendering it BLOCKING would overstate what a default installation does."
     ),
+    "BashSafeModeHandler": (
+        "denies only under `mode: block`, and the shipped defaults are "
+        "`enabled: false` plus `mode: warn` -- the same deliberate warn-first "
+        "rollout as VerificationResultGateHandler, with an extra opt-in gate "
+        "in front. Rendering it BLOCKING would overstate what a default "
+        "installation does."
+    ),
     "StagedLintGateHandler": (
         "denies only under `mode: block`, and the shipped default is `warn` -- "
         "the same deliberate warn-first rollout as VerificationResultGateHandler "
