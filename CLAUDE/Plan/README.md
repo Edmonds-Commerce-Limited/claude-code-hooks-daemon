@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00277: release acceptance findings v3 55 0](00277-release-acceptance-findings-v3-55-0/PLAN.md) - Not Started (MUST-FIX tracking for v3.55.0 gate findings: stale playbook expectations, lsp_enforcement block_once semantics ruling, two inconclusive advisory observations)
-
 - [00276: goal stack concurrent tracking](00276-goal-stack-concurrent-tracking/PLAN.md) - In Progress (daemon-side goal ledger so Stop-time defence covers every In Progress plan's goal, not just the last `/goal` writer; shipped and live — remaining: live two-concurrent-plan observation)
 
 - [00274: skill opportunity detector](00274-skill-opportunity-detector/PLAN.md) - In Progress (mine session transcripts for repeated workloads and recurring explanations via a redacted digest judged by Haiku; TTL-gated SessionStart advisory delegating to a `skill-scan` CLI, report-only per Plan 00161 conventions)
@@ -175,6 +173,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00277: release acceptance findings v3 55 0](Completed/00277-release-acceptance-findings-v3-55-0/PLAN.md) - Complete at `ebf7016a` + the archiving commit (all v3.55.0 gate findings closed: per-session block_once with session-attributed HandlerDecisionRecord, isolation-advisor test precondition, lint-clean error-hiding samples, validate_eslint_on_write deny branch verified live in the client fixture)
 
 - [00275: github auto-close keyword blocker](Completed/00275-github-auto-close-keyword-blocker/PLAN.md) - Complete at merge `2bdafe05` (PreToolUse guard denying GitHub auto-closing keyword references in git commit/merge/tag and `gh pr` messages, inline or via `-F`/`--body-file`; enabled by default, `MUST_AUTO_CLOSE_BECAUSE` hatch)
 
@@ -1259,9 +1259,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 277 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 224 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 225 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 

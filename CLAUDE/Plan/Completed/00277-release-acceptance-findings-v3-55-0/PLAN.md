@@ -1,6 +1,6 @@
 # Plan 00277: release acceptance findings v3 55 0
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: Medium
@@ -76,13 +76,17 @@ immediately after the release ships.
   session repo, so no probe command can fire the fixer against a fixture;
   the shipped acceptance test is an explicit negative control (silence in
   a healthy repo) and says so.
-- [ ] ⬜ **Task 3.4**: `validate_eslint_on_write` deny branch (playbook
-  Test 101) verification. Attempted in the dummy-client fixture: handler
-  enabled, `package.json` with `llm:lint` added, synthesized PostToolUse
-  Write of broken.ts → dummy daemon returned `{}` (no match/advice), so
-  the deny branch remains unverified — needs investigation of why the
-  handler stayed silent in the fixture (project-root/package.json
-  resolution? matches() conditions?) before the branch can be exercised.
+- [x] ✅ **Task 3.4**: `validate_eslint_on_write` deny branch VERIFIED
+  live in the dummy-client fixture: with the handler enabled, `llm:lint`
+  in `package.json` BEFORE daemon start, and `broken.ts` physically on
+  disk, a synthesized Bash-authored PostToolUse write returned
+  `decision: block` ("Failed to run ESLint: ... 'tsx'") — the documented
+  DENY-on-failure-to-run branch. The earlier `{}` was environmental, not
+  a defect: (a) the fixture ships the handler `enabled: false`, and
+  (b) `has_llm_commands` is snapshotted at handler init, so adding
+  `llm:lint` after startup cannot arm enforcement without a restart;
+  additionally `matches()` requires the target file to exist on disk, so
+  a synthesized event with no real file never matches.
 - [x] ✅ **Task 3.5**: RULED a recorded boundary, not fixed: inside a
   quoted-string ARGUMENT (`[[ "... | tail -5" == 0 ]]`) the scanner cannot
   know which embedded word is the "producer" without executing the string,
@@ -100,9 +104,9 @@ immediately after the release ships.
 
 ## Success Criteria
 
-- [ ] All rulings recorded (here or in the affected handlers' docs)
-- [ ] Regenerated playbook expectations pass against the live daemon
-- [ ] Full QA green; daemon restart RUNNING
+- [x] All rulings recorded (here or in the affected handlers' docs)
+- [x] Regenerated playbook expectations pass against the live daemon
+- [x] Full QA green; daemon restart RUNNING
 
 ## Delivery & Milestones
 
@@ -111,3 +115,5 @@ immediately after the release ships.
      JOURNAL/00277-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Filed during the v3.55.0 release acceptance gate
+- Main delivery (per-session block_once, test precondition, lint-clean samples) at ebf7016a
+- Task 3.4 deny-branch verification closed the plan (commit hash: the archiving commit)
