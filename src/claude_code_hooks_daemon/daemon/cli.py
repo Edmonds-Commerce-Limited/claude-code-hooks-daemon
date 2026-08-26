@@ -4164,6 +4164,7 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
         REPORTS_DIR_NAME,
         STATE_FILE_NAME,
     )
+    from claude_code_hooks_daemon.skill_scan.extraction import derive_transcript_dir
     from claude_code_hooks_daemon.skill_scan.invoker import ClaudeCliInvoker
     from claude_code_hooks_daemon.skill_scan.models import SkillScanOptions
     from claude_code_hooks_daemon.skill_scan.pipeline import run_scan
@@ -4205,7 +4206,7 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
             )
             return 0
 
-    sensitive_cfg = config.handlers.pre_tool_use.get("sensitive_content")
+    sensitive_cfg = config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
     if isinstance(sensitive_cfg, dict):
         sensitive_options = sensitive_cfg.get("options", {})
     else:
@@ -4240,8 +4241,23 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
         print(result.digest)
         return 0
 
-    model_failed = result.model_error is not None and stats.genuine > 0
-    if model_failed:
+    if stats.genuine == 0:
+        # An empty window is NOT recorded as a completed scan: a missing or
+        # mistyped transcript directory would otherwise silence the advisory
+        # for the whole interval. Record an attempt (quietens nagging for a
+        # day) and name the directory that was read so the operator can check.
+        transcript_dir = (
+            Path(options.transcript_dir)
+            if options.transcript_dir is not None
+            else derive_transcript_dir(project_root)
+        )
+        print(
+            f"WARNING: no genuine prompts found in transcript directory "
+            f"{transcript_dir} — check the path if this is unexpected. "
+            "Not recording a completed scan; the advisory will retry."
+        )
+        record_attempt(state_path)
+    elif result.model_error is not None:
         print(f"Model stage skipped: {result.model_error}")
         record_attempt(state_path)
     else:

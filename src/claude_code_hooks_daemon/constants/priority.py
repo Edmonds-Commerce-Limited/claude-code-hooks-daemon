@@ -182,7 +182,7 @@ class Priority:
     CONTRACT_STALENESS = 60
     SKILL_OPPORTUNITY_DETECTOR = 61
 
-    # Advisory handlers (Priority: 55-60)
+    # Advisory handlers (Priority: 55-65)
     CRITICAL_THINKING_ADVISORY = 55
     IDLE_HOUSEKEEPING_ADVISORY = 56
     # Last of the UserPromptSubmit advisories deliberately (Plan 00223): the
@@ -224,7 +224,10 @@ class PriorityRange:
     WORKFLOW_MAX = 55
 
     ADVISORY_MIN = 56
-    ADVISORY_MAX = 60
+    # Widened from 60 for skill_opportunity_detector (Plan 00274): 56-60 was
+    # fully occupied by the SessionStart advisory ladder ending at
+    # contract_staleness (60). Documented in root CLAUDE.md's Priority Ranges.
+    ADVISORY_MAX = 65
 
     LOGGING_MIN = 100
     LOGGING_MAX = 199

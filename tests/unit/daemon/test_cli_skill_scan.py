@@ -126,10 +126,19 @@ class TestCmdSkillScan:
         assert state.last_scan_at is None
         assert state.last_attempt_at is not None
 
-    def test_empty_window_is_successful_noop(self, tmp_path: Path) -> None:
+    def test_empty_window_warns_and_records_attempt_only(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # An empty window must NOT silence the advisory for the whole
+        # interval — a mistyped transcript_dir would look identical. The CLI
+        # warns (naming the directory read) and records only an attempt.
         root = _scaffold(tmp_path)
         with patch(_INVOKE_TARGET, return_value=(_EMPTY_SUGGESTIONS, None)) as invoke:
             assert cmd_skill_scan(_args(root, force=True, window_days=0)) == 0
         assert invoke.call_count == 0
+        out = capsys.readouterr().out
+        assert "WARNING: no genuine prompts" in out
+        assert str(tmp_path / "transcripts") in out
         state = load_state(_state_path(root))
-        assert state.last_scan_at is not None
+        assert state.last_scan_at is None
+        assert state.last_attempt_at is not None

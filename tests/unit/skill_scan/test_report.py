@@ -52,8 +52,15 @@ class TestWriteReport:
 
     def test_schema_drift_canary_present(self, tmp_path: Path) -> None:
         text = _write(tmp_path).read_text()
-        assert "canary" in text
-        assert "1" in text
+        assert "- Unparseable lines (schema-drift canary): 1" in text
+
+    def test_paths_in_prompts_never_reach_report(self, tmp_path: Path) -> None:
+        text = _write(
+            tmp_path,
+            clusters=[_cluster("fix the test in /workspace/tests/unit/secret_area/x.py now")],
+        ).read_text()
+        assert "/workspace/tests" not in text
+        assert "secret_area" not in text
 
     def test_existing_skills_noted(self, tmp_path: Path) -> None:
         text = _write(tmp_path).read_text()

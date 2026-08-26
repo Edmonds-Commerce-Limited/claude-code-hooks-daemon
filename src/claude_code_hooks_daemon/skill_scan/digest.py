@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from claude_code_hooks_daemon.skill_scan.clustering import normalise
 from claude_code_hooks_daemon.skill_scan.constants import (
     COMMANDS_SUBDIR,
     DEFAULT_MAX_CLUSTERS,
@@ -20,7 +21,6 @@ from claude_code_hooks_daemon.skill_scan.models import Cluster
 from claude_code_hooks_daemon.utils.secret_redaction import redact_text
 
 _NO_INVENTORY = "(none)"
-_NEWLINE_REPLACEMENT = " "
 
 
 def build_digest(
@@ -28,10 +28,15 @@ def build_digest(
     terms: tuple[str, ...],
     max_clusters: int = DEFAULT_MAX_CLUSTERS,
 ) -> str:
-    """One line per cluster: id, count, distinct sessions, redacted rep."""
+    """One line per cluster: id, count, distinct sessions, normalised+redacted rep.
+
+    Each representative is passed through ``normalise()`` — lowercased, with
+    paths/shas/numbers collapsed to placeholders — and THEN secret-redacted,
+    so raw prompt text (including embedded paths) never reaches the model.
+    """
     lines: list[str] = []
     for idx, cluster in enumerate(clusters[:max_clusters], start=1):
-        rep = redact_text(cluster.representative.replace("\n", _NEWLINE_REPLACEMENT), terms)
+        rep = redact_text(normalise(cluster.representative), terms)
         lines.append(
             f"[{idx}] count={len(cluster.prompts)} sessions={cluster.distinct_sessions} "
             f"rep={rep!r}"

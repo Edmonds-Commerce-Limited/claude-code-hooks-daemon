@@ -23,11 +23,25 @@ def _cluster(text: str, sessions: int = 1) -> Cluster:
 
 
 class TestBuildDigest:
-    def test_lines_carry_counts_and_representative(self) -> None:
-        digest = build_digest([_cluster("deploy the thing", sessions=3)], terms=())
+    def test_lines_carry_counts_and_normalised_representative(self) -> None:
+        digest = build_digest([_cluster("Deploy The Thing", sessions=3)], terms=())
         assert "count=3" in digest
         assert "sessions=3" in digest
+        # The representative is NORMALISED before it can reach the model:
+        # lowercased, with paths/shas/numbers collapsed to placeholders.
         assert "deploy the thing" in digest
+        assert "Deploy The Thing" not in digest
+
+    def test_paths_in_prompts_never_reach_digest(self) -> None:
+        digest = build_digest(
+            [_cluster("fix the test in /workspace/tests/unit/secret_area/x.py now")],
+            terms=(),
+        )
+        assert "/workspace" not in digest
+        assert "secret_area" not in digest
+        from claude_code_hooks_daemon.skill_scan.constants import PATH_PLACEHOLDER
+
+        assert PATH_PLACEHOLDER in digest
 
     def test_secret_terms_are_redacted(self) -> None:
         digest = build_digest([_cluster("please rotate hunter2 now")], terms=("hunter2",))

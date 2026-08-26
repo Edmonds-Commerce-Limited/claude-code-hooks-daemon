@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+from claude_code_hooks_daemon.skill_scan.clustering import normalise
 from claude_code_hooks_daemon.skill_scan.constants import (
     MAX_REPORT_CLUSTERS,
     REPORT_FILE_SUFFIX,
@@ -80,7 +81,9 @@ def write_report(
     if not multi:
         lines.append("_No repeated clusters in the window._")
     for idx, cluster in enumerate(multi[:MAX_REPORT_CLUSTERS], start=1):
-        rep = redact_text(cluster.representative.replace("\n", " "), terms)
+        # Same normalise-then-redact path as the digest: raw prompt text
+        # (including embedded paths) never reaches the report either.
+        rep = redact_text(normalise(cluster.representative), terms)
         lines.append(
             f"{idx}. **{len(cluster.prompts)}x / {cluster.distinct_sessions} session(s)** — "
             f"`{rep}`"
