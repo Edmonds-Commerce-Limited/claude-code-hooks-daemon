@@ -755,6 +755,13 @@ class TestHookResultSystemMessageDenyFormat:
 
         assert output == {}
 
+    def test_stop_block_without_reason_gets_the_fallback(self):
+        """The docs REQUIRE reason with a Stop block (Plan 00271 Task 3.2)."""
+        output = HookResult(decision=Decision.DENY).to_json("Stop")
+
+        assert output["decision"] == "block"
+        assert output["reason"]  # never a bare block
+
     def test_pre_compact_deny_is_a_documented_block(self):
         """PreCompact CAN block compaction (Plan 00271 item 7)."""
         result = HookResult(decision=Decision.DENY, reason="Compact rejected")

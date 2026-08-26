@@ -36,6 +36,9 @@ PRE_TOOL_USE_SCHEMA: Final[dict[str, Any]] = {
                 # (Plan 00271 item 1).
                 "updatedInput": {"type": "object", "additionalProperties": True},
                 "additionalContext": {"type": "string"},
+                # DAEMON-INTERNAL EXTENSION, not part of the documented
+                # contract: Claude Code ignores unknown keys, so this is
+                # harmless on the wire. Recorded in ALLOWLIST.yaml.
                 "guidance": {"type": "string"},
             },
             "required": ["hookEventName"],
@@ -60,6 +63,9 @@ POST_TOOL_USE_SCHEMA: Final[dict[str, Any]] = {
             "properties": {
                 "hookEventName": {"type": "string", "const": "PostToolUse"},
                 "additionalContext": {"type": "string"},
+                # DAEMON-INTERNAL EXTENSION, not part of the documented
+                # contract: Claude Code ignores unknown keys, so this is
+                # harmless on the wire. Recorded in ALLOWLIST.yaml.
                 "guidance": {"type": "string"},
             },
             "required": ["hookEventName"],
@@ -142,6 +148,9 @@ PERMISSION_REQUEST_SCHEMA: Final[dict[str, Any]] = {
                     "additionalProperties": False,
                 },
                 "additionalContext": {"type": "string"},
+                # DAEMON-INTERNAL EXTENSION, not part of the documented
+                # contract: Claude Code ignores unknown keys, so this is
+                # harmless on the wire. Recorded in ALLOWLIST.yaml.
                 "guidance": {"type": "string"},
             },
             "required": ["hookEventName"],
@@ -230,6 +239,9 @@ USER_PROMPT_SUBMIT_SCHEMA: Final[dict[str, Any]] = {
             "properties": {
                 "hookEventName": {"type": "string", "const": "UserPromptSubmit"},
                 "additionalContext": {"type": "string"},
+                # DAEMON-INTERNAL EXTENSION, not part of the documented
+                # contract: Claude Code ignores unknown keys, so this is
+                # harmless on the wire. Recorded in ALLOWLIST.yaml.
                 "guidance": {"type": "string"},
             },
             "required": ["hookEventName"],
@@ -257,6 +269,9 @@ NOTIFICATION_SCHEMA: Final[dict[str, Any]] = {
 # Status Hook Response Schema
 # CRITICAL: Status emits a plain-text payload {"text": "..."} (see
 # HookResult.to_json), NOT hookSpecificOutput or a decision field.
+# OUT-OF-CONTRACT BY DESIGN: the status line is a separate Claude Code feature
+# with its own contract, not a hooks event — the hook_contract QA check skips
+# it deliberately (Plan 00271).
 # =============================================================================
 
 STATUS_SCHEMA: Final[dict[str, Any]] = {

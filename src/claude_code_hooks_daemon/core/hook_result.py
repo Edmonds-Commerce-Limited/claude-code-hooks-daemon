@@ -75,6 +75,12 @@ _HSO_CONTEXT_EXTRA_EVENTS: Final[frozenset[str]] = frozenset(
 #: Events whose documented block is ``continue: false`` + ``stopReason``.
 _CONTINUE_FALSE_EVENTS: Final[frozenset[str]] = frozenset({"TeammateIdle", "TaskCompleted"})
 
+#: The docs REQUIRE ``reason`` alongside a Stop/SubagentStop ``decision:
+#: "block"``; this fallback keeps a reasonless handler block contract-valid.
+_STOP_BLOCK_FALLBACK_REASON: Final[str] = (
+    "A Stop handler blocked the stop without stating a reason; continue working."
+)
+
 # Which events can actually CARRY each refusal on the wire. Anything absent here
 # drops that decision, and the resulting response is still schema-VALID — so the
 # contract check cannot see it. Stop and PostToolUse express `block` but have no
@@ -685,8 +691,9 @@ class HookResult(BaseModel):
 
         if self.decision == Decision.DENY:
             response["decision"] = "block"
-            if self.reason:
-                response["reason"] = self.reason
+            # The docs REQUIRE reason when decision is "block" (Plan 00271
+            # cosmetic finding): a bare block must not go out without one.
+            response["reason"] = self.reason or _STOP_BLOCK_FALLBACK_REASON
             if self.context:
                 response["hookSpecificOutput"] = {
                     "hookEventName": event_name,

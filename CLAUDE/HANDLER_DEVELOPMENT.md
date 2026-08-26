@@ -147,11 +147,19 @@ cannot carry one is **silently dropped on the wire** — the handler believes it
 blocked and nothing blocked. Subclassing the event's base makes that
 unwritable: mypy rejects the decision, and Pydantic rejects it again at runtime.
 
-| Tier         | Decisions it can return    | Events                          | Base class           | Result type      |
-| ------------ | -------------------------- | ------------------------------- | -------------------- | ---------------- |
-| **Gating**   | allow, continue, deny, ask | PreToolUse, PermissionRequest   | `<Event>HandlerBase` | `GatingResult`   |
-| **Blocking** | allow, continue, deny      | PostToolUse, Stop, SubagentStop | `<Event>HandlerBase` | `BlockingResult` |
-| **Advisory** | allow, continue            | every other wired event         | `<Event>HandlerBase` | `AdvisoryResult` |
+| Tier         | Decisions it can return           | Events                                                                                                                                                                   | Base class           | Result type      |
+| ------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------- | ---------------- |
+| **Gating**   | allow, continue, deny, ask, defer | PreToolUse                                                                                                                                                               | `<Event>HandlerBase` | `GatingResult`   |
+| **Blocking** | allow, continue, deny             | PostToolUse, Stop, SubagentStop, PermissionRequest, UserPromptSubmit, PreCompact, UserPromptExpansion, PostToolUseFailure, PostToolBatch, TaskCreated, TaskCompleted, TeammateIdle, ConfigChange | `<Event>HandlerBase` | `BlockingResult` |
+| **Advisory** | allow, continue                   | every other wired event                                                                                                                                                  | `<Event>HandlerBase` | `AdvisoryResult` |
+
+The tier assignments come from the DOCUMENTED hooks contract, vendored under
+`contracts/claude-code-hooks/` and enforced by the `hook_contract` QA check
+(Plan 00271). PreToolUse additionally supports `updatedInput` (set
+`HookResult.updated_input` to rewrite the tool's entire input object before it
+runs) and `GatingResult.defer()` (exit gracefully so the tool resumes later).
+A PermissionRequest deny's reason reaches Claude via the documented
+`decision.message` field.
 
 **Every wired event has a base named after it** — `SessionStartHandlerBase`,
 `PostToolUseHandlerBase`, `StatusLineHandlerBase`, and so on, in
