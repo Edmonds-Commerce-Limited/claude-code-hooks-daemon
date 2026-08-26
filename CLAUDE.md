@@ -1257,6 +1257,27 @@ Add 1 to that value (zero-pad to 5 digits, e.g. counter `117` → next plan `001
 
 **Do NOT** scan `CLAUDE/Plan/` with `ls`/`find`/glob pipelines to discover the next number. Folder scans miss plans in `Completed/` and other subdirectories, and disagree across branches. The folder scan is only used to bootstrap the counter when the git key is unset (which `mkplan.bash` and the daemon both handle).
 
+<!-- handler: verification-result-gate -->
+
+## verification_result_gate — a check's result must be consumed
+
+Flagged: a **verifier** (`ansible-lint`, `shellcheck`, `pytest`, `ruff`, `mypy`, `yamllint`, `go vet`, `bash -n`, `php -l`, `golangci-lint`, `npm test`, `ansible-playbook --syntax-check`) followed by a **mutator** (`git add`/`commit`/`push`/`tag`, `gh pr create`/`gh issue create`/`gh pr merge`, a real `ansible-playbook` run) in the SAME Bash invocation, with nothing consuming the verifier's exit status.
+
+**A NEWLINE separates commands exactly as `;` does.** Putting the lint on one line and the commit on the next gates nothing — that is precisely how an unloadable file reached a default branch: the lint failed, its exit code was printed, and the commit ran anyway.
+
+**Printing `$?` is not consuming it.** `echo "exit=$?"` reports the result; it does not act on it.
+
+**Any of these is accepted** — use whichever fits:
+
+- `verifier … && mutator …`
+- `verifier … || { echo failed; exit 1; }`
+- `verifier …; rc=$?` then an `if`/`case` that branches on it
+- `set -euo pipefail` at the top of the invocation
+
+**This is NOT a style rule about `;` versus `&&`.** Blanket chaining was considered and rejected: `grep -q p f; echo done` exits 1 on a legitimate no-match, `cmd > f 2>&1; echo "exit=$?"` exists to observe a failure, and a labelled diagnostic sweep wants every section even when a probe fails. None of those contains a mutator, so none of them fires here.
+
+Ships advisory (`mode: warn`). Set `handlers.pre_tool_use.verification_result_gate.options.mode: block` to deny instead; extend the tables additively with `extra_verifiers` / `extra_mutators`.
+
 <!-- handler: enforce-tdd -->
 
 ## tdd_enforcement — test file must exist before source file
@@ -1590,16 +1611,6 @@ When you background a long-lived process:
 
 Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
 
-<!-- handler: command-hints -->
-
-## command_hints — advisory reminders after specific commands
-
-PostToolUse advisory (never blocks). When a configured command is detected in a Bash call, a HINT is injected reminding you of a follow-up action. Shipped default: running `agent-browser` reminds you to close the browser session when finished.
-
-**Rate-limited per hint** — each hint has a `ttl_seconds` cooldown (tracked per session + hint id) so it does not repeat on every matching command; state resets on daemon restart, so a hint may fire once more after a restart.
-
-**Configure** via `handlers.post_tool_use.command_hints.options`: `mode: additive` (default) appends your `hints` list to the built-in set — a project entry whose `id` matches a built-in one overrides it; `mode: replace` discards the built-in set entirely and uses only your list. Each hint: `id`, `pattern` (a literal command name, matched at the start of a shell segment — path-qualified and `env`-prefixed spellings are recognised, but it never fires on the word appearing as an unrelated argument), `hint` (the reminder text), `ttl_seconds`, and optional `min_calls_between` (secondary count-based gate). Disable with `handlers.post_tool_use.command_hints.enabled: false`.
-
 <!-- handler: git-hooks-executable-fixer -->
 
 ## git_hooks_executable_fixer — auto-fixes non-executable git hooks
@@ -1787,6 +1798,16 @@ language's `default`/`extended` command (set `extended: null` to run only the
 syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
 globs. The project-wide `daemon.exclude_paths` applies here too; the two are
 additive and neither overrides the other.
+
+<!-- handler: command-hints -->
+
+## command_hints — advisory reminders after specific commands
+
+PostToolUse advisory (never blocks). When a configured command is detected in a Bash call, a HINT is injected reminding you of a follow-up action. Shipped default: running `agent-browser` reminds you to close the browser session when finished.
+
+**Rate-limited per hint** — each hint has a `ttl_seconds` cooldown (tracked per session + hint id) so it does not repeat on every matching command; state resets on daemon restart, so a hint may fire once more after a restart.
+
+**Configure** via `handlers.post_tool_use.command_hints.options`: `mode: additive` (default) appends your `hints` list to the built-in set — a project entry whose `id` matches a built-in one overrides it; `mode: replace` discards the built-in set entirely and uses only your list. Each hint: `id`, `pattern` (a literal command name, matched at the start of a shell segment — path-qualified and `env`-prefixed spellings are recognised, but it never fires on the word appearing as an unrelated argument), `hint` (the reminder text), `ttl_seconds`, and optional `min_calls_between` (secondary count-based gate). Disable with `handlers.post_tool_use.command_hints.enabled: false`.
 
 <!-- handler: ccy-supervisor-integrity -->
 
