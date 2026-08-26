@@ -40,33 +40,27 @@ cic = _load_module()
 
 class TestCollectReads:
     def test_string_literal_get_and_subscript(self) -> None:
-        source = textwrap.dedent(
-            """
+        source = textwrap.dedent("""
             def matches(self, hook_input: dict) -> bool:
                 a = hook_input.get("tool_name")
                 b = hook_input["prompt"]
                 return bool(a or b)
-            """
-        )
+            """)
         assert cic.collect_reads_from_source(source, {}) == {"tool_name", "prompt"}
 
     def test_hook_input_field_attribute_resolved_via_constants(self) -> None:
-        source = textwrap.dedent(
-            """
+        source = textwrap.dedent("""
             def handle(self, hook_input: dict):
                 return hook_input.get(HookInputField.TRANSCRIPT_PATH)
-            """
-        )
+            """)
         constants = {"TRANSCRIPT_PATH": "transcript_path"}
         assert cic.collect_reads_from_source(source, constants) == {"transcript_path"}
 
     def test_nested_tool_input_reads_record_only_top_level_key(self) -> None:
-        source = textwrap.dedent(
-            """
+        source = textwrap.dedent("""
             def matches(self, hook_input: dict) -> bool:
                 return "x" in hook_input.get("tool_input", {}).get("command", "")
-            """
-        )
+            """)
         assert cic.collect_reads_from_source(source, {}) == {"tool_input"}
 
     def test_other_dict_reads_are_ignored(self) -> None:
@@ -75,8 +69,7 @@ class TestCollectReads:
 
     def test_get_with_default_argument(self) -> None:
         source = (
-            "def f(hook_input: dict):\n"
-            '    return hook_input.get("stop_hook_active", False)\n'
+            "def f(hook_input: dict):\n" '    return hook_input.get("stop_hook_active", False)\n'
         )
         assert cic.collect_reads_from_source(source, {}) == {"stop_hook_active"}
 
@@ -189,14 +182,12 @@ class TestScan:
         assert f"{cic.RULE_UNKNOWN_INPUT_FIELD}:Stop:stop_hook_active" in ids
 
     def test_allowlisted_finding_is_recorded_not_violated(self, tmp_path: Path) -> None:
-        allowlist = textwrap.dedent(
-            """
+        allowlist = textwrap.dedent("""
             entries:
               - id: "unknown-input-field:Stop:stop_hook_active"
                 reason: "deliberate legacy fallback"
                 link: "CLAUDE/Plan/00273-hook-input-payload-validation/PLAN.md"
-            """
-        )
+            """)
         _write_tree(
             tmp_path,
             handler_source=_CLEAN_HANDLER,
@@ -208,14 +199,12 @@ class TestScan:
         assert len(report.allowlisted) == 1
 
     def test_stale_allowlist_entry_is_a_violation(self, tmp_path: Path) -> None:
-        allowlist = textwrap.dedent(
-            """
+        allowlist = textwrap.dedent("""
             entries:
               - id: "unknown-input-field:Stop:no_such_read"
                 reason: "gone"
                 link: "CLAUDE/Plan/00273-hook-input-payload-validation/PLAN.md"
-            """
-        )
+            """)
         _write_tree(
             tmp_path,
             handler_source=_CLEAN_HANDLER,
