@@ -3,6 +3,12 @@
   "description": "Intentional error-handling patterns exempt from the error-hiding audit. Prefer 'function' over 'lines': line numbers shift whenever anything above them is edited, function names do not. 'lines' remains necessary for module-level sites and shell scripts, where there is no enclosing function to key on. Each entry documents WHY the pattern is appropriate. Entries are themselves audited: an exclusion matching NO finding is reported as a 'stale-exclusion' violation, because it means either the entry drifted off its target (realign it) or the code was fixed (delete it) — and a drifted entry silently exempts an innocent site while the real finding resurfaces elsewhere looking new.",
   "exclusions": [
     {
+      "file": "utils/secret_file_matching.py",
+      "function": "_realpath_if_resolvable",
+      "rule": "silent-fallback",
+      "reason": "Plan 00272: shell-token symlink probe. A candidate token is arbitrary text sliced out of a Bash command, so Path(token).is_symlink() can raise OSError for shapes that are simply not paths (over-long prose fragments). The except body assigns is_symlink = False — the documented answer for a non-path token, not a hidden error: the raw token is still matched against the protected globs, so nothing is concealed and the guard can only get STRICTER by continuing. Raising would let a crafted token crash the deny path — failing open."
+    },
+    {
       "file": "config/models.py",
       "function": "load_or_default",
       "rule": "silent-pass",

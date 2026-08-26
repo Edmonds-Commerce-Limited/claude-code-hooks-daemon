@@ -127,6 +127,16 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "advisory convenience (no goal injected), never a protection, and the "
         "inject-goal CLI fallback covers it on demand",
     ),
+    "SecretFileGuardHandler": (
+        _PARTIAL,
+        "Plan 00272: the Write/Edit content scan (authored scripts referencing "
+        "a protected path) has no Bash-write counterpart, but the Bash surface "
+        "is judged by COMMAND TEXT instead -- a heredoc/redirect authoring such "
+        "a script necessarily MENTIONS the protected path and is denied by the "
+        "path-mention rule before the write happens, so the practical gap is "
+        "only a path assembled from strings inside the heredoc body (already a "
+        "documented class-(d) residual)",
+    ),
     "LockFileEditBlockerHandler": (
         _BLIND,
         "a hand-written lock file lands via heredoc; damage surfaces at install "

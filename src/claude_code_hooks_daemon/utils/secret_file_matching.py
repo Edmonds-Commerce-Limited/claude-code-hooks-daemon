@@ -252,11 +252,14 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
 def _realpath_if_resolvable(token: str) -> str | None:
     """Realpath of ``token`` when it names an existing symlink, else None."""
     try:
-        path = Path(token)
-        if path.is_symlink():
-            return os.path.realpath(token)
+        is_symlink = Path(token).is_symlink()
     except OSError:
-        return None
+        # A token that cannot be stat-ed (over-long path from prose text) is
+        # not a symlink to resolve; matching proceeds on the raw token, so
+        # nothing is hidden. Registered in error_hiding_exclusions.json.
+        is_symlink = False
+    if is_symlink:
+        return os.path.realpath(token)
     return None
 
 

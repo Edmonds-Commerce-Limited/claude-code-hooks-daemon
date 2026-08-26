@@ -83,6 +83,19 @@ handlers:
       #       description: 'shown in the deny reason -- keep this STRUCTURAL, never a specific identifier'
       #   secret_word_list_path: .claude/block-words.secret  # gitignored; a match here NEVER discloses the term
 
+    secret_file_guard:     # Protected files' CONTENTS never enter context (Plan 00272)
+      enabled: true         # Default globs: *.secret*, .vault-pass*, *.vault-password,
+      priority: 14          # *vault_pass*, id_rsa, id_ed25519. Metadata via `hooks-daemon secret-meta`.
+      # options:
+      #   mode: additive              # additive (merge onto defaults) | replace (only your list)
+      #   protected_paths:
+      #     - "secrets/prod-token"
+      #   allowed_consumers:          # additive to the shipped Ansible family
+      #     - command: "my-deploy-tool"
+      #       path_flags: ["--secret-file"]
+      #   allow_plain_hash: false     # true also exposes exact size + plain sha256 via secret-meta
+      #   exclude_paths: []           # scopes ONLY the authored-script content scan
+
     root_recursion_guard:  # Blocks recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME
       enabled: true
       priority: 16
