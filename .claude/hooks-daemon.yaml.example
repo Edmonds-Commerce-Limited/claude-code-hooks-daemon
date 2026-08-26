@@ -369,6 +369,10 @@ handlers:
       enabled: true               # Silent unless plan_workflow enabled AND mkplan.bash absent
       priority: 59
 
+    contract_staleness:  # Advise a hooks-contract refresh when Claude Code outruns the vendored audit (Plan 00271)
+      enabled: true      # Silent unless installed Claude Code > META.json last_audited_claude_code_version
+      priority: 60
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     compaction_signal:  # Drops <session>.compacting for the PTY supervisor (opt-in)

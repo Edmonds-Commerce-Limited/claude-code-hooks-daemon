@@ -1,6 +1,7 @@
 """SessionStart event handlers."""
 
 from .ccy_supervisor_integrity import CcySupervisorIntegrityHandler
+from .contract_staleness import ContractStalenessHandler
 from .git_filemode_checker import GitFilemodeCheckerHandler
 from .git_upstream_checker import GitUpstreamCheckerHandler
 from .gitignore_safety_checker import GitignoreSafetyCheckerHandler
@@ -13,6 +14,7 @@ from .version_check import VersionCheckHandler
 
 __all__ = [
     "CcySupervisorIntegrityHandler",
+    "ContractStalenessHandler",
     "GitFilemodeCheckerHandler",
     "GitUpstreamCheckerHandler",
     "GitignoreSafetyCheckerHandler",

@@ -344,6 +344,11 @@ class HandlerID:
         config_key="version_check",
         display_name="version-check",
     )
+    CONTRACT_STALENESS = HandlerIDMeta(
+        class_name="ContractStalenessHandler",
+        config_key="contract_staleness",
+        display_name="contract-staleness",
+    )
     RECOVERY_CRON_ADVISOR = HandlerIDMeta(
         class_name="RecoveryCronAdvisorHandler",
         config_key="recovery_cron_advisor",

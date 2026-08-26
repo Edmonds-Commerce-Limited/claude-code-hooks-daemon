@@ -279,6 +279,24 @@
       "reason": "Version check: log-and-continue on cache write failure. Already logged. Version checking is advisory."
     },
     {
+      "file": "handlers/session_start/contract_staleness.py",
+      "function": "_read_meta",
+      "rule": "return-none-on-error",
+      "reason": "Contract-staleness advisory (Plan 00271): returns None when the vendored META.json is absent or unparseable, logged at debug. An install without the vendored contract must not fail session start; the hook_contract QA check owns that failure loudly."
+    },
+    {
+      "file": "handlers/session_start/contract_staleness.py",
+      "function": "_read_installed_version",
+      "rule": "return-none-on-error",
+      "reason": "Contract-staleness advisory (Plan 00271): returns None when `claude --version` cannot be run or parsed (missing binary, timeout, non-zero exit), logged at debug. The advisory then stays silent — a broken probe must not fail session start."
+    },
+    {
+      "file": "handlers/session_start/contract_staleness.py",
+      "function": "_read_installed_version",
+      "rule": "log-and-continue",
+      "reason": "Contract-staleness advisory (Plan 00271): cache read/write failures are logged at debug and the probe falls through to a fresh `claude --version` run. The cache is purely an optimisation; advisory handlers are fail-open."
+    },
+    {
       "file": "handlers/status_line/daemon_stats.py",
       "function": "handle",
       "rule": "log-and-continue",

@@ -2164,6 +2164,29 @@ handlers:
 
 ---
 
+#### contract_staleness
+
+| Property       | Value                |
+| -------------- | -------------------- |
+| **Config key** | `contract_staleness` |
+| **Priority**   | 60                   |
+| **Type**       | Advisory             |
+| **Event**      | SessionStart         |
+
+**Description:** Advises a refresh of the vendored Claude Code hooks contract (`contracts/claude-code-hooks/`) when the installed Claude Code version is newer than `META.json`'s `last_audited_claude_code_version`. The advisory points at the refresh procedure in `docs/guides/HOOK-CONTRACT-REFRESH.md` (raw-fetch-only extraction). Runs on new sessions only, caches the `claude --version` probe for 24 hours, and stays silent when the vendored contract is absent or unreadable — the `hook_contract` QA check owns that failure. Advisory by design, never an auto-refresh (Plan 00271 Decision 3).
+
+**Config example:**
+
+```yaml
+handlers:
+  session_start:
+    contract_staleness:
+      enabled: true
+      priority: 60
+```
+
+---
+
 #### plan_qa_sweep
 
 | Property       | Value           |
@@ -2539,6 +2562,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `git_filemode_checker`     | SessionStart     | 53       | Warns when core.fileMode=false              |
 | `suggest_status_line`      | SessionStart     | 55       | Suggests status line setup                  |
 | `version_check`            | SessionStart     | 55       | Checks for daemon updates                   |
+| `contract_staleness`       | SessionStart     | 60       | Advises a hooks-contract audit refresh      |
 | `plan_qa_sweep`            | SessionStart     | 57       | Reports plan-tree drift once a session      |
 | `git_context_injector`     | UserPromptSubmit | 20       | Injects git status context                  |
 | `nitpick.hedging_language` | Nitpick          | 20       | Detects guessing language per turn          |
