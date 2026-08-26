@@ -54,8 +54,10 @@ logger = logging.getLogger(__name__)
 # The /goal slot is last-writer-wins upstream; the ledger remembers every
 # emission so a displaced-but-unfinished plan is never silently forgotten.
 _DISPLACEMENT_ADVISORY_TEMPLATE: Final[str] = (
-    "⚠️ GOAL DISPLACED: the /goal condition for Plan(s) {plans} has just been "
-    "overwritten by Plan {new_plan}'s goal, but {verb} still In Progress. "
+    "⚠️ GOAL DISPLACED: the /goal slot is last-writer-wins, so any live /goal "
+    "condition for Plan(s) {plans} is now superseded by Plan {new_plan}'s "
+    "goal (a displaced condition set in an earlier session was already gone), "
+    "but {verb} still In Progress. "
     "Claude Code's /goal slot holds only ONE condition (last writer wins); the "
     "daemon's goal ledger still tracks the displaced plan(s) — their work "
     "remains owed and the Stop hook will keep challenging stops on their "

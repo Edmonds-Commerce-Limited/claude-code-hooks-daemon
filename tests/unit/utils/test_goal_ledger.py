@@ -7,7 +7,10 @@ writes are fail-open: a missing or corrupt ledger never raises.
 """
 
 import json
+import threading
 from pathlib import Path
+
+import pytest
 
 from claude_code_hooks_daemon.utils.goal_ledger import (
     LEDGER_FILENAME,
@@ -157,13 +160,34 @@ class TestFailOpen:
         assert ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir) == []
         assert GoalLedger(ledger_path).entries()[0].plan_number == _PLAN_A
 
-    def test_unwritable_directory_never_raises(self, tmp_path: Path) -> None:
-        missing_parent = tmp_path / "no" / "such" / "dir"
-        ledger = GoalLedger(missing_parent / LEDGER_FILENAME)
+    def test_failed_write_never_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
-        # Parent dirs are created on demand; this must simply not raise.
+
+        def _failing_write_text(self: Path, *args: object, **kwargs: object) -> int:
+            raise OSError("disk full")
+
+        # All setup writes are done; every subsequent write fails, so the
+        # OSError branch in _save must be exercised and swallowed (logged).
+        monkeypatch.setattr(Path, "write_text", _failing_write_text)
         ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        assert not (tmp_path / LEDGER_FILENAME).exists()
+
+    def test_nonexistent_plan_dir_never_retires(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        # A misresolved/nonexistent plan dir must NOT retire the entry —
+        # retirement is persisted, so a wrong path would wipe the ledger.
+        wrong_dir = tmp_path / "not" / "a" / "plan" / "dir"
+        assert ledger.live_plan_numbers(wrong_dir) == []
+        assert ledger.entries()[0].retired_at is None
+        # The entry is still live against the real plan dir.
+        assert ledger.live_plan_numbers(plan_dir) == [_PLAN_A]
 
 
 class TestBoundedGrowth:
@@ -180,3 +204,65 @@ class TestBoundedGrowth:
         ledger.live_plan_numbers(plan_dir)
         raw = json.loads(ledger_path.read_text(encoding="utf-8"))
         assert len(raw["entries"]) <= 100
+
+
+class TestStatusParsing:
+    """The ledger delegates to PlanDoc.parse — the tested plan-QA parser."""
+
+    def test_terminal_status_with_date_qualifier_retires(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        folder = _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        (folder / "PLAN.md").write_text("**Status**: Complete (2026-05-01)\n", encoding="utf-8")
+        assert ledger.live_plan_numbers(plan_dir) == []
+
+    def test_in_progress_with_trailing_icon_stays_live(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        folder = _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        (folder / "PLAN.md").write_text("**Status**: In Progress 🔄\n", encoding="utf-8")
+        assert ledger.live_plan_numbers(plan_dir) == [_PLAN_A]
+
+    def test_status_line_inside_fenced_block_is_ignored(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        folder = _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        (folder / "PLAN.md").write_text(
+            "**Status**: In Progress\n\n" "```markdown\n**Status**: Complete\n```\n",
+            encoding="utf-8",
+        )
+        # The fenced Complete must not falsely retire the plan.
+        assert ledger.live_plan_numbers(plan_dir) == [_PLAN_A]
+        assert ledger.entries()[0].retired_at is None
+
+
+class TestConcurrentWriters:
+    def test_concurrent_emissions_all_recorded(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        ledger_path = tmp_path / LEDGER_FILENAME
+        total = 20
+        numbers = [f"{70000 + i:05d}" for i in range(total)]
+        for number in numbers:
+            _make_plan(plan_dir, number, _STATUS_IN_PROGRESS)
+
+        errors: list[BaseException] = []
+
+        def _emit(number: str) -> None:
+            try:
+                GoalLedger(ledger_path).record_emission(_SESSION, number, _GOAL_LINE, plan_dir)
+            except BaseException as exc:  # capture for the assertion below
+                errors.append(exc)
+
+        threads = [threading.Thread(target=_emit, args=(n,)) for n in numbers]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        recorded = {e.plan_number for e in GoalLedger(ledger_path).entries()}
+        # The flock around each read-modify-write means no emission is lost.
+        assert recorded == set(numbers)

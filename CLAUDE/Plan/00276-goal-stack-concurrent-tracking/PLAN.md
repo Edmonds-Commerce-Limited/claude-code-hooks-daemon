@@ -207,6 +207,34 @@ status → `terminal-status`; folder absent from the active plan root →
 archive moves are caught at the next Stop consult without new event plumbing.
 **Date**: 2026-08-26
 
+### Decision 4: Review-driven hardening (code review, 2026-08-26)
+
+**Context**: the branch code review returned FIX FIRST with three majors.
+
+**Decisions taken**:
+
+1. **Concurrency**: hook events dispatch on threads of one daemon process, so
+   every ledger read-modify-write holds an exclusive `flock` on a sibling
+   `.lock` file (daemon-start idiom) and the atomic-replace tmp file is
+   uuid-named, not pid-named. Lock acquisition is itself fail-open.
+2. **Retirement safety**: a nonexistent/unscannable plan dir reports
+   `unreadable` and never retires — only a plan dir that EXISTS but lacks the
+   folder retires as `archived`. The plan dir is resolved from the same
+   config source the plan-QA handlers use (`track_plans_in_project`, injected
+   via the `planning` tag; `PlanWorkflowConfig().directory` is the fallback),
+   shared through `goal_ledger.resolve_plan_dir()`. `goal_injection` keeps
+   deriving the plan dir from the edited PLAN.md's own path: for the emission
+   surface the event's path is ground truth, and it is identical to the
+   configured dir whenever the handler's matcher fired at all.
+3. **Status parsing**: delegated to `plan_qa.model.PlanDoc.parse` (handles
+   date qualifiers, trailing icons, fenced blocks) with `PlanStatus` /
+   `TERMINAL_STATUSES` as the vocabulary — no hand-rolled status regex.
+4. **Advisory wording**: softened to state the last-writer-wins mechanism
+   ("any live /goal condition ... is now superseded") rather than asserting
+   "has just been overwritten", which is untrue when the displaced goal was
+   set in an earlier session and had already expired with it.
+   **Date**: 2026-08-26
+
 ## Success Criteria
 
 - [ ] A ledger file exists under the daemon untracked dir recording every

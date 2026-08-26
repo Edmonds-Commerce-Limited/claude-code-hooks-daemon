@@ -43,7 +43,11 @@ from claude_code_hooks_daemon.core.transcript_reader import (
     TranscriptMessage,
     TranscriptReader,
 )
-from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger
+from claude_code_hooks_daemon.utils.goal_ledger import (
+    LEDGER_FILENAME,
+    GoalLedger,
+    resolve_plan_dir,
+)
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.retention import cap_log_file
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
@@ -121,7 +125,6 @@ _STOP_EXPLANATION_PREFIX = "STOPPING BECAUSE:"
 # condition (last writer wins); the daemon-side goal ledger remembers every
 # emitted goal, so an unexplained stop is challenged on behalf of EVERY
 # ledgered plan still In Progress — not only the newest.
-_PLAN_DIR_RELATIVE = "CLAUDE/Plan"
 _GOAL_LEDGER_CHALLENGE_TEMPLATE = (
     "GOAL LEDGER (daemon-side): the following ledgered plan(s) are still "
     "In Progress and their goals remain owed, even if the /goal condition "
@@ -322,6 +325,11 @@ class AutoContinueStopHandler(StopHandlerBase):
                 HandlerTag.AUTOMATION,
                 HandlerTag.YOLO_MODE,
                 HandlerTag.TERMINAL,
+                # Plan 00276: the PLANNING tag opts this handler into the
+                # registry's plan_workflow injection, so the goal-ledger
+                # consult resolves the CONFIGURED plan directory rather than
+                # hardcoding the default.
+                HandlerTag.PLANNING,
             ],
         )
         # Config flags — declared and initialised here so mypy can verify them
@@ -329,6 +337,9 @@ class AutoContinueStopHandler(StopHandlerBase):
         # than silently falling back to a getattr default (fail-fast).
         self._continue_on_errors: bool = True
         self._force_explanation: bool = True
+        # Injected by the registry for planning-tagged handlers
+        # (plan_workflow.directory); None falls back to the config default.
+        self._track_plans_in_project: str | None = None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Return True for all Stop events unless re-entry or AskUserQuestion.
@@ -496,9 +507,9 @@ class AutoContinueStopHandler(StopHandlerBase):
         """
         try:
             ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
-            plan_dir = ProjectContext.project_root() / _PLAN_DIR_RELATIVE
+            plan_dir = resolve_plan_dir(ProjectContext.project_root(), self._track_plans_in_project)
         except RuntimeError as e:
-            logger.debug("goal ledger consult skipped (no project context): %s", e)
+            logger.warning("goal ledger consult skipped (no project context): %s", e)
             return None
         live = GoalLedger(ledger_path).live_plan_numbers(plan_dir)
         if not live:
