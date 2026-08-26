@@ -26,6 +26,8 @@ Two message routes are covered:
 ``-t``/``--template`` is NOT a message source and is ignored.
 """
 
+import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Final
@@ -35,6 +37,8 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
+
+_LOGGER = logging.getLogger(__name__)
 
 # Mode values (mirrors git_stash / ancestry_preserving_merge, Plan 00207).
 _MODE_BLOCK: Final[str] = "block"
@@ -98,8 +102,7 @@ _ESCAPE_HATCH_PATTERN: Final[re.Pattern[str]] = re.compile(
 )
 
 _REWRITE_EXAMPLES: Final[str] = (
-    '"Addresses #123", "Refs #123" or "See #123" — GitHub links these but '
-    "does not close"
+    '"Addresses #123", "Refs #123" or "See #123" — GitHub links these but ' "does not close"
 )
 
 _WARN_GUIDANCE_HEADER: Final[str] = (
@@ -148,12 +151,13 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
                 cwd = hook_input.get(_CWD_FIELD)
                 if isinstance(cwd, str) and cwd:
                     path = Path(cwd) / path
-            try:
-                texts.append(path.read_text(encoding="utf-8"))
-            except OSError:
+            if not path.is_file() or not os.access(path, os.R_OK):
                 # Missing/unreadable file: the commit itself will fail, and
-                # that failure belongs to git, not to this guard.
+                # that failure belongs to git, not to this guard. Checked
+                # up-front rather than caught, so no exception is swallowed.
+                _LOGGER.debug("Skipping unreadable -F message file %s", path)
                 continue
+            texts.append(path.read_text(encoding="utf-8"))
         return texts
 
     def _find_match(self, hook_input: dict[str, Any]) -> str | None:
@@ -209,7 +213,7 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
                 "triggered this way are easy to miss\n\n"
                 "USE A NON-CLOSING REFERENCE INSTEAD:\n"
                 f"  {_REWRITE_EXAMPLES}\n"
-                '  e.g. git commit -m \'Addresses #123: harden the retry path\'\n\n'
+                "  e.g. git commit -m 'Addresses #123: harden the retry path'\n\n"
                 "ESCAPE HATCH (when auto-closing is genuinely intended):\n"
                 '  MUST_AUTO_CLOSE_BECAUSE="explain why"; git commit ...\n\n'
                 "To disable: handlers.pre_tool_use.github_auto_close_keywords"

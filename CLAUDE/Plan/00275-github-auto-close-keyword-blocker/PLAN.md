@@ -47,26 +47,32 @@ followed by `#N`, `owner/repo#N`, `GH-N`, or a full issue URL.
 
 ### Phase 1: TDD Implementation
 
-- [ ] ⬜ **Task 1.1**: Test file first — keyword×reference matrix, negatives,
+- [x] ✅ **Task 1.1**: Test file first — keyword×reference matrix, negatives,
   -F file reading, escape hatch, warn mode, multi -m, case-insensitivity
-- [ ] ⬜ **Task 1.2**: Implement handler (PreToolUseHandlerBase, priority 18
+- [x] ✅ **Task 1.2**: Implement handler (PreToolUseHandlerBase, priority 18
   safety band, non-terminal like git_stash so warn mode cannot shadow chain)
-- [ ] ⬜ **Task 1.3**: get_claude_md() guidance + get_acceptance_tests()
+- [x] ✅ **Task 1.3**: get_claude_md() guidance + get_acceptance_tests()
 
 ### Phase 2: Registration & Docs
 
-- [ ] ⬜ **Task 2.1**: HandlerID + Priority constants, pre_tool_use import
-- [ ] ⬜ **Task 2.2**: Config wiring — init_config.py default (enabled: true),
+- [x] ✅ **Task 2.1**: HandlerID + Priority constants, pre_tool_use import
+- [x] ✅ **Task 2.2**: Config wiring — init_config.py default (enabled: true),
   .claude/hooks-daemon.yaml, .claude/hooks-daemon.yaml.example
-- [ ] ⬜ **Task 2.3**: docs/guides/HANDLER_REFERENCE.md entry
-- [ ] ⬜ **Task 2.4**: config-changes UNRELEASED manifest entry
+- [x] ✅ **Task 2.3**: docs/guides/HANDLER_REFERENCE.md entry
+- [x] ✅ **Task 2.4**: config-changes UNRELEASED manifest entry
   (recommended: true, notes the unusual enabled-by-default choice)
 
 ### Phase 3: Verification
 
-- [ ] ⬜ **Task 3.1**: Integration suites pass (response validation, guidance
-  coverage, dogfooding config)
-- [ ] ⬜ **Task 3.2**: Full QA green: `./scripts/qa/llm_qa.py all`
+- [x] ✅ **Task 3.1**: Integration suites pass (response validation, guidance
+  coverage, evasion classification, dogfooding config)
+- [x] ✅ **Task 3.2**: Full QA green: `./scripts/qa/llm_qa.py all` (24/24)
+
+### Phase 4: Landing (main session)
+
+- [ ] ⬜ **Task 4.1**: Merge the worktree branch to main, restart the dogfood
+  daemon, verify RUNNING, then flip this plan to Complete with the archive
+  move and README update in one commit
 
 ## Technical Decisions
 
@@ -91,10 +97,10 @@ The file path is resolved as given (absolute) or against the hook input
 
 ## Success Criteria
 
-- [ ] Every keyword×reference form denied; keyword-alone and bare `#N` allowed
-- [ ] `-F` scratch-file route covered, missing file allowed
-- [ ] Warn mode allows with advisory context; escape hatch allows
-- [ ] All QA checks passing in the worktree
+- [x] Every keyword×reference form denied; keyword-alone and bare `#N` allowed
+- [x] `-F` scratch-file route covered, missing file allowed
+- [x] Warn mode allows with advisory context; escape hatch allows
+- [x] All QA checks passing in the worktree (24/24)
 
 ## Delivery & Milestones
 

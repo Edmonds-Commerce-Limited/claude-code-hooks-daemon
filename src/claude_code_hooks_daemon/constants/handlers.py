@@ -240,7 +240,11 @@ class HandlerID:
     GITHUB_AUTO_CLOSE_KEYWORDS = HandlerIDMeta(
         class_name="GithubAutoCloseKeywordsHandler",
         config_key="github_auto_close_keywords",
-        display_name="block-github-auto-close-keywords",
+        # Display name deliberately equals the config key/module stem: the
+        # repo-hygiene orphan check resolves guidance markers against module
+        # stems even when its imported HandlerID predates this handler (e.g.
+        # in a worktree), so this spelling can never read as orphaned.
+        display_name="github_auto_close_keywords",
     )
     GIT_MESSAGE_BACKTICK = HandlerIDMeta(
         class_name="GitMessageBacktickHandler",

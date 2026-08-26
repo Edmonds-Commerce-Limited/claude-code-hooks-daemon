@@ -101,6 +101,15 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             "git \\\n  commit -m x",
         ),
     ),
+    "GithubAutoCloseKeywordsHandler": (
+        "git commit -m 'Fixes #123'",
+        (
+            f"git -C {_SAFE_PATH} commit -m 'Fixes #123'",
+            "git --no-pager commit -m 'closes GH-42'",
+            f"git -C {_SAFE_PATH} tag -a v1 -m 'resolves #7'",
+            "git \\\n  commit -m 'Fixed: #9'",
+        ),
+    ),
     "GitMessageBacktickHandler": (
         'git commit -m "now allows `git branch` here"',
         (
@@ -223,6 +232,14 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
         "git status",
         "git diff --cached",
         'gh pr create --title "x" --body "y"',
+    ),
+    "GithubAutoCloseKeywordsHandler": (
+        # The keyword alone is prose; a reference alone is a link, not a
+        # closure; and the recommended rewrite must itself stay allowed.
+        "git commit -m 'fixes the race condition'",
+        "git commit -m 'Addresses #123'",
+        "git log --grep=fixes",
+        "MUST_AUTO_CLOSE_BECAUSE=\"issue verified done\"; git commit -m 'Fixes #1'",
     ),
     "GitMessageBacktickHandler": (
         # Single quotes suppress substitution, so backticks are literal —

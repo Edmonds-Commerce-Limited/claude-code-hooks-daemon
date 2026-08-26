@@ -111,7 +111,7 @@ class TestEveryKeywordFormIsDenied:
 
     def test_heredoc_visible_in_command_string(self) -> None:
         handler = GithubAutoCloseKeywordsHandler()
-        command = 'git commit -F - <<EOF\nAdd thing\n\nFixes #88\nEOF'
+        command = "git commit -F - <<EOF\nAdd thing\n\nFixes #88\nEOF"
         assert handler.matches(_bash(command))
 
 
@@ -137,9 +137,7 @@ class TestNegativeCases:
 
     def test_non_bash_tool_ignored(self) -> None:
         handler = GithubAutoCloseKeywordsHandler()
-        assert not handler.matches(
-            {"tool_name": "Write", "tool_input": {"content": "Fixes #123"}}
-        )
+        assert not handler.matches({"tool_name": "Write", "tool_input": {"content": "Fixes #123"}})
 
     def test_bare_issue_number_without_keyword(self) -> None:
         handler = GithubAutoCloseKeywordsHandler()
@@ -193,14 +191,12 @@ class TestEscapeHatch:
     def test_declared_intent_allows(self) -> None:
         handler = GithubAutoCloseKeywordsHandler()
         assert not handler.matches(
-            _bash('MUST_AUTO_CLOSE_BECAUSE="issue is done"; git commit -m \'Fixes #1\'')
+            _bash("MUST_AUTO_CLOSE_BECAUSE=\"issue is done\"; git commit -m 'Fixes #1'")
         )
 
     def test_empty_reason_does_not_allow(self) -> None:
         handler = GithubAutoCloseKeywordsHandler()
-        assert handler.matches(
-            _bash('MUST_AUTO_CLOSE_BECAUSE=""; git commit -m \'Fixes #1\'')
-        )
+        assert handler.matches(_bash("MUST_AUTO_CLOSE_BECAUSE=\"\"; git commit -m 'Fixes #1'"))
 
 
 class TestWarnMode:
