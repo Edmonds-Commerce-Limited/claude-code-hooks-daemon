@@ -46,8 +46,21 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_file_path
+from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger
 
 logger = logging.getLogger(__name__)
+
+# ── Goal ledger + displacement advisory (Plan 00276) ───────────────────────
+# The /goal slot is last-writer-wins upstream; the ledger remembers every
+# emission so a displaced-but-unfinished plan is never silently forgotten.
+_DISPLACEMENT_ADVISORY_TEMPLATE: Final[str] = (
+    "⚠️ GOAL DISPLACED: the /goal condition for Plan(s) {plans} has just been "
+    "overwritten by Plan {new_plan}'s goal, but {verb} still In Progress. "
+    "Claude Code's /goal slot holds only ONE condition (last writer wins); the "
+    "daemon's goal ledger still tracks the displaced plan(s) — their work "
+    "remains owed and the Stop hook will keep challenging stops on their "
+    "behalf until they reach a terminal status."
+)
 
 # ── Signal transport (same family as <session>.compacting) ─────────────────
 _SIGNAL_SUBDIR: Final[str] = "context-sidecar"
@@ -383,9 +396,39 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         if joined is None:
             return BlockingResult(decision=Decision.ALLOW)
         written = write_goal_signal(session_id, plan_number, joined, _SOURCE_STATUS_FLIP)
-        if written is not None:
-            self._record_latch(latch_key)
+        if written is None:
+            return BlockingResult(decision=Decision.ALLOW)
+        self._record_latch(latch_key)
+
+        displaced = self._ledger_record(session_id, plan_number, joined, Path(file_path))
+        if displaced:
+            plans = ", ".join(displaced)
+            verb = "it is" if len(displaced) == 1 else "they are"
+            advisory = _DISPLACEMENT_ADVISORY_TEMPLATE.format(
+                plans=plans, new_plan=plan_number, verb=verb
+            )
+            return BlockingResult(decision=Decision.ALLOW, context=[advisory])
         return BlockingResult(decision=Decision.ALLOW)
+
+    @staticmethod
+    def _ledger_record(
+        session_id: str, plan_number: str, joined: str, plan_md_path: Path
+    ) -> list[str]:
+        """Record the emission in the goal ledger; fail-open on any failure.
+
+        ``plan_md_path`` is ``.../CLAUDE/Plan/<folder>/PLAN.md``; its
+        grandparent is the active plan directory used for reconciliation.
+        Returns the plan numbers this emission newly displaced.
+        """
+        try:
+            ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
+        except RuntimeError as e:
+            logger.warning("goal_injection: ledger skipped (no project context): %s", e)
+            return []
+        plan_dir = plan_md_path.parent.parent
+        return GoalLedger(ledger_path).record_emission(
+            session_id, plan_number, joined, plan_dir
+        )
 
     def _read_plan(self, path: Path) -> str | None:
         """Read the just-written PLAN.md from disk; None when unreadable."""

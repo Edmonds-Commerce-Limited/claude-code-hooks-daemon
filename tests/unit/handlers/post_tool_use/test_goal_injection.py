@@ -342,3 +342,88 @@ class TestGoalInjectionHandler:
         )
         result = handler.handle(self._hook_input(plan))
         assert result.decision == Decision.ALLOW
+
+
+class TestGoalLedgerIntegration:
+    """Plan 00276: emissions are ledgered and displacement is advised."""
+
+    @pytest.fixture(autouse=True)
+    def mock_project_context(self, tmp_path: Path):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+                "ProjectContext.daemon_untracked_dir",
+                classmethod(lambda cls: tmp_path / "untracked"),
+            )
+            self._untracked = tmp_path / "untracked"
+            self._project = tmp_path
+            yield
+
+    @pytest.fixture
+    def handler(self) -> GoalInjectionHandler:
+        return GoalInjectionHandler()
+
+    def _write_plan(self, folder: str, status: str = "In Progress") -> Path:
+        plan_dir = self._project / "CLAUDE" / "Plan" / folder
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        plan_file = plan_dir / "PLAN.md"
+        plan_file.write_text(_plan_md(status), encoding="utf-8")
+        return plan_file
+
+    def _hook_input(self, file_path: Path) -> dict[str, Any]:
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(file_path)},
+            "session_id": _SESSION,
+        }
+
+    def _ledger_entries(self) -> list[dict[str, Any]]:
+        from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME
+
+        raw = json.loads((self._untracked / LEDGER_FILENAME).read_text(encoding="utf-8"))
+        return list(raw["entries"])
+
+    def test_emission_is_recorded_in_ledger(self, handler: GoalInjectionHandler) -> None:
+        plan = self._write_plan("00274-first-plan")
+        handler.handle(self._hook_input(plan))
+        entries = self._ledger_entries()
+        assert len(entries) == 1
+        assert entries[0]["plan_number"] == "00274"
+        assert entries[0]["session_id"] == _SESSION
+
+    def test_displacement_marks_entry_and_advises(self, handler: GoalInjectionHandler) -> None:
+        first = self._write_plan("00274-first-plan")
+        second = self._write_plan("00275-second-plan")
+        handler.handle(self._hook_input(first))
+        result = handler.handle(self._hook_input(second))
+        assert result.decision == Decision.ALLOW
+        assert result.context, "displacement must inject advisory context"
+        advisory = "\n".join(result.context)
+        assert "00274" in advisory
+        assert "displaced" in advisory.lower()
+        entry = next(e for e in self._ledger_entries() if e["plan_number"] == "00274")
+        assert entry["displaced_by"] == "00275"
+
+    def test_no_advisory_when_prior_plan_completed(self, handler: GoalInjectionHandler) -> None:
+        first = self._write_plan("00274-first-plan")
+        handler.handle(self._hook_input(first))
+        self._write_plan("00274-first-plan", status="Complete")
+        second = self._write_plan("00275-second-plan")
+        result = handler.handle(self._hook_input(second))
+        assert result.context == []
+
+    def test_ledger_failure_never_blocks(
+        self, handler: GoalInjectionHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        plan = self._write_plan("00274-first-plan")
+
+        def _boom(cls: object) -> Path:
+            raise RuntimeError("no project context")
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+            "ProjectContext.daemon_untracked_dir",
+            classmethod(_boom),
+        )
+        result = handler.handle(self._hook_input(plan))
+        assert result.decision == Decision.ALLOW
