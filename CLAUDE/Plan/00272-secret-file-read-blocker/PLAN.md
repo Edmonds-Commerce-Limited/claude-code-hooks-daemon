@@ -484,20 +484,15 @@ real file's `dummy` prefix has no counterpart in the stem at all.
 
 **Options considered**:
 
-1. Filesystem `glob.glob()` expansion of the token against the real cwd,
-   deny if any expansion matches a protected pattern. Rejected: the Bash cwd
-   is not passed into `find_protected_mention`, and adding it would widen
-   the function's contract for every caller; also non-deterministic
-   (depends on what happens to exist on disk at check time).
-2. Full two-pattern glob LANGUAGE INTERSECTION (treat both the token and the
-   stem as globs with independent wildcards, ask whether any string
-   satisfies both). Rejected after tracing it by hand: for two patterns each
-   carrying an unconstrained `*`, an intersection can always be constructed
-   by splicing arbitrary filler between the two literal fragments — e.g.
-   `dummy.txt*` intersects `*.vault-password` via the (nonexistent, but
-   theoretically satisfying) filename `dummy.txt.vault-password`. That would
-   flag the required-ALLOWED negative control (a token sharing no real
-   relationship with the pattern) purely because both patterns contain `*`.
+1. Filesystem `glob.glob()` expansion of the token against the real cwd.
+   Rejected: cwd is not passed into `find_protected_mention` (would widen
+   the contract for every caller); also non-deterministic.
+2. Full two-pattern glob LANGUAGE INTERSECTION (both token and stem as
+   globs, ask whether any string satisfies both). Rejected: for two
+   unconstrained `*`s an intersection can always be built by splicing
+   arbitrary filler between two literal fragments — `dummy.txt*` intersects
+   `*.vault-password` via the filename `dummy.txt.vault-password`, so it
+   would flag the required-ALLOWED negative control.
 3. **Chosen — literal-edge overlap** (`_glob_token_overlaps_stem`,
    `_suffix_prefix_overlap_length`): the token's literal residue and the
    pattern's literal stem must share a DIRECT boundary — the residue's
@@ -510,24 +505,33 @@ real file's `dummy` prefix has no counterpart in the stem at all.
    attests to.
 
 **Threshold**: overlap must be >= `_MIN_GLOB_OVERLAP_CHARS` (2) characters.
-A 1-character overlap is measurably too common in ordinary vocabulary (e.g.
-a token ending in `i` against the `id_rsa`/`id_ed25519` stems' leading `i`)
-to be worth flagging, and 2 is the smallest overlap the shipped default
-stems ever need for a real truncation (`dummy.v*` needs exactly the 2-char
-`.v` overlap against `.vault-pass`/`.vault-password`). This is not a special
-case tuned to one input: `d*` (asked for explicitly during this fix's TDD)
-cannot reach 2 characters of overlap against ANY shipped stem, by
-construction — its own literal residue is a single character — so it stays
-allowed as accepted residual, the same way an unrelated `dummy.txt*` stays
-allowed because no shipped stem shares a boundary with `.txt`.
+A 1-character overlap is measurably too common in ordinary vocabulary to be
+worth flagging, and 2 is the smallest overlap a LEADING-wildcard shipped
+stem ever needs for a real truncation (`dummy.v*` needs exactly the 2-char
+`.v` overlap against `.vault-password`). This is not a special case tuned to
+one input: `d*` (asked for explicitly during this fix's TDD) cannot reach 2
+characters of overlap against ANY shipped stem, by construction — its own
+literal residue is a single character — so it stays allowed as accepted
+residual, the same way an unrelated `dummy.txt*` stays allowed because no
+shipped stem shares a boundary with `.txt`.
 
-**Verified test matrix** (`tests/unit/utils/test_secret_file_matching.py`,
-`TestBashMentionsProtectedPath`): `dummy.vault-p*`, `dummy.vault-*`,
-`dummy.v*`, and a synthetic reverse-direction-only case (`*rsaXXX`) are all
-DENIED; `d*` and the genuinely-unrelated `dummy.txt*` both stay ALLOWED; all
-56 previously-passing cases (including the G1 shape and the bracket-class
-false-positive regression tests from the v3.55.0 release review) remain
-unchanged.
+**Addendum — over-blocking regression, same day**: the FIRST cut ran the
+overlap test against EVERY stem, including exact-filename stems
+`id_rsa`/`id_ed25519`. Those have no leading wildcard, so their edge chars
+coincidentally overlap common tokens (`sample*`, `grid*`, `valid*`,
+`android*`, `raid*`, `hybrid*`, `id*` were all wrongly denied). Root cause:
+overlap is only meaningful for a **leading**-wildcard pattern — an
+exact-filename or start-anchored pattern (`.vault-pass*`) has no arbitrary
+prefix to hide behind, so a genuine truncation of THOSE is already a literal
+prefix of the stem, caught by the pre-existing substring+fnmatch check.
+**Fix**: gate the overlap branch on `pattern.startswith("*")`. `id_rs*` and
+`id*` (real truncations of `id_rsa`) still deny via that untouched path.
+
+**Verified**: leading-wildcard truncations (`dummy.vault-p*`,
+`dummy.vault-*`, `dummy.v*`) and a leading-wildcard reverse-only case
+(`*passXXX`) stay DENIED; `id_rs*`/`id*` stay DENIED via substring+fnmatch;
+`d*`, `dummy.txt*`, the coordinator's FP list, and `.secret`-stem controls
+(`start*`, `reset*`, `.ssh*`, `market*`) stay ALLOWED — 96 tests green.
 
 **Also fixed in this pass** (same probe report, "Allowlist/secret-meta
 sequencing fragility" finding): `secret_file_guard`'s `get_claude_md()` now
