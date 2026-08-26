@@ -188,6 +188,7 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "SuggestStatusLineHandler": "T4 fires once at session start with the full remedy",
     "VersionCheckHandler": "T4 fires once at session start with the full remedy",
     "ContractStalenessHandler": "T4 fires once at session start with the full remedy",
+    "SkillOpportunityDetectorHandler": "T4 fires once per cadence with the full remedy",
     "CriticalThinkingAdvisoryHandler": "T4 the injected advisory IS the content",
     # -- Test handlers ---------------------------------------------------
 }

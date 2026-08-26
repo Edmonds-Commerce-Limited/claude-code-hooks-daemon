@@ -245,6 +245,7 @@ class ConfigTemplate:
             "    ccy_supervisor_integrity: {enabled: true, priority: 58}  # Warn when the ccy supervisor is armed but its files are unsafe\n"
             "    plan_workflow_asset_checker: {enabled: true, priority: 59}  # Advise when plan_workflow is enabled but its assets are missing\n"
             "    contract_staleness: {enabled: true, priority: 60}  # Advise a hooks-contract refresh when Claude Code outruns the vendored audit\n"
+            "    skill_opportunity_detector: {enabled: false, priority: 61}  # TTL-gated advisory to run `skill-scan` (opt-in; reads transcripts)\n"
             "\n"
             "  # SessionEnd - no handlers ship today (cleanup removed in Plan 00237)\n"
             "  session_end: {}\n"

@@ -38,6 +38,7 @@ _EXPECTED_OPT_IN_CONFIG_KEYS = {
     "daemon_stats",
     "idle_housekeeping_advisory",
     "goal_injection",
+    "skill_opportunity_detector",
 }
 
 

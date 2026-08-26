@@ -49,6 +49,16 @@ Rules of thumb:
   line. Paraphrase only to add commentary around the evidence.
 - **Attribute severity honestly.** Say what is confirmed vs. suspected.
 
+**Standing exception — transcript-derived content.** "Quote, don't
+paraphrase" serves diagnostic evidence (logs, errors, diffs). A report derived
+from private session transcripts (e.g. `hooks-daemon skill-scan`'s
+`YYYY-MM-DD-skill-opportunities.md`) inverts the rule: it must NEVER quote
+prompts verbatim at length. Such reports render only short, normalised,
+secret-redacted representative snippets, and carry a standing header saying
+they are derived from private transcripts and need review before sharing
+outside the project — redaction is list-based and cannot catch unlisted
+secrets.
+
 ### Skeleton
 
 ````markdown

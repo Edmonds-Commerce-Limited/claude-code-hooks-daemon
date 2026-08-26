@@ -4140,6 +4140,134 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
+def cmd_skill_scan(args: argparse.Namespace) -> int:
+    """Run the skill-opportunity scan pipeline (Plan 00274).
+
+    Mines Claude Code session transcripts for repeated workloads and
+    recurring points of confusion, and writes a report of skill-creation
+    suggestions to ``untracked/reports/``. The model stage is headless
+    ``claude -p`` (Decision 5: CLI-auth only); every failure is fail-open.
+
+    Works with the ``skill_opportunity_detector`` handler disabled — a
+    manual run is consent by definition; ``enabled`` gates only the
+    SessionStart advisory.
+
+    Returns:
+        0 on any completed run (including model-stage skips — fail-open),
+        2 when the project root cannot be resolved.
+    """
+    from datetime import date
+
+    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.constants.handlers import HandlerID
+    from claude_code_hooks_daemon.skill_scan.constants import (
+        REPORTS_DIR_NAME,
+        STATE_FILE_NAME,
+    )
+    from claude_code_hooks_daemon.skill_scan.extraction import derive_transcript_dir
+    from claude_code_hooks_daemon.skill_scan.invoker import ClaudeCliInvoker
+    from claude_code_hooks_daemon.skill_scan.models import SkillScanOptions
+    from claude_code_hooks_daemon.skill_scan.pipeline import run_scan
+    from claude_code_hooks_daemon.skill_scan.state import (
+        is_advisory_due,
+        load_state,
+        record_attempt,
+        record_success,
+    )
+    from claude_code_hooks_daemon.utils.secret_redaction import (
+        get_cached_secret_terms,
+        resolve_secret_word_list_path,
+    )
+
+    resolved_root = resolve_tree_root(args)
+    if resolved_root is None:
+        return 2
+    project_root = resolved_root
+
+    config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+    handler_cfg = config.handlers.session_start.get(HandlerID.SKILL_OPPORTUNITY_DETECTOR.config_key)
+    # The config model parses handler entries into HandlerConfig objects, but a
+    # raw dict is tolerated too (defensive: this path also runs against
+    # hand-built configs in tests).
+    if isinstance(handler_cfg, dict):
+        raw_options = handler_cfg.get("options", {})
+    else:
+        raw_options = getattr(handler_cfg, "options", {})
+    options = SkillScanOptions.from_dict(raw_options if isinstance(raw_options, dict) else {})
+
+    state_path = _daemon_untracked_dir(project_root) / STATE_FILE_NAME
+    force = bool(getattr(args, "force", False))
+    dry_run = bool(getattr(args, "dry_run", False))
+    if not force and not dry_run:
+        if not is_advisory_due(load_state(state_path), options.check_interval_days):
+            print(
+                "Skill scan not due yet (last scan within "
+                f"{options.check_interval_days} days). Use --force to run anyway."
+            )
+            return 0
+
+    sensitive_cfg = config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
+    if isinstance(sensitive_cfg, dict):
+        sensitive_options = sensitive_cfg.get("options", {})
+    else:
+        sensitive_options = getattr(sensitive_cfg, "options", {})
+    configured_word_list = (
+        sensitive_options.get("secret_word_list_path")
+        if isinstance(sensitive_options, dict)
+        else None
+    )
+    secret_terms = get_cached_secret_terms(
+        resolve_secret_word_list_path(configured_word_list, project_root)
+    )
+
+    result = run_scan(
+        project_root=project_root,
+        options=options,
+        invoker=ClaudeCliInvoker(model=options.model),
+        report_dir=project_root / "untracked" / REPORTS_DIR_NAME,
+        secret_terms=secret_terms,
+        today=date.today(),
+        dry_run=dry_run,
+        window_days=getattr(args, "window_days", None),
+    )
+
+    stats = result.stats
+    print(
+        f"files={stats.files} lines={stats.lines} user_records={stats.user_records} "
+        f"genuine={stats.genuine} unparseable={stats.unparseable}"
+    )
+    if dry_run:
+        print("--- DRY RUN: digest that would be sent to the model ---")
+        print(result.digest)
+        return 0
+
+    if stats.genuine == 0:
+        # An empty window is NOT recorded as a completed scan: a missing or
+        # mistyped transcript directory would otherwise silence the advisory
+        # for the whole interval. Record an attempt (quietens nagging for a
+        # day) and name the directory that was read so the operator can check.
+        transcript_dir = (
+            Path(options.transcript_dir)
+            if options.transcript_dir is not None
+            else derive_transcript_dir(project_root)
+        )
+        print(
+            f"WARNING: no genuine prompts found in transcript directory "
+            f"{transcript_dir} — check the path if this is unexpected. "
+            "Not recording a completed scan; the advisory will retry."
+        )
+        record_attempt(state_path)
+    elif result.model_error is not None:
+        print(f"Model stage skipped: {result.model_error}")
+        record_attempt(state_path)
+    else:
+        if result.report_path is not None:
+            record_success(state_path, report_path=str(result.report_path))
+    if result.report_path is not None:
+        print(f"Report written: {result.report_path}")
+    return 0
+
+
 _BUG_REPORT_LOG_LINES = 100
 _BUG_REPORT_DIR_NAME = "bug-reports"
 _BUG_REPORT_ENV_VARS = (
@@ -4906,6 +5034,38 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_plan_qa.set_defaults(func=cmd_plan_qa)
+
+    # skill-scan command (Plan 00274) — mine transcripts for skill candidates
+    parser_skill_scan = subparsers.add_parser(
+        "skill-scan",
+        help="Mine session transcripts for skill-creation opportunities (report-only)",
+    )
+    parser_skill_scan.add_argument(
+        "--force",
+        action="store_true",
+        help="Run even when the TTL says a scan is not yet due",
+    )
+    parser_skill_scan.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="Stages 1-2 only: print the redacted digest, no model call, no report",
+    )
+    parser_skill_scan.add_argument(
+        "--window-days",
+        dest="window_days",
+        type=int,
+        default=None,
+        help="Override the transcript mtime window (default: from config)",
+    )
+    parser_skill_scan.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_skill_scan.set_defaults(func=cmd_skill_scan)
 
     # harvest-background command (Plan 00142, Layer B) — detect & surface, never kill
     parser_harvest = subparsers.add_parser(
