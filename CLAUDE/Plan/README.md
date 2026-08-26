@@ -30,6 +30,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00268: verification-result enforcement and the Ansible/YAML lint gap](00268-verification-result-enforcement-and-ansible-lint-gap/PLAN.md) - Not Started (field report: a lint failed, printed its own diagnosis, and was ignored by a `git commit` on the next LINE of the same Bash invocation; the report rejects blanket `;` → `&&` enforcement as both leaky and noisy, and recommends a YAML/Ansible strategy for `lint_on_edit` plus a narrow verifier→mutator handler)
 
+- [00269: supervisor goal message injection](00269-supervisor-goal-message-injection/PLAN.md) - Not Started (inject a machine-marked `/goal` message via the ccy PTY supervisor when plan execution starts, with a config-driven additive/replace line template; brainstorm ready for human review)
+
+- [00270: bash safe mode forcer](00270-bash-safe-mode-forcer/PLAN.md) - Not Started (the OPT-IN counterpart Plan 00268 deferred: a ships-disabled handler enforcing `set -e`/`-o pipefail`/`-u` preludes on multi-statement Bash invocations, inheriting 00268's cry-wolf objections as design constraints; brainstorm ready for human review)
+
+- [00271: hook contract alignment](00271-hook-contract-alignment/PLAN.md) - Not Started (DBF-first: vendor the documented Claude Code hooks contract as tracked JSON with a network-free QA diff + staleness advisory, then fix the 21 audited response-schema drifts — 9 load-bearing, incl. PreToolUse `updatedInput`/`defer` and UserPromptSubmit blocking; audit in-folder)
+
 ### Status Line / Agent View
 
 - [00175: statusline refreshInterval first-class default + startup validation](00175-statusline-refresh-interval-first-class/PLAN.md) - Dormant, part-shipped (root-caused the Ctrl+Z notice lag to `statusLine.refreshInterval: 10` — Claude Code re-runs the status command only on events (Ctrl+Z is not one) plus this optional timer whose minimum is 1s, so an …)
@@ -1239,195 +1245,38 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 268 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 271 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 219 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 36 + 219 + 6 = **261 folders**, spanning
-  **258 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 39 + 219 + 6 = **264 folders**, spanning
+  **261 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **10** of the
-  268 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  271 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258 — abandoned drafts, numbers burned by
   transient probes (00195 during the v3.51.0 acceptance run, 00258 during the
   v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a sub-agent
-  that then found Plan 00208 already covered the work). 258 + 10 = 268. ✅
+  that then found Plan 00208 already covered the work). 261 + 10 = 271. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled by**: the Plan 00267 completion — the folder moved from the
-  plan root into `Completed/`, so Active fell by one and Completed rose by one
-  while Total, Cancelled and the distinct-number count were untouched (a move
-  allocates nothing). Counts recounted from disk at this commit (36 root, 219
-  `Completed/`, 6 `Cancelled/`, 258 distinct numbers against a counter of 268).
+- **Last reconciled at**: the Plan 00271 creation (39 root, 219 `Completed/`,
+  6 `Cancelled/`, 261 distinct numbers against a counter of 271). The index
+  carries NO reconciliation history — it states current truth only; every
+  earlier recount is in git, and per-plan narrative belongs in that plan's
+  `JOURNAL/`.
 
-- **Before that**: the Plan 00268 creation — one new folder in the plan
-  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
-  by one while Completed and Cancelled were untouched.
-
-- **Before that**: the Plan 00267 creation — one new folder in the plan
-  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
-  by one while Completed and Cancelled were untouched. Counts recounted from
-  disk at that commit (36 root, 218 `Completed/`, 6 `Cancelled/`, 257 distinct
-  numbers against a counter of 267).
-
-- **Before that**: the Plan 00266 creation — one new folder in the plan
-  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
-  by one while Completed and Cancelled were untouched. Counts recounted from
-  disk at that commit (35 root, 218 `Completed/`, 6 `Cancelled/`, 256 distinct
-  numbers against a counter of 266).
-
-- **Before that**: the Plan 00265 closure — the folder moved from the
-  plan root into `Completed/`, so Active fell by one and Completed rose by one
-  while Total and Cancelled were untouched. Counts recounted from disk at that
-  commit (34 root, 218 `Completed/`, 6 `Cancelled/`, 255 distinct numbers
-  against a counter of 266). The counter read 266 rather than 265 there because
-  Plan 00266 had already been scaffolded in the same session; its folder and
-  index row landed in the following commit, so it was deliberately excluded
-  from the 34 counted at that point.
-
-- **Before that**: the Plan 00265 creation — one new folder in the plan
-  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
-  by one while Completed and Cancelled were untouched. Counts recounted from
-  disk at that commit (35 root, 217 `Completed/`, 6 `Cancelled/`, 255 distinct
-  numbers against a counter of 265). That recount also corrected the previous
-  entry's figures, which recorded 35 root / 216 `Completed/` against stats
-  reading 34 / 217 — the block disagreed with itself and with disk.
-
-- **Before that**: the Plan 00263 closure — the folder moved from the
-  plan root into `Completed/`, so Active fell by one and Completed rose by one
-  while Total and Cancelled were untouched. Counts recounted from disk at this
-  commit (35 root, 216 `Completed/`, 6 `Cancelled/`, 254 distinct numbers
-  against a counter of 264).
-
-- **Before that**: the Plan 00264 creation — one new folder in the plan
-  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
-  by one while Completed and Cancelled were untouched. That recount also
-  corrected a standing arithmetic slip in this block: the previous
-  reconciliation carried `252 + 10 = 262` while its own line above it said 253
-  distinct numbers against a counter of 263, so neither the addends nor the
-  total were self-consistent.
-
-- **Before that**: the Plan 00262 closure — the folder moved from the
-  plan root into `Completed/`, so Active fell by one and Completed rose by one
-  while Total and Cancelled were untouched. Counts verified from disk at this
-  commit (36 root, 213 `Completed/`, 6 `Cancelled/`, against a counter of 262).
-
-- **Before that**: the Plan 00262 creation — one new folder in the plan root and
-  the counter advanced by `mkplan.bash`, so Total and Active each rose by one.
-
-- **Before that**: the Plan 00261 closure — the folder moved from the plan root
-  into `Completed/`, so Active fell by one and Completed rose by one.
-
-- **Before that**: the Plan 00261 creation — one new folder in the plan root and
-  the counter advanced by `mkplan.bash`, so Total and Active each rose by one.
-
-- **Before that**: the Plan 00259 closure — the folder moved from the plan
-  root into `Completed/`, so Active fell by one and Completed rose by one while
-  Total, Cancelled and the folder count were untouched. This closure lands on top
-  of the Plan 00260 creation (one new root folder, counter advanced by
-  `mkplan.bash`), so the two cancel out in the root count. Counts verified from
-  disk at this commit (36 root, 211 `Completed/`, 6 `Cancelled/`, against a
-  counter of 260).
-
-- **Before that**: the Plan 00256 closure — the folder moved from the plan
-  root into `Completed/`, so Active fell by one and Completed rose by one while
-  Total, Cancelled and the folder count were untouched. Counts verified from
-  disk at that commit (36 root, 210 `Completed/`, 6 `Cancelled/`).
-
-- **Before that**: the Plan 00255 creation — one new folder in the plan
-  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
-  by one while Completed and Cancelled were untouched. Recounted from disk (35
-  root, 208 `Completed/`, 6 `Cancelled/`, 246 distinct numbers against a counter
-  of 255).
-
-- **Before that**: the Plan 00254 closure — the folder moved from the plan
-  root into `Completed/`, so Active fell by one and Completed rose by one while
-  Total, Cancelled and the folder count were untouched. Recounted from disk (34
-  root, 208 `Completed/`, 6 `Cancelled/`, 245 distinct numbers against a counter
-  of 254).
-
-- **Before that**: the Plan 00254 creation — one new folder in the plan
-  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
-  by one while Completed and Cancelled were untouched. Recounted from disk (35
-  root, 207 `Completed/`, 6 `Cancelled/`, 245 distinct numbers against a counter
-  of 254).
-
-- **Before that**: the Plan 00253 closure — the folder moved from the plan
-  root into `Completed/`, so Active fell by one and Completed rose by one while
-  Total, Cancelled and the folder count were untouched. Recounted from disk (34
-  root, 207 `Completed/`, 6 `Cancelled/`, 244 distinct numbers against a counter
-  of 253).
-
-- **Before that**: the Plan 00253 creation — one new folder in the plan
-  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
-  by one while Completed and Cancelled were untouched. Recounted from disk (35
-  root, 206 `Completed/`, 6 `Cancelled/`, 244 distinct numbers against a counter
-  of 253).
-
-- **Before that**: the Plan 00252 creation — one new folder in the plan
-  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
-  by one while Completed and Cancelled were untouched. Recounted from disk (34
-  root, 206 `Completed/`, 6 `Cancelled/`, 243 distinct numbers against a counter
-  of 252).
-
-- **Before that**: the Plan 00251 closure — the folder moved from the plan
-  root into `Completed/`, so Active fell by one and Completed rose by one while
-  Total, Cancelled and the folder count were untouched. Recounted from disk (33
-  root, 206 `Completed/`, 6 `Cancelled/`, 242 distinct numbers against a counter
-  of 251).
-
-- **Before that**: the Plan 00251 creation — one new folder in the plan
-  root and the counter advanced by `mkplan.bash`, so Total and Active each rose
-  by one while Completed and Cancelled were untouched. Recounted from disk (34
-  root, 205 `Completed/`, 6 `Cancelled/`, 242 distinct numbers against a counter
-  of 251).
-
-- **Before that**: the Plan 00248 and 00249 closures — two folders moved
-  from the plan root into `Completed/`, so Active fell by two and Completed rose
-  by two while Total and the folder count were untouched. Recounted from disk (33
-  root, 205 `Completed/`, 6 `Cancelled/`, 241 distinct numbers against a counter
-  of 250).
-
-- **Before that**: the Plan 00245 closure — the folder moved from the plan root
-  into `Completed/`, so Active fell by one and Completed rose by one while Total
-  and the folder count were untouched. Recounted from disk (35 root, 203
-  `Completed/`, 6 `Cancelled/`, 241 distinct numbers against a counter of 250).
-
-- **Before that**: the Plan 00250 creation — one new folder in the plan root and
-  the counter advanced by `mkplan.bash`, so Total and Active each rose by one
-  while Completed and Cancelled were untouched. Recounted from disk (36 root, 202
-  `Completed/`, 6 `Cancelled/`, 241 distinct numbers against a counter of 250).
-
-- **Before that**: the Plan 00249 creation — one new folder in the plan root and
-  the counter advanced by `mkplan.bash`, so Total and Active each rose by one
-  while Completed and Cancelled were untouched. Recounted from disk (35 root, 202
-  `Completed/`, 6 `Cancelled/`, 240 distinct numbers against a counter of 249).
-
-- **Before that**: the Plan 00248 creation — one new folder in the plan root and
-  the counter advanced by `mkplan.bash`, so Total and Active each rose by one
-  while Completed and Cancelled were untouched. Recounted from disk (34 root, 202
-  `Completed/`, 6 `Cancelled/`, 239 distinct numbers against a counter of 248).
-
-- **Before that**: every reconciliation from Plan 00247 back to the start. These
-  were a nested chain of ~30 mechanical recounts ("Total rose by one; recounted
-  from disk (N root, M `Completed/`, …)"), which is a LOG, and a log inside the
-  index is the thing the index-size ceiling exists to stop — git holds each one
-  verbatim. Collapsed to this pointer when the ceiling failed during the Plan
-  00254 closure; the recent entries above are kept because they are what drift is
-  actually spotted against.
-
-  The one non-mechanical fact in that chain, kept because it would otherwise be
-  lost: the Plan 00247 recount turned up an empty `CLAUDE/Plan/CLAUDE/Plan/` left
-  by a relative-path slip. Being untracked, it was invisible to `git status` while
-  still inflating a naive folder count by one. Removed then; worth knowing that a
-  folder recount can be wrong in that specific way.
+  One recount hazard worth keeping, because it recurs: an untracked stray
+  directory (e.g. an accidental `CLAUDE/Plan/CLAUDE/Plan/` from a
+  relative-path slip) is invisible to `git status` while still inflating a
+  naive folder count by one.
