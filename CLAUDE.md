@@ -1025,15 +1025,15 @@ pytest tests/ 2>&1 | /…/scripts/echd-capture 20
 
 ## github_auto_close_keywords — closing keywords in git messages are blocked
 
-A `git commit` (or `git merge -m` / `git tag -m`) whose message contains a GitHub closing keyword followed by an issue reference is DENIED. `Fixes #123`, `closes octo-org/octo-repo#42`, `Resolved GH-7`, or a keyword before a full issue URL all auto-close that issue the moment the commit reaches the default branch — GitHub offers no repo-side switch to turn this off. The nine keywords are close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved, case-insensitive, with or without a colon.
+A `git commit` (or `git merge -m` / `git tag -m`, or a `gh pr create`/`gh pr edit` body) whose message contains a GitHub closing keyword followed by an issue reference is DENIED. `Fixes #123`, `closes octo-org/octo-repo#42`, `Resolved GH-7`, or a keyword before a full issue URL all auto-close that issue the moment the commit reaches the default branch (or the PR merges) — GitHub offers no repo-side switch to turn this off. The nine keywords are close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved, case-insensitive, with or without a colon; keyword and reference must share a line.
 
-**The keyword alone is fine.** `fixes the race condition` is prose and never matches; only keyword+reference forms trigger. A bare `#123` without a keyword is also fine.
+**The keyword alone is fine.** `fixes the race condition` is prose and never matches; only keyword+reference forms trigger. A bare `#123` without a keyword is also fine, and READING is never blocked — a reference inside a `grep`/`git log` in the same compound command does not deny the commit segment.
 
-**Both message routes are checked**: an inline `-m` value (any quoting, any of several `-m` paragraphs) AND the content of a `-F <file>` / `--file=<file>` scratch file, which is read at check time. A missing `-F` file is allowed — the commit fails on its own. `-t`/`--template` is not a message source.
+**All message routes are checked**: inline `-m` values (any quoting, any of several `-m` paragraphs), `gh pr` `--body`/`-b` values, AND the content of a `-F <file>` / `--file=<file>` / `--body-file <file>` scratch file, which is read at check time. A missing, unreadable, binary or oversized file is allowed through — the command fails on its own. `-t`/`--template` is not a message source.
 
 **Use a non-closing reference instead**: `Addresses #123`, `Refs #123`, `See #123` — GitHub links these but does not close.
 
-**Escape hatch** (when auto-closing is genuinely intended):
+**Escape hatch** (when auto-closing is genuinely intended; the reason must be non-empty and quoted):
 
 ```
 MUST_AUTO_CLOSE_BECAUSE="explain why"; git commit -m 'Fixes #123'
