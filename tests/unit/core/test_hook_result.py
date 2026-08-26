@@ -416,7 +416,8 @@ class TestToJsonEventName:
         output = result_session.to_json("SessionStart")
         assert "systemMessage" in output
         assert output["systemMessage"] == "Test context"
-        assert "hookSpecificOutput" not in output
+        # Plan 00271 item 6: the documented Claude-context channel too.
+        assert output["hookSpecificOutput"]["additionalContext"] == "Test context"
 
     def test_to_json_silent_allow_no_event_name(self):
         """Silent allow should not include hookEventName (empty dict)."""
@@ -509,7 +510,7 @@ class TestHookResultIntegration:
 
         assert "systemMessage" in output
         assert "PLAN.md" in output["systemMessage"]
-        assert "hookSpecificOutput" not in output
+        assert "PLAN.md" in output["hookSpecificOutput"]["additionalContext"]
 
     def test_deny_with_guidance_and_context(self):
         """Complex deny with guidance and context."""
@@ -683,7 +684,7 @@ class TestHookResultContextOnlyFormat:
         assert "systemMessage" in output
         assert "Session info" in output["systemMessage"]
         assert "Remember to commit" in output["systemMessage"]
-        assert "hookSpecificOutput" not in output
+        assert "Session info" in output["hookSpecificOutput"]["additionalContext"]
 
     def test_context_only_notification_with_guidance(self):
         """Notification event should use systemMessage (NOT hookSpecificOutput)."""
@@ -710,18 +711,17 @@ class TestHookResultContextOnlyDenyFormat:
     something invalid" to "emits something valid that still says what happened".
     """
 
-    def test_context_only_deny_is_surfaced_as_context(self):
-        """UserPromptSubmit cannot deny, so the attempt becomes visible context."""
+    def test_user_prompt_submit_deny_is_a_documented_block(self):
+        """UserPromptSubmit CAN deny (Plan 00271 item 5): top-level block."""
         result = HookResult(decision=Decision.DENY, reason="Blocked prompt")
         output = result.to_json("UserPromptSubmit")
 
-        assert "hookSpecificOutput" in output
-        assert "permissionDecision" not in output["hookSpecificOutput"]
-        assert "Blocked prompt" in output["hookSpecificOutput"]["additionalContext"]
+        assert output["decision"] == "block"
+        assert output["reason"] == "Blocked prompt"
 
-    def test_context_only_deny_names_the_event_that_cannot_enforce_it(self):
-        """The message must say WHICH event dropped the refusal, and that it did."""
-        result = HookResult(decision=Decision.DENY, reason="Blocked", guidance="Try something else")
+    def test_user_prompt_submit_ask_is_surfaced_as_context(self):
+        """ASK has no wire form on UserPromptSubmit, so it surfaces loudly."""
+        result = HookResult(decision=Decision.ASK, reason="Confirm?", guidance="Try again")
         output = result.to_json("UserPromptSubmit")
 
         context = output["hookSpecificOutput"]["additionalContext"]
@@ -755,13 +755,20 @@ class TestHookResultSystemMessageDenyFormat:
 
         assert output == {}
 
-    def test_pre_compact_deny_is_surfaced_not_dropped(self):
-        """Same contract as SessionStart."""
+    def test_stop_block_without_reason_gets_the_fallback(self):
+        """The docs REQUIRE reason with a Stop block (Plan 00271 Task 3.2)."""
+        output = HookResult(decision=Decision.DENY).to_json("Stop")
+
+        assert output["decision"] == "block"
+        assert output["reason"]  # never a bare block
+
+    def test_pre_compact_deny_is_a_documented_block(self):
+        """PreCompact CAN block compaction (Plan 00271 item 7)."""
         result = HookResult(decision=Decision.DENY, reason="Compact rejected")
         output = result.to_json("PreCompact")
 
-        assert "decision" not in output
-        assert "Compact rejected" in output["systemMessage"]
+        assert output["decision"] == "block"
+        assert output["reason"] == "Compact rejected"
 
 
 class TestHookResultErrorFactory:

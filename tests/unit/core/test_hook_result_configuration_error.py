@@ -85,6 +85,7 @@ class TestConfigurationErrorFactory:
         result = HookResult.configuration_error(errors=["Missing required field: version"])
         output = result.to_json("SessionStart")
 
-        # SessionStart uses systemMessage format
+        # SessionStart: user-facing systemMessage plus the documented
+        # Claude-context channel (Plan 00271 item 6).
         assert "systemMessage" in output
-        assert "hookSpecificOutput" not in output
+        assert "additionalContext" in output["hookSpecificOutput"]

@@ -49,9 +49,9 @@ _DECISION_FIELD: Final[str] = "decision"
 class AdvisoryResult(HookResult):
     """For an event that can neither deny nor ask — it can only add context.
 
-    ``SessionStart``, ``SessionEnd``, ``PreCompact``, ``Notification``, both
-    worktree events, ``Status`` and every newly-wired event route through
-    ``_format_system_message_response``, which has no way to express a refusal.
+    ``SessionStart``, ``SessionEnd``, ``Notification``, both worktree events,
+    ``Status`` and the other events with no documented decision control route
+    through formatters that have no way to express a refusal.
     """
 
     decision: Literal[Decision.ALLOW, Decision.CONTINUE] = Decision.ALLOW
@@ -60,8 +60,11 @@ class AdvisoryResult(HookResult):
 class BlockingResult(HookResult):
     """For an event that can block but has no ``ask``.
 
-    ``PostToolUse``, ``Stop`` and ``SubagentStop`` express a refusal as a
-    top-level ``decision: "block"``. There is no wire representation for ASK.
+    ``PostToolUse``, ``Stop``, ``SubagentStop``, ``UserPromptSubmit``,
+    ``PreCompact``, ``PermissionRequest`` (``decision.behavior``), the
+    wired-extra top-level-block events and the ``continue: false`` pair
+    (``TeammateIdle``/``TaskCompleted``). There is no wire representation for
+    ASK on any of them.
     """
 
     decision: Literal[Decision.ALLOW, Decision.CONTINUE, Decision.DENY] = Decision.ALLOW
@@ -88,13 +91,15 @@ class BlockingResult(HookResult):
 class GatingResult(HookResult):
     """For an event that gates an action and can deny or ask.
 
-    ``PreToolUse`` (``permissionDecision``) and ``PermissionRequest``
-    (``decision.behavior``) are the only two.
+    ``PreToolUse`` (``permissionDecision``) is the only one:
+    ``PermissionRequest``'s documented ``decision.behavior`` enum is
+    ``allow`` | ``deny`` with no ask outcome, so it sits in the blocking tier
+    (Plan 00271 audit item 3).
     """
 
-    decision: Literal[Decision.ALLOW, Decision.CONTINUE, Decision.DENY, Decision.ASK] = (
-        Decision.ALLOW
-    )
+    decision: Literal[
+        Decision.ALLOW, Decision.CONTINUE, Decision.DENY, Decision.ASK, Decision.DEFER
+    ] = Decision.ALLOW
 
     @classmethod
     def deny(cls, reason: str, *, context: list[str] | None = None) -> Self:
@@ -121,6 +126,20 @@ class GatingResult(HookResult):
             A result of the calling class, with the ask decision.
         """
         return cls(decision=Decision.ASK, reason=reason, context=context or [])
+
+    @classmethod
+    def defer(cls) -> Self:
+        """Create a defer result — exit gracefully so the tool resumes later.
+
+        No arguments by design: the docs ignore ``permissionDecisionReason``,
+        ``updatedInput`` and ``additionalContext`` when the decision is defer
+        (Plan 00271 item 2), so accepting them would promise delivery the wire
+        cannot make.
+
+        Returns:
+            A result of the calling class, with the defer decision.
+        """
+        return cls(decision=Decision.DEFER)
 
 
 #: Narrowest first, so ``result_type_for_event`` never returns a wider tier

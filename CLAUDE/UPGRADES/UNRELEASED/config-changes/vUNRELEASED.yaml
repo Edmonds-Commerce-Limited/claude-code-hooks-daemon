@@ -187,6 +187,28 @@ config_changes:
         `only_with_mutator: true`, which spares every diagnostic
         false-positive shape. Its sibling verification_result_gate stands
         down when a prelude is present, so the two never double-fire.
+    - key: handlers.session_start.contract_staleness
+      recommended: true
+      dormant: false
+      description: >-
+        NEW SessionStart advisory handler (Plan 00271). The daemon now vendors
+        the Claude Code hooks output contract (contracts/claude-code-hooks/,
+        one JSON per documented event plus META.json provenance) and a
+        network-free QA check (scripts/qa/check_hook_contract.py) diffs the
+        daemon's response schemas, refusal claim tables and event catalogue
+        against it. This handler is the freshness half: on a new session, when
+        the installed Claude Code version is newer than META.json's
+        last_audited_claude_code_version, it advises running the refresh
+        procedure (docs/guides/HOOK-CONTRACT-REFRESH.md). Silent otherwise;
+        caches the claude --version probe for 24 hours; never auto-refreshes —
+        extraction from prose docs is a verified manual step by design, after
+        a summarising fetch layer fabricated a contract value during the
+        Plan 00271 audit.
+      migration_note: >-
+        Enabled by default in newly generated configs. Existing configs adopt
+        it by adding contract_staleness under handlers.session_start
+        (enabled: true, priority: 60). Without it the vendored contract can
+        rot silently as Claude Code moves on.
     - key: handlers.pre_tool_use.staged_lint_gate
       recommended: true
       dormant: false

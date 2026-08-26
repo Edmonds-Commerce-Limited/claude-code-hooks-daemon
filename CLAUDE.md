@@ -580,11 +580,11 @@ has one in `core.handler_bases` — `PreToolUseHandlerBase`,
 event would silently drop becomes a mypy error instead of a production no-op.
 An integration test enforces this for every handler in `src/`.
 
-| Tier         | Decisions                  | Events                          | Result type      |
-| ------------ | -------------------------- | ------------------------------- | ---------------- |
-| **Gating**   | allow, continue, deny, ask | PreToolUse, PermissionRequest   | `GatingResult`   |
-| **Blocking** | allow, continue, deny      | PostToolUse, Stop, SubagentStop | `BlockingResult` |
-| **Advisory** | allow, continue            | every other wired event         | `AdvisoryResult` |
+| Tier         | Decisions                         | Events                                                                                                                                                                                           | Result type      |
+| ------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------- |
+| **Gating**   | allow, continue, deny, ask, defer | PreToolUse                                                                                                                                                                                       | `GatingResult`   |
+| **Blocking** | allow, continue, deny             | PostToolUse, Stop, SubagentStop, PermissionRequest, UserPromptSubmit, PreCompact, UserPromptExpansion, PostToolUseFailure, PostToolBatch, TaskCreated, TaskCompleted, TeammateIdle, ConfigChange | `BlockingResult` |
+| **Advisory** | allow, continue                   | every other wired event                                                                                                                                                                          | `AdvisoryResult` |
 
 Use your event's name and you never need to know which tier it is in. The base
 is an ABC with **four** abstract methods — implementing only `matches`/`handle`

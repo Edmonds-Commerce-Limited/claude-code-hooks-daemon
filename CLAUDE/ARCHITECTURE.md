@@ -609,6 +609,29 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
 
 ---
 
+## The Vendored Hooks Contract (Wire-Format Source of Truth)
+
+**Claude Code's hooks documentation defines the wire format; the daemon
+vendors it** (Plan 00271). `contracts/claude-code-hooks/` holds one tracked
+JSON file per documented event — output fields, decision-token enums, blocking
+mechanism, discarded fields, and a verbatim input example — plus `META.json`
+(docs URL, fetch date, docs sha256, `last_audited_claude_code_version`) and
+`ALLOWLIST.yaml` (reasoned, task-linked records of capabilities the daemon
+deliberately does not express).
+
+Three daemon sources of truth are diffed against the vendored contract on
+every QA run by `scripts/qa/check_hook_contract.py` (`llm_qa.py hook_contract`,
+network-free): `core/response_schemas.py`, `REFUSAL_CAPABLE_EVENTS` +
+serialiser output in `core/hook_result.py`, and `can_block` in
+`constants/events.py`. A stale allowlist entry fails the check, so recorded
+gaps cannot rot. Freshness is separate: the `contract_staleness` SessionStart
+advisory fires when the installed Claude Code version exceeds the last-audited
+one, pointing at the refresh procedure in
+`docs/guides/HOOK-CONTRACT-REFRESH.md` (raw-markdown fetch only — a
+summarising fetch layer once fabricated a contract value).
+
+---
+
 ## Error Handling & Fail-Open Philosophy
 
 **Core Principle**: **Never block work due to hook system failures**

@@ -1,0 +1,45 @@
+{
+  "event": "PreToolUse",
+  "block_mechanism": "permission-decision",
+  "can_block": true,
+  "ask_capable": true,
+  "top_level_output_fields": [
+    "continue",
+    "stopReason",
+    "suppressOutput",
+    "systemMessage",
+    "terminalSequence"
+  ],
+  "top_level_decision_enum": null,
+  "hook_specific_output_fields": {
+    "permissionDecision": {
+      "enum": [
+        "allow",
+        "deny",
+        "ask",
+        "defer"
+      ]
+    },
+    "permissionDecisionReason": {},
+    "updatedInput": {},
+    "additionalContext": {}
+  },
+  "discarded_fields": [],
+  "notes": "Four outcomes: allow/deny/ask/defer, plus updatedInput to rewrite the tool's input before execution (replaces the ENTIRE input object). Precedence across hooks: deny > defer > ask > allow. For 'defer', permissionDecisionReason, updatedInput and additionalContext are ignored.",
+  "input_example": {
+    "session_id": "abc123",
+    "prompt_id": "00000000-0000-0000-0000-000000000000",
+    "transcript_path": "/home/user/.claude/projects/.../transcript.jsonl",
+    "cwd": "/home/user/my-project",
+    "permission_mode": "default",
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "npm test",
+      "description": "Run test suite",
+      "timeout": 120000,
+      "run_in_background": false
+    },
+    "tool_use_id": "toolu_01ABC123..."
+  }
+}

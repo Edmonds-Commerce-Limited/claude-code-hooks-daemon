@@ -1,0 +1,48 @@
+{
+  "event": "PostToolBatch",
+  "block_mechanism": "top-level-decision",
+  "can_block": true,
+  "ask_capable": false,
+  "top_level_output_fields": [
+    "continue",
+    "stopReason",
+    "suppressOutput",
+    "systemMessage",
+    "terminalSequence",
+    "decision",
+    "reason"
+  ],
+  "top_level_decision_enum": [
+    "block"
+  ],
+  "hook_specific_output_fields": {
+    "additionalContext": {}
+  },
+  "discarded_fields": [],
+  "notes": "decision: 'block' or continue: false stops the agentic loop before the next model call.",
+  "input_example": {
+    "session_id": "abc123",
+    "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
+    "cwd": "/Users/...",
+    "permission_mode": "default",
+    "hook_event_name": "PostToolBatch",
+    "tool_calls": [
+      {
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/.../ledger/accounts.py"
+        },
+        "tool_use_id": "toolu_01...",
+        "tool_response": "     1\tfrom __future__ import annotations\n     2\t..."
+      },
+      {
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/.../ledger/transactions.py"
+        },
+        "tool_use_id": "toolu_02...",
+        "tool_response": "     1\tfrom __future__ import annotations\n     2\t..."
+      }
+    ]
+  }
+}

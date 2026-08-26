@@ -69,9 +69,11 @@ VERDICT_LOG_FILENAME = "verdicts.jsonl"
 # Decisions that represent the handler actively restricting the tool call.
 # Everything else (ALLOW, CONTINUE) is advisory for verdict-log purposes —
 # this is a DERIVED classification, not each handler's own configured
-# block/warn option (no uniform way to read that generically), but it is
-# accurate for the two decisions that matter: a DENY/ASK always blocked.
-_BLOCKING_DECISIONS = frozenset({Decision.DENY, Decision.ASK})
+# block/warn option (no uniform way to read that generically). DENY and ASK
+# always blocked; DEFER (Plan 00271) is a postponement rather than a refusal,
+# but it too stops the tool call from proceeding NOW, which is what the mode
+# field records — the schema's two modes describe what happened to THIS call.
+_BLOCKING_DECISIONS = frozenset({Decision.DENY, Decision.ASK, Decision.DEFER})
 _MODE_BLOCK = "block"
 _MODE_ADVISORY = "advisory"
 

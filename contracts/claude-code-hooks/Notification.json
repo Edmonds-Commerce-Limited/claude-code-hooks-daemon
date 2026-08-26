@@ -1,0 +1,30 @@
+{
+  "event": "Notification",
+  "block_mechanism": null,
+  "can_block": false,
+  "ask_capable": false,
+  "top_level_output_fields": [
+    "continue",
+    "stopReason",
+    "suppressOutput",
+    "systemMessage",
+    "terminalSequence"
+  ],
+  "top_level_decision_enum": null,
+  "hook_specific_output_fields": null,
+  "discarded_fields": [
+    "systemMessage",
+    "continue",
+    "stopReason"
+  ],
+  "notes": "JSON output fields discarded except terminalSequence.",
+  "input_example": {
+    "session_id": "abc123",
+    "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
+    "cwd": "/Users/...",
+    "hook_event_name": "Notification",
+    "message": "Claude needs your permission",
+    "title": "Permission needed",
+    "notification_type": "permission_prompt"
+  }
+}

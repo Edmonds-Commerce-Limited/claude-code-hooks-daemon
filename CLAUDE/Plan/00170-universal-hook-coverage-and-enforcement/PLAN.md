@@ -276,6 +276,21 @@ new registrations.
 
 - **Related**: [Plan 00169](../Completed/00169-prior-art-sota-research-and-feature-brainstorm/PLAN.md)
   (this plan graduated from its hook-coverage finding).
+- **Plan 00271 coordination note (for dormant Phase 4)**: the vendored hooks
+  contract now exists and Phase 4's drift detection should build ON it, not
+  beside it. Substrate: `contracts/claude-code-hooks/` (one JSON per
+  documented event + `META.json` recording docs URL, fetch date, docs sha256
+  and `last_audited_claude_code_version`; `ALLOWLIST.yaml` records reasoned
+  gaps). Checker entry point: `scripts/qa/check_hook_contract.py` (network-free;
+  wired into `llm_qa.py` as `hook_contract`) — its
+  `event-missing-from-catalogue` rule already covers the "docs list an event
+  the catalogue lacks" half of drift detection, and the `contract_staleness`
+  SessionStart advisory (`handlers/session_start/contract_staleness.py`) fires
+  when the installed Claude Code version exceeds the last-audited one. Task
+  4.2's version-pinned spec-audit should consume `META.json` rather than
+  invent a second provenance record; refresh procedure:
+  `docs/guides/HOOK-CONTRACT-REFRESH.md` (raw-fetch-only, per the fabrication
+  incident recorded there).
 - **Feeds**: follow-up feature plans for individual events (F3/F6/F11/F19/F20 etc.).
 
 ## Technical Decisions

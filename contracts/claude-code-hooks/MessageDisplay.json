@@ -1,0 +1,33 @@
+{
+  "event": "MessageDisplay",
+  "block_mechanism": null,
+  "can_block": false,
+  "ask_capable": false,
+  "top_level_output_fields": [
+    "continue",
+    "stopReason",
+    "suppressOutput",
+    "systemMessage",
+    "terminalSequence"
+  ],
+  "top_level_decision_enum": null,
+  "hook_specific_output_fields": {
+    "displayContent": {}
+  },
+  "discarded_fields": [
+    "systemMessage",
+    "continue"
+  ],
+  "notes": "Display-only; no decision control.",
+  "input_example": {
+    "session_id": "abc123",
+    "transcript_path": "/Users/.../.claude/projects/.../transcript.jsonl",
+    "cwd": "/Users/my-project",
+    "hook_event_name": "MessageDisplay",
+    "turn_id": "00000000-0000-0000-0000-000000000000",
+    "message_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    "index": 0,
+    "final": false,
+    "delta": "Here is the plan:\n"
+  }
+}

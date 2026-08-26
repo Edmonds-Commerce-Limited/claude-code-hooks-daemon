@@ -1,0 +1,39 @@
+{
+  "event": "PostToolUseFailure",
+  "block_mechanism": "top-level-decision",
+  "can_block": true,
+  "ask_capable": false,
+  "top_level_output_fields": [
+    "continue",
+    "stopReason",
+    "suppressOutput",
+    "systemMessage",
+    "terminalSequence",
+    "decision",
+    "reason"
+  ],
+  "top_level_decision_enum": [
+    "block"
+  ],
+  "hook_specific_output_fields": {
+    "additionalContext": {}
+  },
+  "discarded_fields": [],
+  "notes": "In the docs' top-level decision: 'block' group.",
+  "input_example": {
+    "session_id": "abc123",
+    "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
+    "cwd": "/Users/...",
+    "permission_mode": "default",
+    "hook_event_name": "PostToolUseFailure",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "npm test",
+      "description": "Run test suite"
+    },
+    "tool_use_id": "toolu_01ABC123...",
+    "error": "Exit code 1\nError: Cannot find module 'express'",
+    "is_interrupt": false,
+    "duration_ms": 4187
+  }
+}

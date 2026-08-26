@@ -68,7 +68,10 @@ _SUFFIX = "HandlerBase"
 
 
 def _wired_event_metas() -> list[EventIDMeta]:
-    return [meta for meta in vars(EventID).values() if isinstance(meta, EventIDMeta)]
+    # WIRED only, matching the name: an unwired catalogued event (DirectoryAdded,
+    # Plan 00271 item 8) has no response schema yet, so result_type_for_event
+    # correctly refuses to choose a tier for it.
+    return [meta for meta in vars(EventID).values() if isinstance(meta, EventIDMeta) and meta.wired]
 
 
 def _schema_key(meta: EventIDMeta) -> str:
@@ -149,7 +152,7 @@ class TestTheLookupHelperAgreesWithTheNames:
 
     def test_the_known_assignments_hold(self) -> None:
         assert handler_base_for_event("PreToolUse") is GatingHandler
-        assert handler_base_for_event("PermissionRequest") is GatingHandler
+        assert handler_base_for_event("PermissionRequest") is BlockingHandler
         assert handler_base_for_event("Stop") is BlockingHandler
         assert handler_base_for_event("PostToolUse") is BlockingHandler
         assert handler_base_for_event("SessionStart") is AdvisoryHandler

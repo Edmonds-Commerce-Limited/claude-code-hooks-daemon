@@ -32,9 +32,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00269: supervisor goal message injection](00269-supervisor-goal-message-injection/PLAN.md) - In Progress (goal_injection handler + inject-goal CLI + supervisor goal branch implemented, code-reviewed and merged at `78665b51`; only the live armed-supervisor `/goal` probes remain, which need a human-attended session)
 
+- [00273: hook input payload validation](00273-hook-input-payload-validation/PLAN.md) - Not Started (follow-up filed by Plan 00271: input-schema layer over the vendored contract's per-event input examples, so an input-field rename surfaces as a QA finding/advisory instead of handlers silently never matching)
+
 - [00272: secret file read blocker](00272-secret-file-read-blocker/PLAN.md) - Not Started (deny-by-default PreToolUse guard so a protected secret file's CONTENT can never enter context by any wired route; `secret-meta` helper returns keyed-hash metadata instead; no agent escape hatch; Phase 1 research classifies every read route by blockability; brainstorm + research scaffold ready for human review)
 
-- [00271: hook contract alignment](00271-hook-contract-alignment/PLAN.md) - Not Started (DBF-first: vendor the documented Claude Code hooks contract as tracked JSON with a network-free QA diff + staleness advisory, then fix the 21 audited response-schema drifts — 9 load-bearing, incl. PreToolUse `updatedInput`/`defer` and UserPromptSubmit blocking; audit in-folder)
+- [00271: hook contract alignment](00271-hook-contract-alignment/PLAN.md) - In Progress (DBF-first: vendored contract + network-free `hook_contract` QA check + `contract_staleness` advisory landed; all 9 load-bearing drifts fixed with the guard green; burn-down/docs in flight)
 
 ### Status Line / Agent View
 
@@ -1247,7 +1249,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 272 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 273 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 220 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 

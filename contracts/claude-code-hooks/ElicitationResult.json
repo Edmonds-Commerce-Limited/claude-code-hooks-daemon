@@ -1,0 +1,43 @@
+{
+  "event": "ElicitationResult",
+  "block_mechanism": "hook-specific-action",
+  "can_block": true,
+  "ask_capable": false,
+  "top_level_output_fields": [
+    "continue",
+    "stopReason",
+    "suppressOutput",
+    "systemMessage",
+    "terminalSequence"
+  ],
+  "top_level_decision_enum": null,
+  "hook_specific_output_fields": {
+    "action": {
+      "enum": [
+        "accept",
+        "decline",
+        "cancel"
+      ]
+    },
+    "content": {}
+  },
+  "discarded_fields": [
+    "systemMessage",
+    "continue"
+  ],
+  "notes": "Overrides the user's response before it returns to the MCP server.",
+  "input_example": {
+    "session_id": "abc123",
+    "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
+    "cwd": "/Users/...",
+    "permission_mode": "default",
+    "hook_event_name": "ElicitationResult",
+    "mcp_server_name": "my-mcp-server",
+    "action": "accept",
+    "content": {
+      "username": "alice"
+    },
+    "mode": "form",
+    "elicitation_id": "elicit-123"
+  }
+}

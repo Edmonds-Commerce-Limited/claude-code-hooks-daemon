@@ -22,6 +22,9 @@ class Decision(StrEnum):
     DENY = "deny"
     ASK = "ask"
     CONTINUE = "continue"
+    # PreToolUse only: exit gracefully so the tool can be resumed later
+    # (Plan 00271 item 2). The docs ignore reason/updatedInput/context on it.
+    DEFER = "defer"
 
 
 # Universal suffix appended to all PreToolUse DENY reasons.
@@ -48,6 +51,36 @@ _STATUS_ROW_SEPARATOR = "\n"
 _WORKTREE_CREATE_EVENT_NAME = "WorktreeCreate"
 _WORKTREE_PATH_KEY = "worktreePath"
 
+# Wired-extra blockable events (Plan 00271 item 9). The docs give each a real
+# blocking mechanism; before this table a DENY on any of them fell through to
+# the systemMessage formatter and emitted the undefined {"decision": "deny"}.
+#: Events whose documented block is a top-level ``decision: "block"`` + reason.
+_TOP_LEVEL_BLOCK_EXTRA_EVENTS: Final[frozenset[str]] = frozenset(
+    {
+        "UserPromptExpansion",
+        "PostToolUseFailure",
+        "PostToolBatch",
+        "TaskCreated",
+        "ConfigChange",
+        # PreCompact: the docs put it in the same top-level block group
+        # (Plan 00271 item 7); its context channel stays systemMessage, which
+        # the docs describe as accepted-but-discarded for this event.
+        "PreCompact",
+    }
+)
+#: The subset of the above whose docs also define hookSpecificOutput.additionalContext.
+_HSO_CONTEXT_EXTRA_EVENTS: Final[frozenset[str]] = frozenset(
+    {"UserPromptExpansion", "PostToolUseFailure", "PostToolBatch"}
+)
+#: Events whose documented block is ``continue: false`` + ``stopReason``.
+_CONTINUE_FALSE_EVENTS: Final[frozenset[str]] = frozenset({"TeammateIdle", "TaskCompleted"})
+
+#: The docs REQUIRE ``reason`` alongside a Stop/SubagentStop ``decision:
+#: "block"``; this fallback keeps a reasonless handler block contract-valid.
+_STOP_BLOCK_FALLBACK_REASON: Final[str] = (
+    "A Stop handler blocked the stop without stating a reason; continue working."
+)
+
 # Which events can actually CARRY each refusal on the wire. Anything absent here
 # drops that decision, and the resulting response is still schema-VALID — so the
 # contract check cannot see it. Stop and PostToolUse express `block` but have no
@@ -71,12 +104,31 @@ REFUSAL_CAPABLE_EVENTS: Final[dict[Decision, frozenset[str]]] = {
             "Stop",  # decision: block
             "SubagentStop",  # decision: block
             "PermissionRequest",  # decision.behavior: deny
+            "UserPromptSubmit",  # decision: block (Plan 00271 item 5)
+            # Wired-extra blockable events (Plan 00271 item 9):
+            "UserPromptExpansion",  # decision: block
+            "PostToolUseFailure",  # decision: block
+            "PostToolBatch",  # decision: block
+            "TaskCreated",  # exit 2 or decision: block
+            "ConfigChange",  # decision: block
+            "TeammateIdle",  # exit 2 or continue: false
+            "TaskCompleted",  # exit 2 or continue: false
+            "PreCompact",  # decision: block (Plan 00271 item 7)
         }
     ),
     Decision.ASK: frozenset(
         {
+            # PreToolUse is the ONLY event with a documented ask outcome.
+            # PermissionRequest was listed here too, but the documented
+            # decision.behavior enum is "allow" | "deny" — the "ask" the daemon
+            # used to claim (and emit) is not defined by the contract, so
+            # Claude Code ignored it (Plan 00271 audit item 3).
             "PreToolUse",  # permissionDecision: ask
-            "PermissionRequest",  # decision.behavior: ask
+        }
+    ),
+    Decision.DEFER: frozenset(
+        {
+            "PreToolUse",  # permissionDecision: defer (Plan 00271 item 2)
         }
     ),
 }
@@ -160,6 +212,10 @@ class HookResult(BaseModel):
     # decision), so the handler carries the absolute path here and to_json emits
     # {"worktreePath": ...} which the forwarder prints raw.
     worktree_path: str | None = Field(default=None)
+    # PreToolUse updatedInput (Plan 00271 item 1): replaces the tool's ENTIRE
+    # input object before execution. Emitted only on PreToolUse, and only for
+    # allow/ask/deny — the docs ignore it on defer.
+    updated_input: dict[str, Any] | None = Field(default=None)
     # Optional sub-classification of WHICH internal check/pattern produced this
     # decision (Plan 00209 verdict log). Purely internal metadata consumed by
     # the verdict-log writer — never part of the Claude Code hook response, so
@@ -383,10 +439,20 @@ class HookResult(BaseModel):
                 return self._format_stop_response(event_name, False)
             if event_name == "PostToolUse":
                 return self._format_post_tool_use_response(event_name)
-            if event_name == "PermissionRequest":
+            if event_name == "PermissionRequest" and self.decision == Decision.DENY:
+                # DENY only: an ASK here has no documented wire form (the
+                # decision.behavior enum is allow|deny), so re-emitting it would
+                # make the SUBSTITUTE invalid too. ASK falls through to the loud
+                # advisory below instead.
                 return self._format_permission_request_response(event_name)
             if event_name == "PreToolUse":
                 return self._format_pre_tool_use_response(event_name)
+            if event_name == "UserPromptSubmit" and self.decision == Decision.DENY:
+                return self._format_user_prompt_submit_response(event_name)
+            if event_name in _TOP_LEVEL_BLOCK_EXTRA_EVENTS and self.decision == Decision.DENY:
+                return self._format_top_level_block_response(event_name)
+            if event_name in _CONTINUE_FALSE_EVENTS and self.decision == Decision.DENY:
+                return self._format_continue_false_response()
 
         detail = f": {self.reason}" if self.reason else ""
         if self.decision in (Decision.DENY, Decision.ASK):
@@ -439,12 +505,15 @@ class HookResult(BaseModel):
 
         Different event types require different response structures:
         - Status: Plain text response {"text": "..."} (NOT JSON hookSpecificOutput)
-        - PreToolUse: hookSpecificOutput with permissionDecision
+        - PreToolUse: hookSpecificOutput with permissionDecision (+ updatedInput/defer)
         - PostToolUse: Top-level decision + hookSpecificOutput
-        - Stop/SubagentStop: Top-level decision only (NO hookSpecificOutput)
+        - Stop/SubagentStop: Top-level decision + hookSpecificOutput.additionalContext
         - PermissionRequest: hookSpecificOutput with nested decision.behavior
-        - UserPromptSubmit: hookSpecificOutput with context only (NO decision fields)
-        - SessionStart/SessionEnd/PreCompact/Notification: systemMessage ONLY (NO hookSpecificOutput)
+        - UserPromptSubmit: Top-level decision "block" + hookSpecificOutput context
+        - The wired-extra block events (incl. PreCompact): top-level decision "block"
+        - TeammateIdle/TaskCompleted: continue: false + stopReason
+        - SessionStart: systemMessage + hookSpecificOutput.additionalContext
+        - SessionEnd/Notification and other no-decision events: systemMessage ONLY
 
         Args:
             event_name: Hook event type (PreToolUse, PostToolUse, etc.)
@@ -494,8 +563,14 @@ class HookResult(BaseModel):
         if event_name == _WORKTREE_CREATE_EVENT_NAME and self.worktree_path:
             return {_WORKTREE_PATH_KEY: self.worktree_path}
 
-        # Silent allow with no context - valid for all events
-        if self.decision == Decision.ALLOW and not self.context and not self.guidance:
+        # Silent allow with no context - valid for all events. An allow that
+        # carries updatedInput is NOT silent: the rewrite is the payload.
+        if (
+            self.decision == Decision.ALLOW
+            and not self.context
+            and not self.guidance
+            and self.updated_input is None
+        ):
             return {}
 
         # Event-specific formatting
@@ -513,11 +588,20 @@ class HookResult(BaseModel):
             # PreToolUse: hookSpecificOutput with permissionDecision
             return self._format_pre_tool_use_response(event_name)
         elif event_name == "UserPromptSubmit":
-            # UserPromptSubmit: hookSpecificOutput with context only
-            return self._format_context_only_response(event_name)
+            # UserPromptSubmit: documented top-level decision "block" + reason,
+            # plus hookSpecificOutput.additionalContext (Plan 00271 item 5).
+            return self._format_user_prompt_submit_response(event_name)
+        elif event_name in _TOP_LEVEL_BLOCK_EXTRA_EVENTS:
+            return self._format_top_level_block_response(event_name)
+        elif event_name in _CONTINUE_FALSE_EVENTS:
+            return self._format_continue_false_response()
+        elif event_name == "SessionStart":
+            return self._format_session_start_response(event_name)
         else:
-            # SessionStart, SessionEnd, PreCompact, Notification: systemMessage ONLY
-            # These events do NOT support hookSpecificOutput in Claude Code
+            # SessionEnd, Notification and the other no-decision-control
+            # events: systemMessage only. (SessionStart and PreCompact used to
+            # be in this bucket; both now have their own branches above —
+            # Plan 00271 items 6 and 7.)
             return self._format_system_message_response()
 
     def _format_pre_tool_use_response(self, event_name: str) -> dict[str, Any]:
@@ -528,6 +612,12 @@ class HookResult(BaseModel):
         """
         output: dict[str, Any] = {"hookEventName": event_name}
 
+        if self.decision == Decision.DEFER:
+            # The docs ignore permissionDecisionReason, updatedInput and
+            # additionalContext when the decision is defer — emit none of them.
+            output["permissionDecision"] = self.decision.value
+            return {"hookSpecificOutput": output}
+
         if self.decision in (Decision.DENY, Decision.ASK):
             output["permissionDecision"] = self.decision.value
             if self.reason:
@@ -535,6 +625,9 @@ class HookResult(BaseModel):
                 if self.decision == Decision.DENY:
                     reason = reason + _DENY_CONTINUATION_SUFFIX
                 output["permissionDecisionReason"] = reason
+
+        if self.updated_input is not None:
+            output["updatedInput"] = self.updated_input
 
         if self.context:
             output["additionalContext"] = "\n\n".join(self.context)
@@ -603,8 +696,9 @@ class HookResult(BaseModel):
 
         if self.decision == Decision.DENY:
             response["decision"] = "block"
-            if self.reason:
-                response["reason"] = self.reason
+            # The docs REQUIRE reason when decision is "block" (Plan 00271
+            # cosmetic finding): a bare block must not go out without one.
+            response["reason"] = self.reason or _STOP_BLOCK_FALLBACK_REASON
             if self.context:
                 response["hookSpecificOutput"] = {
                     "hookEventName": event_name,
@@ -634,27 +728,125 @@ class HookResult(BaseModel):
 
         # Nested decision structure
         if self.decision in (Decision.ALLOW, Decision.DENY, Decision.ASK):
-            hook_output["decision"] = {"behavior": self.decision.value}
+            decision_object: dict[str, Any] = {"behavior": self.decision.value}
+            if self.decision == Decision.DENY:
+                # The DOCUMENTED deny-explanation field is decision.message
+                # ("For deny only: tells Claude why the permission was
+                # denied") — Plan 00271 item 4. Context lines join it so a
+                # multi-line explanation survives on the documented channel.
+                # DUAL-CHANNEL: the same explanation is ALSO emitted below on
+                # the additionalContext extension the daemon previously used —
+                # the audit only says that channel "likely" delivers nothing,
+                # and a bare refusal is the exact incident it was added for.
+                # Retire one channel once live observation settles which
+                # renders (same approach as SessionStart).
+                explanation = [self.reason] if self.reason else []
+                explanation.extend(self.context)
+                if explanation:
+                    joined_explanation = "\n\n".join(explanation)
+                    decision_object["message"] = joined_explanation
+                    hook_output["additionalContext"] = joined_explanation
+            hook_output["decision"] = decision_object
 
-        # The reason shares additionalContext with context, because the nested
-        # decision object permits only `behavior` and `updatedInput` — there is
-        # nowhere else in this event's schema for an explanation to go. Without
-        # this the refusal arrived bare: AutoApproveReadsHandler denies a
-        # non-read tool with a three-line explanation that was discarded in
-        # full, leaving the user refused and told nothing. The sibling
-        # PreToolUse formatter has always emitted permissionDecisionReason.
-        explanation: list[str] = []
-        if self.reason and self.decision in (Decision.DENY, Decision.ASK):
-            explanation.append(self.reason)
-        explanation.extend(self.context)
-
-        if explanation:
-            hook_output["additionalContext"] = "\n\n".join(explanation)
+        # Advisory context on ALLOW/ASK stays on the daemon's additionalContext
+        # extension channel (recorded as a deliberate gap in the contract
+        # ALLOWLIST — the docs define no context field for this event).
+        if self.decision != Decision.DENY and self.context:
+            hook_output["additionalContext"] = "\n\n".join(self.context)
 
         if self.guidance:
             hook_output["guidance"] = self.guidance
 
         return {"hookSpecificOutput": hook_output} if len(hook_output) > 1 else {}
+
+    def _format_user_prompt_submit_response(self, event_name: str) -> dict[str, Any]:
+        """Format UserPromptSubmit: top-level block + hookSpecificOutput context.
+
+        The docs' decision-control table puts UserPromptSubmit in the
+        top-level ``decision: "block"`` group; ``reason`` is shown to the user
+        (not added to context). Context and guidance still travel in
+        ``hookSpecificOutput``. Same shape family as PostToolUse.
+        """
+        response: dict[str, Any] = {}
+        hook_output: dict[str, Any] = {"hookEventName": event_name}
+
+        if self.decision == Decision.DENY:
+            response["decision"] = "block"
+            if self.reason:
+                response["reason"] = self.reason
+        elif self.decision == Decision.ASK:
+            # No documented ask outcome on this event — emit the deliberately
+            # invalid marker so enforcement substitutes a loud advisory.
+            hook_output["permissionDecision"] = self.decision.value
+            if self.reason:
+                hook_output["permissionDecisionReason"] = self.reason
+            return {"hookSpecificOutput": hook_output}
+
+        if self.context:
+            hook_output["additionalContext"] = "\n\n".join(self.context)
+        if self.guidance:
+            hook_output["guidance"] = self.guidance
+
+        if len(hook_output) > 1:
+            response["hookSpecificOutput"] = hook_output
+        return response
+
+    def _format_top_level_block_response(self, event_name: str) -> dict[str, Any]:
+        """Documented top-level ``decision: "block"`` for a wired-extra event.
+
+        Context travels in ``hookSpecificOutput.additionalContext`` where the
+        docs define it for the event, otherwise as a ``systemMessage`` (which
+        for ConfigChange the docs describe as accepted-but-discarded — the
+        dead letter is recorded in the contract ALLOWLIST rather than hidden).
+        An ASK has no documented form on any of these events and falls through
+        with the deliberately-invalid marker so enforcement substitutes loudly.
+        """
+        response: dict[str, Any] = {}
+        if self.decision == Decision.ASK:
+            response["decision"] = self.decision.value
+            if self.reason:
+                response["reason"] = self.reason
+            return response
+        if self.decision == Decision.DENY:
+            response["decision"] = "block"
+            if self.reason:
+                response["reason"] = self.reason
+
+        messages = [*self.context]
+        if self.guidance:
+            messages.append(self.guidance)
+        if messages:
+            joined = "\n\n".join(messages)
+            if event_name in _HSO_CONTEXT_EXTRA_EVENTS:
+                response["hookSpecificOutput"] = {
+                    "hookEventName": event_name,
+                    "additionalContext": joined,
+                }
+            else:
+                response["systemMessage"] = joined
+        return response
+
+    def _format_continue_false_response(self) -> dict[str, Any]:
+        """Documented ``continue: false`` block for TeammateIdle/TaskCompleted.
+
+        A DENY stops the teammate entirely (the docs' JSON form); the reason
+        travels as ``stopReason``, which is shown to the user. ASK has no
+        documented form and falls through deliberately invalid.
+        """
+        response: dict[str, Any] = {}
+        if self.decision == Decision.ASK:
+            return {"decision": self.decision.value}
+        if self.decision == Decision.DENY:
+            response["continue"] = False
+            if self.reason:
+                response["stopReason"] = self.reason
+
+        messages = [*self.context]
+        if self.guidance:
+            messages.append(self.guidance)
+        if messages:
+            response["systemMessage"] = "\n\n".join(messages)
+        return response
 
     def _format_context_only_response(self, event_name: str) -> dict[str, Any]:
         """Format context-only response for SessionStart, SessionEnd, etc.
@@ -686,6 +878,38 @@ class HookResult(BaseModel):
             hook_output["guidance"] = self.guidance
 
         return {"hookSpecificOutput": hook_output} if len(hook_output) > 1 else {}
+
+    def _format_session_start_response(self, event_name: str) -> dict[str, Any]:
+        """Format SessionStart: documented Claude-context channel plus warning.
+
+        The docs route ``hookSpecificOutput.additionalContext`` into CLAUDE's
+        context before the first prompt, and describe ``systemMessage`` as a
+        USER-facing warning (Plan 00271 item 6). Advisory context is emitted on
+        BOTH channels: the documented one so Claude reliably receives it, and
+        systemMessage so the previously observable behaviour is preserved —
+        live verification of each channel is deferred (see the plan JOURNAL).
+        A DENY/ASK has no wire form here and emits the deliberately invalid
+        marker so enforcement substitutes loudly.
+        """
+        if self.decision in (Decision.DENY, Decision.ASK):
+            response: dict[str, Any] = {"decision": self.decision.value}
+            if self.reason:
+                response["reason"] = self.reason
+            return response
+
+        messages = [*self.context]
+        if self.guidance:
+            messages.append(self.guidance)
+        if not messages:
+            return {}
+        joined = "\n\n".join(messages)
+        return {
+            "systemMessage": joined,
+            "hookSpecificOutput": {
+                "hookEventName": event_name,
+                "additionalContext": joined,
+            },
+        }
 
     def _format_system_message_response(self) -> dict[str, Any]:
         """Format response for events that only support systemMessage.

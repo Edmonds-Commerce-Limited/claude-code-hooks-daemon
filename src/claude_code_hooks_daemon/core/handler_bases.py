@@ -47,10 +47,10 @@ from claude_code_hooks_daemon.core.result_types import (
 class AdvisoryHandler(Handler):
     """For an event that can neither deny nor ask — it can only add context.
 
-    ``SessionStart``, ``SessionEnd``, ``PreCompact``, ``Notification``, both
-    worktree events, ``Status`` and every newly-wired event. Their responses go
-    through ``_format_system_message_response``, which has no way to carry a
-    refusal, so a DENY here is dropped on the wire.
+    ``SessionStart``, ``SessionEnd``, ``Notification``, both worktree events,
+    ``Status`` and the other events with no documented decision control. Their
+    responses have no way to carry a refusal, so a DENY here is dropped on the
+    wire.
     """
 
     @abstractmethod
@@ -111,37 +111,43 @@ class GatingHandler(Handler):
 
 # Gating: can deny AND ask.
 PreToolUseHandlerBase = GatingHandler
-PermissionRequestHandlerBase = GatingHandler
 
-# Blocking: can deny, cannot ask.
+# Blocking: can deny, cannot ask. PermissionRequest sits here because its
+# documented decision.behavior enum is allow | deny only (Plan 00271 item 3).
+PermissionRequestHandlerBase = BlockingHandler
 PostToolUseHandlerBase = BlockingHandler
+# UserPromptSubmit: documented top-level decision "block" (Plan 00271 item 5).
+UserPromptSubmitHandlerBase = BlockingHandler
+# Wired-extra events with documented blocking (Plan 00271 item 9): top-level
+# decision "block" for the first five, continue: false for the last two.
+UserPromptExpansionHandlerBase = BlockingHandler
+PostToolUseFailureHandlerBase = BlockingHandler
+PostToolBatchHandlerBase = BlockingHandler
+TaskCreatedHandlerBase = BlockingHandler
+ConfigChangeHandlerBase = BlockingHandler
+TeammateIdleHandlerBase = BlockingHandler
+TaskCompletedHandlerBase = BlockingHandler
+# PreCompact: a hook can block compaction (Plan 00271 item 7).
+PreCompactHandlerBase = BlockingHandler
 StopHandlerBase = BlockingHandler
 SubagentStopHandlerBase = BlockingHandler
 
 # Advisory: can neither deny nor ask.
 SessionStartHandlerBase = AdvisoryHandler
 SessionEndHandlerBase = AdvisoryHandler
-PreCompactHandlerBase = AdvisoryHandler
 PostCompactHandlerBase = AdvisoryHandler
 NotificationHandlerBase = AdvisoryHandler
-UserPromptSubmitHandlerBase = AdvisoryHandler
-UserPromptExpansionHandlerBase = AdvisoryHandler
 StatusLineHandlerBase = AdvisoryHandler
 WorktreeCreateHandlerBase = AdvisoryHandler
 WorktreeRemoveHandlerBase = AdvisoryHandler
 SetupHandlerBase = AdvisoryHandler
 PermissionDeniedHandlerBase = AdvisoryHandler
-PostToolUseFailureHandlerBase = AdvisoryHandler
-PostToolBatchHandlerBase = AdvisoryHandler
 MessageDisplayHandlerBase = AdvisoryHandler
 SubagentStartHandlerBase = AdvisoryHandler
-TaskCreatedHandlerBase = AdvisoryHandler
-TaskCompletedHandlerBase = AdvisoryHandler
 StopFailureHandlerBase = AdvisoryHandler
-TeammateIdleHandlerBase = AdvisoryHandler
 InstructionsLoadedHandlerBase = AdvisoryHandler
-ConfigChangeHandlerBase = AdvisoryHandler
 CwdChangedHandlerBase = AdvisoryHandler
+DirectoryAddedHandlerBase = AdvisoryHandler
 FileChangedHandlerBase = AdvisoryHandler
 ElicitationHandlerBase = AdvisoryHandler
 ElicitationResultHandlerBase = AdvisoryHandler

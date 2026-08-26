@@ -50,7 +50,13 @@ from claude_code_hooks_daemon.core.result_types import (
 _TIERS: dict[type[HookResult], set[Decision]] = {
     AdvisoryResult: {Decision.ALLOW, Decision.CONTINUE},
     BlockingResult: {Decision.ALLOW, Decision.CONTINUE, Decision.DENY},
-    GatingResult: {Decision.ALLOW, Decision.CONTINUE, Decision.DENY, Decision.ASK},
+    GatingResult: {
+        Decision.ALLOW,
+        Decision.CONTINUE,
+        Decision.DENY,
+        Decision.ASK,
+        Decision.DEFER,
+    },
 }
 
 
@@ -107,7 +113,13 @@ class TestTheTiersStayCompatibleWithHookResult:
     def test_each_tier_still_serialises(self, result_type: type[HookResult]) -> None:
         response = result_type(context=["note"]).to_json("SessionStart")
 
-        assert response == {"systemMessage": "note"}
+        assert response == {
+            "systemMessage": "note",
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": "note",
+            },
+        }
 
     def test_a_blocking_tier_deny_still_denies(self) -> None:
         """Narrowing must not weaken a refusal that IS deliverable."""
@@ -174,7 +186,7 @@ class TestTierMembershipIsDerivedFromTheCapabilityTable:
     def test_the_known_tier_assignments_hold(self) -> None:
         """Spot-check the three tiers against events whose behaviour is settled."""
         assert result_type_for_event("PreToolUse") is GatingResult
-        assert result_type_for_event("PermissionRequest") is GatingResult
+        assert result_type_for_event("PermissionRequest") is BlockingResult
         assert result_type_for_event("Stop") is BlockingResult
         assert result_type_for_event("PostToolUse") is BlockingResult
         assert result_type_for_event("SessionStart") is AdvisoryResult

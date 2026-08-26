@@ -10,7 +10,7 @@ from claude_code_hooks_daemon.constants import (
     HookInputField,
     Priority,
 )
-from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.git_repo import run_git
@@ -89,7 +89,7 @@ class GitContextInjectorHandler(UserPromptSubmitHandlerBase):
         """
         return True
 
-    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Inject git status as context, but only when it has something to say.
 
         The duty — git state informs decisions — is why this handler exists.
@@ -102,7 +102,7 @@ class GitContextInjectorHandler(UserPromptSubmitHandlerBase):
             hook_input: Hook input dictionary from Claude Code
 
         Returns:
-            AdvisoryResult with git status context, or a silent allow when git is
+            BlockingResult with git status context, or a silent allow when git is
             unavailable or the status is unchanged since this session's last
             injection
         """
@@ -123,7 +123,7 @@ class GitContextInjectorHandler(UserPromptSubmitHandlerBase):
 
             # If git command failed (not a repo, git not installed, etc.), silent allow
             if result.returncode != 0:
-                return AdvisoryResult(decision=Decision.ALLOW)
+                return BlockingResult(decision=Decision.ALLOW)
 
             # Build context message
             context = "Current git repository status:\n\n"
@@ -133,15 +133,15 @@ class GitContextInjectorHandler(UserPromptSubmitHandlerBase):
 
             session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or "")
             if not self._should_inject(session_id, context):
-                return AdvisoryResult(decision=Decision.ALLOW)
+                return BlockingResult(decision=Decision.ALLOW)
 
-            return AdvisoryResult(decision=Decision.ALLOW, context=[context])
+            return BlockingResult(decision=Decision.ALLOW, context=[context])
 
         except OSError:
             # `run_git` reports an absent git or a timeout as a non-zero
             # returncode rather than raising, so the only thing left that can
             # raise here is resolving the fallback cwd — silent allow either way.
-            return AdvisoryResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
     def get_claude_md(self) -> str | None:
         return None

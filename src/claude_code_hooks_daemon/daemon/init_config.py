@@ -244,6 +244,7 @@ class ConfigTemplate:
             "    plan_qa_sweep: {enabled: true, priority: 57}  # Plan-tree drift report (silent when clean)\n"
             "    ccy_supervisor_integrity: {enabled: true, priority: 58}  # Warn when the ccy supervisor is armed but its files are unsafe\n"
             "    plan_workflow_asset_checker: {enabled: true, priority: 59}  # Advise when plan_workflow is enabled but its assets are missing\n"
+            "    contract_staleness: {enabled: true, priority: 60}  # Advise a hooks-contract refresh when Claude Code outruns the vendored audit\n"
             "\n"
             "  # SessionEnd - no handlers ship today (cleanup removed in Plan 00237)\n"
             "  session_end: {}\n"

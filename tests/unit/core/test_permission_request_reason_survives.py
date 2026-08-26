@@ -54,7 +54,10 @@ class TestPermissionRequestRefusalExplainsItself:
         """Adding an explanation must not disturb the decision itself."""
         response = HookResult(decision=Decision.DENY, reason=_REASON).to_json(_EVENT)
 
-        assert response["hookSpecificOutput"]["decision"] == {"behavior": "deny"}
+        decision = response["hookSpecificOutput"]["decision"]
+        assert decision["behavior"] == "deny"
+        # Plan 00271 item 4: the reason now rides the DOCUMENTED field.
+        assert decision["message"] == _REASON
 
     def test_reason_and_context_both_survive_together(self) -> None:
         """They share one channel, so neither may overwrite the other."""
@@ -62,7 +65,7 @@ class TestPermissionRequestRefusalExplainsItself:
             decision=Decision.DENY, reason=_REASON, context=["extra context line"]
         ).to_json(_EVENT)
 
-        combined = response["hookSpecificOutput"]["additionalContext"]
+        combined = response["hookSpecificOutput"]["decision"]["message"]
         assert _REASON in combined
         assert "extra context line" in combined
 

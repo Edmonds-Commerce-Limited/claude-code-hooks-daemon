@@ -72,6 +72,13 @@ class ContinuingProbe:
         return Decision.CONTINUE
 
 
+class DeferringProbe:
+    """Returns the PreToolUse-only graceful-defer decision (Plan 00271)."""
+
+    def handle(self, hook_input: dict[str, Any]) -> Decision:
+        return Decision.DEFER
+
+
 class ExpectationOnlyProbe:
     """Names a decision ONLY in an acceptance-test expectation."""
 
@@ -148,6 +155,7 @@ _PROBES: dict[Decision, type] = {
     Decision.DENY: RefusingProbe,
     Decision.ASK: AskingProbe,
     Decision.CONTINUE: ContinuingProbe,
+    Decision.DEFER: DeferringProbe,
 }
 
 
@@ -210,7 +218,7 @@ class TestAnEventThatCannotDeliverIsReported:
 
     @pytest.mark.parametrize(
         "event_name",
-        ["SessionStart", "SessionEnd", "PreCompact", "Notification"],
+        ["SessionStart", "SessionEnd", "Notification"],
     )
     def test_a_deny_on_a_message_only_event_is_reported(self, event_name: str) -> None:
         assert undeliverable_decisions(
@@ -220,10 +228,11 @@ class TestAnEventThatCannotDeliverIsReported:
     def test_a_deny_on_a_permissive_schema_event_is_still_reported(self) -> None:
         """The case schema validation alone cannot catch.
 
-        ``TaskCreated`` has no bespoke schema, so any response validates. The
-        decision is dropped regardless.
+        ``Setup`` has no bespoke schema, so any response validates. The
+        decision is dropped regardless. (TaskCreated previously played this
+        role, but Plan 00271 item 9 gave it a real documented block.)
         """
-        assert undeliverable_decisions(RefusingProbe, "TaskCreated"), (
+        assert undeliverable_decisions(RefusingProbe, "Setup"), (
             "a DENY on a permissive-schema event validates but is still dropped, "
             "so schema conformance alone must not be the test"
         )
@@ -254,7 +263,7 @@ class TestDeliverableDecisionsAreLeftAlone:
     def test_a_deny_on_a_refusal_capable_event_is_not_reported(self, event_name: str) -> None:
         assert not undeliverable_decisions(RefusingProbe, event_name)
 
-    @pytest.mark.parametrize("event_name", ["PreToolUse", "PermissionRequest"])
+    @pytest.mark.parametrize("event_name", ["PreToolUse"])
     def test_an_ask_on_an_ask_capable_event_is_not_reported(self, event_name: str) -> None:
         assert not undeliverable_decisions(AskingProbe, event_name)
 

@@ -1,6 +1,6 @@
 # Plan 00271: Hook Contract Alignment
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: High
@@ -93,7 +93,7 @@ automated summary.
 
 ### Phase 1: The Guard (DBF — before any fix)
 
-- [ ] ⬜ **Task 1.1**: Vendor the documented contract as tracked JSON under
+- [x] ✅ **Task 1.1**: Vendor the documented contract as tracked JSON under
   `contracts/claude-code-hooks/` — one file per documented event (30
   events incl. `DirectoryAdded`), each capturing: documented top-level
   output fields, `hookSpecificOutput` fields with enums (e.g.
@@ -102,11 +102,11 @@ automated summary.
   docs say are discarded (e.g. PreCompact `systemMessage`), and a
   representative input example. Source every claim from a fresh raw fetch
   of hooks.md, cross-checked against the audit's contract table.
-- [ ] ⬜ **Task 1.2**: Write `contracts/claude-code-hooks/META.json`: docs
+- [x] ✅ **Task 1.2**: Write `contracts/claude-code-hooks/META.json`: docs
   URL, fetch date, docs byte size/sha256, `last_audited_claude_code_version`
   (2.1.246 or the version current at execution), and a pointer to the
   refresh procedure doc.
-- [ ] ⬜ **Task 1.3**: TDD the contract-diff checker
+- [x] ✅ **Task 1.3**: TDD the contract-diff checker
   (`scripts/qa/check_hook_contract.py` + a supporting module with unit
   tests). Network-free. Per event it asserts:
   - every field/enum value in the daemon's bespoke schema exists in the
@@ -119,26 +119,26 @@ automated summary.
     either allowlisted or reported as a finding;
   - every vendored event name exists in `constants/events.py` (wired or
     tracked in `EXPECTED_UNWIRED`) — this alone catches `DirectoryAdded`.
-- [ ] ⬜ **Task 1.4**: Design and implement the reasoned allowlist
+- [x] ✅ **Task 1.4**: Design and implement the reasoned allowlist
   (tracked file beside the contracts, e.g.
   `contracts/claude-code-hooks/ALLOWLIST.yaml`): each entry names the
   event, the field/token, the reason, and a linked plan/task; the checker
   FAILS on an allowlist entry whose drift no longer exists (stale
   entries rot too).
-- [ ] ⬜ **Task 1.5**: Wire the checker into `scripts/qa/run_all.sh` and
+- [x] ✅ **Task 1.5**: Wire the checker into `scripts/qa/run_all.sh` and
   `scripts/qa/llm_qa.py` as a first-class QA check.
-- [ ] ⬜ **Task 1.6**: RED verification — run the checker against the
+- [x] ✅ **Task 1.6**: RED verification — run the checker against the
   current tree and confirm it reports every load-bearing drift from the
   audit (items 1–9) plus the moderate/cosmetic ones not yet allowlisted.
   Record the red output in this plan's JOURNAL/. Seed the allowlist with
   ALL current findings, each entry linked to its Phase 2/3 task — so the
   QA suite passes between now and each fix while every gap stays recorded.
-- [ ] ⬜ **Task 1.7**: TDD the contract-staleness SessionStart advisory
+- [x] ✅ **Task 1.7**: TDD the contract-staleness SessionStart advisory
   (sibling of `version_check`): when the installed Claude Code version
   exceeds `META.json`'s `last_audited_claude_code_version`, advise running
   the refresh procedure. Enable it in `.claude/hooks-daemon.yaml` and
   `.example`, register constants, daemon restart verification.
-- [ ] ⬜ **Task 1.8**: Write the refresh procedure doc
+- [x] ✅ **Task 1.8**: Write the refresh procedure doc
   (`contracts/claude-code-hooks/REFRESH.md`): raw fetch of hooks.md to a
   scratch file (never a summarising fetch layer — record the fabrication
   incident as the rationale), manual/agent extraction with verbatim
@@ -154,18 +154,18 @@ capabilities. Every task: TDD (failing test first, keyed to the vendored
 contract), full QA, daemon restart verification, remove the corresponding
 allowlist entry so the guard enforces the fix.
 
-- [ ] ⬜ **Task 2.1**: Three-way reconciliation of claim tables (audit
+- [x] ✅ **Task 2.1**: Three-way reconciliation of claim tables (audit
   items 3, 5, 7, 9). Make `REFUSAL_CAPABLE_EVENTS`
   (`core/hook_result.py:66-82`), `can_block` in `constants/events.py`, and
   the schemas agree with the vendored contract for every event. Includes
   removing the undefined PermissionRequest ASK claim
   (`hook_result.py:76-81`, `response_schemas.py:117`).
-- [ ] ⬜ **Task 2.2**: UserPromptSubmit blocking (audit item 5): top-level
+- [x] ✅ **Task 2.2**: UserPromptSubmit blocking (audit item 5): top-level
   `decision: "block"` + `reason` in schema
   (`response_schemas.py:183-198`) and serialiser; add UserPromptSubmit to
   `REFUSAL_CAPABLE_EVENTS[DENY]`; coherence with `can_block=True`
   (`constants/events.py:129-136`).
-- [ ] ⬜ **Task 2.3**: Correct block serialisation for the six wired-extra
+- [x] ✅ **Task 2.3**: Correct block serialisation for the six wired-extra
   blockable events (audit item 9: PostToolBatch, PostToolUseFailure,
   TaskCreated, ConfigChange, UserPromptExpansion, TeammateIdle): a DENY
   must emit the documented mechanism (top-level `decision: "block"` +
@@ -174,25 +174,25 @@ allowlist entry so the guard enforces the fix.
   `_format_system_message_response` (`hook_result.py:518-521, 704-710`).
   Extend `REFUSAL_CAPABLE_EVENTS` so drops on these events are no longer
   silent; tighten their fail-open schemas enough to reject the old token.
-- [ ] ⬜ **Task 2.4**: PreCompact blocking (audit item 7): schema
+- [x] ✅ **Task 2.4**: PreCompact blocking (audit item 7): schema
   (`response_schemas.py:171-177`) and serialiser support top-level
   `decision: "block"`; reconcile with `can_block=True`
   (`constants/events.py:138-145`); document that PreCompact
   `systemMessage` is discarded (dead-letter) per contract.
-- [ ] ⬜ **Task 2.5**: PreToolUse `updatedInput` + `defer` (audit items 1,
+- [x] ✅ **Task 2.5**: PreToolUse `updatedInput` + `defer` (audit items 1,
   2): extend `PRE_TOOL_USE_SCHEMA` (`response_schemas.py:26-40`), add a
   `HookResult` field and formatter support
   (`hook_result.py:523-545`), add `Decision.DEFER`
   (`hook_result.py:18-24`) with correct capability-table and
   handler-base treatment. Unblocks Plan 00270 — notify that plan's task
   list on completion.
-- [ ] ⬜ **Task 2.6**: PermissionRequest deny surface (audit items 3, 4):
+- [x] ✅ **Task 2.6**: PermissionRequest deny surface (audit items 3, 4):
   route the deny reason into the documented `decision.message`
   (replacing the undocumented `additionalContext` routing at
   `hook_result.py:639-652`); add `updatedPermissions` and `interrupt` to
   the schema (`response_schemas.py:105-135`) and result model, or
   allowlist them with linked follow-up if deliberately unsupported.
-- [ ] ⬜ **Task 2.7**: SessionStart live verification then migration
+- [ ] 🔄 **Task 2.7**: SessionStart live verification then migration
   (audit item 6): use `scripts/debug_hooks.sh` against the installed
   Claude Code to establish what `systemMessage` vs
   `hookSpecificOutput.additionalContext` actually do on SessionStart;
@@ -202,10 +202,10 @@ allowlist entry so the guard enforces the fix.
   for genuinely user-facing warnings. `initialUserMessage`,
   `sessionTitle`, `watchPaths`, `reloadSkills` become expressible or
   allowlisted with reasons.
-- [ ] ⬜ **Task 2.8**: Add `DirectoryAdded` to `constants/events.py`
+- [x] ✅ **Task 2.8**: Add `DirectoryAdded` to `constants/events.py`
   (audit item 8) per the file's own tracked-gap rule (`wired=False` +
   `EXPECTED_UNWIRED` if not wired now).
-- [ ] ⬜ **Task 2.9**: Client-observable-change manifests: for each Phase 2
+- [x] ✅ **Task 2.9**: Client-observable-change manifests: for each Phase 2
   fix that changes what a client project observes (new decision
   capabilities on events, PermissionRequest deny reason moving fields,
   SessionStart context channel change), stage
@@ -214,7 +214,7 @@ allowlist entry so the guard enforces the fix.
 
 ### Phase 3: Burn-Down, Coordination and Docs
 
-- [ ] ⬜ **Task 3.1**: Moderate-drift triage: for each remaining
+- [x] ✅ **Task 3.1**: Moderate-drift triage: for each remaining
   allowlisted gap (PostToolUse `updatedToolOutput`/
   `updatedMCPToolOutput`/`classifierContext`, universal fields incl.
   `terminalSequence`, UserPromptSubmit `sessionTitle`/
@@ -222,21 +222,21 @@ allowlist entry so the guard enforces the fix.
   SubagentStart/Setup context shape) decide fix-now vs keep-allowlisted;
   implement the fix-now set with TDD; every kept entry ends with a
   reason and a linked plan/task.
-- [ ] ⬜ **Task 3.2**: Cosmetic clean-up: comment `guidance` as a
+- [x] ✅ **Task 3.2**: Cosmetic clean-up: comment `guidance` as a
   daemon-internal extension (not contractual) where declared in schemas;
   require `reason` alongside Stop `decision: "block"`
   (`hook_result.py:604-607`); comment StatusLine as out-of-contract by
   design.
-- [ ] ⬜ **Task 3.3**: Plan 00170 Phase 4 coordination note: append to
+- [x] ✅ **Task 3.3**: Plan 00170 Phase 4 coordination note: append to
   Plan 00170's PLAN.md (Dependencies/notes) that its dormant drift
   detection should build on `contracts/claude-code-hooks/META.json` and
   the checker from this plan, not a parallel mechanism; record the
   interface (files, checker entry point) there.
-- [ ] ⬜ **Task 3.4**: Documentation: CLAUDE/HANDLER_DEVELOPMENT.md and
+- [x] ✅ **Task 3.4**: Documentation: CLAUDE/HANDLER_DEVELOPMENT.md and
   docs/guides/HANDLER_REFERENCE.md updated for any newly expressible
   decisions/fields; CLAUDE/ARCHITECTURE.md gains a short section naming
   the vendored contract as the source of truth for wire shapes.
-- [ ] ⬜ **Task 3.5**: Candidate follow-up plan filed (or explicitly
+- [x] ✅ **Task 3.5**: Candidate follow-up plan filed (or explicitly
   declined in this plan's JOURNAL/) for input-payload validation, using
   the vendored input examples (audit "Input-payload drift surface").
 
@@ -303,5 +303,12 @@ Summary:
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00271-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Guard red-run verified at <commit-hash>
-- Load-bearing drifts closed at <commit-hash>
+- Guard red-run verified at 02a05c97 (worktree branch
+  `agent-a31082bd6ba927bc5-095ae460`; 59 findings, all nine load-bearing
+  audit items enumerated — see JOURNAL/00271-Journal-26-08-26.md).
+- Load-bearing drifts closed across the Phase 2 commits on that branch;
+  guard enforced incrementally (allowlist 59 → 29 kept entries).
+- REMAINING before Complete: Task 2.7's LIVE verification of the SessionStart
+  context channels (schema+serialiser migration is done, dual-emitting), plus
+  daemon restart verification — both deferred to the merge reviewer on main,
+  because a worktree must not restart the dogfood daemon.

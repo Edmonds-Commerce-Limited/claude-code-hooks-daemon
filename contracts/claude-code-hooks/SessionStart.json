@@ -1,0 +1,31 @@
+{
+  "event": "SessionStart",
+  "block_mechanism": null,
+  "can_block": false,
+  "ask_capable": false,
+  "top_level_output_fields": [
+    "continue",
+    "stopReason",
+    "suppressOutput",
+    "systemMessage",
+    "terminalSequence"
+  ],
+  "top_level_decision_enum": null,
+  "hook_specific_output_fields": {
+    "additionalContext": {},
+    "initialUserMessage": {},
+    "sessionTitle": {},
+    "watchPaths": {},
+    "reloadSkills": {}
+  },
+  "discarded_fields": [],
+  "notes": "Context-only: no blocking or decision control. additionalContext is injected into Claude's context before the first prompt; systemMessage is a user-facing warning, not Claude context.",
+  "input_example": {
+    "session_id": "abc123",
+    "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
+    "cwd": "/Users/...",
+    "hook_event_name": "SessionStart",
+    "source": "startup",
+    "model": "claude-sonnet-5"
+  }
+}

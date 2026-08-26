@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
+from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptMessage, TranscriptReader
 
@@ -122,11 +122,11 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         """Match any string prompt (branching happens in handle)."""
         return isinstance(hook_input.get("prompt"), str)
 
-    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
+    def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Fire housekeeping guidance once the idle-tick threshold is reached."""
         prompt = hook_input.get("prompt")
         if not isinstance(prompt, str):
-            return AdvisoryResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         session_id = str(hook_input.get("session_id", ""))
 
@@ -134,15 +134,15 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         # session's housekeeping budget and get out of the way.
         if _RECOVERY_MARKER not in prompt:
             self._passes_by_session.pop(session_id, None)
-            return AdvisoryResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         # Recovery tick. Respect the per-session pass cap.
         if self._passes_by_session.get(session_id, 0) >= self._max_passes_per_session:
-            return AdvisoryResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         transcript_path = hook_input.get("transcript_path")
         if not isinstance(transcript_path, str) or not transcript_path:
-            return AdvisoryResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         reader = TranscriptReader()
         try:
@@ -159,14 +159,14 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
             reader.load_tail(transcript_path)
         except (OSError, ValueError) as exc:
             logger.debug("housekeeping: could not load transcript %s: %s", transcript_path, exc)
-            return AdvisoryResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         count = count_trailing_noop_recovery_ticks(reader.get_messages(), _RECOVERY_MARKER)
         if count < self._noop_threshold:
-            return AdvisoryResult(decision=Decision.ALLOW)
+            return BlockingResult(decision=Decision.ALLOW)
 
         self._record_pass(session_id)
-        return AdvisoryResult(decision=Decision.ALLOW, context=[self._build_guidance()])
+        return BlockingResult(decision=Decision.ALLOW, context=[self._build_guidance()])
 
     def _record_pass(self, session_id: str) -> None:
         """Increment this session's pass count, bounding the tracking map."""

@@ -1,0 +1,33 @@
+{
+  "event": "UserPromptSubmit",
+  "block_mechanism": "top-level-decision",
+  "can_block": true,
+  "ask_capable": false,
+  "top_level_output_fields": [
+    "continue",
+    "stopReason",
+    "suppressOutput",
+    "systemMessage",
+    "terminalSequence",
+    "decision",
+    "reason",
+    "suppressOriginalPrompt"
+  ],
+  "top_level_decision_enum": [
+    "block"
+  ],
+  "hook_specific_output_fields": {
+    "additionalContext": {},
+    "sessionTitle": {}
+  },
+  "discarded_fields": [],
+  "notes": "decision: 'block' prevents the prompt from being processed; reason is shown to the user, not added to context. suppressOriginalPrompt only meaningful with decision: 'block'.",
+  "input_example": {
+    "session_id": "abc123",
+    "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
+    "cwd": "/Users/...",
+    "permission_mode": "default",
+    "hook_event_name": "UserPromptSubmit",
+    "prompt": "Write a function to calculate the factorial of a number"
+  }
+}

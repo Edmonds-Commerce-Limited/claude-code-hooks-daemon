@@ -1,0 +1,31 @@
+{
+  "event": "CwdChanged",
+  "block_mechanism": null,
+  "can_block": false,
+  "ask_capable": false,
+  "top_level_output_fields": [
+    "continue",
+    "stopReason",
+    "suppressOutput",
+    "systemMessage",
+    "terminalSequence"
+  ],
+  "top_level_decision_enum": null,
+  "hook_specific_output_fields": {
+    "watchPaths": {
+      "note": "wrapper not shown explicitly in docs for this event"
+    }
+  },
+  "discarded_fields": [
+    "continue"
+  ],
+  "notes": "No decision control. systemMessage shown as a brief terminal notification.",
+  "input_example": {
+    "session_id": "abc123",
+    "transcript_path": "/Users/.../.claude/projects/.../transcript.jsonl",
+    "cwd": "/Users/my-project/src",
+    "hook_event_name": "CwdChanged",
+    "old_cwd": "/Users/my-project",
+    "new_cwd": "/Users/my-project/src"
+  }
+}

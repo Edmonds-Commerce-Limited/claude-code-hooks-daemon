@@ -1,0 +1,33 @@
+{
+  "event": "PermissionDenied",
+  "block_mechanism": null,
+  "can_block": false,
+  "ask_capable": false,
+  "top_level_output_fields": [
+    "continue",
+    "stopReason",
+    "suppressOutput",
+    "systemMessage",
+    "terminalSequence"
+  ],
+  "top_level_decision_enum": null,
+  "hook_specific_output_fields": {
+    "retry": {}
+  },
+  "discarded_fields": [],
+  "notes": "retry: true tells the model it may retry the denied tool call. No blocking.",
+  "input_example": {
+    "session_id": "abc123",
+    "transcript_path": "/Users/.../.claude/projects/.../00000000-0000-0000-0000-000000000000.jsonl",
+    "cwd": "/Users/...",
+    "permission_mode": "auto",
+    "hook_event_name": "PermissionDenied",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "rm -rf /tmp/build",
+      "description": "Clean build directory"
+    },
+    "tool_use_id": "toolu_01ABC123...",
+    "reason": "Blocked by classifier"
+  }
+}

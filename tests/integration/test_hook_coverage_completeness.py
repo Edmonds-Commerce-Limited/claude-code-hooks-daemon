@@ -65,6 +65,7 @@ CLAUDE_CODE_HOOK_EVENTS: frozenset[str] = frozenset(
         "InstructionsLoaded",
         "ConfigChange",
         "CwdChanged",
+        "DirectoryAdded",
         "FileChanged",
         "WorktreeCreate",
         "WorktreeRemove",
@@ -87,12 +88,11 @@ _STATUS_EVENTTYPE_VALUE = "Status"
 # Each entry MUST have ``wired=False`` in EventID. As an event is wired, remove
 # it from BOTH places in the same change.
 #
-# FULLY BURNED DOWN: this set is now empty — the daemon wires EVERY Claude Code
-# hook event. It stays empty unless Claude Code ships a NEW event; in that case
-# catalogue it in EventID + CLAUDE_CODE_HOOK_EVENTS and, if it cannot be wired in
-# the same change, add its json_key here to acknowledge the gap (the burn-down
-# test then forces it to be tracked, never silently unwired).
-EXPECTED_UNWIRED: frozenset[str] = frozenset()
+# DirectoryAdded (Plan 00271 item 8): documented (fires after /add-dir or an
+# SDK register_repo_root) and catalogued with wired=False; wiring it end-to-end
+# (forwarder + settings + dispatch) is a follow-up. Remove from BOTH places in
+# the same change when wired.
+EXPECTED_UNWIRED: frozenset[str] = frozenset({"DirectoryAdded"})
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOKS_DIR = _REPO_ROOT / ".claude" / "hooks"
