@@ -93,30 +93,38 @@ paths; possibly a PostToolUse output backstop). Complements
 
 ### Phase 1: Read-route research (deliverable: RESEARCH-read-routes.md complete)
 
-- [ ] 🔄 **Task 1.1**: Output-side capability — vendored contracts FIRST
+- [x] ✅ **Task 1.1** (desk-check done 2026-08-26; behaviour deferred-live):
+  Output-side capability — vendored contracts FIRST
   (`contracts/claude-code-hooks/PostToolUse.json` lists `updatedToolOutput`,
-  answering shape for free), then verify BEHAVIOUR live: does Claude Code
-  honour `updatedToolOutput` for Bash, and does `tool_response` carry full
-  stdout/stderr? If honoured, the backstop is REDACTION, not a late failure
-  report — re-derive the class-(d) list on that basis (see
-  RESEARCH-read-routes.md, output-side section)
-- [ ] ⬜ **Task 1.2**: Verify subagent hook coverage live (spawned agent's
-  Read/Bash hit the same PreToolUse chain) — confirm, do not assume; AND
-  separately verify the `TaskOutput` relay surface, which the subagent
-  probe does not cover
-- [ ] 🔄 **Task 1.3**: Record payload shapes (contract files first, live
-  capture only where contracts are silent) for Grep (output
-  mode/path/root fields), Edit on a protected file (old_string echo-back /
-  error leakage), NotebookEdit, WebFetch `file://`, MCP tool wiring, LSP
-  (hover/documentSymbol return file text), Skill bodies that read files,
-  Artifact `upload_asset`; plus the no-tool-call auto-inlining routes
-  (`@`-imports, `.claude/rules/` `paths:` globs) as a session-start-checkable
-  configuration condition
-- [ ] 🔄 **Task 1.4**: Live aliasing probes against a dummy protected
-  fixture: symlink, hardlink, `cp` to an unprotected path then read,
-  variable-expanded path (`P=x; cat $P` same- and cross-invocation),
-  `$(<file)` / `$(cat file)`, interpreter one-liners — record per probe
-  whether the proposed matcher would catch it or provably cannot
+  answering shape for free — CONFIRMED, plus `updatedMCPToolOutput`). The
+  BEHAVIOUR half (does Claude Code honour `updatedToolOutput` for Bash, does
+  `tool_response` carry full stdout/stderr) is NOT answerable from a subagent
+  or the contract — the `input_example` `tool_response` is a Write case only.
+  Remains [DEFERRED-LIVE]; shipped v1 correctly ships no output-side backstop.
+  See RESEARCH-read-routes.md "Task 1.1 desk-check".
+- [x] ✅ **Task 1.2** (proven live 2026-08-26): Subagent PreToolUse coverage
+  CONFIRMED — this spawned subagent's own first Bash call (creating the
+  fixture at its literal protected path) was DENIED by `secret_file_guard`,
+  reinforced by ~10 further denied Bash/Read/Edit probes. The `TaskOutput`
+  relay surface is UNVERIFIABLE FROM WITHIN A SUBAGENT and is recorded as a
+  main-thread-only check (likely class-(d), not a PreToolUse tool call). See
+  RESEARCH-read-routes.md "Task 1.2 result".
+- [ ] 🔄 **Task 1.3** (Grep-tool/Edit desk-answered; LSP/Skill/MCP/WebFetch/
+  NotebookEdit/upload_asset + auto-inlining remain live-deferred): Edit on a
+  protected file DENIED at PreToolUse (old_string never echoes back — probe
+  #11). `Grep` tool could not be driven from this subagent (not in its
+  toolset) — direct-path Grep is desk-covered by the guard's `path` field.
+  The remaining surfaces (NotebookEdit, WebFetch `file://`, MCP wiring, LSP
+  hover/documentSymbol, Skill bodies, Artifact `upload_asset`) and the
+  no-tool-call auto-inlining routes (`@`-imports, `.claude/rules/` `paths:`
+  globs) need a live main-session capture and stay open.
+- [x] ✅ **Task 1.4** (live probes done 2026-08-26): Aliasing probes against
+  the dummy fixture recorded per-route in RESEARCH-read-routes.md "Live probe
+  results". Key outcomes: symlink read DENIED (realpath-resolved — better than
+  predicted); hardlink read and pre-existing copy read ALLOWED and leaked the
+  marker (class-(d) confirmed); same-invocation var, command substitution, and
+  interpreter one-liners all DENIED; and a NEW class-(c) gap found —
+  `dummy.vault-p*` trailing-wildcard glob token is allowed and leaks.
 - [x] ✅ **Task 1.5**: Classify every route in the inventory as
   (b)/(c)/(d) with visibility column filled; resolve the marked DECIDE
   items: later-turn variable indirection heuristic, bidirectional glob
