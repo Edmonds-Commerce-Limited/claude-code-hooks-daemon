@@ -178,6 +178,40 @@ config_changes:
         `options.mode: block` to deny commits carrying syntax-broken staged
         files. A missing lint tool never blocks — the check is skipped for
         that language, as for lint_on_edit.
+    - key: handlers.post_tool_use.goal_injection
+      recommended: true
+      # dormant: ships enabled: false (opt-in) -- only useful when the ccy PTY
+      # supervisor is watching the session, and nothing is typed unless that
+      # supervisor is separately armed.
+      dormant: true
+      description: >-
+        NEW PostToolUse advisory handler (Plan 00269), ships DISABLED. The
+        sensor half of supervisor /goal injection: when a PLAN.md Write/Edit
+        under the active plan directory (never Completed/) results in
+        "**Status**: In Progress", the daemon renders the configured goal
+        lines (command_hints-style options.mode additive|replace, entries
+        keyed by id, per-line enabled flags), joins them into ONE physical
+        line, and atomically writes a <session>.goal-intent signal into the
+        context-sidecar directory. The ccy PTY supervisor consumes the signal
+        at its existing injection choke point and types a single-line
+        "/goal 🤖 [ccy-supervisor] ..." message into the foreground chat,
+        subject to every existing rail (idle gate, empty-input-box gate,
+        own-session/foreground scoping, a fail-closed structural validation
+        gate, dry-run default). The fixed machine-origin header line -- which
+        includes a "NOT human authorisation" clause -- is never overridable
+        or removable, even in replace mode. Optional authorisation-flavoured
+        built-in lines ship disabled and point at standing_authorisations
+        rather than asserting fresh consent. Manual fallback / debug tool:
+        bin/hooks-daemon inject-goal NNNNN.
+      migration_note: >-
+        Opt-in twice by design: enable the handler AND run the session under
+        an armed ccy supervisor before anything reaches the chat. Enabling
+        only the handler is harmless (a small JSON signal file is written and
+        eventually reaped). Recommended rollout mirrors Plan 00135: enable
+        with the supervisor in dry-run first, observe the visible marker,
+        then arm. Enabling an authorisation line (subagents-encouraged,
+        qa-review-subagents) is a deliberate repository-owner act, the same
+        as enabling a standing_authorisations entry.
     - key: handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes
       recommended: false
       # dormant for the same reason as lint_bash_writes: validate_eslint_on_write

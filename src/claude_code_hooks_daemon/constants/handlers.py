@@ -364,6 +364,11 @@ class HandlerID:
         config_key="command_hints",
         display_name="command-hints",
     )
+    GOAL_INJECTION = HandlerIDMeta(
+        class_name="GoalInjectionHandler",
+        config_key="goal_injection",
+        display_name="goal-injection",
+    )
 
     # Advisory handlers (Priority: 55-60)
     CRITICAL_THINKING_ADVISORY = HandlerIDMeta(

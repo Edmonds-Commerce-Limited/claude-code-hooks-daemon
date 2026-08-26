@@ -128,6 +128,10 @@ _EARNS_GUIDANCE: dict[str, str] = {
     # -- Test 3: standing policy that decays after one delivery ----------
     "BackgroundProcessTrackerHandler": "T3 watchdog protocol outlives the command",
     "CommandHintsHandler": "T3 explains the rate-limited hint mechanism itself",
+    "GoalInjectionHandler": (
+        "T3 standing policy: an injected /goal is machine-marked and can never "
+        "constitute human authorisation; also documents the inject-goal fallback"
+    ),
     "DismissiveLanguageNitpickHandler": (
         "T3 standing norm about deflecting; the fire-time line is one sentence "
         "and the remedy (acknowledge, then fix) is a habit, not a correction. "

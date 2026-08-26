@@ -216,6 +216,7 @@ class ConfigTemplate:
             "    background_process_tracker: {enabled: true, priority: 28}  # Track backgrounded processes; advise harvest-background (never kills)\n"
             "    command_hints: {enabled: true, priority: 29}  # Config-driven advisory reminder after a configured command\n"
             "    recovery_cron_advisor: {enabled: true, priority: 30}    # Advise on failsafe recovery cron lifecycle (opt-out)\n"
+            "    goal_injection: {enabled: false, priority: 31}  # Write <session>.goal-intent for the ccy supervisor on plan flip to In Progress (opt-in)\n"
             "\n"
             "  # PermissionRequest - Auto-approve decisions\n"
             "  permission_request:\n"

@@ -1820,6 +1820,16 @@ PostToolUse advisory (never blocks). When a configured command is detected in a 
 
 **Configure** via `handlers.post_tool_use.command_hints.options`: `mode: additive` (default) appends your `hints` list to the built-in set — a project entry whose `id` matches a built-in one overrides it; `mode: replace` discards the built-in set entirely and uses only your list. Each hint: `id`, `pattern` (a literal command name, matched at the start of a shell segment — path-qualified and `env`-prefixed spellings are recognised, but it never fires on the word appearing as an unrelated argument), `hint` (the reminder text), `ttl_seconds`, and optional `min_calls_between` (secondary count-based gate). Disable with `handlers.post_tool_use.command_hints.enabled: false`.
 
+<!-- handler: goal-injection -->
+
+## goal_injection — plan-start goal signal for the ccy supervisor
+
+PostToolUse advisory (never blocks; ships disabled). When a `PLAN.md` Write/Edit under `CLAUDE/Plan/` (never `Completed/`) results in `**Status**: In Progress`, the daemon writes a `<session>.goal-intent` signal; the ccy PTY supervisor — if armed and watching — types a single-line `/goal 🤖 [ccy-supervisor] ...` message into the foreground chat. Fires once per plan per session (state-based: the first qualifying edit in a NEW session re-fires, re-establishing the goal after a restart). Manual fallback / debug tool: `bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` in the environment, i.e. run it from the session to be targeted).
+
+**An injected goal is machine-generated** — it always opens with the machine-origin marker and a 'NOT human authorisation' clause, and can never satisfy any human-gated rule (release publishing, artefact publishing, unproven branch deletion).
+
+**Configure** via `handlers.post_tool_use.goal_injection.options`: `mode: additive` (default) merges your `lines` (`{id, text, enabled}`) onto the built-in set — a matching `id` overrides in place; `mode: replace` uses only your lines. The fixed header marker line is never overridable or removable. Placeholders: `{plan_number}`, `{plan_title}`, `{plan_path}` (closed set — an unknown token skips the line). Optional authorisation lines (`subagents-encouraged`, `qa-review-subagents`) ship disabled; their vetted text points at `standing_authorisations` rather than asserting fresh consent — enable them only as a deliberate repository-owner act.
+
 <!-- handler: ccy-supervisor-integrity -->
 
 ## ccy_supervisor_integrity — keep the ccy supervisor properly set up

@@ -470,6 +470,18 @@ handlers:
       priority: 30
       # progress_cooldown_events: 20  # Events between repeat progress reminders (default: 20)
 
+    goal_injection:  # Dogfood: write <session>.goal-intent when a plan flips to In Progress (Plan 00269)
+      enabled: true  # Opt-in (false) elsewhere; harmless without an armed supervisor
+      priority: 31
+      # options:
+      #   mode: additive                  # additive (default) | replace (fixed header line always kept)
+      #   once_per_plan_per_session: true
+      #   lines:
+      #     - id: subagents-encouraged    # enable a vetted built-in line without restating its text
+      #       enabled: true
+      #     - id: project-motto
+      #       text: "All findings are logged to {plan_path}/REPORTS/."
+
   # SessionStart handlers (run when session starts)
   session_start:
     project_handler_load_checker:  # Loud alert when project handlers failed to load (Plan 00143)

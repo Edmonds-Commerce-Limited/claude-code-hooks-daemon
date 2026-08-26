@@ -1989,6 +1989,51 @@ handlers:
 
 ---
 
+#### goal_injection
+
+| Property       | Value            |
+| -------------- | ---------------- |
+| **Config key** | `goal_injection` |
+| **Priority**   | 31               |
+| **Type**       | Advisory         |
+| **Event**      | PostToolUse      |
+
+**Description:** Plan-execution-start sensor for the ccy PTY supervisor's `/goal` injection (Plan 00269). When a `PLAN.md` Write/Edit under the active plan directory (never `Completed/`) results in `**Status**: In Progress`, the handler renders the configured goal lines, joins them into ONE physical line, and atomically writes a `<session>.goal-intent` signal into the context-sidecar directory. The supervisor (actuator) consumes the signal and types `/goal 🤖 [ccy-supervisor] ...` into the foreground chat, subject to every existing injection rail (idle gate, empty-input-box gate, own-session/foreground scoping, structural validation gate). Ships disabled (opt-in); never blocks.
+
+The trigger is STATE-based (first qualifying write per plan per session), not transition-based: the first edit to an already-In-Progress plan in a NEW session re-fires deliberately, re-establishing the goal after a session restart. Manual fallback / debugging tool: `bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` in the environment).
+
+**Config paradigm** (mirrors `command_hints`): `options.mode` is `additive` (default) — project `lines` merge onto the built-in set, an entry whose `id` matches a built-in overrides it in place — or `replace`, which uses only the project's lines. The fixed `header` line (machine-origin marker + "NOT human authorisation" clause) is never overridable or removable, even in `replace` mode. Per-line `enabled` flags let a project turn a vetted built-in line on without restating its text.
+
+**Built-in lines:** `header` (always), `work-until-complete` (enabled), `subagents-encouraged` (disabled), `qa-review-subagents` (disabled). The authorisation-flavoured lines ship disabled and their text points at the project's `standing_authorisations` config rather than asserting fresh consent — enabling one is the same deliberate repository-owner act as enabling a standing authorisation entry.
+
+**Placeholders** (closed set; an unknown `{token}` skips the line): `{plan_number}` (5 digits, validated), `{plan_title}` (first PLAN.md heading, sanitised, capped), `{plan_path}` (project-root-relative plan folder).
+
+| Option                      | Values                 | Default    | Effect                                                          |
+| --------------------------- | ---------------------- | ---------- | --------------------------------------------------------------- |
+| `mode`                      | `additive` / `replace` | `additive` | Merge project lines onto built-ins, or use only project lines   |
+| `lines`                     | list                   | `[]`       | `{id, text, enabled}` entries; matching `id` overrides built-in |
+| `once_per_plan_per_session` | `true`/`false`         | `true`     | Latch: fire at most once per `(plan, session)` per daemon run   |
+
+**Config example:**
+
+```yaml
+handlers:
+  post_tool_use:
+    goal_injection:
+      enabled: true
+      priority: 31
+      options:
+        mode: additive
+        once_per_plan_per_session: true
+        lines:
+          - id: subagents-encouraged   # enable a vetted built-in line
+            enabled: true
+          - id: project-motto
+            text: "All findings are logged to {plan_path}/REPORTS/."
+```
+
+---
+
 #### validate_eslint_on_write
 
 | Property       | Value                      |
@@ -2524,24 +2569,25 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 
 ### All Advisory Handlers
 
-| Config Key                 | Event            | Priority | What It Does                                |
-| -------------------------- | ---------------- | -------- | ------------------------------------------- |
-| `daemon_restart_verifier`  | PreToolUse       | 10       | Suggests daemon restart before commits      |
-| `verification_result_gate` | PreToolUse       | 34       | Verifier result unconsumed before a mutator |
-| `staged_lint_gate`         | PreToolUse       | 43       | Cheap syntax check over staged files        |
-| `global_npm_advisor`       | PreToolUse       | 40       | Suggests npx over global installs           |
-| `plan_workflow`            | PreToolUse       | 45       | Guidance for plan creation                  |
-| `web_search_year`          | PreToolUse       | 55       | Warns about outdated search years           |
-| `british_english`          | PreToolUse       | 60       | Warns about American spellings              |
-| `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes           |
-| `command_hints`            | PostToolUse      | 29       | Config-driven reminder after a command      |
-| `optimal_config_checker`   | SessionStart     | 52       | Audits Claude Code settings                 |
-| `git_filemode_checker`     | SessionStart     | 53       | Warns when core.fileMode=false              |
-| `suggest_status_line`      | SessionStart     | 55       | Suggests status line setup                  |
-| `version_check`            | SessionStart     | 55       | Checks for daemon updates                   |
-| `plan_qa_sweep`            | SessionStart     | 57       | Reports plan-tree drift once a session      |
-| `git_context_injector`     | UserPromptSubmit | 20       | Injects git status context                  |
-| `nitpick.hedging_language` | Nitpick          | 20       | Detects guessing language per turn          |
+| Config Key                 | Event            | Priority | What It Does                                   |
+| -------------------------- | ---------------- | -------- | ---------------------------------------------- |
+| `daemon_restart_verifier`  | PreToolUse       | 10       | Suggests daemon restart before commits         |
+| `verification_result_gate` | PreToolUse       | 34       | Verifier result unconsumed before a mutator    |
+| `staged_lint_gate`         | PreToolUse       | 43       | Cheap syntax check over staged files           |
+| `global_npm_advisor`       | PreToolUse       | 40       | Suggests npx over global installs              |
+| `plan_workflow`            | PreToolUse       | 45       | Guidance for plan creation                     |
+| `web_search_year`          | PreToolUse       | 55       | Warns about outdated search years              |
+| `british_english`          | PreToolUse       | 60       | Warns about American spellings                 |
+| `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes              |
+| `command_hints`            | PostToolUse      | 29       | Config-driven reminder after a command         |
+| `goal_injection`           | PostToolUse      | 31       | Goal-intent signal on plan flip to In Progress |
+| `optimal_config_checker`   | SessionStart     | 52       | Audits Claude Code settings                    |
+| `git_filemode_checker`     | SessionStart     | 53       | Warns when core.fileMode=false                 |
+| `suggest_status_line`      | SessionStart     | 55       | Suggests status line setup                     |
+| `version_check`            | SessionStart     | 55       | Checks for daemon updates                      |
+| `plan_qa_sweep`            | SessionStart     | 57       | Reports plan-tree drift once a session         |
+| `git_context_injector`     | UserPromptSubmit | 20       | Injects git status context                     |
+| `nitpick.hedging_language` | Nitpick          | 20       | Detects guessing language per turn             |
 
 ---
 
