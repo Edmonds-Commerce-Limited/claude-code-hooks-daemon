@@ -124,19 +124,23 @@ drift as an advisory rather than a block (inputs must stay fail-open).
 
 Requires the dogfood daemon on main — a worktree agent cannot run this.
 
-- [ ] ⬜ **Task 3.1**: Sentinel experiment: in a real dogfood session, emit a
-  DISTINCT sentinel string on each channel of the two dual emissions —
-  SessionStart advisory context on both `systemMessage` and
-  `hookSpecificOutput.additionalContext`, and a PermissionRequest deny
-  explanation on both `decision.message` and
-  `hookSpecificOutput.additionalContext` — then check which sentinel appears
-  in the session transcript jsonl and which on the user-visible surface.
-  (`scripts/debug_hooks.sh` captures INBOUND events only and cannot answer
-  this outbound rendering question.)
-- [ ] ⬜ **Task 3.2**: Retirement rule, stated in advance: retire a channel
-  ONLY on positive evidence that the surviving channel delivers — never on
-  the other channel's failure to appear (absence has innocent explanations).
-- [ ] ⬜ **Task 3.3**: On positive evidence, drop the redundant emission and
+- [x] ✅ **Task 3.1**: Answered WITHOUT sentinels, from transcript attachment
+  typing: Claude Code's session jsonl records the raw hook stdout (`type: hook_success`, both channels present) AND separately types each rendered
+  channel — `hook_system_message` for `systemMessage`, `hook_additional_context`
+  for `additionalContext`. A fresh session under current code shows the
+  SessionStart advisory rendered by BOTH attachment types with identical
+  content: positive evidence both channels deliver, and the content is
+  DUPLICATED into context. PermissionRequest half: zero `hookEvent: "PermissionRequest"` records exist in any transcript on this machine
+  (every session runs bypassPermissions), so that half is unobservable here
+  and stays open for a human-attended default-mode session.
+- [x] ✅ **Task 3.2**: Rule applied: SessionStart qualifies for retirement
+  (positive evidence both channels deliver); PermissionRequest does NOT
+  (no evidence either way) — its dual emission and allowlist entry stay.
+- [ ] ⬜ **Task 3.3**: SEQUENCED AFTER the v3.55.0 publish (a src change now
+  would invalidate the passed release gates): drop SessionStart's redundant
+  `additionalContext` emission, keeping the documented `systemMessage`
+  (rendered user-visibly AND into context per the evidence). Do NOT touch
+  the PermissionRequest emission or
   update the ONE allowlist entry involved:
   `undocumented-schema-field:PermissionRequest:hookSpecificOutput.additionalContext`
   (`contracts/claude-code-hooks/ALLOWLIST.yaml:25-27`). SessionStart's dual
