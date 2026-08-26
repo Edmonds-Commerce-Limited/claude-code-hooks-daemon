@@ -80,6 +80,16 @@ immediately after the release ships.
   plain-quoted-string comparison (`[[ "python -m pytest tests/ | tail -5" == 0 ]]`), yielding a non-runnable remediation; `$( )` shapes name pytest
   correctly. Plan 00222's runnable-remediation intent is unmet for this
   shape — fix attribution or record the boundary.
+- [ ] ⬜ **Task 3.6**: `/goal` Stop evaluation has no blocked-on-human
+  escape (live dogfood finding, v3.55.0 release session): a goal whose
+  remaining work is human-gated (a publish decision, a fresh-session
+  observation) blocks EVERY stop indefinitely, even when the evaluator's
+  own verdict text agrees the work is blocked on human input. The failsafe
+  recovery cron prompt has exactly such a clause; the goal evaluator (and
+  the goal-ledger Stop challenge from Plan 00276) should honour a stated
+  blocked-only-on-human-input condition, or the displacement/ledger
+  machinery should let the daemon mark a goal "waiting on human" instead
+  of re-blocking. Relates to Plan 00269/00276.
 
 ## Success Criteria
 
