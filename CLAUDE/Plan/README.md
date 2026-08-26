@@ -30,7 +30,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00268: verification-result enforcement and the Ansible/YAML lint gap](00268-verification-result-enforcement-and-ansible-lint-gap/PLAN.md) - In Progress (field report: a lint failed, printed its own diagnosis, and was ignored by a `git commit` on the next LINE of the same Bash invocation; the report rejects blanket `;` → `&&` enforcement as both leaky and noisy, and recommends a YAML/Ansible strategy for `lint_on_edit` plus a narrow verifier→mutator handler)
 
-- [00269: supervisor goal message injection](00269-supervisor-goal-message-injection/PLAN.md) - Not Started (inject a machine-marked `/goal` message via the ccy PTY supervisor when plan execution starts, with a config-driven additive/replace line template; brainstorm ready for human review)
+- [00269: supervisor goal message injection](00269-supervisor-goal-message-injection/PLAN.md) - In Progress (goal_injection handler + inject-goal CLI + supervisor goal branch implemented, code-reviewed and merged at `78665b51`; only the live armed-supervisor `/goal` probes remain, which need a human-attended session)
 
 - [00272: secret file read blocker](00272-secret-file-read-blocker/PLAN.md) - Not Started (deny-by-default PreToolUse guard so a protected secret file's CONTENT can never enter context by any wired route; `secret-meta` helper returns keyed-hash metadata instead; no agent escape hatch; Phase 1 research classifies every read route by blockability; brainstorm + research scaffold ready for human review)
 
