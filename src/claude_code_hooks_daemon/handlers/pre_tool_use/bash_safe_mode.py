@@ -108,7 +108,39 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         self._require: Any = list(_DEFAULT_REQUIRE)
         self._min_statements: Any = _DEFAULT_MIN_STATEMENTS
         self._only_with_mutator: Any = False
-        self._exempt_patterns: Any = []
+        self._exempt_patterns = []
+
+    @property
+    def _exempt_patterns(self) -> list[re.Pattern[str]]:
+        return self.__exempt_patterns
+
+    @_exempt_patterns.setter
+    def _exempt_patterns(self, value: object) -> None:
+        """Compile the configured regexes, rejecting bad config AT LOAD.
+
+        A pattern that cannot compile is a config typo the author wrote
+        expecting an exemption; silently ignoring it would leave the
+        exemption inert with no signal. Raising here surfaces the message in
+        the registry's instantiation guard, exactly like ``mode: inject``.
+        """
+        if not isinstance(value, list):
+            raise ValueError(
+                f"bash_safe_mode exempt_patterns must be a list of regex strings, got {value!r}."
+            )
+        compiled: list[re.Pattern[str]] = []
+        for entry in value:
+            if not isinstance(entry, str):
+                raise ValueError(
+                    f"bash_safe_mode exempt_patterns entries must be strings, got {entry!r}."
+                )
+            try:
+                compiled.append(re.compile(entry))
+            except re.error as exc:
+                raise ValueError(
+                    f"bash_safe_mode exempt_patterns entry {entry!r} is not a "
+                    f"valid regex: {exc}."
+                ) from exc
+        self.__exempt_patterns = compiled
 
     @property
     def _mode(self) -> str:
@@ -127,6 +159,17 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         if value not in (_MODE_WARN, _MODE_BLOCK):
             raise ValueError(f"bash_safe_mode mode must be 'warn' or 'block', got {value!r}.")
         self.__mode = str(value)
+
+    def get_default_enabled(self) -> bool:
+        """Opt-in handler — off by default, per the feature's own framing.
+
+        Plan 00268's cry-wolf analysis stands: forced errexit changes the
+        semantics of every command, so enabling this is a per-project policy
+        act, never a default. Must stay consistent with the
+        ``enabled: false`` flag in the config template (enforced by
+        ``test_default_enabled_template_consistency``).
+        """
+        return False
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True only when the command is missing a required prelude flag."""
@@ -193,18 +236,7 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         return _DEFAULT_MIN_STATEMENTS
 
     def _matches_exempt_pattern(self, command: str) -> bool:
-        value = self._exempt_patterns
-        if not isinstance(value, list):
-            return False
-        for entry in value:
-            if not isinstance(entry, str):
-                continue
-            try:
-                if re.search(entry, command):
-                    return True
-            except re.error:
-                continue
-        return False
+        return any(pattern.search(command) for pattern in self._exempt_patterns)
 
     def _message(self, missing: tuple[str, ...]) -> str:
         remedy = "; ".join(_FLAG_SPELLING[flag] for flag in missing)

@@ -99,8 +99,17 @@ class TestConfigurableOptions:
     def test_malformed_options_fall_back_to_defaults(self, handler: BashSafeModeHandler) -> None:
         handler._require = "not-a-list"
         handler._min_statements = "soon"
-        handler._exempt_patterns = {"nope": 1}
         assert handler.matches(_bash("pytest tests/\ngit commit -m x")) is True
+
+    def test_invalid_exempt_patterns_are_rejected_at_load(
+        self, handler: BashSafeModeHandler
+    ) -> None:
+        with pytest.raises(ValueError, match="exempt_patterns"):
+            handler._exempt_patterns = {"nope": 1}
+        with pytest.raises(ValueError, match="valid regex"):
+            handler._exempt_patterns = ["(unclosed"]
+        with pytest.raises(ValueError, match="strings"):
+            handler._exempt_patterns = [42]
 
 
 class TestModeProperty:
