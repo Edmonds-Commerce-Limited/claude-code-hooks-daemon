@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00276: goal stack concurrent tracking](00276-goal-stack-concurrent-tracking/PLAN.md) - Not Started (daemon-side goal ledger so Stop-time defence covers every In Progress plan's goal, not just the last `/goal` writer)
 
-- [00275: github auto-close keyword blocker](00275-github-auto-close-keyword-blocker/PLAN.md) - In Progress (PreToolUse guard denying git commits whose message — inline `-m` or `-F` scratch file — carries a GitHub auto-closing keyword)
-
 - [00274: skill opportunity detector](00274-skill-opportunity-detector/PLAN.md) - In Progress (mine session transcripts for repeated workloads and recurring explanations via a redacted digest judged by Haiku; TTL-gated SessionStart advisory delegating to a `skill-scan` CLI, report-only per Plan 00161 conventions)
 
 - [00264: cap the size of a GitHub issue/PR comment](00264-github-comment-size-cap/PLAN.md) - Not Started (field report: agent sessions flooded two issues with 44,467- and 22,398-character comments until neither ticket's state was findable by the humans reading it; a PreToolUse cap on `gh` comment bodies steering the content into `JOURNAL/`, plus seven open questions the report's proposed design asserts rather than settles)
@@ -177,6 +175,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00275: github auto-close keyword blocker](Completed/00275-github-auto-close-keyword-blocker/PLAN.md) - Complete at merge `2bdafe05` (PreToolUse guard denying GitHub auto-closing keyword references in git commit/merge/tag and `gh pr` messages, inline or via `-F`/`--body-file`; enabled by default, `MUST_AUTO_CLOSE_BECAUSE` hatch)
 
 - [00268: verification-result enforcement and the Ansible/YAML lint gap](Completed/00268-verification-result-enforcement-and-ansible-lint-gap/PLAN.md) - Complete at `24b4fb47` + `d3ebf1ba` (Ansible YAML strategy for `lint_on_edit`, the `verification_result_gate` verifier→mutator handler, and the `staged_lint_gate` commit-time backstop; blanket `;` → `&&` enforcement deliberately rejected)
 
@@ -1257,15 +1257,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 276 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 222 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 223 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 41 + 222 + 6 = **269 folders**, spanning
+- **Folder-to-number reconciliation**: 40 + 223 + 6 = **269 folders**, spanning
   **266 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1280,7 +1280,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00276 filing (41 root, 222 `Completed/`,
+- **Last reconciled at**: the Plan 00275 archival (40 root, 223 `Completed/`,
   6 `Cancelled/`, 266 distinct numbers against a counter of 276). The index
   carries NO reconciliation history — it states current truth only; every
   earlier recount is in git, and per-plan narrative belongs in that plan's

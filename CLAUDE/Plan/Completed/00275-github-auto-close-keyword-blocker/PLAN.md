@@ -1,6 +1,6 @@
 # Plan 00275: github auto close keyword blocker
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: Medium
@@ -70,9 +70,10 @@ followed by `#N`, `owner/repo#N`, `GH-N`, or a full issue URL.
 
 ### Phase 4: Landing (main session)
 
-- [ ] ⬜ **Task 4.1**: Merge the worktree branch to main, restart the dogfood
-  daemon, verify RUNNING, then flip this plan to Complete with the archive
-  move and README update in one commit
+- [x] ✅ **Task 4.1**: Merged `--no-ff` at `2bdafe05`, dogfood daemon
+  restarted RUNNING, QA 24/24 on main, live socket probe confirmed the deny
+  (the handler blocked the probe command itself); archive move + README
+  update in this commit
 
 ## Technical Decisions
 
