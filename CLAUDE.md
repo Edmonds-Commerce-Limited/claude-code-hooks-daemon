@@ -1021,7 +1021,7 @@ pytest tests/ 2>&1 | /…/scripts/echd-capture 20
 - Regular files: `chmod 644` (owner rw, group/other r)
 - Private files: `chmod 600` (owner rw only)
 
-<!-- handler: block-github-auto-close-keywords -->
+<!-- handler: github_auto_close_keywords -->
 
 ## github_auto_close_keywords — closing keywords in git messages are blocked
 
