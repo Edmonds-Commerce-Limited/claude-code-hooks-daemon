@@ -157,13 +157,20 @@ disabled and are enabled only by the repository owner.
 
 ### Phase 4: Verification
 
-- [ ] ⬜ **Task 4.1**: Full QA `./scripts/qa/llm_qa.py all`; daemon restart →
-  RUNNING; supervisor smoke under system python3.
+- [x] ✅ **Task 4.1**: Full QA `./scripts/qa/llm_qa.py all` → 22/23 PASSED in
+  the execution worktree; the single failure is `smoke_test`, which requires
+  a RUNNING daemon and is inseparable from the daemon-restart check.
+  Supervisor smoke under system python3 passed (imports clean, `--help`
+  usage renders, goal constants present). **Daemon restart → RUNNING is
+  DEFERRED to the merge reviewer on main** — the worktree must not touch the
+  dogfood daemon serving the main checkout.
 - [ ] ⬜ **Task 4.2**: Live dogfood — flip a scratch plan to In Progress and
   observe the injected `/goal` (dry-run first, then armed), including the
   deferral path with a non-empty input box (decision.log names the gate).
-- [ ] ⬜ **Task 4.3**: Update docs (HANDLER_REFERENCE options,
-  regenerate `.claude/HOOKS-DAEMON.md`); record milestones.
+  DEFERRED to main: needs the live supervisor + an interactive session; also
+  carries the Task 1.1 live `/goal` semantics probe.
+- [x] ✅ **Task 4.3**: Update docs (HANDLER_REFERENCE section + summary row,
+  regenerated `.claude/HOOKS-DAEMON.md`); milestones recorded below.
 
 ## Dependencies
 
@@ -234,11 +241,11 @@ marker and a "not human authorisation" clause. **Date**: 2026-08-26
   machine-marked.
 - [ ] `bin/hooks-daemon inject-goal NNNNN` produces the same injection on
   demand.
-- [ ] Project config can add lines, override a built-in line by id, or replace
+- [x] Project config can add lines, override a built-in line by id, or replace
   the whole set (`mode: additive|replace`), verified by tests.
-- [ ] The supervisor refuses malformed/oversized/foreign goal payloads and
+- [x] The supervisor refuses malformed/oversized/foreign goal payloads and
   logs the reason; compact/continue behaviour is regression-tested unchanged.
-- [ ] Feature is opt-in (`get_default_enabled()` → `False`); default config
+- [x] Feature is opt-in (`get_default_enabled()` → `False`); default config
   behaviour is unchanged.
 - [ ] QA fully green; daemon restart RUNNING; supervisor tests pass under
   system python3.
@@ -261,3 +268,12 @@ marker and a "not human authorisation" clause. **Date**: 2026-08-26
      JOURNAL/00269-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Plan + brainstorm authored, awaiting human review before any implementation.
+- Contract locked (SIGNAL-CONTRACT.md) at ca58823b.
+- Daemon sensor delivered (handler + registration + docs) at 679d150a; CLI
+  fallback at 0a5b3e8b.
+- Supervisor actuator delivered (validation gate, cap, reaper, worker
+  round-trip) at f53478c2.
+- QA fixes + classifications at 584ec909; QA 22/23 in the execution worktree
+  (smoke_test needs a running daemon — deferred with daemon-restart
+  verification to the merge review on main, alongside Task 4.2's live
+  dogfood).
