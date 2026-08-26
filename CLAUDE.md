@@ -626,7 +626,7 @@ refusal used to be writable, and was dropped on the wire at runtime.
 - **10-20**: Safety (destructive git, sed blocker, auto-approve)
 - **25-35**: Code quality (ESLint, TDD, QA suppression)
 - **36-55**: Workflow (planning, npm, config checker)
-- **56-60**: Advisory (British English)
+- **56-65**: Advisory (British English, skill-scan advisory)
 - **100+**: Logging/cleanup (range reserved; no built-in handlers ship here)
 
 ### Terminal vs Non-Terminal
