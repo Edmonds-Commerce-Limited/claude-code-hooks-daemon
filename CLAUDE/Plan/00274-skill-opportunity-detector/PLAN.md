@@ -1,6 +1,6 @@
 # Plan 00274: skill opportunity detector
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: Medium
