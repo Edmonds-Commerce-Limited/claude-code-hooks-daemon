@@ -222,6 +222,23 @@ def _pattern_literal_stems(patterns: tuple[str, ...]) -> list[tuple[str, str]]:
     return pairs
 
 
+_BRACKET_EXPRESSION_RE: Final[re.Pattern[str]] = re.compile(r"\[[^\]]*\]")
+
+
+def _token_literal_residue(token: str) -> str:
+    """The literal text left after removing glob syntax from ``token``.
+
+    Bracket expressions are removed WHOLE (``[A-Za-z]`` contributes nothing),
+    then ``*`` and ``?`` are stripped: ``.vault-p*`` -> ``.vault-p``;
+    ``[A-Za-z]*`` -> ``''``. The residue is what the token literally asserts
+    about a filename, so it is what must overlap a protected stem.
+    """
+    residue = _BRACKET_EXPRESSION_RE.sub("", token)
+    for char in _GLOB_CHARS:
+        residue = residue.replace(char, "")
+    return residue
+
+
 def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | None:
     """First protected glob a token of ``command`` mentions, else ``None``.
 
@@ -240,9 +257,18 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
                 if path_matches_globs(form, (pattern,), project_root=project_root):
                     return pattern
             if any(char in form for char in _GLOB_CHARS):
+                basename = form.rsplit("/", maxsplit=1)[-1]
+                residue = _token_literal_residue(basename)
                 for stem, pattern in stem_pairs:
-                    basename = form.rsplit("/", maxsplit=1)[-1]
                     stem_basename = stem.rsplit("/", maxsplit=1)[-1]
+                    # Literal-residue gate (v3.55.0 release code review): a
+                    # POSIX character class is a regex, not a path glob —
+                    # fnmatch('vault_pass', '[A-Za-z]*') is True, so without
+                    # this gate every stem matched any bracketed token. The
+                    # token must share literal text with the stem before its
+                    # fnmatch result counts.
+                    if not residue or residue not in stem_basename:
+                        continue
                     if fnmatch.fnmatch(stem_basename, basename):
                         return pattern
         real = _realpath_if_resolvable(token)

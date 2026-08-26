@@ -323,16 +323,17 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 requires_main_thread=True,
             ),
             AcceptanceTest(
-                title="secret_file_guard - allows an allowlisted consumer",
+                title="secret_file_guard - echo buys no exemption",
                 command=(
                     "echo would-run: ansible-playbook --vault-password-file "
                     "/tmp/fixture.vault-pass site.yml"
                 ),
                 description=(
-                    "A consumer command with the path in flag position is exempt. "
-                    "NOTE: the echo wrapper here is itself DENIED (no echo "
-                    "exemption) — run the bare consumer command form instead when "
-                    "executing this test."
+                    "Unlike sed_blocker, wrapping a protected-path mention in "
+                    "`echo` is NOT exempt — this command is DENIED. (The bare "
+                    "`ansible-playbook --vault-password-file <path> ...` form, "
+                    "path in flag position, is the consumer-allowlist ALLOW "
+                    "case; it needs ansible installed to run to completion.)"
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"SECRET FILE PROTECTED"],

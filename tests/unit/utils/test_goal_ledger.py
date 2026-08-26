@@ -7,6 +7,7 @@ writes are fail-open: a missing or corrupt ledger never raises.
 """
 
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -167,12 +168,19 @@ class TestFailOpen:
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
 
-        def _failing_write_text(self: Path, *args: object, **kwargs: object) -> int:
-            raise OSError("disk full")
+        real_os_open = os.open
 
-        # All setup writes are done; every subsequent write fails, so the
+        def _failing_tmp_open(path: str | Path, flags: int, mode: int = 0o777) -> int:
+            # Fail only the private tmp-file open in _save; the sibling lock
+            # file must keep working so the OSError branch (not the lock's
+            # fail-open) is what this test exercises.
+            if ".tmp" in str(path):
+                raise OSError("disk full")
+            return real_os_open(path, flags, mode)
+
+        # All setup writes are done; every subsequent tmp write fails, so the
         # OSError branch in _save must be exercised and swallowed (logged).
-        monkeypatch.setattr(Path, "write_text", _failing_write_text)
+        monkeypatch.setattr(os, "open", _failing_tmp_open)
         ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
         assert not (tmp_path / LEDGER_FILENAME).exists()
 

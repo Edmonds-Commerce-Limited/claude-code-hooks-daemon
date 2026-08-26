@@ -114,6 +114,23 @@ class TestBashMentionsProtectedPath:
         """A glob token that could expand to a protected name is matched."""
         assert self._match("cat .vault-p*") is not None
 
+    def test_regex_character_class_is_not_matched(self) -> None:
+        """Release v3.55.0 code-review blocker: a POSIX character class is a
+        regex, not a path glob — ``fnmatch('vault_pass', '[A-Za-z]*')`` is
+        True, so without a literal-residue gate every stem matched."""
+        assert self._match("grep -o 'class [A-Za-z]*(x)' file.py") is None
+
+    def test_regex_bracket_quantifier_is_not_matched(self) -> None:
+        assert self._match("grep -E '[a-z]+_[0-9]*' src/mod.py") is None
+
+    def test_numeric_class_glob_is_not_matched(self) -> None:
+        assert self._match("ls report-[0-9]*.txt") is None
+
+    def test_glob_with_protected_literal_residue_still_matched(self) -> None:
+        """The residue gate must not weaken the real case: ``.vault-p*`` has
+        literal residue ``.vault-p``, which is a prefix of the stem."""
+        assert self._match("cat .vault-p*") is not None
+
     def test_no_echo_exemption(self) -> None:
         """Decision 9(c): unlike sed_blocker, echo buys no exemption."""
         assert self._match('echo ".vault-pass"') is not None

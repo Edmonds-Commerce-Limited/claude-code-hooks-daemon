@@ -42,7 +42,8 @@ logger = logging.getLogger(__name__)
 LEDGER_FILENAME: Final[str] = "goal-ledger.json"
 _LOCK_SUFFIX: Final[str] = ".lock"
 # Owner read/write only — consistent with the daemon's private-state posture.
-_LOCK_FILE_MODE: Final[int] = 0o600
+_PRIVATE_FILE_MODE: Final[int] = 0o600
+_LOCK_FILE_MODE: Final[int] = _PRIVATE_FILE_MODE
 
 _ENTRIES_KEY: Final[str] = "entries"
 _MAX_ENTRIES: Final[int] = 100
@@ -227,7 +228,11 @@ class GoalLedger:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = self._path.parent / f".{self._path.name}.{uuid.uuid4().hex}.tmp"
-            tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+            # Owner-only, matching the 0600 lock file and the daemon's
+            # private-state posture (v3.55.0 release code review).
+            fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, _PRIVATE_FILE_MODE)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload))
             tmp_path.replace(self._path)
         except OSError as e:
             logger.warning("goal_ledger: failed to write %s: %s", self._path, e)
