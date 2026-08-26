@@ -95,16 +95,21 @@ dogfood-enabled in this repo. Full design exploration: `BRAINSTORM.md`.
 
 ### Phase 1: Research, verification and spikes
 
-- [ ] ⬜ **Task 1.1**: Transcript-format verification harness: script that
-  classifies every record in the real transcript files on this machine and
-  reports counts per exclusion rule; freeze the observed field/marker
-  contract into synthetic jsonl fixtures for unit tests (never commit real
-  transcript content).
-- [ ] ⬜ **Task 1.2**: Haiku-invocation spike, citing Plan 00266: run
+- [x] ✅ **Task 1.1**: Transcript-format verification harness: DELIVERED by
+  the `prototype/` (commit `4602b8fd`) — `ScanStats` counts every exclusion
+  rule over the real files (20,829 user records → 142 genuine prompts), and
+  `test_skill_scan.py` freezes the field/marker contract into synthetic
+  inline fixtures (25 tests, no real transcript content committed).
+- [ ] 🔄 **Task 1.2**: Haiku-invocation spike, citing Plan 00266: run
   `claude -p --model haiku --output-format json` headlessly with a
   digest-shaped prompt; MEASURE latency and cost per invocation (00266 rule:
   measured, never estimated); document auth prerequisites and every failure
   mode observed (no CLI, no auth, offline, timeout, malformed output).
+  PARTIAL: dogfood run observed the no-auth failure mode — headless
+  `claude -p` exits 1 "Not logged in" inside this container, so Decision 3's
+  reuse-user-auth premise fails in containerised sessions; latency/cost
+  measurement blocked until an authenticated environment or the Task 1.4
+  API-fallback decision.
 - [ ] ⬜ **Task 1.3**: Decide the clustering heuristic (token-set Jaccard vs
   trigram overlap) by running both over the real corpus via the Task 1.1
   harness; record the choice and threshold as a Technical Decision.
