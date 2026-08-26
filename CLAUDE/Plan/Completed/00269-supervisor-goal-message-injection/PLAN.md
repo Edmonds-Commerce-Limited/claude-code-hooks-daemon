@@ -1,6 +1,6 @@
 # Plan 00269: supervisor goal message injection
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: Medium
@@ -164,11 +164,15 @@ disabled and are enabled only by the repository owner.
   usage renders, goal constants present). **Daemon restart → RUNNING is
   DEFERRED to the merge reviewer on main** — the worktree must not touch the
   dogfood daemon serving the main checkout.
-- [ ] ⬜ **Task 4.2**: Live dogfood — flip a scratch plan to In Progress and
-  observe the injected `/goal` (dry-run first, then armed), including the
-  deferral path with a non-empty input box (decision.log names the gate).
-  DEFERRED to main: needs the live supervisor + an interactive session; also
-  carries the Task 1.1 live `/goal` semantics probe.
+- [x] ✅ **Task 4.2**: Live dogfood CLOSED on production evidence: the armed
+  supervisor injected six `/goal` messages into the live session across
+  status-flips (00272, 00273, 00277, scratch 00096/00097/00099) and the
+  `inject-goal` CLI produced the same signal on demand (`source: "cli"`,
+  observed in the goal-intent file). The Task 1.1 live `/goal` semantics
+  probe was answered by observation: the slot is last-writer-wins, and the
+  session-scoped Stop evaluator enforces the goal (livelock shape recorded
+  as Plan 00277 Task 3.6 ruling — clear a human-gated goal early with
+  `/goal clear`).
 - [x] ✅ **Task 4.3**: Update docs (HANDLER_REFERENCE section + summary row,
   regenerated `.claude/HOOKS-DAEMON.md`); milestones recorded below.
 
@@ -236,10 +240,10 @@ marker and a "not human authorisation" clause. **Date**: 2026-08-26
 
 ## Success Criteria
 
-- [ ] Flipping a plan to In Progress (with the feature enabled) results in
+- [x] Flipping a plan to In Progress (with the feature enabled) results in
   exactly one injected `/goal` message per plan per session, visibly
   machine-marked.
-- [ ] `bin/hooks-daemon inject-goal NNNNN` produces the same injection on
+- [x] `bin/hooks-daemon inject-goal NNNNN` produces the same injection on
   demand.
 - [x] Project config can add lines, override a built-in line by id, or replace
   the whole set (`mode: additive|replace`), verified by tests.
@@ -247,7 +251,7 @@ marker and a "not human authorisation" clause. **Date**: 2026-08-26
   logs the reason; compact/continue behaviour is regression-tested unchanged.
 - [x] Feature is opt-in (`get_default_enabled()` → `False`); default config
   behaviour is unchanged.
-- [ ] QA fully green; daemon restart RUNNING; supervisor tests pass under
+- [x] QA fully green; daemon restart RUNNING; supervisor tests pass under
   system python3.
 
 ## Risks & Mitigations
@@ -268,6 +272,7 @@ marker and a "not human authorisation" clause. **Date**: 2026-08-26
      JOURNAL/00269-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Plan + brainstorm authored, awaiting human review before any implementation.
+- Shipped in v3.55.0 (handler + supervisor typing path); live dogfood evidence closed the plan (see JOURNAL/ and the archiving commit).
 - Contract locked (SIGNAL-CONTRACT.md) at ca58823b.
 - Daemon sensor delivered (handler + registration + docs) at 679d150a; CLI
   fallback at 0a5b3e8b.

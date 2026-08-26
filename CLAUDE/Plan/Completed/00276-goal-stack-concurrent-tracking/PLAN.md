@@ -1,6 +1,6 @@
 # Plan 00276: goal stack concurrent tracking
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: Medium
@@ -83,11 +83,11 @@ just the last writer.
   supervisor's goal-signal consumption path; document the exact write points,
   the once-per-`(session, plan)` latch, and where a ledger write would slot in
   without changing trigger semantics (findings in JOURNAL/ 26-08-26 entry).
-- [ ] ⬜ **Task 1.2**: Reproduce the displacement shape from today's session
-  (two plans flipped to In Progress in one session) against the live daemon
-  and record the resulting signal-file history as the failing-behaviour
-  baseline. (Deferred to main checkout: implemented worktree-side; the unit
-  displacement tests encode the same two-plan shape.)
+- [x] ✅ **Task 1.2**: Reproduced live on main: the production
+  `goal-ledger.json` records six emissions in one session including a real
+  displacement pair (00097 `displaced_by` 00096 with `displaced_at`
+  timestamp) and `archived` retirements for every entry — the exact
+  two-plan shape, captured against the live daemon.
 - [x] ✅ **Task 1.3**: Survey existing daemon state-file conventions under
   `ProjectContext.daemon_untracked_dir()` (context-sidecar signals,
   `background-processes.jsonl`, verdict log) and pick the ledger's format,
@@ -124,8 +124,8 @@ just the last writer.
 - [x] ✅ **Task 3.2**: Ledger write/read module
   (`src/claude_code_hooks_daemon/utils/goal_ledger.py`) with tests (atomic
   writes, corrupt-file tolerance, bounded growth/pruning of retired entries).
-- [ ] 🔄 **Task 3.3**: QA passed in worktree; daemon restart verification and
-  two-concurrent-plan dogfood deferred to the main checkout.
+- [x] ✅ **Task 3.3**: QA 25/25 on main post-merge; daemon restart RUNNING;
+  the two-concurrent-plan dogfood is the Task 1.2 live ledger evidence.
 
 ### Phase 4: Increment 2 — Stop-time defence (option a)
 
@@ -134,9 +134,9 @@ just the last writer.
   plan (`tests/unit/handlers/stop/test_goal_ledger_stop_defence.py`).
 - [x] ✅ **Task 4.2**: Retirement on terminal-status flip and archive move,
   with tests (retirement persists; retired plans are no longer named).
-- [ ] 🔄 **Task 4.3**: QA passed in worktree; displacement acceptance test
-  added to `get_acceptance_tests()`; daemon restart verification and the
-  full two-plan live dogfood deferred to the main checkout.
+- [x] ✅ **Task 4.3**: QA 25/25 on main post-merge; displacement acceptance
+  test in `get_acceptance_tests()`; daemon restart RUNNING; two-plan live
+  dogfood evidenced by the production ledger (Task 1.2).
 
 ## Technical Decisions
 
@@ -237,7 +237,7 @@ archive moves are caught at the next Stop consult without new event plumbing.
 
 ## Success Criteria
 
-- [ ] A ledger file exists under the daemon untracked dir recording every
+- [x] A ledger file exists under the daemon untracked dir recording every
   goal emission with plan number, session id, and timestamps; verified by
   unit tests and a live two-plan dogfood run.
 - [x] Emitting a second goal while a prior ledgered plan is In Progress marks
@@ -249,7 +249,7 @@ archive moves are caught at the next Stop consult without new event plumbing.
   ledger entry; a subsequent Stop is not challenged on its behalf.
 - [x] A missing or corrupt ledger never breaks a Stop event or a PLAN.md
   write (fail-open tests).
-- [ ] `./scripts/qa/llm_qa.py all` passes; daemon restart verified RUNNING.
+- [x] `./scripts/qa/llm_qa.py all` passes; daemon restart verified RUNNING.
 
 ## Risks & Mitigations
 

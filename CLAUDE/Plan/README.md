@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00276: goal stack concurrent tracking](00276-goal-stack-concurrent-tracking/PLAN.md) - In Progress (daemon-side goal ledger so Stop-time defence covers every In Progress plan's goal, not just the last `/goal` writer; shipped and live — remaining: live two-concurrent-plan observation)
-
 - [00274: skill opportunity detector](00274-skill-opportunity-detector/PLAN.md) - In Progress (mine session transcripts for repeated workloads and recurring explanations via a redacted digest judged by Haiku; TTL-gated SessionStart advisory delegating to a `skill-scan` CLI, report-only per Plan 00161 conventions)
 
 - [00264: cap the size of a GitHub issue/PR comment](00264-github-comment-size-cap/PLAN.md) - Not Started (field report: agent sessions flooded two issues with 44,467- and 22,398-character comments until neither ticket's state was findable by the humans reading it; a PreToolUse cap on `gh` comment bodies steering the content into `JOURNAL/`, plus seven open questions the report's proposed design asserts rather than settles)
@@ -31,8 +29,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00204: security_antipattern — the three data-flow categories](00204-security-antipattern-dataflow-categories/PLAN.md) - Not Started (v3.52.0 corrected guidance that claimed SQL injection, weak cryptography and path traversal were blocked when no strategy implements any of them; this decides whether construct-level regexes can carry signal for them without the false-positive rate that gets a handler disabled.)
 
 - [00205: destructive git synonym respellings](00205-destructive-git-synonym-respellings/PLAN.md) - Not Started (tracked follow-up captured by the v3.52.0 release gate per RELEASING.md "never drop a finding": v3.52.0 closed ten *invocation* respellings but not *synonym* ones — `git update-ref -d refs/heads/X` is an unguarded `git branch -D`, and `git push origin +main:main` an unguarded `git push --force`.)
-
-- [00269: supervisor goal message injection](00269-supervisor-goal-message-injection/PLAN.md) - In Progress (goal_injection handler + inject-goal CLI + supervisor goal branch implemented, code-reviewed and merged at `78665b51`; only the live armed-supervisor `/goal` probes remain, which need a human-attended session)
 
 - [00272: secret file read blocker](00272-secret-file-read-blocker/PLAN.md) - Not Started (deny-by-default PreToolUse guard so a protected secret file's CONTENT can never enter context by any wired route; `secret-meta` helper returns keyed-hash metadata instead; no agent escape hatch; Phase 1 research classifies every read route by blockability; brainstorm + research scaffold ready for human review)
 
@@ -173,6 +169,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00276: goal stack concurrent tracking](Completed/00276-goal-stack-concurrent-tracking/PLAN.md) - Complete at merge `74fa6e50` + the archiving commit (daemon-side goal ledger: every emission recorded, displacement advisory, Stop-time defence naming all still-live ledgered plans; live-verified by the production ledger's six-emission displacement history)
+
+- [00269: supervisor goal message injection](Completed/00269-supervisor-goal-message-injection/PLAN.md) - Complete at merge `78665b51` + the archiving commit (goal_injection handler + inject-goal CLI + supervisor typing branch; live-verified by six armed-supervisor /goal injections and an on-demand CLI injection)
 
 - [00277: release acceptance findings v3 55 0](Completed/00277-release-acceptance-findings-v3-55-0/PLAN.md) - Complete at `ebf7016a` + the archiving commit (all v3.55.0 gate findings closed: per-session block_once with session-attributed HandlerDecisionRecord, isolation-advisor test precondition, lint-clean error-hiding samples, validate_eslint_on_write deny branch verified live in the client fixture)
 
@@ -1259,9 +1259,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 277 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 225 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 227 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
