@@ -1,6 +1,6 @@
 # Plan 00272: secret file read blocker
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: High
@@ -286,6 +286,41 @@ would be a byte-by-byte extraction oracle (BRAINSTORM.md finding-5 section).
 **Decision**: The backstop's internal matching state and the helper's public
 keyed digest are separate by design — no CLI, config or log route exposes
 the former.
+**Date**: 2026-08-26
+
+### Decision 7: Shipped default globs include `*.secret*` (user directive)
+
+**Context**: Mid-execution human directive: the initial default glob set must
+cover any filename containing `.secret`.
+**Decision**: Ship `*.secret*` as a default protected pattern alongside the
+vault-password shapes and SSH key names. Conservative list:
+`*.secret*`, `.vault-pass*`, `*.vault-password`, `*vault_pass*`,
+`id_rsa`, `id_ed25519`. `*.pem`/`*.key` deliberately NOT shipped (public
+certs share the extension — Task 2.1 open question stands for a human).
+**Date**: 2026-08-26
+
+### Decision 8: Pattern list uses the `mode: additive | replace` convention (user directive)
+
+**Context**: Second mid-execution human directive: project extension must use
+the established `command_hints`/`goal_injection` config style.
+**Decision**: `options.mode: additive` (default) merges `protected_paths`
+onto the built-in defaults; `replace` uses only the project list. An unknown
+mode behaves as `additive` (fail-closed toward MORE protection, matching the
+command_hints precedent).
+**Date**: 2026-08-26
+
+### Decision 9: Phase-2 recommendations adopted as recorded defaults
+
+**Context**: Phase 2 named human-review items; the folded draft review already
+carried recommendations, adopted here so implementation can proceed (a human
+can revise any of them by config or follow-up).
+**Decision**: (a) keyed HMAC-SHA256 digest by default, plain sha256 + exact
+size only behind `allow_plain_hash: true`; (b) bucketed `size_bucket` by
+default; (c) NO echo exemption and NO git-commit-message exemption (match on
+shell WORD tokens only, so prose mentions rarely fire); (d) consumer
+allowlist is subcommand-aware — `ansible-vault view|decrypt` DENIED, the rest
+of the Ansible family allowed with the path in flag position; (e) priority 14
+(safety band, alongside sensitive_content/security_antipattern).
 **Date**: 2026-08-26
 
 ## Success Criteria
