@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
+import yaml
+
 from claude_code_hooks_daemon.utils.path_exclusion import (
     path_matches_globs,
     resolve_project_root,
@@ -144,19 +146,31 @@ def resolve_configured_patterns() -> tuple[str, ...]:
     _CONFIGURED_PATTERNS_RESOLVED = True
     from claude_code_hooks_daemon.core.project_context import ProjectContext
 
-    if not getattr(ProjectContext, "_initialized", False):
+    if not ProjectContext.is_initialized():
         return _CONFIGURED_PATTERNS
 
     try:
-        from claude_code_hooks_daemon.config.models import Config
+        from claude_code_hooks_daemon.config.models import Config, HandlerConfig
 
         config = Config.load_or_default(ProjectContext.config_path())
-        handler_cfg = config.handlers.pre_tool_use.get("secret_file_guard", {})
-        options = handler_cfg.get("options", {}) if isinstance(handler_cfg, dict) else {}
-        mode = options.get("mode") if isinstance(options, dict) else None
-        project_patterns = options.get("protected_paths") if isinstance(options, dict) else None
+        handler_cfg = config.handlers.pre_tool_use.get("secret_file_guard")
+        # ``Config``'s own ``coerce_handler_configs`` validator turns every
+        # entry into a ``HandlerConfig`` instance (not a plain dict) once the
+        # config has been loaded through the model -- ``.options`` is the
+        # correct access, and a stray ``isinstance(..., dict)`` guard here
+        # silently found nothing and fell through to the shipped defaults on
+        # every real config, never actually reading a project's settings.
+        options = handler_cfg.options if isinstance(handler_cfg, HandlerConfig) else {}
+        mode = options.get("mode")
+        project_patterns = options.get("protected_paths")
         _CONFIGURED_PATTERNS = resolve_protected_patterns(mode, project_patterns)
-    except (OSError, RuntimeError) as exc:
+    except (OSError, RuntimeError, ValueError, yaml.YAMLError) as exc:
+        # OSError: unreadable config file. RuntimeError: ProjectContext-adjacent
+        # failures. ValueError: Config.load's own "unsupported format" AND
+        # pydantic's ValidationError (a ValueError subclass) for a
+        # schema-invalid config. yaml.YAMLError: malformed YAML -- Config.load
+        # calls yaml.safe_load directly and does not catch this itself. All
+        # four leave the SHIPPED DEFAULTS already set above in place.
         logger.debug("Could not resolve secret_file_guard config, using defaults: %s", exc)
     return _CONFIGURED_PATTERNS
 

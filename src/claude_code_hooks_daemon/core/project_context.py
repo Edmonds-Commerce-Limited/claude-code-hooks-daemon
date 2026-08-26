@@ -67,6 +67,18 @@ class ProjectContext:
     _initialized: ClassVar[bool] = False
 
     @classmethod
+    def is_initialized(cls) -> bool:
+        """Whether :meth:`initialize` has run in this process.
+
+        The public predicate for the handful of daemon-adjacent, best-effort
+        callers (redaction, path exclusion, secret-file matching) that must
+        degrade gracefully rather than raise when queried before daemon
+        startup -- reaching the private ``_initialized`` ClassVar directly is
+        the alternative these callers used to reach for.
+        """
+        return cls._initialized
+
+    @classmethod
     def initialize(cls, config_path: Path | str) -> None:
         """Initialize project context from config file path.
 
