@@ -201,6 +201,13 @@ class HandlerID:
         config_key="sensitive_content",
         display_name="block-sensitive-content",
     )
+    # Read-direction sibling of SENSITIVE_CONTENT (Plan 00272): denies any
+    # tool call that would put a protected FILE's contents into context.
+    SECRET_FILE_GUARD = HandlerIDMeta(
+        class_name="SecretFileGuardHandler",
+        config_key="secret_file_guard",
+        display_name="block-secret-file-read",
+    )
     # Artefact publishing (Plan 00259): the Artifact tool mints a claude.ai URL
     # for a locally-rendered page. It is the one disclosure path with no guard,
     # so it is blocked by default and only a human may lift the block.

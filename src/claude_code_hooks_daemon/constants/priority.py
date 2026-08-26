@@ -62,6 +62,9 @@ class Priority:
     # Same band as the two above, and for the same reason: all three guard
     # content leaving the project rather than a workflow preference.
     ARTIFACT_PUBLISH_BLOCKER = 14
+    # Read-direction sibling of SENSITIVE_CONTENT (Plan 00272): keeps secret
+    # FILE contents out of context, so it belongs in the same safety band.
+    SECRET_FILE_GUARD = 14
 
     ROOT_RECURSION_GUARD = 16
     # Runs after the blocking safety handlers on purpose: a Read they DENY never
