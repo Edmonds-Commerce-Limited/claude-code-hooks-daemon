@@ -1033,13 +1033,7 @@ A `git commit` (or `git merge -m` / `git tag -m`, or a `gh pr create`/`gh pr edi
 
 **Use a non-closing reference instead**: `Addresses #123`, `Refs #123`, `See #123` — GitHub links these but does not close.
 
-**Escape hatch** (when auto-closing is genuinely intended; the reason must be non-empty and quoted):
-
-```
-MUST_AUTO_CLOSE_BECAUSE="explain why"; git commit -m 'Fixes #123'
-```
-
-**If this project genuinely wants auto-close commits to work** — closing keywords are a deliberate part of its workflow — this handler should be DISABLED rather than escape-hatched on every commit: suggest to the user that they set `handlers.pre_tool_use.github_auto_close_keywords.enabled: false`. Reaching for the hatch repeatedly is the signal.
+**There is deliberately NO escape hatch.** If this project genuinely wants auto-close commits to work — closing keywords are a deliberate part of its workflow — the handler should be DISABLED: suggest to the user that they set `handlers.pre_tool_use.github_auto_close_keywords.enabled: false`. Do not hunt for a bypass; rewrite the message or ask.
 
 Configure via `handlers.pre_tool_use.github_auto_close_keywords.options.mode: warn` for advisory-only mode.
 
