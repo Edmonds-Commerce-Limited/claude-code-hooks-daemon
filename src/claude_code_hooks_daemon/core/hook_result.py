@@ -586,6 +586,8 @@ class HookResult(BaseModel):
             return self._format_top_level_block_response(event_name)
         elif event_name in _CONTINUE_FALSE_EVENTS:
             return self._format_continue_false_response()
+        elif event_name == "SessionStart":
+            return self._format_session_start_response(event_name)
         else:
             # SessionStart, SessionEnd, PreCompact, Notification: systemMessage ONLY
             # These events do NOT support hookSpecificOutput in Claude Code
@@ -856,6 +858,38 @@ class HookResult(BaseModel):
             hook_output["guidance"] = self.guidance
 
         return {"hookSpecificOutput": hook_output} if len(hook_output) > 1 else {}
+
+    def _format_session_start_response(self, event_name: str) -> dict[str, Any]:
+        """Format SessionStart: documented Claude-context channel plus warning.
+
+        The docs route ``hookSpecificOutput.additionalContext`` into CLAUDE's
+        context before the first prompt, and describe ``systemMessage`` as a
+        USER-facing warning (Plan 00271 item 6). Advisory context is emitted on
+        BOTH channels: the documented one so Claude reliably receives it, and
+        systemMessage so the previously observable behaviour is preserved —
+        live verification of each channel is deferred (see the plan JOURNAL).
+        A DENY/ASK has no wire form here and emits the deliberately invalid
+        marker so enforcement substitutes loudly.
+        """
+        if self.decision in (Decision.DENY, Decision.ASK):
+            response: dict[str, Any] = {"decision": self.decision.value}
+            if self.reason:
+                response["reason"] = self.reason
+            return response
+
+        messages = [*self.context]
+        if self.guidance:
+            messages.append(self.guidance)
+        if not messages:
+            return {}
+        joined = "\n\n".join(messages)
+        return {
+            "systemMessage": joined,
+            "hookSpecificOutput": {
+                "hookEventName": event_name,
+                "additionalContext": joined,
+            },
+        }
 
     def _format_system_message_response(self) -> dict[str, Any]:
         """Format response for events that only support systemMessage.

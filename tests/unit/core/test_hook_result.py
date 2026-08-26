@@ -416,7 +416,8 @@ class TestToJsonEventName:
         output = result_session.to_json("SessionStart")
         assert "systemMessage" in output
         assert output["systemMessage"] == "Test context"
-        assert "hookSpecificOutput" not in output
+        # Plan 00271 item 6: the documented Claude-context channel too.
+        assert output["hookSpecificOutput"]["additionalContext"] == "Test context"
 
     def test_to_json_silent_allow_no_event_name(self):
         """Silent allow should not include hookEventName (empty dict)."""
@@ -509,7 +510,7 @@ class TestHookResultIntegration:
 
         assert "systemMessage" in output
         assert "PLAN.md" in output["systemMessage"]
-        assert "hookSpecificOutput" not in output
+        assert "PLAN.md" in output["hookSpecificOutput"]["additionalContext"]
 
     def test_deny_with_guidance_and_context(self):
         """Complex deny with guidance and context."""
@@ -683,7 +684,7 @@ class TestHookResultContextOnlyFormat:
         assert "systemMessage" in output
         assert "Session info" in output["systemMessage"]
         assert "Remember to commit" in output["systemMessage"]
-        assert "hookSpecificOutput" not in output
+        assert "Session info" in output["hookSpecificOutput"]["additionalContext"]
 
     def test_context_only_notification_with_guidance(self):
         """Notification event should use systemMessage (NOT hookSpecificOutput)."""

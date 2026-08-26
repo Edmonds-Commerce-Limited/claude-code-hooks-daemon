@@ -113,7 +113,13 @@ class TestTheTiersStayCompatibleWithHookResult:
     def test_each_tier_still_serialises(self, result_type: type[HookResult]) -> None:
         response = result_type(context=["note"]).to_json("SessionStart")
 
-        assert response == {"systemMessage": "note"}
+        assert response == {
+            "systemMessage": "note",
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": "note",
+            },
+        }
 
     def test_a_blocking_tier_deny_still_denies(self) -> None:
         """Narrowing must not weaken a refusal that IS deliverable."""

@@ -119,9 +119,9 @@ class TestGenerateDaemonErrorResponse:
             "SessionStart", "init_path_error", "Could not find .claude directory"
         )
 
-        # Should have systemMessage (NOT hookSpecificOutput)
+        # systemMessage plus the documented Claude-context channel.
         assert "systemMessage" in response
-        assert "hookSpecificOutput" not in response
+        assert "additionalContext" in response["hookSpecificOutput"]
 
         # System message should contain error details
         message = response["systemMessage"]
@@ -297,8 +297,10 @@ class TestAllEventTypes:
             ("PreToolUse", True),
             ("PostToolUse", True),
             ("UserPromptSubmit", True),
-            # SessionStart/SessionEnd/PreCompact/Notification use systemMessage (NOT hookSpecificOutput)
-            ("SessionStart", False),
+            # SessionStart emits BOTH systemMessage and the documented
+            # hookSpecificOutput.additionalContext (Plan 00271 item 6);
+            # SessionEnd/PreCompact/Notification stay systemMessage-only.
+            ("SessionStart", True),
             ("SessionEnd", False),
             ("PreCompact", False),
             ("Notification", False),

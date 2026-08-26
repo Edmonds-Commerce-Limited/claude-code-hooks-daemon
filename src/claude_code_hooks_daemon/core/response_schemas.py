@@ -153,14 +153,30 @@ PERMISSION_REQUEST_SCHEMA: Final[dict[str, Any]] = {
 
 # =============================================================================
 # SessionStart Hook Response Schema
-# CRITICAL: Claude Code does NOT accept hookSpecificOutput for SessionStart
-# Only systemMessage is valid
+# The docs define hookSpecificOutput on SessionStart: additionalContext (the
+# channel that reaches CLAUDE's context before the first prompt), plus
+# initialUserMessage, sessionTitle, watchPaths and reloadSkills. systemMessage
+# is the user-facing warning channel (Plan 00271 audit item 6). No decision
+# control exists — the schema deliberately accepts no decision fields.
 # =============================================================================
 
 SESSION_START_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "properties": {
         "systemMessage": {"type": "string"},
+        "hookSpecificOutput": {
+            "type": "object",
+            "properties": {
+                "hookEventName": {"type": "string", "const": "SessionStart"},
+                "additionalContext": {"type": "string"},
+                "initialUserMessage": {"type": "string"},
+                "sessionTitle": {"type": "string"},
+                "watchPaths": {"type": "array", "items": {"type": "string"}},
+                "reloadSkills": {"type": "boolean"},
+            },
+            "required": ["hookEventName"],
+            "additionalProperties": False,
+        },
     },
     "additionalProperties": False,
 }

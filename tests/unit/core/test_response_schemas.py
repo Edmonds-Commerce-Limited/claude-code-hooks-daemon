@@ -330,12 +330,22 @@ class TestSessionStartSchema:
         response = {"systemMessage": "Session initialized with custom settings"}
         response_validator.assert_valid("SessionStart", response)
 
-    def test_invalid_with_hook_specific_output(self, response_validator):
-        """SessionStart should NOT use hookSpecificOutput."""
+    def test_valid_with_documented_hook_specific_output(self, response_validator):
+        """SessionStart accepts the documented hookSpecificOutput fields."""
         response = {
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",
-                "additionalContext": "Invalid format",
+                "additionalContext": "Documented Claude-context channel",
+            }
+        }
+        response_validator.assert_valid("SessionStart", response)
+
+    def test_invalid_with_undocumented_hso_field(self, response_validator):
+        """Undocumented hookSpecificOutput fields are still rejected."""
+        response = {
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "permissionDecision": "deny",
             }
         }
         response_validator.assert_invalid("SessionStart", response)
