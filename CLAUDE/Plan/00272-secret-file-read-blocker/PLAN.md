@@ -222,10 +222,12 @@ paths; possibly a PostToolUse output backstop). Complements
 
 - [x] ✅ **Task 7.1**: `get_acceptance_tests()` using dummy fixture paths —
   never a real secret; cover one test per route class shipped
-- [ ] 🔄 **Task 7.2** (QA run in worktree; daemon restart + dogfood verification must happen on main after merge): Full QA (`./scripts/qa/llm_qa.py all`), daemon
-  restart verification, dogfood with `.claude/block-words.secret` protected
-- [ ] ⬜ **Task 7.3**: Client-mode verification (`dummy-client-repo.sh`);
-  docs (`HANDLER_REFERENCE.md`, generate-docs)
+- [x] ✅ **Task 7.2**: Full QA green on main after merge (25/25); daemon
+  restart verified RUNNING; live dogfood verified — Read, Bash `cat`, and
+  `secret-meta` all behaved as designed against `.claude/block-words.secret`
+- [x] ✅ **Task 7.3**: Client-mode verification (`dummy-client-repo.sh`
+  create → cli status RUNNING → destroy) passed on main; docs
+  (`HANDLER_REFERENCE.md`) shipped with the branch
 
 ## Dependencies
 
