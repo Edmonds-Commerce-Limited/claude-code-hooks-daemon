@@ -120,6 +120,13 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "`install`/`dd`) is excluded by design, not by oversight -- see the "
         "COVERED note above",
     ),
+    "GoalInjectionHandler": (
+        _BLIND,
+        "a PLAN.md status flip written by heredoc/redirect never fires the "
+        "goal-intent signal; acceptable because the miss costs an optional "
+        "advisory convenience (no goal injected), never a protection, and the "
+        "inject-goal CLI fallback covers it on demand",
+    ),
     "LockFileEditBlockerHandler": (
         _BLIND,
         "a hand-written lock file lands via heredoc; damage surfaces at install "

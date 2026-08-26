@@ -81,6 +81,18 @@
       "reason": "Directory search loop: log-and-continue when searching upward for .claude directory. SystemExit during path validation means invalid installation at this path \u2014 continue searching upward is the correct behaviour. Already logged at debug level."
     },
     {
+      "file": "handlers/post_tool_use/goal_injection.py",
+      "function": "write_goal_signal",
+      "rule": "return-none-on-error",
+      "reason": "Best-effort observability signal for the PTY supervisor (Plan 00269), same contract as compaction_signal._write_signal: a PostToolUse advisory must never break the tool call that triggered it. Narrow excepts (RuntimeError for missing project context, OSError for the write) are logged at warning before returning None; callers (handler + inject-goal CLI) check for None and report/skip the latch."
+    },
+    {
+      "file": "handlers/post_tool_use/goal_injection.py",
+      "function": "_read_plan",
+      "rule": "return-none-on-error",
+      "reason": "Reading the just-written PLAN.md is advisory sensing (Plan 00269): an unreadable file means no goal signal, never a broken Write/Edit tool call. Narrow except OSError is logged at warning; the single caller treats None as 'do not fire'."
+    },
+    {
       "file": "daemon/cli.py",
       "function": "send_daemon_request",
       "rule": "return-none-on-error",
