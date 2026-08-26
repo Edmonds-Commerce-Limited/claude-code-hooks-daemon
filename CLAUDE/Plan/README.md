@@ -4,7 +4,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00276: goal stack concurrent tracking](00276-goal-stack-concurrent-tracking/PLAN.md) - Not Started (daemon-side goal ledger so Stop-time defence covers every In Progress plan's goal, not just the last `/goal` writer)
+- [00277: release acceptance findings v3 55 0](00277-release-acceptance-findings-v3-55-0/PLAN.md) - Not Started (MUST-FIX tracking for v3.55.0 gate findings: stale playbook expectations, lsp_enforcement block_once semantics ruling, two inconclusive advisory observations)
+
+- [00276: goal stack concurrent tracking](00276-goal-stack-concurrent-tracking/PLAN.md) - In Progress (daemon-side goal ledger so Stop-time defence covers every In Progress plan's goal, not just the last `/goal` writer; shipped and live — remaining: live two-concurrent-plan observation)
 
 - [00274: skill opportunity detector](00274-skill-opportunity-detector/PLAN.md) - In Progress (mine session transcripts for repeated workloads and recurring explanations via a redacted digest judged by Haiku; TTL-gated SessionStart advisory delegating to a `skill-scan` CLI, report-only per Plan 00161 conventions)
 
@@ -1255,11 +1257,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 276 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 277 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 223 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 41 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
