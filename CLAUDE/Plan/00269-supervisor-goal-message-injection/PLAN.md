@@ -1,6 +1,6 @@
 # Plan 00269: supervisor goal message injection
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: Medium
@@ -99,14 +99,16 @@ disabled and are enabled only by the repository owner.
 
 ### Phase 1: Design lock-in and signal contract
 
-- [ ] ⬜ **Task 1.1**: Confirm `/goal` behaviour in the current Claude Code
-  build (argument syntax, multi-line handling — including whether ANY safe
-  multi-line input mechanism exists over a raw PTY, effect when a goal is
-  already set) with a live probe; record findings in a supporting doc.
-- [ ] ⬜ **Task 1.2**: Lock the goal-intent signal schema
+- [x] ✅ **Task 1.1**: Confirm `/goal` behaviour in the current Claude Code
+  build — static findings recorded in
+  [SIGNAL-CONTRACT.md](SIGNAL-CONTRACT.md); the LIVE probe was not possible
+  from the executing worktree agent and folds into Task 4.2's dogfood pass.
+  The design does not depend on unverified `/goal` semantics.
+- [x] ✅ **Task 1.2**: Lock the goal-intent signal schema
   (`<session>.goal-intent` JSON: `{ts, session_id, plan_number, rendered_lines, source}`), its directory (the existing context-sidecar dir), TTL, and
-  reap policy (reuse Plan 00160's reaper).
-- [ ] ⬜ **Task 1.3**: Lock the config schema under
+  reap policy (reuse Plan 00160's reaper) — see
+  [SIGNAL-CONTRACT.md](SIGNAL-CONTRACT.md).
+- [x] ✅ **Task 1.3**: Lock the config schema under
   `handlers.post_tool_use.goal_injection.options` (see BRAINSTORM.md
   Templating): `mode`, `lines` (list of `{id, text, enabled}`), placeholder
   vocabulary, `once_per_plan_per_session` latch.
