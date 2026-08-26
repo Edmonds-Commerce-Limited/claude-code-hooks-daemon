@@ -301,6 +301,30 @@ def test_does_not_flag_an_absolute_path_in_a_shell_fence(tmp_path: Path) -> None
     assert exit_code == 0, f"absolute paths were misread as slash commands: {report['violations']}"
 
 
+def test_does_not_scan_agent_worktrees(tmp_path: Path) -> None:
+    """Markdown inside ``.claude/worktrees/`` belongs to another branch's tree.
+
+    Concurrent agents get isolated checkouts under ``.claude/worktrees/`` (and
+    ``untracked/worktrees/``). Their in-flight docs are a DIFFERENT branch's
+    content, so a violation there must not fail the main tree's gate — it will
+    be judged when that branch's own QA runs, and again at merge.
+    """
+    root = _make_docs(tmp_path, "## Fine\n\nAccurate prose only.\n")
+    stray = root / ".claude" / "worktrees" / "agent-x-1234" / "README.md"
+    stray.parent.mkdir(parents=True)
+    stray.write_text(
+        "## Usage\n\n```bash\n/release\n```\n",
+        encoding="utf-8",
+    )
+
+    exit_code, report = _run_checker(root)
+
+    assert exit_code == 0, (
+        "a violation inside another agent's worktree failed the main tree's "
+        f"gate: {report['violations']}"
+    )
+
+
 def test_real_repository_docs_are_truthful() -> None:
     """The gate itself: this repository's prose must match generated truth."""
     exit_code, report = _run_checker(REPO_ROOT)

@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.plan_qa.checks import (
     dormant_honesty,
     header_body_coherence,
     index_at_birth,
+    index_no_log,
     index_row_length,
     journal_append_only,
     journal_completion_entry,
@@ -75,6 +76,7 @@ def all_checks() -> tuple[CheckSpec, ...]:
         *location_status_coherence.CHECKS,
         # Plan-index shape — EDIT + COMMIT + SWEEP (Plan 00218)
         *index_row_length.CHECKS,
+        *index_no_log.CHECKS,
         # Stage 2 — commit-gate-only checks
         index_at_birth.CHECK,
         counter_sanity.CHECK,

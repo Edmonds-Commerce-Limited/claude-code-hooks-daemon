@@ -106,6 +106,7 @@ class TestRegistryCatalogue:
             "location-status-coherence",
             # Plan-index shape (EDIT + COMMIT + SWEEP registration)
             "index-row-length",
+            "index-no-log",
             # Commit-only
             "index-at-birth",
             "counter-sanity",
@@ -130,15 +131,16 @@ class TestRegistryCatalogue:
         by_stage = {stage: [spec for spec in registry if spec.stage == stage] for stage in Stage}
         # 8 original + 2 journal EDIT checks (Plan 00163) + plan-doc-size
         # (Plan 00190) + journal-dayfile-is-today (Plan 00197)
-        # + index-row-length (Plan 00218)
-        assert len(by_stage[Stage.EDIT]) == 13
+        # + index-row-length (Plan 00218) + index-no-log
+        assert len(by_stage[Stage.EDIT]) == 14
         # 5 commit-only + 5 dual tree checks + 2 journal COMMIT checks (Plan 00163)
         # + plan-shrink-without-journal (Plan 00190) + index-row-length (Plan 00218)
-        assert len(by_stage[Stage.COMMIT]) == 14
+        # + index-no-log
+        assert len(by_stage[Stage.COMMIT]) == 15
         # 3 sweep-only + 5 dual tree checks + 2 journal SWEEP checks (Plan 00163)
-        # + index-row-length (Plan 00218) + 5 document-rule sweep twins and
-        # the journal-dayfile-naming sweep twin (Plan 00230)
-        assert len(by_stage[Stage.SWEEP]) == 17
+        # + index-row-length (Plan 00218) + index-no-log + 5 document-rule sweep
+        # twins and the journal-dayfile-naming sweep twin (Plan 00230)
+        assert len(by_stage[Stage.SWEEP]) == 18
 
     def test_dual_stage_checks_share_run_function(self) -> None:
         from claude_code_hooks_daemon.plan_qa.checks import all_checks
@@ -160,10 +162,11 @@ class TestRegistryCatalogue:
         from claude_code_hooks_daemon.plan_qa.checks import all_checks
 
         # Journal checks (Plan 00163, extended Plan 00197), plan-doc-size
-        # (Plan 00190) and index-row-length (Plan 00218) are post-audit feature
-        # categories — they defend journalling hygiene, plan read-cost and index
-        # navigability respectively, not one of the original 31-sin audit
-        # findings, so they legitimately carry no `sins` provenance.
+        # (Plan 00190), index-row-length (Plan 00218) and index-no-log are
+        # post-audit feature categories — they defend journalling hygiene,
+        # plan read-cost, index navigability and index-as-changelog-creep
+        # respectively, not one of the original 31-sin audit findings, so they
+        # legitimately carry no `sins` provenance.
         post_audit_no_sins = {
             "journal-dayfile-naming",
             "journal-dayfile-is-today",
@@ -175,6 +178,7 @@ class TestRegistryCatalogue:
             "plan-doc-size",
             "plan-shrink-without-journal",
             "index-row-length",
+            "index-no-log",
         }
         for spec in all_checks():
             if spec.check_id in post_audit_no_sins:

@@ -169,8 +169,20 @@ _CLI_INVOCATION_RE: Final[re.Pattern[str]] = re.compile(
 # Directories whose markdown is not this project's documentation. `marketplaces`
 # covers the vendored third-party plugin catalogue under `.claude/ccy/plugins/`:
 # upstream content this project does not author and must not rewrite.
+# `worktrees` covers concurrent agents' isolated checkouts (`.claude/worktrees/`,
+# `untracked/worktrees/`): a DIFFERENT branch's tree, judged by its own QA run
+# and again at merge — its in-flight docs must not fail the main tree's gate.
 _UNSCANNED_DIR_NAMES: Final[frozenset[str]] = frozenset(
-    {".git", "node_modules", "untracked", "__pycache__", ".venv", "vendor", "marketplaces"}
+    {
+        ".git",
+        "node_modules",
+        "untracked",
+        "__pycache__",
+        ".venv",
+        "vendor",
+        "marketplaces",
+        "worktrees",
+    }
 )
 
 _MARKDOWN_GLOB: Final[str] = "*.md"
