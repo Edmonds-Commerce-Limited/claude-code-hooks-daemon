@@ -328,6 +328,18 @@ handlers:
       enabled: true         # On by default (opt-out); advisory-only, fires only on CLAUDE/Plan/*/PLAN.md writes. Set false to disable.
       priority: 30
 
+    goal_injection:  # Writes <session>.goal-intent for the ccy PTY supervisor when a plan flips to In Progress (Plan 00269)
+      enabled: false  # Opt-in: only useful when a supervisor is watching. Manual fallback: bin/hooks-daemon inject-goal NNNNN
+      priority: 31
+      # options:
+      #   mode: additive                  # additive (default) | replace (fixed header line always kept)
+      #   once_per_plan_per_session: true
+      #   lines:
+      #     - id: subagents-encouraged    # enable a vetted built-in line without restating its text
+      #       enabled: true
+      #     - id: project-motto
+      #       text: "All findings are logged to {plan_path}/REPORTS/."
+
     validate_eslint_on_write:  # Runs ESLint after file writes
       enabled: false           # Enable for automatic ESLint validation
       priority: 20

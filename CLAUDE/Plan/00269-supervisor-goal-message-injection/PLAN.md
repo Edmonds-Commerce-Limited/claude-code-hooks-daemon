@@ -1,6 +1,6 @@
 # Plan 00269: supervisor goal message injection
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: Medium
@@ -99,21 +99,23 @@ disabled and are enabled only by the repository owner.
 
 ### Phase 1: Design lock-in and signal contract
 
-- [ ] ⬜ **Task 1.1**: Confirm `/goal` behaviour in the current Claude Code
-  build (argument syntax, multi-line handling — including whether ANY safe
-  multi-line input mechanism exists over a raw PTY, effect when a goal is
-  already set) with a live probe; record findings in a supporting doc.
-- [ ] ⬜ **Task 1.2**: Lock the goal-intent signal schema
+- [x] ✅ **Task 1.1**: Confirm `/goal` behaviour in the current Claude Code
+  build — static findings recorded in
+  [SIGNAL-CONTRACT.md](SIGNAL-CONTRACT.md); the LIVE probe was not possible
+  from the executing worktree agent and folds into Task 4.2's dogfood pass.
+  The design does not depend on unverified `/goal` semantics.
+- [x] ✅ **Task 1.2**: Lock the goal-intent signal schema
   (`<session>.goal-intent` JSON: `{ts, session_id, plan_number, rendered_lines, source}`), its directory (the existing context-sidecar dir), TTL, and
-  reap policy (reuse Plan 00160's reaper).
-- [ ] ⬜ **Task 1.3**: Lock the config schema under
+  reap policy (reuse Plan 00160's reaper) — see
+  [SIGNAL-CONTRACT.md](SIGNAL-CONTRACT.md).
+- [x] ✅ **Task 1.3**: Lock the config schema under
   `handlers.post_tool_use.goal_injection.options` (see BRAINSTORM.md
   Templating): `mode`, `lines` (list of `{id, text, enabled}`), placeholder
   vocabulary, `once_per_plan_per_session` latch.
 
 ### Phase 2: Daemon side (TDD)
 
-- [ ] ⬜ **Task 2.1**: RED — tests for a `goal_injection` PostToolUse handler:
+- [x] ✅ **Task 2.1**: RED — tests for a `goal_injection` PostToolUse handler:
   detects a `PLAN.md` write whose resulting `**Status**:` reads `In Progress`
   (Write/Edit under the plan directory, excluding `Completed/`), renders the
   configured lines with validated placeholders, writes the signal atomically,
@@ -124,10 +126,10 @@ disabled and are enabled only by the repository owner.
   an already-In-Progress plan in a NEW session re-fires. That is intended: it
   is what makes the goal survive session restarts, and it subsumes the
   "resumed sessions" case otherwise left to the CLI fallback.
-- [ ] ⬜ **Task 2.2**: GREEN — implement the handler; placeholder values
+- [x] ✅ **Task 2.2**: GREEN — implement the handler; placeholder values
   strictly validated (`plan_number` = 5 digits; `plan_title`/`plan_path`
   sanitised to a conservative charset, length-capped).
-- [ ] ⬜ **Task 2.3**: RED/GREEN — `bin/hooks-daemon inject-goal NNNNN` CLI
+- [x] ✅ **Task 2.3**: RED/GREEN — `bin/hooks-daemon inject-goal NNNNN` CLI
   subcommand writing the same signal (manual fallback and the primary
   debugging tool). The signal file is session-keyed, so the CLI must resolve
   the target session id from `CLAUDE_CODE_SESSION_ID` in its environment (set
@@ -135,33 +137,40 @@ disabled and are enabled only by the repository owner.
   own-session scan keys on) and refuse with a clear message when it is unset
   or the plan folder does not exist. Cross-session retargeting stays an open
   question (BRAINSTORM.md §6 Q4).
-- [ ] ⬜ **Task 2.4**: Config plumbing: HandlerID/Priority constants, exports,
+- [x] ✅ **Task 2.4**: Config plumbing: HandlerID/Priority constants, exports,
   config template + example, `get_claude_md()`, `get_acceptance_tests()`.
 
 ### Phase 3: Supervisor side (TDD, stdlib-only)
 
-- [ ] ⬜ **Task 3.1**: RED — tests for goal-signal consumption in
+- [x] ✅ **Task 3.1**: RED — tests for goal-signal consumption in
   `claude-supervise.py`: fresh in-scope signal + idle + empty input box →
   inject `/goal 🤖 [ccy-supervisor] ...` and consume (unlink) the signal;
   stale/foreign/oversized/malformed signal → NOOP with logged reason;
   validation gate rejects payloads failing prefix/length/charset rules —
   including ANY payload containing a newline (Decision 2 corollary).
-- [ ] ⬜ **Task 3.2**: GREEN — implement consumption through the existing
+- [x] ✅ **Task 3.2**: GREEN — implement consumption through the existing
   injection choke point and state machine; dry-run mode injects the visible
   marker variant, `--arm` injects the real `/goal`.
-- [ ] ⬜ **Task 3.3**: Regression tests — compaction machine behaviour
+- [x] ✅ **Task 3.3**: Regression tests — compaction machine behaviour
   unchanged; a pending goal signal never starves or reorders a
   compact/continue decision.
 
 ### Phase 4: Verification
 
-- [ ] ⬜ **Task 4.1**: Full QA `./scripts/qa/llm_qa.py all`; daemon restart →
-  RUNNING; supervisor smoke under system python3.
+- [x] ✅ **Task 4.1**: Full QA `./scripts/qa/llm_qa.py all` → 22/23 PASSED in
+  the execution worktree; the single failure is `smoke_test`, which requires
+  a RUNNING daemon and is inseparable from the daemon-restart check.
+  Supervisor smoke under system python3 passed (imports clean, `--help`
+  usage renders, goal constants present). **Daemon restart → RUNNING is
+  DEFERRED to the merge reviewer on main** — the worktree must not touch the
+  dogfood daemon serving the main checkout.
 - [ ] ⬜ **Task 4.2**: Live dogfood — flip a scratch plan to In Progress and
   observe the injected `/goal` (dry-run first, then armed), including the
   deferral path with a non-empty input box (decision.log names the gate).
-- [ ] ⬜ **Task 4.3**: Update docs (HANDLER_REFERENCE options,
-  regenerate `.claude/HOOKS-DAEMON.md`); record milestones.
+  DEFERRED to main: needs the live supervisor + an interactive session; also
+  carries the Task 1.1 live `/goal` semantics probe.
+- [x] ✅ **Task 4.3**: Update docs (HANDLER_REFERENCE section + summary row,
+  regenerated `.claude/HOOKS-DAEMON.md`); milestones recorded below.
 
 ## Dependencies
 
@@ -232,11 +241,11 @@ marker and a "not human authorisation" clause. **Date**: 2026-08-26
   machine-marked.
 - [ ] `bin/hooks-daemon inject-goal NNNNN` produces the same injection on
   demand.
-- [ ] Project config can add lines, override a built-in line by id, or replace
+- [x] Project config can add lines, override a built-in line by id, or replace
   the whole set (`mode: additive|replace`), verified by tests.
-- [ ] The supervisor refuses malformed/oversized/foreign goal payloads and
+- [x] The supervisor refuses malformed/oversized/foreign goal payloads and
   logs the reason; compact/continue behaviour is regression-tested unchanged.
-- [ ] Feature is opt-in (`get_default_enabled()` → `False`); default config
+- [x] Feature is opt-in (`get_default_enabled()` → `False`); default config
   behaviour is unchanged.
 - [ ] QA fully green; daemon restart RUNNING; supervisor tests pass under
   system python3.
@@ -259,3 +268,12 @@ marker and a "not human authorisation" clause. **Date**: 2026-08-26
      JOURNAL/00269-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Plan + brainstorm authored, awaiting human review before any implementation.
+- Contract locked (SIGNAL-CONTRACT.md) at ca58823b.
+- Daemon sensor delivered (handler + registration + docs) at 679d150a; CLI
+  fallback at 0a5b3e8b.
+- Supervisor actuator delivered (validation gate, cap, reaper, worker
+  round-trip) at f53478c2.
+- QA fixes + classifications at 584ec909; QA 22/23 in the execution worktree
+  (smoke_test needs a running daemon — deferred with daemon-restart
+  verification to the merge review on main, alongside Task 4.2's live
+  dogfood).

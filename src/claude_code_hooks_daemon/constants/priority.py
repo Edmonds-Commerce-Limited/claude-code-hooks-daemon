@@ -111,6 +111,10 @@ class Priority:
     # PostToolUse advisory handlers (Priority: 30)
     RECOVERY_CRON_ADVISOR = 30
 
+    # Goal injection (Priority: 31 - PostToolUse plan-execution-start sensor;
+    # sits after recovery_cron_advisor, which watches the same PLAN.md writes)
+    GOAL_INJECTION = 31
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     PLAN_NUMBER_HELPER = 30

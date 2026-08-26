@@ -191,9 +191,9 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         not take the daemon down.
         """
         value = self._max_files
-        if isinstance(value, bool) or not isinstance(value, int):
-            return _DEFAULT_MAX_FILES
-        return value
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        return _DEFAULT_MAX_FILES
 
     def _check_all(self, lintable: list[tuple[str, LintStrategy]]) -> list[tuple[str, str]]:
         """Run the cheap syntax check on every file; return (path, diagnosis) failures."""

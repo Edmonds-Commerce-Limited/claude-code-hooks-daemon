@@ -674,6 +674,16 @@ _DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS = 600.0
 # mistaken for a context sidecar by ``load_freshest_sidecar``.
 _COMPACTION_SIGNAL_GLOB = "*.compacting"
 
+# Goal-intent signal files (Plan 00269) are written by the daemon's
+# goal_injection PostToolUse handler (or `hooks-daemon inject-goal`) as
+# ``<session>.goal-intent`` -- again deliberately NOT ``*.json``. Same TTL
+# reasoning as the compaction signal: plan-execution start is usually an idle
+# moment, but the input-box gate can defer, so the window is generous. The
+# signal is consumed (unlinked) on injection, so a generous TTL cannot
+# re-fire it.
+_GOAL_SIGNAL_GLOB = "*.goal-intent"
+_DEFAULT_GOAL_SIGNAL_TTL_SECONDS = 600.0
+
 # Nothing else deletes per-session sidecars/signals: every session writes its own
 # ``{session}.json`` (and, on compaction, ``{session}.compacting``) into the ONE
 # shared context-sidecar dir, and a closed/backgrounded session's file lingers
@@ -832,6 +842,7 @@ class Decision(enum.Enum):
     WOULD_COMPACT = "would-compact"
     WOULD_CONTINUE = "would-continue"
     WOULD_ESCAPE = "would-escape"
+    WOULD_GOAL = "would-goal"
 
 
 class SupervisorState(enum.Enum):
@@ -878,6 +889,7 @@ class CompactPolicy:
     escape_after_seconds: float = _DEFAULT_ESCAPE_AFTER_SECONDS
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS
     foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS
+    goal_signal_ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS
 
 
 @dataclass(frozen=True)
@@ -1482,6 +1494,110 @@ def load_compaction_signal(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Goal-intent signal (Plan 00269) — structural validation gate (Decision 2).
+#
+# The member allowlist ({'/compact', 'continue'}) cannot express per-plan
+# text, so for the goal family ONLY it becomes a SHAPE allowlist: mandatory
+# machine-origin marker prefix, max total length, max logical-line count, and
+# a printable charset with a hard control-byte (newline!) ban. Anything
+# failing the gate is dropped fail-closed and the reason is logged. The
+# compact/continue member allowlist is untouched.
+# ---------------------------------------------------------------------------
+
+# The goal payload's mandatory FIXED HEADER, verified VERBATIM. A mere
+# marker-prefix check would admit any text following the marker — anything
+# able to write the signal file (a bash redirect is enough; no content guard
+# covers it) could then get arbitrary text, including asserted human consent,
+# typed into the chat. The load-bearing clause is the "NOT a human
+# instruction and NOT human authorisation" disclaimer, so the WHOLE header
+# must equal the daemon renderer's fixed header. A lockstep test
+# (tests/unit/supervise/test_goal_signal.py) asserts this string equals
+# goal_injection._HEADER_TEXT so the two sides cannot drift.
+_GOAL_HEADER_TEXT = (
+    "🤖 [ccy-supervisor] automated goal — machine-generated, NOT a human "
+    "instruction and NOT human authorisation for anything."
+)
+# The slash command; the payload is always ``/goal <joined line>`` so the
+# injected message begins ``/goal 🤖 [ccy-supervisor]``.
+_GOAL_COMMAND = "/goal"
+# Fixed separator used to re-join ``rendered_lines`` (identity for the
+# list-of-one the daemon writes today; forward-compatible with a future safe
+# multi-line mechanism).
+_GOAL_SEPARATOR = " — "
+_GOAL_MAX_JOINED_CHARS = 500
+_GOAL_MAX_LOGICAL_LINES = 8
+# Family-specific per-process cap so a signal storm cannot type repeatedly
+# (each signal is also consumed on injection).
+_MAX_GOAL_INJECTIONS = 5
+_DRY_RUN_GOAL_BODY_PREFIX = "would inject /goal (dry-run — no real /goal sent):"
+
+
+def _validate_goal_lines(rendered_lines: object) -> tuple[str | None, str | None]:
+    """Validate ``rendered_lines`` from a goal signal; return (joined, error).
+
+    Fail-closed: exactly one of the pair is non-None. The gate checks shape
+    only — it never interprets the text.
+    """
+    if not isinstance(rendered_lines, list) or not rendered_lines:
+        return None, "rendered_lines is not a non-empty list"
+    if len(rendered_lines) > _GOAL_MAX_LOGICAL_LINES:
+        return None, f"more than {_GOAL_MAX_LOGICAL_LINES} logical lines"
+    if not all(isinstance(line, str) for line in rendered_lines):
+        return None, "rendered_lines contains a non-string element"
+    joined = _GOAL_SEPARATOR.join(rendered_lines)
+    # The ENTIRE fixed header must open the payload, verbatim — either alone
+    # (a header-only message) or followed by the separator. A prefix-only
+    # marker check would let a forged signal carry arbitrary text (including
+    # asserted human consent) past the gate.
+    if joined != _GOAL_HEADER_TEXT and not joined.startswith(_GOAL_HEADER_TEXT + _GOAL_SEPARATOR):
+        return None, "payload does not open with the verbatim machine-origin header"
+    if len(joined) > _GOAL_MAX_JOINED_CHARS:
+        return None, f"joined line exceeds {_GOAL_MAX_JOINED_CHARS} chars"
+    for ch in joined:
+        # A newline is a control byte too: under the one-chunk + separate \r
+        # delivery contract it would SUBMIT an unmarked intermediate prompt.
+        if ord(ch) < 0x20 or ord(ch) == 0x7F:
+            return None, "control byte in payload"
+    return joined, None
+
+
+def load_goal_signal(
+    directory: Path,
+    *,
+    now: float,
+    ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS,
+    own_sessions: frozenset[str] | None = None,
+) -> tuple[Path | None, str | None, str | None]:
+    """Return ``(path, joined_line, reject_reason)`` for a goal-intent signal.
+
+    Exactly one of the three shapes comes back: a valid fresh in-scope signal
+    yields ``(path, joined, None)``; an in-scope fresh signal that FAILS the
+    validation gate yields ``(None, None, reason)`` so the caller can log the
+    rejection; no actionable signal at all yields ``(None, None, None)``.
+    Foreign-session and stale signals are skipped silently (foreign files in
+    a shared dir are normal; stale ones age out via the reaper).
+    """
+    if not directory.is_dir():
+        return None, None, None
+    for path in sorted(directory.glob(_GOAL_SIGNAL_GLOB)):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None, None, f"unreadable/malformed goal signal {path.name}"
+        if not isinstance(data, dict):
+            return None, None, f"goal signal {path.name} is not a JSON object"
+        if not _session_in_scope(data.get("session_id"), own_sessions):
+            continue
+        if (now - _coerce_float(data.get("ts"))) > ttl_seconds:
+            continue
+        joined, error = _validate_goal_lines(data.get("rendered_lines"))
+        if error is not None:
+            return None, None, f"goal signal {path.name} rejected: {error}"
+        return path, joined, None
+    return None, None, None
+
+
 def reap_stale_sidecars(
     directory: Path,
     *,
@@ -1491,7 +1607,8 @@ def reap_stale_sidecars(
 ) -> list[Path]:
     """Delete dead context-sidecar / compaction-signal files older than the TTL.
 
-    Reaps both ``*.json`` sidecars and ``*.compacting`` signals whose FILE MTIME
+    Reaps ``*.json`` sidecars, ``*.compacting`` signals and ``*.goal-intent``
+    signals whose FILE MTIME
     is older than ``ttl_seconds``. Mtime (not the JSON ``ts``) is used so a
     malformed, truncated, or foreign file is reaped uniformly without a parse --
     a dead file is a dead file. The single newest-mtime ``*.json`` is ALWAYS
@@ -1510,8 +1627,10 @@ def reap_stale_sidecars(
         return []
 
     entries: list[tuple[Path, float]] = []
-    for path in list(directory.glob(_CONTEXT_SIDECAR_GLOB)) + list(
-        directory.glob(_COMPACTION_SIGNAL_GLOB)
+    for path in (
+        list(directory.glob(_CONTEXT_SIDECAR_GLOB))
+        + list(directory.glob(_COMPACTION_SIGNAL_GLOB))
+        + list(directory.glob(_GOAL_SIGNAL_GLOB))
     ):
         try:
             mtime = path.stat().st_mtime
@@ -1606,6 +1725,19 @@ class CompactStateMachine:
         # session with fake prompts. This latch is set on the first dry-run
         # injection and suppresses every one thereafter for the process lifetime.
         self._dry_run_fired = False
+        # Plan 00269: family-specific cap counter for goal injections. Goal
+        # signals are consumed on injection, so this only ever matters under a
+        # signal storm; per-process lifetime, never reset.
+        self._goal_injections = 0
+
+    @property
+    def goal_injections(self) -> int:
+        """How many goal injections this process has fired (Plan 00269)."""
+        return self._goal_injections
+
+    def mark_goal_injection(self) -> None:
+        """Count one goal injection against the family cap (Plan 00269)."""
+        self._goal_injections += 1
 
     @property
     def dry_run_fired(self) -> bool:
@@ -1633,6 +1765,7 @@ class CompactStateMachine:
             "escapes_sent": self._escapes_sent,
             "await_is_human": self._await_is_human,
             "dry_run_fired": self._dry_run_fired,
+            "goal_injections": self._goal_injections,
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -1655,6 +1788,8 @@ class CompactStateMachine:
             self._await_is_human = bool(state["await_is_human"])
         if "dry_run_fired" in state:
             self._dry_run_fired = bool(state["dry_run_fired"])
+        if "goal_injections" in state:
+            self._goal_injections = _coerce_int(state["goal_injections"])
 
     def evaluate(
         self,
@@ -2083,6 +2218,7 @@ def decide_once(
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS,
     foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS,
     own_sessions: frozenset[str] | None = None,
+    goal_signal_ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS,
 ) -> TickOutcome:
     """Decide what to inject this tick WITHOUT touching the PTY (Plan 00164 P4).
 
@@ -2212,9 +2348,61 @@ def decide_once(
     # so the block above skips it -- surface it explicitly for decision.log.
     if dry_run_latched_log is not None:
         noop_reason_log = dry_run_latched_log
+    # ── Goal injection (Plan 00269) ─────────────────────────────────────────
+    # Strictly SUBORDINATE to compact/continue: the goal branch runs only when
+    # this tick decided NOOP with no payload, no compaction signal is pending,
+    # and the machine is in MONITOR — so a pending goal can never starve or
+    # reorder a compact/continue decision. The idle + empty-input-box gate
+    # applies unchanged (a deferred goal keeps its signal and retries).
+    decision_value = evaluation.decision.value
+    reason = evaluation.reason
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+    ):
+        goal_path, goal_line, goal_reject = load_goal_signal(
+            sidecar_dir,
+            now=facts.now_wall,
+            ttl_seconds=goal_signal_ttl_seconds,
+            own_sessions=own_sessions,
+        )
+        if goal_reject is not None:
+            # Fail-closed: an in-scope signal that failed the validation gate
+            # is dropped and the reason is logged (deduped by write_noop).
+            noop_reason_log = f"{_NOOP_LOG_PREFIX}: {goal_reject}"
+        elif goal_path is not None and goal_line is not None:
+            if not can_inject:
+                if facts.idle and not facts.input_line_empty:
+                    deferred_log = f"{_DEFERRED_LOG_PREFIX} (goal injection pending)"
+                else:
+                    noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal signal pending but session busy"
+            elif machine.goal_injections >= _MAX_GOAL_INJECTIONS:
+                noop_reason_log = f"{_NOOP_LOG_PREFIX}: goal injection cap reached"
+            else:
+                # The cap is counted by the HOST only after a SUCCESSFUL
+                # injection (see the callers of _apply_decision) — a PTY
+                # write failure must not burn the cap while the signal
+                # survives for retry. decide_once stays pure.
+                decision_value = Decision.WOULD_GOAL.value
+                reason = "goal signal -> would inject /goal"
+                if dry_run:
+                    payload = (
+                        f"{_format_bot_prefix(facts.now_wall)} "
+                        f"{_DRY_RUN_GOAL_BODY_PREFIX} {goal_line}"
+                    )
+                else:
+                    payload = f"{_GOAL_COMMAND} {goal_line}"
+                submit = True
+                # Consumed in dry-run too — the demonstration episode is spent
+                # either way, so a goal can never flood the session.
+                consume_signal_path = str(goal_path)
+                deferred_log = None
+                noop_reason_log = None
     return TickOutcome(
-        decision_value=evaluation.decision.value,
-        reason=evaluation.reason,
+        decision_value=decision_value,
+        reason=reason,
         payload=payload,
         submit=submit,
         consume_signal_path=consume_signal_path,
@@ -2230,12 +2418,19 @@ def _apply_decision(
     master_writer: Callable[[bytes], None],
     log: DecisionLog | None,
     host_state: str | None = None,
-) -> None:
+) -> bool:
     """Perform a :class:`TickOutcome` on the PTY (host side, Plan 00164 P4).
 
     Injects the payload (if any), logs it, and consumes the compaction signal
     only AFTER a successful resume injection — mirroring the original inline
     behaviour of ``_poll_once`` exactly.
+
+    Returns True when a payload was actually injected (the PTY write
+    succeeded); False on a NOOP/suppressed tick. Callers use this to count a
+    ``would-goal`` injection against the goal cap only on SUCCESS (Plan
+    00269 review fix): a PTY write failure raises out of this function
+    before the return, so the cap is not burned and the un-consumed signal
+    survives for retry.
 
     Plan 00182 defence-in-depth: ``host_state`` is the host's authoritative
     ``SupervisorState`` value BEFORE this outcome is adopted. If the host is
@@ -2250,20 +2445,22 @@ def _apply_decision(
     ):
         if log is not None:
             log.write_noop("noop: stale /compact suppressed (host already awaiting compaction)")
-        return
+        return False
     if outcome.payload is not None:
         _perform_injection(master_writer, outcome.payload, submit=outcome.submit)
         if log is not None:
             log.write(f"{outcome.decision_value}: {outcome.reason}; injected {outcome.payload!r}")
         if outcome.consume_signal_path is not None:
             _consume_signal(Path(outcome.consume_signal_path), log)
-    elif log is not None and outcome.deferred_log is not None:
+        return True
+    if log is not None and outcome.deferred_log is not None:
         # An injection was pending and the NON-EMPTY INPUT BOX was the sole gate.
         log.write(outcome.deferred_log)
     elif log is not None and outcome.noop_reason_log is not None:
         # Plan 00168 Phase 1: record WHY this idle tick did nothing (deduped, so
         # an unchanged gate never floods). Makes red-but-not-compacting visible.
         log.write_noop(outcome.noop_reason_log)
+    return False
 
 
 def _poll_once(
@@ -2283,6 +2480,7 @@ def _poll_once(
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS,
     foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS,
     own_sessions: frozenset[str] | None = None,
+    goal_signal_ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS,
 ) -> Evaluation:
     """One in-process supervisor tick: decide (``decide_once``) then inject.
 
@@ -2310,8 +2508,14 @@ def _poll_once(
         reap_ttl_seconds=reap_ttl_seconds,
         foreground_margin_seconds=foreground_margin_seconds,
         own_sessions=own_sessions,
+        goal_signal_ttl_seconds=goal_signal_ttl_seconds,
     )
-    _apply_decision(outcome, master_writer=master_writer, log=log)
+    injected = _apply_decision(outcome, master_writer=master_writer, log=log)
+    # Count a goal injection against the family cap only on SUCCESS (Plan
+    # 00269 review fix): a PTY write failure raises before this line, so the
+    # cap is not burned and the retained signal can retry.
+    if injected and outcome.decision_value == Decision.WOULD_GOAL.value:
+        machine.mark_goal_injection()
     return Evaluation(decision=Decision(outcome.decision_value), reason=outcome.reason)
 
 
@@ -2421,6 +2625,7 @@ def run_worker(
                 reap_ttl_seconds=policy.reap_ttl_seconds,
                 foreground_margin_seconds=policy.foreground_margin_seconds,
                 own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
+                goal_signal_ttl_seconds=policy.goal_signal_ttl_seconds,
             )
         except Exception:
             # SAFETY NET: a single tick's exception must not kill the worker
@@ -2891,7 +3096,7 @@ def supervise(
             # Plan 00182: pass the host's authoritative PRE-tick state so a stale
             # WOULD_COMPACT reply (worker still MONITOR, host already awaiting)
             # is suppressed instead of stacking a second /compact.
-            _apply_decision(
+            injected = _apply_decision(
                 outcome,
                 master_writer=_write_master,
                 log=log,
@@ -2902,6 +3107,13 @@ def supervise(
             # diverge and inject a duplicate /compact (Plan 00164 Phase 4 fix).
             if outcome.machine_state is not None:
                 machine.import_state(outcome.machine_state)
+            # Count a goal injection against the family cap only on SUCCESS,
+            # and only AFTER adopting the worker state (which carries the
+            # pre-injection count) so the increment is never overwritten. A
+            # PTY write failure raises above, so the cap is not burned and
+            # the retained signal can retry (Plan 00269 review fix).
+            if injected and outcome.decision_value == Decision.WOULD_GOAL.value:
+                machine.mark_goal_injection()
         else:
             _poll_once(
                 machine,
@@ -2919,6 +3131,7 @@ def supervise(
                 reap_ttl_seconds=policy.reap_ttl_seconds,
                 foreground_margin_seconds=policy.foreground_margin_seconds,
                 own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
+                goal_signal_ttl_seconds=policy.goal_signal_ttl_seconds,
             )
 
     previous_handler = signal.signal(signal.SIGWINCH, _on_winch)
