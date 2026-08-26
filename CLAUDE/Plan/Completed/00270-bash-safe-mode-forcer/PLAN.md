@@ -1,6 +1,6 @@
 # Plan 00270: bash safe mode forcer
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-26
 **Owner**: joseph
 **Priority**: Medium
@@ -110,11 +110,12 @@ Design space, false-positive management, and the tool-input-rewriting research
   entry (disabled), dogfood `.claude/hooks-daemon.yaml` entry (enabled, warn),
   `docs/guides/HANDLER_REFERENCE.md` section + summary row, four integration
   classification tables, generated docs regenerated offline.
-- [ ] 🔄 **Task 3.2**: Full QA run in the worktree (see JOURNAL for exact
-  verdict). Daemon restart RUNNING + live warn-mode dogfooding are DEFERRED
-  to the merge reviewer on main — the dogfood daemon must not be touched from
-  this worktree. Registration/load path exercised offline via
-  `regenerate-docs --project-root <worktree>` (full controller initialise).
+- [x] ✅ **Task 3.2**: Full QA run in the worktree (19/23; 4 env-limited),
+  then on merged main by the merge reviewer: QA 23/23 PASSED, daemon restart
+  RUNNING, and live warn-mode dogfooding over the daemon socket — advisory
+  fires on an ungated multi-statement mutator sequence, silent with a
+  `set -euo pipefail` prelude and on mutator-free sequences
+  (`only_with_mutator: true`).
 - [x] ✅ **Task 3.3**: `config-changes` entry added to
   `CLAUDE/UPGRADES/UNRELEASED/config-changes/vUNRELEASED.yaml` with
   `recommended: false`, `dormant: true`.
@@ -163,8 +164,8 @@ config-changes manifest; warn-first even when enabled.
   detection; `verification_result_gate`'s suite stays green after the
   extraction.
 - [x] Guidance names the `set -e` blind spots verbatim.
-- [ ] Full QA passes; daemon restarts RUNNING. (QA run in the worktree; the
-  restart half is deferred to the merge reviewer on main — see Task 3.2.)
+- [x] Full QA passes; daemon restarts RUNNING. (Confirmed on merged main:
+  QA 23/23, restart RUNNING, live socket dogfood — see Task 3.2.)
 
 ## Risks & Mitigations
 
@@ -183,5 +184,7 @@ config-changes manifest; warn-first even when enabled.
 
 - Phases 1-3 implemented on worktree branch `agent-a828d42fa31810843-e32d96f4`
   (shared extraction 4f1196f6; handler TDD 62a2c3d3; registration/classification
-  42f7b654; docs + manifest 72bf63a5). Daemon restart verification deferred to
-  merge on main.
+  42f7b654; docs + manifest 72bf63a5). Review fixes 6139ff43 (end-of-options
+  guard; scoped dogfood).
+- Merged to main at 0f96b7ea (`--no-ff`, code-reviewed MERGE verdict): QA
+  23/23 on merged main, daemon restart RUNNING, live socket dogfood verified.

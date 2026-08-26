@@ -28,11 +28,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00205: destructive git synonym respellings](00205-destructive-git-synonym-respellings/PLAN.md) - Not Started (tracked follow-up captured by the v3.52.0 release gate per RELEASING.md "never drop a finding": v3.52.0 closed ten *invocation* respellings but not *synonym* ones — `git update-ref -d refs/heads/X` is an unguarded `git branch -D`, and `git push origin +main:main` an unguarded `git push --force`.)
 
-- [00268: verification-result enforcement and the Ansible/YAML lint gap](00268-verification-result-enforcement-and-ansible-lint-gap/PLAN.md) - Not Started (field report: a lint failed, printed its own diagnosis, and was ignored by a `git commit` on the next LINE of the same Bash invocation; the report rejects blanket `;` → `&&` enforcement as both leaky and noisy, and recommends a YAML/Ansible strategy for `lint_on_edit` plus a narrow verifier→mutator handler)
+- [00268: verification-result enforcement and the Ansible/YAML lint gap](00268-verification-result-enforcement-and-ansible-lint-gap/PLAN.md) - In Progress (field report: a lint failed, printed its own diagnosis, and was ignored by a `git commit` on the next LINE of the same Bash invocation; the report rejects blanket `;` → `&&` enforcement as both leaky and noisy, and recommends a YAML/Ansible strategy for `lint_on_edit` plus a narrow verifier→mutator handler)
 
 - [00269: supervisor goal message injection](00269-supervisor-goal-message-injection/PLAN.md) - Not Started (inject a machine-marked `/goal` message via the ccy PTY supervisor when plan execution starts, with a config-driven additive/replace line template; brainstorm ready for human review)
-
-- [00270: bash safe mode forcer](00270-bash-safe-mode-forcer/PLAN.md) - In Progress (the OPT-IN counterpart Plan 00268 deferred: a ships-disabled `bash_safe_mode` handler enforcing `set -e`/`-o pipefail` preludes on multi-statement Bash invocations; implemented on a worktree branch, daemon-restart verification deferred to merge)
 
 - [00272: secret file read blocker](00272-secret-file-read-blocker/PLAN.md) - Not Started (deny-by-default PreToolUse guard so a protected secret file's CONTENT can never enter context by any wired route; `secret-meta` helper returns keyed-hash metadata instead; no agent escape hatch; Phase 1 research classifies every read route by blockability; brainstorm + research scaffold ready for human review)
 
@@ -175,6 +173,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00270: bash safe mode forcer](Completed/00270-bash-safe-mode-forcer/PLAN.md) - Complete at merge `0f96b7ea` + the commit that archives it (opt-in `bash_safe_mode` handler enforcing `set -e`/`-o pipefail` preludes on multi-statement Bash invocations; shared `utils/bash_flags.py` scanner with an end-of-options guard, `verification_result_gate` refactored onto it; code-reviewed, dogfooded warn-mode scoped to mutator sequences)
 
 - [00267: Worktree seeding and config suggestions](Completed/00267-worktree-seeding-and-config-suggestions/PLAN.md) - Complete at `79cd6fc6` + the commit that archives it (a fresh worktree now carries the project's git-ignored local files, symlink or copy chosen per entry; `check-worktree-seed` reports drift and runs at install/upgrade; dogfooding it found this repo seeding neither its daemon env nor its secret word list, the latter leaving `sensitive_content` silently inert in every worktree)
 
@@ -1249,15 +1249,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 272 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 219 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 220 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 40 + 219 + 6 = **265 folders**, spanning
+- **Folder-to-number reconciliation**: 39 + 220 + 6 = **265 folders**, spanning
   **262 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1272,7 +1272,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   by a branch that renumbered itself and was never merged; Plan 00267
   supersedes it, so no folder for 00191 will ever land in `main`.
 
-- **Last reconciled at**: the Plan 00272 creation (40 root, 219 `Completed/`,
+- **Last reconciled at**: the Plan 00270 archival (39 root, 220 `Completed/`,
   6 `Cancelled/`, 262 distinct numbers against a counter of 272). The index
   carries NO reconciliation history — it states current truth only; every
   earlier recount is in git, and per-plan narrative belongs in that plan's
