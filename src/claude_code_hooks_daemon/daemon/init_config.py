@@ -144,6 +144,11 @@ class ConfigTemplate:
             "    worktree_file_copy: {enabled: true, priority: 15}  # Prevent worktree file copies\n"
             "    dangerous_permissions: {enabled: true, priority: 15}  # Block chmod 777, chown root\n"
             "    git_stash: {enabled: true, priority: 20}         # Warn about git stash\n"
+            # On by default (Plan 00275): "Fixes #123" auto-closes the issue on
+            # the default branch, cannot be disabled repo-side, and is written
+            # accidentally. Escape hatch: MUST_AUTO_CLOSE_BECAUSE="reason".
+            "    github_auto_close_keywords: {enabled: true, priority: 18}  "
+            "# Block GitHub auto-closing keyword refs (Fixes #N) in git messages\n"
             "    git_message_backtick: {enabled: true, priority: 20}  "
             "# Block backticks in a double-quoted git -m (bash executes them)\n"
             "    ancestry_preserving_merge: {enabled: true, priority: 19}  "

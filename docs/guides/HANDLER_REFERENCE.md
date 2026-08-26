@@ -537,6 +537,49 @@ handlers:
 
 ---
 
+#### github_auto_close_keywords
+
+| Property       | Value                        |
+| -------------- | ---------------------------- |
+| **Config key** | `github_auto_close_keywords` |
+| **Priority**   | 18                           |
+| **Type**       | Blocking (non-terminal)      |
+| **Event**      | PreToolUse                   |
+
+**Description:** Denies a `git commit` / `git merge -m` / `git tag -m` whose message contains a GitHub **auto-closing keyword reference** — one of the nine documented keywords (`close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`; case-insensitive, optional colon) followed by an issue reference (`#N`, `GH-N`, `owner/repo#N`, or a full issue/PR URL). Such a reference auto-closes the issue the moment the commit reaches the default branch, and GitHub offers no repository-side switch to disable it. Agents write these forms accidentally ("Fixes #123" reads as changelog prose), so the guard sits at the source.
+
+**Both message routes are checked:** the full command string (which also catches heredoc and `$(cat ...)` shapes whose text is visible), and the content of a `-F <file>` / `--file=<file>` scratch file, read at check time. A missing or unreadable `-F` file is allowed — the commit fails on its own. `-t`/`--template` is not a message source and is ignored.
+
+**Not matched:** the keyword alone (`fixes the race condition`), a bare `#N` without a keyword, `git log --grep=fixes`, and `gh issue close` (a deliberate, different act).
+
+**Rewrite instead:** `Addresses #123`, `Refs #123`, `See #123` — GitHub links these but does not close.
+
+**Escape hatch** (when auto-closing is genuinely intended):
+
+```bash
+MUST_AUTO_CLOSE_BECAUSE="explain why"; git commit -m 'Fixes #123'
+```
+
+**Options:**
+
+| Option | Values          | Default | Description                         |
+| ------ | --------------- | ------- | ----------------------------------- |
+| `mode` | `block`, `warn` | `block` | `warn` allows with advisory context |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    github_auto_close_keywords:
+      enabled: true
+      priority: 18
+      options:
+        mode: block
+```
+
+---
+
 #### git_message_backtick
 
 | Property       | Value                  |
@@ -2630,6 +2673,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `tdd_enforcement`              | PreToolUse        | 15       | Production code without tests (11 languages)                         |
 | `root_recursion_guard`         | PreToolUse        | 16       | Recursive scans rooted at /, /home, $HOME, ...                       |
 | `git_stash`                    | PreToolUse        | 20       | git stash creation (deny by default; configurable)                   |
+| `github_auto_close_keywords`   | PreToolUse        | 18       | GitHub auto-closing keyword refs (Fixes #N) in git messages          |
 | `git_message_backtick`         | PreToolUse        | 20       | Backticks in a double-quoted git -m (bash executes them)             |
 | `ancestry_preserving_merge`    | PreToolUse        | 19       | git merge --squash, gh pr merge --squash/--rebase (severs ancestry)  |
 | `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)          |

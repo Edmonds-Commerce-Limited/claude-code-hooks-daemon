@@ -229,6 +229,10 @@ handlers:
       options:
         mode: deny             # Block git stash entirely (use git commit or worktree instead)
 
+    github_auto_close_keywords:  # Blocks GitHub auto-closing keyword refs (Plan 00275)
+      enabled: true
+      priority: 18
+
     git_message_backtick:  # Blocks backticks in a double-quoted git -m (Plan 00219)
       enabled: true
       priority: 20

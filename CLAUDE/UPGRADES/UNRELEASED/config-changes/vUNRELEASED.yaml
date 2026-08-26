@@ -35,6 +35,34 @@ config_changes:
         the setting themselves. This does not affect a human publishing
         through the claude.ai UI -- the daemon sees tool calls, not browser
         clicks.
+    - key: handlers.pre_tool_use.github_auto_close_keywords
+      recommended: true
+      dormant: false
+      description: >-
+        NEW PreToolUse blocking handler (Plan 00275). Denies a git commit /
+        git merge -m / git tag -m whose message contains a GitHub
+        auto-closing keyword reference -- one of the nine documented keywords
+        (close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved;
+        case-insensitive, optional colon) followed by an issue reference
+        (#N, GH-N, owner/repo#N, or a full issue/PR URL). Such a reference
+        auto-closes the issue the moment the commit reaches the default
+        branch, GitHub offers no repository-side switch to disable it, and
+        agents write the forms accidentally ("Fixes #123" reads as changelog
+        prose). Both message routes are checked: the full command string
+        (heredoc and substitution shapes included) and the content of a
+        -F/--file scratch file, read at check time; a missing file is
+        allowed since the commit fails on its own. The keyword alone never
+        matches, nor does a bare #N, nor gh issue close (a deliberate act).
+        Ships ON BY DEFAULT -- unusual for a workflow-adjacent guard, but an
+        explicit project-owner choice: an accidental auto-close is silent,
+        outward-facing, and only noticed after the issue is gone from the
+        board.
+      migration_note: >-
+        On by default; no action needed to adopt. Rewrite denied messages
+        with a non-closing reference ("Addresses #123", "Refs #123",
+        "See #123"). When auto-closing is genuinely intended, declare it:
+        MUST_AUTO_CLOSE_BECAUSE="reason"; git commit ... . Set
+        options.mode: warn for advisory-only, or enabled: false to opt out.
     - key: handlers.pre_tool_use.write_clobber_guard
       recommended: true
       dormant: false
