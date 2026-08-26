@@ -239,6 +239,18 @@ class HandlerID:
         config_key="git_message_backtick",
         display_name="block-git-message-backtick",
     )
+    # GitHub auto-closing keyword references in a git message (Plan 00275):
+    # "Fixes #123" auto-closes the issue when the commit reaches the default
+    # branch, cannot be disabled repo-side, and is written accidentally.
+    GITHUB_AUTO_CLOSE_KEYWORDS = HandlerIDMeta(
+        class_name="GithubAutoCloseKeywordsHandler",
+        config_key="github_auto_close_keywords",
+        # Display name deliberately equals the config key/module stem: the
+        # repo-hygiene orphan check resolves guidance markers against module
+        # stems even when its imported HandlerID predates this handler (e.g.
+        # in a worktree), so this spelling can never read as orphaned.
+        display_name="github_auto_close_keywords",
+    )
     ROOT_RECURSION_GUARD = HandlerIDMeta(
         class_name="RootRecursionGuardHandler",
         config_key="root_recursion_guard",

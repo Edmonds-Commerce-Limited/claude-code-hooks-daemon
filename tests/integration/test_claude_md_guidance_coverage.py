@@ -80,6 +80,9 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "GhIssueCommentsHandler": "T1 denies gh issue view without --comments",
     "GhPrCommentsHandler": "T1 denies gh pr view without --comments",
     "GitMessageBacktickHandler": "T1 denies a message whose backticks would execute",
+    "GithubAutoCloseKeywordsHandler": (
+        "T1 denies a message carrying an auto-closing keyword reference"
+    ),
     "GitStashHandler": "T1 denies git stash without the escape hatch",
     "LintOnEditHandler": "T1 denies a write whose lint fails, in nine languages",
     "ValidateEslintOnWriteHandler": (

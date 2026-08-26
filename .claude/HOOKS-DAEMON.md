@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (45 handlers)
+### PreToolUse (46 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -22,6 +22,7 @@
 | 16 | write_clobber_guard | BLOCKING | Deny ``Write`` to an existing file that was not read this session |
 | 17 | pipe_blocker | BLOCKING | Block expensive commands piped to tail/head to prevent information loss |
 | 18 | dangerous_permissions | TERMINAL | Block chmod 777 and dangerous permission commands |
+| 18 | github_auto_close_keywords | BLOCKING | Deny git messages carrying GitHub auto-closing keyword references |
 | 19 | ancestry_preserving_merge | BLOCKING | Block (or, in warn mode, advise against) ancestry-severing merges |
 | 19 | git_stash | BLOCKING | Block or warn about git stash based on mode configuration |
 | 20 | git_message_backtick | BLOCKING | Block a double-quoted git message whose backticks would be executed |
@@ -67,7 +68,7 @@
 | 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
 | 31 | goal_injection | ADVISORY | Write a goal-intent signal when a plan flips to In Progress |
 
-### SessionStart (11 handlers)
+### SessionStart (12 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -82,6 +83,7 @@
 | 57 | plan_qa_sweep | ADVISORY | Advisory SessionStart sweep over the plan tree (silent when clean) |
 | 58 | ccy_supervisor_integrity | ADVISORY | Advisory: warn when the ccy supervisor is armed but its files are unsafe |
 | 59 | plan_workflow_asset_checker | ADVISORY | Advise when plan_workflow is enabled but its assets are not provisioned |
+| 60 | contract_staleness | ADVISORY | Advise a vendored-contract refresh when Claude Code has moved on |
 
 ### PreCompact (1 handler)
 

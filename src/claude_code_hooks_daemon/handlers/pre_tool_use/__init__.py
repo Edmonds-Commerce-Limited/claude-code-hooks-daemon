@@ -13,6 +13,7 @@ from .gh_issue_comments import GhIssueCommentsHandler
 from .gh_pr_comments import GhPrCommentsHandler
 from .git_message_backtick import GitMessageBacktickHandler
 from .git_stash import GitStashHandler
+from .github_auto_close_keywords import GithubAutoCloseKeywordsHandler
 from .markdown_organization import MarkdownOrganizationHandler
 from .npm_command import NpmCommandHandler
 from .plan_qa_commit_gate import PlanQaCommitGateHandler
@@ -44,6 +45,7 @@ __all__ = [
     "GhPrCommentsHandler",
     "GitMessageBacktickHandler",
     "GitStashHandler",
+    "GithubAutoCloseKeywordsHandler",
     "MarkdownOrganizationHandler",
     "NpmCommandHandler",
     "PlanQaCommitGateHandler",
