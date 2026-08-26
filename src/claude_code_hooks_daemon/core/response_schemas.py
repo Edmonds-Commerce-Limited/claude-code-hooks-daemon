@@ -126,6 +126,17 @@ PERMISSION_REQUEST_SCHEMA: Final[dict[str, Any]] = {
                             "type": "object",
                             "additionalProperties": True,
                         },
+                        # For allow only: permission update entries to apply.
+                        "updatedPermissions": {
+                            "type": "array",
+                            "items": {"type": "object", "additionalProperties": True},
+                        },
+                        # For deny only: tells Claude why the permission was
+                        # denied — the documented deny-explanation field
+                        # (Plan 00271 item 4).
+                        "message": {"type": "string"},
+                        # For deny only: if true, stops Claude.
+                        "interrupt": {"type": "boolean"},
                     },
                     "required": ["behavior"],
                     "additionalProperties": False,

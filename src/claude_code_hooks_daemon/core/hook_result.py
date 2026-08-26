@@ -714,22 +714,23 @@ class HookResult(BaseModel):
 
         # Nested decision structure
         if self.decision in (Decision.ALLOW, Decision.DENY, Decision.ASK):
-            hook_output["decision"] = {"behavior": self.decision.value}
+            decision_object: dict[str, Any] = {"behavior": self.decision.value}
+            if self.decision == Decision.DENY:
+                # The DOCUMENTED deny-explanation field is decision.message
+                # ("For deny only: tells Claude why the permission was
+                # denied") — Plan 00271 item 4. Context lines join it so a
+                # multi-line explanation survives on the documented channel.
+                explanation = [self.reason] if self.reason else []
+                explanation.extend(self.context)
+                if explanation:
+                    decision_object["message"] = "\n\n".join(explanation)
+            hook_output["decision"] = decision_object
 
-        # The reason shares additionalContext with context, because the nested
-        # decision object permits only `behavior` and `updatedInput` — there is
-        # nowhere else in this event's schema for an explanation to go. Without
-        # this the refusal arrived bare: AutoApproveReadsHandler denies a
-        # non-read tool with a three-line explanation that was discarded in
-        # full, leaving the user refused and told nothing. The sibling
-        # PreToolUse formatter has always emitted permissionDecisionReason.
-        explanation: list[str] = []
-        if self.reason and self.decision in (Decision.DENY, Decision.ASK):
-            explanation.append(self.reason)
-        explanation.extend(self.context)
-
-        if explanation:
-            hook_output["additionalContext"] = "\n\n".join(explanation)
+        # Advisory context on ALLOW/ASK stays on the daemon's additionalContext
+        # extension channel (recorded as a deliberate gap in the contract
+        # ALLOWLIST — the docs define no context field for this event).
+        if self.decision != Decision.DENY and self.context:
+            hook_output["additionalContext"] = "\n\n".join(self.context)
 
         if self.guidance:
             hook_output["guidance"] = self.guidance
