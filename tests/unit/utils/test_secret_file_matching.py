@@ -236,3 +236,29 @@ class TestDirectoryContainsProtected:
             str(tmp_path), sfm.DEFAULT_PROTECTED_PATTERNS, max_entries=2
         )
         assert result is None
+
+
+class TestResolveConfiguredPatterns:
+    """Plan 00272 Task 4-5: the shared cross-handler pattern resolver."""
+
+    def setup_method(self) -> None:
+        sfm.reset_configured_patterns_cache()
+
+    def teardown_method(self) -> None:
+        sfm.reset_configured_patterns_cache()
+
+    def test_fails_open_to_defaults_when_uninitialised(self) -> None:
+        """No ProjectContext (unit test process) never returns an empty tuple."""
+        result = sfm.resolve_configured_patterns()
+        assert result == sfm.DEFAULT_PROTECTED_PATTERNS
+
+    def test_result_is_cached_across_calls(self) -> None:
+        first = sfm.resolve_configured_patterns()
+        second = sfm.resolve_configured_patterns()
+        assert first == second
+
+    def test_reset_clears_the_cache(self) -> None:
+        sfm.resolve_configured_patterns()
+        sfm.reset_configured_patterns_cache()
+        # No exception, and still resolves (fail-open) after reset.
+        assert sfm.resolve_configured_patterns() == sfm.DEFAULT_PROTECTED_PATTERNS

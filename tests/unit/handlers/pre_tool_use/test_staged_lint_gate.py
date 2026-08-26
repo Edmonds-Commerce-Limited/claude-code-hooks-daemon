@@ -178,6 +178,24 @@ class TestSyntaxFailureIsSurfaced:
         assert not result.context
 
 
+class TestProtectedPathExclusion:
+    def test_a_broken_protected_file_is_never_named(
+        self, handler: StagedLintGateHandler, repo: Path
+    ) -> None:
+        """Plan 00272 Task 4-5: a protected file is skipped, whatever its syntax."""
+        _stage_file(repo, "broken.protectedmarker.py", "def broken(\n")
+
+        target = (
+            "claude_code_hooks_daemon.handlers.pre_tool_use.staged_lint_gate."
+            "sfm.resolve_configured_patterns"
+        )
+        with _patched_root(repo), patch(target, return_value=("*.protectedmarker*",)):
+            result = handler.handle(_bash('git commit -m "x"'))
+
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
+
 class TestModes:
     def test_warn_mode_allows_with_context(
         self, handler: StagedLintGateHandler, repo: Path

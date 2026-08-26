@@ -23,6 +23,7 @@ level — see the plan's RESEARCH-read-routes.md class-(d) rows.
 """
 
 import fnmatch
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -33,6 +34,8 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     path_matches_globs,
     resolve_project_root,
 )
+
+logger = logging.getLogger(__name__)
 
 # ── Config modes (additive/replace paradigm, mirrors command_hints) ──────────
 MODE_ADDITIVE: Final[str] = "additive"
@@ -113,6 +116,56 @@ DEFAULT_ALLOWED_CONSUMERS: Final[tuple[ConsumerSpec, ...]] = (
     ConsumerSpec(command="ansible-playbook", path_flags=_ANSIBLE_VAULT_PASSWORD_FLAGS),
     ConsumerSpec(command="ansible", path_flags=_ANSIBLE_VAULT_PASSWORD_FLAGS),
 )
+
+
+# Process-lifetime cache for the live secret_file_guard config (Plan 00272
+# Task 4.5), mirroring ``secret_redaction._resolve_active_path``'s contract:
+# other daemon-owned outputs (payload capture, lint diagnostics) need the
+# SAME effective protected-path set without importing the handler directly,
+# and config changes in this daemon are only ever picked up on restart, so
+# re-deriving this on every hot-path call would be a real cost for no gain.
+_CONFIGURED_PATTERNS_RESOLVED: bool = False
+_CONFIGURED_PATTERNS: tuple[str, ...] = DEFAULT_PROTECTED_PATTERNS
+
+
+def resolve_configured_patterns() -> tuple[str, ...]:
+    """Effective protected globs from the live ``secret_file_guard`` config.
+
+    Fails open to the SHIPPED DEFAULTS (never an empty tuple) when
+    ``ProjectContext`` is not initialised or config cannot be loaded — this
+    is a residual-route seam-closer (payload capture, lint diagnostics), not
+    the guard itself, so a resolution failure must still protect the
+    defaults rather than silently disabling protection.
+    """
+    global _CONFIGURED_PATTERNS_RESOLVED, _CONFIGURED_PATTERNS
+    if _CONFIGURED_PATTERNS_RESOLVED:
+        return _CONFIGURED_PATTERNS
+
+    _CONFIGURED_PATTERNS_RESOLVED = True
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+    if not getattr(ProjectContext, "_initialized", False):
+        return _CONFIGURED_PATTERNS
+
+    try:
+        from claude_code_hooks_daemon.config.models import Config
+
+        config = Config.load_or_default(ProjectContext.config_path())
+        handler_cfg = config.handlers.pre_tool_use.get("secret_file_guard", {})
+        options = handler_cfg.get("options", {}) if isinstance(handler_cfg, dict) else {}
+        mode = options.get("mode") if isinstance(options, dict) else None
+        project_patterns = options.get("protected_paths") if isinstance(options, dict) else None
+        _CONFIGURED_PATTERNS = resolve_protected_patterns(mode, project_patterns)
+    except (OSError, RuntimeError) as exc:
+        logger.debug("Could not resolve secret_file_guard config, using defaults: %s", exc)
+    return _CONFIGURED_PATTERNS
+
+
+def reset_configured_patterns_cache() -> None:
+    """Clear the process-lifetime resolved-patterns cache. Test-only escape hatch."""
+    global _CONFIGURED_PATTERNS_RESOLVED, _CONFIGURED_PATTERNS
+    _CONFIGURED_PATTERNS_RESOLVED = False
+    _CONFIGURED_PATTERNS = DEFAULT_PROTECTED_PATTERNS
 
 
 def resolve_protected_patterns(

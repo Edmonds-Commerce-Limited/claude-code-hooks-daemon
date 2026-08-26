@@ -167,6 +167,23 @@ class TestMatches:
         }
         assert handler.matches(hook_input) is False
 
+    def test_does_not_match_protected_path(
+        self, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00272 Task 4-5: a protected file is never lintable, whatever its extension."""
+        test_file = tmp_path / "app.protectedmarker.py"
+        test_file.write_text("x = 1")
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.sfm"
+            ".resolve_configured_patterns",
+            return_value=("*.protectedmarker*",),
+        ):
+            assert handler.matches(hook_input) is False
+
 
 class TestHandle:
     @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")

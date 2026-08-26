@@ -170,3 +170,68 @@ class TestSecretRedaction:
         # Unrelated fields survive untouched.
         assert parsed["session_id"] == "abc"
         assert parsed["tool_input"]["file_path"] == "/tmp/f.txt"
+
+
+class TestProtectedPathExclusion:
+    """Plan 00272 Task 4-5: a protected-path event is excluded, never redacted."""
+
+    _PATTERNS = ("*.dummy-fixture-glob",)
+    _PROTECTED_PATH = "/tmp/fixture.dummy-fixture-glob"
+
+    def test_read_of_protected_path_excluded(self, tmp_path: Path) -> None:
+        hook_input = {
+            "tool_name": "Read",
+            "tool_input": {"file_path": self._PROTECTED_PATH},
+        }
+        result = capture_payload(
+            enabled=True,
+            events=[],
+            capture_dir=tmp_path,
+            event="PreToolUse",
+            hook_input=hook_input,
+            protected_patterns=self._PATTERNS,
+        )
+        assert result is None
+        assert list(tmp_path.iterdir()) == []
+
+    def test_bash_mention_of_protected_path_excluded(self, tmp_path: Path) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": f"cat {self._PROTECTED_PATH}"},
+        }
+        result = capture_payload(
+            enabled=True,
+            events=[],
+            capture_dir=tmp_path,
+            event="PreToolUse",
+            hook_input=hook_input,
+            protected_patterns=self._PATTERNS,
+        )
+        assert result is None
+        assert list(tmp_path.iterdir()) == []
+
+    def test_unrelated_payload_still_captured(self, tmp_path: Path) -> None:
+        hook_input = {"tool_name": "Read", "tool_input": {"file_path": "/tmp/normal.txt"}}
+        result = capture_payload(
+            enabled=True,
+            events=[],
+            capture_dir=tmp_path,
+            event="PreToolUse",
+            hook_input=hook_input,
+            protected_patterns=self._PATTERNS,
+        )
+        assert result is not None
+
+    def test_empty_patterns_never_excludes(self, tmp_path: Path) -> None:
+        hook_input = {
+            "tool_name": "Read",
+            "tool_input": {"file_path": self._PROTECTED_PATH},
+        }
+        result = capture_payload(
+            enabled=True,
+            events=[],
+            capture_dir=tmp_path,
+            event="PreToolUse",
+            hook_input=hook_input,
+        )
+        assert result is not None

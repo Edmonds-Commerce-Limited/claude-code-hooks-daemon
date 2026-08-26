@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
 from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
 
 # Placeholder for file path in lint commands
@@ -111,6 +112,13 @@ class LintOnEditHandler(PostToolUseHandlerBase):
 
     def _is_lintable(self, file_path: str) -> bool:
         """Whether one authored path is in scope for linting."""
+        # A protected file (secret_file_guard's globs) must never surface in a
+        # lint diagnostic -- a syntax-error message can quote the offending
+        # source line verbatim (Plan 00272 Task 4-5). Checked first: a
+        # protected path is never lintable, whatever its extension.
+        if sfm.path_is_protected(file_path, sfm.resolve_configured_patterns()):
+            return False
+
         # A project may exempt a path from linting entirely (Plan 00251). Checked
         # before the strategy lookup and before the exists() stat: an exclusion is
         # the project declaring this path out of scope, which should not depend on

@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
 from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.command_evasion import (
     ENV_PREFIX,
     GIT_INVOCATION,
@@ -173,6 +174,11 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
                 continue
             abs_path = project_root / relpath
             if not abs_path.exists():
+                continue
+            # A protected file must never surface in a lint diagnostic -- a
+            # syntax-error message can quote the offending source line
+            # verbatim (Plan 00272 Task 4-5).
+            if sfm.path_is_protected(str(abs_path), sfm.resolve_configured_patterns()):
                 continue
             strategy = self._registry.get_strategy(str(abs_path))
             if strategy is None:

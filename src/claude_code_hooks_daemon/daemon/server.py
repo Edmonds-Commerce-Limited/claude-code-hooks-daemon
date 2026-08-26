@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms, redact_text
 from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
 
@@ -1038,6 +1039,9 @@ class HooksDaemon:
                 # Plan 00201: a secret pasted into a Write/Edit payload must
                 # never survive into this dogfooding capture file.
                 secret_terms=get_active_secret_terms(),
+                # Plan 00272 Task 4-5: a residual-route read that reaches this
+                # far must not land verbatim in a dogfooding capture file.
+                protected_patterns=sfm.resolve_configured_patterns(),
             )
         except (OSError, RuntimeError) as exc:
             logger.warning("Payload capture failed for %s: %s", event, exc)
