@@ -293,19 +293,29 @@ _BRACKET_EXPRESSION_RE: Final[re.Pattern[str]] = re.compile(r"\[[^\]]*\]")
 
 # Plan 00272 live-probe gap (class-(c) glob truncation, G2): the minimum
 # character overlap required at the boundary between a glob token's literal
-# residue and a protected pattern's literal stem before the token is treated
-# as a possible truncation of a real protected basename. A single-character
-# overlap (e.g. the token "api*" ending in "i" against the "id_rsa"/
-# "id_ed25519" stems' leading "i") is coincidental far too often in ordinary
-# project vocabulary to be worth flagging — it was measured to false-positive
-# on innocuous single-letter-ish globs during this fix's own TDD pass. Two
-# characters is the smallest overlap the shipped default stems ever need
-# (".vault-pass"/".vault-password" truncated to "dummy.v*" needs exactly the
-# 2-char ".v" overlap) — see TestBashMentionsProtectedPath in
+# residue and a LEADING-WILDCARD protected pattern's literal stem before the
+# token is treated as a possible truncation of a real protected basename.
+# This overlap test is used ONLY for patterns starting with "*" — see the
+# gate at its call site in ``find_protected_mention`` and Decision 12 in
+# CLAUDE/Plan/00272-secret-file-read-blocker/PLAN.md for why an exact-filename
+# or start-anchored pattern must never reach it (it would only add
+# coincidental false positives there; the pre-existing substring+fnmatch
+# check already catches every genuine truncation of those).
+#
+# Even restricted to leading-wildcard patterns, a single-character overlap
+# is still coincidental far too often in ordinary project vocabulary — this
+# project's own coordinator review caught a first cut of this fix flagging
+# common tokens like "sample*"/"grid*"/"id*" purely from a 2-char edge match
+# against the EXACT-filename "id_rsa" stem (fixed by the gate above, not by
+# raising this threshold — those stems must not use overlap matching at
+# all). Two characters is the smallest overlap a LEADING-wildcard shipped
+# stem ever needs (".vault-password" truncated to "dummy.v*" needs exactly
+# the 2-char ".v" overlap) — see TestBashMentionsProtectedPath in
 # tests/unit/utils/test_secret_file_matching.py for the worked cases this
-# threshold is tuned against. A single-character generic glob like "d*" is
-# accepted residual: it cannot reach this threshold against any shipped stem,
-# by construction, not by a special case.
+# threshold is tuned against, including the false-positive allowlist the
+# coordinator's review added. A single-character generic glob like "d*" is
+# accepted residual: it cannot reach this threshold against any shipped
+# leading-wildcard stem, by construction, not by a special case.
 _MIN_GLOB_OVERLAP_CHARS: Final[int] = 2
 
 
@@ -397,21 +407,27 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
                     # stem (e.g. ".vault-p*" vs stem ".vault-pass").
                     if residue in stem_basename and fnmatch.fnmatch(stem_basename, basename):
                         return pattern
-                    # Plan 00272 gap fix (G2): a trailing-wildcard TRUNCATION
-                    # of a real protected basename can carry an arbitrary
-                    # prefix belonging to the pattern's own leading wildcard
-                    # (e.g. "dummy.vault-p*" truncates the real file
+                    # Plan 00272 gap fix (G2), GATED to leading-wildcard
+                    # patterns only (over-blocking regression fix, same
+                    # plan): a trailing-wildcard TRUNCATION of a real
+                    # protected basename can carry an arbitrary prefix
+                    # belonging to the pattern's own LEADING wildcard (e.g.
+                    # "dummy.vault-p*" truncates the real file
                     # "dummy.vault-password", matched by "*.vault-password"
                     # whose fixed stem ".vault-password" has no "dummy"
-                    # prefix to compare against). The fnmatch check above
-                    # cannot see this because it requires the residue to be
-                    # a SUBSTRING of the stem outright. The overlap check
-                    # instead asks whether the token's literal edge could
-                    # directly join the stem's literal edge — see
-                    # ``_glob_token_overlaps_stem`` for why this is narrower
-                    # than a full glob-language intersection (and so does
-                    # NOT flag an unrelated token like "dummy.txt*").
-                    if _glob_token_overlaps_stem(residue, stem_basename):
+                    # prefix to compare against). The overlap check exists
+                    # ONLY for that shape: an exact-filename pattern
+                    # ("id_rsa") or a pattern anchored at the START
+                    # (".vault-pass*") has NO arbitrary-prefix wildcard for
+                    # a token to hide behind, so a genuine truncation of
+                    # THOSE patterns is already a literal PREFIX of the stem
+                    # and is caught by the fnmatch check above — the overlap
+                    # test adds nothing there but false positives (a token
+                    # like "sample*" or "id*" sharing a coincidental 2-char
+                    # edge with "id_rsa" was denied before this gate).
+                    if pattern.startswith("*") and _glob_token_overlaps_stem(
+                        residue, stem_basename
+                    ):
                         return pattern
         real = _realpath_if_resolvable(token)
         if real is not None:

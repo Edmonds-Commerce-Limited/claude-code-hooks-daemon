@@ -163,15 +163,54 @@ class TestBashMentionsProtectedPath:
         assert self._match("cat dummy.txt*") is None
 
     def test_leading_wildcard_reverse_overlap_is_matched(self) -> None:
-        """A leading-wildcard token's residue can only overlap a stem in the
+        """A leading-wildcard TOKEN's residue can only overlap a stem in the
         REVERSE direction (stem's suffix vs residue's prefix) — exercises the
         second branch of ``_glob_token_overlaps_stem`` independently of the
         forward-direction case the trailing-wildcard tests already cover.
-        ``*rsaXXX`` is synthetic (not a realistic real-world truncation): the
-        residue ``rsaXXX`` is NOT a substring of the ``id_rsa`` stem, so the
-        original fnmatch check cannot fire here — only the reverse overlap
-        (stem suffix ``rsa`` == residue prefix ``rsa``) can."""
-        assert self._match("cat *rsaXXX") is not None
+        Uses ``*vault_pass*`` (a leading-wildcard PATTERN — the overlap check
+        is gated to those, see ``test_overlap_never_fires_for_anchored_or_exact_stems``),
+        so this is not a synthetic corner case: ``*passXXX`` genuinely shares
+        no substring with the stem, only a boundary overlap."""
+        assert self._match("cat *passXXX") is not None
+
+    def test_overlap_never_fires_for_anchored_or_exact_stems(self) -> None:
+        """Coordinator-reported over-blocking regression: the overlap test
+        must be GATED to patterns with a LEADING wildcard (``*.vault-password``,
+        ``*.secret*``, ``*vault_pass*``). An exact-filename pattern
+        (``id_rsa``/``id_ed25519``) or a pattern anchored at the START
+        (``.vault-pass*``) has no arbitrary prefix for a token to hide
+        behind, so ANY genuine truncation of those is already a literal
+        PREFIX of the stem and is caught by the pre-existing substring+fnmatch
+        check — the overlap test contributes nothing there but false
+        positives from a coincidental short edge match. Every one of these
+        tokens shares a 2+ char edge with the ``id_rsa`` stem purely by
+        coincidence and must stay ALLOWED."""
+        for token in ("sample*", "grid*", "valid*", "android*", "raid*", "hybrid*"):
+            assert self._match(f"cat {token}") is None, token
+
+    def test_prefix_truncation_of_exact_filename_pattern_still_denied(self) -> None:
+        """``id_rs*`` is a REAL truncation of the exact-filename pattern
+        ``id_rsa`` (residue ``id_rs`` is a literal substring/prefix of the
+        stem) — this must keep denying via the untouched substring+fnmatch
+        path, independent of the leading-wildcard gate on the overlap test."""
+        assert self._match("cat id_rs*") is not None
+
+    def test_short_prefix_of_exact_filename_pattern_still_denied(self) -> None:
+        """``id*`` is also a literal prefix of ``id_rsa`` (and of
+        ``id_ed25519``) — genuinely denied via the same substring+fnmatch
+        path as ``id_rs*``, not the overlap heuristic. This is deliberately
+        NOT in the allowed-FP list: unlike ``sample*``/``grid*``/etc. (which
+        share only a coincidental short EDGE with the stem), ``id*`` shares
+        the stem's own leading substring — exactly the shape the pre-existing
+        check exists to catch, and exactly why ``id_rs*`` must also deny."""
+        assert self._match("cat id*") is not None
+
+    def test_dot_secret_leading_wildcard_negative_controls(self) -> None:
+        """``*.secret*`` is both-ends-wildcard, so the overlap gate applies —
+        confirm it does not manufacture new false positives on common tokens
+        that merely start with ``.s`` or end with ``et``."""
+        for token in ("start*", "reset*", ".ssh*", "market*"):
+            assert self._match(f"cat {token}") is None, token
 
     def test_no_echo_exemption(self) -> None:
         """Decision 9(c): unlike sed_blocker, echo buys no exemption."""
