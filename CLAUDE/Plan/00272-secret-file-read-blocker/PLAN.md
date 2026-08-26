@@ -217,18 +217,23 @@ paths; possibly a PostToolUse output backstop). Complements
 
 - [x] ✅ **Task 6.1** (permissions/ownership half shipped earlier in
   `secret-meta` output — `permissions_ok` + chmod 600 hint; the deferred
-  SessionStart half shipped now): new `SecretFileHygieneCheckerHandler`
+  SessionStart half shipped now, then fixed a review round — see
+  Decision 11): new `SecretFileHygieneCheckerHandler`
   (`handlers/session_start/secret_file_hygiene_checker.py`, priority 62,
-  default-enabled) walks the project tree (same bounded cap as
-  `directory_contains_protected`) for every path matching the effective
-  `secret_file_guard` globs, and advises — never blocks — when a matched path
-  is not gitignored, is git-tracked, or is group/world-readable (`mode & FileMode.DAEMON_UMASK`).
-  Metadata only: `os.walk`, `git check-ignore`/`git ls-files`, `stat()` —
-  content is never opened. The Task 1.3 auto-inlining config check
-  (`@`-imports, `.claude/rules/` `paths:` globs) is NOT included here: it is a
-  distinct configuration-condition check unrelated to protected-file hygiene,
-  and bundling it would have doubled this handler's scope for no shared code;
-  left as a candidate for its own follow-up plan.
+  default-enabled) enumerates every path matching the effective
+  `secret_file_guard` globs via `git ls-files` (tracked, untracked-visible,
+  untracked-ignored — three index reads, deterministic, no filesystem walk),
+  and advises — never blocks — when a matched path is not gitignored, is
+  git-tracked, or is group/world-readable (`mode & FileMode.GROUP_OTHER_MASK`).
+  Outside a git repository (or when `git` is unavailable), gitignore/tracked
+  checks are skipped as meaningless and only permissions are checked via a
+  bounded fallback walk, which states explicitly in the advisory when its
+  cap was hit rather than presenting a truncated scan as a clean one.
+  Metadata only: no file content is ever opened. The Task 1.3 auto-inlining
+  config check (`@`-imports, `.claude/rules/` `paths:` globs) is NOT included
+  here: it is a distinct configuration-condition check unrelated to
+  protected-file hygiene, and bundling it would have doubled this handler's
+  scope for no shared code; left as a candidate for its own follow-up plan.
 - [x] ✅ **Task 6.2**: Update `sensitive_content` guidance; stage
   truth-changes + config-changes manifests in `UNRELEASED/`
 
@@ -355,6 +360,106 @@ from the capture file rather than partially written. `lint_on_edit` and
 `staged_lint_gate` are closed the same way: a protected path is skipped
 before any lint command runs, because a syntax-error diagnostic can quote the
 offending source line verbatim.
+**Boundary (code review)**: `_touches_protected_path` inspects `tool_input`
+fields (`file_path`/`notebook_path`/`path`/`command`) ONLY — it does not
+recurse into arbitrary nested structures the way `redact_structure` does.
+This matches every route the guard itself inspects (Task 4.1's field set), so
+it closes exactly the seam Task 1.9 identified; a hypothetical future field
+carrying a bare path outside those keys would need the same field added here
+AND to the guard first, since the guard's own coverage is the ceiling this
+seam-closer tracks.
+**Residual gap (code review, accepted)**: `lint_on_edit`/`staged_lint_gate`
+now SILENTLY skip a protected-path file rather than linting it — a
+`*.secret*`-named source file (a real, if narrow, possibility given
+Decision 7's intentionally broad default) is therefore never syntax-checked
+by either surface, with no advisory noting the skip. This is the accepted
+cost of the fix: linting it would risk exactly the diagnostic-quotes-source
+leak the fix exists to close (a syntax error can echo the offending line),
+and an advisory naming the skipped file adds no actionable content beyond
+"this path is protected" (already known from `secret_file_guard`'s own
+deny). A future enhancement could emit a content-free advisory ("N protected
+file(s) excluded from lint") if the silent gap proves confusing in practice.
+**Date**: 2026-08-26
+
+### Decision 11: code-review fix round on Tasks 4.5/6.1 — findings and one rebuttal
+
+**Context**: a code review of the worktree branch returned REQUEST CHANGES
+with three mandatory findings and six advisory ones.
+
+**Fixed (mandatory)**:
+
+1. `secret_file_hygiene_checker`'s unfiltered `os.walk` + 5,000-entry cap
+   could exhaust the cap inside an unrelated large subtree before ever
+   reaching a protected file, silently reporting the tree clean. Replaced
+   with `git ls-files` (three cheap index reads: `--cached`, `--others --exclude-standard`, `--others --ignored --exclude-standard`) as the
+   primary route — deterministic, no walk. A non-git directory falls back to
+   the bounded walk for PERMISSIONS ONLY (gitignore/tracked checks are
+   meaningless there), and a hit cap is now stated explicitly in the
+   advisory rather than silently reported as clean.
+2. `resolve_configured_patterns`'s `except (OSError, RuntimeError)` did not
+   catch `yaml.YAMLError` (malformed YAML) or pydantic's `ValidationError`
+   (a `ValueError` subclass, schema-invalid config) — both propagated into
+   `LintOnEditHandler`/`StagedLintGateHandler` callers. Widened to
+   `(OSError, RuntimeError, ValueError, yaml.YAMLError)`, `import yaml`
+   moved to module top-level (a lazy import inside the `try` would leave the
+   `except` tuple's own `yaml.YAMLError` reference unbound on a failure
+   before the import line ran — caught in a follow-up coordinator note, not
+   the original review, and fixed the same way).
+3. Added tests for the resolver's try: block against a REAL config file
+   (mode: replace + custom protected_paths) — which caught a genuine bug:
+   `Config`'s own `coerce_handler_configs` validator turns every handler
+   entry into a `HandlerConfig` instance, not a plain dict, so the
+   `isinstance(handler_cfg, dict)` guard always failed and the resolver had
+   NEVER actually read a real project config, only ever the shipped
+   defaults. Fixed to check `isinstance(handler_cfg, HandlerConfig)` and use
+   `.options`. Added an equivalence test between the resolver and the
+   guard's registry-injected `_patterns()` for the same `mode`/
+   `protected_paths` pair.
+
+**Rebutted**: the review's PREFERRED fix for finding 3 was having
+`secret_file_guard` delegate to `resolve_configured_patterns()` so there is
+only one resolution route. Not done: the guard's options arrive through the
+registry's generic `setattr` injection (`registry.py`'s `register_all`),
+which is the SAME mechanism every handler in the daemon uses and which also
+applies tag filtering and `daemon.exclude_paths` inheritance the resolver
+does not replicate. Delegating one handler to instead read raw YAML directly
+via `resolve_configured_patterns()` would (a) diverge from that shared
+convention for no other handler, (b) silently stop responding to the
+registry-injection pattern every existing unit test for the guard already
+relies on (`handler._mode = ...`, `handler._protected_paths = ...`
+`setattr`-style, per Tasks 4.1–4.4), and (c) risk drift from the tag/exclude
+inheritance the registry provides. The two routes are not actually
+redundant — they read the SAME config through two different, already-tested
+mechanisms — so the equivalence test (proving they compute the same answer
+for the same inputs) is the correct fix, not architectural unification.
+
+**Fixed (advisory, cheap)**:
+
+- Added `FileMode.GROUP_OTHER_MASK`, a purpose-named alias for the existing
+  `DAEMON_UMASK` bit pattern, used by the hygiene checker's permission test.
+- Non-git directories: `_scan_repo` now detects git failure ONCE (any of the
+  three `ls-files` calls returning non-zero) and returns `None`, at which
+  point gitignore/tracked checks are skipped entirely (not run and reported
+  false) and only permissions are checked, with an explicit "not a git
+  repository" notice.
+- Added `ProjectContext.is_initialized()`, a public classmethod, and moved
+  `secret_file_matching.py`'s own check onto it.
+- Recorded the lint-skip residual gap in Decision 10 above (a protected
+  `.py`/`.sh`/etc. file is now silently never lint-checked) rather than
+  adding an advisory line — reasoned there as an accepted cost.
+- Stated the `_touches_protected_path` tool_input-field-only boundary in
+  Decision 10.
+- Registered the new handler in `daemon/init_config.py`'s generated template
+  (parity with `skill_opportunity_detector`) and staged
+  `CLAUDE/UPGRADES/UNRELEASED/config-changes/vUNRELEASED.yaml` with a
+  `recommended: true` entry (new default-enabled handler, per RELEASING.md
+  Step 7). This worktree branched before main's own Task 6.2 commit added a
+  `vUNRELEASED.yaml` with several other entries; the two will need merging
+  (not rebasing) when this branch lands — a plain content merge, since both
+  sides only ADD list entries.
+
+**Not rebutted, not yet done**: none — every mandatory and advisory finding
+above was either fixed or has a recorded reason it was not.
 **Date**: 2026-08-26
 
 ## Success Criteria
