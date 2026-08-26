@@ -427,6 +427,10 @@ handlers:
         extra_exclude_patterns: []   # Additional content-level noise markers, additive
         # transcript_dir: /path/override   # Test/unusual-layout override of ~/.claude/projects/<slug>
 
+    secret_file_hygiene_checker:  # On-disk hygiene for protected paths (Plan 00272 Task 6.1)
+      enabled: true                # gitignore/tracked/permissions -- never reads content
+      priority: 62
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     compaction_signal:  # Drops <session>.compacting for the PTY supervisor (opt-in)
