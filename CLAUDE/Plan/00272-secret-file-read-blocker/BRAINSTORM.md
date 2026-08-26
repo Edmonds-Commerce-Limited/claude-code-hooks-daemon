@@ -52,11 +52,25 @@ The entire point of a vault password file is `ansible-vault --vault-password-fil
 and must be ALLOWED — the consumer reads the file internally and never prints
 it (modulo a hostile playbook, which is outside our trust boundary). So the
 design needs an allowlist of consumer invocations where the path may appear as
-an argument. Shape: a per-protected-path (or global) `allowed_consumers` list
-of command-head patterns (`ansible-playbook`, `ansible-vault`, `ansible`),
-with the rule that the path may only appear following a recognised
-`--vault-password-file`-style flag — not in a substitution, not redirected.
-Shipped defaults cover the Ansible family; projects extend via config.
+an argument.
+
+**Command-head allowlisting alone has a hole that defeats the guard**
+(draft-review finding 3): `ansible-vault view --vault-password-file .vault-pass secrets.yml` and `ansible-vault decrypt ...` have exactly the
+allowed shape, and exist to **print decrypted secret material to stdout**. A
+head-only allowlist would deny `cat .vault-pass` while permitting
+`ansible-vault view` — strictly worse. The grammar therefore needs
+SUBCOMMAND awareness: permit `ansible-vault encrypt|rekey|create`,
+`ansible-playbook`, `ansible`; deny `ansible-vault view|decrypt` (and any
+subcommand whose purpose is disclosure). This is a named Phase 2 decision
+item (PLAN.md Task 2.1). Note also the scope boundary for `get_claude_md()`:
+protecting the vault password FILE does not protect the vaulted PAYLOAD —
+`ansible-playbook` with a `debug:` task can still print vaulted vars; that is
+a separate decision, documented as such. Shape: a per-protected-path (or
+global) `allowed_consumers` list of command patterns with optional
+`denied_subcommands`, with the rule that the path may only appear following a
+recognised `--vault-password-file`-style flag — not in a substitution
+(including process substitution `<(...)`), not redirected. Shipped defaults
+cover the Ansible family; projects extend via config.
 
 ## Honest limits — what a PreToolUse deny CANNOT guarantee
 
@@ -69,7 +83,13 @@ This is pattern matching on command text, not a sandbox. Enumerate honestly
    full coverage is impossible.
 2. **Scripts that open the file internally**: `python script.py` where the
    script hardcodes the path; `make deploy`; any binary. The command text is
-   clean. Unfixable at this layer.
+   clean — unfixable at the PreToolUse layer. HOWEVER (draft-review finding
+   2): the script's OUTPUT is visible at PostToolUse, and the vendored
+   contract's `updatedToolOutput` field means a PostToolUse handler may be
+   able to REWRITE the tool result before it reaches context — so this route
+   may be redactable output-side even though it is invisible input-side.
+   Phase 1 (Task 1.1) verifies whether Claude Code honours the field for
+   Bash; the class-(d) list is re-derived afterwards.
 3. **Directory-rooted content search**: `grep -r password .` over a tree
    containing the file; the Grep tool in content mode rooted above the file.
    Mitigation: the daemon could expand protected globs and deny recursive
@@ -122,10 +142,28 @@ publishing a crackable commitment. Options:
 
 **Recommendation**: default to keyed HMAC (option 2); expose plain sha256
 only behind an explicit config flag (`allow_plain_hash: true`) for projects
-that need cross-machine comparison and accept the leak. `size_bytes` also
-leaks a little (password length) — acceptable, but note it; consider a
-`min_size_bucket` rounding option only if a reviewer wants it (YAGNI lean:
-report exact size, document the leak).
+that need cross-machine comparison and accept the leak.
+
+### Size, key hygiene and the extraction-oracle boundary (draft-review finding 5)
+
+Three hardening points, superseding the earlier "report exact size" YAGNI
+lean:
+
+1. **Bucketed size by default.** Exact `size_bytes` is the single most
+   valuable disclosure to an offline cracker of a passphrase file, and no
+   legitimate use needs byte-exact length — "did it change?" is answered by
+   the digest. Default to a bucketed size; expose exact length only behind
+   the same flag as the plain hash.
+2. **The HMAC key file needs its own precondition.** A key in `untracked/` is
+   worthless if group/world-readable; the helper must check the key file's
+   mode (and owner) and REFUSE to emit a digest under a compromised key,
+   rather than sign with it.
+3. **Architectural separation from any output backstop.** If the PostToolUse
+   backstop matches output against first/last-N-byte digests or rolling
+   hashes, none of that may be reachable through the helper's CLI — repeated
+   prefix queries would otherwise recover the secret byte-by-byte. The
+   backstop's internal digests and the helper's public digest are separate by
+   DECISION (PLAN.md Decision 6), not by implementation accident.
 
 ## Config shape
 
@@ -182,6 +220,43 @@ guidance says so explicitly and tells agents not to hunt for another way.
   (YAGNI); it falls out of deny-by-default, document that.
 - **Read of a protected path by ANOTHER tool** (NotebookEdit, MCP tools): out
   of scope for v1; note as residual risk. The daemon only sees wired events.
+
+## Daemon-owned artefacts — the guard must not worsen the footprint
+
+Draft-review finding 1: the routes above describe content reaching AGENT
+context, but the daemon itself writes artefacts, and today
+`daemon/payload_capture.py` redacts only configured secret-word-list TERMS.
+Any read route this guard misses (class (c)/(d)) produces a PostToolUse
+payload carrying the secret that is captured verbatim to `payload-capture/` —
+so shipping the guard without extending that seam would WORSEN the on-disk
+footprint for exactly the residual routes. `utils/secret_redaction.py` is the
+single sanctioned reader of raw secret terms and already documents this
+vector class (Plan 00233 known gap). Two consequences, now plan tasks:
+
+- Extend `redact_structure` (or exclude protected-path payloads from capture)
+  BEFORE building any output-side layer (PLAN.md Task 4.5).
+- Any decision to let the daemon read a protected file's bytes for output
+  matching must be written as an AMENDMENT to `secret_redaction.py`'s
+  "exactly one code path" doctrine, not alongside it (PLAN.md Task 1.6).
+
+Also in this class: the daemon's own linter handlers. `staged_lint_gate`
+surfaces "the first line of diagnosis" over staged files and `lint_on_edit`
+does the same on write — if a protected file is ever staged or edited, a
+diagnostic can quote a content line into context. Protected paths need
+excluding from both (see RESEARCH table).
+
+## OS-level boundary — one shippable piece
+
+The real boundary is OS-level (permissions, separate user, encryption at
+rest), and most of it is documentation. One piece IS cheaply shippable
+(draft-review finding 4): the hygiene advisory (PLAN.md Task 6.1) checks not
+just gitignore/tracked status but each protected file's MODE and OWNER —
+flagging group/world-readable modes with `chmod 600` remediation text, using
+the `FileMode` constants in `constants/permissions.py`. Precedent:
+`utils/private_io.py` ("the redundancy is the point: neither layer is
+load-bearing on its own"). The handler is a detection-and-friction layer OVER
+an OS boundary the project must set independently — the advisory nudges that
+boundary into existence.
 
 ## Interaction with existing handlers
 
