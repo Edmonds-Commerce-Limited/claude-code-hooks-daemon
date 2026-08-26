@@ -53,7 +53,7 @@
 | 57 | daemon_docs_guard | ADVISORY | Warn when reading from the hooks-daemon internal CLAUDE/ docs directory |
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
 
-### PostToolUse (7 handlers)
+### PostToolUse (8 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -64,6 +64,7 @@
 | 28 | background_process_tracker | ADVISORY | Track backgrounded Bash processes and advise on watchdog/harvest (never kills) |
 | 29 | command_hints | ADVISORY | Inject a rate-limited advisory HINT when a configured command is detected |
 | 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
+| 31 | goal_injection | ADVISORY | Write a goal-intent signal when a plan flips to In Progress |
 
 ### SessionStart (11 handlers)
 

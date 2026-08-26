@@ -115,7 +115,7 @@ disabled and are enabled only by the repository owner.
 
 ### Phase 2: Daemon side (TDD)
 
-- [ ] ⬜ **Task 2.1**: RED — tests for a `goal_injection` PostToolUse handler:
+- [x] ✅ **Task 2.1**: RED — tests for a `goal_injection` PostToolUse handler:
   detects a `PLAN.md` write whose resulting `**Status**:` reads `In Progress`
   (Write/Edit under the plan directory, excluding `Completed/`), renders the
   configured lines with validated placeholders, writes the signal atomically,
@@ -126,10 +126,10 @@ disabled and are enabled only by the repository owner.
   an already-In-Progress plan in a NEW session re-fires. That is intended: it
   is what makes the goal survive session restarts, and it subsumes the
   "resumed sessions" case otherwise left to the CLI fallback.
-- [ ] ⬜ **Task 2.2**: GREEN — implement the handler; placeholder values
+- [x] ✅ **Task 2.2**: GREEN — implement the handler; placeholder values
   strictly validated (`plan_number` = 5 digits; `plan_title`/`plan_path`
   sanitised to a conservative charset, length-capped).
-- [ ] ⬜ **Task 2.3**: RED/GREEN — `bin/hooks-daemon inject-goal NNNNN` CLI
+- [x] ✅ **Task 2.3**: RED/GREEN — `bin/hooks-daemon inject-goal NNNNN` CLI
   subcommand writing the same signal (manual fallback and the primary
   debugging tool). The signal file is session-keyed, so the CLI must resolve
   the target session id from `CLAUDE_CODE_SESSION_ID` in its environment (set
@@ -137,21 +137,21 @@ disabled and are enabled only by the repository owner.
   own-session scan keys on) and refuse with a clear message when it is unset
   or the plan folder does not exist. Cross-session retargeting stays an open
   question (BRAINSTORM.md §6 Q4).
-- [ ] ⬜ **Task 2.4**: Config plumbing: HandlerID/Priority constants, exports,
+- [x] ✅ **Task 2.4**: Config plumbing: HandlerID/Priority constants, exports,
   config template + example, `get_claude_md()`, `get_acceptance_tests()`.
 
 ### Phase 3: Supervisor side (TDD, stdlib-only)
 
-- [ ] ⬜ **Task 3.1**: RED — tests for goal-signal consumption in
+- [x] ✅ **Task 3.1**: RED — tests for goal-signal consumption in
   `claude-supervise.py`: fresh in-scope signal + idle + empty input box →
   inject `/goal 🤖 [ccy-supervisor] ...` and consume (unlink) the signal;
   stale/foreign/oversized/malformed signal → NOOP with logged reason;
   validation gate rejects payloads failing prefix/length/charset rules —
   including ANY payload containing a newline (Decision 2 corollary).
-- [ ] ⬜ **Task 3.2**: GREEN — implement consumption through the existing
+- [x] ✅ **Task 3.2**: GREEN — implement consumption through the existing
   injection choke point and state machine; dry-run mode injects the visible
   marker variant, `--arm` injects the real `/goal`.
-- [ ] ⬜ **Task 3.3**: Regression tests — compaction machine behaviour
+- [x] ✅ **Task 3.3**: Regression tests — compaction machine behaviour
   unchanged; a pending goal signal never starves or reorders a
   compact/continue decision.
 
