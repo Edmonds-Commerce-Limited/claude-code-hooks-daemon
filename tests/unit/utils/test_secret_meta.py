@@ -46,9 +46,7 @@ class TestCollect:
 
     def test_exact_size_and_sha256_only_with_plain_flag(self, tmp_path: Path) -> None:
         secret = _secret(tmp_path)
-        meta = sm.collect_secret_meta(
-            secret, key_path=_key_path(tmp_path), allow_plain_hash=True
-        )
+        meta = sm.collect_secret_meta(secret, key_path=_key_path(tmp_path), allow_plain_hash=True)
         assert meta["size_bytes"] == 8
         assert len(meta["sha256"]) == 64
 
