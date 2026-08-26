@@ -100,23 +100,17 @@ dogfood-enabled in this repo. Full design exploration: `BRAINSTORM.md`.
   rule over the real files (20,829 user records → 142 genuine prompts), and
   `test_skill_scan.py` freezes the field/marker contract into synthetic
   inline fixtures (25 tests, no real transcript content committed).
-- [ ] 🔄 **Task 1.2**: Haiku-invocation spike, citing Plan 00266: run
-  `claude -p --model haiku --output-format json` headlessly with a
-  digest-shaped prompt; MEASURE latency and cost per invocation (00266 rule:
-  measured, never estimated); document auth prerequisites and every failure
-  mode observed (no CLI, no auth, offline, timeout, malformed output).
-  PARTIAL: dogfood run observed the no-auth failure mode — headless
-  `claude -p` exits 1 "Not logged in" inside this container, so Decision 3's
-  reuse-user-auth premise fails in containerised sessions; latency/cost
-  measurement blocked until an authenticated environment or the Task 1.4
-  API-fallback decision.
-- [ ] ⬜ **Task 1.3**: Decide the clustering heuristic (token-set Jaccard vs
-  trigram overlap) by running both over the real corpus via the Task 1.1
-  harness; record the choice and threshold as a Technical Decision.
-- [ ] ⬜ **Task 1.4**: Resolve the open questions in `BRAINSTORM.md` §9 with
-  the user (CLI-without-handler, API fallback, report retention, corrections
-  vs workloads sections, cross-project scope) and record answers as Technical
-  Decisions here.
+- [x] ✅ **Task 1.2**: Haiku-invocation spike, citing Plan 00266: the dogfood
+  run observed the no-auth failure mode — headless `claude -p` exits 1 "Not
+  logged in" inside this container, so Decision 3's reuse-user-auth premise
+  fails in containerised sessions. Resolved by Decision 5: v1 is CLI-auth
+  only with the no-auth failure mode first-class (fail-open, report notes the
+  skip and remedy). Latency/cost measurement deferred to the Task 5.2
+  authenticated dogfood run.
+- [x] ✅ **Task 1.3**: Clustering heuristic decided — see Decision 4
+  (token-set Jaccard, threshold 0.5, measured over the real corpus).
+- [x] ✅ **Task 1.4**: Open questions resolved by the user's rollout
+  authorisation — recorded as Decisions 5–8 below.
 
 ### Phase 2: TDD — extraction and aggregation (deterministic core)
 
@@ -209,6 +203,45 @@ Claude Code auth; API fallback only if Task 1.4 decides it is wanted), per
 Plan 00266's mechanism research; every model-call failure degrades to a
 logged skip and a partial report, never a block or crash; the call lives only
 in the CLI, so no hook event ever waits on a model. **Date**: 2026-08-26
+
+### Decision 4: Clustering — token-set Jaccard at threshold 0.5
+
+**Context**: Task 1.3 compared token-set Jaccard against character-trigram
+Jaccard over the real corpus (143 genuine prompts) at thresholds 0.3–0.6.
+Both produced near-identical cluster structures at every threshold (e.g.
+130 vs 130 clusters, 11 vs 11 multi-prompt clusters at 0.5); trigram gained
+no additional true merges, made one questionable looser merge at 0.3, and ran
+~4–5x slower. **Decision**: token-set Jaccard over normalised tokens with a
+greedy threshold of 0.5 — simplest, fastest, dependency-free, and empirically
+equivalent on this corpus. **Date**: 2026-08-26
+
+### Decision 5: v1 model auth — CLI-only, no API-key fallback
+
+**Decision**: v1 invokes only `claude -p --model <model>`; there is NO
+`ANTHROPIC_API_KEY` fallback. The no-auth failure mode (observed in-container:
+exit 1 "Not logged in") is first-class: fail-open, the report records the skip
+reason and the remedy (log in, or run the scan from an authenticated
+environment). The CLI works with the handler disabled — a manual run is
+consent by definition; `enabled` gates only the SessionStart advisory.
+**Date**: 2026-08-26
+
+### Decision 6: Report retention — dated files
+
+**Decision**: one dated report per scan,
+`untracked/reports/YYYY-MM-DD-skill-opportunities.md` (Plan 00161 convention);
+the TTL state file remembers the latest report path. **Date**: 2026-08-26
+
+### Decision 7: Report separates WORKLOADS from CORRECTIONS
+
+**Decision**: the model rubric asks for two sections — repeated workloads
+(skill candidates) and recurring corrections/confusion (which may want a
+doc/CLAUDE.md/rules line rather than a skill) — and the report renders both.
+**Date**: 2026-08-26
+
+### Decision 8: Cross-project scanning stays out of scope for v1
+
+**Decision**: confirmed by the user; already listed in Non-Goals.
+**Date**: 2026-08-26
 
 ## Success Criteria
 
