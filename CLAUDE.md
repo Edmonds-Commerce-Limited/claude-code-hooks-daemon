@@ -1733,66 +1733,6 @@ Do not carry "a missing linter never blocks" across to TypeScript.
 present this handler only advises — and suggests adding `llm:lint` — so silence
 is not evidence that a `.ts` file is clean.
 
-<!-- handler: lint-on-edit -->
-
-## lint_on_edit — source writes are linted, and a failure DENIES
-
-Every `Write`/`Edit` to a Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin or
-Dart file is linted immediately. A lint failure DENIES the tool call.
-
-**Ansible YAML is covered too, and only Ansible YAML.** A `.yml`/`.yaml` file is
-linted when it is plausibly a playbook or a role task file — by Ansible's own
-conventions (`playbooks/`, `roles/`, `tasks/`, `handlers/`, `site.yml`,
-`play-*`, `playbook-*`) or by carrying a top-level `- hosts:` / `- import_playbook:`
-line wherever it sits. Everything else sharing the extension is left alone:
-`.github/workflows/`, `hooks-daemon.yaml`, `docker-compose*`, `group_vars/`,
-`host_vars/`, inventories, and any vault file (never read — it is encrypted).
-The cheap tier is `ansible-playbook --syntax-check`, which is what catches a
-play that will not LOAD: an unbalanced quote inside a `shell:` block aborts the
-whole play at parse time, before `#` means comment. Full `ansible-lint` runs at
-the `extended` tier. The linter runs from the nearest directory containing
-`ansible.cfg`, because roles and collections resolve relative to it.
-
-**Bash-authored files are linted too.** A file a command writes with `>`, `>>`,
-`tee` or a `cat <<EOF` heredoc gets the same treatment — so the heredoc route is
-no longer the quiet way to land unparseable source. A command can author several
-files at once (`tee a.py b.py`); each is linted and the first failure is
-reported. Two boundaries are deliberate:
-
-- **Relocation is NOT linted.** `cp`, `mv`, `install` and `dd` move bytes that
-  were already on disk, so denying them would report a defect the command did
-  not introduce and leave you repairing a file you never wrote.
-- **A target that does not exist is NOT linted.** The path is inferred from the
-  command text, so a command that failed leaves nothing to check.
-
-Opt out with `handlers.post_tool_use.lint_on_edit.options.lint_bash_writes: false`, which leaves `Write`/`Edit` linting untouched.
-
-**The write has ALREADY landed on disk.** A PostToolUse denial is a failure
-report, not a rollback — the file exists, with your content in it. Fix the
-reported problems with `Edit`. Do NOT re-`Write` the file from scratch: that
-rewrites content already on disk from memory, and loses anything you no longer
-have in hand.
-
-A denial also cancels every sibling tool call batched in the same turn, so
-re-issue those separately.
-
-Each language runs a cheap syntax check first (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) and then an optional deeper linter (`ruff`,
-`shellcheck`, `golangci-lint`, `rubocop`, …). Tools are resolved from the
-daemon's venv before `PATH`.
-
-**A linter that is not installed never blocks.** You get an advisory saying it
-was not found and the write stands — so that message means the check was
-SKIPPED, not that it passed. That leniency is specific to THIS handler:
-`.ts`/`.tsx` files are handled by `validate_eslint_on_write`, which denies on
-a timeout and on any failure to run ESLint.
-
-Narrow it under `handlers.post_tool_use.lint_on_edit.options`: `languages`
-restricts which languages are checked, `command_overrides` replaces a
-language's `default`/`extended` command (set `extended: null` to run only the
-syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
-globs. The project-wide `daemon.exclude_paths` applies here too; the two are
-additive and neither overrides the other.
-
 <!-- handler: command-hints -->
 
 ## command_hints — advisory reminders after specific commands
@@ -1893,6 +1833,66 @@ handlers:
 ## git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
 When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
+
+<!-- handler: lint-on-edit -->
+
+## lint_on_edit — source writes are linted, and a failure DENIES
+
+Every `Write`/`Edit` to a Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin or
+Dart file is linted immediately. A lint failure DENIES the tool call.
+
+**Ansible YAML is covered too, and only Ansible YAML.** A `.yml`/`.yaml` file is
+linted when it is plausibly a playbook or a role task file — by Ansible's own
+conventions (`playbooks/`, `roles/`, `tasks/`, `handlers/`, `site.yml`,
+`play-*`, `playbook-*`) or by carrying a top-level `- hosts:` / `- import_playbook:`
+line wherever it sits. Everything else sharing the extension is left alone:
+`.github/workflows/`, `hooks-daemon.yaml`, `docker-compose*`, `group_vars/`,
+`host_vars/`, inventories, and any vault file (never read — it is encrypted).
+The cheap tier is `ansible-playbook --syntax-check`, which is what catches a
+play that will not LOAD: an unbalanced quote inside a `shell:` block aborts the
+whole play at parse time, before `#` means comment. Full `ansible-lint` runs at
+the `extended` tier. The linter runs from the nearest directory containing
+`ansible.cfg`, because roles and collections resolve relative to it.
+
+**Bash-authored files are linted too.** A file a command writes with `>`, `>>`,
+`tee` or a `cat <<EOF` heredoc gets the same treatment — so the heredoc route is
+no longer the quiet way to land unparseable source. A command can author several
+files at once (`tee a.py b.py`); each is linted and the first failure is
+reported. Two boundaries are deliberate:
+
+- **Relocation is NOT linted.** `cp`, `mv`, `install` and `dd` move bytes that
+  were already on disk, so denying them would report a defect the command did
+  not introduce and leave you repairing a file you never wrote.
+- **A target that does not exist is NOT linted.** The path is inferred from the
+  command text, so a command that failed leaves nothing to check.
+
+Opt out with `handlers.post_tool_use.lint_on_edit.options.lint_bash_writes: false`, which leaves `Write`/`Edit` linting untouched.
+
+**The write has ALREADY landed on disk.** A PostToolUse denial is a failure
+report, not a rollback — the file exists, with your content in it. Fix the
+reported problems with `Edit`. Do NOT re-`Write` the file from scratch: that
+rewrites content already on disk from memory, and loses anything you no longer
+have in hand.
+
+A denial also cancels every sibling tool call batched in the same turn, so
+re-issue those separately.
+
+Each language runs a cheap syntax check first (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) and then an optional deeper linter (`ruff`,
+`shellcheck`, `golangci-lint`, `rubocop`, …). Tools are resolved from the
+daemon's venv before `PATH`.
+
+**A linter that is not installed never blocks.** You get an advisory saying it
+was not found and the write stands — so that message means the check was
+SKIPPED, not that it passed. That leniency is specific to THIS handler:
+`.ts`/`.tsx` files are handled by `validate_eslint_on_write`, which denies on
+a timeout and on any failure to run ESLint.
+
+Narrow it under `handlers.post_tool_use.lint_on_edit.options`: `languages`
+restricts which languages are checked, `command_overrides` replaces a
+language's `default`/`extended` command (set `extended: null` to run only the
+syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
+globs. The project-wide `daemon.exclude_paths` applies here too; the two are
+additive and neither overrides the other.
 
 <!-- handler: ccy-supervisor-integrity -->
 
@@ -2009,6 +2009,20 @@ On every new session this handler audits hook configuration across `.claude/sett
 - **Legacy-style commands**: replace them with a project-level handler. Run `bin/hooks-daemon init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
 - **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
 - **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry and remove the duplicate in `settings.local.json`.
+
+<!-- handler: secret-file-hygiene-checker -->
+
+## secret_file_hygiene_checker -- on-disk hygiene for protected paths
+
+At SessionStart, for every configured protected path (the effective `secret_file_guard` globs) that EXISTS on disk, this advisory reports (never blocks) when it is:
+
+- **not gitignored** -- add it to `.gitignore`
+- **git-tracked** -- `git rm --cached <path>` to untrack it
+- **group/world-readable** -- `chmod 600 <path>`
+
+**Metadata only.** Files are enumerated via `git ls-files` (tracked, untracked-visible and untracked-ignored -- three cheap index reads, no filesystem walk) and checked with `stat()` -- the file's CONTENTS are never opened, so this advisory cannot leak what it protects. This is the SessionStart half of the permissions/ownership hygiene the `secret-meta` CLI already reports on demand for a single path.
+
+**Outside a git repository** (or when `git` is unavailable), gitignore/tracked status is meaningless, so only permissions are checked via a bounded fallback walk -- and if that walk hits its file-count bound, the advisory says so explicitly rather than reporting a truncated scan as a clean one.
 
 <!-- handler: idle-housekeeping-advisory -->
 
