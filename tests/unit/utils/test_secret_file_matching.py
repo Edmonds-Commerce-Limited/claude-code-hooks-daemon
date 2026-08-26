@@ -131,6 +131,48 @@ class TestBashMentionsProtectedPath:
         literal residue ``.vault-p``, which is a prefix of the stem."""
         assert self._match("cat .vault-p*") is not None
 
+    def test_trailing_wildcard_truncation_of_protected_basename_is_matched(self) -> None:
+        """Plan 00272 live-probe gap (G2): a token whose fixed prefix is a
+        real filename's stem plus part of the protected SUFFIX (the arbitrary
+        prefix belongs to the pattern, e.g. ``*.vault-password``) must still
+        be denied — the original stem-vs-token fnmatch missed this because
+        the stem has no ``dummy`` prefix to match against."""
+        assert self._match("cat dummy.vault-p*") is not None
+
+    def test_shorter_trailing_wildcard_truncation_is_also_matched(self) -> None:
+        """A shorter truncation of the same shape must not slip through —
+        the fix must not be tuned to one specific truncation length."""
+        assert self._match("cat dummy.vault-*") is not None
+
+    def test_very_short_trailing_wildcard_truncation_is_matched(self) -> None:
+        """Two-character literal overlap (``.v``) is still enough to deny —
+        the minimum overlap threshold is set at 2, not at the full stem."""
+        assert self._match("cat dummy.v*") is not None
+
+    def test_single_char_generic_wildcard_is_not_matched(self) -> None:
+        """``d*`` cannot overlap any stem by 2+ characters (max possible
+        overlap is 1, since the token's literal residue is one character) —
+        this is the accepted residual for arbitrarily short generic globs,
+        not a special case: the threshold that catches ``dummy.v*`` cannot
+        be lowered to 1 without flagging near-universal single-letter globs."""
+        assert self._match("ls d*") is None
+
+    def test_unrelated_trailing_wildcard_is_not_matched(self) -> None:
+        """Negative control: a genuinely unrelated glob must stay allowed.
+        ``dummy.txt`` shares no literal edge with any protected stem."""
+        assert self._match("cat dummy.txt*") is None
+
+    def test_leading_wildcard_reverse_overlap_is_matched(self) -> None:
+        """A leading-wildcard token's residue can only overlap a stem in the
+        REVERSE direction (stem's suffix vs residue's prefix) — exercises the
+        second branch of ``_glob_token_overlaps_stem`` independently of the
+        forward-direction case the trailing-wildcard tests already cover.
+        ``*rsaXXX`` is synthetic (not a realistic real-world truncation): the
+        residue ``rsaXXX`` is NOT a substring of the ``id_rsa`` stem, so the
+        original fnmatch check cannot fire here — only the reverse overlap
+        (stem suffix ``rsa`` == residue prefix ``rsa``) can."""
+        assert self._match("cat *rsaXXX") is not None
+
     def test_no_echo_exemption(self) -> None:
         """Decision 9(c): unlike sed_blocker, echo buys no exemption."""
         assert self._match('echo ".vault-pass"') is not None
