@@ -28,8 +28,8 @@ from typing import Final
 DEFAULT_TRANSCRIPT_DIR: Final[str] = str(Path.home() / ".claude" / "projects" / "-workspace")
 PROJECT_ROOT: Final[Path] = Path("/workspace")
 SECRET_WORD_LIST: Final[Path] = PROJECT_ROOT / ".claude" / "block-words.secret"
-REPORT_PATH: Final[Path] = PROJECT_ROOT / "untracked" / "reports" / (
-    "skill-opportunities-2026-08-26.md"
+REPORT_PATH: Final[Path] = (
+    PROJECT_ROOT / "untracked" / "reports" / ("skill-opportunities-2026-08-26.md")
 )
 SKILLS_DIR: Final[Path] = PROJECT_ROOT / ".claude" / "skills"
 COMMANDS_DIR: Final[Path] = PROJECT_ROOT / ".claude" / "commands"
@@ -230,9 +230,7 @@ def _existing_skill_names() -> list[str]:
     names: list[str] = []
     for directory in (SKILLS_DIR, COMMANDS_DIR):
         if directory.is_dir():
-            names.extend(
-                sorted(p.name for p in directory.iterdir() if not p.name.endswith(".md"))
-            )
+            names.extend(sorted(p.name for p in directory.iterdir() if not p.name.endswith(".md")))
     return names
 
 

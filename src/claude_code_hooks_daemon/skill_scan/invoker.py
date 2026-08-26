@@ -14,7 +14,7 @@ import logging
 
 # SECURITY: subprocess invokes only the trusted local `claude` CLI with a
 # list argv and no shell.
-import subprocess
+import subprocess  # nosec B404 — only ever runs the trusted local `claude` CLI
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -76,7 +76,7 @@ class ClaudeCliInvoker:
         argv = [CLAUDE_CLI_BINARY, "-p", prompt, "--model", self._model]
         try:
             # SECURITY: list argv, trusted local CLI, no shell interpretation.
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 — fixed argv, no shell, trusted binary
                 argv,
                 capture_output=True,
                 text=True,
@@ -88,9 +88,7 @@ class ClaudeCliInvoker:
         except subprocess.TimeoutExpired:
             return None, f"{CLAUDE_CLI_BINARY} CLI timed out after {MODEL_TIMEOUT_SECONDS}s"
         if result.returncode != 0:
-            detail = (result.stderr.strip() or result.stdout.strip())[
-                :MODEL_ERROR_DETAIL_MAX_CHARS
-            ]
+            detail = (result.stderr.strip() or result.stdout.strip())[:MODEL_ERROR_DETAIL_MAX_CHARS]
             error = f"{CLAUDE_CLI_BINARY} CLI exited {result.returncode}: {detail}"
             if NOT_LOGGED_IN_MARKER in detail:
                 error += _NO_AUTH_REMEDY

@@ -65,9 +65,7 @@ class TestClaudeCliInvoker:
         assert "exited 1" in error
 
     def test_no_auth_error_mentions_remedy(self) -> None:
-        with patch(
-            _RUN_TARGET, return_value=_completed(returncode=1, stderr="Not logged in")
-        ):
+        with patch(_RUN_TARGET, return_value=_completed(returncode=1, stderr="Not logged in")):
             _, error = ClaudeCliInvoker(model="haiku").invoke("prompt")
         assert error is not None
         assert "authenticated" in error

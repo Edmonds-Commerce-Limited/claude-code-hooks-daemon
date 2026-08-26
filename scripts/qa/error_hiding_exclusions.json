@@ -291,6 +291,30 @@
       "reason": "Version check: log-and-continue on cache write failure. Already logged. Version checking is advisory."
     },
     {
+      "file": "skill_scan/invoker.py",
+      "function": "parse_model_output",
+      "rule": "return-none-on-error",
+      "reason": "Skill-scan model stage (Plan 00274): None on unparseable model output is the documented degrade-to-raw-notes contract — the caller appends the raw text to the report as unparsed model notes. Fail-open is mandatory for model calls (Plan 00266)."
+    },
+    {
+      "file": "skill_scan/state.py",
+      "function": "_write_state",
+      "rule": "log-and-continue",
+      "reason": "Skill-scan TTL state (Plan 00274): log-and-continue on state write failure, the version_check cache pattern. The scan is advisory; a failed state write means the advisory refires next session, which fails toward a suggestion rather than silence."
+    },
+    {
+      "file": "skill_scan/extraction.py",
+      "function": "extract_prompts",
+      "rule": "log-and-continue",
+      "reason": "Skill-scan transcript reader (Plan 00274): an unreadable/unstatable transcript file is skipped and logged. Transcripts are Claude Code's private files being read best-effort; one bad file must not abort the whole scan."
+    },
+    {
+      "file": "skill_scan/extraction.py",
+      "function": "_consume_line",
+      "rule": "return-none-on-error",
+      "reason": "Skill-scan line parser (Plan 00274): a malformed jsonl line is counted in ScanStats.unparseable (the schema-drift canary rendered in every report) and skipped — the documented tolerant-parser contract for a private, version-dependent format."
+    },
+    {
       "file": "handlers/session_start/contract_staleness.py",
       "function": "_read_meta",
       "rule": "return-none-on-error",

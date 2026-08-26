@@ -66,7 +66,9 @@ def _state_path(root: Path) -> Path:
 
 
 class TestCmdSkillScan:
-    def test_runs_with_handler_disabled(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_runs_with_handler_disabled(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         # Decision 5: a manual run is consent; `enabled` gates only the advisory.
         root = _scaffold(tmp_path, enabled=False)
         with patch(_INVOKE_TARGET, return_value=(_EMPTY_SUGGESTIONS, None)):

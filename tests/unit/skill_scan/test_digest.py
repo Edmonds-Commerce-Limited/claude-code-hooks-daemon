@@ -30,9 +30,7 @@ class TestBuildDigest:
         assert "deploy the thing" in digest
 
     def test_secret_terms_are_redacted(self) -> None:
-        digest = build_digest(
-            [_cluster("please rotate hunter2 now")], terms=("hunter2",)
-        )
+        digest = build_digest([_cluster("please rotate hunter2 now")], terms=("hunter2",))
         assert "hunter2" not in digest
         assert "[REDACTED]" in digest
 

@@ -80,9 +80,7 @@ class TestIsAdvisoryDue:
     def test_stale_scan_due(self, tmp_path: Path) -> None:
         path = tmp_path / "state.json"
         record_success(path, report_path="/r.md", now=1000.0)
-        assert (
-            is_advisory_due(load_state(path), interval_days=7, now=1000.0 + 8 * _DAY) is True
-        )
+        assert is_advisory_due(load_state(path), interval_days=7, now=1000.0 + 8 * _DAY) is True
 
     def test_recent_failed_attempt_quietens_the_advisory(self, tmp_path: Path) -> None:
         # A permanently-offline box must not be nagged every session: a recent

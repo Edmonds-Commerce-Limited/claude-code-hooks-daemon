@@ -4184,9 +4184,7 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
     project_root = resolved_root
 
     config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
-    handler_cfg = config.handlers.session_start.get(
-        HandlerID.SKILL_OPPORTUNITY_DETECTOR.config_key
-    )
+    handler_cfg = config.handlers.session_start.get(HandlerID.SKILL_OPPORTUNITY_DETECTOR.config_key)
     # The config model parses handler entries into HandlerConfig objects, but a
     # raw dict is tolerated too (defensive: this path also runs against
     # hand-built configs in tests).

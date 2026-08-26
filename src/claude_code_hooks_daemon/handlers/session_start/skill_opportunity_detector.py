@@ -47,6 +47,10 @@ class SkillOpportunityDetectorHandler(SessionStartHandlerBase):
         )
         self.config: dict[str, Any] = {"enabled": True}
 
+    def get_default_enabled(self) -> bool:
+        """Opt-in: the scan reads this machine's session transcripts."""
+        return False
+
     def configure(self, config: dict[str, Any]) -> None:
         """Apply configuration."""
         self.config.update(config)

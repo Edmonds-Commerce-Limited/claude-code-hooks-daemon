@@ -31,9 +31,7 @@ def build_digest(
     """One line per cluster: id, count, distinct sessions, redacted rep."""
     lines: list[str] = []
     for idx, cluster in enumerate(clusters[:max_clusters], start=1):
-        rep = redact_text(
-            cluster.representative.replace("\n", _NEWLINE_REPLACEMENT), terms
-        )
+        rep = redact_text(cluster.representative.replace("\n", _NEWLINE_REPLACEMENT), terms)
         lines.append(
             f"[{idx}] count={len(cluster.prompts)} sessions={cluster.distinct_sessions} "
             f"rep={rep!r}"

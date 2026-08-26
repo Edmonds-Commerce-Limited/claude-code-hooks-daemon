@@ -114,63 +114,61 @@ dogfood-enabled in this repo. Full design exploration: `BRAINSTORM.md`.
 
 ### Phase 2: TDD — extraction and aggregation (deterministic core)
 
-- [ ] ⬜ **Task 2.1**: RED/GREEN/REFACTOR the transcript reader: project-slug
-  derivation, mtime windowing, streaming line parse, tolerant of unknown
-  record types (skip + count), field-level exclusions.
-- [ ] ⬜ **Task 2.2**: TDD the content-level noise filter (teammate messages,
-  task notifications, `FAILSAFE RECOVERY CHECK`, interrupts, `/goal`
-  machine-marker, command echoes) with `extra_exclude_patterns` config.
-- [ ] ⬜ **Task 2.3**: TDD normalisation (path/sha/number placeholders),
-  clustering, per-cluster aggregation (counts, distinct sessions/days, date
-  range), digest cap (`max_prompts`) and representative truncation.
-- [ ] ⬜ **Task 2.4**: TDD redaction integration: every representative passes
-  through `utils/secret_redaction.redact_text` before it can reach the digest
-  or a report; regression test that a secret-list term never appears in
-  either.
+- [x] ✅ **Task 2.1**: Transcript reader delivered in
+  `src/claude_code_hooks_daemon/skill_scan/extraction.py`: slug derivation,
+  mtime windowing, streaming line parse, tolerant skip+count of unknown
+  records, field-level exclusions.
+- [x] ✅ **Task 2.2**: Content-level noise filter with
+  `extra_exclude_patterns` config (constants + extraction tests freeze the
+  marker contract).
+- [x] ✅ **Task 2.3**: Normalisation, clustering, per-cluster aggregation,
+  digest cap and representative truncation
+  (`clustering.py`, `digest.py`, `models.py`).
+- [x] ✅ **Task 2.4**: Redaction integration via
+  `utils/secret_redaction.redact_text` in digest AND report; regression
+  tests assert a secret term never reaches the model prompt or the report.
 
 ### Phase 3: TDD — CLI, Haiku stage and report
 
-- [ ] ⬜ **Task 3.1**: TDD the `skill-scan` CLI subcommand (`--force`,
-  `--window-days`, `--dry-run`); `--dry-run` prints the digest and skips the
-  model call (doubling as the privacy audit view); model call behind an
-  injectable dependency so tests mock it (00266 pattern).
-- [ ] ⬜ **Task 3.2**: TDD the Haiku stage: prompt assembly including the
-  existing-skill/command inventory and rubric; strict-JSON parse with
-  degrade-to-raw-notes on garbage; fail-open (skip + logged reason + partial
-  report) on every external error; `last_attempt_at` vs `last_scan_at` state
-  so failures retry without nagging.
-- [ ] ⬜ **Task 3.3**: TDD report generation per `CREATING_REPORTS.md`
-  (`untracked/reports/YYYY-MM-DD-skill-opportunities.md`): summarised
-  clusters with short redacted snippets only, existing-skill suppression
-  noted, schema-drift canary line, standing "derived from private transcripts
-  — review before sharing" header.
+- [x] ✅ **Task 3.1**: `skill-scan` CLI subcommand (`--force`,
+  `--window-days`, `--dry-run`, `--project-root`) in `daemon/cli.py`;
+  model behind the `ModelInvoker` protocol, mocked in tests.
+- [x] ✅ **Task 3.2**: Model stage (`invoker.py`): rubric prompt with
+  existing-skill inventory; strict-JSON parse with degrade-to-raw-notes;
+  fail-open on every external error; `last_attempt_at` vs `last_scan_at`
+  in `state.py` so failures retry without nagging.
+- [x] ✅ **Task 3.3**: Report writer (`report.py`) per `CREATING_REPORTS.md`:
+  dated filename, privacy header, schema-drift canary, redacted snippets,
+  workloads vs corrections sections, existing-skill suppression note.
 
 ### Phase 4: TDD — SessionStart handler and config
 
-- [ ] ⬜ **Task 4.1**: TDD `skill_opportunity_detector`
-  (`SessionStartHandlerBase`, advisory, non-blocking): TTL check via the
-  version_check state pattern; when due, inject "a skill-scan is due — run
-  `bin/hooks-daemon skill-scan`"; silent otherwise; can never fail session
-  start.
-- [ ] ⬜ **Task 4.2**: Config surface per `BRAINSTORM.md` §6 (`enabled: false`
-  upstream default, `check_interval_days`, `transcript_window_days`, `model`,
-  `max_prompts`, `extra_exclude_patterns`, transcript-dir override);
-  `get_claude_md()` guidance; `get_acceptance_tests()`; constants (no magic
-  values); HANDLER_REFERENCE.md entry; `config-changes` UNRELEASED manifest
-  entry.
+- [x] ✅ **Task 4.1**: `skill_opportunity_detector` handler
+  (`SessionStartHandlerBase`, advisory, non-terminal, broad fail-open):
+  TTL check via the version_check state pattern; advisory carries the full
+  remedy at fire time (T4 exemption recorded in the guidance coverage
+  suite — no resident CLAUDE.md section).
+- [x] ✅ **Task 4.2**: Config surface shipped: `enabled: false` upstream
+  default (template + `get_default_enabled`), all six options, constants,
+  HandlerID/Priority registrations, `get_acceptance_tests()`,
+  HANDLER_REFERENCE.md entry, `config-changes` UNRELEASED manifest entry
+  (dormant, recommended for dev-heavy projects).
 
 ### Phase 5: Integration, dogfooding and closure
 
-- [ ] ⬜ **Task 5.1**: Full QA (`./scripts/qa/llm_qa.py all`), daemon restart
-  RUNNING, dogfooding config tests pass.
-- [ ] ⬜ **Task 5.2**: Enable in this repo's `.claude/hooks-daemon.yaml`; run
-  `skill-scan --force` against this machine's real transcripts; review the
-  report with the user (including whether existing skills were correctly
-  suppressed); record findings in JOURNAL/.
-- [ ] ⬜ **Task 5.3**: Docs: note the transcript-derived-content privacy
-  exception in `CREATING_REPORTS.md`; verify client-mode behaviour
-  (`scripts/dummy-client-repo.sh`) since the CLI touches paths outside the
-  project root.
+- [ ] 🔄 **Task 5.1**: Full QA green in the worktree (24/24, coverage
+  95.1%); worktree daemon started RUNNING with the new code; dogfooding
+  config tests pass. REMAINING on main after merge: dogfood daemon restart
+  verification.
+- [ ] ⬜ **Task 5.2**: Enable in this repo's `.claude/hooks-daemon.yaml`
+  (stanza staged with `enabled: false`); run `skill-scan --force` against
+  this machine's real transcripts; review the report with the user
+  (including whether existing skills were correctly suppressed); record
+  findings in JOURNAL/. Main-thread act after merge.
+- [x] ✅ **Task 5.3**: Privacy exception noted in `CREATING_REPORTS.md`;
+  client-mode verified via `scripts/dummy-client-repo.sh` (production
+  installer; `cli skill-scan --dry-run` runs cleanly with an empty
+  transcript window).
 
 ## Technical Decisions
 
