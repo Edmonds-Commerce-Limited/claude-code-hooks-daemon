@@ -190,11 +190,17 @@ paths; possibly a PostToolUse output backstop). Complements
   exemptions, the (b)/(c)/(d) honest-limits summary, no-escape-hatch
   statement, OS-level-controls pointer, and the vault-payload scope
   boundary (protecting the password file does not protect vaulted vars)
-- [ ] ⬜ **Task 4.5**: Close the Task 1.9 daemon-artefact seam BEFORE any
-  output-side layer: extend `redact_structure` (or exclude protected-path
-  payloads from capture) so a residual-route read never lands verbatim in
-  `payload-capture/` or logs; exclude protected paths from
-  `staged_lint_gate`/`lint_on_edit` diagnostics
+- [x] ✅ **Task 4.5** (approach: EXCLUDE, not redact — see Decision 10): closed
+  the Task 1.9 daemon-artefact seam. `daemon/payload_capture.capture_payload`
+  gained a `protected_patterns` param; when `hook_input` names or Bash-mentions
+  a protected path (via the SAME `secret_file_matching` primitives the guard
+  uses), the WHOLE event is excluded from the capture file rather than written
+  at all — redaction only removes known TERMS, and a protected path's globs
+  say nothing about its content, so there is nothing safe to write back for
+  the matched event. Wired at the one call site (`daemon/server.py`) via a new
+  cached cross-handler resolver, `secret_file_matching.resolve_configured_patterns()`.
+  `lint_on_edit`/`staged_lint_gate` now skip a protected path before running
+  any lint command, closing the syntax-error-quotes-source-line route.
 
 ### Phase 5: TDD — metadata helper
 
@@ -209,12 +215,20 @@ paths; possibly a PostToolUse output backstop). Complements
 
 ### Phase 6: Hygiene checks
 
-- [ ] 🔄 **Task 6.1** (permissions/ownership half shipped in `secret-meta` output — `permissions_ok` + chmod 600 hint; SessionStart gitignore/tracked/auto-inlining advisory deferred): Advisory (SessionStart or in-handler) that each
-  protected path is gitignored, not git-tracked, AND has safe
-  permissions/ownership (flag group/world-readable modes via
-  `constants/permissions.py` `FileMode`; `chmod 600` remediation) — the one
-  cheaply shippable OS-boundary piece (BRAINSTORM.md OS-boundary section);
-  include the Task 1.3 auto-inlining config check if feasible
+- [x] ✅ **Task 6.1** (permissions/ownership half shipped earlier in
+  `secret-meta` output — `permissions_ok` + chmod 600 hint; the deferred
+  SessionStart half shipped now): new `SecretFileHygieneCheckerHandler`
+  (`handlers/session_start/secret_file_hygiene_checker.py`, priority 62,
+  default-enabled) walks the project tree (same bounded cap as
+  `directory_contains_protected`) for every path matching the effective
+  `secret_file_guard` globs, and advises — never blocks — when a matched path
+  is not gitignored, is git-tracked, or is group/world-readable (`mode & FileMode.DAEMON_UMASK`).
+  Metadata only: `os.walk`, `git check-ignore`/`git ls-files`, `stat()` —
+  content is never opened. The Task 1.3 auto-inlining config check
+  (`@`-imports, `.claude/rules/` `paths:` globs) is NOT included here: it is a
+  distinct configuration-condition check unrelated to protected-file hygiene,
+  and bundling it would have doubled this handler's scope for no shared code;
+  left as a candidate for its own follow-up plan.
 - [x] ✅ **Task 6.2**: Update `sensitive_content` guidance; stage
   truth-changes + config-changes manifests in `UNRELEASED/`
 
@@ -325,6 +339,24 @@ of the Ansible family allowed with the path in flag position; (e) priority 14
 (safety band, alongside sensitive_content/security_antipattern).
 **Date**: 2026-08-26
 
+### Decision 10: Task 4.5 closes the payload-capture seam by EXCLUSION, not redaction
+
+**Context**: `redact_structure` removes known TERMS (the `sensitive_content`
+secret word list) from a payload before it is written. A protected path's
+GLOB tells us a file must never be read — it says nothing about what that
+file's content actually contains, so there is no term to redact even when a
+residual route slips a mention past the guard's deny rule.
+**Decision**: `daemon/payload_capture.capture_payload` gained a
+`protected_patterns` parameter; when the incoming `hook_input` names or
+Bash-mentions a matching path (checked with the SAME `secret_file_matching`
+primitives the guard itself uses — single source of truth, so this can never
+disagree with what the guard would have denied), the WHOLE event is dropped
+from the capture file rather than partially written. `lint_on_edit` and
+`staged_lint_gate` are closed the same way: a protected path is skipped
+before any lint command runs, because a syntax-error diagnostic can quote the
+offending source line verbatim.
+**Date**: 2026-08-26
+
 ## Success Criteria
 
 - [ ] RESEARCH-read-routes.md complete: every route has verified visibility,
@@ -334,16 +366,23 @@ of the Ansible family allowed with the path in flag position; (e) priority 14
   expected-verdict column in RESEARCH-read-routes.md (Task 7.1 asserts
   against that table); class-(d) residual risk stated in resident guidance
   with OS-level mitigations named
-- [ ] Permissions/ownership advisory fires on group/world-readable protected
+- [x] Permissions/ownership advisory fires on group/world-readable protected
   files with remediation text (Task 6.1)
-- [ ] No residual-route read lands verbatim in payload capture or logs
+- [x] No residual-route read lands verbatim in payload capture or logs
   (Task 4.5)
 - [ ] `secret-meta` returns metadata JSON with no content bytes;
   `ansible-vault --vault-password-file <protected>` consumer commands pass
 - [ ] Deny reasons never include file content; verdict log clean
 - [ ] No escape hatch exists
 - [ ] 95%+ coverage, full QA green, daemon restart verified, client-mode
-  verified
+  verified — the current worktree session verified unit+integration tests
+  (12327 + 1722 passed) and per-file ruff/black/mypy/bandit/magic-values
+  green; `./scripts/qa/llm_qa.py all` could not run in this worktree (no
+  bootstrapped venv at `untracked/venv*` here — self-install venvs are
+  project-path-slug-keyed and this worktree has none); ONE integration test
+  (`test_every_earning_handler_has_a_section_in_claude_md`) requires an
+  actual daemon restart to regenerate `CLAUDE.md` and is deferred to the main
+  session, which also owns the daemon-restart + client-mode verification
 
 ## Risks & Mitigations
 
