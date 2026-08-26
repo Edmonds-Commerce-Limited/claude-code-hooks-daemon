@@ -1421,15 +1421,20 @@ against the plan QA edit-stage rules on the content the file WOULD
 have. Block-level violations (in `edit_mode: block`) deny the tool
 call with the exact remediation; fix the content and retry.
 
-The plan-index `README.md` is linted too, against ONE rule:
-`index-row-length`. Keep every line under 500 characters — an index
-row is a POINTER (a link, a status and one clause), not a summary,
-because the rationale belongs in the linked `PLAN.md` and a second
-copy in the index is the one that goes stale. Only an edit that
-makes the index WORSE is blocked (more over-long lines, or a longer
-worst offender), so an index that already has one stays editable —
-including by the edit that fixes it. No other plan-document rule
-applies to the index: it has no `**Status**:` line and needs none.
+The plan-index `README.md` is linted too, against TWO rules:
+`index-row-length` and `index-no-log`. Keep every line under 500
+characters — an index row is a POINTER (a link, a status and one
+clause), not a summary, because the rationale belongs in the linked
+`PLAN.md` and a second copy in the index is the one that goes stale.
+Only an edit that makes the index WORSE is blocked (more over-long
+lines, or a longer worst offender), so an index that already has one
+stays editable — including by the edit that fixes it. `index-no-log`
+(advisory) flags a bullet written in LOG grammar — a bold
+"Before that"/"Prior to that"/"Previously" lead-in, or a bold ISO
+date — because the index has twice re-grown a stacked reconciliation
+ledger of past recounts; state current truth only and put history in
+git or that plan's `JOURNAL/`. No other plan-document rule applies to
+the index: it has no `**Status**:` line and needs none.
 
 **Rules that block new plan material**:
 
