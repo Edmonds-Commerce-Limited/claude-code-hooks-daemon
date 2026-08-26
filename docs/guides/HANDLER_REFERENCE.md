@@ -546,11 +546,13 @@ handlers:
 | **Type**       | Blocking (non-terminal)      |
 | **Event**      | PreToolUse                   |
 
-**Description:** Denies a `git commit` / `git merge -m` / `git tag -m` whose message contains a GitHub **auto-closing keyword reference** — one of the nine documented keywords (`close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`; case-insensitive, optional colon) followed by an issue reference (`#N`, `GH-N`, `owner/repo#N`, or a full issue/PR URL). Such a reference auto-closes the issue the moment the commit reaches the default branch, and GitHub offers no repository-side switch to disable it. Agents write these forms accidentally ("Fixes #123" reads as changelog prose), so the guard sits at the source.
+**Description:** Denies a `git commit` / `git merge -m` / `git tag -m` — or a `gh pr create` / `gh pr edit` body — whose message contains a GitHub **auto-closing keyword reference**: one of the nine documented keywords (`close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`; case-insensitive, optional colon) followed on the **same line** by an issue reference (`#N`, `GH-N`, `owner/repo#N`, or a full issue/PR URL). Such a reference auto-closes the issue the moment the commit reaches the default branch (or the PR merges), and GitHub offers no repository-side switch to disable it. Agents write these forms accidentally ("Fixes #123" reads as changelog prose), so the guard sits at the source.
 
-**Both message routes are checked:** the full command string (which also catches heredoc and `$(cat ...)` shapes whose text is visible), and the content of a `-F <file>` / `--file=<file>` scratch file, read at check time. A missing or unreadable `-F` file is allowed — the commit fails on its own. `-t`/`--template` is not a message source and is ignored.
+**Scanning is scoped to the message-bearing segment** (from the `git commit|merge|tag` or `gh pr create|edit` token onward within its `&&`/`||`/`;` segment), so reading is never blocked — `grep 'fixes #12' notes.txt && git commit -m 'clean'` is allowed. Heredoc and `$(cat ...)` shapes inside the segment are still caught.
 
-**Not matched:** the keyword alone (`fixes the race condition`), a bare `#N` without a keyword, `git log --grep=fixes`, and `gh issue close` (a deliberate, different act).
+**All message routes are checked:** inline `-m`/`--message` values, `gh pr` `--body`/`-b` values, and the content of a `-F <file>` / `--file=<file>` / `--body-file <file>` scratch file, read at check time (decoded with replacement, capped at 64 KiB). A missing, unreadable, binary or oversized file is allowed through — the command fails on its own. `-t`/`--template` is not a message source and is ignored.
+
+**Not matched:** the keyword alone (`fixes the race condition`), a bare `#N` without a keyword, a keyword and reference on different lines, `git log --grep=fixes`, and `gh issue close` (a deliberate, different act).
 
 **Rewrite instead:** `Addresses #123`, `Refs #123`, `See #123` — GitHub links these but does not close.
 
@@ -2672,8 +2674,8 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `dangerous_permissions`        | PreToolUse        | 15       | chmod 777, chmod a+rwx                                               |
 | `tdd_enforcement`              | PreToolUse        | 15       | Production code without tests (11 languages)                         |
 | `root_recursion_guard`         | PreToolUse        | 16       | Recursive scans rooted at /, /home, $HOME, ...                       |
+| `github_auto_close_keywords`   | PreToolUse        | 18       | GitHub auto-closing keyword refs (Fixes #N) in git/gh pr messages    |
 | `git_stash`                    | PreToolUse        | 20       | git stash creation (deny by default; configurable)                   |
-| `github_auto_close_keywords`   | PreToolUse        | 18       | GitHub auto-closing keyword refs (Fixes #N) in git messages          |
 | `git_message_backtick`         | PreToolUse        | 20       | Backticks in a double-quoted git -m (bash executes them)             |
 | `ancestry_preserving_merge`    | PreToolUse        | 19       | git merge --squash, gh pr merge --squash/--rebase (severs ancestry)  |
 | `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)          |

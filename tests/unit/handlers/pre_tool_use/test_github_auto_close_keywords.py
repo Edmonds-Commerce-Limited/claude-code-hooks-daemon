@@ -129,6 +129,16 @@ class TestNegativeCases:
             "gh issue close 123",  # deliberate, different act
             "echo fixes",
             "ls -la",
+            # Reading is never blocked: the reference sits in a NON-message
+            # segment, and only the message-bearing segment is scanned.
+            "grep -F 'Fixes #123' CHANGELOG.md && git commit -m 'clean message'",
+            "git tag -l && grep 'fixes #12' notes.txt",
+            # The keyword and the reference are on DIFFERENT lines — GitHub
+            # does not close across the newline, so neither do we.
+            "git commit -m 'Partially fixed\n#456 remains open'",
+            # gh pr with a clean body, and gh pr subcommands that take none.
+            "gh pr create --title 'x' --body 'Addresses #123'",
+            "gh pr view 123 --comments",
         ],
     )
     def test_does_not_match(self, command: str) -> None:
@@ -186,6 +196,54 @@ class TestScratchFileRoute:
         handler = GithubAutoCloseKeywordsHandler()
         assert not handler.matches(_bash(f"git commit -t {tpl} -m 'clean message'"))
 
+    def test_binary_file_does_not_raise(self, tmp_path: Path) -> None:
+        """A binary -F target must never abort the PreToolUse chain."""
+        msg = tmp_path / "blob.bin"
+        msg.write_bytes(b"\x00\x9c\xff\xfeFixes #1\x00\x80")
+        handler = GithubAutoCloseKeywordsHandler()
+        hook_input = _bash(f"git commit -F {msg}")
+        # Decoded with errors="replace", so the embedded reference is still
+        # visible and denied — the point is no UnicodeDecodeError escapes.
+        assert handler.matches(hook_input)
+
+    def test_oversized_file_is_skipped(self, tmp_path: Path) -> None:
+        """A file beyond the byte cap is not read — commit messages are small."""
+        msg = tmp_path / "huge.txt"
+        msg.write_text("Fixes #1\n" + "x" * 200_000, encoding="utf-8")
+        handler = GithubAutoCloseKeywordsHandler()
+        assert not handler.matches(_bash(f"git commit -F {msg}"))
+
+    def test_file_flag_outside_git_segment_is_not_read(self, tmp_path: Path) -> None:
+        """`grep -F <file>` before the git segment must not trigger a read."""
+        probe = tmp_path / "probe.txt"
+        probe.write_text("Fixes #7\n", encoding="utf-8")
+        handler = GithubAutoCloseKeywordsHandler()
+        assert not handler.matches(_bash(f"grep -F {probe} src && git commit -m 'clean message'"))
+
+
+class TestGhPrBodies:
+    def test_pr_create_body_with_closing_reference_is_denied(self) -> None:
+        handler = GithubAutoCloseKeywordsHandler()
+        hook_input = _bash("gh pr create --title 'x' --body 'Fixes #123'")
+        assert handler.matches(hook_input)
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    def test_pr_edit_short_body_flag(self) -> None:
+        handler = GithubAutoCloseKeywordsHandler()
+        assert handler.matches(_bash("gh pr edit 5 -b 'closes GH-9'"))
+
+    def test_pr_create_body_file(self, tmp_path: Path) -> None:
+        body = tmp_path / "body.md"
+        body.write_text("Summary\n\nResolves #44\n", encoding="utf-8")
+        handler = GithubAutoCloseKeywordsHandler()
+        assert handler.matches(_bash(f"gh pr create --title 'x' --body-file {body}"))
+
+    def test_pr_create_clean_body_file_allowed(self, tmp_path: Path) -> None:
+        body = tmp_path / "body.md"
+        body.write_text("Summary\n\nAddresses #44\n", encoding="utf-8")
+        handler = GithubAutoCloseKeywordsHandler()
+        assert not handler.matches(_bash(f"gh pr create --title 'x' --body-file {body}"))
+
 
 class TestEscapeHatch:
     def test_declared_intent_allows(self) -> None:
@@ -198,8 +256,30 @@ class TestEscapeHatch:
         handler = GithubAutoCloseKeywordsHandler()
         assert handler.matches(_bash("MUST_AUTO_CLOSE_BECAUSE=\"\"; git commit -m 'Fixes #1'"))
 
+    def test_hatch_is_case_sensitive_like_its_siblings(self) -> None:
+        handler = GithubAutoCloseKeywordsHandler()
+        assert handler.matches(
+            _bash("must_auto_close_because=\"reason\"; git commit -m 'Fixes #1'")
+        )
+
+    def test_unquoted_reason_does_not_allow(self) -> None:
+        handler = GithubAutoCloseKeywordsHandler()
+        assert handler.matches(_bash("MUST_AUTO_CLOSE_BECAUSE=reason; git commit -m 'Fixes #1'"))
+
 
 class TestWarnMode:
+    def test_mode_value_is_normalised(self) -> None:
+        handler = GithubAutoCloseKeywordsHandler()
+        handler._mode = "  WARN  "
+        result = handler.handle(_bash("git commit -m 'Fixes #123'"))
+        assert result.decision == Decision.ALLOW
+
+    def test_unknown_mode_fails_closed(self) -> None:
+        handler = GithubAutoCloseKeywordsHandler()
+        handler._mode = "advise"
+        result = handler.handle(_bash("git commit -m 'Fixes #123'"))
+        assert result.decision == Decision.DENY
+
     def test_warn_mode_allows_with_context(self) -> None:
         handler = GithubAutoCloseKeywordsHandler()
         handler._mode = "warn"
