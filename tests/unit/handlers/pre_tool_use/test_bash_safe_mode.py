@@ -87,9 +87,7 @@ class TestConfigurableOptions:
         assert handler.matches(_bash("a\nb")) is False
         assert handler.matches(_bash("a\nb\nc")) is True
 
-    def test_only_with_mutator_spares_pure_diagnostics(
-        self, handler: BashSafeModeHandler
-    ) -> None:
+    def test_only_with_mutator_spares_pure_diagnostics(self, handler: BashSafeModeHandler) -> None:
         handler._only_with_mutator = True
         assert handler.matches(_bash("grep -q pattern file.txt; echo done")) is False
         assert handler.matches(_bash("pytest tests/\ngit commit -m x")) is True

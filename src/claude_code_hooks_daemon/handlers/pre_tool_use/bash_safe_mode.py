@@ -125,9 +125,7 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
                 "'warn' or 'block' until the serialisation gap is closed."
             )
         if value not in (_MODE_WARN, _MODE_BLOCK):
-            raise ValueError(
-                f"bash_safe_mode mode must be 'warn' or 'block', got {value!r}."
-            )
+            raise ValueError(f"bash_safe_mode mode must be 'warn' or 'block', got {value!r}.")
         self.__mode = str(value)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
