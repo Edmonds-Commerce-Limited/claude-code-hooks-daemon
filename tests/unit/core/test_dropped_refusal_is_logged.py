@@ -55,7 +55,6 @@ _CARRIED = [
     ("PostToolUse", Decision.DENY),
     ("Stop", Decision.DENY),
     ("PermissionRequest", Decision.DENY),
-    ("PermissionRequest", Decision.ASK),
 ]
 
 

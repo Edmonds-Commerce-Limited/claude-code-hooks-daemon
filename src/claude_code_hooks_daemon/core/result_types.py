@@ -88,8 +88,10 @@ class BlockingResult(HookResult):
 class GatingResult(HookResult):
     """For an event that gates an action and can deny or ask.
 
-    ``PreToolUse`` (``permissionDecision``) and ``PermissionRequest``
-    (``decision.behavior``) are the only two.
+    ``PreToolUse`` (``permissionDecision``) is the only one:
+    ``PermissionRequest``'s documented ``decision.behavior`` enum is
+    ``allow`` | ``deny`` with no ask outcome, so it sits in the blocking tier
+    (Plan 00271 audit item 3).
     """
 
     decision: Literal[Decision.ALLOW, Decision.CONTINUE, Decision.DENY, Decision.ASK] = (

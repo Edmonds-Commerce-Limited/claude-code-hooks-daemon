@@ -75,8 +75,12 @@ REFUSAL_CAPABLE_EVENTS: Final[dict[Decision, frozenset[str]]] = {
     ),
     Decision.ASK: frozenset(
         {
+            # PreToolUse is the ONLY event with a documented ask outcome.
+            # PermissionRequest was listed here too, but the documented
+            # decision.behavior enum is "allow" | "deny" — the "ask" the daemon
+            # used to claim (and emit) is not defined by the contract, so
+            # Claude Code ignored it (Plan 00271 audit item 3).
             "PreToolUse",  # permissionDecision: ask
-            "PermissionRequest",  # decision.behavior: ask
         }
     ),
 }
@@ -383,7 +387,11 @@ class HookResult(BaseModel):
                 return self._format_stop_response(event_name, False)
             if event_name == "PostToolUse":
                 return self._format_post_tool_use_response(event_name)
-            if event_name == "PermissionRequest":
+            if event_name == "PermissionRequest" and self.decision == Decision.DENY:
+                # DENY only: an ASK here has no documented wire form (the
+                # decision.behavior enum is allow|deny), so re-emitting it would
+                # make the SUBSTITUTE invalid too. ASK falls through to the loud
+                # advisory below instead.
                 return self._format_permission_request_response(event_name)
             if event_name == "PreToolUse":
                 return self._format_pre_tool_use_response(event_name)

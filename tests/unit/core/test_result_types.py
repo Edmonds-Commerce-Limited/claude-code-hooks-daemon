@@ -174,7 +174,7 @@ class TestTierMembershipIsDerivedFromTheCapabilityTable:
     def test_the_known_tier_assignments_hold(self) -> None:
         """Spot-check the three tiers against events whose behaviour is settled."""
         assert result_type_for_event("PreToolUse") is GatingResult
-        assert result_type_for_event("PermissionRequest") is GatingResult
+        assert result_type_for_event("PermissionRequest") is BlockingResult
         assert result_type_for_event("Stop") is BlockingResult
         assert result_type_for_event("PostToolUse") is BlockingResult
         assert result_type_for_event("SessionStart") is AdvisoryResult

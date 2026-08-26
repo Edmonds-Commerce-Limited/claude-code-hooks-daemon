@@ -254,7 +254,7 @@ class TestDeliverableDecisionsAreLeftAlone:
     def test_a_deny_on_a_refusal_capable_event_is_not_reported(self, event_name: str) -> None:
         assert not undeliverable_decisions(RefusingProbe, event_name)
 
-    @pytest.mark.parametrize("event_name", ["PreToolUse", "PermissionRequest"])
+    @pytest.mark.parametrize("event_name", ["PreToolUse"])
     def test_an_ask_on_an_ask_capable_event_is_not_reported(self, event_name: str) -> None:
         assert not undeliverable_decisions(AskingProbe, event_name)
 

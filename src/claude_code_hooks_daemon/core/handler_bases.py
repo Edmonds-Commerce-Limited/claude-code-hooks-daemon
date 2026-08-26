@@ -111,9 +111,10 @@ class GatingHandler(Handler):
 
 # Gating: can deny AND ask.
 PreToolUseHandlerBase = GatingHandler
-PermissionRequestHandlerBase = GatingHandler
 
-# Blocking: can deny, cannot ask.
+# Blocking: can deny, cannot ask. PermissionRequest sits here because its
+# documented decision.behavior enum is allow | deny only (Plan 00271 item 3).
+PermissionRequestHandlerBase = BlockingHandler
 PostToolUseHandlerBase = BlockingHandler
 StopHandlerBase = BlockingHandler
 SubagentStopHandlerBase = BlockingHandler

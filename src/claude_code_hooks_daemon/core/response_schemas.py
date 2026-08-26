@@ -112,9 +112,12 @@ PERMISSION_REQUEST_SCHEMA: Final[dict[str, Any]] = {
                 "decision": {
                     "type": "object",
                     "properties": {
+                        # The documented enum is allow | deny ONLY — there is
+                        # no "ask" outcome on PermissionRequest (the docs'
+                        # decision.behavior table; Plan 00271 audit item 3).
                         "behavior": {
                             "type": "string",
-                            "enum": ["allow", "deny", "ask"],
+                            "enum": ["allow", "deny"],
                         },
                         "updatedInput": {
                             "type": "object",
