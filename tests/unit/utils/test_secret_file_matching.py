@@ -212,6 +212,23 @@ class TestBashMentionsProtectedPath:
         for token in ("start*", "reset*", ".ssh*", "market*"):
             assert self._match(f"cat {token}") is None, token
 
+    def test_internal_wildcard_prefix_coincidence_is_not_matched(self) -> None:
+        """Regression: a glob token with NO leading wildcard whose literal
+        PREFIX coincidentally shares an edge with a stem's SUFFIX must not
+        match. ``assert.*x`` shares ``ass`` with the ``vault_pass`` stem
+        (``…p·ass``) yet is not a truncation of any vault file — the reverse
+        overlap direction is only meaningful for a LEADING-wildcard token,
+        where an arbitrary prefix could precede the residue. Observed live:
+        ``grep 'assert.*→' file`` was denied as a ``*vault_pass*`` access."""
+        assert self._match("grep -n 'assert.*x' file.py") is None
+
+    def test_internal_wildcard_source_glob_is_not_matched(self) -> None:
+        """``secret*.py`` starts with the literal ``secret`` (no leading
+        wildcard) and is a source-file glob, not a secret — its ``secret``
+        prefix coincides with the ``.secret`` stem's suffix but must not match
+        ``*.secret*``. Observed live: ``grep secret*.py dir`` was denied."""
+        assert self._match("ls src/secret*.py") is None
+
     def test_no_echo_exemption(self) -> None:
         """Decision 9(c): unlike sed_blocker, echo buys no exemption."""
         assert self._match('echo ".vault-pass"') is not None

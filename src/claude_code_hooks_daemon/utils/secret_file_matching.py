@@ -77,6 +77,12 @@ _COMMAND_SEPARATORS: Final[tuple[str, ...]] = (";", "&&", "||", "|", "\n")
 _PROCESS_SUBSTITUTION: Final[str] = "<("
 
 _GLOB_CHARS: Final[tuple[str, ...]] = ("*", "?", "[")
+# Wildcard characters by POSITION: a leading wildcard opens the token's LEFT
+# edge (an arbitrary prefix), a trailing wildcard opens its RIGHT edge. The
+# overlap heuristic only treats a stem/residue edge match as a real truncation
+# when the token carries a wildcard at that edge (see `_glob_token_overlaps_stem`).
+_LEADING_WILDCARD_CHARS: Final[tuple[str, ...]] = ("*", "?", "[")
+_TRAILING_WILDCARD_CHARS: Final[tuple[str, ...]] = ("*", "?", "]")
 
 # The metadata helper: the ONE universally-exempt way to mention a protected
 # path in Bash. Recognised as `<anything>/hooks-daemon secret-meta ...` (or a
@@ -355,19 +361,41 @@ def _suffix_prefix_overlap_length(a: str, b: str) -> int:
     return 0
 
 
-def _glob_token_overlaps_stem(residue: str, stem_basename: str) -> bool:
+def _glob_token_overlaps_stem(
+    residue: str,
+    stem_basename: str,
+    *,
+    leading_wildcard: bool,
+    trailing_wildcard: bool,
+) -> bool:
     """True when ``residue``'s literal edge could directly join ``stem_basename``.
 
-    Checked in both directions because either side may carry the wildcard
-    that makes the other side "arbitrary": a trailing-wildcard token
-    (``dummy.vault-p*``) needs its residue's SUFFIX to overlap the stem's
-    PREFIX (the stem is the suffix-anchored fixed part of a leading-wildcard
-    pattern like ``*.vault-password``); a leading-wildcard token would need
-    the reverse. Gated at ``_MIN_GLOB_OVERLAP_CHARS`` — see its docstring.
+    Each direction models exactly one wildcard SITE and is gated on the token
+    actually carrying a wildcard THERE — without that gate a token whose
+    residue merely shares a coincidental edge with the stem is flagged even
+    though it is no truncation of any protected name (observed live: ``assert.*``
+    shares ``ass`` with the ``vault_pass`` stem, ``secret*.py`` shares
+    ``secret`` with the ``.secret`` stem — neither has the wildcard at the
+    edge that would make the overlap a real truncation):
+
+    - A TRAILING-wildcard token (``dummy.vault-p*``) can be extended on the
+      RIGHT, so its residue's SUFFIX must overlap the stem's PREFIX (forward).
+    - A LEADING-wildcard token (``*passXXX``) can be preceded on the LEFT, so
+      the stem's SUFFIX must overlap the residue's PREFIX (reverse).
+
+    A token whose wildcard sits INTERNALLY (``assert.*x``, ``secret*.py``) has
+    neither edge open, so neither direction applies. Gated at
+    ``_MIN_GLOB_OVERLAP_CHARS`` — see its docstring.
     """
-    if _suffix_prefix_overlap_length(residue, stem_basename) >= _MIN_GLOB_OVERLAP_CHARS:
+    if (
+        trailing_wildcard
+        and _suffix_prefix_overlap_length(residue, stem_basename) >= _MIN_GLOB_OVERLAP_CHARS
+    ):
         return True
-    if _suffix_prefix_overlap_length(stem_basename, residue) >= _MIN_GLOB_OVERLAP_CHARS:
+    if (
+        leading_wildcard
+        and _suffix_prefix_overlap_length(stem_basename, residue) >= _MIN_GLOB_OVERLAP_CHARS
+    ):
         return True
     return False
 
@@ -394,6 +422,10 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
                 residue = _token_literal_residue(basename)
                 if not residue:
                     continue
+                # Where the token's wildcard sits decides which overlap
+                # direction is a plausible truncation (see the helper).
+                has_leading_wildcard = basename[:1] in _LEADING_WILDCARD_CHARS
+                has_trailing_wildcard = basename[-1:] in _TRAILING_WILDCARD_CHARS
                 for stem, pattern in stem_pairs:
                     stem_basename = stem.rsplit("/", maxsplit=1)[-1]
                     # Original fnmatch check (v3.55.0 release code review): a
@@ -426,7 +458,10 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
                     # like "sample*" or "id*" sharing a coincidental 2-char
                     # edge with "id_rsa" was denied before this gate).
                     if pattern.startswith("*") and _glob_token_overlaps_stem(
-                        residue, stem_basename
+                        residue,
+                        stem_basename,
+                        leading_wildcard=has_leading_wildcard,
+                        trailing_wildcard=has_trailing_wildcard,
                     ):
                         return pattern
         real = _realpath_if_resolvable(token)
