@@ -137,7 +137,7 @@ effective capability when it happens anyway.
 
 ### Phase 3: Security-work delegation (prevention)
 
-- [ ] ⬜ **Task 3.1**: Design — decide the surface(s), taking the field
+- [x] ✅ **Task 3.1**: Design (Decision 5) — decide the surface(s), taking the field
   report's proposals as the starting point: `fable_flaggable_advisor`
   (advisory, configurable flaggable path globs + topic terms, pointing at an
   opus-security subagent) and `model_fallback_detector` (advisory scan of the
@@ -152,6 +152,13 @@ effective capability when it happens anyway.
 - [ ] ⬜ **Task 3.3**: Dogfood — enable in this repo's config; verify the
   advisory fires on a representative security task and that the delegation
   guidance names `model: "opus"` explicitly.
+
+### Phase 3d: Blocking surfaces (deferred until advisories dogfood cleanly)
+
+- [ ] ⬜ **Task 3d.1**: Deny content-revealing git/grep over configured
+  flaggable paths by command shape (handover §3.3).
+- [ ] ⬜ **Task 3d.2**: Enforce the `*-opus-security-DETAIL*` read-boundary
+  by pattern (handover §3.4).
 
 ### Phase 3b: Downgrade snapshot capture (joseph, 2026-08-27)
 
@@ -230,6 +237,36 @@ safety-triggered model fallback with no documented reset. Skill/agent
 frontmatter `effort:` covers only skill/subagent scope. So the per-model
 minimum map (Task 2b.2) is legitimately the supervisor's job, not a
 reimplementation of an official feature.
+**Date**: 2026-08-27
+
+### Decision 5: Phase 3 surfaces (Task 3.1 design)
+
+**Context**: which daemon surfaces implement prevention + detection, per the
+field report and the Plan 00279 handover spec (§3).
+**Decision**: two ADVISORY handlers, plus snapshot capture inside the
+detector:
+
+1. `model_fallback_detector` (SessionStart, advisory, enabled by default —
+   model-agnostic: keys on the `model_refusal_fallback` record shape in the
+   session transcript JSONL, never on model names). On detection: loud
+   PROTECTION-DEGRADED-style advisory (session-sticky, restart to clear) AND
+   the Task 3b.1 diagnostic snapshot — the fallback record plus a bounded
+   window of preceding transcript records, secret-redacted, written under a
+   configurable snapshots dir (default `untracked/reports/`), never
+   auto-committed.
+2. `flaggable_work_advisor` (PreToolUse, advisory, never blocks, ships
+   DISABLED — the boundary is project-specific). Options:
+   `flaggable_path_globs`, `flaggable_topic_terms` (built-in seed set from
+   the report: spoof/evasion/exploit/rootkit), `quarantine_agent` (default
+   `hooks-daemon-opus-security`, deployed by Plan 00279), with
+   `mode: additive | replace` merging for the list options (Task 3c.1) and
+   once-per-session-per-path rate limiting (the `block_once` pattern,
+   advisory-strength).
+
+Deferred within this plan: the report's §3.3 (deny content-revealing
+git/grep over flaggable paths by command shape) and §3.4 (enforce the
+`*-opus-security-DETAIL*` read-boundary) — blocking surfaces, added as
+Phase 3d after the advisories dogfood cleanly.
 **Date**: 2026-08-27
 
 ## Success Criteria
