@@ -9,6 +9,7 @@ from .comment_size import CommentSizeHandler
 from .daemon_location_guard import DaemonLocationGuardHandler
 from .destructive_git import DestructiveGitHandler
 from .error_hiding_blocker import ErrorHidingBlockerHandler
+from .flaggable_work_advisor import FlaggableWorkAdvisorHandler
 from .gh_issue_comments import GhIssueCommentsHandler
 from .gh_pr_comments import GhPrCommentsHandler
 from .git_message_backtick import GitMessageBacktickHandler
@@ -41,6 +42,7 @@ __all__ = [
     "DaemonLocationGuardHandler",
     "DestructiveGitHandler",
     "ErrorHidingBlockerHandler",
+    "FlaggableWorkAdvisorHandler",
     "GhIssueCommentsHandler",
     "GhPrCommentsHandler",
     "GitMessageBacktickHandler",
