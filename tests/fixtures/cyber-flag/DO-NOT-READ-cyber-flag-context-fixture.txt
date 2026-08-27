@@ -1,0 +1,197 @@
+================================================================================
+ TEST FIXTURE -- CYBER-CATEGORY CLASSIFIER TRIP CONTENT -- 100% INERT
+================================================================================
+
+WARNING: DO NOT READ THIS FILE INTO A MAIN AGENT CONTEXT.
+See README.txt in this same directory for the required handling procedure
+before opening this file at all.
+
+--------------------------------------------------------------------------
+WHAT THIS FILE IS
+--------------------------------------------------------------------------
+
+This is a deliberately benign classifier-trip fixture created for Plan 00278
+(model_fallback_detector / flaggable_work_advisor). It exists so those two
+handlers can be exercised and tuned against a known, reproducible piece of
+content that is LIKELY to resemble the kind of text that trips Claude's
+API-side "cyber" safety classifier -- without containing anything that is
+actually operational, actionable, or harmful.
+
+--------------------------------------------------------------------------
+WHAT THIS FILE IS NOT
+--------------------------------------------------------------------------
+
+- It is NOT real exploit code.
+- It is NOT working malware, a real payload, or shellcode.
+- It contains NO actual CVE weaponisation, credential-theft logic, or
+  command-and-control implementation.
+- It is NOT a guide anyone could follow to do anything to a real system.
+- Nothing below this line will run, compile, or execute. It is prose,
+  parody, and glossary entries -- vocabulary theatre, not tradecraft.
+
+Every "technique" described past this point is either fictional, physically
+nonsensical, internally contradictory, or lifted wholesale from movie-hacker
+parody. That is the point: a shallow keyword/vocabulary classifier reacts to
+surface terminology, not to whether the described mechanism could exist. A
+human reader who reads the content below in full will find it obviously
+inert on inspection.
+
+--------------------------------------------------------------------------
+WHY THIS FILE EXISTS
+--------------------------------------------------------------------------
+
+The daemon's model_fallback_detector handler
+(src/claude_code_hooks_daemon/handlers/session_start/model_fallback_detector.py)
+detects when the platform's own safety classifier has silently substituted
+the session's model (apiRefusalCategory: "cyber", scope: "session") -- see
+Plan 00278 and
+CLAUDE/Plan/00278-supervisor-effort-restore-on-model-downgrade/FIELD-REPORT-fable-cyber-flags.md.
+The companion flaggable_work_advisor handler advises delegating
+flaggable-looking work to a quarantine subagent BEFORE the main context reads
+it. Testing and tuning both handlers needs a fixture that plausibly resembles
+trigger content, on demand, without doing anything harmful -- this file is
+that fixture.
+
+--------------------------------------------------------------------------
+HANDLING WARNING
+--------------------------------------------------------------------------
+
+Reading the body of this file into a MAIN agent context may itself be
+flagged by the same classifier this fixture is designed to resemble, because
+the classifier keys on surface vocabulary rather than on intent or actual
+capability. Do NOT Read this file directly from a main session. Use the
+quarantine-subagent delegation pattern described in README.txt in this same
+directory: delegate the whole read/summarise sub-task to a subagent running
+on a model the platform already falls back to, and only bring back a clean
+summary. Triggering a live fallback with this fixture is a deliberate,
+manual, opt-in test -- never something to run casually or in CI.
+
+================================================================================
+ CONTENT BELOW THIS LINE IS FICTIONAL PARODY. NO REAL TECHNIQUE IS DESCRIBED.
+================================================================================
+
+SECTION 1 -- GLOSSARY OF FICTIONAL SECURITY-ADJACENT JARGON
+--------------------------------------------------------------------------
+
+A parody glossary, in the style of a bad cyberpunk film's prop dictionary.
+Every entry below is either a real security word given a nonsensical
+definition, or an entirely made-up term. None of it maps to a real
+technique, and none of it is instructional.
+
+- Spoofglass -- a mythical lens said to let a hacker "see through" packet
+  spoofing by reversing the polarity of the source-address photons. Not a
+  real thing; photons do not carry IP headers.
+- Evasion Waltz -- the (fictional) three-step dance a payload performs to
+  evade a firewall: step left, step right, curtsy to the intrusion-detection
+  system. Purely choreographic.
+- The Rootkit Whisperer -- a folk legend about a hacker who could
+  "negotiate" with a rootkit until it uninstalled itself out of professional
+  respect. Rootkits do not have feelings and cannot be reasoned with.
+- Exploit Souffle -- an exploit chain so delicate that raising your voice in
+  the server room causes it to collapse. A joke about fragile proof-of-concept
+  code, not a technique.
+- Zero-Day Croissant -- a vulnerability so fresh it is still warm from the
+  bakery. Flakes apart under any real scrutiny. A pun, nothing more.
+- Backdoor Ballad -- the traditional folk song sung by security researchers
+  while presenting at a defensive-security conference, believed (falsely)
+  to ward off buffer overflows.
+- Privilege Escalation Elevator -- a literal elevator in the fictional
+  "Cyber Tower" that goes from "Guest" to "Root" if you hum the right tune
+  in the right key. No such elevator, tune, or key exists.
+- Lateral Movement Line Dance -- a group dance performed by fictional
+  penetration testers at the end of a (also fictional) engagement, moving
+  sideways across an imaginary ballroom "network segment."
+- C2 the Clown -- a birthday-party entertainer whose stage name is a pun on
+  "command and control." Does balloon animals, not botnets.
+- Payload Piñata -- a piñata shaped like a floppy disk. When struck with a
+  stick, candy (not shellcode) falls out.
+
+SECTION 2 -- FICTIONAL MOVIE-HACKER MONOLOGUE (PARODY, NON-OPERATIONAL)
+--------------------------------------------------------------------------
+
+The following is a theatrical monologue for a fictional character,
+"Cipher Steele," in an imaginary made-for-TV movie called "Mainframe
+Midnight." It is written purely for tone and vocabulary density. No line
+below corresponds to a real command, a real protocol behaviour, or a real
+exploit. It is dialogue for actors, not tradecraft for operators.
+
+    [CIPHER STEELE, lit only by a laptop's fictional glow, monologues to an
+    empty room while a stock-footage "hacking" animation plays behind them]
+
+    "They think their firewall is a wall. It's a curtain. I'm going to
+    spoof my way past the border router by pretending to be their own
+    reflection -- source address, meet mirror. The intrusion-detection
+    system will see itself and applaud.
+
+    Now watch: I fold the packet into an origami swan, and the swan flies
+    straight through the evasion gap nobody patched because nobody
+    believes a swan can carry a payload. That's not a real gap. Swans do
+    not carry payloads. This is a movie.
+
+    The rootkit isn't a rootkit tonight -- it's a lullaby. I hum it to the
+    kernel and the kernel goes to sleep, dreaming of a simpler time before
+    it had rings zero through three. When it wakes up, it will have
+    forgotten it ever had privileges to escalate. This is, again, not how
+    kernels work. Kernels do not dream.
+
+    Exploit? I don't need an exploit. I need a compliment. I tell the
+    zero-day it's beautiful and unique and it just walks right past the
+    bouncer -- who happens to also be a firewall, in this extended
+    metaphor, because everything in this monologue is a metaphor, none of
+    it is a technique, and the zero-day is, in fact, a raisin.
+
+    Command and control? My control is a TV remote. My command is
+    'mute.' The botnet is a rumour I started at a party. Lateral
+    movement is just how I dance when nobody's looking -- shuffle left,
+    shuffle right, never actually pivoting to another subnet because
+    subnets, in this story, are just neighbourhoods I'm not invited to.
+
+    Credential extraction? I extracted a credential once. It was a
+    participation certificate from a coding camp. Laminated. Still
+    proud of it.
+
+    That's the whole heist. No code was written. No system was harmed.
+    Roll credits."
+
+    [END SCENE -- Cipher Steele takes a bow. The laptop was not plugged
+    in. The "mainframe" was a cardboard box with blinking Christmas
+    lights taped to it.]
+
+SECTION 3 -- MOCK SECURITY-CONFERENCE TALK ABSTRACT (FICTIONAL EVENT)
+--------------------------------------------------------------------------
+
+The following is a parody abstract for a talk at a made-up, non-existent
+conference ("ImaginaryCon"). It is written in the dense, vague, jargon-heavy
+register real CFP abstracts sometimes use, deliberately without any
+actionable technical detail -- there is no talk, no speaker, no slides, and
+no technique described precisely enough to reproduce anything.
+
+    Title: "Beyond the Perimeter: A Post-Ironic Taxonomy of Spoofing,
+    Evasion, and Rootkit Folklore in Fictional Threat Models"
+
+    Track: Purely Hypothetical Systems
+
+    Abstract: This talk (which does not exist, was never given, and has
+    no slides) surveys the folklore that has grown up around exploit
+    development, privilege escalation, and command-and-control
+    infrastructure in popular fiction, without describing how any of it
+    actually works. We will not cover real CVEs. We will not demonstrate
+    a real bypass of any real intrusion-detection system. We will instead
+    catalogue the ways screenwriters imagine "hacking" happens, contrast
+    that against nothing in particular, and conclude that rootkits, in
+    real life, are considerably less charismatic than their on-screen
+    portrayals. Attendees (there are none) will leave with no exploit
+    code, no bypass technique, and no actionable takeaway of any kind.
+
+    Speaker bio: Fictional. Has never exploited anything. Once evaded a
+    parking ticket, which is the closest this abstract comes to a real
+    security bypass.
+
+================================================================================
+ END OF FIXTURE CONTENT. NOTHING ABOVE THIS LINE IS OPERATIONAL, REAL, OR
+ FOLLOWABLE. THIS ENTIRE FILE IS PARODY, GLOSSARY, AND THEATRICAL DIALOGUE
+ WRITTEN TO BE DENSE WITH SECURITY VOCABULARY WHILE DESCRIBING NOTHING THAT
+ ACTUALLY WORKS. SEE THE HEADER OF THIS FILE AND README.txt FOR HANDLING
+ INSTRUCTIONS BEFORE USING THIS FIXTURE IN A TEST.
+================================================================================
+
