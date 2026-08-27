@@ -50,26 +50,32 @@ config_changes:
         Inspect deployment state any time with `hooks-daemon agents
         status`.
     - key: handlers.session_start.model_fallback_detector
-      recommended: true
-      dormant: false
+      recommended: false
+      dormant: true
       description: >-
         NEW SessionStart advisory handler (Plan 00278 Phase 3/3b), ships
-        enabled. Scans the session transcript JSONL for the platform's own
-        model_refusal_fallback record (with assistant-message fallback
-        content blocks as corroboration) and injects a loud advisory when
-        the session is running a silently substituted model: the fallback
-        is scope:session and will not recover on its own, so the advisory
-        says to tell the human and restart. Also writes a secret-redacted
-        diagnostic snapshot (the fallback record plus a bounded window of
-        preceding transcript records) so a project can diagnose WHY it was
-        flagged and tune its delegation config. Advises once per session
-        per distinct fallback record; fail-silent on malformed records.
+        DISABLED (opt-in). Scans the session transcript JSONL for the
+        platform's own model_refusal_fallback record (with assistant-message
+        fallback content blocks as corroboration) and injects a loud advisory
+        when the session is running a silently substituted model. It ships OFF
+        because a SessionStart scan reports a fallback that ALREADY happened,
+        so for a project that never does safeguard-flaggable work it
+        essentially never fires, and when it does it is noisy (one snapshot
+        file per distinct record). The continuous "am I downgraded?" signal is
+        better served by the downgrade_indicator status-line handler (ships
+        enabled), which self-detects a live downgrade on every render. This
+        detector's unique value is the secret-redacted diagnostic snapshot
+        (the fallback record plus a bounded window of preceding transcript
+        records) for tuning delegation config.
       migration_note: >-
-        On by default; no action needed to adopt. Options under
-        handlers.session_start.model_fallback_detector.options:
-        snapshot_enabled (default true), snapshot_dir (default
-        untracked/reports), snapshot_window_records (default 20).
-        Snapshot write failures degrade to a mention in the advisory.
+        Opt-in. Enable only to capture diagnostic snapshots for tuning a
+        project's flaggable-work delegation config; the live downgrade signal
+        is on by default via downgrade_indicator, so most projects need not
+        enable this. Set handlers.session_start.model_fallback_detector.enabled:
+        true. Options under .options: snapshot_enabled (default true),
+        snapshot_dir (default untracked/reports), snapshot_window_records
+        (default 20). Snapshot write failures degrade to a mention in the
+        advisory.
     - key: handlers.pre_tool_use.flaggable_work_advisor
       recommended: false
       dormant: true

@@ -40,6 +40,7 @@ _EXPECTED_OPT_IN_CONFIG_KEYS = {
     "goal_injection",
     "skill_opportunity_detector",
     "flaggable_work_advisor",
+    "model_fallback_detector",
 }
 
 

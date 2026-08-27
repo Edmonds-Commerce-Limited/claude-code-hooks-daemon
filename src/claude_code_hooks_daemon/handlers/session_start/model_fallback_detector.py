@@ -152,8 +152,18 @@ def _block_model(block: dict[str, Any], key: str) -> str:
 class ModelFallbackDetectorHandler(SessionStartHandlerBase):
     """Detect a safety-triggered model fallback from the session transcript.
 
-    Advisory only, default-enabled, fail-silent on every per-record parse
-    failure. Fires once per session per distinct fallback record.
+    Advisory only, opt-in (disabled by default), fail-silent on every
+    per-record parse failure. Fires once per session per distinct fallback
+    record.
+
+    Ships DISABLED (Plan 00278): a SessionStart scan reports a fallback that
+    already happened, so for a project that never does safeguard-flaggable work
+    it essentially never fires, and when it does it is noisy (one snapshot file
+    per distinct record). The continuous "am I downgraded?" signal is better
+    served by the ``downgrade_indicator`` status-line handler, which self-detects
+    a live downgrade on every render. This detector's unique value is the
+    secret-redacted diagnostic snapshot for tuning delegation config, so it is
+    left for a project (like this daemon's own dev estate) to opt into.
     """
 
     def __init__(self) -> None:
@@ -175,6 +185,12 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
 
         # (session_id, record identity) keys already advised — bounded FIFO.
         self._advised: dict[tuple[str, str], None] = {}
+
+    def get_default_enabled(self) -> bool:
+        """Opt-in: a SessionStart scan is a stale, noisy signal for most
+        projects; the ``downgrade_indicator`` status line covers the live one
+        (Plan 00278)."""
+        return False
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Fire on every SessionStart carrying a transcript path.

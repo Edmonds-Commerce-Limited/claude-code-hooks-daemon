@@ -440,8 +440,14 @@ handlers:
       enabled: true                # gitignore/tracked/permissions -- never reads content
       priority: 62
 
-    model_fallback_detector:  # Loud alert on a recorded safety-triggered model fallback (Plan 00278)
-      enabled: true
+    model_fallback_detector:  # Opt-in: loud SessionStart alert on a recorded model fallback (Plan 00278)
+      # Probably leave this OFF. A SessionStart scan reports a fallback that
+      # already happened, so for a project that never does safeguard-flaggable
+      # work it essentially never fires, and when it does it is noisy (one
+      # snapshot file per distinct record). The `downgrade_indicator` status
+      # line (enabled above) shows a LIVE downgrade instead. Enable this only
+      # to capture diagnostic snapshots for tuning delegation config.
+      enabled: false
       priority: 63
       # options:
       #   snapshot_enabled: true

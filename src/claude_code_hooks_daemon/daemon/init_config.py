@@ -259,7 +259,7 @@ class ConfigTemplate:
             "    contract_staleness: {enabled: true, priority: 60}  # Advise a hooks-contract refresh when Claude Code outruns the vendored audit\n"
             "    skill_opportunity_detector: {enabled: false, priority: 61}  # TTL-gated advisory to run `skill-scan` (opt-in; reads transcripts)\n"
             "    secret_file_hygiene_checker: {enabled: true, priority: 62}  # On-disk hygiene (gitignore/tracked/permissions) for protected paths\n"
-            "    model_fallback_detector: {enabled: true, priority: 63}  # Loud alert when the transcript records a safety-triggered model fallback (Plan 00278)\n"
+            "    model_fallback_detector: {enabled: false, priority: 63}  # Opt-in (Plan 00278): loud SessionStart alert on a recorded model fallback. Probably leave OFF — it reports a fallback that already happened and is noisy; the downgrade_indicator status line shows a LIVE downgrade instead. Enable only to capture diagnostic snapshots for tuning delegation config.\n"
             "\n"
             "  # SessionEnd - no handlers ship today (cleanup removed in Plan 00237)\n"
             "  session_end: {}\n"

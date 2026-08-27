@@ -592,7 +592,9 @@ handlers:
       priority: 62
 
     model_fallback_detector:  # Loud alert on a recorded safety-triggered model fallback (Plan 00278)
-      enabled: true            # Default-enabled; snapshot to untracked/reports/
+      enabled: true            # Dogfood-ON only: ships DISABLED upstream (opt-in). We keep it
+                               # here because THIS estate does flaggable work and the diagnostic
+                               # snapshots to untracked/reports/ help tune delegation config.
       priority: 63
 
   # PreCompact handlers (run before conversation compaction)
