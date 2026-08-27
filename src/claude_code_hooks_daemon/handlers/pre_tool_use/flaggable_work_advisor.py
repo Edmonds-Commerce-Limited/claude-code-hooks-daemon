@@ -156,9 +156,7 @@ class FlaggableWorkAdvisorHandler(PreToolUseHandlerBase):
             return []
         session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or "unknown")
         return [
-            key
-            for key in self._matched_keys(hook_input)
-            if (session_id, key) not in self._advised
+            key for key in self._matched_keys(hook_input) if (session_id, key) not in self._advised
         ]
 
     def _matched_keys(self, hook_input: dict[str, Any]) -> list[str]:
@@ -260,7 +258,7 @@ class FlaggableWorkAdvisorHandler(PreToolUseHandlerBase):
             "whole remainder.\n\n"
             "**The move**: delegate the WHOLE sub-task to the quarantine "
             "subagent BEFORE opening the content — "
-            "`Agent(subagent_type: \"<quarantine_agent>\")` — deciding from "
+            '`Agent(subagent_type: "<quarantine_agent>")` — deciding from '
             "the framing and the path, never by reading first (scouting "
             "first IS reading first), and take back only the clean summary.\n\n"
             "**Configure** via `handlers.pre_tool_use.flaggable_work_advisor."

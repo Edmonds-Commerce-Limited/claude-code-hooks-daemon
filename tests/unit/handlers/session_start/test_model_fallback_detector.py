@@ -110,9 +110,7 @@ class TestMatches:
         _write_transcript(transcript, [_prose_record()])
         assert handler.matches(_hook_input(transcript)) is True
 
-    def test_no_match_without_transcript_path(
-        self, handler: ModelFallbackDetectorHandler
-    ) -> None:
+    def test_no_match_without_transcript_path(self, handler: ModelFallbackDetectorHandler) -> None:
         assert handler.matches({"hook_event_name": _SESSION_START, "session_id": "s"}) is False
 
     def test_no_match_wrong_event(

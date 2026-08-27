@@ -105,9 +105,7 @@ class TestPathGlobMatching:
 
 
 class TestTopicTermMatching:
-    def test_two_seed_terms_in_content_match(
-        self, handler: FlaggableWorkAdvisorHandler
-    ) -> None:
+    def test_two_seed_terms_in_content_match(self, handler: FlaggableWorkAdvisorHandler) -> None:
         payload = _write(
             "/project/docs/note.md",
             "This documents the exploit and the rootkit internals in depth.",
@@ -141,9 +139,7 @@ class TestModeMerging:
 
 
 class TestRateLimiting:
-    def test_same_path_advises_once_per_session(
-        self, handler: FlaggableWorkAdvisorHandler
-    ) -> None:
+    def test_same_path_advises_once_per_session(self, handler: FlaggableWorkAdvisorHandler) -> None:
         payload = _read("/project/firewall/edge/rules.yml")
         assert handler.matches(payload) is True
         first = handler.handle(payload)
@@ -156,9 +152,7 @@ class TestRateLimiting:
         second = _read("/project/firewall/tarpit/rules.yml")
         assert handler.matches(second) is True
 
-    def test_different_session_advises_again(
-        self, handler: FlaggableWorkAdvisorHandler
-    ) -> None:
+    def test_different_session_advises_again(self, handler: FlaggableWorkAdvisorHandler) -> None:
         handler.handle(_read("/project/firewall/edge/rules.yml", session_id="a"))
         assert handler.matches(_read("/project/firewall/edge/rules.yml", session_id="b")) is True
 

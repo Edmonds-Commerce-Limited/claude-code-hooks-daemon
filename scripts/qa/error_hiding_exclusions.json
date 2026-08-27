@@ -3,6 +3,18 @@
   "description": "Intentional error-handling patterns exempt from the error-hiding audit. Prefer 'function' over 'lines': line numbers shift whenever anything above them is edited, function names do not. 'lines' remains necessary for module-level sites and shell scripts, where there is no enclosing function to key on. Each entry documents WHY the pattern is appropriate. Entries are themselves audited: an exclusion matching NO finding is reported as a 'stale-exclusion' violation, because it means either the entry drifted off its target (realign it) or the code was fixed (delete it) — and a drifted entry silently exempts an innocent site while the real finding resurfaces elsewhere looking new.",
   "exclusions": [
     {
+      "file": "handlers/session_start/model_fallback_detector.py",
+      "function": "_scan_transcript",
+      "rule": "log-and-continue",
+      "reason": "Plan 00278: advisory SessionStart transcript scan. A missing or unreadable transcript is a documented no-detection outcome, not an error to raise — the handler must never fail a session start, and the OSError is logged before returning the (correct) empty result. Nothing is concealed: an empty result simply means no fallback record could be observed."
+    },
+    {
+      "file": "handlers/session_start/model_fallback_detector.py",
+      "function": "_parse_candidate",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00278: per-record fail-silent contract. Transcript JSONL lines are external data written by Claude Code; a malformed line is skipped (None = 'not a fallback record'), matching TranscriptReader._ingest_record's established convention. Raising would let one corrupt line disable detection of a real fallback record elsewhere in the same file."
+    },
+    {
       "file": "utils/secret_file_matching.py",
       "function": "_realpath_if_resolvable",
       "rule": "silent-fallback",

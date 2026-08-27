@@ -304,6 +304,11 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
 # assumption that let the git bypasses survive.
 _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "AbsolutePathHandler": "matches on the file_path parameter, not a command",
+    "FlaggableWorkAdvisorHandler": (
+        "matches on configured path globs and topic-term content, not a command "
+        "name - the Bash route scans every whitespace token for a glob match, so "
+        "there is no command spelling to evade; advisory-only, never denies"
+    ),
     "AgentIsolationAdvisorHandler": "matches on the Agent tool, not a command",
     "WriteClobberGuardHandler": (
         "matches a Write file path plus per-session read state, not a command string - "
