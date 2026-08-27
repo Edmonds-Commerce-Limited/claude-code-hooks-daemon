@@ -9,6 +9,18 @@
       "reason": "Plan 00279: agent-asset sync at daemon start is deliberately best-effort, mirroring the fail-open startup contract (_validate_config, ClaudeMdInjector): an unwritable .claude/agents/, an invalid config (already reported by the degraded-mode path), or a mocked non-Path workspace_root must not stop the daemon serving hooks. The failure is logged at ERROR, so nothing is concealed; the deploy is re-attempted on every restart and available on demand via `hooks-daemon agents install`."
     },
     {
+      "file": "handlers/session_start/model_fallback_detector.py",
+      "function": "_scan_transcript",
+      "rule": "log-and-continue",
+      "reason": "Plan 00278: advisory SessionStart transcript scan. A missing or unreadable transcript is a documented no-detection outcome, not an error to raise — the handler must never fail a session start, and the OSError is logged before returning the (correct) empty result. Nothing is concealed: an empty result simply means no fallback record could be observed."
+    },
+    {
+      "file": "handlers/session_start/model_fallback_detector.py",
+      "function": "_parse_candidate",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00278: per-record fail-silent contract. Transcript JSONL lines are external data written by Claude Code; a malformed line is skipped (None = 'not a fallback record'), matching TranscriptReader._ingest_record's established convention. Raising would let one corrupt line disable detection of a real fallback record elsewhere in the same file."
+    },
+    {
       "file": "utils/secret_file_matching.py",
       "function": "_realpath_if_resolvable",
       "rule": "silent-fallback",

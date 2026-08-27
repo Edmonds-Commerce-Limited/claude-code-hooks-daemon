@@ -1,0 +1,445 @@
+"""ModelFallbackDetectorHandler - loud alert when a session runs a substituted model.
+
+Plan 00278 Phase 3/3b. Some caller models carry an API-side content safety
+classifier; when a request trips it, the platform silently substitutes a
+different model for the REMAINDER of the session (``scope: "session"``). The
+switch is announced once, in one transcript line, and never again — a measured
+field incident ran ~5.5 hours degraded before a human noticed.
+
+This SessionStart handler closes that observability gap the same way
+``project_handler_load_checker`` closes the silently-skipped-handler gap: it
+reads the record the platform ALREADY writes (the transcript JSONL's
+``subtype: "model_refusal_fallback"`` record, corroborated by assistant-message
+``content[].type == "fallback"`` blocks), and injects a loud
+PROTECTION-DEGRADED-style advisory naming the original model, the fallback
+model, and the refusal category. Model-agnostic: it keys on the record shape,
+never on model names.
+
+It ALSO writes a diagnostic snapshot — the fallback record(s) plus a bounded
+window of the preceding transcript records, passed through the secret-word
+redaction utility — so a project can diagnose WHY it was flagged and tune its
+delegation config (``flaggable_work_advisor`` path globs / topic terms).
+Snapshot failures degrade to a mention in the advisory, never an exception.
+
+Advisory only; fail-silent per malformed transcript record; advises once per
+session per DISTINCT fallback record (identity derived from the record's own
+fields, so a SessionStart resume does not re-spam an already-reported flip).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+from collections import deque
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Final
+
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.core import AdvisoryResult, Decision
+from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
+from claude_code_hooks_daemon.utils import secret_redaction
+
+# Module-level aliases so tests can monkeypatch this module's own names, and
+# so the snapshot path has exactly one redaction entry point.
+get_active_secret_terms = secret_redaction.get_active_secret_terms
+redact_text = secret_redaction.redact_text
+
+logger = logging.getLogger(__name__)
+
+_SESSION_START_EVENT: Final[str] = "SessionStart"
+
+# ── Transcript record shapes (see the Plan 00278 field report) ──────────────
+_KEY_SUBTYPE: Final[str] = "subtype"
+_FALLBACK_SUBTYPE: Final[str] = "model_refusal_fallback"
+_KEY_MESSAGE: Final[str] = "message"
+_KEY_CONTENT: Final[str] = "content"
+_KEY_TYPE: Final[str] = "type"
+_FALLBACK_BLOCK_TYPE: Final[str] = "fallback"
+_KEY_ORIGINAL_MODEL: Final[str] = "originalModel"
+_KEY_FALLBACK_MODEL: Final[str] = "fallbackModel"
+_KEY_REFUSAL_CATEGORY: Final[str] = "apiRefusalCategory"
+_KEY_SCOPE: Final[str] = "scope"
+_KEY_TIMESTAMP: Final[str] = "timestamp"
+_KEY_FROM: Final[str] = "from"
+_KEY_TO: Final[str] = "to"
+_KEY_MODEL: Final[str] = "model"
+
+# Cheap substring pre-filter: only lines that can possibly hold a fallback
+# record are json-parsed, so a large transcript stays a linear string scan.
+_PREFILTER_TOKENS: Final[tuple[str, ...]] = (_FALLBACK_SUBTYPE, f'"{_FALLBACK_BLOCK_TYPE}"')
+
+_UNKNOWN_VALUE: Final[str] = "unknown"
+
+# ── Snapshot defaults (options injected by the registry as _<option>) ───────
+_DEFAULT_SNAPSHOT_ENABLED: Final[bool] = True
+_DEFAULT_SNAPSHOT_DIR: Final[str] = "untracked/reports"
+_DEFAULT_SNAPSHOT_WINDOW_RECORDS: Final[int] = 20
+_SNAPSHOT_FILE_PREFIX: Final[str] = "model-fallback-snapshot"
+_SNAPSHOT_TIMESTAMP_FORMAT: Final[str] = "%Y-%m-%d-%H%M%S"
+
+# Bound the advised-record memory so a long-lived daemon cannot leak across
+# many sessions (same FIFO-eviction shape as command_hints' fire-state map).
+_MAX_ADVISED_KEYS: Final[int] = 512
+
+
+@dataclass(frozen=True)
+class _FallbackRecord:
+    """One detected fallback event, normalised from either record shape."""
+
+    original_model: str
+    fallback_model: str
+    category: str
+    scope: str
+    timestamp: str
+    identity: str
+    raw_line: str
+    preceding_lines: tuple[str, ...]
+
+
+def _record_identity(payload: dict[str, Any], raw_line: str) -> str:
+    """A deterministic identity for one fallback record.
+
+    Prefers the record's own distinguishing fields (timestamp + model pair);
+    falls back to a digest of the raw line so two field-identical records on
+    different lines still deduplicate deterministically.
+    """
+    timestamp = str(payload.get(_KEY_TIMESTAMP, "") or "")
+    if timestamp:
+        return "|".join(
+            (
+                timestamp,
+                str(payload.get(_KEY_ORIGINAL_MODEL, "") or ""),
+                str(payload.get(_KEY_FALLBACK_MODEL, "") or ""),
+            )
+        )
+    # MD5 as a cheap content fingerprint, not a security control.
+    return hashlib.md5(raw_line.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
+def _extract_fallback_block(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """The first assistant-message ``fallback`` content block, if any."""
+    message = payload.get(_KEY_MESSAGE)
+    if not isinstance(message, dict):
+        return None
+    content = message.get(_KEY_CONTENT)
+    if not isinstance(content, list):
+        return None
+    for block in content:
+        if isinstance(block, dict) and block.get(_KEY_TYPE) == _FALLBACK_BLOCK_TYPE:
+            return block
+    return None
+
+
+def _block_model(block: dict[str, Any], key: str) -> str:
+    """The model name inside a fallback block's ``from``/``to`` object."""
+    endpoint = block.get(key)
+    if isinstance(endpoint, dict):
+        return str(endpoint.get(_KEY_MODEL, _UNKNOWN_VALUE) or _UNKNOWN_VALUE)
+    return _UNKNOWN_VALUE
+
+
+class ModelFallbackDetectorHandler(SessionStartHandlerBase):
+    """Detect a safety-triggered model fallback from the session transcript.
+
+    Advisory only, default-enabled, fail-silent on every per-record parse
+    failure. Fires once per session per distinct fallback record.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            handler_id=HandlerID.MODEL_FALLBACK_DETECTOR,
+            priority=Priority.MODEL_FALLBACK_DETECTOR,
+            terminal=False,
+            tags=[
+                HandlerTag.ADVISORY,
+                HandlerTag.NON_TERMINAL,
+                HandlerTag.ENVIRONMENT,
+            ],
+        )
+        # Options — injected by the registry via setattr; typed and defaulted
+        # here so mypy sees real attributes (command_hints convention).
+        self._snapshot_enabled: bool = _DEFAULT_SNAPSHOT_ENABLED
+        self._snapshot_dir: str = _DEFAULT_SNAPSHOT_DIR
+        self._snapshot_window_records: int = _DEFAULT_SNAPSHOT_WINDOW_RECORDS
+
+        # (session_id, record identity) keys already advised — bounded FIFO.
+        self._advised: dict[tuple[str, str], None] = {}
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        """Fire on every SessionStart carrying a transcript path.
+
+        Resumed sessions fire too — a degraded session that resumes is still
+        degraded, and the once-per-record state keeps this from spamming.
+        """
+        if not isinstance(hook_input, dict):
+            return False
+        if hook_input.get(HookInputField.HOOK_EVENT_NAME) != _SESSION_START_EVENT:
+            return False
+        return bool(hook_input.get(HookInputField.TRANSCRIPT_PATH))
+
+    def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
+        """Scan the transcript; advise loudly on any unreported fallback record."""
+        try:
+            transcript_path = str(hook_input.get(HookInputField.TRANSCRIPT_PATH, "") or "")
+            session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or _UNKNOWN_VALUE)
+
+            records = self._scan_transcript(Path(transcript_path))
+            new_records = [
+                record for record in records if self._mark_advised(session_id, record.identity)
+            ]
+            if not new_records:
+                return AdvisoryResult(decision=Decision.ALLOW, context=[])
+
+            snapshot_notes: list[str] = []
+            if self._snapshot_enabled:
+                snapshot_notes = self._write_snapshots(new_records, transcript_path)
+
+            return AdvisoryResult(
+                decision=Decision.ALLOW,
+                context=self._build_alert(new_records, snapshot_notes),
+            )
+        except Exception as exc:
+            # Advisory handler: any failure degrades to silence, never blocks
+            # a session start.
+            logger.error("model_fallback_detector failed: %s", exc, exc_info=True)
+            return AdvisoryResult(decision=Decision.ALLOW, context=[])
+
+    # ── Transcript scanning ─────────────────────────────────────────────────
+
+    def _scan_transcript(self, path: Path) -> list[_FallbackRecord]:
+        """Stream the transcript, collecting fallback records + their windows.
+
+        Missing/unreadable file → empty list. Malformed lines are skipped
+        fail-silent per record. Every line feeds the bounded preceding-record
+        window; only pre-filtered candidate lines are json-parsed.
+        """
+        window_size = max(0, int(self._snapshot_window_records))
+        window: deque[str] = deque(maxlen=window_size or 1)
+        found: list[_FallbackRecord] = []
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as stream:
+                for raw_line in stream:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    if any(token in line for token in _PREFILTER_TOKENS):
+                        record = self._parse_candidate(line, tuple(window) if window_size else ())
+                        if record is not None:
+                            found.append(record)
+                    window.append(line)
+        except OSError as exc:
+            logger.debug("model_fallback_detector: cannot read transcript %s: %s", path, exc)
+        return found
+
+    def _parse_candidate(self, line: str, preceding: tuple[str, ...]) -> _FallbackRecord | None:
+        """Parse one candidate line into a fallback record, or ``None``."""
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+
+        if payload.get(_KEY_SUBTYPE) == _FALLBACK_SUBTYPE:
+            return _FallbackRecord(
+                original_model=str(payload.get(_KEY_ORIGINAL_MODEL, _UNKNOWN_VALUE) or ""),
+                fallback_model=str(payload.get(_KEY_FALLBACK_MODEL, _UNKNOWN_VALUE) or ""),
+                category=str(payload.get(_KEY_REFUSAL_CATEGORY, _UNKNOWN_VALUE) or ""),
+                scope=str(payload.get(_KEY_SCOPE, _UNKNOWN_VALUE) or ""),
+                timestamp=str(payload.get(_KEY_TIMESTAMP, "") or ""),
+                identity=_record_identity(payload, line),
+                raw_line=line,
+                preceding_lines=preceding,
+            )
+
+        block = _extract_fallback_block(payload)
+        if block is not None:
+            return _FallbackRecord(
+                original_model=_block_model(block, _KEY_FROM),
+                fallback_model=_block_model(block, _KEY_TO),
+                category=_UNKNOWN_VALUE,
+                scope=_UNKNOWN_VALUE,
+                timestamp=str(payload.get(_KEY_TIMESTAMP, "") or ""),
+                identity=_record_identity(payload, line),
+                raw_line=line,
+                preceding_lines=preceding,
+            )
+        return None
+
+    # ── Once-per-session-per-record state ───────────────────────────────────
+
+    def _mark_advised(self, session_id: str, identity: str) -> bool:
+        """True (and record it) the FIRST time this key is seen; False after."""
+        key = (session_id, identity)
+        if key in self._advised:
+            return False
+        if len(self._advised) >= _MAX_ADVISED_KEYS:
+            del self._advised[next(iter(self._advised))]
+        self._advised[key] = None
+        return True
+
+    # ── Advisory rendering ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_alert(records: list[_FallbackRecord], snapshot_notes: list[str]) -> list[str]:
+        lines: list[str] = [
+            "🚨 MODEL FALLBACK DETECTED — SESSION IS RUNNING A SUBSTITUTED MODEL 🚨",
+            "",
+            "The platform's safety classifier flagged a turn and silently switched "
+            "this session's model. The switch is scope: session — it will NOT "
+            "recover on its own; every subsequent turn runs the fallback model "
+            "until the session is restarted.",
+            "",
+        ]
+        for record in records:
+            detail = (
+                f"  - {record.original_model or _UNKNOWN_VALUE} → "
+                f"{record.fallback_model or _UNKNOWN_VALUE}"
+                f" (category: {record.category or _UNKNOWN_VALUE}"
+            )
+            if record.timestamp:
+                detail += f", at {record.timestamp}"
+            detail += ")"
+            lines.append(detail)
+        lines.extend(
+            [
+                "",
+                "ACTION: tell the human, and restart the session to clear the "
+                "fallback. Prevention: delegate safeguard-flaggable work to the "
+                "quarantine subagent BEFORE reading it (see flaggable_work_advisor).",
+            ]
+        )
+        if snapshot_notes:
+            lines.append("")
+            lines.extend(snapshot_notes)
+        return lines
+
+    # ── Snapshot writing ────────────────────────────────────────────────────
+
+    def _resolve_snapshot_dir(self) -> Path:
+        """The snapshot directory, resolved against the project root.
+
+        Falls back to the current working directory when ``ProjectContext``
+        is not initialised (unit tests, CLI probes) — snapshotting is
+        best-effort diagnostics, never worth failing over.
+        """
+        configured = Path(self._snapshot_dir or _DEFAULT_SNAPSHOT_DIR).expanduser()
+        if configured.is_absolute():
+            return configured
+        try:
+            from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+            return ProjectContext.project_root() / configured
+        except (RuntimeError, OSError) as exc:
+            logger.debug("model_fallback_detector: no project root (%s); using cwd", exc)
+            return Path.cwd() / configured
+
+    def _write_snapshots(self, records: list[_FallbackRecord], transcript_path: str) -> list[str]:
+        """Write one redacted diagnostic snapshot per record.
+
+        Returns advisory note lines — the written paths on success, or a
+        degradation notice on failure. Never raises.
+        """
+        notes: list[str] = []
+        directory = self._resolve_snapshot_dir()
+        terms = get_active_secret_terms()
+        stamp = datetime.now().strftime(_SNAPSHOT_TIMESTAMP_FORMAT)
+        for index, record in enumerate(records, start=1):
+            target = directory / f"{_SNAPSHOT_FILE_PREFIX}-{stamp}-{index}.md"
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+                target.write_text(
+                    self._render_snapshot(record, transcript_path, terms),
+                    encoding="utf-8",
+                )
+                notes.append(f"Diagnostic snapshot written: {target}")
+            except OSError as exc:
+                logger.warning("model_fallback_detector: snapshot write failed: %s", exc)
+                notes.append(
+                    f"NOTE: the diagnostic snapshot could not be written ({exc}); "
+                    "the advisory above is the only record of this detection."
+                )
+        return notes
+
+    @staticmethod
+    def _render_snapshot(
+        record: _FallbackRecord, transcript_path: str, terms: tuple[str, ...]
+    ) -> str:
+        preceding = "\n".join(record.preceding_lines)
+        body = (
+            "# Model-fallback diagnostic snapshot\n\n"
+            f"Transcript: `{transcript_path}`\n\n"
+            "Purpose: show WHAT the safety classifier reacted to, so this "
+            "project can tune its delegation config "
+            "(`flaggable_work_advisor` path globs / topic terms) and keep "
+            "flaggable material out of the main context.\n\n"
+            "## Fallback record\n\n"
+            "```json\n"
+            f"{record.raw_line}\n"
+            "```\n\n"
+            f"## Preceding transcript records (up to {len(record.preceding_lines)})\n\n"
+            "```json\n"
+            f"{preceding}\n"
+            "```\n"
+        )
+        return redact_text(body, terms)
+
+    # ── Guidance surfaces ───────────────────────────────────────────────────
+
+    def get_claude_md(self) -> str | None:
+        return (
+            "## model_fallback_detector — silent model substitution is surfaced\n\n"
+            "At session start the transcript is scanned for the platform's own "
+            "`model_refusal_fallback` record. When one is found, a loud advisory "
+            "reports that this session is running a SUBSTITUTED model: a safety "
+            "classifier flagged a turn and switched the model with `scope: "
+            "session`, so it will NOT recover on its own.\n\n"
+            "**When you see `🚨 MODEL FALLBACK DETECTED 🚨`**:\n\n"
+            "1. **Tell the human immediately** — the substitution is otherwise "
+            "silent, and a session has run degraded for hours unnoticed.\n"
+            "2. **A session restart is the only cure** — the fallback is "
+            "session-sticky; keep working only on the human's say-so.\n"
+            "3. **Read the diagnostic snapshot** (path named in the advisory, "
+            "default `untracked/reports/`): it holds the fallback record plus "
+            "the preceding transcript window, secret-redacted, so the project "
+            "can tune its `flaggable_work_advisor` delegation config to stop "
+            "the recurrence.\n\n"
+            "Options under `handlers.session_start.model_fallback_detector."
+            "options`: `snapshot_enabled` (default true), `snapshot_dir` "
+            "(default `untracked/reports`), `snapshot_window_records` (default "
+            "20). Snapshots are never auto-committed."
+        )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            RecommendedModel,
+            TestType,
+        )
+
+        return [
+            AcceptanceTest(
+                title="model fallback detector - alerts on a recorded fallback",
+                command='echo "session start advisory"',
+                description=(
+                    "When the session transcript contains a model_refusal_fallback "
+                    "record, a new session shows a MODEL FALLBACK DETECTED alert "
+                    "naming the original and fallback models and the refusal "
+                    "category, plus the diagnostic snapshot path."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"MODEL FALLBACK DETECTED"],
+                safety_notes=(
+                    "Advisory only. Requires a transcript carrying a real "
+                    "fallback record, which cannot be synthesised safely in a "
+                    "live session — verified by unit tests otherwise."
+                ),
+                test_type=TestType.CONTEXT,
+                requires_event="SessionStart event with a fallback record in the transcript",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+        ]

@@ -82,6 +82,14 @@ _BASH_WRITE_ACCESSORS = (
 _VALID_VERDICTS = (_BLIND, _PARTIAL, _COVERED, _OUT_OF_FRAME)
 
 _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
+    "FlaggableWorkAdvisorHandler": (
+        _PARTIAL,
+        "a Bash command MENTIONING a flaggable path is matched by token glob "
+        "scan (Plan 00278), so cat/grep/git over those paths still advise; "
+        "but the topic-term route sees only tool_input text, so flaggable "
+        "vocabulary reaching disk via heredoc body is not scanned. Advisory "
+        "only -- the resident guidance names the routes it covers",
+    ),
     "AbsolutePathHandler": (
         _OUT_OF_FRAME,
         "premise is about a TOOL ARGUMENT being absolute, not a file on disk; "

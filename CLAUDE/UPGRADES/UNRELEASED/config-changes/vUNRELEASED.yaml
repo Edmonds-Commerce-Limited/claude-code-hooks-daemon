@@ -49,6 +49,49 @@ config_changes:
         delegation-boundary document defining which work is flaggable.
         Inspect deployment state any time with `hooks-daemon agents
         status`.
+    - key: handlers.session_start.model_fallback_detector
+      recommended: true
+      dormant: false
+      description: >-
+        NEW SessionStart advisory handler (Plan 00278 Phase 3/3b), ships
+        enabled. Scans the session transcript JSONL for the platform's own
+        model_refusal_fallback record (with assistant-message fallback
+        content blocks as corroboration) and injects a loud advisory when
+        the session is running a silently substituted model: the fallback
+        is scope:session and will not recover on its own, so the advisory
+        says to tell the human and restart. Also writes a secret-redacted
+        diagnostic snapshot (the fallback record plus a bounded window of
+        preceding transcript records) so a project can diagnose WHY it was
+        flagged and tune its delegation config. Advises once per session
+        per distinct fallback record; fail-silent on malformed records.
+      migration_note: >-
+        On by default; no action needed to adopt. Options under
+        handlers.session_start.model_fallback_detector.options:
+        snapshot_enabled (default true), snapshot_dir (default
+        untracked/reports), snapshot_window_records (default 20).
+        Snapshot write failures degrade to a mention in the advisory.
+    - key: handlers.pre_tool_use.flaggable_work_advisor
+      recommended: false
+      dormant: true
+      description: >-
+        NEW opt-in PreToolUse advisory handler (Plan 00278 Phase 3), ships
+        DISABLED. When a Read/Edit/Write/Grep targets a path matching
+        flaggable_path_globs, a Bash command mentions such a path, or the
+        tool input text matches 2+ flaggable_topic_terms (seed: spoof,
+        spoofing, evasion, exploit, rootkit), it advises (never denies)
+        delegating the whole sub-task to the quarantine subagent BEFORE
+        opening the content, deciding from framing/path never by reading
+        first, taking back only the clean summary. Rate-limited once per
+        session per matched path. Options: flaggable_path_globs (default
+        empty), flaggable_topic_terms, quarantine_agent (default
+        hooks-daemon-opus-security), mode (additive | replace — whether
+        project lists extend or replace the built-in seeds, matching the
+        command_hints convention).
+      migration_note: >-
+        Enable only in projects whose subject matter can trip an API-side
+        content safety classifier (defensive-security estates). Set
+        handlers.pre_tool_use.flaggable_work_advisor.enabled: true and
+        configure the path globs to the project's sensitive directories.
   removed:
     - key: handlers.session_start.skill_opportunity_detector.options.model
       description: >-

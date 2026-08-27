@@ -190,6 +190,7 @@ class Priority:
     CONTRACT_STALENESS = 60
     SKILL_OPPORTUNITY_DETECTOR = 61
     SECRET_FILE_HYGIENE_CHECKER = 62
+    MODEL_FALLBACK_DETECTOR = 63
 
     # Advisory handlers (Priority: 55-65)
     CRITICAL_THINKING_ADVISORY = 55
@@ -201,6 +202,7 @@ class Priority:
     NITPICK_DISMISSIVE = 10
     NITPICK_HEDGING = 20
     DAEMON_DOCS_GUARD = 57
+    FLAGGABLE_WORK_ADVISOR = 58
     BRITISH_ENGLISH = 60
 
     # Status line handlers (varied priorities)

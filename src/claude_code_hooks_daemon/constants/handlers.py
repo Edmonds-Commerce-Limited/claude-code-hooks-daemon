@@ -375,6 +375,21 @@ class HandlerID:
         config_key="skill_opportunity_detector",
         display_name="skill-opportunity-detector",
     )
+    # Model-fallback detector (SessionStart handler) — Plan 00278 Phase 3/3b:
+    # loud advisory when the transcript records a safety-triggered model
+    # fallback, plus a redacted diagnostic snapshot
+    MODEL_FALLBACK_DETECTOR = HandlerIDMeta(
+        class_name="ModelFallbackDetectorHandler",
+        config_key="model_fallback_detector",
+        display_name="model-fallback-detector",
+    )
+    # Flaggable-work advisor (PreToolUse handler) — Plan 00278 Phase 3:
+    # delegate-before-reading advisory for safeguard-flaggable work
+    FLAGGABLE_WORK_ADVISOR = HandlerIDMeta(
+        class_name="FlaggableWorkAdvisorHandler",
+        config_key="flaggable_work_advisor",
+        display_name="flaggable-work-advisor",
+    )
     CONTRACT_STALENESS = HandlerIDMeta(
         class_name="ContractStalenessHandler",
         config_key="contract_staleness",

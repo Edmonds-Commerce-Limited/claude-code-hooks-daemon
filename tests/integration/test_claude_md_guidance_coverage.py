@@ -165,6 +165,15 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "GitHooksExecutableFixerHandler": "T3 the daemon changed file permissions on your behalf",
     "MarkdownTableFormatterHandler": "T3 the daemon rewrites your .md files after every write",
     "SecretFileHygieneCheckerHandler": "T3 the remediation commands must survive to be actioned",
+    "ModelFallbackDetectorHandler": (
+        "T3 'your session runs a substituted model' must persist until the "
+        "restart; the snapshot/tuning workflow outlives the fire-time alert"
+    ),
+    "FlaggableWorkAdvisorHandler": (
+        "T2 the delegate-before-reading decision must be made before the tool "
+        "call this fires on; the standing delegation discipline cannot fit in "
+        "the once-per-path fire-time line"
+    ),
 }
 
 # Handlers that correctly return None. The reason is the point: it is what a
