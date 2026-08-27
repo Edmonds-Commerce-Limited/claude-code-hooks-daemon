@@ -284,12 +284,19 @@ class DaemonController:
         """Run the config-driven agent-asset lifecycle sync (Plan 00279)."""
         from claude_code_hooks_daemon.install.agent_assets import deploy_agents_if_enabled
 
+        messages: list[str] = []
         try:
-            report = deploy_agents_if_enabled(workspace_root, config_path)
-        except OSError as exc:
+            messages = deploy_agents_if_enabled(workspace_root, config_path).messages
+        except (OSError, ValueError, TypeError) as exc:
+            # Deliberately non-fatal, mirroring the fail-open startup contract
+            # (_validate_config): an unwritable .claude/agents/ (OSError), an
+            # invalid config the degraded-mode path already reports
+            # (pydantic ValidationError is a ValueError), or a non-Path
+            # workspace_root in a mocked unit-test initialise (TypeError) must
+            # not stop the daemon serving hooks. The failure is logged loudly
+            # at ERROR — never swallowed.
             logger.error("Agent-asset sync failed (daemon continues): %s", exc)
-            return
-        for message in report.messages:
+        for message in messages:
             logger.info("Agent assets: %s", message)
 
     def _load_plugins(self, plugins_config: "PluginsConfig", workspace_root: Path) -> int:

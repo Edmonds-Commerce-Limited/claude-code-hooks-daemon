@@ -82,9 +82,7 @@ class TestInstall:
 
 
 class TestRemove:
-    def test_remove_requires_name(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_remove_requires_name(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         assert cmd_agents(_ns(_project(tmp_path), "remove")) == 1
         assert "name" in capsys.readouterr().err.lower()
 

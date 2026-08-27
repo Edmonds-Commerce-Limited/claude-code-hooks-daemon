@@ -323,9 +323,7 @@ def sync_agents(project_root: Path, config: Config) -> AgentSyncReport:
                 AgentActionResult(
                     name=spec.name,
                     action=AgentAction.SKIPPED_DISABLED,
-                    message=(
-                        f"{spec.name} not deployed ({spec.gating_config_key} is disabled)"
-                    ),
+                    message=(f"{spec.name} not deployed ({spec.gating_config_key} is disabled)"),
                 )
             )
             continue
