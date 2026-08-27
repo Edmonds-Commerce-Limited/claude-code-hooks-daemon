@@ -1,6 +1,6 @@
 # Plan 00279: Generic Agent Install Subsystem
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-27
 **Owner**: Claude (requested by joseph)
 **Priority**: High
@@ -122,7 +122,7 @@ agent asset itself.
 - [x] ✅ **Task 4.1**: Full QA; daemon restart RUNNING; client-mode
   verification via `scripts/dummy-client-repo.sh` (deploy, upgrade
   overwrite, customisation refusal, disable advisory, remove).
-- [ ] ⬜ **Task 4.2**: Complete plan (archive, README row, journal closure).
+- [x] ✅ **Task 4.2**: Complete plan (archive, README row, journal closure).
 
 ## Dependencies
 
@@ -151,20 +151,25 @@ removes only pristine files and refuses customised ones.
 
 ## Success Criteria
 
-- [ ] Both agents deploy through one generic subsystem; dedupe-scout
+- [x] Both agents deploy through one generic subsystem; dedupe-scout
   behaviour unchanged for existing installs.
-- [ ] Upgrade path proves: outdated pristine file overwritten; customised
+- [x] Upgrade path proves: outdated pristine file overwritten; customised
   file left intact with a loud warning.
-- [ ] Enable/disable config transitions produce deploy/removal-advisory on
+- [x] Enable/disable config transitions produce deploy/removal-advisory on
   daemon start; CLI list/status/install/remove all work in the dummy client
   repo.
-- [ ] opus-security agent ships disabled-by-default, generalised, and
+- [x] opus-security agent ships disabled-by-default, generalised, and
   deploys cleanly when enabled.
-- [ ] All QA green; daemon restarts RUNNING.
+- [x] All QA green; daemon restarts RUNNING.
 
 ## Delivery & Milestones
 
 <!-- Curated milestones + delivery commit hashes only (git is the SSoT for
      "when"). The activity log lives in JOURNAL/. -->
 
-- (pending)
+- Core subsystem + CLI + docs merged --no-ff at 6679da75; startup sync
+  live-upgraded the dogfood dedupe scout to v1.1.0.
+- CLI double-emission dogfood fix at 3a7e5eff.
+- Frontmatter context-cleanliness pass (opus-security v1.1.0, v1.0.0 md5
+  ledgered) merged at 3abbc809.
+- Full QA 25/25 on the merged tree at f0a9dc33.
