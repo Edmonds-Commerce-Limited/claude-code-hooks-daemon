@@ -49,7 +49,10 @@ Every ``/model <family>`` injection (the auto-restore above, and the manual
 override below) sends a SECOND, confirming Enter after the normal submit:
 Claude Code's model switch shows a confirmation dialog that the ordinary
 single-Enter submit does not clear. The count is configurable via
-``CCY_MODEL_CONFIRM_ENTERS`` (default 1). A session can also be switched
+``CCY_MODEL_CONFIRM_ENTERS`` (default 1). Every ``/effort <level>``
+injection sends its own confirming Enter the same way — the effort selector
+also needs one — configurable via ``CCY_EFFORT_CONFIRM_ENTERS`` (default 1).
+A session can also be switched
 on demand — for end-to-end testing, or a genuine manual override — by
 writing a ``<session>.model-switch-intent`` signal (mirroring the
 goal-intent signal) and consuming it at the same idle choke point, ahead of
@@ -1019,6 +1022,32 @@ def _model_confirm_enters_from_env() -> int:
     return _parse_model_confirm_enters(raw)
 
 
+# Every ``/effort <level>`` injection needs the same treatment: Claude Code's
+# effort selector shows a confirmation UI that the ordinary single-Enter
+# submit does not clear, so without a confirming Enter the level change sits
+# unconfirmed forever (a human had to press Enter for the first live coupled
+# correction).
+_DEFAULT_EFFORT_CONFIRM_ENTERS = 1
+_EFFORT_CONFIRM_ENTERS_ENV_VAR = "CCY_EFFORT_CONFIRM_ENTERS"
+
+
+def _parse_effort_confirm_enters(raw: str) -> int:
+    """Parse the effort confirm-Enter override; junk or negative keeps default."""
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return _DEFAULT_EFFORT_CONFIRM_ENTERS
+    return value if value >= 0 else _DEFAULT_EFFORT_CONFIRM_ENTERS
+
+
+def _effort_confirm_enters_from_env() -> int:
+    """Resolve the effective effort confirm-Enter count (env override or default)."""
+    raw = os.environ.get(_EFFORT_CONFIRM_ENTERS_ENV_VAR)
+    if raw is None:
+        return _DEFAULT_EFFORT_CONFIRM_ENTERS
+    return _parse_effort_confirm_enters(raw)
+
+
 def _parse_min_effort_levels(raw: str) -> dict[str, str]:
     """Parse ``family=level,...`` overrides onto the default minimum map.
 
@@ -1129,6 +1158,11 @@ class CompactPolicy:
     # auto-restore and the manual switch signal). Env-resolved for the same
     # host/worker agreement.
     model_confirm_enters: int = field(default_factory=_model_confirm_enters_from_env)
+    # Additional confirming Enters sent after every /effort injection (both
+    # the floor-based restore and the coupled post-/model correction) — the
+    # effort selector needs one just like the model switch. Env-resolved for
+    # the same host/worker agreement.
+    effort_confirm_enters: int = field(default_factory=_effort_confirm_enters_from_env)
 
 
 @dataclass(frozen=True)
@@ -2885,6 +2919,7 @@ def decide_once(
     own_sessions: frozenset[str] | None = None,
     goal_signal_ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS,
     model_confirm_enters: int = _DEFAULT_MODEL_CONFIRM_ENTERS,
+    effort_confirm_enters: int = _DEFAULT_EFFORT_CONFIRM_ENTERS,
 ) -> TickOutcome:
     """Decide what to inject this tick WITHOUT touching the PTY (Plan 00164 P4).
 
@@ -3063,6 +3098,7 @@ def decide_once(
                 noop_reason_log = f"{_NOOP_LOG_PREFIX}: coupled effort pending but session busy"
         else:
             decision_value = Decision.WOULD_EFFORT.value
+            confirm_enters = effort_confirm_enters
             coupled_target = machine.coupled_effort_pending.rsplit(":", 1)[-1]
             effort_command = f"{_EFFORT_COMMAND} {coupled_target}"
             reason = (
@@ -3202,6 +3238,7 @@ def decide_once(
             noop_reason_log = f"{_NOOP_LOG_PREFIX}: effort injection cap reached"
         else:
             decision_value = Decision.WOULD_EFFORT.value
+            confirm_enters = effort_confirm_enters
             target = machine.effort_pending.rsplit(":", 1)[-1]
             effort_command = f"{_EFFORT_COMMAND} {target}"
             reason = (
@@ -3384,6 +3421,7 @@ def _poll_once(
     own_sessions: frozenset[str] | None = None,
     goal_signal_ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS,
     model_confirm_enters: int = _DEFAULT_MODEL_CONFIRM_ENTERS,
+    effort_confirm_enters: int = _DEFAULT_EFFORT_CONFIRM_ENTERS,
 ) -> Evaluation:
     """One in-process supervisor tick: decide (``decide_once``) then inject.
 
@@ -3413,6 +3451,7 @@ def _poll_once(
         own_sessions=own_sessions,
         goal_signal_ttl_seconds=goal_signal_ttl_seconds,
         model_confirm_enters=model_confirm_enters,
+        effort_confirm_enters=effort_confirm_enters,
     )
     injected = _apply_decision(outcome, master_writer=master_writer, log=log)
     _apply_post_injection_bookkeeping(machine, outcome, injected=injected)
@@ -3535,6 +3574,7 @@ def run_worker(
                 own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
                 goal_signal_ttl_seconds=policy.goal_signal_ttl_seconds,
                 model_confirm_enters=policy.model_confirm_enters,
+                effort_confirm_enters=policy.effort_confirm_enters,
             )
         except Exception:
             # SAFETY NET: a single tick's exception must not kill the worker

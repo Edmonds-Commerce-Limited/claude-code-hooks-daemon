@@ -351,6 +351,38 @@ def test_model_restore_sets_confirm_enters(tmp_path: Path) -> None:
     assert outcome.confirm_enters == _mod._DEFAULT_MODEL_CONFIRM_ENTERS
 
 
+def test_floor_effort_injection_sets_confirm_enters(tmp_path: Path) -> None:
+    # /effort opens Claude Code's effort selector, which — like /model — needs
+    # a SECOND, confirming Enter after the normal submit or the switch never
+    # completes (observed live: the coupled /effort fired but sat unconfirmed
+    # until a human pressed Enter).
+    outcome = _downgrade(tmp_path / "cs", _machine())
+    assert outcome.decision_value == "would-effort"
+    assert outcome.confirm_enters == _mod._DEFAULT_EFFORT_CONFIRM_ENTERS
+    assert outcome.confirm_enters >= 1
+
+
+def test_coupled_effort_injection_sets_confirm_enters(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    _write_sidecar(sidecar_dir)
+    machine = _machine()
+    machine.arm_coupled_effort(session=_SESSION, family="fable")
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.decision_value == "would-effort"
+    assert outcome.confirm_enters == _mod._DEFAULT_EFFORT_CONFIRM_ENTERS
+
+
+def test_effort_confirm_enters_env_parsing() -> None:
+    assert _mod._parse_effort_confirm_enters("2") == 2
+    assert _mod._parse_effort_confirm_enters("0") == 0
+    assert _mod._parse_effort_confirm_enters("junk") == _mod._DEFAULT_EFFORT_CONFIRM_ENTERS
+    assert _mod._parse_effort_confirm_enters("-1") == _mod._DEFAULT_EFFORT_CONFIRM_ENTERS
+
+
+def test_effort_confirm_enters_policy_default() -> None:
+    assert _mod.CompactPolicy().effort_confirm_enters == _mod._DEFAULT_EFFORT_CONFIRM_ENTERS
+
+
 def test_model_restore_dry_run_marker(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
     machine, later = _restore_ready_machine(sidecar_dir)
