@@ -357,15 +357,18 @@ class TestAuditTrailFlush:
         assert driver.machine.audit_pending == ()
         assert driver.tick().payload is None
 
-    def test_failed_flush_keeps_items_for_retry(self, tmp_path: Path) -> None:
+    def test_flush_clears_at_decision_time_even_when_injection_fails(self, tmp_path: Path) -> None:
+        # The backlog is cleared when the flush is DECIDED, not when the host
+        # reports success: a PTY too broken to print the audit line must not
+        # retry it forever, and the same broken PTY cannot print a false
+        # claim either — a failed flush loses the audit record, it never
+        # fabricates one.
         driver = _AuditDriver(tmp_path / "cs")
         driver.switch_and_couple()
         failed = driver.tick(injected=False)
         assert failed.decision_value == "would-audit"
-        assert driver.machine.audit_pending != ()
-        retried = driver.tick()
-        assert retried.decision_value == "would-audit"
         assert driver.machine.audit_pending == ()
+        assert driver.tick().payload is None
 
     def test_flush_defers_while_session_busy(self, tmp_path: Path) -> None:
         driver = _AuditDriver(tmp_path / "cs")

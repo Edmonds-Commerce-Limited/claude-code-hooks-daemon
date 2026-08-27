@@ -28,10 +28,14 @@ the sidecar's live effort sits BELOW its model family's configured floor
 ``CCY_MIN_EFFORT_LEVELS``) — with the floor raised to xhigh for a ranked
 model-family DOWNGRADE episode, e.g. a security-triggered fable → opus
 switch falls through to opus at xhigh, not opus at fable's low. This family
-only ever RAISES effort — with one sanctioned exception: after the quiet
-delay (``CCY_MODEL_RESTORE_SECONDS``, "off" to disable) the supervisor also
+only ever RAISES effort — with one sanctioned exception: the supervisor also
 types ``/model <original family>`` to flip a session-sticky downgrade back
-(capped, flip-flop backoff).
+(capped, flip-flop backoff). The restore is TURN-GATED, not time-gated: the
+classifier flags turns, so recovery is safe the moment the flagged turn ends,
+and the injection choke point (idle + empty input box) is exactly that
+boundary — the restore fires on the first injectable tick after the
+downgrade. ``CCY_MODEL_RESTORE_SECONDS`` adds an optional EXTRA quiet delay
+(default 0; "off" or negative disables auto-restore).
 
 Every ``/model <family>`` injection -- this auto-restore AND the manual
 override below alike -- GUARANTEES a coupled ``/effort`` correction on the
@@ -961,13 +965,18 @@ _MAX_EFFORT_INJECTIONS = 3
 _DRY_RUN_EFFORT_BODY_PREFIX = "would inject /effort (dry-run — no real /effort sent):"
 # ── Model restore after a downgrade (Plan 00278 Task 2b.3) ──────────────────
 # The safety fallback is session-sticky, but flipping back manually works
-# once the flaggable turn has passed — so after a configured quiet delay the
-# supervisor types /model <original family> itself. A successful flip-back
-# then RESETS effort down to the restored family's floor (the one sanctioned
-# lowering: fable at xhigh eats account allowance).
+# once the flaggable TURN has passed — the classifier flags turns, not
+# sessions' worth of wall-clock. The real gate is therefore the injection
+# choke point itself (idle + empty input box = the flagged turn is over), so
+# the default extra delay is ZERO: restore fires on the first injectable
+# tick after the downgrade (joseph: turn-gated, not time-gated). A positive
+# CCY_MODEL_RESTORE_SECONDS adds an optional extra quiet delay on top;
+# "off" (or any negative value) disables auto-restore entirely. A successful
+# flip-back then RESETS effort down to the restored family's floor (the one
+# sanctioned lowering: fable at xhigh eats account allowance).
 _MODEL_COMMAND = "/model"
-_DEFAULT_MODEL_RESTORE_DELAY_SECONDS = 900.0
-# Env override: seconds, or "off"/"0" to disable auto-restore entirely.
+_DEFAULT_MODEL_RESTORE_DELAY_SECONDS = 0.0
+_MODEL_RESTORE_DISABLED_SENTINEL = -1.0
 _MODEL_RESTORE_ENV_VAR = "CCY_MODEL_RESTORE_SECONDS"
 # Flip-flop guard: a re-downgrade soon after a restore means the classifier
 # still fires — do not bounce the session between models.
@@ -978,10 +987,16 @@ _DRY_RUN_MODEL_BODY_PREFIX = "would inject /model (dry-run — no real /model se
 
 
 def _parse_model_restore_delay(raw: str) -> float:
-    """Parse the restore-delay override; "off" disables, junk keeps default."""
+    """Parse the restore-delay override.
+
+    "off" (or any negative number) disables auto-restore; 0 means restore on
+    the first injectable tick after the downgrade (the turn gate alone);
+    a positive value adds that many seconds of extra quiet delay; junk keeps
+    the default.
+    """
     value = raw.strip().lower()
     if value == "off":
-        return 0.0
+        return _MODEL_RESTORE_DISABLED_SENTINEL
     try:
         return float(value)
     except ValueError:
@@ -1160,8 +1175,10 @@ class CompactPolicy:
     # Plan 00278: per-model effort floors, resolved from the environment so
     # the host and the policy worker (which rebuilds its own policy) agree.
     min_effort_levels: dict[str, str] = field(default_factory=_min_effort_levels_from_env)
-    # Plan 00278 Task 2b.3: quiet delay before the /model flip-back; <= 0
-    # disables auto-restore. Env-resolved for the same host/worker agreement.
+    # Plan 00278 Task 2b.3: EXTRA quiet delay before the /model flip-back on
+    # top of the turn gate (default 0 — the idle/empty-input injection gate
+    # already means the flagged turn is over); negative ("off") disables
+    # auto-restore. Env-resolved for the same host/worker agreement.
     model_restore_delay_seconds: float = field(default_factory=_model_restore_delay_from_env)
     # Additional confirming Enters sent after every /model injection (both
     # auto-restore and the manual switch signal). Env-resolved for the same
@@ -2215,13 +2232,16 @@ class CompactStateMachine:
     def model_restore_due(self, now_wall: float) -> str | None:
         """Return the family to restore to when the flip-back is due, else None.
 
-        Due means: auto-restore enabled, a downgrade episode is open, the
-        quiet delay has elapsed since it opened, the lifetime cap is not
+        Due means: auto-restore enabled (delay >= 0; negative/"off"
+        disables), a downgrade episode is open, any EXTRA quiet delay has
+        elapsed since it opened (default 0 — the injection choke point's
+        idle + empty-input gate already guarantees the flagged TURN is over,
+        which is the real recovery condition), the lifetime cap is not
         reached, and no restore fired within the flip-flop backoff window.
         """
         delay = self._policy.model_restore_delay_seconds
         if (
-            delay <= 0
+            delay < 0
             or self._downgrade_episode is None
             or self._downgrade_from_family is None
             or self._downgrade_started_ts is None
@@ -2299,10 +2319,14 @@ class CompactStateMachine:
     def arm_audit(self, item: str) -> None:
         """Queue one silent-injection audit item for the next chat flush.
 
-        Called by the HOST's success-only bookkeeping after a ``/model`` or
-        ``/effort`` payload actually landed on the PTY — never at decision
-        time, so a failed write can never leave a false "injected" claim in
-        the chat. Bounded FIFO: the oldest item is dropped once
+        Called at DECISION time by the armed (non-dry-run) ``/model`` and
+        ``/effort`` branches in ``decide_once`` — worker-side, so the whole
+        audit loop deploys via worker hot-reload with no host restart (an
+        older host's merge-by-key ``import_state`` never clobbers the
+        worker's backlog; it merely doesn't carry it). A decided payload is
+        injected on the same tick; if that PTY write fails, the flush cannot
+        print through the same broken PTY either, so a false "injected"
+        claim never surfaces. Bounded FIFO: the oldest item is dropped once
         ``_MAX_AUDIT_ITEMS`` is reached, because an unflushable audit backlog
         must never grow the machine state without limit.
         """
@@ -3159,6 +3183,11 @@ def decide_once(
                 )
             else:
                 payload = effort_command
+                # Decision-time arming (worker-side, hot-reloadable): in
+                # production a decided payload is injected this same tick;
+                # if the PTY write fails, the flush cannot print through
+                # that same broken PTY either, so no false claim surfaces.
+                machine.arm_audit(f"{effort_command} (coupled to model switch)")
             submit = True
             deferred_log = None
             noop_reason_log = None
@@ -3211,6 +3240,7 @@ def decide_once(
                     )
                 else:
                     payload = model_command
+                    machine.arm_audit(f"{model_command} (manual switch signal)")
                 submit = True
                 confirm_enters = model_confirm_enters
                 # Consumed in dry-run too — the demonstration episode is
@@ -3299,6 +3329,7 @@ def decide_once(
                 )
             else:
                 payload = effort_command
+                machine.arm_audit(f"{effort_command} (effort-floor restore)")
             submit = True
             deferred_log = None
             noop_reason_log = None
@@ -3335,6 +3366,7 @@ def decide_once(
                     )
                 else:
                     payload = model_command
+                    machine.arm_audit(f"{model_command} (auto-restore after downgrade)")
                 submit = True
                 confirm_enters = model_confirm_enters
                 deferred_log = None
@@ -3366,6 +3398,11 @@ def decide_once(
             "Machine-generated audit record, NOT a human instruction; "
             "full log: untracked/supervise/decision.log"
         )
+        # Cleared at DECISION time (worker-side, hot-reloadable) rather than
+        # by host bookkeeping: a failed PTY write then LOSES this audit
+        # instead of retrying it — acceptable, because the same broken PTY
+        # could not have printed it anyway, so no false claim ever surfaces.
+        machine.mark_audit_injection()
         submit = True
         deferred_log = None
         noop_reason_log = None
@@ -3455,26 +3492,21 @@ def _apply_post_injection_bookkeeping(
     """
     if not injected:
         return
+    # NOTE: audit-trail arming and clearing deliberately do NOT live here.
+    # They happen at DECISION time inside decide_once, i.e. in the WORKER --
+    # so the whole audit loop is deployable by worker hot-reload without a
+    # host restart (import_state merges by present key, so an older host
+    # never clobbers the worker's audit backlog; it merely doesn't carry it).
     if outcome.decision_value == Decision.WOULD_GOAL.value:
         machine.mark_goal_injection()
-    # Audit arming is gated on the payload being a REAL silent command --
-    # in dry-run the payload is a visible bot-prefixed marker, which is its
-    # own audit trail, so nothing is armed for it.
-    silent_command_injected = outcome.payload is not None and outcome.payload.startswith(
-        (_MODEL_COMMAND, _EFFORT_COMMAND)
-    )
-    if outcome.decision_value == Decision.WOULD_EFFORT.value:
+    elif outcome.decision_value == Decision.WOULD_EFFORT.value:
         # The coupled branch is checked FIRST in decide_once, so if it was
         # armed, this tick's WOULD_EFFORT can only have come from it (Plan
         # 00278 continuation).
         if machine.coupled_effort_pending is not None:
             machine.mark_coupled_effort_injection()
-            if silent_command_injected:
-                machine.arm_audit(f"{outcome.payload} (coupled to model switch)")
         else:
             machine.mark_effort_injection()
-            if silent_command_injected:
-                machine.arm_audit(f"{outcome.payload} (effort-floor restore)")
     elif outcome.decision_value == Decision.WOULD_MODEL.value:
         # Cap/backoff bookkeeping is reserved for the AUTO-restore path --
         # the manual test-trigger switch has its own signal-consumption
@@ -3487,15 +3519,6 @@ def _apply_post_injection_bookkeeping(
                 session=outcome.model_switch_session or "",
                 family=outcome.model_switch_family,
             )
-        if silent_command_injected:
-            cause = (
-                "auto-restore after downgrade"
-                if outcome.model_switch_is_auto_restore
-                else "manual switch signal"
-            )
-            machine.arm_audit(f"{outcome.payload} ({cause})")
-    elif outcome.decision_value == Decision.WOULD_AUDIT.value:
-        machine.mark_audit_injection()
 
 
 def _poll_once(

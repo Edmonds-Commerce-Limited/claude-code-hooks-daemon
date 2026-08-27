@@ -66,8 +66,16 @@ def _write_sidecar(
     return path
 
 
-def _machine():
-    return _mod.CompactStateMachine(_mod.CompactPolicy())
+def _machine(restore_delay: float | None = None):
+    """A machine with the default policy, or an explicit restore delay.
+
+    ``restore_delay=-1.0`` disables auto-restore (isolates the effort
+    family); a positive value adds an extra quiet delay; the default policy
+    restores on the first injectable tick after a downgrade (turn-gated).
+    """
+    if restore_delay is None:
+        return _mod.CompactStateMachine(_mod.CompactPolicy())
+    return _mod.CompactStateMachine(_mod.CompactPolicy(model_restore_delay_seconds=restore_delay))
 
 
 def _decide(sidecar_dir: Path, machine, *, dry_run: bool = False, facts: object | None = None):
@@ -167,12 +175,12 @@ def test_different_session_switch_is_not_a_downgrade(tmp_path: Path) -> None:
 
 
 def test_already_xhigh_does_not_inject(tmp_path: Path) -> None:
-    outcome = _downgrade(tmp_path / "cs", _machine(), effort="xhigh")
+    outcome = _downgrade(tmp_path / "cs", _machine(restore_delay=-1.0), effort="xhigh")
     assert outcome.payload is None
 
 
 def test_already_max_does_not_inject(tmp_path: Path) -> None:
-    outcome = _downgrade(tmp_path / "cs", _machine(), effort="max")
+    outcome = _downgrade(tmp_path / "cs", _machine(restore_delay=-1.0), effort="max")
     assert outcome.payload is None
 
 
@@ -242,6 +250,7 @@ def test_reinject_cooldown_suppresses_stale_reading(tmp_path: Path) -> None:
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 1.0)
     assert _decide(sidecar_dir, machine).decision_value == "would-effort"
     machine.mark_effort_injection(now_wall=_NOW)
+    machine.mark_audit_injection()  # consume the decision-time audit backlog
     # The sidecar has not caught up yet — the stale "low" must not re-fire...
     outcome = _decide(sidecar_dir, machine)
     assert outcome.payload is None
@@ -270,10 +279,11 @@ def test_deferred_while_input_box_not_empty_then_retries(tmp_path: Path) -> None
 
 def test_success_mark_clears_pending_and_counts(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
-    machine = _machine()
+    machine = _machine(restore_delay=-1.0)  # isolate the effort family
     outcome = _downgrade(sidecar_dir, machine)
     assert outcome.decision_value == "would-effort"
     machine.mark_effort_injection(now_wall=_NOW)
+    machine.mark_audit_injection()  # consume the decision-time audit backlog
     assert machine.effort_injections == 1
     # No re-fire while the family stays downgraded.
     again = _decide(sidecar_dir, machine)
@@ -284,6 +294,7 @@ def test_recovery_clears_pending(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
     _downgrade(sidecar_dir, machine)
+    machine.mark_audit_injection()  # consume the decision-time audit backlog
     # Model recovers before the injection ever landed.
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 0.1)
     outcome = _decide(sidecar_dir, machine)
@@ -292,8 +303,9 @@ def test_recovery_clears_pending(tmp_path: Path) -> None:
 
 def test_effort_becoming_xhigh_clears_pending(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
-    machine = _machine()
+    machine = _machine(restore_delay=-1.0)  # isolate the effort family
     _downgrade(sidecar_dir, machine, effort="low")
+    machine.mark_audit_injection()  # consume the decision-time audit backlog
     # Someone (human or otherwise) already raised the effort.
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=_NOW - 0.1)
     outcome = _decide(sidecar_dir, machine)
@@ -302,7 +314,7 @@ def test_effort_becoming_xhigh_clears_pending(tmp_path: Path) -> None:
 
 def test_injection_cap(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
-    machine = _machine()
+    machine = _machine(restore_delay=-1.0)  # isolate the effort family
     for _ in range(_mod._MAX_EFFORT_INJECTIONS):
         machine.mark_effort_injection(now_wall=_NOW - 10_000.0)
     outcome = _downgrade(sidecar_dir, machine)
@@ -317,6 +329,7 @@ def _restore_ready_machine(sidecar_dir: Path):
     machine = _machine()
     _downgrade(sidecar_dir, machine)
     machine.mark_effort_injection(now_wall=_NOW)  # effort restore already fired
+    machine.mark_audit_injection()  # consume the decision-time audit backlog
     later = _NOW + _mod._DEFAULT_MODEL_RESTORE_DELAY_SECONDS + 1.0
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=later - 1.0)
     return machine, later
@@ -332,10 +345,13 @@ def test_model_restore_fires_after_delay(tmp_path: Path) -> None:
 
 
 def test_model_restore_not_before_delay(tmp_path: Path) -> None:
+    # An EXPLICIT extra delay (CCY_MODEL_RESTORE_SECONDS) holds the restore
+    # back even after the turn gate would allow it.
     sidecar_dir = tmp_path / "cs"
-    machine = _machine()
+    machine = _machine(restore_delay=900.0)
     _downgrade(sidecar_dir, machine)
     machine.mark_effort_injection(now_wall=_NOW)
+    machine.mark_audit_injection()  # consume the decision-time audit backlog
     soon = _NOW + 5.0
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=soon - 1.0)
     outcome = _decide(sidecar_dir, machine, facts=_facts(soon))
@@ -445,6 +461,7 @@ def test_no_effort_reset_without_our_restore(tmp_path: Path) -> None:
     machine = _machine()
     _downgrade(sidecar_dir, machine)
     machine.mark_effort_injection(now_wall=_NOW)
+    machine.mark_audit_injection()  # consume the decision-time audit backlog
     after = _NOW + 60.0
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=after - 1.0)
     outcome = _decide(sidecar_dir, machine, facts=_facts(after))
@@ -453,7 +470,7 @@ def test_no_effort_reset_without_our_restore(tmp_path: Path) -> None:
 
 def test_parse_model_restore_delay() -> None:
     assert _mod._parse_model_restore_delay("300") == 300.0
-    assert _mod._parse_model_restore_delay("off") == 0.0
+    assert _mod._parse_model_restore_delay("off") == _mod._MODEL_RESTORE_DISABLED_SENTINEL
     assert _mod._parse_model_restore_delay("junk") == _mod._DEFAULT_MODEL_RESTORE_DELAY_SECONDS
     assert _mod._parse_model_restore_delay("") == _mod._DEFAULT_MODEL_RESTORE_DELAY_SECONDS
 
@@ -463,7 +480,8 @@ def test_model_restore_disabled_when_delay_off(tmp_path: Path) -> None:
     machine = _machine()
     _downgrade(sidecar_dir, machine)
     machine.mark_effort_injection(now_wall=_NOW)
-    policy = _mod.CompactPolicy(model_restore_delay_seconds=0.0)
+    machine.mark_audit_injection()  # consume the decision-time audit backlog
+    policy = _mod.CompactPolicy(model_restore_delay_seconds=_mod._MODEL_RESTORE_DISABLED_SENTINEL)
     disabled = _mod.CompactStateMachine(policy)
     disabled.import_state(machine.export_state())
     later = _NOW + 1_000_000.0
