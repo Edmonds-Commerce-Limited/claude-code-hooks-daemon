@@ -177,6 +177,38 @@ class TestPerformInjection:
         _mod._perform_injection(written.append, "hello world", sleep=lambda _s: None)
         assert b"".join(written) == b"hello world\r"
 
+    def test_confirm_enters_sends_additional_standalone_enters(self) -> None:
+        # A /model switch needs a SECOND confirming Enter after the normal
+        # submit -- each is its own delayed write, mirroring the submit itself.
+        written: list[bytes] = []
+        sleeps: list[float] = []
+        _mod._perform_injection(
+            written.append, "/model fable", confirm_enters=1, sleep=sleeps.append
+        )
+        assert written == [b"/model fable", b"\r", b"\r"]
+        assert sleeps == [_mod._SUBMIT_DELAY_SECONDS, _mod._MODEL_CONFIRM_DELAY_SECONDS]
+
+    def test_confirm_enters_default_is_zero_and_unchanged(self) -> None:
+        written: list[bytes] = []
+        _mod._perform_injection(written.append, "hello", sleep=lambda _s: None)
+        assert written == [b"hello", b"\r"]
+
+    def test_confirm_enters_multiple(self) -> None:
+        written: list[bytes] = []
+        _mod._perform_injection(
+            written.append, "/model fable", confirm_enters=2, sleep=lambda _s: None
+        )
+        assert written == [b"/model fable", b"\r", b"\r", b"\r"]
+
+    def test_confirm_enters_ignored_when_submit_false(self) -> None:
+        # ESC is an interrupt keypress, not a submitted line -- confirm_enters
+        # must never apply to it.
+        written: list[bytes] = []
+        _mod._perform_injection(
+            written.append, "\x1b", submit=False, confirm_enters=1, sleep=lambda _s: None
+        )
+        assert written == [b"\x1b"]
+
 
 class TestIsIdle:
     def test_no_input_is_idle(self) -> None:
