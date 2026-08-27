@@ -209,10 +209,11 @@ effective capability when it happens anyway.
   Manual switches no longer consume the auto-restore cap/backoff.
 - [x] ✅ **Task 5.5**: Ship `model_fallback_detector` DISABLED by default
   (Decision 7); dogfood config keeps it on.
-- [ ] ⬜ **Task 5.6**: Live re-test after a FULL ccy restart (the coupling
-  bookkeeping is host-side; worker hot-reload alone cannot arm it): from
-  opus, `--emit-model-switch fable` must flip the model AND drop effort to
-  fable's floor in lockstep.
+- [x] ✅ **Task 5.6**: Live re-test PASSED hands-free (decision.log 12:32:00
+  `/model fable` → 12:32:03 coupled `/effort low`, no human keypress, end
+  state fable low). First round exposed that `/effort` needs its own
+  confirming Enter — added as `CCY_EFFORT_CONFIRM_ENTERS` (default 1),
+  worker-side only so a hot-reload deployed it.
 - [ ] ⬜ **Task 5.7** (proposed, awaiting joseph): mid-session fallback
   detection on UserPromptSubmit (turn-gated live scan) to replace the
   SessionStart-only surface.
