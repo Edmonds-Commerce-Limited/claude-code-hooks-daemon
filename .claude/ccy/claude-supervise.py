@@ -31,9 +31,19 @@ switch falls through to opus at xhigh, not opus at fable's low. This family
 only ever RAISES effort — with one sanctioned exception: after the quiet
 delay (``CCY_MODEL_RESTORE_SECONDS``, "off" to disable) the supervisor also
 types ``/model <original family>`` to flip a session-sticky downgrade back
-(capped, flip-flop backoff), and once the sidecar confirms OUR flip landed
-it resets effort down to the restored family's floor, so fable never idles
-at xhigh burning allowance.
+(capped, flip-flop backoff).
+
+Every ``/model <family>`` injection -- this auto-restore AND the manual
+override below alike -- GUARANTEES a coupled ``/effort`` correction on the
+very next injectable tick, unconditionally: switching TO the TOP-ranked
+family (fable) drives effort DOWN to its configured floor (the one
+sanctioned lowering, so fable never idles at xhigh burning account
+allowance); switching to anything else drives effort UP to
+``_DOWNGRADE_TARGET_EFFORT`` (xhigh), so a still-degraded fallback model
+gets maximum compensating effort. This is unconditional — it never waits
+for a downgrade episode to be open, nor for a later sidecar reading to
+confirm the switch landed, which is exactly what a purely reading-driven
+reset previously missed for a manual override.
 
 Every ``/model <family>`` injection (the auto-restore above, and the manual
 override below) sends a SECOND, confirming Enter after the normal submit:
@@ -915,6 +925,11 @@ _MODEL_FAMILY_RANKS: dict[str, int] = {
 }
 # "mythos" is an alias: _model_family canonicalises it to "fable".
 _MODEL_FAMILY_CANONICAL: dict[str, str] = {"mythos": "fable"}
+# The single highest capability rank (fable/mythos). Used by the coupled-
+# effort mechanism to distinguish "switching TO the best model" (a sanctioned
+# effort LOWERING to its floor) from every other destination (a downgrade or
+# a partial restore, which targets _DOWNGRADE_TARGET_EFFORT instead).
+_TOP_FAMILY_RANK = max(_MODEL_FAMILY_RANKS.values())
 _EFFORT_COMMAND = "/effort"
 # Ascending effort ranks (Claude Code's own low→max ordering).
 _EFFORT_RANKS: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "xhigh": 3, "max": 4}
@@ -1184,6 +1199,15 @@ class TickOutcome:
     # ever non-zero for a ``/model`` injection -- see ``_perform_injection``).
     # 0 for every other decision and for legacy replies without the field.
     confirm_enters: int = 0
+    # Plan 00278 continuation: populated only when ``decision_value`` is
+    # WOULD_MODEL, so the HOST can arm the mandatory coupled-effort
+    # correction after a successful injection (``arm_coupled_effort``) --
+    # for BOTH the manual test-trigger switch and the auto-restore
+    # flip-back. None/False for every other decision and for legacy replies
+    # without the fields.
+    model_switch_family: str | None = None
+    model_switch_session: str | None = None
+    model_switch_is_auto_restore: bool = False
 
 
 def _coerce_float(value: object) -> float:
@@ -2091,13 +2115,18 @@ class CompactStateMachine:
         self._effort_last_fired_ts: float | None = None
         # Plan 00278 Task 2b.3: model-restore bookkeeping — the family the
         # downgrade came FROM, when the episode opened, the per-process
-        # restore count, the last restore ts (flip-flop backoff), and whether
-        # a successful restore is awaiting its post-flip effort reset.
+        # restore count, and the last restore ts (flip-flop backoff).
         self._downgrade_from_family: str | None = None
         self._downgrade_started_ts: float | None = None
         self._model_restores = 0
         self._model_restore_last_ts: float | None = None
-        self._awaiting_effort_reset = False
+        # Plan 00278 continuation: the COUPLED effort correction a /model
+        # switch always owes on the next injectable tick (format
+        # "session:family:target"). Armed by the HOST after ANY successful
+        # /model injection -- manual test-trigger AND auto-restore alike --
+        # so the correction never depends on a downgrade episode being open
+        # or a later sidecar reading confirming the switch landed.
+        self._coupled_effort_pending: str | None = None
 
     @property
     def effort_pending(self) -> str | None:
@@ -2123,16 +2152,18 @@ class CompactStateMachine:
         self._effort_pending = None
 
     def mark_model_restore(self, now_wall: float | None = None) -> None:
-        """Count a fired /model flip-back and arm the post-flip effort reset.
+        """Count a fired auto-restore /model flip-back for cap/backoff purposes.
 
-        Called by the HOST only after a SUCCESSFUL injection (Plan 00278
-        Task 2b.3). The timestamp starts the flip-flop backoff; the armed
-        reset lowers effort to the restored family's floor once the sidecar
-        confirms the flip landed.
+        Called by the HOST only after a SUCCESSFUL AUTO-RESTORE injection
+        (Plan 00278 Task 2b.3) -- never for the manual test-trigger switch,
+        which has its own signal-consumption lifecycle and must not eat into
+        this cap/backoff budget. The timestamp starts the flip-flop backoff
+        (see ``model_restore_due``). The post-flip effort correction is
+        handled unconditionally by the coupled-effort mechanism, not by this
+        method -- see ``arm_coupled_effort``.
         """
         self._model_restores += 1
         self._model_restore_last_ts = time.time() if now_wall is None else now_wall
-        self._awaiting_effort_reset = True
 
     def model_restore_due(self, now_wall: float) -> str | None:
         """Return the family to restore to when the flip-back is due, else None.
@@ -2160,8 +2191,66 @@ class CompactStateMachine:
             return None
         return self._downgrade_from_family
 
+    def _coupled_effort_target(self, family: str) -> str:
+        """Return the mandatory post-/model-switch effort target for ``family``.
+
+        Every ``/model <family>`` injection is followed, unconditionally, by
+        an ``/effort`` injection to this target on the next injectable tick
+        (the "effort switch MUST follow model switch" invariant) -- entirely
+        independent of whether a downgrade episode happens to be open or a
+        later sidecar reading ever confirms the switch landed. The
+        TOP-ranked family (fable) is a SANCTIONED LOWERING to its configured
+        floor -- the fix for the live defect where an opus->fable switch
+        left effort at xhigh and burned account allowance. Any other
+        destination -- a downgrade, or a partial restore that has not yet
+        reached the top family -- targets ``_DOWNGRADE_TARGET_EFFORT``
+        (xhigh) so a still-degraded model gets maximum compensating effort.
+        This BYPASSES the raise-only invariant that governs the floor-based
+        ``_effort_pending`` family: lowering fable to its floor is the
+        entire point.
+        """
+        if _family_rank(family) == _TOP_FAMILY_RANK:
+            return self._policy.min_effort_levels.get(
+                family, _DEFAULT_MIN_EFFORT_LEVELS.get(family, _DOWNGRADE_TARGET_EFFORT)
+            )
+        return _DOWNGRADE_TARGET_EFFORT
+
+    @property
+    def coupled_effort_pending(self) -> str | None:
+        """Pending coupled effort-injection key, or None (Plan 00278 cont.)."""
+        return self._coupled_effort_pending
+
+    def arm_coupled_effort(self, *, session: str, family: str) -> None:
+        """Arm the mandatory post-/model-switch effort correction.
+
+        Called by the HOST after ANY successful ``/model <family>``
+        injection -- both the manual test-trigger signal and the
+        auto-restore flip-back -- so the very next injectable tick fires
+        ``/effort <target>`` unconditionally, guaranteeing the invariant
+        regardless of downgrade-episode state or sidecar timing. A blank
+        ``session`` or ``family`` is a no-op (defensive: decide_once only
+        ever calls this with values it has just resolved for a real switch).
+        """
+        if not session or not family:
+            return
+        target = self._coupled_effort_target(family)
+        self._coupled_effort_pending = f"{session}:{family}:{target}"
+
+    def mark_coupled_effort_injection(self) -> None:
+        """Close the pending coupled-effort episode after a SUCCESSFUL injection.
+
+        Called by the HOST only after a successful PTY write -- a failed
+        write keeps the pending episode so the next tick retries.
+        """
+        self._coupled_effort_pending = None
+
+    @property
+    def last_model_session(self) -> str | None:
+        """The most recently observed foreground session id, or None (Plan 00278)."""
+        return self._last_model_session
+
     def note_model_reading(self, reading: SidecarReading, *, now_wall: float) -> None:
-        """Track the foreground model; recompute the effort-restore episode.
+        """Track the foreground model; recompute the floor-based effort episode.
 
         Two triggers share one pending episode (Plan 00278):
 
@@ -2176,6 +2265,17 @@ class CompactStateMachine:
         cooldown, because the sidecar reports the old effort until the next
         status render. Unknown families and session-less synthetic readings
         are ignored entirely.
+
+        The post-/model-switch effort correction is NOT decided here any
+        more (Plan 00278 continuation): it used to fire only once THIS
+        method observed the switch land, which never happened for a manual
+        override with no downgrade episode open. That correction is now the
+        unconditional ``_coupled_effort_pending`` mechanism, armed by the
+        HOST straight off a successful injection -- see
+        ``arm_coupled_effort``. This method still closes a recovered
+        downgrade episode (so ``model_restore_due`` stops considering a
+        restore "due" once the family is back); it just no longer tries to
+        infer an effort reset from that recovery.
         """
         family = _model_family(reading.model_id)
         session = reading.session_id
@@ -2185,15 +2285,12 @@ class CompactStateMachine:
         prev_family = self._last_model_family
         self._last_model_session = session
         self._last_model_family = family
-        recovered_from_restore = False
         if self._downgrade_episode is not None:
             ep_session, _, ep_family = self._downgrade_episode.partition(":")
             if session != ep_session or _family_rank(family) > _family_rank(ep_family):
-                recovered_from_restore = self._awaiting_effort_reset and session == ep_session
                 self._downgrade_episode = None
                 self._downgrade_from_family = None
                 self._downgrade_started_ts = None
-                self._awaiting_effort_reset = False
         if (
             prev_session == session
             and prev_family is not None
@@ -2206,23 +2303,6 @@ class CompactStateMachine:
                 self._downgrade_from_family = prev_family
                 self._downgrade_started_ts = now_wall
             self._downgrade_episode = f"{session}:{family}"
-        # Post-flip effort reset (Task 2b.3): OUR restore just landed — lower
-        # effort to the restored family's floor (the one sanctioned lowering;
-        # fable at xhigh eats account allowance). A recovery we did not cause
-        # is left alone.
-        if recovered_from_restore:
-            floor = self._policy.min_effort_levels.get(family)
-            current_effort = reading.effort
-            if (
-                floor is not None
-                and current_effort is not None
-                and current_effort in _EFFORT_RANKS
-                and _EFFORT_RANKS[current_effort] > _EFFORT_RANKS[floor]
-            ):
-                self._effort_pending = f"{session}:{family}:{floor}"
-            else:
-                self._effort_pending = None
-            return
         if self._downgrade_episode is not None:
             target: str | None = _DOWNGRADE_TARGET_EFFORT
         else:
@@ -2299,7 +2379,7 @@ class CompactStateMachine:
             "downgrade_started_ts": self._downgrade_started_ts,
             "model_restores": self._model_restores,
             "model_restore_last_ts": self._model_restore_last_ts,
-            "awaiting_effort_reset": self._awaiting_effort_reset,
+            "coupled_effort_pending": self._coupled_effort_pending,
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -2355,8 +2435,9 @@ class CompactStateMachine:
         if "model_restore_last_ts" in state:
             raw = state["model_restore_last_ts"]
             self._model_restore_last_ts = None if raw is None else _coerce_float(raw)
-        if "awaiting_effort_reset" in state:
-            self._awaiting_effort_reset = bool(state["awaiting_effort_reset"])
+        if "coupled_effort_pending" in state:
+            raw = state["coupled_effort_pending"]
+            self._coupled_effort_pending = None if raw is None else str(raw)
 
     def evaluate(
         self,
@@ -2950,15 +3031,64 @@ def decide_once(
     # applies unchanged (a deferred goal keeps its signal and retries).
     decision_value = evaluation.decision.value
     reason = evaluation.reason
+    # Populated below whenever THIS tick's decision is WOULD_MODEL, so the
+    # HOST can arm the mandatory coupled-effort correction after a
+    # successful injection (Plan 00278 continuation) -- for BOTH the manual
+    # test-trigger switch and the auto-restore flip-back.
+    model_switch_family: str | None = None
+    model_switch_session: str | None = None
+    model_switch_is_auto_restore = False
+    # ── Coupled effort: "/model switch MUST be followed by /effort" ─────────
+    # HIGH PRIORITY: checked BEFORE every other subordinate family (manual
+    # model switch, goal, floor-based effort, auto-model-restore) so a
+    # correction owed from a PRIOR /model switch is always delivered before
+    # any new intent is considered. Still strictly subordinate to
+    # compact/continue/escape above. Unconditional and UNGATED on any
+    # downgrade episode or sidecar-observed recovery -- the manual-switch
+    # path has no episode to gate on, and the auto-restore path must not
+    # depend on a race-prone later reading confirming the switch landed.
+    # This is the fix for the live defect where opus->fable left effort at
+    # xhigh and burned account allowance.
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+        and machine.coupled_effort_pending is not None
+    ):
+        if not can_inject:
+            if facts.idle and not facts.input_line_empty:
+                deferred_log = f"{_DEFERRED_LOG_PREFIX} (coupled effort pending)"
+            else:
+                noop_reason_log = f"{_NOOP_LOG_PREFIX}: coupled effort pending but session busy"
+        else:
+            decision_value = Decision.WOULD_EFFORT.value
+            coupled_target = machine.coupled_effort_pending.rsplit(":", 1)[-1]
+            effort_command = f"{_EFFORT_COMMAND} {coupled_target}"
+            reason = (
+                f"model switch requires coupled effort "
+                f"({machine.coupled_effort_pending}) -> would inject {effort_command}"
+            )
+            if dry_run:
+                payload = (
+                    f"{_format_bot_prefix(facts.now_wall)} "
+                    f"{_DRY_RUN_EFFORT_BODY_PREFIX} {effort_command}"
+                )
+            else:
+                payload = effort_command
+            submit = True
+            deferred_log = None
+            noop_reason_log = None
     # ── Manual model-switch override (test trigger / deliberate override) ────
-    # Checked FIRST among the four subordinate families (ahead of goal, effort
-    # and auto-model-restore) so a deliberate switch is never starved by them
-    # -- but still strictly after compact/continue/escape above, so it can
-    # never disrupt an in-flight compaction. Unlike every other family, the
-    # injection gate here is `facts.input_line_empty` ONLY, not the full
-    # `can_inject` (which also requires the keystroke-idle floor): the whole
-    # point of a manual trigger is to fire promptly, and an empty input box is
-    # the one hard safety rail (never type into a box mid-composition).
+    # Checked ahead of goal, effort and auto-model-restore so a deliberate
+    # switch is never starved by them -- but still strictly after
+    # compact/continue/escape (and the coupled-effort correction) above, so
+    # it can never disrupt an in-flight compaction or skip a correction
+    # owed from a PRIOR switch. Unlike every other family, the injection
+    # gate here is `facts.input_line_empty` ONLY, not the full `can_inject`
+    # (which also requires the keystroke-idle floor): the whole point of a
+    # manual trigger is to fire promptly, and an empty input box is the one
+    # hard safety rail (never type into a box mid-composition).
     if (
         payload is None
         and evaluation.decision is Decision.NOOP
@@ -2986,6 +3116,13 @@ def decide_once(
                 decision_value = Decision.WOULD_MODEL.value
                 model_command = f"{_MODEL_COMMAND} {switch_family}"
                 reason = f"model-switch signal -> would inject {model_command}"
+                model_switch_family = switch_family
+                # The signal file is named "<session_id>.model-switch-intent"
+                # (write_model_switch_signal) -- derive the session the same
+                # way rather than re-parsing the JSON body a second time.
+                model_switch_session = switch_path.name.removesuffix(
+                    _MODEL_SWITCH_SIGNAL_SUFFIX
+                )
                 if dry_run:
                     payload = (
                         f"{_format_bot_prefix(facts.now_wall)} "
@@ -3086,8 +3223,9 @@ def decide_once(
     # ── Model restore after a downgrade (Plan 00278 Task 2b.3) ──────────────
     # Fires only on an otherwise-NOOP MONITOR tick, after the quiet delay,
     # under the lifetime cap and the flip-flop backoff (all inside
-    # model_restore_due). The HOST marks success (mark_model_restore), which
-    # also arms the post-flip effort reset.
+    # model_restore_due). The HOST marks success (mark_model_restore) for
+    # the cap/backoff, and ALSO arms the coupled effort correction
+    # (arm_coupled_effort) -- see `model_switch_is_auto_restore` below.
     if (
         payload is None
         and evaluation.decision is Decision.NOOP
@@ -3105,6 +3243,9 @@ def decide_once(
                 decision_value = Decision.WOULD_MODEL.value
                 model_command = f"{_MODEL_COMMAND} {restore_family}"
                 reason = f"downgrade quiet delay elapsed -> would inject {model_command}"
+                model_switch_family = restore_family
+                model_switch_session = machine.last_model_session
+                model_switch_is_auto_restore = True
                 if dry_run:
                     payload = (
                         f"{_format_bot_prefix(facts.now_wall)} "
@@ -3126,6 +3267,9 @@ def decide_once(
         machine_state=machine.export_state(),
         noop_reason_log=noop_reason_log,
         confirm_enters=confirm_enters,
+        model_switch_family=model_switch_family,
+        model_switch_session=model_switch_session,
+        model_switch_is_auto_restore=model_switch_is_auto_restore,
     )
 
 
@@ -3185,6 +3329,44 @@ def _apply_decision(
     return False
 
 
+def _apply_post_injection_bookkeeping(
+    machine: CompactStateMachine, outcome: TickOutcome, *, injected: bool
+) -> None:
+    """Update per-family cap/pending bookkeeping after ``_apply_decision`` runs.
+
+    Shared by both host call sites (``_poll_once``'s in-process path and
+    ``supervise()``'s ``_on_poll``) so the success-only counting/clearing
+    rules for every injectable family live in exactly one place. Every
+    mark_*/arm_* call below fires ONLY on a successful injection
+    (``injected``) -- a failed PTY write keeps every pending episode/signal
+    intact so the next tick retries.
+    """
+    if not injected:
+        return
+    if outcome.decision_value == Decision.WOULD_GOAL.value:
+        machine.mark_goal_injection()
+    elif outcome.decision_value == Decision.WOULD_EFFORT.value:
+        # The coupled branch is checked FIRST in decide_once, so if it was
+        # armed, this tick's WOULD_EFFORT can only have come from it (Plan
+        # 00278 continuation).
+        if machine.coupled_effort_pending is not None:
+            machine.mark_coupled_effort_injection()
+        else:
+            machine.mark_effort_injection()
+    elif outcome.decision_value == Decision.WOULD_MODEL.value:
+        # Cap/backoff bookkeeping is reserved for the AUTO-restore path --
+        # the manual test-trigger switch has its own signal-consumption
+        # lifecycle and must not eat into that budget.
+        if outcome.model_switch_is_auto_restore:
+            machine.mark_model_restore()
+        # BOTH paths owe the coupled effort correction, unconditionally.
+        if outcome.model_switch_family is not None:
+            machine.arm_coupled_effort(
+                session=outcome.model_switch_session or "",
+                family=outcome.model_switch_family,
+            )
+
+
 def _poll_once(
     machine: CompactStateMachine,
     *,
@@ -3235,17 +3417,7 @@ def _poll_once(
         model_confirm_enters=model_confirm_enters,
     )
     injected = _apply_decision(outcome, master_writer=master_writer, log=log)
-    # Count a goal injection against the family cap only on SUCCESS (Plan
-    # 00269 review fix): a PTY write failure raises before this line, so the
-    # cap is not burned and the retained signal can retry.
-    if injected and outcome.decision_value == Decision.WOULD_GOAL.value:
-        machine.mark_goal_injection()
-    # Same success-only rule for the effort-restore family (Plan 00278): the
-    # mark also closes the pending episode, so a failed write retries.
-    if injected and outcome.decision_value == Decision.WOULD_EFFORT.value:
-        machine.mark_effort_injection()
-    if injected and outcome.decision_value == Decision.WOULD_MODEL.value:
-        machine.mark_model_restore()
+    _apply_post_injection_bookkeeping(machine, outcome, injected=injected)
     return Evaluation(decision=Decision(outcome.decision_value), reason=outcome.reason)
 
 
@@ -3301,6 +3473,9 @@ def _outcome_to_json(outcome: TickOutcome) -> str:
             "noop_reason_log": outcome.noop_reason_log,
             "tick_id": outcome.tick_id,
             "confirm_enters": outcome.confirm_enters,
+            "model_switch_family": outcome.model_switch_family,
+            "model_switch_session": outcome.model_switch_session,
+            "model_switch_is_auto_restore": outcome.model_switch_is_auto_restore,
         }
     )
 
@@ -3318,6 +3493,9 @@ def _outcome_from_json(line: str) -> TickOutcome:
         noop_reason_log=data.get("noop_reason_log"),
         tick_id=int(data.get("tick_id", 0)),
         confirm_enters=int(data.get("confirm_enters", 0)),
+        model_switch_family=data.get("model_switch_family"),
+        model_switch_session=data.get("model_switch_session"),
+        model_switch_is_auto_restore=bool(data.get("model_switch_is_auto_restore", False)),
     )
 
 
@@ -3840,19 +4018,12 @@ def supervise(
             # diverge and inject a duplicate /compact (Plan 00164 Phase 4 fix).
             if outcome.machine_state is not None:
                 machine.import_state(outcome.machine_state)
-            # Count a goal injection against the family cap only on SUCCESS,
-            # and only AFTER adopting the worker state (which carries the
-            # pre-injection count) so the increment is never overwritten. A
-            # PTY write failure raises above, so the cap is not burned and
-            # the retained signal can retry (Plan 00269 review fix).
-            if injected and outcome.decision_value == Decision.WOULD_GOAL.value:
-                machine.mark_goal_injection()
-            # Same success-only rule for the effort-restore family (Plan
-            # 00278): the mark also closes the pending episode.
-            if injected and outcome.decision_value == Decision.WOULD_EFFORT.value:
-                machine.mark_effort_injection()
-            if injected and outcome.decision_value == Decision.WOULD_MODEL.value:
-                machine.mark_model_restore()
+            # Success-only bookkeeping, run AFTER adopting the worker state
+            # (which carries the pre-injection counts) so no increment is
+            # ever overwritten. A PTY write failure raises above, so no cap
+            # is burned and no pending episode/signal is lost (Plan 00269
+            # review fix; Plan 00278 continuation).
+            _apply_post_injection_bookkeeping(machine, outcome, injected=injected)
         else:
             _poll_once(
                 machine,
