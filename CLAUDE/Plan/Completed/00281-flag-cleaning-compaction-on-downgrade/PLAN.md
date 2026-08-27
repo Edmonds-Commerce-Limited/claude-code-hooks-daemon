@@ -1,6 +1,6 @@
 # Plan 00281: flag cleaning compaction on downgrade
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-27
 **Owner**: joseph
 **Priority**: Medium
@@ -101,15 +101,18 @@ per-action glyph (🧽) to the Plan 00278 audit iconography ruleset.
 ### Phase 3: Audit glyph + docs
 
 - [x] ✅ **Task 3.1**: 🧽 per-action glyph for `/compact` in `_audit_action_glyph`.
-- [ ] 🔄 **Task 3.2**: supervisor header doc (module docstring — done);
-  dogfood-enable in this repo (pending); config-changes manifest entry is
-  **N/A** — `CCY_FLAG_COMPACT` is a ccy env var, not a `hooks-daemon.yaml`
-  key, so it does not fit the manifest schema (the sibling
-  `CCY_MODEL_RESTORE_SECONDS` correctly has no manifest entry either).
+- [x] ✅ **Task 3.2**: supervisor header doc (module docstring — done);
+  dogfood-enabled in this repo (`CCY_FLAG_COMPACT=1` in the tracked
+  `.claude/ccy/ccy.env`, verified dogfood-only — the installer never copies it
+  to clients); config-changes manifest entry is **N/A** — `CCY_FLAG_COMPACT`
+  is a ccy env var, not a `hooks-daemon.yaml` key, so it does not fit the
+  manifest schema (the sibling `CCY_MODEL_RESTORE_SECONDS` has none either).
 
 ### Phase 4: Dogfood
 
-- [ ] ⬜ **Task 4.1**: worker-reload, verify pid; full supervise suite + QA green.
+- [x] ✅ **Task 4.1**: worker-reloaded (forced restart; fresh pid verified
+  loading the committed code); full supervise suite (492) + QA (25/25,
+  coverage 95.1%) green.
 
 ## Success Criteria
 
@@ -127,4 +130,6 @@ per-action glyph (🧽) to the Plan 00278 audit iconography ruleset.
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hashes -->
+- Feature + tests + plan docs delivered at `5580d9a7`
+- Dogfood-enable (`CCY_FLAG_COMPACT=1` in this repo's `ccy.env`) at `6594dbad`
+- Live worker restarted onto the committed code (fresh pid verified) — Phase 4

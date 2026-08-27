@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00281: flag cleaning compaction on downgrade](00281-flag-cleaning-compaction-on-downgrade/PLAN.md) - In Progress (supervisor fires an opt-in, gated `/compact` on a REPEATED downgrade instructing Claude to summarise flaggable material at a high level, so the cleaned context stops re-tripping the classifier and the model-restore sticks)
-
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
 
 - [00278: model-downgrade resilience](00278-supervisor-effort-restore-on-model-downgrade/PLAN.md) - In Progress (recovery: supervisor detects a fable→opus downgrade via the context sidecar and injects `/effort xhigh`; prevention: steer security-flavoured work into an Opus subagent so the fable context stays clean)
@@ -171,6 +169,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00281: flag cleaning compaction on downgrade](Completed/00281-flag-cleaning-compaction-on-downgrade/PLAN.md) - Complete at `5580d9a7` + `6594dbad` + the archiving commit (supervisor fires an opt-in, gated, armed `/compact` on a REPEATED downgrade so the cleaned context stops re-tripping the classifier and the model-restore sticks; 🧽 audit glyph, dogfood-enabled here, default OFF for clients)
 
 - [00279: generic agent install subsystem](Completed/00279-generic-agent-install-subsystem/PLAN.md) - Complete at merges `6679da75` + `3abbc809` + the archiving commit (first-class daemon-shipped agent deployment: version + md5 ledger, customisation detection that never clobbers, config-gated deploy/remove lifecycle, `hooks-daemon agents` CLI; payloads: plan-dedupe scout migration + the opus-security quarantine agent v1.1.0)
 
@@ -1267,9 +1267,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 281 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 230 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 231 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 38 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
