@@ -192,15 +192,11 @@ class TestGuidanceSurfaces:
 
 
 class TestEdgeBranches:
-    def test_non_dict_hook_input_does_not_match(
-        self, handler: FlaggableWorkAdvisorHandler
-    ) -> None:
+    def test_non_dict_hook_input_does_not_match(self, handler: FlaggableWorkAdvisorHandler) -> None:
         payload: Any = None
         assert handler.matches(payload) is False
 
-    def test_non_dict_tool_input_does_not_match(
-        self, handler: FlaggableWorkAdvisorHandler
-    ) -> None:
+    def test_non_dict_tool_input_does_not_match(self, handler: FlaggableWorkAdvisorHandler) -> None:
         payload: dict[str, Any] = {
             "hook_event_name": "PreToolUse",
             "session_id": "s1",
