@@ -57,11 +57,16 @@ config_changes:
         DISABLED (opt-in). Scans the session transcript JSONL for the
         platform's own model_refusal_fallback record (with assistant-message
         fallback content blocks as corroboration) and injects a loud advisory
-        when the session is running a silently substituted model. It ships OFF
+        when the session is running a silently substituted model. Dedupe
+        state is PERSISTED to disk and survives a daemon restart: an ACTIVE
+        record re-advises once per (session, identity); a RECOVERED record is
+        noted at most once EVER, across every session; each distinct record's
+        diagnostic snapshot is written at most once EVER (fixed after a
+        restart previously re-advised the full alert wall and re-wrote a
+        snapshot for every historical record on every restart). It ships OFF
         because a SessionStart scan reports a fallback that ALREADY happened,
         so for a project that never does safeguard-flaggable work it
-        essentially never fires, and when it does it is noisy (one snapshot
-        file per distinct record). The continuous "am I downgraded?" signal is
+        essentially never fires. The continuous "am I downgraded?" signal is
         better served by the downgrade_indicator status-line handler (ships
         enabled), which self-detects a live downgrade on every render. This
         detector's unique value is the secret-redacted diagnostic snapshot

@@ -89,10 +89,27 @@ def _hook_input(transcript: Path, session_id: str = "session-1") -> dict[str, An
 
 
 @pytest.fixture
-def handler(tmp_path: Path) -> ModelFallbackDetectorHandler:
+def handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ModelFallbackDetectorHandler:
     instance = ModelFallbackDetectorHandler()
     instance._snapshot_dir = str(tmp_path / "reports")
+    state_file = tmp_path / "advised-state.json"
+    monkeypatch.setattr(instance, "_resolve_state_file", lambda: state_file)
     return instance
+
+
+def _new_handler_same_state(
+    handler: ModelFallbackDetectorHandler, monkeypatch: pytest.MonkeyPatch
+) -> ModelFallbackDetectorHandler:
+    """A fresh handler instance sharing ``handler``'s persisted state file.
+
+    Simulates a daemon restart: a brand-new in-memory instance, but the same
+    on-disk state file.
+    """
+    fresh = ModelFallbackDetectorHandler()
+    fresh._snapshot_dir = handler._snapshot_dir
+    state_file = handler._resolve_state_file()
+    monkeypatch.setattr(fresh, "_resolve_state_file", lambda: state_file)
+    return fresh
 
 
 class TestInitialisation:
@@ -487,3 +504,92 @@ class TestEdgeBranches:
         resolved = handler._resolve_snapshot_dir()
         assert resolved.is_absolute()
         assert str(resolved).endswith("untracked/reports")
+
+
+class TestPersistedStateAcrossRestarts:
+    """Plan 00278 dogfooding fix: dedupe state survives a daemon restart."""
+
+    def test_fresh_instance_sharing_state_file_does_not_repeat(
+        self,
+        handler: ModelFallbackDetectorHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(transcript, [_fallback_record()])
+        first = handler.handle(_hook_input(transcript))
+        assert first.context
+
+        restarted = _new_handler_same_state(handler, monkeypatch)
+        second = restarted.handle(_hook_input(transcript))
+        assert second.context == []
+        # No second snapshot was written for the same (session, identity).
+        assert len(list((tmp_path / "reports").glob("*.md"))) == 1
+
+    def test_active_record_re_advises_in_new_session_but_snapshots_once(
+        self,
+        handler: ModelFallbackDetectorHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(transcript, [_fallback_record()])
+        first = handler.handle(_hook_input(transcript, session_id="a"))
+        assert first.context
+
+        restarted = _new_handler_same_state(handler, monkeypatch)
+        second = restarted.handle(_hook_input(transcript, session_id="b"))
+        assert second.context
+        assert "MODEL FALLBACK DETECTED" in "\n".join(second.context)
+        # Same distinct record: snapshot is only ever written once, ever.
+        assert len(list((tmp_path / "reports").glob("*.md"))) == 1
+
+    def test_recovered_record_noted_once_ever_across_sessions(
+        self,
+        handler: ModelFallbackDetectorHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(
+            transcript,
+            [
+                _fallback_record(),
+                _prose_record("back on track", model="claude-fable-5"),
+            ],
+        )
+        first = handler.handle(_hook_input(transcript, session_id="a"))
+        assert "recovered" in "\n".join(first.context).lower()
+
+        restarted = _new_handler_same_state(handler, monkeypatch)
+        second = restarted.handle(_hook_input(transcript, session_id="b"))
+        assert second.context == []
+
+    def test_corrupt_state_file_is_treated_as_empty(
+        self,
+        handler: ModelFallbackDetectorHandler,
+        tmp_path: Path,
+    ) -> None:
+        state_file = handler._resolve_state_file()
+        assert state_file is not None
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text("{not json", encoding="utf-8")
+
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(transcript, [_fallback_record()])
+        result = handler.handle(_hook_input(transcript))
+        assert "MODEL FALLBACK DETECTED" in "\n".join(result.context)
+
+    def test_no_state_file_resolved_falls_back_to_in_memory_only(
+        self,
+        handler: ModelFallbackDetectorHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(handler, "_resolve_state_file", lambda: None)
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(transcript, [_fallback_record()])
+        first = handler.handle(_hook_input(transcript))
+        assert first.context
+        second = handler.handle(_hook_input(transcript))
+        assert second.context == []
