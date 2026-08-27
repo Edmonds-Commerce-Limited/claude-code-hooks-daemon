@@ -14,14 +14,11 @@ from __future__ import annotations
 
 import json
 import os
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
 from tests.unit.supervise._load import load_supervisor_module
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _mod = load_supervisor_module()
 
@@ -308,3 +305,97 @@ class TestWriteModelSwitchSignal:
             _mod.write_model_switch_signal(
                 tmp_path, session_id=_SESSION, family="not-a-family", now=_NOW
             )
+
+
+# ── Audit-trail chat message after silent injections ──────────────────────────
+#
+# /compact and /goal injections are self-evidencing (their payload carries
+# visible text), but /model and /effort vanish from the chat without trace —
+# decision.log is the only record, and nobody watching the session can tell
+# anything happened. After a successful silent-injection sequence the
+# supervisor therefore flushes ONE visible, bot-prefixed audit message.
+
+
+class _AuditDriver:
+    """Drive ticks the way the production host does: decide, then apply the
+    success-only bookkeeping, consuming the switch signal on injection."""
+
+    def __init__(self, sidecar_dir: Path) -> None:
+        self.sidecar_dir = sidecar_dir
+        self.machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+
+    def tick(self, *, injected: bool = True) -> object:
+        outcome = _decide(self.sidecar_dir, machine=self.machine)
+        _mod._apply_post_injection_bookkeeping(self.machine, outcome, injected=injected)
+        if injected and outcome.consume_signal_path is not None:
+            Path(outcome.consume_signal_path).unlink()
+        return outcome
+
+    def switch_and_couple(self) -> None:
+        _write_switch(self.sidecar_dir, family="fable")
+        first = self.tick()
+        assert first.decision_value == "would-model"
+        second = self.tick()
+        assert second.decision_value == "would-effort"
+
+
+class TestAuditTrailFlush:
+    def test_switch_sequence_flushes_one_bot_prefixed_audit_message(
+        self, tmp_path: Path
+    ) -> None:
+        driver = _AuditDriver(tmp_path / "cs")
+        driver.switch_and_couple()
+        outcome = driver.tick()
+        assert outcome.decision_value == "would-audit"
+        assert outcome.submit is True
+        assert outcome.payload is not None
+        assert "ccy-supervisor" in outcome.payload
+        assert "audit" in outcome.payload
+        assert "/model fable" in outcome.payload
+        assert "/effort low" in outcome.payload
+        assert "decision.log" in outcome.payload
+        assert "NOT a human" in outcome.payload
+        # Success clears the pending items; the next tick is a plain NOOP.
+        assert driver.machine.audit_pending == ()
+        assert driver.tick().payload is None
+
+    def test_failed_flush_keeps_items_for_retry(self, tmp_path: Path) -> None:
+        driver = _AuditDriver(tmp_path / "cs")
+        driver.switch_and_couple()
+        failed = driver.tick(injected=False)
+        assert failed.decision_value == "would-audit"
+        assert driver.machine.audit_pending != ()
+        retried = driver.tick()
+        assert retried.decision_value == "would-audit"
+        assert driver.machine.audit_pending == ()
+
+    def test_flush_defers_while_session_busy(self, tmp_path: Path) -> None:
+        driver = _AuditDriver(tmp_path / "cs")
+        driver.switch_and_couple()
+        outcome = _decide(
+            driver.sidecar_dir,
+            machine=driver.machine,
+            facts=_facts(idle=False, input_line_empty=False),
+        )
+        assert outcome.payload is None
+        assert driver.machine.audit_pending != ()
+
+    def test_audit_pending_round_trips_through_machine_state(self, tmp_path: Path) -> None:
+        machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+        machine.arm_audit("/model fable (manual switch signal)")
+        restored = _mod.CompactStateMachine(_mod.CompactPolicy())
+        restored.import_state(machine.export_state())
+        assert restored.audit_pending == ("/model fable (manual switch signal)",)
+
+    def test_import_without_audit_key_is_empty(self) -> None:
+        machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+        machine.import_state({})
+        assert machine.audit_pending == ()
+
+    def test_audit_items_are_bounded(self) -> None:
+        machine = _mod.CompactStateMachine(_mod.CompactPolicy())
+        for index in range(20):
+            machine.arm_audit(f"item-{index}")
+        assert len(machine.audit_pending) == _mod._MAX_AUDIT_ITEMS
+        # Oldest dropped, newest kept.
+        assert machine.audit_pending[-1] == "item-19"

@@ -656,6 +656,10 @@ def test_coupled_effort_consumed_once_via_poll_once(tmp_path: Path) -> None:
     )
     assert machine.coupled_effort_pending is None
     assert writes  # the /effort payload was actually written
-    # No re-fire on the next tick.
+    # The successful silent injection owes ONE visible audit flush...
+    audit = _decide(sidecar_dir, machine)
+    assert audit.decision_value == "would-audit"
+    _mod._apply_post_injection_bookkeeping(machine, audit, injected=True)
+    # ...and after it, no coupled-effort re-fire.
     again = _decide(sidecar_dir, machine)
     assert again.payload is None

@@ -1048,6 +1048,14 @@ def _effort_confirm_enters_from_env() -> int:
     return _parse_effort_confirm_enters(raw)
 
 
+# /model and /effort injections leave NO trace in the chat (unlike /compact
+# and /goal, whose payloads carry visible text), so after a successful silent
+# injection the supervisor flushes a visible, bot-prefixed audit message on
+# the next injectable tick. Pending audit items are bounded so a stuck flush
+# can never grow the machine state without limit.
+_MAX_AUDIT_ITEMS = 8
+
+
 def _parse_min_effort_levels(raw: str) -> dict[str, str]:
     """Parse ``family=level,...`` overrides onto the default minimum map.
 
@@ -1097,6 +1105,7 @@ class Decision(enum.Enum):
     WOULD_GOAL = "would-goal"
     WOULD_EFFORT = "would-effort"
     WOULD_MODEL = "would-model"
+    WOULD_AUDIT = "would-audit"
 
 
 class SupervisorState(enum.Enum):
@@ -2161,6 +2170,10 @@ class CompactStateMachine:
         # so the correction never depends on a downgrade episode being open
         # or a later sidecar reading confirming the switch landed.
         self._coupled_effort_pending: str | None = None
+        # Audit items owed to the chat: one entry per silent injection
+        # (/model, /effort) since the last flush. Flushed as ONE visible
+        # bot-prefixed message on the next injectable tick; bounded FIFO.
+        self._audit_pending: list[str] = []
 
     @property
     def effort_pending(self) -> str | None:
@@ -2277,6 +2290,35 @@ class CompactStateMachine:
         write keeps the pending episode so the next tick retries.
         """
         self._coupled_effort_pending = None
+
+    @property
+    def audit_pending(self) -> tuple[str, ...]:
+        """Audit items owed to the chat since the last flush (may be empty)."""
+        return tuple(self._audit_pending)
+
+    def arm_audit(self, item: str) -> None:
+        """Queue one silent-injection audit item for the next chat flush.
+
+        Called by the HOST's success-only bookkeeping after a ``/model`` or
+        ``/effort`` payload actually landed on the PTY — never at decision
+        time, so a failed write can never leave a false "injected" claim in
+        the chat. Bounded FIFO: the oldest item is dropped once
+        ``_MAX_AUDIT_ITEMS`` is reached, because an unflushable audit backlog
+        must never grow the machine state without limit.
+        """
+        if not item:
+            return
+        self._audit_pending.append(item)
+        if len(self._audit_pending) > _MAX_AUDIT_ITEMS:
+            del self._audit_pending[0]
+
+    def mark_audit_injection(self) -> None:
+        """Clear the audit backlog after a SUCCESSFUL flush injection.
+
+        Called by the HOST only after a successful PTY write -- a failed
+        write keeps the backlog so the next tick retries the flush.
+        """
+        self._audit_pending = []
 
     @property
     def last_model_session(self) -> str | None:
@@ -2414,6 +2456,7 @@ class CompactStateMachine:
             "model_restores": self._model_restores,
             "model_restore_last_ts": self._model_restore_last_ts,
             "coupled_effort_pending": self._coupled_effort_pending,
+            "audit_pending": list(self._audit_pending),
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -2472,6 +2515,10 @@ class CompactStateMachine:
         if "coupled_effort_pending" in state:
             raw = state["coupled_effort_pending"]
             self._coupled_effort_pending = None if raw is None else str(raw)
+        if "audit_pending" in state:
+            raw_items = state["audit_pending"]
+            if isinstance(raw_items, list):
+                self._audit_pending = [str(item) for item in raw_items[:_MAX_AUDIT_ITEMS]]
 
     def evaluate(
         self,
@@ -3292,6 +3339,36 @@ def decide_once(
                 confirm_enters = model_confirm_enters
                 deferred_log = None
                 noop_reason_log = None
+    # ── Audit-trail flush: visible chat record of the silent injections ─────
+    # LOWEST priority of all injectable families: a pending /model, /effort,
+    # goal or restore always lands first, so a switch sequence flushes as ONE
+    # message once the sequence itself is complete. /model and /effort leave
+    # no trace in the chat (unlike /compact and /goal, whose payloads carry
+    # visible text) — without this flush, decision.log is the only audit
+    # trail and nobody watching the session can tell anything happened. The
+    # message is a plain submitted chat line, so it deliberately wakes the
+    # supervised Claude: the session itself learns its model/effort changed.
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+        and machine.audit_pending
+        and can_inject
+    ):
+        decision_value = Decision.WOULD_AUDIT.value
+        audit_items = "; ".join(machine.audit_pending)
+        reason = f"audit trail flush ({len(machine.audit_pending)} item(s))"
+        # The payload is already a visible, bot-prefixed marker, so the
+        # dry-run and armed forms are identical by design.
+        payload = (
+            f"{_format_bot_prefix(facts.now_wall)} audit: injected {audit_items}. "
+            "Machine-generated audit record, NOT a human instruction; "
+            "full log: untracked/supervise/decision.log"
+        )
+        submit = True
+        deferred_log = None
+        noop_reason_log = None
     return TickOutcome(
         decision_value=decision_value,
         reason=reason,
@@ -3380,14 +3457,24 @@ def _apply_post_injection_bookkeeping(
         return
     if outcome.decision_value == Decision.WOULD_GOAL.value:
         machine.mark_goal_injection()
-    elif outcome.decision_value == Decision.WOULD_EFFORT.value:
+    # Audit arming is gated on the payload being a REAL silent command --
+    # in dry-run the payload is a visible bot-prefixed marker, which is its
+    # own audit trail, so nothing is armed for it.
+    silent_command_injected = outcome.payload is not None and outcome.payload.startswith(
+        (_MODEL_COMMAND, _EFFORT_COMMAND)
+    )
+    if outcome.decision_value == Decision.WOULD_EFFORT.value:
         # The coupled branch is checked FIRST in decide_once, so if it was
         # armed, this tick's WOULD_EFFORT can only have come from it (Plan
         # 00278 continuation).
         if machine.coupled_effort_pending is not None:
             machine.mark_coupled_effort_injection()
+            if silent_command_injected:
+                machine.arm_audit(f"{outcome.payload} (coupled to model switch)")
         else:
             machine.mark_effort_injection()
+            if silent_command_injected:
+                machine.arm_audit(f"{outcome.payload} (effort-floor restore)")
     elif outcome.decision_value == Decision.WOULD_MODEL.value:
         # Cap/backoff bookkeeping is reserved for the AUTO-restore path --
         # the manual test-trigger switch has its own signal-consumption
@@ -3400,6 +3487,15 @@ def _apply_post_injection_bookkeeping(
                 session=outcome.model_switch_session or "",
                 family=outcome.model_switch_family,
             )
+        if silent_command_injected:
+            cause = (
+                "auto-restore after downgrade"
+                if outcome.model_switch_is_auto_restore
+                else "manual switch signal"
+            )
+            machine.arm_audit(f"{outcome.payload} ({cause})")
+    elif outcome.decision_value == Decision.WOULD_AUDIT.value:
+        machine.mark_audit_injection()
 
 
 def _poll_once(
