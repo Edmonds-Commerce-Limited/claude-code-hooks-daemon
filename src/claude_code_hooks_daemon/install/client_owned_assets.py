@@ -163,16 +163,18 @@ CLIENT_OWNED_ASSETS: Final[tuple[ClientOwnedAsset, ...]] = (
         ),
     ),
     ClientOwnedAsset(
-        source="src/claude_code_hooks_daemon/install/templates/hooks-daemon-plan-dedupe-scout.md",
-        deployed_to=".claude/agents/hooks-daemon-plan-dedupe-scout.md",
+        source="src/claude_code_hooks_daemon/install/templates/agents/*.md",
+        deployed_to=".claude/agents/hooks-daemon-*.md",
         language=AssetLanguage.MARKDOWN,
-        deployed_by="plan_workflow",
+        deployed_by="agent_assets",
         why=(
             "Claude Code discovers sub-agents only under .claude/agents/, a flat "
             "directory the client owns and fills with its own agents; a definition "
-            "inside the vendor clone would never be dispatchable. The name is "
-            "prefixed so it cannot collide with a client's own agent, since a "
-            "collision there silently drops one definition rather than erroring."
+            "inside the vendor clone would never be dispatchable. The names are "
+            "prefixed so they cannot collide with a client's own agent, since a "
+            "collision there silently drops one definition rather than erroring. "
+            "Deployed and version-tracked by the agent-asset subsystem "
+            "(Plan 00279), which never overwrites a customised copy."
         ),
     ),
     ClientOwnedAsset(

@@ -79,13 +79,13 @@ agent asset itself.
 
 ### Phase 1: Subsystem core (TDD throughout)
 
-- [ ] ⬜ **Task 1.1**: Agent asset source layout + metadata: agents dir in
-  `src/claude_code_hooks_daemon/`, per-agent version, gating config key;
-  deployed files carry a version marker line.
-- [ ] ⬜ **Task 1.2**: Version/md5 ledger: agent → version → content md5 for
+- [x] ✅ **Task 1.1**: Agent asset source layout + metadata: agents dir at
+  `src/claude_code_hooks_daemon/install/templates/agents/`, per-agent version,
+  gating config key; shipped files carry a version marker line.
+- [x] ✅ **Task 1.2**: Version/md5 ledger: agent → version → content md5 for
   every shipped version; classification helper returning
   absent | current | outdated | customised.
-- [ ] ⬜ **Task 1.3**: Deploy/update/remove engine: install when gated
+- [x] ✅ **Task 1.3**: Deploy/update/remove engine: install when gated
   config enabled; overwrite ONLY absent/outdated; customised → loud warning,
   never clobbered; disabled → removal advisory (auto-remove only a
   pristine shipped file, and only via the explicit CLI command).
@@ -98,8 +98,10 @@ agent asset itself.
 - [ ] ⬜ **Task 2.2**: CLI `hooks-daemon agents list|status|install|remove`;
   status shows the classification per agent; guidance surfaces name the
   commands.
-- [ ] ⬜ **Task 2.3**: Migrate the plan-dedupe scout onto the subsystem
-  (behaviour-preserving, same deployed path/name).
+- [x] ✅ **Task 2.3**: Migrate the plan-dedupe scout onto the subsystem
+  (same deployed path/name, still gated on plan_workflow; pristine copies
+  refreshed exactly as before, customised copies now warned instead of
+  clobbered).
 
 ### Phase 3: opus-security agent payload
 
