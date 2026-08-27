@@ -4065,6 +4065,84 @@ def cmd_deploy_plan_workflow(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_agents(args: argparse.Namespace) -> int:
+    """Manage daemon-shipped agent assets (Plan 00279).
+
+    Actions:
+
+    - ``list``: every shipped agent with version and gating config key.
+    - ``status``: per-agent deployment classification
+      (absent | current | outdated | customised) plus whether its gate is on.
+    - ``install [name]``: run the config-gated lifecycle sync (all agents), or
+      deploy one named agent — refused with guidance if its gate is disabled.
+    - ``remove <name>``: remove one deployed agent; refuses a customised file.
+
+    Args:
+        args: Parsed CLI arguments with ``project_root``, ``action`` and
+            optional ``name``.
+
+    Returns:
+        0 on success; 1 on refusal/failure.
+    """
+    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.install import agent_assets
+
+    project_root: Path = args.project_root
+    config_path = project_root / ".claude" / "hooks-daemon.yaml"
+    config = Config.load_or_default(config_path)
+    action: str = args.action
+    name: str | None = args.name
+
+    if name is not None:
+        try:
+            named_spec = agent_assets.spec_by_name(name)
+        except KeyError:
+            known = ", ".join(spec.name for spec in agent_assets.SHIPPED_AGENTS)
+            print(f"ERROR: unknown agent {name!r}. Shipped agents: {known}", file=sys.stderr)
+            return 1
+    else:
+        named_spec = None
+
+    if action == "list":
+        for spec in agent_assets.SHIPPED_AGENTS:
+            enabled = "enabled" if spec.is_enabled(config) else "disabled"
+            print(f"{spec.name}  v{spec.version}  gated on {spec.gating_config_key} ({enabled})")
+        return 0
+
+    if action == "status":
+        for spec in agent_assets.SHIPPED_AGENTS:
+            state = agent_assets.classify_agent(spec, project_root)
+            enabled = "enabled" if spec.is_enabled(config) else "disabled"
+            print(f"{spec.name}  v{spec.version}  {state.value}  ({enabled})")
+        return 0
+
+    if action == "install":
+        if named_spec is not None:
+            if not named_spec.is_enabled(config):
+                print(
+                    f"ERROR: {named_spec.name} is gated on "
+                    f"{named_spec.gating_config_key}, which is disabled. Enable "
+                    f"it in .claude/hooks-daemon.yaml and retry.",
+                    file=sys.stderr,
+                )
+                return 1
+            result = agent_assets.deploy_agent(named_spec, project_root)
+            print(result.message)
+            return 0 if result.action is not agent_assets.AgentAction.CUSTOMISED_WARNING else 1
+        report = agent_assets.sync_agents(project_root, config)
+        for message in report.messages:
+            print(message)
+        return 0
+
+    # action == "remove" (argparse restricts choices)
+    if named_spec is None:
+        print("ERROR: 'agents remove' requires an agent name", file=sys.stderr)
+        return 1
+    result = agent_assets.remove_agent(named_spec, project_root)
+    print(result.message)
+    return 0 if result.action is not agent_assets.AgentAction.REFUSED_CUSTOMISED else 1
+
+
 def cmd_plan_qa(args: argparse.Namespace) -> int:
     """Run plan QA checks (Plan 00144): sweep, staged gate, or single-file lint.
 
@@ -5390,6 +5468,31 @@ def main() -> int:
         help="Project root (default: current directory)",
     )
     parser_deploy_plan.set_defaults(func=cmd_deploy_plan_workflow)
+
+    # agents (Plan 00279) — daemon-shipped agent-asset lifecycle
+    parser_agents = subparsers.add_parser(
+        "agents",
+        help="Manage daemon-shipped agents in .claude/agents/ (list/status/install/remove)",
+    )
+    parser_agents.add_argument(
+        "action",
+        choices=["list", "status", "install", "remove"],
+        help="list shipped agents; status shows deployment classification; "
+        "install runs the config-gated deploy; remove deletes a pristine deployed agent",
+    )
+    parser_agents.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        help="Agent name (required for remove; optional for install)",
+    )
+    parser_agents.add_argument(
+        "--project-root",
+        type=Path,
+        default=Path.cwd(),
+        help="Project root (default: current directory)",
+    )
+    parser_agents.set_defaults(func=cmd_agents)
 
     # bug-report command
     parser_bug_report = subparsers.add_parser(

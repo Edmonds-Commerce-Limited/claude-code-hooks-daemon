@@ -273,6 +273,25 @@ class DaemonController:
         # Validate configuration at startup (fail-open: degraded mode on errors)
         self._validate_config(config_path)
 
+        # Sync daemon-shipped agent assets with the gating config (Plan 00279):
+        # enabled + missing/outdated deploys, disabled + present logs a removal
+        # advisory. Best-effort — an unwritable .claude/agents/ must not stop
+        # the daemon serving hooks, so the failure is logged, never swallowed
+        # silently and never fatal.
+        self._sync_agent_assets(workspace_root, config_path)
+
+    def _sync_agent_assets(self, workspace_root: Path, config_path: Path) -> None:
+        """Run the config-driven agent-asset lifecycle sync (Plan 00279)."""
+        from claude_code_hooks_daemon.install.agent_assets import deploy_agents_if_enabled
+
+        try:
+            report = deploy_agents_if_enabled(workspace_root, config_path)
+        except OSError as exc:
+            logger.error("Agent-asset sync failed (daemon continues): %s", exc)
+            return
+        for message in report.messages:
+            logger.info("Agent assets: %s", message)
+
     def _load_plugins(self, plugins_config: "PluginsConfig", workspace_root: Path) -> int:
         """Load and register plugin handlers.
 

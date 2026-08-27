@@ -92,12 +92,13 @@ agent asset itself.
 
 ### Phase 2: Lifecycle wiring
 
-- [ ] ⬜ **Task 2.1**: Daemon-start (and config-change) detection: enabled +
-  missing/outdated ⇒ deploy; disabled + present ⇒ advisory naming the
-  removal command. Registered in `client_owned_assets.py`.
-- [ ] ⬜ **Task 2.2**: CLI `hooks-daemon agents list|status|install|remove`;
-  status shows the classification per agent; guidance surfaces name the
-  commands.
+- [x] ✅ **Task 2.1**: Daemon-start detection (controller `initialise` runs
+  the sync; a config change takes effect on the restart that applies it):
+  enabled + missing/outdated ⇒ deploy; disabled + present ⇒ advisory naming
+  the removal command. Registered in `client_owned_assets.py`.
+- [x] ✅ **Task 2.2**: CLI `hooks-daemon agents list|status|install|remove`;
+  status shows the classification per agent; docs (LLM-INSTALL table,
+  docs/guides/AGENT_ASSETS.md, removal advisories) name the commands.
 - [x] ✅ **Task 2.3**: Migrate the plan-dedupe scout onto the subsystem
   (same deployed path/name, still gated on plan_workflow; pristine copies
   refreshed exactly as before, customised copies now warned instead of
@@ -105,14 +106,16 @@ agent asset itself.
 
 ### Phase 3: opus-security agent payload
 
-- [ ] ⬜ **Task 3.1**: Author `hooks-daemon-opus-security.md` generalised
+- [x] ✅ **Task 3.1**: Author `hooks-daemon-opus-security.md` generalised
   from the spec's Appendix A: model: opus; quarantine executor; two-file
   SUMMARY/DETAIL contract with the `-opus-security-SUMMARY`/`-DETAIL`
   markers; subagent-owned git cycle; clean-summary rule; estate-specific
   paths/doc names replaced by config/doc placeholders the project fills in.
   Ships gated on config that defaults OFF.
-- [ ] ⬜ **Task 3.2**: Docs: HANDLER_REFERENCE/config docs for the gating
-  keys; config-changes manifest entries; discourage-customisation note.
+- [x] ✅ **Task 3.2**: Docs: `docs/guides/AGENT_ASSETS.md` (gating keys, CLI,
+  discourage-customisation note); config-changes manifest entry for
+  `agents.opus_security.enabled`; LLM-INSTALL ownership table updated.
+  (No HANDLER_REFERENCE change — no handler options were added.)
 
 ### Phase 4: Verification & closure
 
