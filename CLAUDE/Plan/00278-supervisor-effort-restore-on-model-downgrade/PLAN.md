@@ -193,11 +193,14 @@ effective capability when it happens anyway.
 
 ### Phase 4: Integration & closure
 
-- [ ] ⬜ **Task 4.1**: Full QA (`./scripts/qa/llm_qa.py all`), daemon restart
-  RUNNING, supervisor version-lockstep test still green.
-- [ ] ⬜ **Task 4.2**: Docs — supervisor top-of-file behaviour summary and
+- [x] ✅ **Task 4.1**: Full QA (`./scripts/qa/llm_qa.py all`), daemon restart
+  RUNNING, supervisor version-lockstep test still green. (QA 25/25 on the
+  merged tree at f0a9dc33; daemon RUNNING; lockstep test in the passing suite.)
+- [x] ✅ **Task 4.2**: Docs — supervisor top-of-file behaviour summary and
   any doc that enumerates injection families; config-changes manifest entry
-  for any new handler/option.
+  for any new handler/option. (Supervisor header documents all families +
+  raise-only invariant; vUNRELEASED manifest carries model_fallback_detector
+  and flaggable_work_advisor entries.)
 - [ ] ⬜ **Task 4.3**: Complete plan (archive, README row, journal closure).
 
 ## Dependencies
