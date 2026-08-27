@@ -2038,13 +2038,15 @@ At SessionStart, for every configured protected path (the effective `secret_file
 
 ## model_fallback_detector — silent model substitution is surfaced
 
-At session start the transcript is scanned for the platform's own `model_refusal_fallback` record. When one is found, a loud advisory reports that this session is running a SUBSTITUTED model: a safety classifier flagged a turn and switched the model with `scope: session`, so it will NOT recover on its own.
+At session start the transcript is scanned for the platform's own `model_refusal_fallback` record, AND for every subsequent assistant message's model — so the advisory can tell an ACTIVE fallback from one that has already RECOVERED.
 
-**When you see `🚨 MODEL FALLBACK DETECTED 🚨`**:
+**`🚨 MODEL FALLBACK DETECTED 🚨` (ACTIVE — no later assistant turn returned to the original model)**:
 
 1. **Tell the human immediately** — the substitution is otherwise silent, and a session has run degraded for hours unnoticed.
-2. **A session restart is the only cure** — the fallback is session-sticky; keep working only on the human's say-so.
+2. **A session restart is the only cure** — while active, the fallback is session-sticky; keep working only on the human's say-so.
 3. **Read the diagnostic snapshot** (path named in the advisory, default `untracked/reports/`): it holds the fallback record plus the preceding transcript window, secret-redacted, so the project can tune its `flaggable_work_advisor` delegation config to stop the recurrence.
+
+**A soft, non-alarming notice (no 🚨, no restart instruction) means RECOVERED** — a later assistant turn was already back on the original model before this advisory ever fired. No action is needed; the diagnostic snapshot is still written for tuning purposes.
 
 Options under `handlers.session_start.model_fallback_detector.options`: `snapshot_enabled` (default true), `snapshot_dir` (default `untracked/reports`), `snapshot_window_records` (default 20). Snapshots are never auto-committed.
 
