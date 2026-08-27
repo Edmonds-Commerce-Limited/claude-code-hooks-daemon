@@ -158,6 +158,31 @@ _WORKER_READ_TIMEOUT_SECONDS = 2.0
 # the worker (cheap mtime pre-check gates the hash).
 _WORKER_RELOAD_CHECK_SECONDS = 5.0
 
+# ─── DOGFOODING: EDITING THIS FILE DOES NOT TAKE EFFECT UNTIL THE WORKER RELOADS ───
+# Every injection decision runs in the `--worker` SUBPROCESS, not the running
+# PTY host. So a fresh edit to this file is INERT in the live session until that
+# subprocess is respawned from the new code. The host auto-respawns it within
+# ~_WORKER_RELOAD_CHECK_SECONDS of a *content* change (reload_if_stale compares a
+# content hash, and an mtime pre-check gates it), on the next tick — the PTY/child
+# is never touched, so no full Claude Code session restart is needed.
+#
+# Two traps that make an edit look shipped while the worker is still stale — both
+# have bitten this project, hence this note:
+#   1. A bare `touch` (mtime bumps, content unchanged) triggers NOTHING — the
+#      content hash is identical. Only a real content change reloads the worker.
+#   2. A redeploy that PRESERVES mtime (`cp -p`, `rsync -a`, some installers) can
+#      change the content WITHOUT advancing mtime, so the mtime pre-check skips
+#      the hash and the reload never fires.
+#
+# To dogfood a change to this file IMMEDIATELY AND CORRECTLY, do not assume — VERIFY
+# the worker actually reloaded before testing behaviour:
+#     ps -eo pid,lstart,args | grep 'claude-supervise.py --worker' | grep -v grep
+# A NEW pid / start-time means the new code is live. If it has not changed, force
+# it: `kill <worker-pid>` — the host's `if not worker.alive(): worker.restart()`
+# path respawns a fresh worker from current on-disk code on its next tick. Never
+# restart the whole ccy session just to reload the worker.
+# See also .claude/rules/ccy-supervisor-dogfooding.md.
+
 # Braille spinner frames for the brief pre-fork "starting up" flourish.
 _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 _SPINNER_INTERVAL_SECONDS = 0.08
