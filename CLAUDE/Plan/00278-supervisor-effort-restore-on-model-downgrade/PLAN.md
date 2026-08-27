@@ -214,6 +214,13 @@ effective capability when it happens anyway.
   state fable low). First round exposed that `/effort` needs its own
   confirming Enter — added as `CCY_EFFORT_CONFIRM_ENTERS` (default 1),
   worker-side only so a hot-reload deployed it.
+- [x] ✅ **Task 5.8**: FULL end-to-end downgrade demo PASSED hands-free in
+  the live session (decision.log 13:27:34–13:27:42): real cyber-classifier
+  downgrade fable→opus (triggered by reading the cyber-flag fixture into
+  main context) → `/effort xhigh` (floor restore) → turn-gated `/model fable` auto-restore with the new zero-extra-delay default → coupled
+  `/effort low` → ONE audit-trail comment naming all three injections.
+  End state fable low. Deployed into the running session via worker
+  hot-reload only, validating Decision 8's worker-side audit design.
 - [ ] ⬜ **Task 5.7** (proposed, awaiting joseph): mid-session fallback
   detection on UserPromptSubmit (turn-gated live scan) to replace the
   SessionStart-only surface.
@@ -327,6 +334,21 @@ the `downgrade_indicator` status line (ships enabled).
 "probably leave OFF" hint in the config template; keep it enabled only in
 this repo's dogfood config, where the diagnostic snapshots earn their keep
 tuning delegation config.
+**Date**: 2026-08-27
+
+### Decision 8: Turn-gated restore; audit armed/cleared worker-side at decision time
+
+**Context**: restore used a wall-clock quiet delay (120s), but the classifier
+flags TURNS — recovery is safe the moment the flagged turn ends. And audit
+arming in host bookkeeping would have required a full ccy restart to deploy;
+joseph challenged the "needs a new session" claim.
+**Decision** (2026-08-27, delivered 2c7290a3): `CCY_MODEL_RESTORE_SECONDS`
+becomes an optional EXTRA delay (default 0; "off"/negative disables). Audit
+arming and flush-clearing live worker-side at decision time — deployable by
+worker hot-reload, since `import_state` merges by present key so an old host
+never clobbers the backlog. Trade-off: a failed flush LOSES the audit record
+rather than retrying, because the same broken PTY could otherwise print a
+false success claim; the decision.log remains the complete record.
 **Date**: 2026-08-27
 
 ## Success Criteria
