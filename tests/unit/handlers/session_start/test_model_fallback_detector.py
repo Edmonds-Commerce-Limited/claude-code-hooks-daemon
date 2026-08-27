@@ -103,7 +103,8 @@ class TestInitialisation:
         assert instance.terminal is False
 
     def test_default_enabled(self) -> None:
-        assert ModelFallbackDetectorHandler().get_default_enabled() is True
+        """Opt-in since the Decision 7 default flip (Plan 00278)."""
+        assert ModelFallbackDetectorHandler().get_default_enabled() is False
 
 
 class TestMatches:

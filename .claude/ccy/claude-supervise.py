@@ -3120,9 +3120,7 @@ def decide_once(
                 # The signal file is named "<session_id>.model-switch-intent"
                 # (write_model_switch_signal) -- derive the session the same
                 # way rather than re-parsing the JSON body a second time.
-                model_switch_session = switch_path.name.removesuffix(
-                    _MODEL_SWITCH_SIGNAL_SUFFIX
-                )
+                model_switch_session = switch_path.name.removesuffix(_MODEL_SWITCH_SIGNAL_SUFFIX)
                 if dry_run:
                     payload = (
                         f"{_format_bot_prefix(facts.now_wall)} "
