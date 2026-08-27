@@ -191,6 +191,32 @@ effective capability when it happens anyway.
   supervisor-side values resolve via ccy env (documented in one place).
   Record the split as a Technical Decision; config-changes manifest entry.
 
+### Phase 5: Live-dogfooding burst (2026-08-27, joseph in session)
+
+- [x] ✅ **Task 5.1**: Detector recovery-fix — distinguish an ACTIVE fallback
+  from one a later assistant turn already recovered from; soft notice for
+  recovered, loud alert only while active.
+- [x] ✅ **Task 5.2**: Status-line `downgrade_indicator` — per-session
+  model-family high-water state; renders `⚠️{high}→{current}` only while a
+  downgrade is live; no supervisor dependency.
+- [x] ✅ **Task 5.3**: Manual model-switch trigger — `*.model-switch-intent`
+  signal + `--emit-model-switch <family>` CLI; eager insert (empty-input-box
+  gate only); `/model` confirm-Enter (payload → \\r → delay → \\r). PROVEN live:
+  opus→fable switch fired and landed.
+- [x] ✅ **Task 5.4**: Coupled effort correction — EVERY `/model` injection
+  (manual and auto-restore) arms an unconditional `/effort` on the next
+  injectable tick: top family → its floor (sanctioned lowering), else xhigh.
+  Manual switches no longer consume the auto-restore cap/backoff.
+- [x] ✅ **Task 5.5**: Ship `model_fallback_detector` DISABLED by default
+  (Decision 7); dogfood config keeps it on.
+- [ ] ⬜ **Task 5.6**: Live re-test after a FULL ccy restart (the coupling
+  bookkeeping is host-side; worker hot-reload alone cannot arm it): from
+  opus, `--emit-model-switch fable` must flip the model AND drop effort to
+  fable's floor in lockstep.
+- [ ] ⬜ **Task 5.7** (proposed, awaiting joseph): mid-session fallback
+  detection on UserPromptSubmit (turn-gated live scan) to replace the
+  SessionStart-only surface.
+
 ### Phase 4: Integration & closure
 
 - [x] ✅ **Task 4.1**: Full QA (`./scripts/qa/llm_qa.py all`), daemon restart
@@ -272,8 +298,8 @@ git/grep over flaggable paths by command shape) and §3.4 (enforce the
 `*-opus-security-DETAIL*` read-boundary) — blocking surfaces, added as
 Phase 3d after the advisories dogfood cleanly.
 
-> > > > > > > agent-a0418c50fb220e49b-3c789121
-> > > > > > > **Date**: 2026-08-27
+**Date**: 2026-08-27 (default-enabled choice for the detector REVISED by
+Decision 7 — it now ships disabled/opt-in)
 
 ### Decision 6: config split — daemon YAML vs supervisor env (Task 3c.1)
 
@@ -286,6 +312,20 @@ features (effort floors, model-restore timing) configure via ccy env vars —
 standalone supervisor deliberately imports nothing from the daemon (no
 YAML/pydantic), and env resolution keeps the host and its policy worker
 subprocess in agreement. Both halves are documented at their point of use.
+**Date**: 2026-08-27
+
+### Decision 7: model_fallback_detector ships DISABLED (opt-in) — dogfood verdict
+
+**Context**: dogfooding it in the noisiest possible estate (this repo, doing
+flaggable work) showed the SessionStart surface spamming: a huge alert block
+plus one snapshot file PER distinct record at every session start, reporting
+fallbacks that had already happened. For a normal project it essentially
+never fires; the continuous "am I downgraded?" signal is carried better by
+the `downgrade_indicator` status line (ships enabled).
+**Decision** (joseph, 2026-08-27): flip the default to disabled with a
+"probably leave OFF" hint in the config template; keep it enabled only in
+this repo's dogfood config, where the diagnostic snapshots earn their keep
+tuning delegation config.
 **Date**: 2026-08-27
 
 ## Success Criteria
@@ -312,4 +352,9 @@ subprocess in agreement. Both halves are documented at their point of use.
 <!-- Curated milestones + delivery commit hashes only (git is the SSoT for
      "when"). The activity log lives in JOURNAL/. -->
 
-- (pending)
+- Phases 1–3c delivered through f0a9dc33 (QA 25/25 on merged tree)
+- Detector recovery-fix at 3e23dff2; benign classifier-trip fixture at 3b028d4b
+- Confirm-Enter + manual model-switch signal at d8379072 (flip PROVEN live)
+- Status-line downgrade_indicator merged at 3a89c867
+- Coupled effort correction merged at efbaf2b7
+- Detector default flipped to opt-in at 2af2f579
