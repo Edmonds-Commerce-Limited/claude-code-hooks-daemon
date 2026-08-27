@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
 
-- [00278: model-downgrade resilience](00278-supervisor-effort-restore-on-model-downgrade/PLAN.md) - In Progress (recovery: supervisor detects a fable→opus downgrade via the context sidecar and injects `/effort xhigh`; prevention: steer security-flavoured work into an Opus subagent so the fable context stays clean)
-
 - [00264: cap the size of a GitHub issue/PR comment](00264-github-comment-size-cap/PLAN.md) - Not Started (field report: agent sessions flooded two issues with 44,467- and 22,398-character comments until neither ticket's state was findable by the humans reading it; a PreToolUse cap on `gh` comment bodies steering the content into `JOURNAL/`, plus seven open questions the report's proposed design asserts rather than settles)
 
 - [00252: guards for premises no write-time hook sees](00252-guards-for-premises-no-write-time-hook-sees/PLAN.md) - Not Started (two defects, one argument from Core Standard 15's corollary: the ambient-git-premise class Plan 00245 fixed seven times by hand without a guard, and the fact that no guard inspects STAGED CONTENT for secret-list terms, so a file arriving by `mv` reached a pushed commit)
@@ -169,6 +167,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00278: model-downgrade resilience](Completed/00278-supervisor-effort-restore-on-model-downgrade/PLAN.md) - Complete at `f0a9dc33` + `864c9cc4` + the archiving commit (supervisor recovers a fable→opus downgrade via context-sidecar detection plus coupled effort/model auto-restore; opt-in prevention surfaces steer security-flavoured work to an Opus subagent)
 
 - [00282: generate-docs null-priority crash](Completed/00282-generate-docs-null-priority-crash/PLAN.md) - Complete at `86ca861a` + the archiving commit (both doc generators aborted with a NoneType-vs-int sort crash when a handler config omitted `priority:`; fixed via a shared `resolve_priority` helper across both generators and the `registry.py` guard, plus CLI traceback logging and two-handler regression tests)
 
@@ -1269,9 +1269,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 282 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 232 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 233 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 

@@ -1,6 +1,6 @@
 # Plan 00278: Model-Downgrade Resilience — Effort Restore + Security-Work Delegation
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-27
 **Owner**: Claude (requested by joseph)
 **Priority**: High
@@ -157,10 +157,12 @@ effective capability when it happens anyway.
 
 ### Phase 3d: Blocking surfaces (deferred until advisories dogfood cleanly)
 
-- [ ] ⬜ **Task 3d.1**: Deny content-revealing git/grep over configured
-  flaggable paths by command shape (handover §3.3).
-- [ ] ⬜ **Task 3d.2**: Enforce the `*-opus-security-DETAIL*` read-boundary
-  by pattern (handover §3.4).
+- [x] ✅ **Task 3d.1**: Deny content-revealing git/grep over configured
+  flaggable paths by command shape (handover §3.3). Delivered at `864c9cc4`
+  (`flaggable_content_channel_guard`, ships disabled/opt-in).
+- [x] ✅ **Task 3d.2**: Enforce the `*-opus-security-DETAIL*` read-boundary
+  by pattern (handover §3.4). Delivered at `864c9cc4`
+  (`quarantine_artefact_read_guard`, ships disabled/pre-seeded).
 
 ### Phase 3b: Downgrade snapshot capture (joseph, 2026-08-27)
 
@@ -221,9 +223,14 @@ effective capability when it happens anyway.
   `/effort low` → ONE audit-trail comment naming all three injections.
   End state fable low. Deployed into the running session via worker
   hot-reload only, validating Decision 8's worker-side audit design.
-- [ ] ⬜ **Task 5.7** (proposed, awaiting joseph): mid-session fallback
-  detection on UserPromptSubmit (turn-gated live scan) to replace the
-  SessionStart-only surface.
+- [x] ❌ **Task 5.7** (DROPPED, joseph 2026-08-27): a mid-session
+  UserPromptSubmit scan fires only when the user is PRESENT — and a present
+  user already sees the unambiguous `downgrade_indicator` status bar, so it
+  adds nothing. The real need is the UNATTENDED case (a long session stranded
+  on a lower model); that is the supervisor's job, already served by the
+  tick-driven auto-restore. Its known cap/backoff stranding limit (a second
+  re-downgrade past the per-process model-restore cap re-applies only the
+  effort floor, not the model flip) is noted as future work, not built here.
 
 ### Phase 4: Integration & closure
 
@@ -235,7 +242,7 @@ effective capability when it happens anyway.
   for any new handler/option. (Supervisor header documents all families +
   raise-only invariant; vUNRELEASED manifest carries model_fallback_detector
   and flaggable_work_advisor entries.)
-- [ ] ⬜ **Task 4.3**: Complete plan (archive, README row, journal closure).
+- [x] ✅ **Task 4.3**: Complete plan (archive, README row, journal closure).
 
 ## Dependencies
 
@@ -353,14 +360,14 @@ false success claim; the decision.log remains the complete record.
 
 ## Success Criteria
 
-- [ ] Sidecar JSON includes `effort` on every render; null-safe.
-- [ ] Simulated fable→opus transition in unit tests yields exactly one
+- [x] Sidecar JSON includes `effort` on every render; null-safe.
+- [x] Simulated fable→opus transition in unit tests yields exactly one
   `/effort xhigh` injection decision; opus→fable yields none; xhigh/max
   effort yields none; different-session switch yields none.
-- [ ] Dry-run fires the marker only; armed fires the real command.
-- [ ] Security-work delegation surface exists, is advisory-only, names an
+- [x] Dry-run fires the marker only; armed fires the real command.
+- [x] Security-work delegation surface exists, is advisory-only, names an
   Opus subagent as the destination, and is dogfood-enabled in this repo.
-- [ ] All QA green; daemon restarts RUNNING; supervisor lockstep test green.
+- [x] All QA green; daemon restarts RUNNING; supervisor lockstep test green.
 
 ## Risks & Mitigations
 
@@ -381,3 +388,9 @@ false success claim; the decision.log remains the complete record.
 - Status-line downgrade_indicator merged at 3a89c867
 - Coupled effort correction merged at efbaf2b7
 - Detector default flipped to opt-in at 2af2f579
+- Audit iconography `ced9fb46`; status-line downgrade/recovery episode counter
+  `6b9390f5`; read-guard false-positive fix `087719db`
+- Phase 3d blocking handlers (`flaggable_content_channel_guard`,
+  `quarantine_artefact_read_guard`) at `864c9cc4`
+- Task 5.7 dropped (redundant with the status bar; unattended coverage is the
+  supervisor auto-restore's job); plan completed and archived alongside this line
