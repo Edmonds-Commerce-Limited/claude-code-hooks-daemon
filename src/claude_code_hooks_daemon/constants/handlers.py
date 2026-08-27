@@ -462,6 +462,11 @@ class HandlerID:
         config_key="model_context",
         display_name="status-model-context",
     )
+    DOWNGRADE_INDICATOR = HandlerIDMeta(
+        class_name="DowngradeIndicatorHandler",
+        config_key="downgrade_indicator",
+        display_name="status-downgrade-indicator",
+    )
     CONTEXT_SIDECAR = HandlerIDMeta(
         class_name="ContextSidecarHandler",
         config_key="context_sidecar",

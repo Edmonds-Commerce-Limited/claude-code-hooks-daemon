@@ -211,6 +211,9 @@ class Priority:
     ENVIRONMENT_INDICATOR = 4  # After repo name, before account display
     ACCOUNT_DISPLAY = 5
     MODEL_CONTEXT = 10
+    # Plan 00278: sits immediately after model_context so the downgrade marker
+    # renders right next to the model name it qualifies.
+    DOWNGRADE_INDICATOR = 11
     CONTEXT_SIDECAR = 12  # Observe-only context sidecar for the PTY supervisor (opt-in)
     SUPERVISOR_INDICATOR = 13  # ccy PTY supervisor armed/dryrun/inactive shield (opt-in)
     CURRENT_TIME = 14

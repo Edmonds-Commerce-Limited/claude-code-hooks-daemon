@@ -13,6 +13,9 @@ from claude_code_hooks_daemon.handlers.status_line.context_sidecar import (
 )
 from claude_code_hooks_daemon.handlers.status_line.current_time import CurrentTimeHandler
 from claude_code_hooks_daemon.handlers.status_line.daemon_stats import DaemonStatsHandler
+from claude_code_hooks_daemon.handlers.status_line.downgrade_indicator import (
+    DowngradeIndicatorHandler,
+)
 from claude_code_hooks_daemon.handlers.status_line.environment_indicator import (
     EnvironmentIndicatorHandler,
 )
@@ -37,6 +40,7 @@ __all__ = [
     "ContextSidecarHandler",
     "CurrentTimeHandler",
     "DaemonStatsHandler",
+    "DowngradeIndicatorHandler",
     "EnvironmentIndicatorHandler",
     "GitBranchHandler",
     "GitRepoNameHandler",
