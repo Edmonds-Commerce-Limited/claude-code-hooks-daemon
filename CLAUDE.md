@@ -924,6 +924,32 @@ If a compound command is denied because an unrelated part of it carries a term (
 
 Missing/empty/comments-only secret file = this source is silently inert.
 
+<!-- handler: flaggable-content-channel-guard -->
+
+## flaggable_content_channel_guard — no content-revealing git/grep over flaggable paths
+
+Ships disabled (opt-in). When enabled, DENIES a Bash command segment whose SHAPE reveals file content — `git diff`, `git show`, `git log -p`/`--patch`, `git add -p`/`--patch`, or `grep`/`egrep`/`fgrep`/`rg` — when it also references a path matching a configured `flaggable_path_globs` entry. A plain `git status`, `git log` (no `-p`), or `git add <path>` (no `-p`) is NOT content-revealing and stays allowed.
+
+**Why**: those shapes pull a flaggable file's content into context inside a routine command's output, with no deliberate Read at all — the one leak an agent-side convention cannot plug. Delegate the WHOLE review to the quarantine subagent instead; it owns the entire git cycle for flaggable files (stage, commit, push) and reports back a clean summary — confirm CI by status, never by diffing the content.
+
+**Configure** via `handlers.pre_tool_use.flaggable_content_channel_guard.options`: `flaggable_path_globs` (default empty — inert until configured) plus `mode: additive` (default) or `replace` (governs only the path-glob list); `extra_content_revealing_patterns` (raw regexes) always EXTENDS the built-in git/grep shape set — there is no supported way to remove the built-in shapes, since that would leave the handler unable to detect the leak it exists for.
+
+**There is NO escape hatch.** An agent that could type its own justification would have self-authorised the disclosure this guard exists to prevent. Only a human may lift it, by editing config.
+
+<!-- handler: quarantine-artefact-read-guard -->
+
+## quarantine_artefact_read_guard — the DETAIL artefact is never read into the coordinator's context
+
+Ships disabled but pre-seeded (opt-in; works with zero config once enabled). Denies `Read`/`Edit`/`Grep`/`NotebookEdit` on any path matching a configured `quarantine_artefact_globs` entry (default seed: `*-opus-security-DETAIL*`), and any Bash command whose shape reveals file content (`cat`, `head`, `tail`, `less`, `more`, `grep`/`egrep`/`fgrep`/`rg`, `strings`, `xxd`/`hexdump`/`od`, `awk`, or an interpreter one-liner) mentioning such a path.
+
+**Why**: the two-file artefact contract has a quarantine subagent report back through a mandatory `*-opus-security-SUMMARY*` (always safe to read) and an optional `*-opus-security-DETAIL*` holding the raw flaggable substance it examined. Reading DETAIL back into the coordinator re-contaminates exactly the context the delegation was meant to protect. Confirm the subagent's work by commit hash and CI status, never by reading DETAIL's content.
+
+**Writing/creating the artefact is unaffected** — the subagent authors it, so `Write` is never checked, and a Bash command that AUTHORS the path (`cat > file <<EOF` with a redirect) is not treated as a reveal. The subagent also owns the entire git cycle for its own artefacts, so `git add`/`git commit`/`git push` mentioning the path are unaffected — content-revealing git commands (`git diff`/`show`/`log -p`/`add -p`) are `flaggable_content_channel_guard`'s job.
+
+**Configure** via `handlers.pre_tool_use.quarantine_artefact_read_guard.options`: `quarantine_artefact_globs` (additive onto the seed by default) and `mode: additive` (default) or `replace`.
+
+**There is NO escape hatch.** Only a human may lift this, by editing config. Ask; do not work around the block.
+
 <!-- handler: prevent-worktree-file-copying -->
 
 ## worktree_file_copy — do not copy files between worktrees and the main repo
