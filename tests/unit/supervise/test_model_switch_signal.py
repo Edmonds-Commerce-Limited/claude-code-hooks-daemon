@@ -340,9 +340,7 @@ class _AuditDriver:
 
 
 class TestAuditTrailFlush:
-    def test_switch_sequence_flushes_one_bot_prefixed_audit_message(
-        self, tmp_path: Path
-    ) -> None:
+    def test_switch_sequence_flushes_one_bot_prefixed_audit_message(self, tmp_path: Path) -> None:
         driver = _AuditDriver(tmp_path / "cs")
         driver.switch_and_couple()
         outcome = driver.tick()
