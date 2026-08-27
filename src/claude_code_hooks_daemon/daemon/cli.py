@@ -4127,11 +4127,20 @@ def cmd_agents(args: argparse.Namespace) -> int:
                 )
                 return 1
             result = agent_assets.deploy_agent(named_spec, project_root)
+            # Warning-family messages are already emitted once via logging
+            # (routed to stderr by the CLI); printing them again duplicates.
+            if result.action is agent_assets.AgentAction.CUSTOMISED_WARNING:
+                return 1
             print(result.message)
-            return 0 if result.action is not agent_assets.AgentAction.CUSTOMISED_WARNING else 1
+            return 0
         report = agent_assets.sync_agents(project_root, config)
-        for message in report.messages:
-            print(message)
+        warning_family = (
+            agent_assets.AgentAction.CUSTOMISED_WARNING,
+            agent_assets.AgentAction.REMOVAL_ADVISED,
+        )
+        for result in report.results:
+            if result.action not in warning_family:
+                print(result.message)
         return 0
 
     # action == "remove" (argparse restricts choices)
@@ -4139,8 +4148,10 @@ def cmd_agents(args: argparse.Namespace) -> int:
         print("ERROR: 'agents remove' requires an agent name", file=sys.stderr)
         return 1
     result = agent_assets.remove_agent(named_spec, project_root)
+    if result.action is agent_assets.AgentAction.REFUSED_CUSTOMISED:
+        return 1
     print(result.message)
-    return 0 if result.action is not agent_assets.AgentAction.REFUSED_CUSTOMISED else 1
+    return 0
 
 
 def cmd_plan_qa(args: argparse.Namespace) -> int:

@@ -93,7 +93,10 @@ class TestRemove:
         assert not deployed_agent_path(spec_by_name(OPUS_SECURITY_AGENT_NAME), project).exists()
 
     def test_remove_refuses_customised(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         project = _project(tmp_path)
         spec = spec_by_name(DEDUPE_AGENT_NAME)
@@ -102,4 +105,22 @@ class TestRemove:
         target.write_text("hacked\n")
         assert cmd_agents(_ns(project, "remove", DEDUPE_AGENT_NAME)) == 1
         assert target.exists()
-        assert "REFUSED" in capsys.readouterr().out
+        # The refusal reaches the user ONCE, via the logging system (the CLI
+        # routes WARNING to stderr); cmd_agents must not print it a second time.
+        assert "REFUSED" in caplog.text
+        assert "REFUSED" not in capsys.readouterr().out
+
+    def test_install_customised_warns_once(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        project = _project(tmp_path, _OPUS_ENABLED_YAML)
+        spec = spec_by_name(OPUS_SECURITY_AGENT_NAME)
+        target = deployed_agent_path(spec, project)
+        target.parent.mkdir(parents=True)
+        target.write_text("hacked\n")
+        assert cmd_agents(_ns(project, "install", OPUS_SECURITY_AGENT_NAME)) == 1
+        assert "CUSTOMISED" in caplog.text
+        assert "CUSTOMISED" not in capsys.readouterr().out
