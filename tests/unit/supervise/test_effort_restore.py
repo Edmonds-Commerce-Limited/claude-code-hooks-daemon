@@ -381,11 +381,25 @@ def test_model_restore_backoff_after_recent_restore(tmp_path: Path) -> None:
 
 
 def test_effort_resets_to_floor_after_successful_flip_back(tmp_path: Path) -> None:
-    # The ONE sanctioned effort LOWERING: after our /model restore lands and
-    # the sidecar confirms fable again, xhigh drops back to fable's floor.
+    # The ONE sanctioned effort LOWERING: after our /model restore lands,
+    # xhigh drops back to fable's floor. This is now driven by the
+    # unconditional coupled-effort mechanism (Plan 00278 continuation) --
+    # armed by the HOST the moment the /model injection succeeds, not by a
+    # later sidecar reading confirming the switch landed.
     sidecar_dir = tmp_path / "cs"
     machine, later = _restore_ready_machine(sidecar_dir)
-    machine.mark_model_restore(now_wall=later)
+    writes: list[bytes] = []
+    policy = _mod.CompactPolicy()
+    _mod._poll_once(
+        machine,
+        sidecar_dir=sidecar_dir,
+        now_wall=later,
+        idle=True,
+        dry_run=False,
+        master_writer=writes.append,
+        log=None,
+        freshness_seconds=policy.freshness_seconds,
+    )
     after = later + 30.0
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=after - 1.0)
     outcome = _decide(sidecar_dir, machine, facts=_facts(after))
@@ -444,3 +458,172 @@ def test_effort_state_round_trips_through_export_import(tmp_path: Path) -> None:
     machine.mark_effort_injection(now_wall=_NOW)
     clone.import_state(machine.export_state())
     assert clone.effort_injections == 1
+
+
+# ── Coupled effort: "/model switch MUST be followed by /effort" (cont.) ──────
+#
+# Plan 00278 continuation. The post-flip effort correction must be
+# UNCONDITIONAL, never gated on a downgrade episode being open or on a
+# later sidecar reading confirming the switch landed -- that gating is
+# exactly what let a live defect through: switching opus->fable left effort
+# at xhigh (fable's floor is "low"), burning account allowance, because the
+# old reset only fired once `note_model_reading` observed the recovery,
+# which a manual/no-episode switch never triggers.
+
+
+def test_model_switch_to_fable_forces_coupled_effort_to_floor_without_downgrade_episode(
+    tmp_path: Path,
+) -> None:
+    """THE SAFETY TEST: switching TO fable always drives effort to its floor.
+
+    No downgrade episode is ever opened here (a fresh machine, exactly the
+    manual test-trigger shape) -- the coupled mechanism must still fire.
+    """
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    # Simulate: the HOST just successfully injected "/model fable" (manual
+    # test-trigger path) while the session's live effort is still xhigh.
+    machine.arm_coupled_effort(session=_SESSION, family="fable")
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.decision_value == "would-effort"
+    assert outcome.payload == "/effort low"
+    assert outcome.submit is True
+
+
+def test_coupled_target_for_top_family_is_its_configured_floor() -> None:
+    machine = _machine()
+    machine.arm_coupled_effort(session=_SESSION, family="fable")
+    assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
+
+
+def test_coupled_target_for_non_top_family_is_downgrade_xhigh() -> None:
+    machine = _machine()
+    machine.arm_coupled_effort(session=_SESSION, family="opus")
+    assert machine.coupled_effort_pending == f"{_SESSION}:opus:xhigh"
+
+
+def test_coupled_target_respects_custom_fable_floor_override() -> None:
+    policy = _mod.CompactPolicy(
+        min_effort_levels={"fable": "medium", "opus": "high", "sonnet": "high", "haiku": "low"}
+    )
+    machine = _mod.CompactStateMachine(policy)
+    machine.arm_coupled_effort(session=_SESSION, family="fable")
+    assert machine.coupled_effort_pending == f"{_SESSION}:fable:medium"
+
+
+def test_coupled_effort_fires_on_the_tick_after_arming(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    machine.arm_coupled_effort(session=_SESSION, family="opus")
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.decision_value == "would-effort"
+    assert outcome.payload == "/effort xhigh"
+
+
+def test_coupled_effort_subordinate_to_pending_compaction(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    machine.arm_coupled_effort(session=_SESSION, family="fable")
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    compacting = sidecar_dir / f"{_SESSION}.compacting"
+    compacting.write_text(json.dumps({"ts": _NOW - 1.0, "session_id": _SESSION}), encoding="utf-8")
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.decision_value == "would-continue"
+    # Untouched -- the coupled branch never even ran this tick.
+    assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
+
+
+def test_coupled_effort_deferred_while_input_box_not_empty_then_retries(
+    tmp_path: Path,
+) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    machine.arm_coupled_effort(session=_SESSION, family="fable")
+    busy = _decide(sidecar_dir, machine, facts=_facts(input_line_empty=False))
+    assert busy.payload is None
+    assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
+    retry = _decide(sidecar_dir, machine)
+    assert retry.decision_value == "would-effort"
+    assert retry.payload == "/effort low"
+
+
+def test_coupled_effort_pending_round_trips_through_export_import() -> None:
+    machine = _machine()
+    machine.arm_coupled_effort(session=_SESSION, family="fable")
+    clone = _machine()
+    clone.import_state(machine.export_state())
+    assert clone.coupled_effort_pending == f"{_SESSION}:fable:low"
+
+
+def test_coupled_effort_pending_defaults_to_none_for_legacy_state() -> None:
+    machine = _machine()
+    legacy_state = machine.export_state()
+    legacy_state.pop("coupled_effort_pending", None)
+    fresh = _machine()
+    fresh.import_state(legacy_state)
+    assert fresh.coupled_effort_pending is None
+
+
+def test_manual_model_switch_arms_coupled_effort_via_poll_once(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _mod.write_model_switch_signal(sidecar_dir, session_id=_SESSION, family="fable", now=_NOW)
+    writes: list[bytes] = []
+    policy = _mod.CompactPolicy()
+    _mod._poll_once(
+        machine,
+        sidecar_dir=sidecar_dir,
+        now_wall=_NOW,
+        idle=True,
+        dry_run=False,
+        master_writer=writes.append,
+        log=None,
+        freshness_seconds=policy.freshness_seconds,
+    )
+    assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
+    # A manual test-trigger switch must NOT eat into the auto-restore
+    # cap/backoff budget -- that bookkeeping is reserved for the AUTO path.
+    assert machine.export_state()["model_restores"] == 0
+
+
+def test_auto_model_restore_arms_coupled_effort_via_poll_once(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine, later = _restore_ready_machine(sidecar_dir)
+    writes: list[bytes] = []
+    policy = _mod.CompactPolicy()
+    _mod._poll_once(
+        machine,
+        sidecar_dir=sidecar_dir,
+        now_wall=later,
+        idle=True,
+        dry_run=False,
+        master_writer=writes.append,
+        log=None,
+        freshness_seconds=policy.freshness_seconds,
+    )
+    assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
+    # The AUTO path DOES count against the restore cap/backoff.
+    assert machine.export_state()["model_restores"] == 1
+
+
+def test_coupled_effort_consumed_once_via_poll_once(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    machine.arm_coupled_effort(session=_SESSION, family="fable")
+    writes: list[bytes] = []
+    policy = _mod.CompactPolicy()
+    _mod._poll_once(
+        machine,
+        sidecar_dir=sidecar_dir,
+        now_wall=_NOW,
+        idle=True,
+        dry_run=False,
+        master_writer=writes.append,
+        log=None,
+        freshness_seconds=policy.freshness_seconds,
+    )
+    assert machine.coupled_effort_pending is None
+    assert writes  # the /effort payload was actually written
+    # No re-fire on the next tick.
+    again = _decide(sidecar_dir, machine)
+    assert again.payload is None
