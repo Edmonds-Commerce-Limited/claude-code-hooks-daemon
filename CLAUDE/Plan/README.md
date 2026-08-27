@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00282: generate-docs null-priority crash](00282-generate-docs-null-priority-crash/PLAN.md) - In Progress (both doc generators abort on a handler config that omits `priority:` because `model_dump()` materialises it as `None`; fix mirrors the `registry.py` guard via a shared DRY helper + regression test)
+
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
 
 - [00278: model-downgrade resilience](00278-supervisor-effort-restore-on-model-downgrade/PLAN.md) - In Progress (recovery: supervisor detects a fable→opus downgrade via the context sidecar and injects `/effort xhigh`; prevention: steer security-flavoured work into an Opus subagent so the fable context stays clean)
