@@ -235,6 +235,18 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "`cat > file` overwrites an unread file with no guard, so the guard "
         "shipped with the hole its own premise is about",
     ),
+    "QuarantineArtefactReadGuardHandler": (
+        _PARTIAL,
+        "Plan 00278 Phase 3d.2: Write is never checked at the tool level at "
+        "all -- authoring the DETAIL artefact is deliberately allowed via ANY "
+        "route (Write tool or `cat > file <<EOF`), so there is no Write-side "
+        "premise to violate. Edit is denied because editing requires reading "
+        "old content; its Bash counterpart is judged by COMMAND TEXT via the "
+        "revealing-bash-verb scan (cat/head/tail/less/grep family/interpreter "
+        "one-liners), so cat/grep of the artefact via Bash IS caught -- but a "
+        "verb outside that fixed list, or a wrapper script opening the file "
+        "internally, is not (same honest-limits shape as SecretFileGuardHandler)",
+    ),
 }
 
 # Handlers whose resident guidance opened with an unqualified "Writing X is

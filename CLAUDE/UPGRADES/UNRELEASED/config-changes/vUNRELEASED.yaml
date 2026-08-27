@@ -103,6 +103,56 @@ config_changes:
         content safety classifier (defensive-security estates). Set
         handlers.pre_tool_use.flaggable_work_advisor.enabled: true and
         configure the path globs to the project's sensitive directories.
+    - key: handlers.pre_tool_use.flaggable_content_channel_guard
+      recommended: false
+      dormant: true
+      description: >-
+        NEW opt-in PreToolUse blocking handler (Plan 00278 Phase 3d.1), ships
+        DISABLED. Closes the one contamination channel
+        flaggable_work_advisor can only advise about: content-revealing git
+        commands (git diff, git show, git log -p/--patch, git add -p/--patch)
+        and the grep/rg/egrep/fgrep family pull a flaggable file's content
+        into context inside a routine command's output, with no deliberate
+        Read at all. Denies a Bash command segment whose SHAPE is
+        content-revealing AND references a path matching
+        flaggable_path_globs; a plain git status, git log (no -p), or git
+        add <path> (no -p) stays allowed even when it names a flaggable
+        path. No escape hatch -- an agent that could type its own
+        justification would have self-authorised the disclosure this guard
+        exists to prevent. Options: flaggable_path_globs (default empty --
+        inert until configured), extra_content_revealing_patterns (raw
+        regexes that always EXTEND the built-in shape set), mode (additive
+        default | replace -- governs only the path-glob list, never the
+        built-in shapes).
+      migration_note: >-
+        Enable only in projects that already use flaggable_work_advisor and
+        want the git/grep leak closed by DENY rather than advisory. Set
+        handlers.pre_tool_use.flaggable_content_channel_guard.enabled: true
+        and configure flaggable_path_globs to the same paths.
+    - key: handlers.pre_tool_use.quarantine_artefact_read_guard
+      recommended: false
+      dormant: true
+      description: >-
+        NEW opt-in PreToolUse blocking handler (Plan 00278 Phase 3d.2), ships
+        DISABLED but PRE-SEEDED with the *-opus-security-DETAIL* marker glob
+        (unlike flaggable_work_advisor's empty seed), so enabling it needs no
+        configuration. Enforces the two-file artefact contract's read
+        boundary by pattern, not trust: denies Read/Edit/Grep/NotebookEdit on
+        a path matching a quarantine_artefact_globs entry, and any Bash
+        command whose shape reveals file content (cat, head, tail, less,
+        more, grep/egrep/fgrep/rg, strings, xxd/hexdump/od, awk, or an
+        interpreter one-liner) mentioning such a path. Writing/creating the
+        artefact stays allowed (the subagent authors it), and the subagent's
+        own git add/commit/push of its artefacts is unaffected -- that
+        channel is flaggable_content_channel_guard's job. No escape hatch.
+        Options: quarantine_artefact_globs (additive onto the seed by
+        default), mode (additive default | replace).
+      migration_note: >-
+        Enable in any project using the opus-security-style two-file
+        artefact contract to make the DETAIL read-boundary enforced rather
+        than convention-only. Set
+        handlers.pre_tool_use.quarantine_artefact_read_guard.enabled: true --
+        no further configuration is required.
     - key: handlers.status_line.downgrade_indicator
       recommended: true
       dormant: false

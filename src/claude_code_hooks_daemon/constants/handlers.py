@@ -208,6 +208,26 @@ class HandlerID:
         config_key="secret_file_guard",
         display_name="block-secret-file-read",
     )
+    # Content-channel guard (Plan 00278 Phase 3d.1, handover §3.3): denies
+    # content-revealing git/grep commands (git diff/show/log -p/add -p,
+    # grep/rg family) that reference a configured flaggable path -- the one
+    # leak an agent-side convention cannot plug, because the content arrives
+    # in a routine command's output with no deliberate Read at all.
+    FLAGGABLE_CONTENT_CHANNEL_GUARD = HandlerIDMeta(
+        class_name="FlaggableContentChannelGuardHandler",
+        config_key="flaggable_content_channel_guard",
+        display_name="flaggable-content-channel-guard",
+    )
+    # Quarantine-artefact read boundary (Plan 00278 Phase 3d.2, handover
+    # §3.4): denies Read/Edit/Grep/NotebookEdit and content-revealing Bash
+    # over a configured "*-opus-security-DETAIL*"-style glob. The coordinator
+    # must never read that artefact; only a human or another quarantine
+    # agent opens it on purpose.
+    QUARANTINE_ARTEFACT_READ_GUARD = HandlerIDMeta(
+        class_name="QuarantineArtefactReadGuardHandler",
+        config_key="quarantine_artefact_read_guard",
+        display_name="quarantine-artefact-read-guard",
+    )
     # Artefact publishing (Plan 00259): the Artifact tool mints a claude.ai URL
     # for a locally-rendered page. It is the one disclosure path with no guard,
     # so it is blocked by default and only a human may lift the block.

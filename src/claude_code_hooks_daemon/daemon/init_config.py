@@ -140,6 +140,15 @@ class ConfigTemplate:
             # Presence/metadata stay available via `hooks-daemon secret-meta`.
             # No agent escape hatch — a human edits this block to lift it.
             "    secret_file_guard: {enabled: true, priority: 14}  # Deny reads of protected secret files (contents never enter context)\n"
+            # Opt-in (Plan 00278 Phase 3d.1): closes the git/grep channel that
+            # flaggable_work_advisor can only advise about. Inert until
+            # flaggable_path_globs is configured.
+            "    flaggable_content_channel_guard: {enabled: false, priority: 14}  "
+            "# Deny content-revealing git/grep over configured flaggable paths (opt-in)\n"
+            # Opt-in (Plan 00278 Phase 3d.2): pre-seeded with the DETAIL
+            # marker glob, so enabling it needs no further configuration.
+            "    quarantine_artefact_read_guard: {enabled: false, priority: 14}  "
+            "# Deny reading a *-opus-security-DETAIL* artefact from the main context (opt-in)\n"
             # On by default (Plan 00261): Write replaces a file wholesale, and the
             # harness does not enforce its own documented read-before-overwrite
             # contract under bypassPermissions. New files are never blocked.

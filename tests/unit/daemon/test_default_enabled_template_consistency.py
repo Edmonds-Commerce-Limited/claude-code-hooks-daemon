@@ -41,6 +41,8 @@ _EXPECTED_OPT_IN_CONFIG_KEYS = {
     "skill_opportunity_detector",
     "flaggable_work_advisor",
     "model_fallback_detector",
+    "flaggable_content_channel_guard",
+    "quarantine_artefact_read_guard",
 }
 
 

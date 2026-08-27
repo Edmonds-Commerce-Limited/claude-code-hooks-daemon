@@ -96,6 +96,21 @@ handlers:
       #   allow_plain_hash: false     # true also exposes exact size + plain sha256 via secret-meta
       #   exclude_paths: []           # scopes ONLY the authored-script content scan
 
+    flaggable_content_channel_guard:  # Deny content-revealing git/grep over flaggable paths (Plan 00278)
+      enabled: false        # Opt-in: closes the channel flaggable_work_advisor can only advise about
+      priority: 14
+      # options:
+      #   flaggable_path_globs: ["firewall/**"]
+      #   extra_content_revealing_patterns: ['^git\s+blame\b']  # always additive, never replaces the built-in shapes
+      #   mode: additive  # or: replace (governs only flaggable_path_globs)
+
+    quarantine_artefact_read_guard:  # Deny reading a *-opus-security-DETAIL* artefact (Plan 00278)
+      enabled: false        # Opt-in; pre-seeded, so enabling needs no further config
+      priority: 14
+      # options:
+      #   quarantine_artefact_globs: ["*-project-quarantine-RAW*"]
+      #   mode: additive  # or: replace
+
     root_recursion_guard:  # Blocks recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME
       enabled: true
       priority: 16

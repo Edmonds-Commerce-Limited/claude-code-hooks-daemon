@@ -1391,6 +1391,117 @@ handlers:
 
 ---
 
+#### flaggable_content_channel_guard
+
+| Property       | Value                             |
+| -------------- | --------------------------------- |
+| **Config key** | `flaggable_content_channel_guard` |
+| **Priority**   | 14                                |
+| **Type**       | Blocking (terminal)               |
+| **Event**      | PreToolUse                        |
+
+**Description:** Ships DISABLED (opt-in; Plan 00278 Phase 3d.1). Closes the
+one contamination channel [`flaggable_work_advisor`](#flaggable_work_advisor)
+can only advise about: content-revealing git commands (`git diff`,
+`git show`, `git log -p`/`--patch`, `git add -p`/`--patch`) and the
+`grep`/`rg`/`egrep`/`fgrep` family pull a flaggable file's content into
+context inside a routine command's output, with no deliberate `Read` at all.
+
+Denies a Bash command segment (statements and pipe/`&&`/`||` spans, quote-
+and heredoc-aware) whose SHAPE is content-revealing AND that references a
+path matching `flaggable_path_globs`. A plain `git status`, `git log` (no
+`-p`), or `git add <path>` (no `-p`) is NOT content-revealing and stays
+allowed even when it names a flaggable path — this is a command-SHAPE guard,
+not a blanket ban on mentioning a flaggable path in Bash.
+
+**No agent escape hatch** (same doctrine as `secret_file_guard`): an agent
+that could type its own justification would have self-authorised exactly the
+disclosure this guard exists to prevent. Only a human may lift it, by
+editing config.
+
+**Options:**
+
+| Option                             | Type        | Default    | Description                                                                                                               |
+| ---------------------------------- | ----------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `flaggable_path_globs`             | `list[str]` | `[]`       | Gitignore-style globs. Inert until configured — the flaggable boundary is project-specific.                               |
+| `extra_content_revealing_patterns` | `list[str]` | `[]`       | Raw regexes matched against a command segment. ALWAYS additive — there is no way to discard the built-in git/grep shapes. |
+| `mode`                             | `str`       | `additive` | Governs only `flaggable_path_globs`: `additive` merges onto the (empty) seed; `replace` uses only the project list.       |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    flaggable_content_channel_guard:
+      enabled: true
+      priority: 14
+      options:
+        flaggable_path_globs:
+          - "firewall/**"
+        extra_content_revealing_patterns:
+          - '^git\s+blame\b'
+```
+
+---
+
+#### quarantine_artefact_read_guard
+
+| Property       | Value                            |
+| -------------- | -------------------------------- |
+| **Config key** | `quarantine_artefact_read_guard` |
+| **Priority**   | 14                               |
+| **Type**       | Blocking (terminal)              |
+| **Event**      | PreToolUse                       |
+
+**Description:** Ships DISABLED but PRE-SEEDED (opt-in; Plan 00278 Phase
+3d.2) — unlike `flaggable_work_advisor`'s empty seed, the marker convention
+is project-independent, so enabling this handler needs no configuration.
+
+Enforces the two-file artefact contract's read boundary by PATTERN, not
+trust: a subagent reports back through a mandatory
+`<topic>-opus-security-SUMMARY` (always safe to read) and an optional
+`<topic>-opus-security-DETAIL` holding the raw flaggable substance, which the
+coordinator must NEVER read. Denies `Read`/`Edit`/`Grep`/`NotebookEdit` on a
+path matching `quarantine_artefact_globs` (default seed:
+`*-opus-security-DETAIL*`), and any Bash command whose SHAPE reveals file
+content (`cat`, `head`, `tail`, `less`, `more`,
+`grep`/`egrep`/`fgrep`/`rg`, `strings`, `xxd`/`hexdump`/`od`, `awk`, or an
+interpreter one-liner) mentioning such a path. A `Grep` rooted at a
+DIRECTORY gets the same bounded protected-name walk as `secret_file_guard`.
+
+Writing/creating the artefact is deliberately ALLOWED — the subagent authors
+it — so `Write` is never checked, and a Bash command that AUTHORS the path
+(`cat > file <<EOF` with a redirect) is not treated as a reveal. The
+subagent also owns the entire git cycle for its own artefacts, so
+`git add`/`git commit`/`git push` mentioning the path are unaffected —
+content-revealing git commands are `flaggable_content_channel_guard`'s job,
+configured against its own path list.
+
+**No agent escape hatch** (same doctrine as `secret_file_guard`). Only a
+human may lift it, by editing config.
+
+**Options:**
+
+| Option                      | Type        | Default                                                    | Description                                                                                        |
+| --------------------------- | ----------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `quarantine_artefact_globs` | `list[str]` | `["*-opus-security-DETAIL*", "*-opus-security-DETAIL.md"]` | Gitignore-style globs, combined with the seed per `mode`.                                          |
+| `mode`                      | `str`       | `additive`                                                 | `additive` merges `quarantine_artefact_globs` onto the seed; `replace` uses only the project list. |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    quarantine_artefact_read_guard:
+      enabled: true
+      priority: 14
+      options:
+        quarantine_artefact_globs:
+          - "*-project-quarantine-RAW*"
+```
+
+---
+
 #### error_hiding_blocker
 
 | Property       | Value                  |

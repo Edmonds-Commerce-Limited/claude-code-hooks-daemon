@@ -9,6 +9,7 @@ from .comment_size import CommentSizeHandler
 from .daemon_location_guard import DaemonLocationGuardHandler
 from .destructive_git import DestructiveGitHandler
 from .error_hiding_blocker import ErrorHidingBlockerHandler
+from .flaggable_content_channel_guard import FlaggableContentChannelGuardHandler
 from .flaggable_work_advisor import FlaggableWorkAdvisorHandler
 from .gh_issue_comments import GhIssueCommentsHandler
 from .gh_pr_comments import GhPrCommentsHandler
@@ -22,6 +23,7 @@ from .plan_qa_edit import PlanQaEditHandler
 from .plan_time_estimates import PlanTimeEstimatesHandler
 from .plan_workflow import PlanWorkflowHandler
 from .qa_suppression import QaSuppressionHandler
+from .quarantine_artefact_read_guard import QuarantineArtefactReadGuardHandler
 from .root_recursion_guard import RootRecursionGuardHandler
 from .security_antipattern import SecurityAntipatternHandler
 from .sed_blocker import SedBlockerHandler
@@ -42,6 +44,7 @@ __all__ = [
     "DaemonLocationGuardHandler",
     "DestructiveGitHandler",
     "ErrorHidingBlockerHandler",
+    "FlaggableContentChannelGuardHandler",
     "FlaggableWorkAdvisorHandler",
     "GhIssueCommentsHandler",
     "GhPrCommentsHandler",
@@ -55,6 +58,7 @@ __all__ = [
     "PlanTimeEstimatesHandler",
     "PlanWorkflowHandler",
     "QaSuppressionHandler",
+    "QuarantineArtefactReadGuardHandler",
     "RootRecursionGuardHandler",
     "SecurityAntipatternHandler",
     "SedBlockerHandler",

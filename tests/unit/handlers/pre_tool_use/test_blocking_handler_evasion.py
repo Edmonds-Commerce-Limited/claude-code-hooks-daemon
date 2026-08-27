@@ -195,6 +195,23 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             f"git \\\n  -C {_SAFE_PATH} \\\n  merge --squash feature-branch",
         ),
     ),
+    "FlaggableContentChannelGuardHandler": (
+        "git diff firewall/edge/rules.yml",
+        (
+            f"git -C {_SAFE_PATH} diff firewall/edge/rules.yml",
+            "git --no-pager diff firewall/edge/rules.yml",
+            "/usr/bin/git diff firewall/edge/rules.yml",
+            "git \\\n  diff firewall/edge/rules.yml",
+        ),
+    ),
+    "QuarantineArtefactReadGuardHandler": (
+        "cat topic-opus-security-DETAIL.md",
+        (
+            "/bin/cat topic-opus-security-DETAIL.md",
+            "env cat topic-opus-security-DETAIL.md",
+            "LANG=C cat topic-opus-security-DETAIL.md",
+        ),
+    ),
 }
 
 # class name -> safe commands that must NOT match after the widening.
@@ -297,6 +314,18 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
         'git commit -m "squash these debug prints later"',
         f"git -C {_SAFE_PATH} log --oneline -n 5",
     ),
+    "FlaggableContentChannelGuardHandler": (
+        "git status",
+        f"git -C {_SAFE_PATH} log firewall/edge/rules.yml",
+        "git add firewall/edge/rules.yml",
+        "grep TODO src/app.py",
+    ),
+    "QuarantineArtefactReadGuardHandler": (
+        "cat src/app.py",
+        "ls topic-opus-security-DETAIL.md",
+        "cat > topic-opus-security-DETAIL.md <<'EOF'\nraw\nEOF",
+        "git add topic-opus-security-DETAIL.md && git commit -m 'Plan 00278: add detail'",
+    ),
 }
 
 # Handlers that do NOT anchor on a command name, so no respelling applies.
@@ -364,6 +393,12 @@ _COMMAND_ANCHORED_NOT_UNIT_TESTABLE: dict[str, str] = {
 _CONFIGURATORS: dict[str, Callable[[Handler], None]] = {
     "SensitiveContentHandler": lambda handler: setattr(
         handler, "_public_patterns", [_SENTINEL_PATTERN]
+    ),
+    # Ships with an empty seed (inert by design, Plan 00278) -- needs a
+    # configured glob to match at all. QuarantineArtefactReadGuardHandler
+    # needs no configurator: it is pre-seeded out of the box.
+    "FlaggableContentChannelGuardHandler": lambda handler: setattr(
+        handler, "_flaggable_path_globs", ["firewall/**"]
     ),
 }
 

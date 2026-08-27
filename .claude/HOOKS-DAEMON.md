@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (48 handlers)
+### PreToolUse (50 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -14,6 +14,8 @@
 | 12 | absolute_path | BLOCKING | Require absolute paths for Read/Write/Edit tool file_path parameters |
 | 13 | error_hiding_blocker | BLOCKING | Block error-hiding patterns in code written via Write or Edit tools |
 | 14 | artifact_publish_blocker | TERMINAL | Deny artefact publishing; allow read-only enumeration |
+| 14 | flaggable_content_channel_guard | BLOCKING | Deny content-revealing git/grep commands over configured flaggable paths |
+| 14 | quarantine_artefact_read_guard | BLOCKING | Deny reading a quarantined DETAIL artefact from the main context |
 | 14 | secret_file_guard | BLOCKING | Deny any tool call that would put a protected file's contents into context |
 | 14 | security_antipattern | BLOCKING | Block Write/Edit of files containing security antipatterns |
 | 14 | sensitive_content | BLOCKING | Block Write/Edit content matching configured public patterns or a secret word list |

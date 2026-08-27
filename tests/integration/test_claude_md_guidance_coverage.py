@@ -107,6 +107,21 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "(b)/(c)/(d) limits so an unblocked evasion is never read as permission, "
         "the secret-meta/consumer exemptions, and the no-escape-hatch doctrine"
     ),
+    "FlaggableContentChannelGuardHandler": (
+        "T1 denies a content-revealing git/grep command over a flaggable path, "
+        "and the guidance carries what the deny reason cannot: this is a "
+        "command-SHAPE guard (git status/log/add without -p stay allowed even "
+        "naming a flaggable path), the config split (mode governs only the "
+        "glob list; extra shapes are always additive, never a replacement), "
+        "and the no-escape-hatch doctrine"
+    ),
+    "QuarantineArtefactReadGuardHandler": (
+        "T1 denies reading a quarantined DETAIL artefact, and the guidance "
+        "carries what the deny reason cannot: the two-file SUMMARY/DETAIL "
+        "contract this enforces, that Write/authoring the artefact and the "
+        "subagent's own git add/commit/push are deliberately unaffected, and "
+        "the no-escape-hatch doctrine"
+    ),
     "WriteClobberGuardHandler": (
         "T1 denies a Write that would destroy unread file contents, and the guidance "
         "carries what the deny reason cannot: that new files and Edits are never "

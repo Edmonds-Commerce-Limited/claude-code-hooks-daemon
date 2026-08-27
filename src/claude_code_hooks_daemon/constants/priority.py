@@ -65,6 +65,12 @@ class Priority:
     # Read-direction sibling of SENSITIVE_CONTENT (Plan 00272): keeps secret
     # FILE contents out of context, so it belongs in the same safety band.
     SECRET_FILE_GUARD = 14
+    # Plan 00278 Phase 3d: same band as SECRET_FILE_GUARD -- both close a
+    # content-into-context channel by command shape / path pattern rather
+    # than a workflow preference. Relative order does not change any verdict
+    # since all four in this band match disjoint hazards.
+    FLAGGABLE_CONTENT_CHANNEL_GUARD = 14
+    QUARANTINE_ARTEFACT_READ_GUARD = 14
 
     ROOT_RECURSION_GUARD = 16
     # Runs after the blocking safety handlers on purpose: a Read they DENY never

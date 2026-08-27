@@ -224,6 +224,24 @@ handlers:
           - 'tests/unit/utils/test_secret_meta.py'
           - 'tests/unit/daemon/test_cli_secret_meta.py'
 
+    # Plan 00278 Phase 3d.1: dogfood-enabled here with the flaggable path
+    # pointed at the cyber-flag test fixture (ships disabled upstream via
+    # get_default_enabled). Closes the git/grep channel flaggable_work_advisor
+    # can only advise about.
+    flaggable_content_channel_guard:
+      enabled: true
+      priority: 14
+      options:
+        flaggable_path_globs:
+          - 'tests/fixtures/cyber-flag/**'
+
+    # Plan 00278 Phase 3d.2: dogfood-enabled here (ships disabled upstream).
+    # Pre-seeded with the *-opus-security-DETAIL* marker glob, so no options
+    # are needed even in this repo.
+    quarantine_artefact_read_guard:
+      enabled: true
+      priority: 14
+
     root_recursion_guard:  # Blocks recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME
       enabled: true
       priority: 15
