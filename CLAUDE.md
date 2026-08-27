@@ -1666,6 +1666,16 @@ A `Write`/`Edit` of ephemeral or session-specific content to `CLAUDE.md` or `REA
 
 Content inside markdown code blocks is exempt from validation.
 
+<!-- handler: flaggable-work-advisor -->
+
+## flaggable_work_advisor — delegate flaggable work BEFORE reading it
+
+Advisory only (never denies; ships disabled). When a Read/Edit/Write/Grep targets a configured flaggable path, a Bash command mentions one, or the tool input carries 2+ configured attack-mechanics topic terms, it reminds you: reading or producing that content in the MAIN context can silently trip a safety classifier and downgrade the session's model for its whole remainder.
+
+**The move**: delegate the WHOLE sub-task to the quarantine subagent BEFORE opening the content — `Agent(subagent_type: "<quarantine_agent>")` — deciding from the framing and the path, never by reading first (scouting first IS reading first), and take back only the clean summary.
+
+**Configure** via `handlers.pre_tool_use.flaggable_work_advisor.options`: `flaggable_path_globs` (default empty), `flaggable_topic_terms` (seed: spoof, spoofing, evasion, exploit, rootkit), `quarantine_agent` (default `hooks-daemon-opus-security`), and `mode: additive` (default — project lists extend the seeds) or `replace` (project lists stand alone). Rate-limited once per session per matched path, so a deliberate retry passes silently.
+
 <!-- handler: background-process-tracker -->
 
 ## background_process_tracker — backgrounded processes are tracked
