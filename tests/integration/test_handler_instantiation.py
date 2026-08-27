@@ -42,6 +42,7 @@ def _discover_handler_modules() -> list[tuple[str, str]]:
                 "context_tiers.py",
                 "thread_registry.py",
                 "mtime_cache.py",
+                "downgrade_state.py",
             ):
                 continue
 
