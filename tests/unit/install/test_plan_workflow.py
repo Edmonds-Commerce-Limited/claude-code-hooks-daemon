@@ -784,15 +784,43 @@ class TestDedupeAgentDeployment:
         assert deployed.read_text() == dedupe_agent_template_path().read_text()
         assert result.deployed_dedupe_agent is True
 
-    def test_agent_is_daemon_owned_and_overwritten(self, tmp_path: Path) -> None:
-        """Unlike the client-owned template/journal assets, a stale copy is
-        replaced — otherwise a prompt fix never reaches an existing install."""
+    def test_outdated_pristine_agent_is_overwritten(self, tmp_path: Path) -> None:
+        """An OUTDATED pristine copy (a previously shipped revision) is
+        replaced — otherwise a prompt fix never reaches an existing install.
+        Since Plan 00279 an unrecognised (customised) copy is instead kept."""
+        from claude_code_hooks_daemon.install.agent_assets import (
+            AgentAssetSpec,
+            content_md5,
+            deploy_agent,
+            spec_by_name,
+        )
+
+        real_spec = spec_by_name(DEDUPE_AGENT_NAME)
+        old_body = "# a previously shipped revision\n"
+        patched = AgentAssetSpec(
+            name=real_spec.name,
+            version=real_spec.version,
+            gating_config_key=real_spec.gating_config_key,
+            is_enabled=real_spec.is_enabled,
+            historic_versions=(("legacy-test", content_md5(old_body)),),
+        )
         agents_dir = tmp_path / ".claude" / "agents"
         agents_dir.mkdir(parents=True)
-        (agents_dir / f"{DEDUPE_AGENT_NAME}.md").write_text("# stale\n")
-        bootstrap_plan_workflow(tmp_path)
         deployed = agents_dir / f"{DEDUPE_AGENT_NAME}.md"
+        deployed.write_text(old_body)
+        deploy_agent(patched, tmp_path)
         assert deployed.read_text() == dedupe_agent_template_path().read_text()
+
+    def test_customised_agent_is_never_clobbered(self, tmp_path: Path) -> None:
+        """Plan 00279: content matching no shipped revision is customised —
+        the bootstrap warns loudly and leaves the file intact."""
+        agents_dir = tmp_path / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / f"{DEDUPE_AGENT_NAME}.md").write_text("# my local hack\n")
+        result = bootstrap_plan_workflow(tmp_path)
+        assert (agents_dir / f"{DEDUPE_AGENT_NAME}.md").read_text() == "# my local hack\n"
+        assert result.deployed_dedupe_agent is False
+        assert any("CUSTOMISED" in m for m in result.messages)
 
     def test_does_not_disturb_other_agents(self, tmp_path: Path) -> None:
         """`.claude/agents/` is the user's namespace; we add one file to it."""

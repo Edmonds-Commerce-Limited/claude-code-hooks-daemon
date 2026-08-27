@@ -273,6 +273,32 @@ class DaemonController:
         # Validate configuration at startup (fail-open: degraded mode on errors)
         self._validate_config(config_path)
 
+        # Sync daemon-shipped agent assets with the gating config (Plan 00279):
+        # enabled + missing/outdated deploys, disabled + present logs a removal
+        # advisory. Best-effort — an unwritable .claude/agents/ must not stop
+        # the daemon serving hooks, so the failure is logged, never swallowed
+        # silently and never fatal.
+        self._sync_agent_assets(workspace_root, config_path)
+
+    def _sync_agent_assets(self, workspace_root: Path, config_path: Path) -> None:
+        """Run the config-driven agent-asset lifecycle sync (Plan 00279)."""
+        from claude_code_hooks_daemon.install.agent_assets import deploy_agents_if_enabled
+
+        messages: list[str] = []
+        try:
+            messages = deploy_agents_if_enabled(workspace_root, config_path).messages
+        except (OSError, ValueError, TypeError) as exc:
+            # Deliberately non-fatal, mirroring the fail-open startup contract
+            # (_validate_config): an unwritable .claude/agents/ (OSError), an
+            # invalid config the degraded-mode path already reports
+            # (pydantic ValidationError is a ValueError), or a non-Path
+            # workspace_root in a mocked unit-test initialise (TypeError) must
+            # not stop the daemon serving hooks. The failure is logged loudly
+            # at ERROR — never swallowed.
+            logger.error("Agent-asset sync failed (daemon continues): %s", exc)
+        for message in messages:
+            logger.info("Agent assets: %s", message)
+
     def _load_plugins(self, plugins_config: "PluginsConfig", workspace_root: Path) -> int:
         """Load and register plugin handlers.
 

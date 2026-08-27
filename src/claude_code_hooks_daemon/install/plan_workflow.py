@@ -12,6 +12,18 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.install.agent_assets import (
+    AGENTS_DIR_PARTS as _AGENTS_DIR_PARTS,
+)
+from claude_code_hooks_daemon.install.agent_assets import (
+    DEDUPE_AGENT_NAME as _DEDUPE_AGENT_NAME,
+)
+from claude_code_hooks_daemon.install.agent_assets import (
+    AgentAction,
+    deploy_agent,
+    spec_by_name,
+    spec_source_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,23 +75,13 @@ PLAN_JOURNALLING_DOC_NAME: Final[str] = "PlanJournalling.md"
 # project-wide filenames and by CORRECT prior-art citations. Duplicates share
 # SUBJECT, not citations, which needs a reader.
 #
-# DAEMON-owned, so it is refreshed on every deploy like `mkplan.bash` and the
-# skills: the file encodes a procedure, not client content, and a prompt fix
-# that never reaches an existing install is worthless.
-# NAMESPACED deliberately. `.claude/agents/` is a FLAT namespace that the
-# CLIENT owns and populates with its own agents. A bare `plan-dedupe-scout`
-# could collide with one of theirs, and a collision in a flat namespace does
-# not error — one definition wins and the other is silently never dispatched,
-# which is the same class of silent-disablement failure the project-handler
-# load checker exists to catch. The `hooks-daemon-` prefix makes collision
-# impossible and makes daemon-deployed agents obvious in a directory listing.
-DEDUPE_AGENT_NAME: Final[str] = "hooks-daemon-plan-dedupe-scout"
-# Claude Code resolves agent definitions at `<project>/.claude/agents/`, which
-# is why this deploys relative to the PROJECT ROOT and not to the plan
-# directory — a project tracking plans elsewhere must still get a usable agent.
-AGENTS_DIR_PARTS: Final[tuple[str, str]] = (".claude", "agents")
-# Owner rw, group/other r — a definition that is read, never executed.
-_DEDUPE_AGENT_MODE: Final[int] = 0o644
+# DAEMON-owned and, since Plan 00279, deployed through the generic
+# agent-asset subsystem (`install/agent_assets.py`), which refreshes pristine
+# copies on every deploy like `mkplan.bash` and the skills but never clobbers
+# a customised file. The name/location constants are re-exported here for
+# back-compat; the subsystem is their single source of truth.
+DEDUPE_AGENT_NAME: Final[str] = _DEDUPE_AGENT_NAME
+AGENTS_DIR_PARTS: Final[tuple[str, str]] = _AGENTS_DIR_PARTS
 
 
 def mkplan_template_path() -> Path:
@@ -117,8 +119,12 @@ def plan_journalling_doc_path() -> Path:
 
 
 def dedupe_agent_template_path() -> Path:
-    """Absolute path to the bundled plan-dedupe scout agent (Plan 00216)."""
-    return Path(__file__).resolve().parent / _TEMPLATES_DIR_NAME / f"{DEDUPE_AGENT_NAME}.md"
+    """Absolute path to the bundled plan-dedupe scout agent (Plan 00216).
+
+    Since Plan 00279 the bundled file lives in the agent-asset subsystem's
+    source directory; this helper delegates so the path has one owner.
+    """
+    return spec_source_path(spec_by_name(DEDUPE_AGENT_NAME))
 
 
 _README_TEMPLATE: Final[str] = """\
@@ -306,26 +312,23 @@ def bootstrap_plan_workflow(
 
 
 def _deploy_dedupe_agent(project_root: Path, result: BootstrapResult) -> None:
-    """Copy the plan-dedupe scout into ``<project>/.claude/agents/``.
+    """Deploy the plan-dedupe scout via the agent-asset subsystem (Plan 00279).
 
-    Daemon-owned: overwritten on every run so a prompt fix reaches existing
-    installs, exactly like ``mkplan.bash`` and the deployed skills. Only this
-    one file is touched — ``.claude/agents/`` is the user's namespace and any
-    other agent definition in it is left alone.
+    Behaviour-preserving migration of the pre-subsystem deploy: same deployed
+    path and name, still gated on plan_workflow enablement (this function is
+    only reached when the workflow is on). The one deliberate change is the
+    subsystem's ownership rule — a pristine copy (current or any previously
+    shipped revision) is refreshed exactly as before, while a CUSTOMISED copy
+    is never clobbered and draws a loud warning instead.
     """
-    template = dedupe_agent_template_path()
-    if not template.is_file():
-        raise FileNotFoundError(f"Bundled dedupe agent definition not found: {template}")
-
-    agents_dir = project_root.joinpath(*AGENTS_DIR_PARTS)
-    agents_dir.mkdir(parents=True, exist_ok=True)
-
-    target = agents_dir / f"{DEDUPE_AGENT_NAME}.md"
-    target.write_text(template.read_text())
-    target.chmod(_DEDUPE_AGENT_MODE)
-    result.deployed_dedupe_agent = True
-    result.messages.append(f"Deployed {DEDUPE_AGENT_NAME} agent (plan duplicate check)")
-    logger.info("Deployed %s to %s", DEDUPE_AGENT_NAME, target)
+    action_result = deploy_agent(spec_by_name(DEDUPE_AGENT_NAME), project_root)
+    result.messages.append(action_result.message)
+    if action_result.action in (
+        AgentAction.DEPLOYED,
+        AgentAction.UPDATED,
+        AgentAction.KEPT_CURRENT,
+    ):
+        result.deployed_dedupe_agent = True
 
 
 def _deploy_journal_assets(plan_dir: Path, result: BootstrapResult) -> None:

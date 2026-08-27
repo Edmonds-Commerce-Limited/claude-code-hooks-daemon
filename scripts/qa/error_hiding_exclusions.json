@@ -3,6 +3,12 @@
   "description": "Intentional error-handling patterns exempt from the error-hiding audit. Prefer 'function' over 'lines': line numbers shift whenever anything above them is edited, function names do not. 'lines' remains necessary for module-level sites and shell scripts, where there is no enclosing function to key on. Each entry documents WHY the pattern is appropriate. Entries are themselves audited: an exclusion matching NO finding is reported as a 'stale-exclusion' violation, because it means either the entry drifted off its target (realign it) or the code was fixed (delete it) — and a drifted entry silently exempts an innocent site while the real finding resurfaces elsewhere looking new.",
   "exclusions": [
     {
+      "file": "daemon/controller.py",
+      "function": "_sync_agent_assets",
+      "rule": "log-and-continue",
+      "reason": "Plan 00279: agent-asset sync at daemon start is deliberately best-effort, mirroring the fail-open startup contract (_validate_config, ClaudeMdInjector): an unwritable .claude/agents/, an invalid config (already reported by the degraded-mode path), or a mocked non-Path workspace_root must not stop the daemon serving hooks. The failure is logged at ERROR, so nothing is concealed; the deploy is re-attempted on every restart and available on demand via `hooks-daemon agents install`."
+    },
+    {
       "file": "utils/secret_file_matching.py",
       "function": "_realpath_if_resolvable",
       "rule": "silent-fallback",

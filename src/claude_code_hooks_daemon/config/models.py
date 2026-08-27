@@ -757,6 +757,44 @@ class PlanWorkflowConfig(BaseModel):
     )
 
 
+class AgentAssetGateConfig(BaseModel):
+    """Gating config for one daemon-shipped agent asset (Plan 00279).
+
+    Attributes:
+        enabled: Whether the agent is deployed/maintained in
+            ``.claude/agents/``. Ships False — every agent asset is opt-in
+            unless its spec is gated on another subsystem's key.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        default=False,
+        description="Deploy and maintain this daemon-shipped agent asset",
+    )
+
+
+class AgentsConfig(BaseModel):
+    """Configuration for daemon-shipped agent assets (Plan 00279).
+
+    Each entry gates one agent deployed into the client's ``.claude/agents/``
+    namespace by the agent-asset subsystem (``install/agent_assets.py``).
+    The plan-dedupe scout is gated on ``plan_workflow.enabled`` rather than
+    here, preserving its pre-subsystem behaviour.
+
+    Attributes:
+        opus_security: Quarantine executor for safeguard-flaggable security
+            work (``hooks-daemon-opus-security``). Ships disabled.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    opus_security: AgentAssetGateConfig = Field(
+        default_factory=AgentAssetGateConfig,
+        description="hooks-daemon-opus-security quarantine agent (ships disabled)",
+    )
+
+
 class PayloadCaptureConfig(BaseModel):
     """Configuration for daemon-side hook-payload capture (Plan 00158).
 
@@ -1024,6 +1062,7 @@ class Config(BaseModel):
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     project_handlers: ProjectHandlersConfig = Field(default_factory=ProjectHandlersConfig)
     plan_workflow: PlanWorkflowConfig = Field(default_factory=PlanWorkflowConfig)
+    agents: AgentsConfig = Field(default_factory=AgentsConfig)
     ccy: CcyConfig = Field(default_factory=CcyConfig)
     pseudo_events: dict[str, dict[str, Any]] = Field(
         default_factory=dict,

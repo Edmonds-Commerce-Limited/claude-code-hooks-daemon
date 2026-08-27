@@ -25,6 +25,30 @@ config_changes:
         know is safe, fix the listed issue (gitignore it, untrack it, or
         chmod 600 it) -- there is no per-finding suppression, matching
         secret_file_guard's own no-escape-hatch doctrine for protected paths.
+    - key: agents.opus_security.enabled
+      recommended: false
+      dormant: true
+      description: >-
+        NEW gating key for the hooks-daemon-opus-security agent asset
+        (Plan 00279), ships false. When enabled, the generic agent-asset
+        subsystem deploys a quarantine-executor sub-agent into
+        .claude/agents/ for safeguard-flaggable security work: the caller
+        delegates the whole sub-task before reading the sensitive content
+        and receives back only a clean SUMMARY artefact (the paired DETAIL
+        artefact is never read by the coordinator). Deployment happens on
+        daemon start and via `hooks-daemon agents install`; disabling the
+        key produces a removal advisory naming `hooks-daemon agents remove
+        hooks-daemon-opus-security` — the daemon never deletes agents
+        itself. Pristine deployed copies (matching any shipped revision)
+        are refreshed on upgrade; a customised copy is never touched and
+        draws a loud warning — customising daemon-owned agents is strongly
+        discouraged (copy under your own name instead).
+      migration_note: >-
+        Opt-in. Enable only in projects whose security work can trip a
+        caller-side content classifier; provide your own
+        delegation-boundary document defining which work is flaggable.
+        Inspect deployment state any time with `hooks-daemon agents
+        status`.
   removed:
     - key: handlers.session_start.skill_opportunity_detector.options.model
       description: >-
