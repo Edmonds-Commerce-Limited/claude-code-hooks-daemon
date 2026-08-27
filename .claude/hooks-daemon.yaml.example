@@ -503,6 +503,12 @@ handlers:
       enabled: true
       priority: 10
 
+    downgrade_indicator:  # Warns when the session model has silently downgraded (Plan 00278)
+      # Self-detected from model-family-rank high-water per session; silent
+      # unless a downgrade is active, so it costs nothing normally.
+      enabled: true
+      priority: 11
+
     context_sidecar:  # Observe-only: writes context state for the PTY supervisor (opt-in)
       enabled: false
       priority: 12
