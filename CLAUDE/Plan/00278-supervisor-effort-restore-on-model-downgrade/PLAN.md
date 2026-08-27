@@ -118,7 +118,7 @@ effective capability when it happens anyway.
   an OFFICIAL per-model minimum/default effort mechanism exists. Answer: NO
   (Decision 4) — effort is a single global setting that survives a
   safety-triggered fallback unchanged; the supervisor mechanism stands.
-- [ ] ⬜ **Task 2b.2**: Design + TDD — per-model minimum effort map in the
+- [x] ✅ **Task 2b.2**: Design + TDD — per-model minimum effort map in the
   supervisor (e.g. fable: low, opus: high, sonnet: high; configurable): when
   the foreground sidecar's live effort ranks BELOW the configured minimum for
   its model family, inject `/effort <minimum>`. Subsumes the Phase 2
@@ -130,8 +130,10 @@ effective capability when it happens anyway.
   has passed. After a detected downgrade, inject `/model fable` a configured
   interval after the block (measured in supervisor-observable units — sidecar
   render progress/time, since the supervisor cannot count turns directly),
-  followed by the effort logic re-applying if needed. Guard against a
-  flip-flop loop (re-downgrade backoff/cap).
+  followed by an `/effort <fable minimum>` reset — the ONE sanctioned
+  effort-lowering: fable at xhigh eats account allowance, so a successful
+  flip-back returns effort to fable's configured floor (joseph,
+  2026-08-27). Guard against a flip-flop loop (re-downgrade backoff/cap).
 
 ### Phase 3: Security-work delegation (prevention)
 
@@ -150,6 +152,31 @@ effective capability when it happens anyway.
 - [ ] ⬜ **Task 3.3**: Dogfood — enable in this repo's config; verify the
   advisory fires on a representative security task and that the delegation
   guidance names `model: "opus"` explicitly.
+
+### Phase 3b: Downgrade snapshot capture (joseph, 2026-08-27)
+
+- [ ] ⬜ **Task 3b.1**: Design + TDD — when a cyber downgrade is detected
+  (the transcript's `model_refusal_fallback` record — natural home is the
+  `model_fallback_detector` surface from Task 3.1), capture a DIAGNOSTIC
+  SNAPSHOT: the fallback record itself (originalModel, fallbackModel,
+  apiRefusalCategory, scope, timestamp) plus a bounded window of the
+  preceding transcript (the prompt/content that tripped the classifier),
+  written to a dated file under a configurable reports dir (default
+  `untracked/reports/`). Purpose: let a project diagnose WHY it gets
+  flagged and fine-tune its delegation config (path globs, topic terms).
+  Secret-word redaction applies to everything written; snapshots live in
+  untracked/ and are never auto-committed.
+
+### Phase 3c: Config surface (joseph, 2026-08-27)
+
+- [ ] ⬜ **Task 3c.1**: ALL Plan 00278 features get first-class config with
+  the classic clobber-or-extend convention (`mode: additive | replace`,
+  matching `command_hints`/`goal_injection`): per-model effort floors,
+  downgrade target, caps/cooldowns, model-restore timing, flaggable
+  path globs + topic terms, snapshot dir + window size. Daemon-side
+  options live under the owning handler in `.claude/hooks-daemon.yaml`;
+  supervisor-side values resolve via ccy env (documented in one place).
+  Record the split as a Technical Decision; config-changes manifest entry.
 
 ### Phase 4: Integration & closure
 

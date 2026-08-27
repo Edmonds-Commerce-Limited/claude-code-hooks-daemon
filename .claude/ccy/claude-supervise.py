@@ -22,11 +22,13 @@ injects the real ``/compact`` (and ``continue``).
 
 Two further injection families share the same choke point (idle + empty input
 box, subordinate to compact/continue): a ``/goal`` typed from a daemon-written
-goal-intent signal (Plan 00269), and ``/effort xhigh`` typed once when the
-sidecar's model_id shows a ranked model-family DOWNGRADE for the same session
-— e.g. a security-triggered fable → opus switch must fall through to opus at
-xhigh effort, not inherit fable's low (Plan 00278; skipped when the live
-effort already reads xhigh/max).
+goal-intent signal (Plan 00269), and an ``/effort`` raise (Plan 00278) when
+the sidecar's live effort sits BELOW its model family's configured floor
+(defaults fable=low, opus=high, sonnet=high; override via
+``CCY_MIN_EFFORT_LEVELS``) — with the floor raised to xhigh for a ranked
+model-family DOWNGRADE episode, e.g. a security-triggered fable → opus
+switch falls through to opus at xhigh, not opus at fable's low. This family
+only ever RAISES effort.
 
 It also GUARDS the session against accidental terminal control keys that would
 otherwise freeze or kill it: Ctrl+Z (SUSP) is stripped from the forwarded input
@@ -843,6 +845,97 @@ _DEFERRED_LOG_PREFIX = "injection deferred: input box not empty"
 _NOOP_LOG_PREFIX = "noop"
 
 
+# ── Effort restore on model downgrade (Plan 00278) ──────────────────────────
+# A session downgraded from a higher-ranked model family (e.g. a
+# security-triggered fable → opus switch) inherits its previous effort
+# setting; "fable low" must fall through to "opus xhigh", not "opus low".
+# The supervisor tracks the foreground sidecar's model family per session,
+# enforces per-model effort FLOORS, and raises the floor to xhigh for a
+# downgrade episode.
+#
+# INVARIANT: this family only ever RAISES effort. An injection fires only
+# when the live effort ranks strictly BELOW the target, so a session already
+# at or above its floor (or at max) is never touched.
+#
+# Ascending capability rank; "mythos" shares fable's rank (same underlying
+# model). Matched by token containment on the sidecar's model_id; unknown
+# ids have no rank and never trigger.
+_MODEL_FAMILY_RANKS: dict[str, int] = {
+    "haiku": 0,
+    "sonnet": 1,
+    "opus": 2,
+    "fable": 3,
+    "mythos": 3,
+}
+# "mythos" is an alias: _model_family canonicalises it to "fable".
+_MODEL_FAMILY_CANONICAL: dict[str, str] = {"mythos": "fable"}
+_EFFORT_COMMAND = "/effort"
+# Ascending effort ranks (Claude Code's own low→max ordering).
+_EFFORT_RANKS: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "xhigh": 3, "max": 4}
+# The effort a downgraded session is restored to — the whole point of the
+# family: "fable low" falls through to the fallback model at XHIGH, so the
+# downgrade target outranks any configured per-model minimum.
+_DOWNGRADE_TARGET_EFFORT = "xhigh"
+# Per-model minimum effort levels (Plan 00278 Task 2b.2). No official
+# per-model effort mechanism exists in Claude Code (effort is one global
+# setting that survives a safety fallback unchanged), so the supervisor
+# enforces these floors. Override via the env var below, e.g.
+# CCY_MIN_EFFORT_LEVELS="fable=low,opus=xhigh".
+_DEFAULT_MIN_EFFORT_LEVELS: dict[str, str] = {
+    "fable": "low",
+    "opus": "high",
+    "sonnet": "high",
+    "haiku": "low",
+}
+_MIN_EFFORT_ENV_VAR = "CCY_MIN_EFFORT_LEVELS"
+# After a successful /effort injection the sidecar keeps reporting the OLD
+# effort until the next status render; without a cooldown the stale reading
+# would re-open the episode and burn the cap on duplicates.
+_EFFORT_REINJECT_COOLDOWN_SECONDS = 180.0
+# Family-specific per-process cap: a flapping model_id cannot type forever.
+_MAX_EFFORT_INJECTIONS = 3
+_DRY_RUN_EFFORT_BODY_PREFIX = "would inject /effort (dry-run — no real /effort sent):"
+
+
+def _parse_min_effort_levels(raw: str) -> dict[str, str]:
+    """Parse ``family=level,...`` overrides onto the default minimum map.
+
+    Unknown families and unknown levels are ignored (the defaults stand) —
+    a typo in the env var must degrade to defaults, never crash the launch.
+    """
+    result = dict(_DEFAULT_MIN_EFFORT_LEVELS)
+    for part in raw.split(","):
+        family, sep, level = part.partition("=")
+        family = family.strip().lower()
+        level = level.strip().lower()
+        if sep and family in _MODEL_FAMILY_RANKS and level in _EFFORT_RANKS:
+            result[_MODEL_FAMILY_CANONICAL.get(family, family)] = level
+    return result
+
+
+def _min_effort_levels_from_env() -> dict[str, str]:
+    """Resolve the effective per-model minimum map (defaults + env overrides).
+
+    Read via the environment so the HOST and the policy WORKER subprocess
+    (which reconstructs its own CompactPolicy) resolve identical maps.
+    """
+    return _parse_min_effort_levels(os.environ.get(_MIN_EFFORT_ENV_VAR, ""))
+
+
+def _model_family(model_id: str) -> str | None:
+    """Return the canonical model family for ``model_id``, or None if unknown."""
+    lowered = model_id.lower()
+    for token in _MODEL_FAMILY_RANKS:
+        if token in lowered:
+            return _MODEL_FAMILY_CANONICAL.get(token, token)
+    return None
+
+
+def _family_rank(family: str) -> int:
+    """Return the capability rank of a known family (KeyError on unknown)."""
+    return _MODEL_FAMILY_RANKS[family]
+
+
 class Decision(enum.Enum):
     """What the supervisor WOULD do this evaluation (dry-run logs it)."""
 
@@ -903,6 +996,9 @@ class CompactPolicy:
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS
     foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS
     goal_signal_ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS
+    # Plan 00278: per-model effort floors, resolved from the environment so
+    # the host and the policy worker (which rebuilds its own policy) agree.
+    min_effort_levels: dict[str, str] = field(default_factory=_min_effort_levels_from_env)
 
 
 @dataclass(frozen=True)
@@ -1552,47 +1648,6 @@ _GOAL_MAX_LOGICAL_LINES = 8
 _MAX_GOAL_INJECTIONS = 5
 _DRY_RUN_GOAL_BODY_PREFIX = "would inject /goal (dry-run — no real /goal sent):"
 
-# ── Effort restore on model downgrade (Plan 00278) ──────────────────────────
-# A session downgraded from a higher-ranked model family (e.g. a
-# security-triggered fable → opus switch) inherits its previous effort
-# setting; "fable low" must fall through to "opus xhigh", not "opus low".
-# The supervisor tracks the foreground sidecar's model family per session and
-# injects the restore command once per downgrade episode.
-#
-# Ascending capability rank; "mythos" shares fable's rank (same underlying
-# model). Matched by token containment on the sidecar's model_id; unknown
-# ids have no rank and never trigger.
-_MODEL_FAMILY_RANKS: dict[str, int] = {
-    "haiku": 0,
-    "sonnet": 1,
-    "opus": 2,
-    "fable": 3,
-    "mythos": 3,
-}
-# "mythos" is an alias: _model_family canonicalises it to "fable".
-_MODEL_FAMILY_CANONICAL: dict[str, str] = {"mythos": "fable"}
-_EFFORT_RESTORE_COMMAND = "/effort xhigh"
-# Effort levels that mean the session is already running hot enough — a
-# positive reading of one of these suppresses the restore.
-_HIGH_EFFORT_LEVELS = frozenset({"xhigh", "max"})
-# Family-specific per-process cap: a flapping model_id cannot type forever.
-_MAX_EFFORT_INJECTIONS = 3
-_DRY_RUN_EFFORT_BODY_PREFIX = "would inject /effort (dry-run — no real /effort sent):"
-
-
-def _model_family(model_id: str) -> str | None:
-    """Return the canonical model family for ``model_id``, or None if unknown."""
-    lowered = model_id.lower()
-    for token in _MODEL_FAMILY_RANKS:
-        if token in lowered:
-            return _MODEL_FAMILY_CANONICAL.get(token, token)
-    return None
-
-
-def _family_rank(family: str) -> int:
-    """Return the capability rank of a known family (KeyError on unknown)."""
-    return _MODEL_FAMILY_RANKS[family]
-
 
 def _validate_goal_lines(rendered_lines: object) -> tuple[str | None, str | None]:
     """Validate ``rendered_lines`` from a goal signal; return (joined, error).
@@ -1790,13 +1845,18 @@ class CompactStateMachine:
         # signals are consumed on injection, so this only ever matters under a
         # signal storm; per-process lifetime, never reset.
         self._goal_injections = 0
-        # Plan 00278: model-downgrade effort-restore tracking. The last
-        # observed (session, family) pair, a pending-restore episode key
-        # ("session:family", cleared on success/recovery), and the family cap.
+        # Plan 00278: effort-floor tracking. The last observed (session,
+        # family) pair, an open downgrade episode ("session:family"), the
+        # pending injection key ("session:family:target" — recomputed from
+        # every fresh reading), the family cap, and the last-fired key/ts
+        # pair backing the stale-reading re-inject cooldown.
         self._last_model_session: str | None = None
         self._last_model_family: str | None = None
+        self._downgrade_episode: str | None = None
         self._effort_pending: str | None = None
         self._effort_injections = 0
+        self._effort_last_fired_key: str | None = None
+        self._effort_last_fired_ts: float | None = None
 
     @property
     def effort_pending(self) -> str | None:
@@ -1808,22 +1868,35 @@ class CompactStateMachine:
         """How many effort injections this process has fired (Plan 00278)."""
         return self._effort_injections
 
-    def mark_effort_injection(self) -> None:
+    def mark_effort_injection(self, now_wall: float | None = None) -> None:
         """Count a fired effort restore and close the pending episode.
 
         Called by the HOST only after a SUCCESSFUL injection — a failed PTY
-        write keeps the pending episode so the next tick retries (Plan 00278).
+        write keeps the pending episode so the next tick retries. The fired
+        key + timestamp start the stale-reading re-inject cooldown
+        (Plan 00278).
         """
         self._effort_injections += 1
+        self._effort_last_fired_key = self._effort_pending
+        self._effort_last_fired_ts = time.time() if now_wall is None else now_wall
         self._effort_pending = None
 
-    def note_model_reading(self, reading: SidecarReading) -> None:
-        """Track the foreground model family; open/close restore episodes.
+    def note_model_reading(self, reading: SidecarReading, *, now_wall: float) -> None:
+        """Track the foreground model; recompute the effort-restore episode.
 
-        A ranked downgrade for the SAME session opens a pending episode; the
-        episode closes when the family recovers, the session changes, or the
-        live effort is already xhigh/max (Plan 00278). Unknown families and
-        session-less synthetic readings are ignored entirely.
+        Two triggers share one pending episode (Plan 00278):
+
+        - a ranked DOWNGRADE for the same session raises the target to
+          ``_DOWNGRADE_TARGET_EFFORT`` until the family recovers;
+        - otherwise the live effort sitting BELOW the configured per-model
+          minimum targets that minimum.
+
+        The pending key is recomputed from every fresh reading, so it clears
+        itself when the effort rises, the family recovers, or the session
+        changes. A just-fired episode is suppressed for the re-inject
+        cooldown, because the sidecar reports the old effort until the next
+        status render. Unknown families and session-less synthetic readings
+        are ignored entirely.
         """
         family = _model_family(reading.model_id)
         session = reading.session_id
@@ -1833,22 +1906,44 @@ class CompactStateMachine:
         prev_family = self._last_model_family
         self._last_model_session = session
         self._last_model_family = family
-        if self._effort_pending is not None:
-            pend_session, _, pend_family = self._effort_pending.partition(":")
-            if (
-                session != pend_session
-                or reading.effort in _HIGH_EFFORT_LEVELS
-                or _family_rank(family) > _family_rank(pend_family)
-            ):
-                self._effort_pending = None
+        if self._downgrade_episode is not None:
+            ep_session, _, ep_family = self._downgrade_episode.partition(":")
+            if session != ep_session or _family_rank(family) > _family_rank(ep_family):
+                self._downgrade_episode = None
         if (
-            self._effort_pending is None
-            and prev_session == session
+            prev_session == session
             and prev_family is not None
             and _family_rank(family) < _family_rank(prev_family)
-            and reading.effort not in _HIGH_EFFORT_LEVELS
         ):
-            self._effort_pending = f"{session}:{family}"
+            self._downgrade_episode = f"{session}:{family}"
+        if self._downgrade_episode is not None:
+            target: str | None = _DOWNGRADE_TARGET_EFFORT
+        else:
+            target = self._policy.min_effort_levels.get(family)
+        current = reading.effort
+        below = target is not None and (
+            # An unknown effort is assumed low ONLY inside a downgrade
+            # episode (the restore is the point); outside one it means an
+            # older Claude Code without the live field — do nothing.
+            (current is None and self._downgrade_episode is not None)
+            or (
+                current is not None
+                and current in _EFFORT_RANKS
+                and _EFFORT_RANKS[current] < _EFFORT_RANKS[target]
+            )
+        )
+        if not below or target is None:
+            self._effort_pending = None
+            return
+        key = f"{session}:{family}:{target}"
+        if (
+            self._effort_last_fired_key == key
+            and self._effort_last_fired_ts is not None
+            and now_wall - self._effort_last_fired_ts < _EFFORT_REINJECT_COOLDOWN_SECONDS
+        ):
+            self._effort_pending = None
+            return
+        self._effort_pending = key
 
     @property
     def goal_injections(self) -> int:
@@ -1888,8 +1983,11 @@ class CompactStateMachine:
             "goal_injections": self._goal_injections,
             "last_model_session": self._last_model_session,
             "last_model_family": self._last_model_family,
+            "downgrade_episode": self._downgrade_episode,
             "effort_pending": self._effort_pending,
             "effort_injections": self._effort_injections,
+            "effort_last_fired_key": self._effort_last_fired_key,
+            "effort_last_fired_ts": self._effort_last_fired_ts,
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -1920,11 +2018,20 @@ class CompactStateMachine:
         if "last_model_family" in state:
             raw = state["last_model_family"]
             self._last_model_family = None if raw is None else str(raw)
+        if "downgrade_episode" in state:
+            raw = state["downgrade_episode"]
+            self._downgrade_episode = None if raw is None else str(raw)
         if "effort_pending" in state:
             raw = state["effort_pending"]
             self._effort_pending = None if raw is None else str(raw)
         if "effort_injections" in state:
             self._effort_injections = _coerce_int(state["effort_injections"])
+        if "effort_last_fired_key" in state:
+            raw = state["effort_last_fired_key"]
+            self._effort_last_fired_key = None if raw is None else str(raw)
+        if "effort_last_fired_ts" in state:
+            raw = state["effort_last_fired_ts"]
+            self._effort_last_fired_ts = None if raw is None else _coerce_float(raw)
 
     def evaluate(
         self,
@@ -2428,7 +2535,7 @@ def decide_once(
     # opens an effort-restore episode (fired further below, subordinate to
     # every other family). Synthetic/stale readings are ignored.
     if reading is not None and not reading.stale:
-        machine.note_model_reading(reading)
+        machine.note_model_reading(reading, now_wall=facts.now_wall)
     evaluation = machine.evaluate(
         reading,
         idle=can_inject,
@@ -2563,17 +2670,19 @@ def decide_once(
             noop_reason_log = f"{_NOOP_LOG_PREFIX}: effort injection cap reached"
         else:
             decision_value = Decision.WOULD_EFFORT.value
+            target = machine.effort_pending.rsplit(":", 1)[-1]
+            effort_command = f"{_EFFORT_COMMAND} {target}"
             reason = (
-                f"model downgrade ({machine.effort_pending}) -> "
-                f"would inject {_EFFORT_RESTORE_COMMAND}"
+                f"effort below floor ({machine.effort_pending}) -> "
+                f"would inject {effort_command}"
             )
             if dry_run:
                 payload = (
                     f"{_format_bot_prefix(facts.now_wall)} "
-                    f"{_DRY_RUN_EFFORT_BODY_PREFIX} {_EFFORT_RESTORE_COMMAND}"
+                    f"{_DRY_RUN_EFFORT_BODY_PREFIX} {effort_command}"
                 )
             else:
-                payload = _EFFORT_RESTORE_COMMAND
+                payload = effort_command
             submit = True
             deferred_log = None
             noop_reason_log = None

@@ -132,9 +132,9 @@ def test_dry_run_injects_visible_marker(tmp_path: Path) -> None:
 def test_upgrade_does_not_inject(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
-    _write_sidecar(sidecar_dir, model_id="claude-opus-5", ts=_NOW - 2.0)
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 2.0)
     _decide(sidecar_dir, machine)
-    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 0.5)
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW - 0.5)
     outcome = _decide(sidecar_dir, machine)
     assert outcome.decision_value == "noop"
     assert outcome.payload is None
@@ -155,7 +155,13 @@ def test_different_session_switch_is_not_a_downgrade(tmp_path: Path) -> None:
     machine = _machine()
     _write_sidecar(sidecar_dir, session_id="sess-a", model_id="claude-fable-5", ts=_NOW - 2.0)
     _decide(sidecar_dir, machine)
-    _write_sidecar(sidecar_dir, session_id="sess-b", model_id="claude-opus-5", ts=_NOW + 100.0)
+    _write_sidecar(
+        sidecar_dir,
+        session_id="sess-b",
+        model_id="claude-opus-5",
+        effort="high",
+        ts=_NOW + 100.0,
+    )
     outcome = _decide(sidecar_dir, machine, facts=_facts(_NOW + 101.0))
     assert outcome.payload is None
 
@@ -170,10 +176,80 @@ def test_already_max_does_not_inject(tmp_path: Path) -> None:
     assert outcome.payload is None
 
 
-def test_unknown_effort_still_injects(tmp_path: Path) -> None:
+def test_unknown_effort_still_injects_after_downgrade(tmp_path: Path) -> None:
     outcome = _downgrade(tmp_path / "cs", _machine(), effort=None)
     assert outcome.decision_value == "would-effort"
     assert outcome.payload == "/effort xhigh"
+
+
+# ── Per-model minimum effort (no downgrade needed) ───────────────────────────
+
+
+def test_opus_below_default_minimum_injects_high(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 1.0)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.decision_value == "would-effort"
+    assert outcome.payload == "/effort high"
+
+
+def test_fable_low_meets_its_minimum(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW - 1.0)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.payload is None
+
+
+def test_unknown_effort_without_downgrade_does_not_inject(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort=None, ts=_NOW - 1.0)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.payload is None
+
+
+def test_downgrade_target_outranks_configured_minimum(tmp_path: Path) -> None:
+    # After a fable → opus downgrade the target is xhigh, not opus's plain
+    # "high" minimum — even an effort already at "high" gets raised.
+    outcome = _downgrade(tmp_path / "cs", _machine(), effort="high")
+    assert outcome.decision_value == "would-effort"
+    assert outcome.payload == "/effort xhigh"
+
+
+def test_never_lowers_effort_above_floor(tmp_path: Path) -> None:
+    # INVARIANT (joseph): this family only ever RAISES effort — a session
+    # running above its configured floor is never touched.
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="max", ts=_NOW - 1.0)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.payload is None
+
+
+def test_parse_min_effort_levels_overrides_and_ignores_junk() -> None:
+    parsed = _mod._parse_min_effort_levels("opus=xhigh, sonnet = medium, bogus=high, opus=nope")
+    assert parsed["opus"] == "xhigh"
+    assert parsed["sonnet"] == "medium"
+    assert parsed["fable"] == _mod._DEFAULT_MIN_EFFORT_LEVELS["fable"]
+    assert "bogus" not in parsed
+
+
+def test_reinject_cooldown_suppresses_stale_reading(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 1.0)
+    assert _decide(sidecar_dir, machine).decision_value == "would-effort"
+    machine.mark_effort_injection(now_wall=_NOW)
+    # The sidecar has not caught up yet — the stale "low" must not re-fire...
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.payload is None
+    # ...until the cooldown has passed and the effort is STILL below minimum.
+    later = _NOW + _mod._EFFORT_REINJECT_COOLDOWN_SECONDS + 1.0
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=later - 1.0)
+    retry = _decide(sidecar_dir, machine, facts=_facts(later))
+    assert retry.decision_value == "would-effort"
 
 
 # ── Gates, retry, cap ────────────────────────────────────────────────────────
@@ -197,7 +273,7 @@ def test_success_mark_clears_pending_and_counts(tmp_path: Path) -> None:
     machine = _machine()
     outcome = _downgrade(sidecar_dir, machine)
     assert outcome.decision_value == "would-effort"
-    machine.mark_effort_injection()
+    machine.mark_effort_injection(now_wall=_NOW)
     assert machine.effort_injections == 1
     # No re-fire while the family stays downgraded.
     again = _decide(sidecar_dir, machine)
@@ -228,7 +304,7 @@ def test_injection_cap(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
     for _ in range(_mod._MAX_EFFORT_INJECTIONS):
-        machine.mark_effort_injection()
+        machine.mark_effort_injection(now_wall=_NOW - 10_000.0)
     outcome = _downgrade(sidecar_dir, machine)
     assert outcome.payload is None
 
@@ -248,6 +324,6 @@ def test_effort_state_round_trips_through_export_import(tmp_path: Path) -> None:
     # The clone (a fresh worker) fires from the imported pending state.
     outcome = _decide(sidecar_dir, clone)
     assert outcome.decision_value == "would-effort"
-    machine.mark_effort_injection()
+    machine.mark_effort_injection(now_wall=_NOW)
     clone.import_state(machine.export_state())
     assert clone.effort_injections == 1
