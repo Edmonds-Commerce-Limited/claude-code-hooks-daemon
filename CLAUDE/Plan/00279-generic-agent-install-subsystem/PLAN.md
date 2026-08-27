@@ -119,7 +119,7 @@ agent asset itself.
 
 ### Phase 4: Verification & closure
 
-- [ ] ⬜ **Task 4.1**: Full QA; daemon restart RUNNING; client-mode
+- [x] ✅ **Task 4.1**: Full QA; daemon restart RUNNING; client-mode
   verification via `scripts/dummy-client-repo.sh` (deploy, upgrade
   overwrite, customisation refusal, disable advisory, remove).
 - [ ] ⬜ **Task 4.2**: Complete plan (archive, README row, journal closure).
