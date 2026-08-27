@@ -16,6 +16,24 @@
     },
     {
       "file": "handlers/session_start/model_fallback_detector.py",
+      "function": "_resolve_state_file",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00278 dogfooding fix: persisted dedupe state is best-effort, mirroring _resolve_snapshot_dir's contract. Without a live ProjectContext (unit tests, CLI probes) a RuntimeError/OSError is logged at debug and None is returned, which callers treat as 'persistence unavailable, fall back to in-memory-only dedupe for this process' -- never a reason to fail a session start."
+    },
+    {
+      "file": "handlers/session_start/model_fallback_detector.py",
+      "function": "_load_state",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00278 dogfooding fix: loading persisted dedupe state is fail-silent by design, matching this handler's advisory contract. A missing state file (first run), an unreadable one (OSError), or a corrupt one (ValueError from json.loads) are all logged at debug and treated as 'no prior state' -- exactly the same fallback as _parse_high_water in downgrade_state.py. Nothing is concealed: dedupe simply starts from empty, which only means a record MIGHT re-advise once, never that a real fallback goes unreported."
+    },
+    {
+      "file": "handlers/session_start/model_fallback_detector.py",
+      "function": "_save_state",
+      "rule": "log-and-continue",
+      "reason": "Plan 00278 dogfooding fix: persisting dedupe state is best-effort. An OSError (unwritable directory, disk full) is logged at warning and swallowed -- losing persistence for this call degrades to in-memory-only dedupe for the remainder of THIS process, it must never fail or block a session start. The write itself is atomic (tmp + os.replace, mirroring downgrade_state.write_high_water) so a failure here can never corrupt an existing state file."
+    },
+    {
+      "file": "handlers/session_start/model_fallback_detector.py",
       "function": "_parse_candidate",
       "rule": "return-none-on-error",
       "reason": "Plan 00278: per-record fail-silent contract. Transcript JSONL lines are external data written by Claude Code; a malformed line is skipped (None = 'not a fallback record'), matching TranscriptReader._ingest_record's established convention. Raising would let one corrupt line disable detection of a real fallback record elsewhere in the same file."
