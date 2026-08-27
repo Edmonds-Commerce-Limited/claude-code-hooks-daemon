@@ -309,6 +309,114 @@ def test_injection_cap(tmp_path: Path) -> None:
     assert outcome.payload is None
 
 
+# ── Model restore (/model flip-back, Task 2b.3) ──────────────────────────────
+
+
+def _restore_ready_machine(sidecar_dir: Path):
+    """Downgrade at _NOW, then return (machine, ts) with the delay elapsed."""
+    machine = _machine()
+    _downgrade(sidecar_dir, machine)
+    machine.mark_effort_injection(now_wall=_NOW)  # effort restore already fired
+    later = _NOW + _mod._DEFAULT_MODEL_RESTORE_DELAY_SECONDS + 1.0
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=later - 1.0)
+    return machine, later
+
+
+def test_model_restore_fires_after_delay(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine, later = _restore_ready_machine(sidecar_dir)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(later))
+    assert outcome.decision_value == "would-model"
+    assert outcome.payload == "/model fable"
+    assert outcome.submit is True
+
+
+def test_model_restore_not_before_delay(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _downgrade(sidecar_dir, machine)
+    machine.mark_effort_injection(now_wall=_NOW)
+    soon = _NOW + 5.0
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=soon - 1.0)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(soon))
+    assert outcome.payload is None
+
+
+def test_model_restore_dry_run_marker(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine, later = _restore_ready_machine(sidecar_dir)
+    outcome = _decide(sidecar_dir, machine, dry_run=True, facts=_facts(later))
+    assert outcome.decision_value == "would-model"
+    assert outcome.payload is not None
+    assert not outcome.payload.startswith("/model")
+    assert "dry-run" in outcome.payload
+
+
+def test_model_restore_cap(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine, later = _restore_ready_machine(sidecar_dir)
+    for _ in range(_mod._MAX_MODEL_RESTORES):
+        machine.mark_model_restore(now_wall=_NOW - 100_000.0)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(later))
+    assert outcome.payload is None
+
+
+def test_model_restore_backoff_after_recent_restore(tmp_path: Path) -> None:
+    # A re-downgrade soon after a restore must NOT auto-restore again
+    # (flip-flop guard): the classifier evidently still fires.
+    sidecar_dir = tmp_path / "cs"
+    machine, later = _restore_ready_machine(sidecar_dir)
+    machine.mark_model_restore(now_wall=later)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(later + 5.0))
+    assert outcome.decision_value != "would-model"
+
+
+def test_effort_resets_to_floor_after_successful_flip_back(tmp_path: Path) -> None:
+    # The ONE sanctioned effort LOWERING: after our /model restore lands and
+    # the sidecar confirms fable again, xhigh drops back to fable's floor.
+    sidecar_dir = tmp_path / "cs"
+    machine, later = _restore_ready_machine(sidecar_dir)
+    machine.mark_model_restore(now_wall=later)
+    after = later + 30.0
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=after - 1.0)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(after))
+    assert outcome.decision_value == "would-effort"
+    assert outcome.payload == "/effort low"
+
+
+def test_no_effort_reset_without_our_restore(tmp_path: Path) -> None:
+    # A recovery we did not cause (human flipped back) is left alone.
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _downgrade(sidecar_dir, machine)
+    machine.mark_effort_injection(now_wall=_NOW)
+    after = _NOW + 60.0
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=after - 1.0)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(after))
+    assert outcome.payload is None
+
+
+def test_parse_model_restore_delay() -> None:
+    assert _mod._parse_model_restore_delay("300") == 300.0
+    assert _mod._parse_model_restore_delay("off") == 0.0
+    assert _mod._parse_model_restore_delay("junk") == _mod._DEFAULT_MODEL_RESTORE_DELAY_SECONDS
+    assert _mod._parse_model_restore_delay("") == _mod._DEFAULT_MODEL_RESTORE_DELAY_SECONDS
+
+
+def test_model_restore_disabled_when_delay_off(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _downgrade(sidecar_dir, machine)
+    machine.mark_effort_injection(now_wall=_NOW)
+    policy = _mod.CompactPolicy(model_restore_delay_seconds=0.0)
+    disabled = _mod.CompactStateMachine(policy)
+    disabled.import_state(machine.export_state())
+    later = _NOW + 1_000_000.0
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=later - 1.0)
+    outcome = _decide(sidecar_dir, disabled, facts=_facts(later))
+    assert outcome.decision_value != "would-model"
+
+
 # ── Worker round-trip ────────────────────────────────────────────────────────
 
 

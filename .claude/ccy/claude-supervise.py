@@ -28,7 +28,12 @@ the sidecar's live effort sits BELOW its model family's configured floor
 ``CCY_MIN_EFFORT_LEVELS``) — with the floor raised to xhigh for a ranked
 model-family DOWNGRADE episode, e.g. a security-triggered fable → opus
 switch falls through to opus at xhigh, not opus at fable's low. This family
-only ever RAISES effort.
+only ever RAISES effort — with one sanctioned exception: after the quiet
+delay (``CCY_MODEL_RESTORE_SECONDS``, "off" to disable) the supervisor also
+types ``/model <original family>`` to flip a session-sticky downgrade back
+(capped, flip-flop backoff), and once the sidecar confirms OUR flip landed
+it resets effort down to the restored family's floor, so fable never idles
+at xhigh burning allowance.
 
 It also GUARDS the session against accidental terminal control keys that would
 otherwise freeze or kill it: Ctrl+Z (SUSP) is stripped from the forwarded input
@@ -895,6 +900,41 @@ _EFFORT_REINJECT_COOLDOWN_SECONDS = 180.0
 # Family-specific per-process cap: a flapping model_id cannot type forever.
 _MAX_EFFORT_INJECTIONS = 3
 _DRY_RUN_EFFORT_BODY_PREFIX = "would inject /effort (dry-run — no real /effort sent):"
+# ── Model restore after a downgrade (Plan 00278 Task 2b.3) ──────────────────
+# The safety fallback is session-sticky, but flipping back manually works
+# once the flaggable turn has passed — so after a configured quiet delay the
+# supervisor types /model <original family> itself. A successful flip-back
+# then RESETS effort down to the restored family's floor (the one sanctioned
+# lowering: fable at xhigh eats account allowance).
+_MODEL_COMMAND = "/model"
+_DEFAULT_MODEL_RESTORE_DELAY_SECONDS = 900.0
+# Env override: seconds, or "off"/"0" to disable auto-restore entirely.
+_MODEL_RESTORE_ENV_VAR = "CCY_MODEL_RESTORE_SECONDS"
+# Flip-flop guard: a re-downgrade soon after a restore means the classifier
+# still fires — do not bounce the session between models.
+_MODEL_RESTORE_BACKOFF_SECONDS = 3600.0
+# Per-process lifetime cap on auto-restores.
+_MAX_MODEL_RESTORES = 2
+_DRY_RUN_MODEL_BODY_PREFIX = "would inject /model (dry-run — no real /model sent):"
+
+
+def _parse_model_restore_delay(raw: str) -> float:
+    """Parse the restore-delay override; "off" disables, junk keeps default."""
+    value = raw.strip().lower()
+    if value == "off":
+        return 0.0
+    try:
+        return float(value)
+    except ValueError:
+        return _DEFAULT_MODEL_RESTORE_DELAY_SECONDS
+
+
+def _model_restore_delay_from_env() -> float:
+    """Resolve the effective restore delay (env override or default)."""
+    raw = os.environ.get(_MODEL_RESTORE_ENV_VAR)
+    if raw is None:
+        return _DEFAULT_MODEL_RESTORE_DELAY_SECONDS
+    return _parse_model_restore_delay(raw)
 
 
 def _parse_min_effort_levels(raw: str) -> dict[str, str]:
@@ -945,6 +985,7 @@ class Decision(enum.Enum):
     WOULD_ESCAPE = "would-escape"
     WOULD_GOAL = "would-goal"
     WOULD_EFFORT = "would-effort"
+    WOULD_MODEL = "would-model"
 
 
 class SupervisorState(enum.Enum):
@@ -999,6 +1040,9 @@ class CompactPolicy:
     # Plan 00278: per-model effort floors, resolved from the environment so
     # the host and the policy worker (which rebuilds its own policy) agree.
     min_effort_levels: dict[str, str] = field(default_factory=_min_effort_levels_from_env)
+    # Plan 00278 Task 2b.3: quiet delay before the /model flip-back; <= 0
+    # disables auto-restore. Env-resolved for the same host/worker agreement.
+    model_restore_delay_seconds: float = field(default_factory=_model_restore_delay_from_env)
 
 
 @dataclass(frozen=True)
@@ -1857,6 +1901,15 @@ class CompactStateMachine:
         self._effort_injections = 0
         self._effort_last_fired_key: str | None = None
         self._effort_last_fired_ts: float | None = None
+        # Plan 00278 Task 2b.3: model-restore bookkeeping — the family the
+        # downgrade came FROM, when the episode opened, the per-process
+        # restore count, the last restore ts (flip-flop backoff), and whether
+        # a successful restore is awaiting its post-flip effort reset.
+        self._downgrade_from_family: str | None = None
+        self._downgrade_started_ts: float | None = None
+        self._model_restores = 0
+        self._model_restore_last_ts: float | None = None
+        self._awaiting_effort_reset = False
 
     @property
     def effort_pending(self) -> str | None:
@@ -1880,6 +1933,44 @@ class CompactStateMachine:
         self._effort_last_fired_key = self._effort_pending
         self._effort_last_fired_ts = time.time() if now_wall is None else now_wall
         self._effort_pending = None
+
+    def mark_model_restore(self, now_wall: float | None = None) -> None:
+        """Count a fired /model flip-back and arm the post-flip effort reset.
+
+        Called by the HOST only after a SUCCESSFUL injection (Plan 00278
+        Task 2b.3). The timestamp starts the flip-flop backoff; the armed
+        reset lowers effort to the restored family's floor once the sidecar
+        confirms the flip landed.
+        """
+        self._model_restores += 1
+        self._model_restore_last_ts = time.time() if now_wall is None else now_wall
+        self._awaiting_effort_reset = True
+
+    def model_restore_due(self, now_wall: float) -> str | None:
+        """Return the family to restore to when the flip-back is due, else None.
+
+        Due means: auto-restore enabled, a downgrade episode is open, the
+        quiet delay has elapsed since it opened, the lifetime cap is not
+        reached, and no restore fired within the flip-flop backoff window.
+        """
+        delay = self._policy.model_restore_delay_seconds
+        if (
+            delay <= 0
+            or self._downgrade_episode is None
+            or self._downgrade_from_family is None
+            or self._downgrade_started_ts is None
+        ):
+            return None
+        if now_wall - self._downgrade_started_ts < delay:
+            return None
+        if self._model_restores >= _MAX_MODEL_RESTORES:
+            return None
+        if (
+            self._model_restore_last_ts is not None
+            and now_wall - self._model_restore_last_ts < _MODEL_RESTORE_BACKOFF_SECONDS
+        ):
+            return None
+        return self._downgrade_from_family
 
     def note_model_reading(self, reading: SidecarReading, *, now_wall: float) -> None:
         """Track the foreground model; recompute the effort-restore episode.
@@ -1906,16 +1997,44 @@ class CompactStateMachine:
         prev_family = self._last_model_family
         self._last_model_session = session
         self._last_model_family = family
+        recovered_from_restore = False
         if self._downgrade_episode is not None:
             ep_session, _, ep_family = self._downgrade_episode.partition(":")
             if session != ep_session or _family_rank(family) > _family_rank(ep_family):
+                recovered_from_restore = self._awaiting_effort_reset and session == ep_session
                 self._downgrade_episode = None
+                self._downgrade_from_family = None
+                self._downgrade_started_ts = None
+                self._awaiting_effort_reset = False
         if (
             prev_session == session
             and prev_family is not None
             and _family_rank(family) < _family_rank(prev_family)
         ):
+            if self._downgrade_episode is None:
+                # A fresh episode: remember where we fell FROM and when, for
+                # the delayed /model flip-back (Task 2b.3). A further drop
+                # inside an open episode keeps the original from/started.
+                self._downgrade_from_family = prev_family
+                self._downgrade_started_ts = now_wall
             self._downgrade_episode = f"{session}:{family}"
+        # Post-flip effort reset (Task 2b.3): OUR restore just landed — lower
+        # effort to the restored family's floor (the one sanctioned lowering;
+        # fable at xhigh eats account allowance). A recovery we did not cause
+        # is left alone.
+        if recovered_from_restore:
+            floor = self._policy.min_effort_levels.get(family)
+            current_effort = reading.effort
+            if (
+                floor is not None
+                and current_effort is not None
+                and current_effort in _EFFORT_RANKS
+                and _EFFORT_RANKS[current_effort] > _EFFORT_RANKS[floor]
+            ):
+                self._effort_pending = f"{session}:{family}:{floor}"
+            else:
+                self._effort_pending = None
+            return
         if self._downgrade_episode is not None:
             target: str | None = _DOWNGRADE_TARGET_EFFORT
         else:
@@ -1988,6 +2107,11 @@ class CompactStateMachine:
             "effort_injections": self._effort_injections,
             "effort_last_fired_key": self._effort_last_fired_key,
             "effort_last_fired_ts": self._effort_last_fired_ts,
+            "downgrade_from_family": self._downgrade_from_family,
+            "downgrade_started_ts": self._downgrade_started_ts,
+            "model_restores": self._model_restores,
+            "model_restore_last_ts": self._model_restore_last_ts,
+            "awaiting_effort_reset": self._awaiting_effort_reset,
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -2032,6 +2156,19 @@ class CompactStateMachine:
         if "effort_last_fired_ts" in state:
             raw = state["effort_last_fired_ts"]
             self._effort_last_fired_ts = None if raw is None else _coerce_float(raw)
+        if "downgrade_from_family" in state:
+            raw = state["downgrade_from_family"]
+            self._downgrade_from_family = None if raw is None else str(raw)
+        if "downgrade_started_ts" in state:
+            raw = state["downgrade_started_ts"]
+            self._downgrade_started_ts = None if raw is None else _coerce_float(raw)
+        if "model_restores" in state:
+            self._model_restores = _coerce_int(state["model_restores"])
+        if "model_restore_last_ts" in state:
+            raw = state["model_restore_last_ts"]
+            self._model_restore_last_ts = None if raw is None else _coerce_float(raw)
+        if "awaiting_effort_reset" in state:
+            self._awaiting_effort_reset = bool(state["awaiting_effort_reset"])
 
     def evaluate(
         self,
@@ -2686,6 +2823,38 @@ def decide_once(
             submit = True
             deferred_log = None
             noop_reason_log = None
+    # ── Model restore after a downgrade (Plan 00278 Task 2b.3) ──────────────
+    # Fires only on an otherwise-NOOP MONITOR tick, after the quiet delay,
+    # under the lifetime cap and the flip-flop backoff (all inside
+    # model_restore_due). The HOST marks success (mark_model_restore), which
+    # also arms the post-flip effort reset.
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+    ):
+        restore_family = machine.model_restore_due(facts.now_wall)
+        if restore_family is not None:
+            if not can_inject:
+                if facts.idle and not facts.input_line_empty:
+                    deferred_log = f"{_DEFERRED_LOG_PREFIX} (model restore pending)"
+                else:
+                    noop_reason_log = f"{_NOOP_LOG_PREFIX}: model restore pending but session busy"
+            else:
+                decision_value = Decision.WOULD_MODEL.value
+                model_command = f"{_MODEL_COMMAND} {restore_family}"
+                reason = f"downgrade quiet delay elapsed -> would inject {model_command}"
+                if dry_run:
+                    payload = (
+                        f"{_format_bot_prefix(facts.now_wall)} "
+                        f"{_DRY_RUN_MODEL_BODY_PREFIX} {model_command}"
+                    )
+                else:
+                    payload = model_command
+                submit = True
+                deferred_log = None
+                noop_reason_log = None
     return TickOutcome(
         decision_value=decision_value,
         reason=reason,
@@ -2806,6 +2975,8 @@ def _poll_once(
     # mark also closes the pending episode, so a failed write retries.
     if injected and outcome.decision_value == Decision.WOULD_EFFORT.value:
         machine.mark_effort_injection()
+    if injected and outcome.decision_value == Decision.WOULD_MODEL.value:
+        machine.mark_model_restore()
     return Evaluation(decision=Decision(outcome.decision_value), reason=outcome.reason)
 
 
@@ -3408,6 +3579,8 @@ def supervise(
             # 00278): the mark also closes the pending episode.
             if injected and outcome.decision_value == Decision.WOULD_EFFORT.value:
                 machine.mark_effort_injection()
+            if injected and outcome.decision_value == Decision.WOULD_MODEL.value:
+                machine.mark_model_restore()
         else:
             _poll_once(
                 machine,

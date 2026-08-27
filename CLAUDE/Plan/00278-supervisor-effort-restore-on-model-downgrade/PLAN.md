@@ -125,7 +125,7 @@ effective capability when it happens anyway.
   downgrade trigger (which becomes the special case "opus minimum = xhigh
   after a downgrade") — reconcile the two so there is ONE effort-injection
   family.
-- [ ] ⬜ **Task 2b.3**: Design + TDD — model restore: the fallback is
+- [x] ✅ **Task 2b.3**: Design + TDD — model restore: the fallback is
   session-sticky, but flipping back manually works once the flaggable turn
   has passed. After a detected downgrade, inject `/model fable` a configured
   interval after the block (measured in supervisor-observable units — sidecar
