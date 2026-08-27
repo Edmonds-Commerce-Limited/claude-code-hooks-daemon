@@ -62,10 +62,14 @@ def _corroboration_record() -> dict[str, Any]:
     }
 
 
-def _prose_record(text: str = "hello") -> dict[str, Any]:
+def _prose_record(text: str = "hello", model: str = "claude-opus-4-8") -> dict[str, Any]:
     return {
         "type": "assistant",
-        "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
+        "message": {
+            "role": "assistant",
+            "model": model,
+            "content": [{"type": "text", "text": text}],
+        },
     }
 
 
@@ -176,6 +180,75 @@ class TestDetection:
         )
         result = handler.handle(_hook_input(transcript))
         assert "MODEL FALLBACK DETECTED" in "\n".join(result.context)
+
+
+class TestRecovery:
+    def test_recovered_fallback_emits_soft_advisory(
+        self, handler: ModelFallbackDetectorHandler, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(
+            transcript,
+            [
+                _fallback_record(),
+                _prose_record("back on track", model="claude-fable-5"),
+            ],
+        )
+        result = handler.handle(_hook_input(transcript))
+        text = "\n".join(result.context)
+        assert "MODEL FALLBACK DETECTED" not in text
+        assert "recovered" in text.lower()
+        assert "claude-fable-5" in text
+        assert "claude-opus-4-8" in text
+        assert "cyber" in text
+        assert "🚨" not in text
+        assert "restart" not in text.lower()
+        assert "tell the human" not in text.lower()
+        # the diagnostic snapshot is still written and mentioned.
+        assert "snapshot" in text.lower()
+        assert list((tmp_path / "reports").glob("*.md"))
+
+    def test_active_fallback_with_no_later_original_model_stays_loud(
+        self, handler: ModelFallbackDetectorHandler, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(
+            transcript,
+            [
+                _fallback_record(),
+                _prose_record("still fallback", model="claude-opus-4-8"),
+            ],
+        )
+        result = handler.handle(_hook_input(transcript))
+        text = "\n".join(result.context)
+        assert "MODEL FALLBACK DETECTED" in text
+
+    def test_fallback_with_no_subsequent_assistant_messages_is_active(
+        self, handler: ModelFallbackDetectorHandler, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(transcript, [_fallback_record()])
+        result = handler.handle(_hook_input(transcript))
+        text = "\n".join(result.context)
+        assert "MODEL FALLBACK DETECTED" in text
+
+    def test_recovery_followed_by_another_fallback_is_active(
+        self, handler: ModelFallbackDetectorHandler, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(
+            transcript,
+            [
+                _fallback_record(timestamp="2026-08-27T01:00:00Z"),
+                _prose_record("recovered", model="claude-fable-5"),
+                _fallback_record(timestamp="2026-08-27T06:42:07Z"),
+            ],
+        )
+        result = handler.handle(_hook_input(transcript))
+        text = "\n".join(result.context)
+        assert "MODEL FALLBACK DETECTED" in text
+        # only the second (active) record is loudly reported.
+        assert text.count("MODEL FALLBACK DETECTED") == 1
 
 
 class TestOncePerSessionPerRecord:

@@ -21,6 +21,12 @@
       "reason": "Plan 00278: per-record fail-silent contract. Transcript JSONL lines are external data written by Claude Code; a malformed line is skipped (None = 'not a fallback record'), matching TranscriptReader._ingest_record's established convention. Raising would let one corrupt line disable detection of a real fallback record elsewhere in the same file."
     },
     {
+      "file": "handlers/session_start/model_fallback_detector.py",
+      "function": "_assistant_message_model",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00278 (recovery detection): identical fail-silent contract to _parse_candidate for the same transcript file, just reading an assistant message's model instead of a fallback record. A malformed line yields None = 'no model observed on this line', so one corrupt line cannot hide a later assistant turn that proves a fallback recovered."
+    },
+    {
       "file": "utils/secret_file_matching.py",
       "function": "_realpath_if_resolvable",
       "rule": "silent-fallback",

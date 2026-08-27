@@ -71,6 +71,13 @@ _KEY_MODEL: Final[str] = "model"
 # record are json-parsed, so a large transcript stays a linear string scan.
 _PREFILTER_TOKENS: Final[tuple[str, ...]] = (_FALLBACK_SUBTYPE, f'"{_FALLBACK_BLOCK_TYPE}"')
 
+# Cheap substring pre-filter for assistant-message model tracking, used to
+# decide whether a fallback has since RECOVERED (a later assistant message
+# is back on the original model).
+_ASSISTANT_TOKEN: Final[str] = '"assistant"'
+_KEY_ROLE: Final[str] = "role"
+_ROLE_ASSISTANT: Final[str] = "assistant"
+
 _UNKNOWN_VALUE: Final[str] = "unknown"
 
 # ── Snapshot defaults (options injected by the registry as _<option>) ───────
@@ -97,6 +104,7 @@ class _FallbackRecord:
     identity: str
     raw_line: str
     preceding_lines: tuple[str, ...]
+    line_index: int
 
 
 def _record_identity(payload: dict[str, Any], raw_line: str) -> str:
@@ -186,21 +194,37 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
             transcript_path = str(hook_input.get(HookInputField.TRANSCRIPT_PATH, "") or "")
             session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or _UNKNOWN_VALUE)
 
-            records = self._scan_transcript(Path(transcript_path))
+            records, assistant_models = self._scan_transcript(Path(transcript_path))
             new_records = [
                 record for record in records if self._mark_advised(session_id, record.identity)
             ]
             if not new_records:
                 return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
+            active_records = [
+                record for record in new_records if not self._is_recovered(record, assistant_models)
+            ]
+            recovered_records = [record for record in new_records if record not in active_records]
+
             snapshot_notes: list[str] = []
             if self._snapshot_enabled:
                 snapshot_notes = self._write_snapshots(new_records, transcript_path)
 
-            return AdvisoryResult(
-                decision=Decision.ALLOW,
-                context=self._build_alert(new_records, snapshot_notes),
-            )
+            context: list[str] = []
+            if active_records:
+                context.extend(self._build_alert(active_records, snapshot_notes))
+            if recovered_records:
+                if context:
+                    context.append("")
+                # The recovered notice covers the shared snapshot notes only
+                # when nothing active already surfaced them.
+                context.extend(
+                    self._build_recovered_notice(
+                        recovered_records, [] if active_records else snapshot_notes
+                    )
+                )
+
+            return AdvisoryResult(decision=Decision.ALLOW, context=context)
         except Exception as exc:
             # Advisory handler: any failure degrades to silence, never blocks
             # a session start.
@@ -209,32 +233,61 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
 
     # ── Transcript scanning ─────────────────────────────────────────────────
 
-    def _scan_transcript(self, path: Path) -> list[_FallbackRecord]:
-        """Stream the transcript, collecting fallback records + their windows.
+    def _scan_transcript(self, path: Path) -> tuple[list[_FallbackRecord], list[tuple[int, str]]]:
+        """Stream the transcript, collecting fallback records + assistant models.
 
-        Missing/unreadable file → empty list. Malformed lines are skipped
+        Missing/unreadable file → empty results. Malformed lines are skipped
         fail-silent per record. Every line feeds the bounded preceding-record
         window; only pre-filtered candidate lines are json-parsed.
+
+        Also returns ``(line_index, model)`` for every assistant message that
+        carries a ``message.model`` field, in transcript order — this is what
+        lets a fallback record be classified as RECOVERED when a later
+        assistant message is back on the original model.
         """
         window_size = max(0, int(self._snapshot_window_records))
         window: deque[str] = deque(maxlen=window_size or 1)
         found: list[_FallbackRecord] = []
+        assistant_models: list[tuple[int, str]] = []
         try:
             with path.open("r", encoding="utf-8", errors="replace") as stream:
-                for raw_line in stream:
+                for line_index, raw_line in enumerate(stream):
                     line = raw_line.strip()
                     if not line:
                         continue
                     if any(token in line for token in _PREFILTER_TOKENS):
-                        record = self._parse_candidate(line, tuple(window) if window_size else ())
+                        record = self._parse_candidate(
+                            line, line_index, tuple(window) if window_size else ()
+                        )
                         if record is not None:
                             found.append(record)
+                    elif _ASSISTANT_TOKEN in line:
+                        model = self._assistant_message_model(line)
+                        if model is not None:
+                            assistant_models.append((line_index, model))
                     window.append(line)
         except OSError as exc:
             logger.debug("model_fallback_detector: cannot read transcript %s: %s", path, exc)
-        return found
+        return found, assistant_models
 
-    def _parse_candidate(self, line: str, preceding: tuple[str, ...]) -> _FallbackRecord | None:
+    @staticmethod
+    def _assistant_message_model(line: str) -> str | None:
+        """The ``message.model`` of an assistant-role transcript line, if any."""
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        message = payload.get(_KEY_MESSAGE)
+        if not isinstance(message, dict) or message.get(_KEY_ROLE) != _ROLE_ASSISTANT:
+            return None
+        model = message.get(_KEY_MODEL)
+        return str(model) if model else None
+
+    def _parse_candidate(
+        self, line: str, line_index: int, preceding: tuple[str, ...]
+    ) -> _FallbackRecord | None:
         """Parse one candidate line into a fallback record, or ``None``."""
         try:
             payload = json.loads(line)
@@ -253,6 +306,7 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
                 identity=_record_identity(payload, line),
                 raw_line=line,
                 preceding_lines=preceding,
+                line_index=line_index,
             )
 
         block = _extract_fallback_block(payload)
@@ -266,8 +320,23 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
                 identity=_record_identity(payload, line),
                 raw_line=line,
                 preceding_lines=preceding,
+                line_index=line_index,
             )
         return None
+
+    @staticmethod
+    def _is_recovered(record: _FallbackRecord, assistant_models: list[tuple[int, str]]) -> bool:
+        """Whether a LATER assistant message is back on the original model.
+
+        A record with an unknown/empty original model can never be proven
+        recovered — it stays ACTIVE, the conservative (louder) default.
+        """
+        if not record.original_model or record.original_model == _UNKNOWN_VALUE:
+            return False
+        return any(
+            index > record.line_index and model == record.original_model
+            for index, model in assistant_models
+        )
 
     # ── Once-per-session-per-record state ───────────────────────────────────
 
@@ -312,6 +381,34 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
                 "quarantine subagent BEFORE reading it (see flaggable_work_advisor).",
             ]
         )
+        if snapshot_notes:
+            lines.append("")
+            lines.extend(snapshot_notes)
+        return lines
+
+    @staticmethod
+    def _build_recovered_notice(
+        records: list[_FallbackRecord], snapshot_notes: list[str]
+    ) -> list[str]:
+        """A soft, non-alarming notice for a fallback that has since recovered."""
+        lines: list[str] = [
+            "A past model fallback occurred and has since recovered — no " "action needed.",
+            "",
+        ]
+        for record in records:
+            detail = (
+                f"  - {record.original_model or _UNKNOWN_VALUE} → "
+                f"{record.fallback_model or _UNKNOWN_VALUE}"
+                f" (category: {record.category or _UNKNOWN_VALUE}"
+            )
+            if record.timestamp:
+                detail += f", at {record.timestamp}"
+            detail += (
+                f"); a later assistant turn returned to "
+                f"{record.original_model or _UNKNOWN_VALUE}, so this session is "
+                "no longer degraded"
+            )
+            lines.append(detail)
         if snapshot_notes:
             lines.append("")
             lines.extend(snapshot_notes)
@@ -393,20 +490,26 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         return (
             "## model_fallback_detector — silent model substitution is surfaced\n\n"
             "At session start the transcript is scanned for the platform's own "
-            "`model_refusal_fallback` record. When one is found, a loud advisory "
-            "reports that this session is running a SUBSTITUTED model: a safety "
-            "classifier flagged a turn and switched the model with `scope: "
-            "session`, so it will NOT recover on its own.\n\n"
-            "**When you see `🚨 MODEL FALLBACK DETECTED 🚨`**:\n\n"
+            "`model_refusal_fallback` record, AND for every subsequent assistant "
+            "message's model — so the advisory can tell an ACTIVE fallback from "
+            "one that has already RECOVERED.\n\n"
+            "**`🚨 MODEL FALLBACK DETECTED 🚨` (ACTIVE — no later assistant turn "
+            "returned to the original model)**:\n\n"
             "1. **Tell the human immediately** — the substitution is otherwise "
             "silent, and a session has run degraded for hours unnoticed.\n"
-            "2. **A session restart is the only cure** — the fallback is "
-            "session-sticky; keep working only on the human's say-so.\n"
+            "2. **A session restart is the only cure** — while active, the "
+            "fallback is session-sticky; keep working only on the human's "
+            "say-so.\n"
             "3. **Read the diagnostic snapshot** (path named in the advisory, "
             "default `untracked/reports/`): it holds the fallback record plus "
             "the preceding transcript window, secret-redacted, so the project "
             "can tune its `flaggable_work_advisor` delegation config to stop "
             "the recurrence.\n\n"
+            "**A soft, non-alarming notice (no 🚨, no restart instruction) means "
+            "RECOVERED** — a later assistant turn was already back on the "
+            "original model before this advisory ever fired. No action is "
+            "needed; the diagnostic snapshot is still written for tuning "
+            "purposes.\n\n"
             "Options under `handlers.session_start.model_fallback_detector."
             "options`: `snapshot_enabled` (default true), `snapshot_dir` "
             "(default `untracked/reports`), `snapshot_window_records` (default "
