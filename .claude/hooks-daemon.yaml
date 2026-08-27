@@ -694,6 +694,12 @@ handlers:
       #   1000k_orange_pct: 30   # default: 30 (1M context models)
       #   1000k_red_pct: 40      # default: 40
 
+    downgrade_indicator:  # Warns when the session model has silently downgraded (Plan 00278)
+      # Self-detected from model-family-rank high-water per session; silent
+      # unless a downgrade is active, so it costs nothing normally.
+      enabled: true
+      priority: 11
+
     context_sidecar:  # Observe-only context sidecar for the Plan 00135 PTY supervisor
       # Dogfood: ENABLED here so this repo's ccy sessions write a live sidecar
       # (untracked/context-sidecar/<session>.json) the supervisor can read.

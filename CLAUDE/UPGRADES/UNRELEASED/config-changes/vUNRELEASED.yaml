@@ -92,6 +92,30 @@ config_changes:
         content safety classifier (defensive-security estates). Set
         handlers.pre_tool_use.flaggable_work_advisor.enabled: true and
         configure the path globs to the project's sensitive directories.
+    - key: handlers.status_line.downgrade_indicator
+      recommended: true
+      dormant: false
+      description: >-
+        NEW StatusLine advisory handler (Plan 00278), ships enabled. Makes a
+        SILENT model-family downgrade (the platform's own safety classifier
+        substituting the session model, e.g. fable to opus, with
+        scope:session) visible on the status line, self-detected purely from
+        the model id Claude Code reports on every render -- no dependency on
+        the ccy supervisor or any external signal. Tracks each session's
+        HIGH-WATER model family rank (haiku=0, sonnet=1, opus=2, fable=3;
+        mythos canonicalises to fable) in a small per-session JSON state file
+        under the daemon untracked dir, keyed by session id so a
+        genuinely-fresh session starting on a high-ranked model is never
+        mislabelled a downgrade. Renders a compact warning segment naming the
+        drop (high-water family, an arrow, current family) only while the
+        current render's family ranks below the recorded high-water; silent
+        on a first render, a new high, a recovered render, or an unrecognised
+        model id. Options: emoji, label_format, color (all overridable via
+        handler options, following the model_context.py colour-constant
+        convention).
+      migration_note: >-
+        On by default; no action needed to adopt. Silent unless a downgrade
+        is active, so it costs nothing normally.
   removed:
     - key: handlers.session_start.skill_opportunity_detector.options.model
       description: >-
