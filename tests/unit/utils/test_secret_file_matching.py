@@ -229,6 +229,16 @@ class TestBashMentionsProtectedPath:
         ``*.secret*``. Observed live: ``grep secret*.py dir`` was denied."""
         assert self._match("ls src/secret*.py") is None
 
+    def test_bracket_subscript_adjacent_code_is_not_matched(self) -> None:
+        """Regression (peer-reported): a code token like ``words[0].rsplit``
+        strips its ``[0]`` bracket expression to residue ``words.rsplit``,
+        which shares the 4-char ``word`` edge with the ``.vault-password``
+        stem. The subscript is a Python index, not a leading/trailing glob
+        wildcard, so the overlap gate must not fire — the wildcard-position
+        gate rejects it because neither token edge carries a wildcard."""
+        assert self._match("x = words[0].rsplit(y)") is None
+        assert self._match("a = parts[0].split(z)") is None
+
     def test_no_echo_exemption(self) -> None:
         """Decision 9(c): unlike sed_blocker, echo buys no exemption."""
         assert self._match('echo ".vault-pass"') is not None
