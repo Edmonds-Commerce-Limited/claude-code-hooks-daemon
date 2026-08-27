@@ -79,7 +79,7 @@ effective capability when it happens anyway.
 
 ### Phase 1: Sidecar effort field (sensor)
 
-- [ ] ⬜ **Task 1.1**: TDD — extend `ContextSidecarHandler` payload with
+- [x] ✅ **Task 1.1**: TDD — extend `ContextSidecarHandler` payload with
   `effort` (string | null) from `hook_input["effort"]["level"]`; absent or
   malformed → null. Update sidecar unit tests.
 

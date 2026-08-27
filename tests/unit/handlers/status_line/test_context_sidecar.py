@@ -23,9 +23,12 @@ def _hook_input(
     session_id: str | None = "sess-abc",
     model_id: str = "claude-opus-4-8",
     cost_usd: float | None = None,
+    effort: Any = None,
 ) -> dict[str, Any]:
     """Build a minimal Status-event payload for the sidecar handler."""
     payload: dict[str, Any] = {"model": {"id": model_id}}
+    if effort is not None:
+        payload["effort"] = effort
     ctx: dict[str, Any] = {}
     if used_pct is not None:
         ctx["used_percentage"] = used_pct
@@ -218,6 +221,24 @@ class TestContextSidecarHandler:
     def test_cost_usd_populated_when_present(self, handler: ContextSidecarHandler) -> None:
         handler.handle(_hook_input(cost_usd=1.25, session_id="s"))
         assert self._read_sidecar("s")["cost_usd"] == 1.25
+
+    # ---- handle: effort level (Plan 00278) ------------------------------
+
+    def test_effort_null_when_absent(self, handler: ContextSidecarHandler) -> None:
+        handler.handle(_hook_input(session_id="s"))
+        assert self._read_sidecar("s")["effort"] is None
+
+    def test_effort_populated_from_live_field(self, handler: ContextSidecarHandler) -> None:
+        handler.handle(_hook_input(session_id="s", effort={"level": "xhigh"}))
+        assert self._read_sidecar("s")["effort"] == "xhigh"
+
+    def test_effort_null_when_malformed(self, handler: ContextSidecarHandler) -> None:
+        handler.handle(_hook_input(session_id="s", effort="xhigh"))
+        assert self._read_sidecar("s")["effort"] is None
+
+    def test_effort_null_when_level_not_string(self, handler: ContextSidecarHandler) -> None:
+        handler.handle(_hook_input(session_id="s", effort={"level": 3}))
+        assert self._read_sidecar("s")["effort"] is None
 
     # ---- handle: session id -> filename ---------------------------------
 

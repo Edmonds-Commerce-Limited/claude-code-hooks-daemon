@@ -137,6 +137,7 @@ class ContextSidecarHandler(StatusLineHandlerBase):
             "pct": used_pct,
             "window_size": window_size,
             "cost_usd": self._read_cost(hook_input),
+            "effort": self._read_effort(hook_input),
             "session_id": session_id,
             "model_id": model_id,
             "ts": self._now(),
@@ -159,6 +160,22 @@ class ContextSidecarHandler(StatusLineHandlerBase):
             total = cost_data.get("total_cost_usd")
             if total is not None:
                 return float(total)
+        return None
+
+    def _read_effort(self, hook_input: dict[str, Any]) -> str | None:
+        """Extract the live effort level if the payload carries it, else None.
+
+        Only the live ``effort.level`` field counts (Plan 00278): a session-only
+        override is visible nowhere else, and the sensor must report what the
+        session is actually running — the settings.json fallback is a display
+        concern, not a sensor concern. Nullable by design: readers treat a
+        missing level as "unknown", never as a specific tier.
+        """
+        effort_data = hook_input.get("effort")
+        if isinstance(effort_data, dict):
+            level = effort_data.get("level")
+            if isinstance(level, str):
+                return level
         return None
 
     def _write_sidecar(self, session_id: str, payload: dict[str, Any]) -> None:
