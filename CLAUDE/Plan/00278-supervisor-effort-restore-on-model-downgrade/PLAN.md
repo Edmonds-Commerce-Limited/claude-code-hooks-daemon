@@ -151,7 +151,7 @@ effective capability when it happens anyway.
   never blocking; rate-limited per session. Delivered as
   `model_fallback_detector` (SessionStart) and `flaggable_work_advisor`
   (PreToolUse, ships disabled), tests first.
-- [ ] ⬜ **Task 3.3**: Dogfood — enable in this repo's config; verify the
+- [x] ✅ **Task 3.3**: Dogfood — enable in this repo's config; verify the
   advisory fires on a representative security task and that the delegation
   guidance names `model: "opus"` explicitly.
 
@@ -178,11 +178,11 @@ effective capability when it happens anyway.
 
 ### Phase 3c: Config surface (joseph, 2026-08-27)
 
-- [ ] 🔄 **Task 3c.1** (daemon-side flaggable/snapshot config DONE — options
-  with `mode: additive | replace` on `flaggable_work_advisor`, snapshot dir +
-  window on `model_fallback_detector`, config-changes manifest entries;
-  supervisor-side effort/restore config and the split Decision remain):
-  ALL Plan 00278 features get first-class config with
+- [x] ✅ **Task 3c.1** (daemon-side: options with `mode: additive | replace`
+  on `flaggable_work_advisor`, snapshot dir + window on
+  `model_fallback_detector`, config-changes manifest entries;
+  supervisor-side: `CCY_MIN_EFFORT_LEVELS` + `CCY_MODEL_RESTORE_SECONDS`
+  env config shipped in Phase 2b; split recorded as Decision 6): ALL Plan 00278 features get first-class config with
   the classic clobber-or-extend convention (`mode: additive | replace`,
   matching `command_hints`/`goal_injection`): per-model effort floors,
   downgrade target, caps/cooldowns, model-restore timing, flaggable
@@ -271,6 +271,19 @@ Phase 3d after the advisories dogfood cleanly.
 
 > > > > > > > agent-a0418c50fb220e49b-3c789121
 > > > > > > > **Date**: 2026-08-27
+
+### Decision 6: config split — daemon YAML vs supervisor env (Task 3c.1)
+
+**Context**: where each 00278 feature's configuration lives.
+**Decision**: daemon-side features (the two Phase 3 handlers, snapshot
+options) configure under their handler keys in `.claude/hooks-daemon.yaml`,
+with `mode: additive | replace` merging for list options. Supervisor-side
+features (effort floors, model-restore timing) configure via ccy env vars —
+`CCY_MIN_EFFORT_LEVELS`, `CCY_MODEL_RESTORE_SECONDS` — because the
+standalone supervisor deliberately imports nothing from the daemon (no
+YAML/pydantic), and env resolution keeps the host and its policy worker
+subprocess in agreement. Both halves are documented at their point of use.
+**Date**: 2026-08-27
 
 ## Success Criteria
 
