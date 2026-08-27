@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00278: supervisor effort restore on model downgrade](00278-supervisor-effort-restore-on-model-downgrade/PLAN.md) - In Progress (ccy supervisor detects a fable→opus model downgrade via the context sidecar and injects `/effort xhigh` so the fallback is opus-xhigh, not opus-low)
+- [00278: model-downgrade resilience](00278-supervisor-effort-restore-on-model-downgrade/PLAN.md) - In Progress (recovery: supervisor detects a fable→opus downgrade via the context sidecar and injects `/effort xhigh`; prevention: steer security-flavoured work into an Opus subagent so the fable context stays clean)
 
 - [00264: cap the size of a GitHub issue/PR comment](00264-github-comment-size-cap/PLAN.md) - Not Started (field report: agent sessions flooded two issues with 44,467- and 22,398-character comments until neither ticket's state was findable by the humans reading it; a PreToolUse cap on `gh` comment bodies steering the content into `JOURNAL/`, plus seven open questions the report's proposed design asserts rather than settles)
 

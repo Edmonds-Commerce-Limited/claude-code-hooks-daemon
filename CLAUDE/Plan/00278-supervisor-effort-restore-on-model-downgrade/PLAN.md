@@ -1,4 +1,4 @@
-# Plan 00278: Supervisor Effort Restore on Model Downgrade
+# Plan 00278: Model-Downgrade Resilience — Effort Restore + Security-Work Delegation
 
 **Status**: In Progress
 **Created**: 2026-08-27
@@ -24,6 +24,15 @@ on a downgrade transition (fable → opus), injects `/effort xhigh` once —
 unless the live effort is already xhigh or max, which requires the sidecar to
 also carry the live effort level.
 
+This plan bundles a second, complementary idea (joseph, 2026-08-27):
+PREVENTION. The downgrade is triggered by security-flavoured content
+accumulating in the fable main context. Routing security-related work
+(exploit-adjacent code, credential-handling, attack-pattern analysis) into an
+Opus subagent keeps that material out of the fable context entirely, so the
+downgrade is less likely to fire at all. The two features are cross-related
+for dogfooding: one prevents the downgrade, the other recovers the session's
+effective capability when it happens anyway.
+
 ## Goals
 
 - Context sidecar payload carries the live effort level (`effort`, nullable)
@@ -34,6 +43,10 @@ also carry the live effort level.
 - No injection when the post-downgrade effort is already `xhigh` or `max`.
 - Dry-run mode injects the visible marker only, exactly like the other
   injection families.
+- A guidance surface (advisory handler and/or resident CLAUDE.md guidance)
+  steers security-flavoured work into an Opus subagent (`model: "opus"` on
+  the Agent tool) so the fable main context stays clean of
+  downgrade-triggering material.
 
 ## Non-Goals
 
@@ -84,13 +97,28 @@ also carry the live effort level.
   command, empty-input-box deferral, decision.log lines, success-only cap
   counting (mirror goal injection).
 
-### Phase 3: Integration & closure
+### Phase 3: Security-work delegation (prevention)
 
-- [ ] ⬜ **Task 3.1**: Full QA (`./scripts/qa/llm_qa.py all`), daemon restart
+- [ ] ⬜ **Task 3.1**: Design — decide the surface(s): a PreToolUse/
+  UserPromptSubmit advisory that recognises security-flavoured work in the
+  MAIN thread and advises delegating it to an Opus subagent; and/or resident
+  guidance via `get_claude_md()`. Record the trigger heuristics (what counts
+  as security-flavoured without false-positiving normal handler work in this
+  security-tooling repo) as a Technical Decision before implementing.
+- [ ] ⬜ **Task 3.2**: TDD — implement the chosen surface(s); advisory-only,
+  never blocking; rate-limited per session.
+- [ ] ⬜ **Task 3.3**: Dogfood — enable in this repo's config; verify the
+  advisory fires on a representative security task and that the delegation
+  guidance names `model: "opus"` explicitly.
+
+### Phase 4: Integration & closure
+
+- [ ] ⬜ **Task 4.1**: Full QA (`./scripts/qa/llm_qa.py all`), daemon restart
   RUNNING, supervisor version-lockstep test still green.
-- [ ] ⬜ **Task 3.2**: Docs — supervisor top-of-file behaviour summary and
-  any doc that enumerates injection families.
-- [ ] ⬜ **Task 3.3**: Complete plan (archive, README row, journal closure).
+- [ ] ⬜ **Task 4.2**: Docs — supervisor top-of-file behaviour summary and
+  any doc that enumerates injection families; config-changes manifest entry
+  for any new handler/option.
+- [ ] ⬜ **Task 4.3**: Complete plan (archive, README row, journal closure).
 
 ## Dependencies
 
@@ -132,6 +160,8 @@ skips only on a positive xhigh/max reading.
   `/effort xhigh` injection decision; opus→fable yields none; xhigh/max
   effort yields none; different-session switch yields none.
 - [ ] Dry-run fires the marker only; armed fires the real command.
+- [ ] Security-work delegation surface exists, is advisory-only, names an
+  Opus subagent as the destination, and is dogfood-enabled in this repo.
 - [ ] All QA green; daemon restarts RUNNING; supervisor lockstep test green.
 
 ## Risks & Mitigations
