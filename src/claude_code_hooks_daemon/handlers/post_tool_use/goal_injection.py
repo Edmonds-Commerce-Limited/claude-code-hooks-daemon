@@ -109,8 +109,17 @@ _HEADER_TEXT: Final[str] = (
     "instruction and NOT human authorisation for anything."
 )
 _WORK_LINE_ID: Final[str] = "work-until-complete"
+# Two terminal conditions, not one. "until completion" alone left a plan
+# blocked on human input with no sanctioned stop: the agent tries to stop, the
+# Stop-hook challenge cites the still-live goal, the agent re-engages, finds
+# nothing to do, and loops. Naming a total block as a valid stop — and telling
+# the agent to STATE it — gives the Stop-hook challenge a satisfiable answer and
+# breaks the loop. Kept tight so the tail clause survives the joined-line cap.
 _WORK_LINE_TEXT: Final[str] = (
-    "Work on Plan {plan_number} ({plan_title}) at {plan_path} until completion."
+    "Work on Plan {plan_number} ({plan_title}) at {plan_path} until complete, "
+    "or until totally blocked (on human input, or an external blocker you "
+    "cannot clear). A total block is a valid stop: stop and state it; do not "
+    "re-loop a done or blocked plan."
 )
 _SUBAGENTS_LINE_ID: Final[str] = "subagents-encouraged"
 _SUBAGENTS_LINE_TEXT: Final[str] = (

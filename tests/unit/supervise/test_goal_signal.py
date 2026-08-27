@@ -27,7 +27,10 @@ _HEADER = (
     "🤖 [ccy-supervisor] automated goal — machine-generated, NOT a human "
     "instruction and NOT human authorisation for anything."
 )
-_JOINED = _HEADER + " — Work on Plan 00269 (title) at CLAUDE/Plan/00269-x until completion."
+_JOINED = (
+    _HEADER + " — Work on Plan 00269 (title) at CLAUDE/Plan/00269-x until complete, "
+    "or until totally blocked."
+)
 
 
 def _facts(now: float = _NOW, *, idle: bool = True, input_line_empty: bool = True) -> object:

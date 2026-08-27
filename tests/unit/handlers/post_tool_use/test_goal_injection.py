@@ -50,6 +50,37 @@ class TestRenderGoalLine:
         assert "my title" in joined
         assert _PLAN_FOLDER in joined
 
+    def test_default_work_line_sanctions_a_total_block_stop(self) -> None:
+        """The built-in work line must offer TWO terminal conditions —
+        completion OR a total block — not completion alone.
+
+        With only "until completion", a plan blocked on human input has no
+        sanctioned stopping point: the agent tries to stop, the Stop-hook
+        challenge cites the still-live goal, the agent re-engages, finds
+        nothing to do, and loops. Naming the total block as a valid stop
+        (and telling the agent to state it) is what breaks that loop.
+        """
+        joined = render_goal_line(_PLAN_NUMBER, "t", "CLAUDE/Plan/x")
+        assert joined is not None
+        assert "until complete" in joined  # completion is still an exit
+        assert "totally blocked" in joined  # the second exit
+        assert "valid stop" in joined  # a total block is a legitimate stop
+        assert "state it" in joined  # stop and report the blocker (loop-breaker)
+
+    def test_total_block_clause_survives_the_join_cap_for_realistic_inputs(self) -> None:
+        """The loop-breaking clause lives at the tail, and the joined line is
+        hard-truncated at the cap — so a long-but-realistic plan title/path
+        must not push the clause off the end.
+        """
+        long_title = "a" * 60
+        long_path = "CLAUDE/Plan/00282-some-fairly-long-plan-folder-name"
+        joined = render_goal_line(_PLAN_NUMBER, long_title, long_path)
+        assert joined is not None
+        assert len(joined) <= _MAX_JOINED_CHARS
+        assert "totally blocked" in joined
+        assert "valid stop" in joined
+        assert "state it" in joined
+
     def test_render_is_single_physical_line(self) -> None:
         joined = render_goal_line(_PLAN_NUMBER, "t", "CLAUDE/Plan/x")
         assert joined is not None
@@ -91,7 +122,7 @@ class TestRenderGoalLine:
         )
         assert joined is not None
         assert "Custom work line." in joined
-        assert "until completion" not in joined
+        assert "totally blocked" not in joined  # the built-in default was replaced
 
     def test_replace_mode_uses_only_project_lines_but_keeps_header(self) -> None:
         joined = render_goal_line(
@@ -104,7 +135,7 @@ class TestRenderGoalLine:
         assert joined is not None
         assert joined.startswith(_HEADER_TEXT)
         assert "Only line." in joined
-        assert "until completion" not in joined
+        assert "totally blocked" not in joined  # replace mode dropped the built-in default
 
     def test_replace_mode_empty_yields_header_only(self) -> None:
         joined = render_goal_line(_PLAN_NUMBER, "t", "CLAUDE/Plan/x", mode="replace")
