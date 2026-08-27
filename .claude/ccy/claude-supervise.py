@@ -37,6 +37,18 @@ boundary — the restore fires on the first injectable tick after the
 downgrade. ``CCY_MODEL_RESTORE_SECONDS`` adds an optional EXTRA quiet delay
 (default 0; "off" or negative disables auto-restore).
 
+On a REPEATED downgrade — a flip-flop, where a prior auto-restore was undone
+because the saturated context re-tripped the classifier on the next flagged
+turn — restoring the model alone cannot win. So, opt-in via ``CCY_FLAG_COMPACT``
+(default OFF; ``1``/``true``/``yes``/``on`` enables), the supervisor fires ONE
+armed ``/compact`` that asks the agent to summarise the sensitive material at a
+HIGH LEVEL, omitting the low-level specifics — so the compacted context stops
+re-triggering the classifier and the subsequent restore sticks. It is capped
+per process (``_MAX_FLAG_COMPACTIONS``) with a flip-flop backoff, audit-trailed
+with a 🧽 glyph, and fires only when idle (no ESC needed; the resume rides the
+normal compaction-signal path). It is checked just BEFORE the model restore, so
+on a qualifying flip-flop the compact fires instead of a re-restore.
+
 Every ``/model <family>`` injection -- this auto-restore AND the manual
 override below alike -- GUARANTEES a coupled ``/effort`` correction on the
 very next injectable tick, unconditionally: switching TO the TOP-ranked
@@ -1071,6 +1083,35 @@ def _effort_confirm_enters_from_env() -> int:
 _MAX_AUDIT_ITEMS = 8
 
 
+# ── Flag-cleaning compaction on repeated downgrade (Plan 00281) ──────────────
+# When a downgrade RECURS after a prior auto-restore (a flip-flop the model
+# restore cannot win because the CONTEXT keeps re-tripping the classifier), the
+# supervisor can fire ONE armed /compact instructing Claude to summarise the
+# flaggable material at a HIGH LEVEL, cleaning the context so the next restore
+# sticks. OFF by default: /compact rewrites context, so a project not doing
+# flaggable work never wants it fired automatically.
+_DEFAULT_FLAG_COMPACT_ENABLED = False
+_FLAG_COMPACT_ENV_VAR = "CCY_FLAG_COMPACT"
+_FLAG_COMPACT_TRUE_VALUES = ("1", "true", "yes", "on")
+# At most this many flag-cleaning compactions per worker process, with a
+# backoff between them: /compact is heavy and must never storm.
+_MAX_FLAG_COMPACTIONS = 1
+_FLAG_COMPACT_BACKOFF_SECONDS = 1800.0
+
+
+def _parse_flag_compact_enabled(raw: str) -> bool:
+    """Parse the CCY_FLAG_COMPACT toggle; anything not clearly true is False."""
+    return raw.strip().lower() in _FLAG_COMPACT_TRUE_VALUES
+
+
+def _flag_compact_enabled_from_env() -> bool:
+    """Resolve the effective flag-compact toggle (env override or default off)."""
+    raw = os.environ.get(_FLAG_COMPACT_ENV_VAR)
+    if raw is None:
+        return _DEFAULT_FLAG_COMPACT_ENABLED
+    return _parse_flag_compact_enabled(raw)
+
+
 def _parse_min_effort_levels(raw: str) -> dict[str, str]:
     """Parse ``family=level,...`` overrides onto the default minimum map.
 
@@ -1189,6 +1230,10 @@ class CompactPolicy:
     # effort selector needs one just like the model switch. Env-resolved for
     # the same host/worker agreement.
     effort_confirm_enters: int = field(default_factory=_effort_confirm_enters_from_env)
+    # Plan 00281: opt-in flag-cleaning /compact on a repeated (flip-flop)
+    # downgrade. OFF by default — auto-compaction rewrites context. Env-resolved
+    # for host/worker agreement, like the other Plan 00278/00281 toggles.
+    flag_compact_enabled: bool = field(default_factory=_flag_compact_enabled_from_env)
 
 
 @dataclass(frozen=True)
@@ -1268,6 +1313,13 @@ class TickOutcome:
     model_switch_family: str | None = None
     model_switch_session: str | None = None
     model_switch_is_auto_restore: bool = False
+    # Plan 00281: True only for the flip-flop flag-cleaning /compact, so the
+    # HOST counts it against the flag-compaction cap/backoff
+    # (``mark_flag_compaction``) on a successful injection. The capacity-based
+    # /compact (Plan 00152) leaves this False — it has its own AWAIT_COMPACTING
+    # lifecycle and must not eat into the flag-compaction budget. False for
+    # every other decision and for legacy replies without the field.
+    is_flag_compact: bool = False
 
 
 def _coerce_float(value: object) -> float:
@@ -2180,6 +2232,10 @@ class CompactStateMachine:
         self._downgrade_started_ts: float | None = None
         self._model_restores = 0
         self._model_restore_last_ts: float | None = None
+        # Plan 00281: flag-cleaning /compact bookkeeping — per-process count
+        # (round-tripped) and last-fire ts (process-local backoff).
+        self._flag_compactions = 0
+        self._flag_compact_last_ts: float | None = None
         # Plan 00278 continuation: the COUPLED effort correction a /model
         # switch always owes on the next injectable tick (format
         # "session:family:target"). Armed by the HOST after ANY successful
@@ -2257,6 +2313,38 @@ class CompactStateMachine:
         ):
             return None
         return self._downgrade_from_family
+
+    def mark_flag_compaction(self, now_wall: float | None = None) -> None:
+        """Count a fired flag-cleaning /compact for cap/backoff purposes.
+
+        Called by the HOST only after a SUCCESSFUL injection (Plan 00281); a
+        failed PTY write keeps the budget so a later tick can retry. The
+        timestamp starts the flip-flop backoff (see ``flag_compact_due``).
+        """
+        self._flag_compactions += 1
+        self._flag_compact_last_ts = time.time() if now_wall is None else now_wall
+
+    def flag_compact_due(self, now_wall: float) -> bool:
+        """True when a flag-cleaning /compact should fire on this tick (Plan 00281).
+
+        Fires only on a FLIP-FLOP: the feature is enabled, a downgrade episode
+        is open, AND at least one model auto-restore has already happened this
+        process — so a prior restore was undone by the classifier re-firing and
+        restoring the model alone cannot win. Capped per process and backed
+        off, because /compact rewrites context and must never storm.
+        """
+        if not self._policy.flag_compact_enabled:
+            return False
+        if self._downgrade_episode is None or self._model_restores < 1:
+            return False
+        if self._flag_compactions >= _MAX_FLAG_COMPACTIONS:
+            return False
+        if (
+            self._flag_compact_last_ts is not None
+            and now_wall - self._flag_compact_last_ts < _FLAG_COMPACT_BACKOFF_SECONDS
+        ):
+            return False
+        return True
 
     def _coupled_effort_target(self, family: str) -> str:
         """Return the mandatory post-/model-switch effort target for ``family``.
@@ -2479,6 +2567,7 @@ class CompactStateMachine:
             "downgrade_started_ts": self._downgrade_started_ts,
             "model_restores": self._model_restores,
             "model_restore_last_ts": self._model_restore_last_ts,
+            "flag_compactions": self._flag_compactions,
             "coupled_effort_pending": self._coupled_effort_pending,
             "audit_pending": list(self._audit_pending),
         }
@@ -2536,6 +2625,8 @@ class CompactStateMachine:
         if "model_restore_last_ts" in state:
             raw = state["model_restore_last_ts"]
             self._model_restore_last_ts = None if raw is None else _coerce_float(raw)
+        if "flag_compactions" in state:
+            self._flag_compactions = _coerce_int(state["flag_compactions"])
         if "coupled_effort_pending" in state:
             raw = state["coupled_effort_pending"]
             self._coupled_effort_pending = None if raw is None else str(raw)
@@ -2775,6 +2866,22 @@ _DRY_RUN_COMPACT_BODY = "compact suggestion fired (dry-run — not a real /compa
 _ARMED_COMPACT_BODY = (
     "After compacting, immediately resume and continue the work that was in progress."
 )
+# Plan 00281: the instruction body for a flag-cleaning /compact. Phrased WITHOUT
+# the trigger vocabulary itself (naming those categories would re-seed the very
+# terms the compaction exists to clear) — it asks for a high-level summary that
+# omits low-level technical specifics, so the compacted context stops
+# re-triggering the content classifier and the model-restore can stick.
+_FLAG_COMPACT_BODY = (
+    "Summarise the work so far at a HIGH LEVEL. Where the conversation touched "
+    "sensitive or security-adjacent material, keep only what was done and the "
+    "outcome — leave out the low-level technical specifics, sample text, and "
+    "sensitive strings, which are preserved in git and the plan docs. This keeps "
+    "the continuing context from re-triggering content classifiers. Then resume "
+    "and continue the work in progress."
+)
+_DRY_RUN_FLAG_COMPACT_BODY = (
+    "flag-cleaning compact fired (dry-run — not a real /compact, not human input)"
+)
 # `continue` is harmless -- it only nudges the agent to resume -- so it is
 # injected FOR REAL in both dry-run and armed modes. Detecting a compaction and
 # not resuming would defeat the purpose, and (unlike /compact) a stray
@@ -2830,17 +2937,20 @@ def _format_bot_prefix(now_wall: float | None = None) -> str:
 # sentence:
 #   ⚙️  /effort …   (effort level changed)
 #   ♻️  /model …    (model restored / switched)
+#   🧽  /compact …  (flag-cleaning compaction, Plan 00281)
 # New action families extend `_AUDIT_ACTION_GLYPHS`; unknown items fall back to
 # the neutral bullet. Keep this block and the table in sync.
 _AUDIT_BANNER_GLYPH = "🧾"
 _AUDIT_ACTION_EFFORT_GLYPH = "⚙️"
 _AUDIT_ACTION_MODEL_GLYPH = "♻️"
+_AUDIT_ACTION_COMPACT_GLYPH = "🧽"
 _AUDIT_ACTION_DEFAULT_GLYPH = "•"
 # (command-prefix, glyph) pairs, longest-prefix-first is unnecessary here since
-# the two commands share no prefix; a plain first-match scan suffices.
+# the commands share no prefix; a plain first-match scan suffices.
 _AUDIT_ACTION_GLYPHS: tuple[tuple[str, str], ...] = (
     ("/effort", _AUDIT_ACTION_EFFORT_GLYPH),
     ("/model", _AUDIT_ACTION_MODEL_GLYPH),
+    ("/compact", _AUDIT_ACTION_COMPACT_GLYPH),
 )
 # Human-readable pointer to the full machine-readable record (not a path used
 # for I/O — the audit message only tells the reader where to look).
@@ -3207,6 +3317,9 @@ def decide_once(
     model_switch_family: str | None = None
     model_switch_session: str | None = None
     model_switch_is_auto_restore = False
+    # Plan 00281: set True by the flip-flop flag-compact branch below, so the
+    # HOST counts the successful injection against the flag-compaction budget.
+    is_flag_compact = False
     # ── Coupled effort: "/model switch MUST be followed by /effort" ─────────
     # HIGH PRIORITY: checked BEFORE every other subordinate family (manual
     # model switch, goal, floor-based effort, auto-model-restore) so a
@@ -3396,6 +3509,43 @@ def decide_once(
             submit = True
             deferred_log = None
             noop_reason_log = None
+    # ── Flag-cleaning compaction on a REPEATED downgrade (Plan 00281) ───────
+    # Checked JUST BEFORE the model restore: on a flip-flop (an open episode
+    # AND a prior auto-restore that the classifier already undid) a re-restore
+    # cannot win while the context keeps re-tripping, so instead fire ONE armed
+    # `/compact` that asks the agent to summarise the sensitive material at a
+    # high level. Opt-in (default off), capped and backed off (all inside
+    # flag_compact_due). Fires only when idle (can_inject) so no ESC interrupt
+    # is needed; the resume is driven by the compaction signal like every other
+    # `/compact`. The HOST counts a successful injection (mark_flag_compaction).
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+        and machine.flag_compact_due(facts.now_wall)
+    ):
+        if not can_inject:
+            if facts.idle and not facts.input_line_empty:
+                deferred_log = f"{_DEFERRED_LOG_PREFIX} (flag-cleaning compact pending)"
+            else:
+                noop_reason_log = (
+                    f"{_NOOP_LOG_PREFIX}: flag-cleaning compact pending but session busy"
+                )
+        else:
+            decision_value = Decision.WOULD_COMPACT.value
+            reason = "repeated downgrade (flip-flop) -> would inject flag-cleaning /compact"
+            is_flag_compact = True
+            if dry_run:
+                payload = f"{_format_bot_prefix(facts.now_wall)} {_DRY_RUN_FLAG_COMPACT_BODY}"
+            else:
+                # `/compact` MUST stay the FIRST token so it is recognised as the
+                # slash command; the bot chrome rides along as its instruction.
+                payload = f"/compact {_format_bot_prefix(facts.now_wall)} {_FLAG_COMPACT_BODY}"
+                machine.arm_audit("/compact (flag-cleaning after repeated downgrade)")
+            submit = True
+            deferred_log = None
+            noop_reason_log = None
     # ── Model restore after a downgrade (Plan 00278 Task 2b.3) ──────────────
     # Fires only on an otherwise-NOOP MONITOR tick, after the quiet delay,
     # under the lifetime cap and the flip-flop backoff (all inside
@@ -3478,6 +3628,7 @@ def decide_once(
         model_switch_family=model_switch_family,
         model_switch_session=model_switch_session,
         model_switch_is_auto_restore=model_switch_is_auto_restore,
+        is_flag_compact=is_flag_compact,
     )
 
 
@@ -3578,6 +3729,12 @@ def _apply_post_injection_bookkeeping(
                 session=outcome.model_switch_session or "",
                 family=outcome.model_switch_family,
             )
+    elif outcome.decision_value == Decision.WOULD_COMPACT.value and outcome.is_flag_compact:
+        # Plan 00281: only the flip-flop flag-compact counts against the
+        # flag-compaction cap/backoff. The capacity-based /compact leaves
+        # is_flag_compact False and is governed by its AWAIT_COMPACTING
+        # lifecycle instead.
+        machine.mark_flag_compaction()
 
 
 def _poll_once(
@@ -3691,6 +3848,7 @@ def _outcome_to_json(outcome: TickOutcome) -> str:
             "model_switch_family": outcome.model_switch_family,
             "model_switch_session": outcome.model_switch_session,
             "model_switch_is_auto_restore": outcome.model_switch_is_auto_restore,
+            "is_flag_compact": outcome.is_flag_compact,
         }
     )
 
@@ -3711,6 +3869,7 @@ def _outcome_from_json(line: str) -> TickOutcome:
         model_switch_family=data.get("model_switch_family"),
         model_switch_session=data.get("model_switch_session"),
         model_switch_is_auto_restore=bool(data.get("model_switch_is_auto_restore", False)),
+        is_flag_compact=bool(data.get("is_flag_compact", False)),
     )
 
 

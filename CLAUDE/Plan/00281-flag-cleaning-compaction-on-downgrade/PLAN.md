@@ -82,24 +82,30 @@ per-action glyph (🧽) to the Plan 00278 audit iconography ruleset.
 
 ### Phase 1: Config + machine state
 
-- [ ] ⬜ **Task 1.1**: `CompactPolicy.flag_compact_enabled` (+ `CCY_FLAG_COMPACT`
+- [x] ✅ **Task 1.1**: `CompactPolicy.flag_compact_enabled` (+ `CCY_FLAG_COMPACT`
   env parse, default off); `_MAX_FLAG_COMPACTIONS` + backoff constants.
-- [ ] ⬜ **Task 1.2**: machine `_flag_compactions` counter, `mark_flag_compaction`,
+- [x] ✅ **Task 1.2**: machine `_flag_compactions` counter, `mark_flag_compaction`,
   a `flag_compact_due(now)` predicate, export/import round-trip.
 
 ### Phase 2: decide_once branch (TDD)
 
-- [ ] ⬜ **Task 2.1**: RED tests — fires only on flip-flop (episode open +
+- [x] ✅ **Task 2.1**: RED tests — fires only on flip-flop (episode open +
   ≥1 restore), respects opt-in/cap/backoff/can-inject, payload is a real
   `/compact` with the flag-cleaning body, dry-run marker, arms audit.
-- [ ] ⬜ **Task 2.2**: GREEN — add the branch before the model-restore branch;
-  host success-only `mark_flag_compaction` bookkeeping.
+  (`tests/unit/supervise/test_flag_compact.py`, 17 tests.)
+- [x] ✅ **Task 2.2**: GREEN — branch added before the model-restore branch,
+  gated on `flag_compact_due`; `TickOutcome.is_flag_compact` distinguishes it
+  from the capacity `/compact`; host success-only `mark_flag_compaction`
+  bookkeeping; `is_flag_compact` round-trips through the worker→host JSON.
 
 ### Phase 3: Audit glyph + docs
 
-- [ ] ⬜ **Task 3.1**: 🧽 per-action glyph for `/compact` in `_audit_action_glyph`.
-- [ ] ⬜ **Task 3.2**: supervisor header doc; dogfood-enable in this repo;
-  config-changes manifest entry.
+- [x] ✅ **Task 3.1**: 🧽 per-action glyph for `/compact` in `_audit_action_glyph`.
+- [ ] 🔄 **Task 3.2**: supervisor header doc (module docstring — done);
+  dogfood-enable in this repo (pending); config-changes manifest entry is
+  **N/A** — `CCY_FLAG_COMPACT` is a ccy env var, not a `hooks-daemon.yaml`
+  key, so it does not fit the manifest schema (the sibling
+  `CCY_MODEL_RESTORE_SECONDS` correctly has no manifest entry either).
 
 ### Phase 4: Dogfood
 
