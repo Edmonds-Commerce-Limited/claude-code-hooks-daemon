@@ -5,6 +5,150 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.56.0] - 2026-08-27
+
+### Added
+
+- **`secret_file_hygiene_checker` (Plan 00272 Task 6.1) — enabled by
+  default.** New SessionStart advisory: for every path matching the effective
+  `secret_file_guard` globs that exists on disk, advises (never blocks) when
+  it is not gitignored, is git-tracked, or is group/world-readable. Enumerates
+  via `git ls-files` (three cheap index reads, no filesystem walk) and
+  `stat()` only — contents are never opened. This is the SessionStart half of
+  the permissions/ownership hygiene `secret-meta` already reports on demand
+  for a single path.
+- **`downgrade_indicator` (Plan 00278) — new status-line handler, enabled by
+  default.** Surfaces a silent model-family downgrade (Anthropic's safety
+  classifier substituting the session model, e.g. `fable` → `opus`, with
+  `scope: session`) on every render of the status line, self-detected purely
+  from the model id Claude Code reports — no dependency on the ccy
+  supervisor. Tracks a per-session high-water model-family rank and appends a
+  `↓N↑M` episode counter, so a session stuck flip-flopping between downgrade
+  and recovery is visible at a glance.
+- **`model_fallback_detector` (Plan 00278) — ships disabled, opt-in.** New
+  SessionStart advisory that scans the session transcript for the platform's
+  own `model_refusal_fallback` record and distinguishes an ACTIVE fallback
+  (no later turn returned to the original model) from one that has already
+  RECOVERED. Dedupe state now persists to disk across daemon restarts. Ships
+  off because the continuous "am I downgraded?" signal is better served by
+  `downgrade_indicator` above; this detector's unique value is a
+  secret-redacted diagnostic snapshot for tuning a project's flaggable-work
+  delegation config.
+- **`flaggable_work_advisor` (Plan 00278) — ships disabled, opt-in.** New
+  PreToolUse advisory that reminds an agent to delegate safeguard-flaggable
+  work (matching configured path globs or topic terms) to a quarantine
+  subagent *before* opening the content, rather than after.
+- **`flaggable_content_channel_guard` (Plan 00278) — ships disabled,
+  opt-in.** New PreToolUse blocking handler that denies content-revealing
+  git/grep shapes (`git diff`, `git show`, `git log -p`, `grep`/`rg`/…) over
+  configured flaggable paths — closing the one contamination channel
+  `flaggable_work_advisor` can only advise about. No escape hatch.
+- **`quarantine_artefact_read_guard` (Plan 00278) — ships disabled,
+  pre-seeded, opt-in.** New PreToolUse blocking handler enforcing the
+  two-file quarantine-agent artefact contract: denies reading a
+  `*-opus-security-DETAIL*` artefact back into the coordinator's context by
+  any route (`Read`, `Grep`, `cat`, `head`, an interpreter one-liner, …),
+  while writing/creating the artefact and the subagent's own git cycle stay
+  unaffected. No escape hatch.
+- **Supervisor effort-restore-on-downgrade (Plan 00278).** The ccy PTY
+  supervisor now detects a model-family downgrade across ticks and injects a
+  coupled `/effort xhigh` correction (skipped when already `xhigh`/`max`),
+  with a confirming Enter matching the existing `/model` injection, and a
+  visible audit-trail chat message after every silent `/model`/`/effort`
+  injection so the correction is never invisible.
+- **Flip-flop flag-cleaning `/compact` (Plan 00281) — opt-in via
+  `CCY_FLAG_COMPACT=1`, ships off.** When a session's downgrade recurs (an
+  open episode plus at least one prior auto-restore), the ccy supervisor
+  fires one armed `/compact` instructing Claude to summarise the sensitive
+  material at a high level, so the compacted context stops re-tripping the
+  safety classifier and the effort/model restore actually sticks. Capped per
+  process with a flip-flop backoff; audit-trailed like every other injection.
+- **Generic agent-install subsystem + `hooks-daemon agents` CLI (Plan
+  00279).** Agent deployment is now a first-class, versioned subsystem
+  (`install/agent_assets.py`): a registry of daemon-shipped agents, a
+  version/md5 ledger across every shipped revision, absent/current/outdated/
+  customised classification, and a deploy/remove engine that never clobbers a
+  customised copy. `hooks-daemon agents list|status|install|remove` inspects
+  and manages deployment state. The existing `hooks-daemon-plan-dedupe-scout`
+  agent is migrated onto the subsystem (historic md5s harvested from git
+  history so existing pristine installs stay upgradeable). The first new
+  payload is `hooks-daemon-opus-security`, a quarantine-executor sub-agent
+  for safeguard-flaggable security work, gated on
+  `agents.opus_security.enabled` (ships false, opt-in) — the daemon deploys
+  and refreshes it on start and via `hooks-daemon agents install`, and never
+  deletes it itself.
+
+### Changed
+
+- **`skill_opportunity_detector` no longer shells out to a model (Plan
+  00274).** `bin/hooks-daemon skill-scan` now embeds the judging rubric
+  directly in its report, and an in-session subagent dispatched at the report
+  appends the judgement — replacing the previous bounded headless
+  `claude -p --model haiku` call. No CLI authentication is needed for the
+  scan any more.
+
+### Removed
+
+- **`handlers.session_start.skill_opportunity_detector.options.model`** —
+  the model shell-out it configured no longer exists (see Changed, above);
+  the option is now silently ignored. Non-breaking: delete the line, there is
+  nothing else to migrate.
+
+### Fixed
+
+- **`secret_file_guard` closed a glob-truncation leak, then a false-positive
+  its own fix introduced (Plan 00272).** A trailing- or leading-wildcard
+  truncation of a protected filename (e.g. a vault-password file cut
+  mid-name) could slip past the token heuristic and leak the file; a
+  bidirectional literal-edge overlap check closes it. The first cut of that
+  check then over-blocked ordinary commands sharing an unrelated 2+ character
+  boundary with a protected stem (a `grep` regex starting `ass...` denied
+  against a stem ending in those letters); fixed by gating each overlap
+  direction on the token actually carrying a wildcard at that edge.
+- **A protected path's content could still reach a capture file or a lint
+  diagnostic (Plan 00272 Task 4.5).** `payload_capture` now excludes the
+  whole event when hook input names or Bash-mentions a protected path, and
+  `lint_on_edit`/`staged_lint_gate` skip a protected path before running any
+  lint command, so a syntax-error diagnostic can never quote a protected
+  file's source line.
+- **`lsp_enforcement`'s `block_once` mode is now scoped per session (Plan
+  00277)** — previously a block recorded against one session could suppress
+  the advisory in another. `HandlerDecisionRecord` now carries `session_id`
+  and decision counting can be filtered by it.
+- **`generate-docs` and `generate-playbook` crashed on a handler config with
+  an empty/omitted `priority` key** (`'<' not supported between instances of 'NoneType' and 'int'`) (Plan 00282) — `config.handlers.model_dump()`
+  materialises an unset `priority` as an explicit `None`, which reached the
+  sort comparison unguarded. A shared `resolve_priority()` helper now backs
+  both generators and the pre-existing runtime dispatch guard.
+- **A goal-injected plan had no sanctioned way to stop on a total block.**
+  The built-in work-until-complete `/goal` line named only "until
+  completion", so a plan blocked solely on human input had no satisfiable
+  answer to the Stop-hook challenge and looped. The line now names two
+  terminal conditions — complete, or totally blocked — so stating the
+  blocker is a valid stop.
+- **The `hooks-daemon-opus-security` agent's own frontmatter description was
+  contaminating the calling agent's context** with the enumerated trigger
+  vocabulary it exists to keep out of that context; rewritten in neutral
+  operational language (template v1.1.0) that still routes correctly.
+- **`hooks-daemon agents` printed customisation/removal warnings twice** —
+  once via logging, once via a duplicate CLI print.
+- **`model_fallback_detector`'s dedupe state now survives a daemon
+  restart** — previously a restart re-advised every historical fallback
+  record and re-wrote its diagnostic snapshot on every restart.
+
+### No breaking changes
+
+No handler was removed or renamed, and no `@abstractmethod` was added to the
+`Handler` base class. Every new handler in this release ships either
+enabled-and-silent-until-triggered (`secret_file_hygiene_checker`,
+`downgrade_indicator`) or fully opt-in and disabled by default
+(`model_fallback_detector`, `flaggable_work_advisor`,
+`flaggable_content_channel_guard`, `quarantine_artefact_read_guard`,
+`agents.opus_security.enabled`). The one item under Removed above is a
+config option whose backing feature no longer exists (see Changed, above) —
+it is silently ignored, not rejected, so no project's config will fail to
+load.
+
 ## [3.55.0] - 2026-08-26
 
 ### Added
