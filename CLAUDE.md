@@ -2048,6 +2048,8 @@ At session start the transcript is scanned for the platform's own `model_refusal
 
 **A soft, non-alarming notice (no 🚨, no restart instruction) means RECOVERED** — a later assistant turn was already back on the original model before this advisory ever fired. No action is needed; the diagnostic snapshot is still written for tuning purposes.
 
+Dedupe state is PERSISTED to disk and survives a daemon restart: an ACTIVE record re-advises once per (session, identity); a RECOVERED record is noted at most once EVER, across every session; each distinct record's diagnostic snapshot is written at most once EVER.
+
 Options under `handlers.session_start.model_fallback_detector.options`: `snapshot_enabled` (default true), `snapshot_dir` (default `untracked/reports`), `snapshot_window_records` (default 20). Snapshots are never auto-committed.
 
 <!-- handler: idle-housekeeping-advisory -->
