@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from claude_code_hooks_daemon.constants import ConfigKey
+from claude_code_hooks_daemon.constants.config import ConfigKey, resolve_priority
 from claude_code_hooks_daemon.core import AcceptanceTest
 from claude_code_hooks_daemon.core.cli_acceptance_test import CliAcceptanceTest
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
@@ -214,7 +214,7 @@ class PlaybookGenerator:
                     if hasattr(instance, "get_acceptance_tests"):
                         tests = instance.get_acceptance_tests()
                         if tests:
-                            priority = handler_config.get(ConfigKey.PRIORITY, instance.priority)
+                            priority = resolve_priority(handler_config, instance.priority)
                             tests_by_handler.append(
                                 (handler_class_name, event_type.value, priority, tests, "library")
                             )

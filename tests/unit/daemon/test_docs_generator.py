@@ -1036,3 +1036,51 @@ class TestDocsGeneratorGenerateOrchestration:
         assert "## Plan Mode" in output
         assert "## Active Handlers" in output
         assert "## Quick Config Reference" in output
+
+
+class TestDocsGeneratorNullPriority:
+    """Plan 00282: a handler config entry whose priority is None must not crash.
+
+    ``config.handlers.model_dump()`` materialises an UNSET ``priority`` field as
+    an explicit ``None`` (not an absent key), so ``.get(PRIORITY, fallback)``
+    returns that ``None`` and the sort key raises ``NoneType < int``. The
+    generator must fall back to the handler class's own ``instance.priority``.
+    """
+
+    def test_generate_markdown_with_null_priority_falls_back_to_instance(self) -> None:
+        # TWO handlers in the same event section, so the per-section
+        # ``handlers.sort(key=lambda h: h[3])`` actually COMPARES the priorities
+        # (a one-element sort never compares, so it would not reproduce).
+        from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
+        from claude_code_hooks_daemon.handlers.registry import _to_snake_case
+
+        null_cls = _make_handler_class(
+            name="aaa-null-prio",
+            priority=42,  # instance fallback that must be used when config is None
+            tags=["blocking"],
+            module_name="claude_code_hooks_daemon.handlers.pre_tool_use.aaa_null_prio",
+        )
+        set_cls = _make_handler_class(
+            name="bbb-set-prio",
+            priority=15,
+            tags=["blocking"],
+            module_name="claude_code_hooks_daemon.handlers.pre_tool_use.bbb_set_prio",
+        )
+        registry = _make_registry(null_cls, set_cls)
+        null_key = _to_snake_case(null_cls.__name__)
+        set_key = _to_snake_case(set_cls.__name__)
+        config: dict[str, Any] = {
+            "pre_tool_use": {
+                null_key: {"enabled": True, "priority": None, "options": {}},
+                set_key: {"enabled": True, "priority": 15, "options": {}},
+            },
+        }
+        gen = DocsGenerator(config=config, registry=registry)
+        # Before the fix this raises TypeError: '<' not supported between
+        # instances of 'NoneType' and 'int'.
+        output = gen.generate_markdown()
+        assert "## Active Handlers" in output
+        # Both handlers render; the null one falls back to its instance priority.
+        assert null_key in output
+        assert set_key in output
+        assert "| 42 |" in output

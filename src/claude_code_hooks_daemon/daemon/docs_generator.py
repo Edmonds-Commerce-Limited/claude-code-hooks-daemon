@@ -12,7 +12,7 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from claude_code_hooks_daemon.constants import ConfigKey
+from claude_code_hooks_daemon.constants.config import ConfigKey, resolve_priority
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
 from claude_code_hooks_daemon.pseudo_events.registry import (
     enabled_pseudo_event_handler_classes,
@@ -295,7 +295,7 @@ class DocsGenerator:
                 try:
                     instance = handler_class()
 
-                    priority = handler_config.get(ConfigKey.PRIORITY, instance.priority)
+                    priority = resolve_priority(handler_config, instance.priority)
                     behavior = self._detect_behavior(instance)
                     description = self._get_description(handler_class)
 

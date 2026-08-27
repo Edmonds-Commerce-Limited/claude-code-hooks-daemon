@@ -10,12 +10,21 @@ Usage:
     handler_config = config[ConfigKey.HANDLERS]
     enabled = handler_config[handler_name][ConfigKey.ENABLED]
 
-    # In config validation:
-    if ConfigKey.PRIORITY in handler_config:
-        priority = handler_config[ConfigKey.PRIORITY]
+    # Resolving a handler priority (absent OR None both fall back):
+    priority = resolve_priority(handler_config, instance.priority)
+
+Note: do NOT test ``if ConfigKey.PRIORITY in handler_config`` against a
+``model_dump()`` result — ``model_dump()`` materialises an UNSET field as an
+explicit ``None``, so the key is present while its value is ``None``. Use
+``resolve_priority`` (below), which treats absent and ``None`` identically.
+The membership form is only correct against a RAW parsed-YAML dict, where an
+omitted key is genuinely absent.
 """
 
 from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
 
 
 class ConfigKey:
@@ -70,4 +79,26 @@ class ConfigKey:
     INCLUDE = "include"
 
 
-__all__ = ["ConfigKey"]
+def resolve_priority(handler_config: Mapping[str, Any], fallback: int) -> int:
+    """Return the config's ``priority``, or ``fallback`` when absent OR ``None``.
+
+    Single source of truth for the three consumers (runtime dispatch in
+    ``registry.py`` and both documentation generators). Two shapes both mean
+    "no priority given, use the handler's own default":
+
+    - ``config.handlers.model_dump()`` materialises an UNSET ``priority`` field
+      as an explicit ``None`` (not an absent key), so a plain
+      ``.get(PRIORITY, fallback)`` returns that ``None`` — the default never
+      applies, and ``None`` reaches a sort key and raises (Plan 00282).
+    - PyYAML parses a bare ``priority:`` line as ``None`` (Plan 00070).
+
+    Only an explicit integer overrides the fallback (``0`` included); anything
+    non-integer — ``None`` or an absent key — falls back.
+    """
+    value = handler_config.get(ConfigKey.PRIORITY)
+    if isinstance(value, int):
+        return value
+    return fallback
+
+
+__all__ = ["ConfigKey", "resolve_priority"]

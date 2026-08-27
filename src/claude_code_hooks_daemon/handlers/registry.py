@@ -11,7 +11,7 @@ import pkgutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeGuard
 
-from claude_code_hooks_daemon.constants import ConfigKey
+from claude_code_hooks_daemon.constants.config import ConfigKey, resolve_priority
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
@@ -352,11 +352,12 @@ class HandlerRegistry:
                                 )
                                 continue
 
-                            # Override priority from config if specified and not None
-                            # (PyYAML parses 'priority:' with no value as None — Plan 00070)
-                            config_priority = handler_config.get(ConfigKey.PRIORITY)
-                            if config_priority is not None:
-                                instance.priority = config_priority
+                            # Override priority from config, falling back to the
+                            # handler's own default when absent OR None (PyYAML
+                            # parses a bare 'priority:' as None — Plan 00070; a
+                            # model_dump() None is Plan 00282). One shared helper
+                            # across dispatch + both doc generators.
+                            instance.priority = resolve_priority(handler_config, instance.priority)
 
                             # Apply options inheritance if handler shares options with parent
                             registry_key = f"{event_type.value}.{config_key}"

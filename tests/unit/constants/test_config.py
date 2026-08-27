@@ -222,3 +222,35 @@ class TestConfigKeyGroups:
         ]
         assert len(daemon_keys) == 8
         assert all(isinstance(key, str) for key in daemon_keys)
+
+
+class TestResolvePriority:
+    """Plan 00282: resolve_priority treats absent AND None as "use the fallback".
+
+    ``config.handlers.model_dump()`` materialises an unset ``priority`` field as
+    an explicit ``None`` (not an absent key), so a plain ``.get(PRIORITY,
+    fallback)`` returns that ``None``. This helper is the single source of truth
+    for the three consumers (registry dispatch + both doc generators).
+    """
+
+    def test_absent_priority_uses_fallback(self) -> None:
+        from claude_code_hooks_daemon.constants.config import resolve_priority
+
+        assert resolve_priority({"enabled": True}, 56) == 56
+
+    def test_none_priority_uses_fallback(self) -> None:
+        from claude_code_hooks_daemon.constants.config import resolve_priority
+
+        # This is the model_dump() shape that crashed the generators.
+        assert resolve_priority({"enabled": True, "priority": None, "options": {}}, 56) == 56
+
+    def test_explicit_priority_overrides_fallback(self) -> None:
+        from claude_code_hooks_daemon.constants.config import resolve_priority
+
+        assert resolve_priority({"priority": 10}, 56) == 10
+
+    def test_explicit_zero_priority_is_respected(self) -> None:
+        from claude_code_hooks_daemon.constants.config import resolve_priority
+
+        # 0 is a legitimate priority and must NOT be treated as "unset".
+        assert resolve_priority({"priority": 0}, 56) == 0

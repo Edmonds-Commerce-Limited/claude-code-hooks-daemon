@@ -1868,3 +1868,73 @@ def test_generate_markdown_still_runs_tests_without_the_marker() -> None:
     assert "**⚠️ SKIP**" not in markdown
     assert 'echo "git reset --hard"' in markdown
     assert "**Result**: [ ] PASS [ ] FAIL" in markdown
+
+
+class MockHandlerWithTestsB(Handler):
+    """A second handler-with-tests, so the playbook sort actually compares (Plan 00282)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            handler_id=HandlerID.ABSOLUTE_PATH, priority=Priority.ABSOLUTE_PATH, terminal=False
+        )
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        return True
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult(decision=Decision.ALLOW)
+
+    def get_claude_md(self) -> str | None:
+        return None
+
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        return []
+
+
+def test_generate_markdown_with_null_priority_falls_back_to_instance() -> None:
+    """Plan 00282: a None priority in a handler config must not crash the sort.
+
+    ``config.handlers.model_dump()`` materialises an unset ``priority`` as an
+    explicit ``None``, so ``.get(PRIORITY, instance.priority)`` returns ``None``
+    and ``tests_by_handler.sort(key=lambda x: x[2])`` raises. TWO handlers with
+    tests are needed so the sort actually compares (a one-element sort never
+    does). The None entry must fall back to the handler's own instance priority.
+    """
+    test_a = AcceptanceTest(
+        title="Null priority handler test",
+        command='echo "a"',
+        description="handler config omits priority",
+        expected_decision=Decision.DENY,
+        expected_message_patterns=["a"],
+        test_type=TestType.BLOCKING,
+    )
+    test_b = AcceptanceTest(
+        title="Set priority handler test",
+        command='echo "b"',
+        description="handler config sets priority",
+        expected_decision=Decision.DENY,
+        expected_message_patterns=["b"],
+        test_type=TestType.BLOCKING,
+    )
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.null_prio_a"
+    MockHandlerWithTestsB.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.set_prio_b"
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+    registry._handlers["MockHandlerWithTestsB"] = MockHandlerWithTestsB
+    config = {
+        "pre_tool_use": {
+            "mock_handler_with_tests": {"enabled": True, "priority": None},
+            "mock_handler_with_tests_b": {"enabled": True, "priority": 20},
+        }
+    }
+    generator = PlaybookGenerator(config=config, registry=registry)
+    with (
+        patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[test_a]),
+        patch.object(MockHandlerWithTestsB, "get_acceptance_tests", return_value=[test_b]),
+    ):
+        # Before the fix this raises TypeError: '<' not supported between
+        # instances of 'NoneType' and 'int'.
+        markdown = generator.generate_markdown()
+
+    assert "Null priority handler test" in markdown
+    assert "Set priority handler test" in markdown

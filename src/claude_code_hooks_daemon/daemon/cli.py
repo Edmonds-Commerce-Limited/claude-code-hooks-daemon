@@ -2335,6 +2335,10 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
         return 0
 
     except Exception as e:
+        # Log the full traceback so the failure is diagnosable — the bare
+        # exception string alone (e.g. a NoneType-vs-int TypeError from a
+        # config that omits a handler priority) names nothing (Plan 00282).
+        logger.exception("Failed to generate playbook")
         print(f"ERROR: Failed to generate playbook: {e}", file=sys.stderr)
         return 1
 
@@ -2409,6 +2413,10 @@ def cmd_generate_docs(args: argparse.Namespace) -> int:
         return 0
 
     except Exception as e:
+        # Log the full traceback so the failure is diagnosable — the bare
+        # exception string alone names neither the handler nor the site
+        # (Plan 00282).
+        logger.exception("Failed to generate docs")
         print(f"ERROR: Failed to generate docs: {e}", file=sys.stderr)
         return 1
 

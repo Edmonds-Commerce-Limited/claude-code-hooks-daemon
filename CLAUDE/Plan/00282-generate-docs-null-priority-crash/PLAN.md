@@ -42,7 +42,8 @@ Reproduced in-process against this codebase:
 - NOT switching the `model_dump()` call sites to `exclude_none=True` — that is
   the broader change and risks other consumers that rely on the null keys
   being present; the targeted null-guard is the narrower, safer fix.
-- NOT changing `config/validator.py`'s membership-form priority check: it
+- NOT changing `src/claude_code_hooks_daemon/config/validator.py`'s
+  membership-form priority check: it
   operates on the RAW parsed YAML (where an omitted key is genuinely absent),
   so the membership form is correct there. The misleading guidance is in the
   `constants/config.py` module docstring, which is what gets fixed.
@@ -68,23 +69,27 @@ repeat the bug.
 
 ### Phase 1: Reproduce + RED
 
-- [ ] ⬜ **Task 1.1**: In-process repro confirmed (done — see Overview).
-- [ ] ⬜ **Task 1.2**: RED tests — a null-priority `HandlerConfig` makes both
-  generators produce output (fail before the fix); helper unit tests.
+- [x] ✅ **Task 1.1**: In-process repro confirmed (see Overview).
+- [x] ✅ **Task 1.2**: RED tests — two-handler configs (a one-element sort never
+  compares) with a null priority crash both generators with the reported
+  `TypeError`; helper unit tests. (`test_docs_generator.py`,
+  `test_playbook_generator.py`, `test_config.py`.)
 
 ### Phase 2: Fix (GREEN)
 
-- [ ] ⬜ **Task 2.1**: Add the shared priority-resolution helper + fix the
-  `constants/config.py` docstring.
-- [ ] ⬜ **Task 2.2**: Use it at `docs_generator.py`, `playbook_generator.py`,
-  and refactor `registry.py` to the same helper.
-- [ ] ⬜ **Task 2.3**: Secondary — generator CLI wrappers log a diagnosable
-  error (traceback / context), not the bare message.
+- [x] ✅ **Task 2.1**: Added `resolve_priority` helper in `constants/config.py`
+  (absent AND None both fall back; explicit 0 respected) + fixed the misleading
+  module docstring.
+- [x] ✅ **Task 2.2**: Used it at `docs_generator.py`, `playbook_generator.py`,
+  and refactored `registry.py` to the same helper (one rule, three sites).
+- [x] ✅ **Task 2.3**: Secondary — both generator CLI wrappers now
+  `logger.exception(...)` the full traceback, not just the bare message.
 
 ### Phase 3: Verify
 
-- [ ] ⬜ **Task 3.1**: Full QA green; daemon restart RUNNING; `generate-docs`
-  and `generate-playbook` still exit 0 on this repo.
+- [ ] 🔄 **Task 3.1**: Daemon restarted RUNNING; `generate-docs` and
+  `generate-playbook` exit 0 on this repo with no doc drift. Full QA in
+  progress.
 
 ## Success Criteria
 
