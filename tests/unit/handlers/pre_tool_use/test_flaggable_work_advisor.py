@@ -189,3 +189,50 @@ class TestGuidanceSurfaces:
         for test in tests:
             assert test.title
             assert test.expected_decision == Decision.ALLOW
+
+
+class TestEdgeBranches:
+    def test_non_dict_hook_input_does_not_match(
+        self, handler: FlaggableWorkAdvisorHandler
+    ) -> None:
+        payload: Any = None
+        assert handler.matches(payload) is False
+
+    def test_non_dict_tool_input_does_not_match(
+        self, handler: FlaggableWorkAdvisorHandler
+    ) -> None:
+        payload: dict[str, Any] = {
+            "hook_event_name": "PreToolUse",
+            "session_id": "s1",
+            "tool_name": "Read",
+            "tool_input": "not-a-dict",
+        }
+        assert handler.matches(payload) is False
+
+    def test_replace_mode_with_single_term_disables_topic_route(self) -> None:
+        instance = FlaggableWorkAdvisorHandler()
+        instance._mode = "replace"
+        instance._flaggable_topic_terms = ["tarpit"]
+        payload = _write("/p/doc.md", "tarpit and tarpit again with exploit rootkit")
+        assert instance.matches(payload) is False
+
+    def test_unserialisable_tool_input_does_not_match_topic_route(
+        self, handler: FlaggableWorkAdvisorHandler
+    ) -> None:
+        payload = _write("/p/doc.md", "exploit rootkit")
+        payload["tool_input"]["weird"] = object()
+        assert handler.matches(payload) is False
+
+    def test_handle_with_nothing_pending_is_a_silent_allow(
+        self, handler: FlaggableWorkAdvisorHandler
+    ) -> None:
+        payload = _read("/project/firewall/edge/rules.yml")
+        handler.handle(payload)
+        second = handler.handle(payload)
+        assert second.decision == Decision.ALLOW
+        assert not second.context
+
+    def test_advised_state_is_bounded_fifo(self, handler: FlaggableWorkAdvisorHandler) -> None:
+        for index in range(600):
+            handler._record_advised(f"session-{index}", "key")
+        assert len(handler._advised) <= 512

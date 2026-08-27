@@ -307,3 +307,109 @@ class TestGuidanceSurfaces:
         for test in tests:
             assert test.title
             assert test.expected_decision == Decision.ALLOW
+
+
+class TestExtractFallbackBlock:
+    def test_non_dict_message_yields_none(self) -> None:
+        from claude_code_hooks_daemon.handlers.session_start.model_fallback_detector import (
+            _extract_fallback_block,
+        )
+
+        assert _extract_fallback_block({"message": "prose"}) is None
+
+    def test_non_list_content_yields_none(self) -> None:
+        from claude_code_hooks_daemon.handlers.session_start.model_fallback_detector import (
+            _extract_fallback_block,
+        )
+
+        assert _extract_fallback_block({"message": {"content": "text"}}) is None
+
+    def test_no_fallback_block_yields_none(self) -> None:
+        from claude_code_hooks_daemon.handlers.session_start.model_fallback_detector import (
+            _extract_fallback_block,
+        )
+
+        payload = {"message": {"content": [{"type": "text", "text": "hi"}]}}
+        assert _extract_fallback_block(payload) is None
+
+
+class TestEdgeBranches:
+    def test_candidate_with_fallback_token_but_wrong_shape_is_ignored(
+        self, handler: ModelFallbackDetectorHandler, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(
+            transcript,
+            [
+                {"type": "assistant", "message": 'the word "fallback" in prose'},
+                {
+                    "type": "assistant",
+                    "message": {"role": "assistant", "content": '"fallback"'},
+                },
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": 'mentions "fallback" only'}],
+                    },
+                },
+            ],
+        )
+        result = handler.handle(_hook_input(transcript))
+        assert result.context == []
+
+    def test_fallback_block_with_non_dict_endpoints_reports_unknown(
+        self, handler: ModelFallbackDetectorHandler, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(
+            transcript,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "fallback", "from": "x", "to": "y"}],
+                    },
+                }
+            ],
+        )
+        result = handler.handle(_hook_input(transcript))
+        assert "unknown" in "\n".join(result.context)
+
+    def test_blank_lines_are_skipped(
+        self, handler: ModelFallbackDetectorHandler, tmp_path: Path
+    ) -> None:
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text("\n\n" + json.dumps(_fallback_record()) + "\n\n", encoding="utf-8")
+        result = handler.handle(_hook_input(transcript))
+        assert result.context
+
+    def test_unexpected_failure_degrades_to_silence(
+        self,
+        handler: ModelFallbackDetectorHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def _boom(path: Path) -> list[Any]:
+            raise ValueError("synthetic failure")
+
+        monkeypatch.setattr(handler, "_scan_transcript", _boom)
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(transcript, [_fallback_record()])
+        result = handler.handle(_hook_input(transcript))
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_advised_state_is_bounded_fifo(self, handler: ModelFallbackDetectorHandler) -> None:
+        for index in range(600):
+            assert handler._mark_advised(f"session-{index}", "id") is True
+        assert len(handler._advised) <= 512
+
+    def test_relative_snapshot_dir_resolves_without_project_context(
+        self, handler: ModelFallbackDetectorHandler
+    ) -> None:
+        handler._snapshot_dir = "untracked/reports"
+        resolved = handler._resolve_snapshot_dir()
+        assert resolved.is_absolute()
+        assert str(resolved).endswith("untracked/reports")
