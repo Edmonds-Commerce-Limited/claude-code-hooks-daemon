@@ -282,6 +282,7 @@ class ConfigTemplate:
             "    git_repo_name: {enabled: true, priority: 5}      # Git repository name\n"
             "    account_display: {enabled: true, priority: 6}    # Account information\n"
             "    model_context: {enabled: true, priority: 10}    # Model name and context %\n"
+            "    downgrade_indicator: {enabled: true, priority: 11}  # Warn on a silent model-family downgrade\n"
             "    context_sidecar: {enabled: false, priority: 12}  # Observe-only context sidecar for PTY supervisor (opt-in)\n"
             "    git_branch: {enabled: true, priority: 20}       # Current git branch\n"
             "    startup_cleanup: {enabled: true, priority: 28}  # Stale file cleanup indicator\n"

@@ -2813,6 +2813,35 @@ These handlers generate the terminal status line displayed by Claude Code. They 
 
 ---
 
+#### downgrade_indicator
+
+| Property       | Value                 |
+| -------------- | --------------------- |
+| **Config key** | `downgrade_indicator` |
+| **Priority**   | 11                    |
+| **Type**       | Advisory              |
+| **Event**      | StatusLine            |
+
+**Description:** Surfaces a silent model-family downgrade (Anthropic's safety classifier substituting the session model, e.g. fable to opus, with `scope: session`). Tracks each session's high-water model-family rank (haiku=0, sonnet=1, opus=2, fable=3; `mythos` canonicalises to fable) in a small per-session state file, keyed by session id so a genuinely-fresh session starting on a high-ranked model is never mislabelled a downgrade. Renders a compact warning segment naming the drop (high-water family, an arrow, current family) only while the current render's family ranks below the recorded high-water; silent on a first render, a new high, a recovered render, or an unrecognised model id.
+
+**Options:**
+
+| Option         | Type | Default                   | Description                                                                                           |
+| -------------- | ---- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `emoji`        | str  | `⚠️`                      | Emoji prefix rendered ahead of the family names.                                                      |
+| `label_format` | str  | `{emoji}{high}→{current}` | Placeholders: `{emoji}`, `{high}` (recorded high-water family), `{current}` (family this render saw). |
+| `color`        | str  | bold red ANSI code        | ANSI escape sequence wrapping the rendered label.                                                     |
+
+```yaml
+handlers:
+  status_line:
+    downgrade_indicator:
+      enabled: true
+      priority: 11
+```
+
+---
+
 #### git_branch
 
 | Property       | Value        |
