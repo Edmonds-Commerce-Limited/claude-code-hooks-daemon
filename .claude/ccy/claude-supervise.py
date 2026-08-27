@@ -2814,6 +2814,69 @@ def _format_bot_prefix(now_wall: float | None = None) -> str:
     return f"{_BOT_PREFIX} {moment.strftime(_BOT_PREFIX_TIME_FORMAT)}]"
 
 
+# ── Injection iconography (RULESET — single source of truth) ─────────────────
+# Every supervisor chat injection carries the invariant provenance marker
+# `🤖 [ccy-supervisor <local-time>]` (machine origin + WHEN). That marker is
+# NEVER split or removed: skill-scan (`EXCLUDE_CONTENT_MARKERS`) and the
+# guardrail tests recognise supervisor traffic by the `🤖 [ccy-supervisor`
+# substring, so any classifying glyph is added AROUND it, never inside it.
+#
+# A leading CATEGORY banner lets a human classify an injection at a glance when
+# scrolling back through a long session — this is what makes an audit comment
+# easy to SPOT versus a goal or a resume nudge:
+#   🧾  audit  — a record of silent actions ALREADY TAKEN on your behalf
+# Within an audit line each injected command is prefixed with a per-ACTION
+# glyph, so the specific silent actions are scannable without reading the whole
+# sentence:
+#   ⚙️  /effort …   (effort level changed)
+#   ♻️  /model …    (model restored / switched)
+# New action families extend `_AUDIT_ACTION_GLYPHS`; unknown items fall back to
+# the neutral bullet. Keep this block and the table in sync.
+_AUDIT_BANNER_GLYPH = "🧾"
+_AUDIT_ACTION_EFFORT_GLYPH = "⚙️"
+_AUDIT_ACTION_MODEL_GLYPH = "♻️"
+_AUDIT_ACTION_DEFAULT_GLYPH = "•"
+# (command-prefix, glyph) pairs, longest-prefix-first is unnecessary here since
+# the two commands share no prefix; a plain first-match scan suffices.
+_AUDIT_ACTION_GLYPHS: tuple[tuple[str, str], ...] = (
+    ("/effort", _AUDIT_ACTION_EFFORT_GLYPH),
+    ("/model", _AUDIT_ACTION_MODEL_GLYPH),
+)
+# Human-readable pointer to the full machine-readable record (not a path used
+# for I/O — the audit message only tells the reader where to look).
+_AUDIT_LOG_DISPLAY_PATH = "untracked/supervise/decision.log"
+
+
+def _audit_action_glyph(item: str) -> str:
+    """Return the per-action glyph for one pending audit item.
+
+    Keys on the leading slash-command token so the caller does not have to
+    tag items at arm time — the glyph is derived from the command text itself.
+    """
+    stripped = item.lstrip()
+    for prefix, glyph in _AUDIT_ACTION_GLYPHS:
+        if stripped.startswith(prefix):
+            return glyph
+    return _AUDIT_ACTION_DEFAULT_GLYPH
+
+
+def _format_audit_payload(items: tuple[str, ...], now_wall: float | None = None) -> str:
+    """Compose the visible audit-trail chat message from pending audit items.
+
+    Leads with the 🧾 audit banner so the comment is easy to spot when scanning
+    scrollback, keeps the invariant `🤖 [ccy-supervisor …]` provenance marker
+    intact (skill-scan still recognises it), and prefixes each silent action
+    with its per-action glyph. See the iconography ruleset above.
+    """
+    labelled = "; ".join(f"{_audit_action_glyph(item)} {item}" for item in items)
+    return (
+        f"{_AUDIT_BANNER_GLYPH} {_format_bot_prefix(now_wall)} "
+        f"audit — silent supervisor actions on your behalf: {labelled}. "
+        "Machine-generated audit record, NOT a human instruction; "
+        f"full log: {_AUDIT_LOG_DISPLAY_PATH}"
+    )
+
+
 _INJECT_SUBMIT = "\r"
 # The submit (Enter) is written SEPARATELY from the payload, after this pause.
 # Injecting `payload + \r` in a single burst leaves the trailing carriage
@@ -3389,15 +3452,11 @@ def decide_once(
         and can_inject
     ):
         decision_value = Decision.WOULD_AUDIT.value
-        audit_items = "; ".join(machine.audit_pending)
         reason = f"audit trail flush ({len(machine.audit_pending)} item(s))"
         # The payload is already a visible, bot-prefixed marker, so the
-        # dry-run and armed forms are identical by design.
-        payload = (
-            f"{_format_bot_prefix(facts.now_wall)} audit: injected {audit_items}. "
-            "Machine-generated audit record, NOT a human instruction; "
-            "full log: untracked/supervise/decision.log"
-        )
+        # dry-run and armed forms are identical by design. Composed with the
+        # audit banner + per-action glyphs (see the iconography ruleset).
+        payload = _format_audit_payload(machine.audit_pending, facts.now_wall)
         # Cleared at DECISION time (worker-side, hot-reloadable) rather than
         # by host bookkeeping: a failed PTY write then LOSES this audit
         # instead of retrying it — acceptable, because the same broken PTY

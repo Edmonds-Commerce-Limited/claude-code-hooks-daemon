@@ -353,9 +353,31 @@ class TestAuditTrailFlush:
         assert "/effort low" in outcome.payload
         assert "decision.log" in outcome.payload
         assert "NOT a human" in outcome.payload
+        # Iconography ruleset: the audit banner leads so the comment is easy to
+        # spot in scrollback, and each action carries its per-action glyph.
+        assert outcome.payload.startswith(_mod._AUDIT_BANNER_GLYPH)
+        assert f"{_mod._AUDIT_ACTION_MODEL_GLYPH} /model fable" in outcome.payload
+        assert f"{_mod._AUDIT_ACTION_EFFORT_GLYPH} /effort low" in outcome.payload
+        # The provenance marker stays INTACT (skill-scan keys on this substring).
+        assert _mod._BOT_PREFIX in outcome.payload
         # Success clears the pending items; the next tick is a plain NOOP.
         assert driver.machine.audit_pending == ()
         assert driver.tick().payload is None
+
+    def test_audit_action_glyph_maps_commands(self) -> None:
+        assert _mod._audit_action_glyph("/effort xhigh (floor)") == _mod._AUDIT_ACTION_EFFORT_GLYPH
+        assert _mod._audit_action_glyph("/model fable (restore)") == _mod._AUDIT_ACTION_MODEL_GLYPH
+        # Unknown action families fall back to the neutral bullet.
+        assert _mod._audit_action_glyph("something else") == _mod._AUDIT_ACTION_DEFAULT_GLYPH
+
+    def test_audit_payload_banner_precedes_intact_provenance_marker(self) -> None:
+        payload = _mod._format_audit_payload(
+            ("/effort xhigh (effort-floor restore)", "/model fable (auto-restore)"),
+            now_wall=_NOW,
+        )
+        # Banner first (scannable), then the untouched `🤖 [ccy-supervisor …]`.
+        assert payload.startswith(f"{_mod._AUDIT_BANNER_GLYPH} {_mod._BOT_PREFIX}")
+        assert _mod._AUDIT_LOG_DISPLAY_PATH in payload
 
     def test_flush_clears_at_decision_time_even_when_injection_fails(self, tmp_path: Path) -> None:
         # The backlog is cleared when the flush is DECIDED, not when the host
