@@ -342,6 +342,15 @@ def test_model_restore_not_before_delay(tmp_path: Path) -> None:
     assert outcome.payload is None
 
 
+def test_model_restore_sets_confirm_enters(tmp_path: Path) -> None:
+    # /model needs the confirming Enter too -- the auto-restore branch sets
+    # confirm_enters from the SAME policy value as the manual switch signal.
+    sidecar_dir = tmp_path / "cs"
+    machine, later = _restore_ready_machine(sidecar_dir)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(later))
+    assert outcome.confirm_enters == _mod._DEFAULT_MODEL_CONFIRM_ENTERS
+
+
 def test_model_restore_dry_run_marker(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
     machine, later = _restore_ready_machine(sidecar_dir)

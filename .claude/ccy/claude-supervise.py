@@ -35,6 +35,18 @@ types ``/model <original family>`` to flip a session-sticky downgrade back
 it resets effort down to the restored family's floor, so fable never idles
 at xhigh burning allowance.
 
+Every ``/model <family>`` injection (the auto-restore above, and the manual
+override below) sends a SECOND, confirming Enter after the normal submit:
+Claude Code's model switch shows a confirmation dialog that the ordinary
+single-Enter submit does not clear. The count is configurable via
+``CCY_MODEL_CONFIRM_ENTERS`` (default 1). A session can also be switched
+on demand — for end-to-end testing, or a genuine manual override — by
+writing a ``<session>.model-switch-intent`` signal (mirroring the
+goal-intent signal) and consuming it at the same idle choke point, ahead of
+goal/effort/auto-model-restore. The CLI helper ``--emit-model-switch
+<family>`` writes one for whichever session owns the newest context
+sidecar; it does not start a supervisor.
+
 It also GUARDS the session against accidental terminal control keys that would
 otherwise freeze or kill it: Ctrl+Z (SUSP) is stripped from the forwarded input
 (``strip_suspend``) AND, belt-and-braces, the stop/quit SIGNALS are swallowed if
@@ -138,6 +150,10 @@ _DECISION_LOG_RETAIN_BYTES = 2 * 1024 * 1024
 _SUPERVISOR_STATUS_FILENAME = "supervisor-status.json"
 
 _USAGE = "Usage: claude-supervise.py [--dry-run | --arm] [--log PATH] -- <child argv...>\n"
+
+# CLI test-trigger mode: writes a manual model-switch signal and exits --
+# never starts a supervisor. See `_run_emit_model_switch`.
+_EMIT_MODEL_SWITCH_FLAG = "--emit-model-switch"
 
 # Opt-out env var for the startup banner + spinner (any non-empty value silences
 # them). The banner is also skipped whenever stderr is not a TTY (piped output,
@@ -962,6 +978,32 @@ def _model_restore_delay_from_env() -> float:
     return _parse_model_restore_delay(raw)
 
 
+# Every ``/model <family>`` injection -- the auto-restore above AND the
+# manual override signal below -- sends this many ADDITIONAL standalone
+# Enter keystrokes after the normal submit. Claude Code's model switch shows
+# a confirmation dialog that the ordinary single-Enter submit does not
+# clear, so without this the switch never completes.
+_DEFAULT_MODEL_CONFIRM_ENTERS = 1
+_MODEL_CONFIRM_ENTERS_ENV_VAR = "CCY_MODEL_CONFIRM_ENTERS"
+
+
+def _parse_model_confirm_enters(raw: str) -> int:
+    """Parse the confirm-Enter count override; junk or negative keeps default."""
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return _DEFAULT_MODEL_CONFIRM_ENTERS
+    return value if value >= 0 else _DEFAULT_MODEL_CONFIRM_ENTERS
+
+
+def _model_confirm_enters_from_env() -> int:
+    """Resolve the effective confirm-Enter count (env override or default)."""
+    raw = os.environ.get(_MODEL_CONFIRM_ENTERS_ENV_VAR)
+    if raw is None:
+        return _DEFAULT_MODEL_CONFIRM_ENTERS
+    return _parse_model_confirm_enters(raw)
+
+
 def _parse_min_effort_levels(raw: str) -> dict[str, str]:
     """Parse ``family=level,...`` overrides onto the default minimum map.
 
@@ -1068,6 +1110,10 @@ class CompactPolicy:
     # Plan 00278 Task 2b.3: quiet delay before the /model flip-back; <= 0
     # disables auto-restore. Env-resolved for the same host/worker agreement.
     model_restore_delay_seconds: float = field(default_factory=_model_restore_delay_from_env)
+    # Additional confirming Enters sent after every /model injection (both
+    # auto-restore and the manual switch signal). Env-resolved for the same
+    # host/worker agreement.
+    model_confirm_enters: int = field(default_factory=_model_confirm_enters_from_env)
 
 
 @dataclass(frozen=True)
@@ -1134,6 +1180,10 @@ class TickOutcome:
     # discard a stale reply from a previously timed-out tick. 0 on the
     # in-process path and on legacy replies without the field.
     tick_id: int = 0
+    # Additional confirming Enters the host must send after ``payload`` (only
+    # ever non-zero for a ``/model`` injection -- see ``_perform_injection``).
+    # 0 for every other decision and for legacy replies without the field.
+    confirm_enters: int = 0
 
 
 def _coerce_float(value: object) -> float:
@@ -1783,6 +1833,118 @@ def load_goal_signal(
     return None, None, None
 
 
+# ---------------------------------------------------------------------------
+# Manual model-switch signal (test trigger / deliberate override).
+#
+# Mirrors the goal-intent signal: a session-keyed file dropped into the
+# shared context-sidecar dir, consumed at the same idle choke point. Unlike
+# the daemon-written goal signal, this one is written by the supervisor's OWN
+# ``--emit-model-switch`` CLI helper -- there was previously no way to
+# trigger a ``/model`` switch on demand to verify the confirm-Enter fix
+# end-to-end.
+# ---------------------------------------------------------------------------
+
+_MODEL_SWITCH_SIGNAL_SUFFIX = ".model-switch-intent"
+_MODEL_SWITCH_SIGNAL_GLOB = f"*{_MODEL_SWITCH_SIGNAL_SUFFIX}"
+# Same idle-gate reasoning as the goal signal: plan-execution/test-trigger
+# start is usually an idle moment, but the input-box gate can defer, so the
+# window is generous. The signal is consumed on injection, so a generous TTL
+# cannot re-fire it.
+_DEFAULT_MODEL_SWITCH_SIGNAL_TTL_SECONDS = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS
+
+
+def _canonical_model_family(raw: object) -> str | None:
+    """Canonicalise a bare model-family token (e.g. ``mythos`` -> ``fable``).
+
+    Returns None when ``raw`` is not a string or names no known family. Exact
+    membership only -- unlike ``_model_family``'s token-containment scan over
+    a full model id, the model-switch signal always carries a bare family
+    token, never a model id string.
+    """
+    if not isinstance(raw, str):
+        return None
+    lowered = raw.strip().lower()
+    canonical = _MODEL_FAMILY_CANONICAL.get(lowered, lowered)
+    return canonical if canonical in _MODEL_FAMILY_RANKS else None
+
+
+def load_model_switch_signal(
+    directory: Path,
+    *,
+    now: float,
+    ttl_seconds: float = _DEFAULT_MODEL_SWITCH_SIGNAL_TTL_SECONDS,
+    own_sessions: frozenset[str] | None = None,
+) -> tuple[Path | None, str | None, str | None]:
+    """Return ``(path, canonical_family, reject_reason)`` for a switch signal.
+
+    Exactly one of the three shapes comes back: a valid fresh in-scope signal
+    yields ``(path, family, None)``; an in-scope fresh signal that FAILS
+    validation (unknown family, malformed JSON) yields ``(None, None,
+    reason)`` so the caller can log the rejection; no actionable signal at
+    all yields ``(None, None, None)``. Foreign-session and stale signals are
+    skipped silently, mirroring ``load_goal_signal``.
+    """
+    if not directory.is_dir():
+        return None, None, None
+    for path in sorted(directory.glob(_MODEL_SWITCH_SIGNAL_GLOB)):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None, None, f"unreadable/malformed model-switch signal {path.name}"
+        if not isinstance(data, dict):
+            return None, None, f"model-switch signal {path.name} is not a JSON object"
+        if not _session_in_scope(data.get("session_id"), own_sessions):
+            continue
+        if (now - _coerce_float(data.get("ts"))) > ttl_seconds:
+            continue
+        raw_family = data.get("family")
+        family = _canonical_model_family(raw_family)
+        if family is None:
+            return (
+                None,
+                None,
+                f"model-switch signal {path.name} names unknown family {raw_family!r}",
+            )
+        return path, family, None
+    return None, None, None
+
+
+def write_model_switch_signal(
+    directory: Path,
+    *,
+    session_id: str,
+    family: str,
+    now: float,
+) -> Path:
+    """Atomically write a manual model-switch signal (the CLI test trigger).
+
+    ``family`` is validated and canonicalised (e.g. ``mythos`` -> ``fable``)
+    the SAME way :func:`load_model_switch_signal` reads it back, so a round
+    trip through this writer always yields a family the reader accepts.
+    Raises ``ValueError`` for an unrecognised family -- fail fast on bad CLI
+    input rather than writing a signal the reader would only reject later.
+
+    Mirrors ``write_status_message``'s atomic-replace pattern: write to a
+    PRIVATE pid-qualified temp file, then ``os.replace`` (``Path.replace``)
+    swaps it in, so a concurrent reader (the supervisor's own tick) always
+    sees either no file or a COMPLETE one. This is a one-shot CLI helper, not
+    a hot-loop writer, so an ``OSError`` propagates to the caller rather than
+    being swallowed here.
+    """
+    canonical = _canonical_model_family(family)
+    if canonical is None:
+        raise ValueError(
+            f"unknown model family {family!r}; expected one of {sorted(_MODEL_FAMILY_RANKS)}"
+        )
+    directory.mkdir(parents=True, exist_ok=True)
+    signal_path = directory / f"{session_id}{_MODEL_SWITCH_SIGNAL_SUFFIX}"
+    payload = {"session_id": session_id, "ts": now, "family": canonical}
+    tmp_path = directory / f".{signal_path.name}.{os.getpid()}.tmp"
+    tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+    tmp_path.replace(signal_path)
+    return signal_path
+
+
 def reap_stale_sidecars(
     directory: Path,
     *,
@@ -1792,8 +1954,8 @@ def reap_stale_sidecars(
 ) -> list[Path]:
     """Delete dead context-sidecar / compaction-signal files older than the TTL.
 
-    Reaps ``*.json`` sidecars, ``*.compacting`` signals and ``*.goal-intent``
-    signals whose FILE MTIME
+    Reaps ``*.json`` sidecars, ``*.compacting`` signals, ``*.goal-intent``
+    signals and ``*.model-switch-intent`` signals whose FILE MTIME
     is older than ``ttl_seconds``. Mtime (not the JSON ``ts``) is used so a
     malformed, truncated, or foreign file is reaped uniformly without a parse --
     a dead file is a dead file. The single newest-mtime ``*.json`` is ALWAYS
@@ -1816,6 +1978,7 @@ def reap_stale_sidecars(
         list(directory.glob(_CONTEXT_SIDECAR_GLOB))
         + list(directory.glob(_COMPACTION_SIGNAL_GLOB))
         + list(directory.glob(_GOAL_SIGNAL_GLOB))
+        + list(directory.glob(_MODEL_SWITCH_SIGNAL_GLOB))
     ):
         try:
             mtime = path.stat().st_mtime
@@ -2475,6 +2638,12 @@ _INJECT_SUBMIT = "\r"
 # real Enter and submits regardless of payload length. This mirrors how
 # tmux/expect/pexpect drive a TUI: send text, then send Enter as its own key.
 _SUBMIT_DELAY_SECONDS = 0.2
+# A `/model <family>` switch shows a CONFIRMATION dialog after the command
+# line is submitted; a second, standalone Enter is needed to complete it, and
+# the dialog needs a moment to render before that keystroke lands. Kept
+# separate from _SUBMIT_DELAY_SECONDS (a different UI element, a different
+# render latency) rather than reusing the same constant for two purposes.
+_MODEL_CONFIRM_DELAY_SECONDS = 0.4
 
 _DEFAULT_POLL_SECONDS = 2.0
 _DEFAULT_IDLE_FLOOR_SECONDS = 2.0
@@ -2519,6 +2688,7 @@ def _perform_injection(
     payload: str,
     *,
     submit: bool = True,
+    confirm_enters: int = 0,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     """Type ``payload`` into the child PTY, optionally submitting it with Enter.
@@ -2531,12 +2701,22 @@ def _perform_injection(
 
     ``submit=False`` writes the payload with NO trailing Enter -- used for the
     raw ESC interrupt, which is a keypress, not a line to submit.
+
+    ``confirm_enters`` sends that many ADDITIONAL standalone Enter keystrokes
+    after the normal submit, each preceded by ``_MODEL_CONFIRM_DELAY_SECONDS``
+    -- a ``/model <family>`` switch shows a confirmation dialog that needs a
+    SECOND Enter to complete. Every other decision passes 0, making this loop
+    a no-op for them; it is also skipped entirely when ``submit=False`` (an
+    interrupt keypress is never followed by a confirmation dialog).
     """
     master_writer(payload.encode("utf-8"))
     if not submit:
         return
     sleep(_SUBMIT_DELAY_SECONDS)
     master_writer(_INJECT_SUBMIT.encode("utf-8"))
+    for _ in range(confirm_enters):
+        sleep(_MODEL_CONFIRM_DELAY_SECONDS)
+        master_writer(_INJECT_SUBMIT.encode("utf-8"))
 
 
 def _consume_signal(path: Path, log: DecisionLog | None) -> None:
@@ -2623,6 +2803,7 @@ def decide_once(
     foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS,
     own_sessions: frozenset[str] | None = None,
     goal_signal_ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS,
+    model_confirm_enters: int = _DEFAULT_MODEL_CONFIRM_ENTERS,
 ) -> TickOutcome:
     """Decide what to inject this tick WITHOUT touching the PTY (Plan 00164 P4).
 
@@ -2707,6 +2888,10 @@ def decide_once(
         foreground_ambiguous=foreground_ambiguous,
     )
     payload = _resolve_payload(evaluation.decision, dry_run=dry_run, now_wall=facts.now_wall)
+    # Additional confirming Enters for a /model injection (set by the manual
+    # switch branch and the auto-restore branch below); every other decision
+    # leaves this at 0, which is a no-op in _perform_injection.
+    confirm_enters = 0
     # Plan 00183: dry-run fires ONCE per session, once only. A dry-run marker is a
     # no-op on the environment (no real /compact), so context stays red and the
     # machine re-decides to act every episode -- and each marker is Enter-submitted,
@@ -2765,6 +2950,56 @@ def decide_once(
     # applies unchanged (a deferred goal keeps its signal and retries).
     decision_value = evaluation.decision.value
     reason = evaluation.reason
+    # ── Manual model-switch override (test trigger / deliberate override) ────
+    # Checked FIRST among the four subordinate families (ahead of goal, effort
+    # and auto-model-restore) so a deliberate switch is never starved by them
+    # -- but still strictly after compact/continue/escape above, so it can
+    # never disrupt an in-flight compaction. Unlike every other family, the
+    # injection gate here is `facts.input_line_empty` ONLY, not the full
+    # `can_inject` (which also requires the keystroke-idle floor): the whole
+    # point of a manual trigger is to fire promptly, and an empty input box is
+    # the one hard safety rail (never type into a box mid-composition).
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+    ):
+        switch_path, switch_family, switch_reject = load_model_switch_signal(
+            sidecar_dir,
+            now=facts.now_wall,
+            own_sessions=own_sessions,
+        )
+        if switch_reject is not None:
+            # Fail-closed: an in-scope signal that failed validation (unknown
+            # family, malformed JSON) is dropped and the reason is logged.
+            noop_reason_log = f"{_NOOP_LOG_PREFIX}: {switch_reject}"
+        elif switch_path is not None and switch_family is not None:
+            if not facts.input_line_empty:
+                if facts.idle:
+                    deferred_log = f"{_DEFERRED_LOG_PREFIX} (model-switch signal pending)"
+                else:
+                    noop_reason_log = (
+                        f"{_NOOP_LOG_PREFIX}: model-switch signal pending but session busy"
+                    )
+            else:
+                decision_value = Decision.WOULD_MODEL.value
+                model_command = f"{_MODEL_COMMAND} {switch_family}"
+                reason = f"model-switch signal -> would inject {model_command}"
+                if dry_run:
+                    payload = (
+                        f"{_format_bot_prefix(facts.now_wall)} "
+                        f"{_DRY_RUN_MODEL_BODY_PREFIX} {model_command}"
+                    )
+                else:
+                    payload = model_command
+                submit = True
+                confirm_enters = model_confirm_enters
+                # Consumed in dry-run too — the demonstration episode is
+                # spent either way, mirroring the goal signal's rule.
+                consume_signal_path = str(switch_path)
+                deferred_log = None
+                noop_reason_log = None
     if (
         payload is None
         and evaluation.decision is Decision.NOOP
@@ -2878,6 +3113,7 @@ def decide_once(
                 else:
                     payload = model_command
                 submit = True
+                confirm_enters = model_confirm_enters
                 deferred_log = None
                 noop_reason_log = None
     return TickOutcome(
@@ -2889,6 +3125,7 @@ def decide_once(
         deferred_log=deferred_log,
         machine_state=machine.export_state(),
         noop_reason_log=noop_reason_log,
+        confirm_enters=confirm_enters,
     )
 
 
@@ -2927,7 +3164,12 @@ def _apply_decision(
             log.write_noop("noop: stale /compact suppressed (host already awaiting compaction)")
         return False
     if outcome.payload is not None:
-        _perform_injection(master_writer, outcome.payload, submit=outcome.submit)
+        _perform_injection(
+            master_writer,
+            outcome.payload,
+            submit=outcome.submit,
+            confirm_enters=outcome.confirm_enters,
+        )
         if log is not None:
             log.write(f"{outcome.decision_value}: {outcome.reason}; injected {outcome.payload!r}")
         if outcome.consume_signal_path is not None:
@@ -2961,6 +3203,7 @@ def _poll_once(
     foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS,
     own_sessions: frozenset[str] | None = None,
     goal_signal_ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS,
+    model_confirm_enters: int = _DEFAULT_MODEL_CONFIRM_ENTERS,
 ) -> Evaluation:
     """One in-process supervisor tick: decide (``decide_once``) then inject.
 
@@ -2989,6 +3232,7 @@ def _poll_once(
         foreground_margin_seconds=foreground_margin_seconds,
         own_sessions=own_sessions,
         goal_signal_ttl_seconds=goal_signal_ttl_seconds,
+        model_confirm_enters=model_confirm_enters,
     )
     injected = _apply_decision(outcome, master_writer=master_writer, log=log)
     # Count a goal injection against the family cap only on SUCCESS (Plan
@@ -3056,6 +3300,7 @@ def _outcome_to_json(outcome: TickOutcome) -> str:
             "machine_state": outcome.machine_state,
             "noop_reason_log": outcome.noop_reason_log,
             "tick_id": outcome.tick_id,
+            "confirm_enters": outcome.confirm_enters,
         }
     )
 
@@ -3072,6 +3317,7 @@ def _outcome_from_json(line: str) -> TickOutcome:
         machine_state=data.get("machine_state"),
         noop_reason_log=data.get("noop_reason_log"),
         tick_id=int(data.get("tick_id", 0)),
+        confirm_enters=int(data.get("confirm_enters", 0)),
     )
 
 
@@ -3112,6 +3358,7 @@ def run_worker(
                 foreground_margin_seconds=policy.foreground_margin_seconds,
                 own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
                 goal_signal_ttl_seconds=policy.goal_signal_ttl_seconds,
+                model_confirm_enters=policy.model_confirm_enters,
             )
         except Exception:
             # SAFETY NET: a single tick's exception must not kill the worker
@@ -3728,6 +3975,63 @@ def _resolve_decision_log(explicit_path: Path | None) -> DecisionLog:
     return DecisionLog(explicit_path)
 
 
+def _newest_sidecar_session_id(directory: Path) -> str | None:
+    """Return the ``session_id`` of the newest (max-``ts``) context sidecar.
+
+    Mirrors the scan ``load_freshest_sidecar`` uses for the supervisor's own
+    current reading source, without the freshness/staleness filtering -- the
+    CLI trigger wants whichever session is CURRENTLY under supervision,
+    live or not, so it can target it explicitly.
+    """
+    scanned = _scan_sidecars(directory)
+    if not scanned:
+        return None
+    data, _ts = max(scanned, key=lambda pair: pair[1])
+    session_id = data.get("session_id")
+    return session_id if isinstance(session_id, str) and session_id else None
+
+
+def _run_emit_model_switch(argv: list[str]) -> int:
+    """CLI test-trigger: write a manual model-switch signal and exit.
+
+    Does NOT start a supervisor. Resolves the sidecar/signal directory the
+    SAME way the running supervisor does (`_default_sidecar_dir`) and targets
+    whichever session currently owns the newest context sidecar there.
+
+    Returns:
+        0 on success; 2 on a usage error (missing ``<family>`` argument);
+        1 when no sidecar can be found or the signal cannot be written.
+    """
+    index = argv.index(_EMIT_MODEL_SWITCH_FLAG)
+    if index + 1 >= len(argv):
+        sys.stderr.write(f"Usage: claude-supervise.py {_EMIT_MODEL_SWITCH_FLAG} <family>\n")
+        return 2
+    family_arg = argv[index + 1]
+    sidecar_dir = _default_sidecar_dir()
+    session_id = _newest_sidecar_session_id(sidecar_dir)
+    if session_id is None:
+        sys.stderr.write(
+            f"claude-supervise: no context sidecar found under {sidecar_dir} -- "
+            "is a supervised session running?\n"
+        )
+        return 1
+    try:
+        path = write_model_switch_signal(
+            sidecar_dir, session_id=session_id, family=family_arg, now=time.time()
+        )
+    except ValueError as exc:
+        sys.stderr.write(f"claude-supervise: {exc}\n")
+        return 1
+    except OSError as exc:
+        sys.stderr.write(f"claude-supervise: could not write model-switch signal: {exc}\n")
+        return 1
+    sys.stdout.write(
+        f"claude-supervise: wrote model-switch signal for session {session_id} "
+        f"-> {family_arg} ({path})\n"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point: parse args, run the PTY supervisor, return the exit code.
 
@@ -3740,6 +4044,12 @@ def main(argv: list[str] | None = None) -> int:
         child's exit code.
     """
     argv = argv if argv is not None else sys.argv[1:]
+
+    # CLI test-trigger mode: writes a manual model-switch signal and exits --
+    # never starts a supervisor, so it is checked before the worker/child-argv
+    # modes below.
+    if _EMIT_MODEL_SWITCH_FLAG in argv:
+        return _run_emit_model_switch(argv)
 
     # Policy-worker mode (Plan 00164 Phase 4): no child argv — read TickFacts
     # from stdin, write TickOutcomes to stdout. The host spawns this.

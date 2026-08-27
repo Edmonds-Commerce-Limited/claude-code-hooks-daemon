@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess  # nosec B404 - trusted, args-list only, no shell
 import sys
@@ -147,3 +148,72 @@ class TestSystemPythonRuntime:
 
         assert result.returncode == 2
         assert "usage" in result.stderr.lower()
+
+
+class TestEmitModelSwitch:
+    """``--emit-model-switch <family>`` writes a signal file; no supervisor starts."""
+
+    @staticmethod
+    def _write_sidecar(sidecar_dir: Path, *, session_id: str) -> None:
+        sidecar_dir.mkdir(parents=True, exist_ok=True)
+        (sidecar_dir / f"{session_id}.json").write_text(
+            json.dumps(
+                {
+                    "red": False,
+                    "critical": False,
+                    "compact_urgent": False,
+                    "tier": "ok",
+                    "pct": 10.0,
+                    "session_id": session_id,
+                    "ts": 1000.0,
+                    "seq": 1,
+                    "writer_pid": 1,
+                    "compacting": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_writes_signal_for_newest_sidecar_session(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+        sidecar_dir = tmp_path / ".claude" / "hooks-daemon" / "untracked" / "context-sidecar"
+        self._write_sidecar(sidecar_dir, session_id="sess-a")
+
+        exit_code = main(["--emit-model-switch", "fable"])
+
+        assert exit_code == 0
+        signal_path = sidecar_dir / "sess-a.model-switch-intent"
+        assert signal_path.exists()
+        data = json.loads(signal_path.read_text(encoding="utf-8"))
+        assert data["session_id"] == "sess-a"
+        assert data["family"] == "fable"
+        captured = capsys.readouterr()
+        assert "sess-a" in captured.out
+
+    def test_rejects_unknown_family(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+        sidecar_dir = tmp_path / ".claude" / "hooks-daemon" / "untracked" / "context-sidecar"
+        self._write_sidecar(sidecar_dir, session_id="sess-a")
+
+        exit_code = main(["--emit-model-switch", "not-a-family"])
+
+        assert exit_code == 1
+
+    def test_fails_without_any_sidecar(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+
+        exit_code = main(["--emit-model-switch", "fable"])
+
+        assert exit_code == 1
+
+    def test_missing_family_argument_is_usage_error(self) -> None:
+        exit_code = main(["--emit-model-switch"])
+
+        assert exit_code == 2
