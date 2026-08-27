@@ -1,6 +1,6 @@
 # Plan 00282: generate-docs / generate-playbook null-priority crash
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-27
 **Owner**: joseph
 **Priority**: High
@@ -87,16 +87,16 @@ repeat the bug.
 
 ### Phase 3: Verify
 
-- [ ] 🔄 **Task 3.1**: Daemon restarted RUNNING; `generate-docs` and
-  `generate-playbook` exit 0 on this repo with no doc drift. Full QA in
-  progress.
+- [x] ✅ **Task 3.1**: Daemon restarted RUNNING; `generate-docs` and
+  `generate-playbook` exit 0 on this repo with no doc drift. Full QA green —
+  25/25 PASSED, 14900 tests, coverage 95.1%.
 
 ## Success Criteria
 
-- [ ] Both generators produce output with a null/absent-priority handler entry.
-- [ ] One helper is the single source of truth across the three sites.
-- [ ] Regression test fails before the fix and passes after.
-- [ ] Full QA green; daemon restarts RUNNING.
+- [x] Both generators produce output with a null/absent-priority handler entry.
+- [x] One helper is the single source of truth across the three sites.
+- [x] Regression test fails before the fix and passes after.
+- [x] Full QA green; daemon restarts RUNNING.
 
 ## Dependencies
 
@@ -104,4 +104,7 @@ repeat the bug.
 
 ## Delivery & Milestones
 
-- <!-- delivery commit hashes -->
+- Fix delivered in commit `86ca861a` (shared `resolve_priority` helper; three
+  sites; docstring correction; CLI traceback logging; two-handler regression
+  tests). QA 25/25 green at delivery.
+- Plan completed and archived in the follow-up commit alongside this line.
