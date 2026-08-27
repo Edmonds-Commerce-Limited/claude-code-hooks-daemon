@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.handlers.status_line.downgrade_state import (
     evaluate_downgrade,
+    read_downgrade_counts,
     resolve_model_family,
     state_dir,
 )
@@ -31,6 +32,12 @@ _DOWNGRADE_COLOR: Final[str] = "\033[1;31m"
 _RESET: Final[str] = "\033[0m"
 _DEFAULT_EMOJI: Final[str] = "⚠️"
 _DEFAULT_LABEL_FORMAT: Final[str] = "{emoji}{high}→{current}"
+# Episode-tally suffix appended to the downgrade label so a STUCK session is
+# obvious at a glance: ↓ = times downgraded, ↑ = times recovered this session.
+# When the two disagree (↓ > ↑) the session is currently stranded on the lower
+# model — exactly the "why hasn't it switched back?" signal. Shown only while a
+# downgrade is active, so a healthy session still costs nothing.
+_DEFAULT_COUNTS_FORMAT: Final[str] = " ↓{down}↑{up}"
 _MODEL_FIELD: Final[str] = "model"
 _MODEL_ID_FIELD: Final[str] = "id"
 
@@ -48,6 +55,11 @@ class DowngradeIndicatorHandler(StatusLineHandlerBase):
         self._emoji: str = _DEFAULT_EMOJI
         self._label_format: str = _DEFAULT_LABEL_FORMAT
         self._color: str = _DOWNGRADE_COLOR
+        # Whether to append the ↓N↑M episode tally to the downgrade label, and
+        # how to format it. Overridable via handler options (show_counts /
+        # counts_format), matching the emoji/label_format/color convention.
+        self._show_counts: bool = True
+        self._counts_format: str = _DEFAULT_COUNTS_FORMAT
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return True
@@ -80,6 +92,11 @@ class DowngradeIndicatorHandler(StatusLineHandlerBase):
             label = self._label_format.format(
                 emoji=self._emoji, high=high_water_family, current=current
             )
+            if self._show_counts:
+                # evaluate_downgrade has just persisted this render's episode
+                # tally; read it back so the suffix reflects the current state.
+                down, up = read_downgrade_counts(dir_path, session_id)
+                label += self._counts_format.format(down=down, up=up)
             return f"{self._color}{label}{_RESET}"
         except RuntimeError as e:
             logger.warning("Skipping downgrade indicator (no project context): %s", e)

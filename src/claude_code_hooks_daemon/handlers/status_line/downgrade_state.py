@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
@@ -88,11 +89,38 @@ def state_dir(daemon_untracked_dir: Path) -> Path:
     return daemon_untracked_dir / _STATE_SUBDIR
 
 
-def _parse_high_water(text: str) -> tuple[str, int] | None:
-    """Parse one state file's text into ``(family, rank)``, or ``None``.
+# JSON keys for the episode tallies added on top of the high-water fields
+# (Plan 00278 continuation). Absent from files written before this feature —
+# `_parse_state` defaults them, so a legacy file reads back as zero counts.
+_STATE_KEY_DOWNGRADE_COUNT: Final[str] = "downgrade_count"
+_STATE_KEY_RECOVERY_COUNT: Final[str] = "recovery_count"
+_STATE_KEY_ACTIVE: Final[str] = "downgraded"
+
+
+@dataclass(frozen=True)
+class DowngradeRecord:
+    """One session's persisted downgrade state.
+
+    ``family``/``rank`` are the high-water mark; ``downgrade_count`` and
+    ``recovery_count`` tally EPISODES (transitions, not renders); ``active``
+    is whether a downgrade episode is currently open, so the next render can
+    tell an ongoing downgrade (no new count) from a fresh one.
+    """
+
+    family: str
+    rank: int
+    downgrade_count: int = 0
+    recovery_count: int = 0
+    active: bool = False
+
+
+def _parse_state(text: str) -> DowngradeRecord | None:
+    """Parse one state file's text into a ``DowngradeRecord``, or ``None``.
 
     Never raises: any malformed content is reported as "no prior state",
-    matching this package's fail-silent render-path contract.
+    matching this package's fail-silent render-path contract. The count and
+    ``active`` fields default when absent, so a file written before this
+    feature (family/rank only) parses cleanly as zero counts.
     """
     try:
         data: Any = json.loads(text)
@@ -102,17 +130,31 @@ def _parse_high_water(text: str) -> tuple[str, int] | None:
         return None
     family = data.get(_STATE_KEY_FAMILY)
     rank = data.get(_STATE_KEY_RANK)
-    if not isinstance(family, str) or not isinstance(rank, int):
+    # ``bool`` is an ``int`` subclass; exclude it so a stray ``true`` rank is
+    # rejected rather than silently read as 1.
+    if not isinstance(family, str) or not isinstance(rank, int) or isinstance(rank, bool):
         return None
-    return family, rank
+    return DowngradeRecord(
+        family=family,
+        rank=rank,
+        downgrade_count=_coerce_count(data.get(_STATE_KEY_DOWNGRADE_COUNT)),
+        recovery_count=_coerce_count(data.get(_STATE_KEY_RECOVERY_COUNT)),
+        active=bool(data.get(_STATE_KEY_ACTIVE, False)),
+    )
+
+
+def _coerce_count(value: Any) -> int:
+    """Return a non-negative int count, defaulting anything malformed to 0."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return value if value >= 0 else 0
 
 
 # One process-wide cache, keyed internally by path (one entry per session file)
 # — see `mtime_cache.py`. Re-parses only when a session's state file mtime
-# moves, which happens only on a genuine new high-water write.
-_HIGH_WATER_CACHE: MtimeCachedFile[tuple[str, int] | None] = MtimeCachedFile(
-    _parse_high_water, None
-)
+# moves, which happens only on a genuine state write (new high-water, or an
+# episode transition that bumps a count).
+_STATE_CACHE: MtimeCachedFile[DowngradeRecord | None] = MtimeCachedFile(_parse_state, None)
 
 
 def _session_state_path(dir_path: Path, session_id: str) -> Path:
@@ -120,31 +162,76 @@ def _session_state_path(dir_path: Path, session_id: str) -> Path:
     return dir_path / f"{safe_session_stem(session_id)}.json"
 
 
-def read_high_water(dir_path: Path, session_id: str) -> tuple[str, int] | None:
-    """Read this session's stored high-water ``(family, rank)``, or ``None``.
+def read_state(dir_path: Path, session_id: str) -> DowngradeRecord | None:
+    """Read this session's full ``DowngradeRecord``, or ``None`` if unset.
 
     Fail-silent: a missing, unreadable, or malformed state file returns
     ``None`` exactly like "no prior state" — the status line render must
     never raise.
     """
-    return _HIGH_WATER_CACHE.read(_session_state_path(dir_path, session_id))
+    return _STATE_CACHE.read(_session_state_path(dir_path, session_id))
 
 
-def write_high_water(dir_path: Path, session_id: str, family: str, rank: int) -> None:
-    """Atomically write this session's high-water ``(family, rank)``.
+def read_high_water(dir_path: Path, session_id: str) -> tuple[str, int] | None:
+    """Read this session's stored high-water ``(family, rank)``, or ``None``.
 
-    Uses a private-then-replace write (tmp file + ``os.replace``, POSIX-atomic)
-    so a concurrent reader — another render of the same session, or a peer
-    session sharing the daemon (Plan 00127) — never observes a half-written
-    file.
+    Thin projection of :func:`read_state`, kept as the stable public accessor
+    the downgrade evaluation and its tests already use.
+    """
+    record = read_state(dir_path, session_id)
+    return (record.family, record.rank) if record is not None else None
+
+
+def read_downgrade_counts(dir_path: Path, session_id: str) -> tuple[int, int]:
+    """Read this session's ``(downgrade_count, recovery_count)`` tally.
+
+    Returns ``(0, 0)`` when there is no state yet or the file predates the
+    tally fields — never raises, matching the render-path contract.
+    """
+    record = read_state(dir_path, session_id)
+    if record is None:
+        return (0, 0)
+    return (record.downgrade_count, record.recovery_count)
+
+
+def _atomic_write(dir_path: Path, session_id: str, payload: dict[str, Any]) -> None:
+    """Atomically replace this session's state file with ``payload``.
+
+    Private-then-replace (tmp file + ``os.replace``, POSIX-atomic) so a
+    concurrent reader — another render of the same session, or a peer session
+    sharing the daemon (Plan 00127) — never observes a half-written file.
     """
     dir_path.mkdir(parents=True, exist_ok=True)
     stem = safe_session_stem(session_id)
     path = dir_path / f"{stem}.json"
     tmp_path = dir_path / f".{stem}.{os.getpid()}.tmp"
-    payload: dict[str, Any] = {_STATE_KEY_FAMILY: family, _STATE_KEY_RANK: rank}
     tmp_path.write_text(json.dumps(payload), encoding="utf-8")
     tmp_path.replace(path)
+
+
+def write_high_water(dir_path: Path, session_id: str, family: str, rank: int) -> None:
+    """Atomically write this session's high-water ``(family, rank)``.
+
+    Writes the MINIMAL record (no tally fields) — used to seed state and kept
+    for backward compatibility. Episode tallies are maintained by
+    :func:`evaluate_downgrade` via :func:`write_state`.
+    """
+    _atomic_write(dir_path, session_id, {_STATE_KEY_FAMILY: family, _STATE_KEY_RANK: rank})
+
+
+def write_state(dir_path: Path, session_id: str, record: DowngradeRecord) -> None:
+    """Atomically persist a full ``DowngradeRecord`` (high-water + tallies)."""
+    _atomic_write(
+        dir_path,
+        session_id,
+        {
+            _STATE_KEY_FAMILY: record.family,
+            _STATE_KEY_RANK: record.rank,
+            _STATE_KEY_DOWNGRADE_COUNT: record.downgrade_count,
+            _STATE_KEY_RECOVERY_COUNT: record.recovery_count,
+            _STATE_KEY_ACTIVE: record.active,
+        },
+    )
 
 
 def evaluate_downgrade(
@@ -169,11 +256,52 @@ def evaluate_downgrade(
         A downgrade render never rewrites the stored high-water, so the
         session's true peak survives a sustained downgrade and a later
         recovery is judged against it, not against the degraded value.
+
+    Side effect: maintains the per-session EPISODE tallies (see
+    :func:`read_downgrade_counts`). A downgrade increments ``downgrade_count``
+    exactly once — on the render that OPENS the episode, not on every
+    sustained render — and a return to (or above) the high-water increments
+    ``recovery_count`` once and closes the episode. The state file is written
+    only on these transitions and on a new high-water, so a sustained
+    downgrade or a steady healthy session still costs a single ``stat()``.
     """
-    prior = read_high_water(dir_path, session_id)
-    if prior is None or current_rank > prior[1]:
-        write_high_water(dir_path, session_id, current_family, current_rank)
+    prior = read_state(dir_path, session_id)
+
+    # First render for this session — seed the high-water, no episode yet.
+    if prior is None:
+        write_state(dir_path, session_id, DowngradeRecord(current_family, current_rank))
         return None
-    if current_rank < prior[1]:
-        return prior[0], current_family
-    return None
+
+    down, recovery, active = prior.downgrade_count, prior.recovery_count, prior.active
+
+    # New high-water. If a downgrade episode was open, climbing to a new peak
+    # is itself a recovery — count it and close the episode.
+    if current_rank > prior.rank:
+        if active:
+            recovery += 1
+        write_state(
+            dir_path,
+            session_id,
+            DowngradeRecord(current_family, current_rank, down, recovery, active=False),
+        )
+        return None
+
+    # Back at the high-water rank. If an episode was open, this closes it.
+    if current_rank == prior.rank:
+        if active:
+            write_state(
+                dir_path,
+                session_id,
+                DowngradeRecord(prior.family, prior.rank, down, recovery + 1, active=False),
+            )
+        return None
+
+    # Below the high-water — an active downgrade. Count it once, when the
+    # episode opens; a sustained downgrade writes nothing further.
+    if not active:
+        write_state(
+            dir_path,
+            session_id,
+            DowngradeRecord(prior.family, prior.rank, down + 1, recovery, active=True),
+        )
+    return prior.family, current_family

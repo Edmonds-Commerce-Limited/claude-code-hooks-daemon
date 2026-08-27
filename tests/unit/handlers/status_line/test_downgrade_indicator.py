@@ -102,6 +102,40 @@ class TestDowngradeIndicatorHandler:
         assert "fable" in segment
         assert "opus" in segment
 
+    def test_downgrade_segment_carries_episode_counts(
+        self, handler: DowngradeIndicatorHandler
+    ) -> None:
+        handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
+        result = handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))
+        segment = result.context[0]
+        # First downgrade episode: one down, zero recoveries.
+        assert "↓1" in segment
+        assert "↑0" in segment
+
+    def test_counts_show_stuck_session_after_flap(
+        self, handler: DowngradeIndicatorHandler
+    ) -> None:
+        handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))  # HW fable
+        handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))  # down 1
+        handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))  # up 1
+        result = handler.handle(
+            _hook_input(session_id="sess-a", model_id="claude-opus-4-6")
+        )  # down 2
+        segment = result.context[0]
+        # ↓2 > ↑1 -> the session is currently stranded on the lower model.
+        assert "↓2" in segment
+        assert "↑1" in segment
+
+    def test_show_counts_option_suppresses_the_suffix(
+        self, handler: DowngradeIndicatorHandler
+    ) -> None:
+        handler._show_counts = False
+        handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))
+        result = handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))
+        segment = result.context[0]
+        assert "fable" in segment and "opus" in segment
+        assert "↓" not in segment
+
     def test_render_back_on_fable_after_downgrade_is_silent_recovery(
         self, handler: DowngradeIndicatorHandler
     ) -> None:

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.handlers.status_line.downgrade_state import (
     evaluate_downgrade,
+    read_downgrade_counts,
     read_high_water,
     resolve_model_family,
     state_dir,
@@ -129,3 +130,61 @@ class TestEvaluateDowngrade:
         result = evaluate_downgrade(tmp_path, "sess-b", "opus", 2)
         assert result is None
         assert read_high_water(tmp_path, "sess-b") == ("opus", 2)
+
+
+class TestDowngradeCounts:
+    """Per-session tally of downgrade EPISODES and recoveries (Plan 00278).
+
+    Counts transitions, not renders: a sustained downgrade increments the
+    downgrade count exactly once, and a return to (or above) the high-water
+    increments the recovery count exactly once. A stuck session then shows
+    downgrades > recoveries, which is the signal the status line surfaces.
+    """
+
+    def test_counts_start_at_zero(self, tmp_path: Path) -> None:
+        evaluate_downgrade(tmp_path, "s", "fable", 3)
+        assert read_downgrade_counts(tmp_path, "s") == (0, 0)
+
+    def test_missing_state_reports_zero_counts(self, tmp_path: Path) -> None:
+        assert read_downgrade_counts(tmp_path, "s") == (0, 0)
+
+    def test_downgrade_increments_once_per_episode(self, tmp_path: Path) -> None:
+        write_high_water(tmp_path, "s", "fable", 3)
+        assert evaluate_downgrade(tmp_path, "s", "opus", 2) == ("fable", "opus")
+        # A SUSTAINED downgrade (another render on the same lower family) must
+        # not double-count the same episode.
+        evaluate_downgrade(tmp_path, "s", "opus", 2)
+        assert read_downgrade_counts(tmp_path, "s") == (1, 0)
+
+    def test_recovery_increments_recovery_count(self, tmp_path: Path) -> None:
+        write_high_water(tmp_path, "s", "fable", 3)
+        evaluate_downgrade(tmp_path, "s", "opus", 2)
+        evaluate_downgrade(tmp_path, "s", "fable", 3)
+        assert read_downgrade_counts(tmp_path, "s") == (1, 1)
+
+    def test_flapping_counts_each_episode_and_shows_stuck(self, tmp_path: Path) -> None:
+        write_high_water(tmp_path, "s", "fable", 3)
+        evaluate_downgrade(tmp_path, "s", "opus", 2)  # down 1
+        evaluate_downgrade(tmp_path, "s", "fable", 3)  # up 1
+        evaluate_downgrade(tmp_path, "s", "opus", 2)  # down 2 — and stays there
+        # down (2) > up (1): the session is currently stranded on the lower model.
+        assert read_downgrade_counts(tmp_path, "s") == (2, 1)
+
+    def test_climbing_above_prior_high_while_downgraded_counts_recovery(
+        self, tmp_path: Path
+    ) -> None:
+        write_high_water(tmp_path, "s", "opus", 2)
+        evaluate_downgrade(tmp_path, "s", "sonnet", 1)  # down 1
+        # Jump straight to a NEW high (fable outranks the opus high-water):
+        # still a recovery from the open episode.
+        evaluate_downgrade(tmp_path, "s", "fable", 3)
+        assert read_downgrade_counts(tmp_path, "s") == (1, 1)
+        assert read_high_water(tmp_path, "s") == ("fable", 3)
+
+    def test_legacy_state_without_count_fields_reads_zero(self, tmp_path: Path) -> None:
+        # A state file written before this feature (only family/rank) must read
+        # back as zero counts, never raise.
+        write_high_water(tmp_path, "s", "fable", 3)
+        raw = json.loads((tmp_path / "s.json").read_text(encoding="utf-8"))
+        assert "downgrade_count" not in raw  # write_high_water stays minimal
+        assert read_downgrade_counts(tmp_path, "s") == (0, 0)
