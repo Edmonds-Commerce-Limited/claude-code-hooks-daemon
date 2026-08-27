@@ -112,9 +112,7 @@ class TestDowngradeIndicatorHandler:
         assert "↓1" in segment
         assert "↑0" in segment
 
-    def test_counts_show_stuck_session_after_flap(
-        self, handler: DowngradeIndicatorHandler
-    ) -> None:
+    def test_counts_show_stuck_session_after_flap(self, handler: DowngradeIndicatorHandler) -> None:
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))  # HW fable
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-opus-4-6"))  # down 1
         handler.handle(_hook_input(session_id="sess-a", model_id="claude-fable-1-0"))  # up 1
