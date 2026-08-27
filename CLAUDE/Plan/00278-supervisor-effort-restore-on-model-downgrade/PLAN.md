@@ -61,17 +61,32 @@ effective capability when it happens anyway.
 
 ## Context & Background
 
+- **Field report**:
+  [FIELD-REPORT-fable-cyber-flags.md](FIELD-REPORT-fable-cyber-flags.md)
+  (imported, generalised) documents the trigger: Fable's API-side `[cyber]`
+  classifier keys on attack-mechanics CONTENT not intent, the fallback is
+  session-scoped and silent (one estate ran degraded ~5.5h unnoticed), and the
+  transcript JSONL records `model_refusal_fallback` /
+  `content[].type == "fallback"` records. It ships a repo-level mitigation
+  (opus-security subagent + trigger skill + path rule, delegate-BEFORE-reading
+  invariant, clean-summary contract) and proposes two daemon handlers
+  (`fable_flaggable_advisor`, `model_fallback_detector`) — direct input to
+  Phase 3.
+
 - Sensor: `src/claude_code_hooks_daemon/handlers/status_line/context_sidecar.py`
   already writes `model_id` per render; `model_context.py` already reads the
   live effort from `hook_input["effort"]["level"]` — the sidecar addition
   reuses that extraction rule (live field only; the settings.json fallback is
   a display concern, not a sensor concern).
+
 - Actuator: `.claude/ccy/claude-supervise.py` `decide_once()` composes the
   tick decision; goal injection (Plan 00269) is the closest template —
   per-family cap, success-only counting, empty-input-box deferral.
+
 - Model family ranking (highest first): fable/mythos, opus, sonnet, haiku —
   matched by substring on `model_id`. A transition from a higher-ranked to a
   lower-ranked family is a downgrade. Unknown families never trigger.
+
 - Session identity: the downgrade must be observed on the SAME `session_id`
   (a thread/terminal switch to a different session is not a downgrade).
 
@@ -85,26 +100,51 @@ effective capability when it happens anyway.
 
 ### Phase 2: Supervisor downgrade detector (actuator)
 
-- [ ] ⬜ **Task 2.1**: TDD — model family classifier + ranking in
+- [x] ✅ **Task 2.1**: TDD — model family classifier + ranking in
   `claude-supervise.py` (pure functions; unknown → no rank).
-- [ ] ⬜ **Task 2.2**: TDD — per-session model tracking in the tick decision
+- [x] ✅ **Task 2.2**: TDD — per-session model tracking in the tick decision
   path: remember `(session_id, family)` from the last foreground reading;
   on ranked downgrade with effort not in {xhigh, max}, decide an effort
   injection with payload `/effort xhigh`; one-shot cap per downgrade,
   reset when the family recovers; state carried in the machine state dict
   so host and worker never diverge.
-- [ ] ⬜ **Task 2.3**: TDD — injection wiring: dry-run marker vs armed real
+- [x] ✅ **Task 2.3**: TDD — injection wiring: dry-run marker vs armed real
   command, empty-input-box deferral, decision.log lines, success-only cap
   counting (mirror goal injection).
 
+### Phase 2b: Per-model minimum effort + model restore (joseph, 2026-08-27)
+
+- [x] ✅ **Task 2b.1**: Research — confirm via the Claude Code guide whether
+  an OFFICIAL per-model minimum/default effort mechanism exists. Answer: NO
+  (Decision 4) — effort is a single global setting that survives a
+  safety-triggered fallback unchanged; the supervisor mechanism stands.
+- [ ] ⬜ **Task 2b.2**: Design + TDD — per-model minimum effort map in the
+  supervisor (e.g. fable: low, opus: high, sonnet: high; configurable): when
+  the foreground sidecar's live effort ranks BELOW the configured minimum for
+  its model family, inject `/effort <minimum>`. Subsumes the Phase 2
+  downgrade trigger (which becomes the special case "opus minimum = xhigh
+  after a downgrade") — reconcile the two so there is ONE effort-injection
+  family.
+- [ ] ⬜ **Task 2b.3**: Design + TDD — model restore: the fallback is
+  session-sticky, but flipping back manually works once the flaggable turn
+  has passed. After a detected downgrade, inject `/model fable` a configured
+  interval after the block (measured in supervisor-observable units — sidecar
+  render progress/time, since the supervisor cannot count turns directly),
+  followed by the effort logic re-applying if needed. Guard against a
+  flip-flop loop (re-downgrade backoff/cap).
+
 ### Phase 3: Security-work delegation (prevention)
 
-- [ ] ⬜ **Task 3.1**: Design — decide the surface(s): a PreToolUse/
-  UserPromptSubmit advisory that recognises security-flavoured work in the
-  MAIN thread and advises delegating it to an Opus subagent; and/or resident
-  guidance via `get_claude_md()`. Record the trigger heuristics (what counts
-  as security-flavoured without false-positiving normal handler work in this
-  security-tooling repo) as a Technical Decision before implementing.
+- [ ] ⬜ **Task 3.1**: Design — decide the surface(s), taking the field
+  report's proposals as the starting point: `fable_flaggable_advisor`
+  (advisory, configurable flaggable path globs + topic terms, pointing at an
+  opus-security subagent) and `model_fallback_detector` (advisory scan of the
+  live transcript for `model_refusal_fallback` records — the report calls
+  this the highest-value, lowest-risk piece). Honour the report's boundaries:
+  delegate-BEFORE-reading (decide from framing/path, never by opening the
+  content), clean-summary contract, and a NARROW trigger set (only
+  attack-mechanics-describing work delegates — not all security work).
+  Record trigger heuristics as a Technical Decision before implementing.
 - [ ] ⬜ **Task 3.2**: TDD — implement the chosen surface(s); advisory-only,
   never blocking; rate-limited per session.
 - [ ] ⬜ **Task 3.3**: Dogfood — enable in this repo's config; verify the
@@ -151,6 +191,18 @@ opus→sonnet fallbacks too, and unknown ids are inert.
 **Decision**: sidecar carries the live effort; the detector treats null as
 "unknown → inject anyway" (the injection is idempotent and visible), and
 skips only on a positive xhigh/max reading.
+**Date**: 2026-08-27
+
+### Decision 4: No official per-model effort exists — supervisor owns it
+
+**Context**: Task 2b.1 — checked the Claude Code guide before building.
+**Decision**: Claude Code has NO per-model effort configuration: `effortLevel`
+(settings.json) / `CLAUDE_CODE_EFFORT_LEVEL` are single global settings, and
+the docs state the effort setting carries over unchanged through a
+safety-triggered model fallback with no documented reset. Skill/agent
+frontmatter `effort:` covers only skill/subagent scope. So the per-model
+minimum map (Task 2b.2) is legitimately the supervisor's job, not a
+reimplementation of an official feature.
 **Date**: 2026-08-27
 
 ## Success Criteria

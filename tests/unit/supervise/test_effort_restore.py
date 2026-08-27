@@ -1,0 +1,253 @@
+"""Plan 00278 — supervisor effort restore on model downgrade.
+
+A session downgraded from a higher-ranked model family (fable/mythos) to a
+lower one (opus) inherits its previous effort setting — "fable low" must fall
+through to "opus xhigh", not "opus low". The supervisor tracks the foreground
+sidecar's model family per session and, on a ranked downgrade with the live
+effort not already xhigh/max, injects ``/effort xhigh`` once, at the same
+injection choke point (idle + empty input box) as the other families.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING
+
+from tests.unit.supervise._load import load_supervisor_module
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+_mod = load_supervisor_module()
+
+_NOW = 20_000.0
+_SESSION = "effort-sess-1"
+
+
+def _facts(now: float = _NOW, *, idle: bool = True, input_line_empty: bool = True) -> object:
+    return _mod.TickFacts(
+        now_wall=now,
+        idle=idle,
+        input_line_empty=input_line_empty,
+        human_compact_submitted=False,
+        work_idle=True,
+    )
+
+
+def _write_sidecar(
+    sidecar_dir: Path,
+    *,
+    session_id: str = _SESSION,
+    model_id: str = "claude-fable-5",
+    effort: str | None = "low",
+    ts: float = _NOW - 1.0,
+) -> Path:
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    path = sidecar_dir / f"{session_id}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "red": False,
+                "critical": False,
+                "compact_urgent": False,
+                "tier": "ok",
+                "pct": 20.0,
+                "session_id": session_id,
+                "ts": ts,
+                "seq": 1,
+                "writer_pid": 42,
+                "compacting": False,
+                "model_id": model_id,
+                "effort": effort,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _machine():
+    return _mod.CompactStateMachine(_mod.CompactPolicy())
+
+
+def _decide(sidecar_dir: Path, machine, *, dry_run: bool = False, facts: object | None = None):
+    policy = _mod.CompactPolicy()
+    return _mod.decide_once(
+        machine,
+        sidecar_dir=sidecar_dir,
+        facts=facts or _facts(),
+        dry_run=dry_run,
+        freshness_seconds=policy.freshness_seconds,
+    )
+
+
+def _downgrade(sidecar_dir: Path, machine, *, effort: str | None = "low", dry_run: bool = False):
+    """Tick once on fable, then tick after a switch to opus; return the outcome."""
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW - 2.0)
+    _decide(sidecar_dir, machine, dry_run=dry_run)
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort=effort, ts=_NOW - 0.5)
+    return _decide(sidecar_dir, machine, dry_run=dry_run)
+
+
+# ── Family classifier ────────────────────────────────────────────────────────
+
+
+def test_model_family_recognises_known_families() -> None:
+    assert _mod._model_family("claude-fable-5") == "fable"
+    assert _mod._model_family("claude-mythos-5") == "fable"
+    assert _mod._model_family("claude-opus-4-8") == "opus"
+    assert _mod._model_family("claude-sonnet-5") == "sonnet"
+    assert _mod._model_family("claude-haiku-4-5-20251001") == "haiku"
+
+
+def test_model_family_unknown_is_none() -> None:
+    assert _mod._model_family("") is None
+    assert _mod._model_family("gpt-5") is None
+
+
+def test_family_ranking_orders_fable_above_opus_above_sonnet_above_haiku() -> None:
+    ranks = [_mod._family_rank(f) for f in ("haiku", "sonnet", "opus", "fable")]
+    assert ranks == sorted(ranks)
+    assert len(set(ranks)) == 4
+
+
+# ── Downgrade detection → injection ──────────────────────────────────────────
+
+
+def test_fable_to_opus_downgrade_injects_effort_xhigh(tmp_path: Path) -> None:
+    outcome = _downgrade(tmp_path / "cs", _machine())
+    assert outcome.decision_value == "would-effort"
+    assert outcome.payload == "/effort xhigh"
+    assert outcome.submit is True
+
+
+def test_dry_run_injects_visible_marker(tmp_path: Path) -> None:
+    outcome = _downgrade(tmp_path / "cs", _machine(), dry_run=True)
+    assert outcome.decision_value == "would-effort"
+    assert outcome.payload is not None
+    assert not outcome.payload.startswith("/effort")
+    assert "dry-run" in outcome.payload
+
+
+def test_upgrade_does_not_inject(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", ts=_NOW - 2.0)
+    _decide(sidecar_dir, machine)
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 0.5)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.decision_value == "noop"
+    assert outcome.payload is None
+
+
+def test_stable_model_does_not_inject(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 2.0)
+    _decide(sidecar_dir, machine)
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 0.5)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.payload is None
+
+
+def test_different_session_switch_is_not_a_downgrade(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, session_id="sess-a", model_id="claude-fable-5", ts=_NOW - 2.0)
+    _decide(sidecar_dir, machine)
+    _write_sidecar(sidecar_dir, session_id="sess-b", model_id="claude-opus-5", ts=_NOW + 100.0)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(_NOW + 101.0))
+    assert outcome.payload is None
+
+
+def test_already_xhigh_does_not_inject(tmp_path: Path) -> None:
+    outcome = _downgrade(tmp_path / "cs", _machine(), effort="xhigh")
+    assert outcome.payload is None
+
+
+def test_already_max_does_not_inject(tmp_path: Path) -> None:
+    outcome = _downgrade(tmp_path / "cs", _machine(), effort="max")
+    assert outcome.payload is None
+
+
+def test_unknown_effort_still_injects(tmp_path: Path) -> None:
+    outcome = _downgrade(tmp_path / "cs", _machine(), effort=None)
+    assert outcome.decision_value == "would-effort"
+    assert outcome.payload == "/effort xhigh"
+
+
+# ── Gates, retry, cap ────────────────────────────────────────────────────────
+
+
+def test_deferred_while_input_box_not_empty_then_retries(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 2.0)
+    _decide(sidecar_dir, machine)
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", ts=_NOW - 0.5)
+    busy = _decide(sidecar_dir, machine, facts=_facts(input_line_empty=False))
+    assert busy.payload is None
+    # Pending survives the deferral; the next unobstructed tick fires.
+    retry = _decide(sidecar_dir, machine)
+    assert retry.decision_value == "would-effort"
+
+
+def test_success_mark_clears_pending_and_counts(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    outcome = _downgrade(sidecar_dir, machine)
+    assert outcome.decision_value == "would-effort"
+    machine.mark_effort_injection()
+    assert machine.effort_injections == 1
+    # No re-fire while the family stays downgraded.
+    again = _decide(sidecar_dir, machine)
+    assert again.payload is None
+
+
+def test_recovery_clears_pending(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _downgrade(sidecar_dir, machine)
+    # Model recovers before the injection ever landed.
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 0.1)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.payload is None
+
+
+def test_effort_becoming_xhigh_clears_pending(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _downgrade(sidecar_dir, machine, effort="low")
+    # Someone (human or otherwise) already raised the effort.
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=_NOW - 0.1)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.payload is None
+
+
+def test_injection_cap(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    for _ in range(_mod._MAX_EFFORT_INJECTIONS):
+        machine.mark_effort_injection()
+    outcome = _downgrade(sidecar_dir, machine)
+    assert outcome.payload is None
+
+
+# ── Worker round-trip ────────────────────────────────────────────────────────
+
+
+def test_effort_state_round_trips_through_export_import(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 2.0)
+    _decide(sidecar_dir, machine)
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", ts=_NOW - 0.5)
+    _decide(sidecar_dir, machine, facts=_facts(input_line_empty=False))  # pending, deferred
+    clone = _machine()
+    clone.import_state(machine.export_state())
+    # The clone (a fresh worker) fires from the imported pending state.
+    outcome = _decide(sidecar_dir, clone)
+    assert outcome.decision_value == "would-effort"
+    machine.mark_effort_injection()
+    clone.import_state(machine.export_state())
+    assert clone.effort_injections == 1

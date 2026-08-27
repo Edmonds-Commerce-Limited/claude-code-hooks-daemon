@@ -20,6 +20,14 @@ session. In DRY-RUN (default) that injection is a harmless VISIBLE MARKER,
 proving the mechanism end-to-end without a real compaction; with ``--arm`` it
 injects the real ``/compact`` (and ``continue``).
 
+Two further injection families share the same choke point (idle + empty input
+box, subordinate to compact/continue): a ``/goal`` typed from a daemon-written
+goal-intent signal (Plan 00269), and ``/effort xhigh`` typed once when the
+sidecar's model_id shows a ranked model-family DOWNGRADE for the same session
+— e.g. a security-triggered fable → opus switch must fall through to opus at
+xhigh effort, not inherit fable's low (Plan 00278; skipped when the live
+effort already reads xhigh/max).
+
 It also GUARDS the session against accidental terminal control keys that would
 otherwise freeze or kill it: Ctrl+Z (SUSP) is stripped from the forwarded input
 (``strip_suspend``) AND, belt-and-braces, the stop/quit SIGNALS are swallowed if
@@ -843,6 +851,7 @@ class Decision(enum.Enum):
     WOULD_CONTINUE = "would-continue"
     WOULD_ESCAPE = "would-escape"
     WOULD_GOAL = "would-goal"
+    WOULD_EFFORT = "would-effort"
 
 
 class SupervisorState(enum.Enum):
@@ -874,6 +883,10 @@ class SidecarReading:
     writer_pid: int
     compacting: bool
     stale: bool
+    # Plan 00278: model identity and live effort level, for the model-downgrade
+    # effort-restore family. Defaults cover sidecars predating the fields.
+    model_id: str = ""
+    effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1452,7 +1465,14 @@ def _build_sidecar_reading(
         writer_pid=_coerce_int(data.get("writer_pid")),
         compacting=bool(data.get("compacting", False)),
         stale=(now - ts) > freshness_seconds,
+        model_id=str(data.get("model_id", "")),
+        effort=_coerce_optional_str(data.get("effort")),
     )
+
+
+def _coerce_optional_str(value: object) -> str | None:
+    """Return ``value`` as a string, or None for anything non-string."""
+    return value if isinstance(value, str) else None
 
 
 def load_compaction_signal(
@@ -1531,6 +1551,47 @@ _GOAL_MAX_LOGICAL_LINES = 8
 # (each signal is also consumed on injection).
 _MAX_GOAL_INJECTIONS = 5
 _DRY_RUN_GOAL_BODY_PREFIX = "would inject /goal (dry-run — no real /goal sent):"
+
+# ── Effort restore on model downgrade (Plan 00278) ──────────────────────────
+# A session downgraded from a higher-ranked model family (e.g. a
+# security-triggered fable → opus switch) inherits its previous effort
+# setting; "fable low" must fall through to "opus xhigh", not "opus low".
+# The supervisor tracks the foreground sidecar's model family per session and
+# injects the restore command once per downgrade episode.
+#
+# Ascending capability rank; "mythos" shares fable's rank (same underlying
+# model). Matched by token containment on the sidecar's model_id; unknown
+# ids have no rank and never trigger.
+_MODEL_FAMILY_RANKS: dict[str, int] = {
+    "haiku": 0,
+    "sonnet": 1,
+    "opus": 2,
+    "fable": 3,
+    "mythos": 3,
+}
+# "mythos" is an alias: _model_family canonicalises it to "fable".
+_MODEL_FAMILY_CANONICAL: dict[str, str] = {"mythos": "fable"}
+_EFFORT_RESTORE_COMMAND = "/effort xhigh"
+# Effort levels that mean the session is already running hot enough — a
+# positive reading of one of these suppresses the restore.
+_HIGH_EFFORT_LEVELS = frozenset({"xhigh", "max"})
+# Family-specific per-process cap: a flapping model_id cannot type forever.
+_MAX_EFFORT_INJECTIONS = 3
+_DRY_RUN_EFFORT_BODY_PREFIX = "would inject /effort (dry-run — no real /effort sent):"
+
+
+def _model_family(model_id: str) -> str | None:
+    """Return the canonical model family for ``model_id``, or None if unknown."""
+    lowered = model_id.lower()
+    for token in _MODEL_FAMILY_RANKS:
+        if token in lowered:
+            return _MODEL_FAMILY_CANONICAL.get(token, token)
+    return None
+
+
+def _family_rank(family: str) -> int:
+    """Return the capability rank of a known family (KeyError on unknown)."""
+    return _MODEL_FAMILY_RANKS[family]
 
 
 def _validate_goal_lines(rendered_lines: object) -> tuple[str | None, str | None]:
@@ -1729,6 +1790,65 @@ class CompactStateMachine:
         # signals are consumed on injection, so this only ever matters under a
         # signal storm; per-process lifetime, never reset.
         self._goal_injections = 0
+        # Plan 00278: model-downgrade effort-restore tracking. The last
+        # observed (session, family) pair, a pending-restore episode key
+        # ("session:family", cleared on success/recovery), and the family cap.
+        self._last_model_session: str | None = None
+        self._last_model_family: str | None = None
+        self._effort_pending: str | None = None
+        self._effort_injections = 0
+
+    @property
+    def effort_pending(self) -> str | None:
+        """Pending effort-restore episode key, or None (Plan 00278)."""
+        return self._effort_pending
+
+    @property
+    def effort_injections(self) -> int:
+        """How many effort injections this process has fired (Plan 00278)."""
+        return self._effort_injections
+
+    def mark_effort_injection(self) -> None:
+        """Count a fired effort restore and close the pending episode.
+
+        Called by the HOST only after a SUCCESSFUL injection — a failed PTY
+        write keeps the pending episode so the next tick retries (Plan 00278).
+        """
+        self._effort_injections += 1
+        self._effort_pending = None
+
+    def note_model_reading(self, reading: SidecarReading) -> None:
+        """Track the foreground model family; open/close restore episodes.
+
+        A ranked downgrade for the SAME session opens a pending episode; the
+        episode closes when the family recovers, the session changes, or the
+        live effort is already xhigh/max (Plan 00278). Unknown families and
+        session-less synthetic readings are ignored entirely.
+        """
+        family = _model_family(reading.model_id)
+        session = reading.session_id
+        if not session or family is None:
+            return
+        prev_session = self._last_model_session
+        prev_family = self._last_model_family
+        self._last_model_session = session
+        self._last_model_family = family
+        if self._effort_pending is not None:
+            pend_session, _, pend_family = self._effort_pending.partition(":")
+            if (
+                session != pend_session
+                or reading.effort in _HIGH_EFFORT_LEVELS
+                or _family_rank(family) > _family_rank(pend_family)
+            ):
+                self._effort_pending = None
+        if (
+            self._effort_pending is None
+            and prev_session == session
+            and prev_family is not None
+            and _family_rank(family) < _family_rank(prev_family)
+            and reading.effort not in _HIGH_EFFORT_LEVELS
+        ):
+            self._effort_pending = f"{session}:{family}"
 
     @property
     def goal_injections(self) -> int:
@@ -1766,6 +1886,10 @@ class CompactStateMachine:
             "await_is_human": self._await_is_human,
             "dry_run_fired": self._dry_run_fired,
             "goal_injections": self._goal_injections,
+            "last_model_session": self._last_model_session,
+            "last_model_family": self._last_model_family,
+            "effort_pending": self._effort_pending,
+            "effort_injections": self._effort_injections,
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -1790,6 +1914,17 @@ class CompactStateMachine:
             self._dry_run_fired = bool(state["dry_run_fired"])
         if "goal_injections" in state:
             self._goal_injections = _coerce_int(state["goal_injections"])
+        if "last_model_session" in state:
+            raw = state["last_model_session"]
+            self._last_model_session = None if raw is None else str(raw)
+        if "last_model_family" in state:
+            raw = state["last_model_family"]
+            self._last_model_family = None if raw is None else str(raw)
+        if "effort_pending" in state:
+            raw = state["effort_pending"]
+            self._effort_pending = None if raw is None else str(raw)
+        if "effort_injections" in state:
+            self._effort_injections = _coerce_int(state["effort_injections"])
 
     def evaluate(
         self,
@@ -2289,6 +2424,11 @@ def decide_once(
     # path (the passed machine is already the live authoritative one).
     if facts.machine_state is not None:
         machine.import_state(facts.machine_state)
+    # Plan 00278: track the foreground model family so a ranked downgrade
+    # opens an effort-restore episode (fired further below, subordinate to
+    # every other family). Synthetic/stale readings are ignored.
+    if reading is not None and not reading.stale:
+        machine.note_model_reading(reading)
     evaluation = machine.evaluate(
         reading,
         idle=can_inject,
@@ -2400,6 +2540,43 @@ def decide_once(
                 consume_signal_path = str(goal_path)
                 deferred_log = None
                 noop_reason_log = None
+    # ── Effort restore on model downgrade (Plan 00278) ──────────────────────
+    # Subordinate to every other family: fires only on a tick that would
+    # otherwise NOOP in MONITOR with no compaction signal and no goal payload.
+    # The pending episode persists across deferred ticks; the HOST closes it
+    # (mark_effort_injection) only after a successful PTY write, so a failed
+    # write retries. No signal file exists to consume — the episode key in the
+    # machine state is the whole lifecycle.
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+        and machine.effort_pending is not None
+    ):
+        if not can_inject:
+            if facts.idle and not facts.input_line_empty:
+                deferred_log = f"{_DEFERRED_LOG_PREFIX} (effort restore pending)"
+            else:
+                noop_reason_log = f"{_NOOP_LOG_PREFIX}: effort restore pending but session busy"
+        elif machine.effort_injections >= _MAX_EFFORT_INJECTIONS:
+            noop_reason_log = f"{_NOOP_LOG_PREFIX}: effort injection cap reached"
+        else:
+            decision_value = Decision.WOULD_EFFORT.value
+            reason = (
+                f"model downgrade ({machine.effort_pending}) -> "
+                f"would inject {_EFFORT_RESTORE_COMMAND}"
+            )
+            if dry_run:
+                payload = (
+                    f"{_format_bot_prefix(facts.now_wall)} "
+                    f"{_DRY_RUN_EFFORT_BODY_PREFIX} {_EFFORT_RESTORE_COMMAND}"
+                )
+            else:
+                payload = _EFFORT_RESTORE_COMMAND
+            submit = True
+            deferred_log = None
+            noop_reason_log = None
     return TickOutcome(
         decision_value=decision_value,
         reason=reason,
@@ -2516,6 +2693,10 @@ def _poll_once(
     # cap is not burned and the retained signal can retry.
     if injected and outcome.decision_value == Decision.WOULD_GOAL.value:
         machine.mark_goal_injection()
+    # Same success-only rule for the effort-restore family (Plan 00278): the
+    # mark also closes the pending episode, so a failed write retries.
+    if injected and outcome.decision_value == Decision.WOULD_EFFORT.value:
+        machine.mark_effort_injection()
     return Evaluation(decision=Decision(outcome.decision_value), reason=outcome.reason)
 
 
@@ -3114,6 +3295,10 @@ def supervise(
             # the retained signal can retry (Plan 00269 review fix).
             if injected and outcome.decision_value == Decision.WOULD_GOAL.value:
                 machine.mark_goal_injection()
+            # Same success-only rule for the effort-restore family (Plan
+            # 00278): the mark also closes the pending episode.
+            if injected and outcome.decision_value == Decision.WOULD_EFFORT.value:
+                machine.mark_effort_injection()
         else:
             _poll_once(
                 machine,
