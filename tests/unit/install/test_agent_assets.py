@@ -33,6 +33,10 @@ from claude_code_hooks_daemon.install.agent_assets import (
     sync_agents,
 )
 
+#: Content md5 of the first shipped opus-security revision. Pinned here so the
+#: ledger entry that keeps such a deployment upgradeable cannot be dropped.
+_OPUS_SECURITY_V1_MD5 = "9724c2afde95dd7f33a2e53a40849c1b"
+
 
 def _spec(name: str) -> AgentAssetSpec:
     return spec_by_name(name)
@@ -106,6 +110,14 @@ class TestLedger:
         and never upgraded again."""
         spec = _spec(DEDUPE_AGENT_NAME)
         assert len(spec.historic_md5s) >= 5
+
+    def test_opus_security_agent_ledgers_its_first_shipped_revision(self) -> None:
+        """The v1.0.0 content md5 must stay in the ledger after the v1.1.0
+        rewrite, so an already-deployed pristine copy classifies OUTDATED
+        (upgradeable) rather than CUSTOMISED (frozen forever)."""
+        spec = _spec(OPUS_SECURITY_AGENT_NAME)
+        assert spec.version == "1.1.0"
+        assert _OPUS_SECURITY_V1_MD5 in spec.historic_md5s
 
 
 class TestClassification:
