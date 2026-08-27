@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-08-26 (v3.55.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-08-27 (v3.55.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (47 handlers)
+### PreToolUse (48 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -54,6 +54,7 @@
 | 50 | validate_instruction_content | TERMINAL | Validates content being written to CLAUDE.md and README.md files |
 | 55 | web_search_year | ADVISORY | Validate WebSearch queries don't use outdated years |
 | 57 | daemon_docs_guard | ADVISORY | Warn when reading from the hooks-daemon internal CLAUDE/ docs directory |
+| 58 | flaggable_work_advisor | ADVISORY | Advise delegating safeguard-flaggable work BEFORE opening the content |
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
 
 ### PostToolUse (8 handlers)
@@ -69,7 +70,7 @@
 | 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
 | 31 | goal_injection | ADVISORY | Write a goal-intent signal when a plan flips to In Progress |
 
-### SessionStart (13 handlers)
+### SessionStart (15 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -86,6 +87,8 @@
 | 59 | plan_workflow_asset_checker | ADVISORY | Advise when plan_workflow is enabled but its assets are not provisioned |
 | 60 | contract_staleness | ADVISORY | Advise a vendored-contract refresh when Claude Code has moved on |
 | 61 | skill_opportunity_detector | ADVISORY | TTL-gated advisory pointing at the ``skill-scan`` CLI |
+| 62 | secret_file_hygiene_checker | ADVISORY | Advise (never block) unsafe on-disk state for existing protected files |
+| 63 | model_fallback_detector | ADVISORY | Detect a safety-triggered model fallback from the session transcript |
 
 ### PreCompact (1 handler)
 

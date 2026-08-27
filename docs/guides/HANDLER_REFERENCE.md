@@ -2088,7 +2088,47 @@ handlers:
 
 ---
 
-### Advisory Handlers (Priority 60)
+### Advisory Handlers (Priority 56-60)
+
+#### flaggable_work_advisor
+
+| Property       | Value                    |
+| -------------- | ------------------------ |
+| **Config key** | `flaggable_work_advisor` |
+| **Priority**   | 58                       |
+| **Type**       | Advisory                 |
+| **Event**      | PreToolUse               |
+
+**Description:** Delegate-first advisory for safeguard-flaggable work (Plan 00278 Phase 3). Some caller models carry an API-side content safety classifier that keys on attack-mechanics CONTENT, not intent — reading such material into the main context can silently downgrade the session's model for its whole remainder. When a `Read`/`Edit`/`Write`/`Grep` targets a path matching `flaggable_path_globs`, a `Bash` command mentions such a path, or the tool input text carries 2+ of `flaggable_topic_terms`, it advises (NEVER denies) delegating the whole sub-task to the quarantine subagent BEFORE opening the content — `Agent(subagent_type: "<quarantine_agent>")` — deciding from framing/path never by reading first, taking back only the clean summary. Rate-limited once per session per matched path, so retries pass silently. Ships **disabled**: the flaggable boundary is project-specific.
+
+**Options:**
+
+| Option                  | Default                                        | Description                                                           |
+| ----------------------- | ---------------------------------------------- | --------------------------------------------------------------------- |
+| `flaggable_path_globs`  | `[]`                                           | Globs of paths whose content is likely to trip the classifier         |
+| `flaggable_topic_terms` | `[spoof, spoofing, evasion, exploit, rootkit]` | Topic terms; 2+ distinct hits in the tool input trigger the advisory  |
+| `quarantine_agent`      | `hooks-daemon-opus-security`                   | Subagent named in the delegation advice                               |
+| `mode`                  | `additive`                                     | `additive` extends the built-in seed lists; `replace` uses only yours |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    flaggable_work_advisor:
+      enabled: true
+      priority: 58
+      options:
+        flaggable_path_globs:
+          - "firewall/**"
+          - "intrusion-detection/**"
+        flaggable_topic_terms:
+          - tarpit
+        quarantine_agent: hooks-daemon-opus-security
+        mode: additive
+```
+
+---
 
 #### british_english
 
@@ -2460,6 +2500,41 @@ handlers:
     secret_file_hygiene_checker:
       enabled: true
       priority: 62
+```
+
+---
+
+#### model_fallback_detector
+
+| Property       | Value                     |
+| -------------- | ------------------------- |
+| **Config key** | `model_fallback_detector` |
+| **Priority**   | 63                        |
+| **Type**       | Advisory                  |
+| **Event**      | SessionStart              |
+
+**Description:** Loud alert when the session transcript records a safety-triggered model fallback (Plan 00278 Phase 3/3b). Scans the transcript JSONL for the platform's own `subtype: "model_refusal_fallback"` record (with assistant-message `content[].type == "fallback"` blocks as corroboration) and injects a PROTECTION-DEGRADED-style advisory naming the original model, the fallback model and the refusal category: the substitution is `scope: session`, so the session will not recover on its own — a restart is the only cure. Also writes a secret-redacted diagnostic snapshot (the fallback record plus a bounded window of preceding transcript records) so the project can diagnose WHY it was flagged and tune its `flaggable_work_advisor` delegation config. Advises once per session per distinct fallback record; malformed transcript lines are skipped fail-silent; snapshot write failures degrade to a mention in the advisory.
+
+**Options:**
+
+| Option                    | Default             | Description                                                    |
+| ------------------------- | ------------------- | -------------------------------------------------------------- |
+| `snapshot_enabled`        | `true`              | Write a diagnostic snapshot per newly detected fallback record |
+| `snapshot_dir`            | `untracked/reports` | Snapshot destination, resolved against the project root        |
+| `snapshot_window_records` | `20`                | Preceding transcript records captured into each snapshot       |
+
+**Config example:**
+
+```yaml
+handlers:
+  session_start:
+    model_fallback_detector:
+      enabled: true
+      priority: 63
+      options:
+        snapshot_enabled: true
+        snapshot_dir: untracked/reports
+        snapshot_window_records: 20
 ```
 
 ---
@@ -2866,13 +2941,13 @@ handlers:
 
 Priority determines execution order. Lower numbers run first.
 
-| Range | Category        | Examples                                            |
-| ----- | --------------- | --------------------------------------------------- |
-| 5     | Test            | reserved — no built-in handlers ship here           |
-| 10-20 | Safety          | destructive_git, sed_blocker, pip_break_system      |
-| 25-35 | Code Quality    | qa_suppression, lint_on_edit, markdown_organization |
-| 36-55 | Workflow        | lsp_enforcement, gh_issue_comments, npm_command     |
-| 56-60 | Advisory        | british_english, daemon_docs_guard                  |
-| 100   | Logging/Cleanup | (none ship today; range reserved)                   |
+| Range | Category        | Examples                                                   |
+| ----- | --------------- | ---------------------------------------------------------- |
+| 5     | Test            | reserved — no built-in handlers ship here                  |
+| 10-20 | Safety          | destructive_git, sed_blocker, pip_break_system             |
+| 25-35 | Code Quality    | qa_suppression, lint_on_edit, markdown_organization        |
+| 36-55 | Workflow        | lsp_enforcement, gh_issue_comments, npm_command            |
+| 56-60 | Advisory        | british_english, daemon_docs_guard, flaggable_work_advisor |
+| 100   | Logging/Cleanup | (none ship today; range reserved)                          |
 
 When two handlers have the same priority, they run in registration order.
