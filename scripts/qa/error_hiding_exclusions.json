@@ -531,6 +531,12 @@
       "reason": "Plan 00200 Task 5.4: re.error from compiling a client-configured public_pattern is a documented no-match (see docstring: 'A pattern that fails to compile is a documented no-match -- never crashes the handler'), cached as None so a broken client config is not re-attempted every event."
     },
     {
+      "file": "handlers/pre_tool_use/flaggable_content_channel_guard.py",
+      "function": "_compiled_shape_pattern",
+      "rule": "silent-fallback",
+      "reason": "Plan 00278 Phase 3d.1: identical shape and rationale to sensitive_content.py::_compiled_public_pattern above -- re.error from compiling a client-configured extra_content_revealing_patterns entry is a documented no-match (see this function's own docstring), cached as None so a broken client config is not re-attempted every event. Letting it raise instead would crash FrontController's dispatch loop for every subsequent Bash command, silently disabling every OTHER PreToolUse safety handler below this one in priority order -- far worse than skipping one bad regex."
+    },
+    {
       "file": "handlers/session_start/optimal_config_checker.py",
       "function": "_check_max_output_tokens",
       "rule": "silent-fallback",
@@ -552,9 +558,9 @@
     },
     {
       "file": "handlers/status_line/downgrade_state.py",
-      "function": "_parse_high_water",
+      "function": "_parse_state",
       "rule": "return-none-on-error",
-      "reason": "Plan 00278: fail-silent read of the per-session model high-water state file on the status-line render path. Malformed/foreign/partial JSON (a concurrent write by another session sharing the daemon, a truncated file) yields None = 'no prior state', matching this directory's documented CLAUDE.md rule #2 ('reads are fail-silent and defensive... never raise'). Same contract as thread_registry.upsert_heartbeat and supervisor_indicator._read_status -- a broken status line is worse than a missing element."
+      "reason": "Plan 00278: fail-silent read of the per-session downgrade state file on the status-line render path (renamed from _parse_high_water when episode-count fields were added on top of the high-water fields). Malformed/foreign/partial JSON (a concurrent write by another session sharing the daemon, a truncated file, or a legacy file predating the count fields) yields None = 'no prior state', matching this directory's documented CLAUDE.md rule #2 ('reads are fail-silent and defensive... never raise'). Same contract as thread_registry.upsert_heartbeat and supervisor_indicator._read_status -- a broken status line is worse than a missing element."
     },
     {
       "file": "handlers/user_prompt_submit/git_context_injector.py",
