@@ -156,6 +156,15 @@ _DEDUPE_HISTORIC_VERSIONS: Final[tuple[tuple[str, str], ...]] = (
     ("legacy-1", "a590da6b9f2d03e877856e6b9b56a0bd"),
 )
 
+#: Historic opus-security revisions. v1.0.0 enumerated its trigger vocabulary
+#: in the frontmatter description, which Claude Code surfaces into the CALLING
+#: agent's context — contaminating the very context this agent exists to keep
+#: clean. Ledgered so a pristine v1.0.0 deployment upgrades rather than being
+#: frozen as customised.
+_OPUS_SECURITY_HISTORIC_VERSIONS: Final[tuple[tuple[str, str], ...]] = (
+    ("1.0.0", "9724c2afde95dd7f33a2e53a40849c1b"),
+)
+
 SHIPPED_AGENTS: Final[tuple[AgentAssetSpec, ...]] = (
     AgentAssetSpec(
         name=DEDUPE_AGENT_NAME,
@@ -166,9 +175,10 @@ SHIPPED_AGENTS: Final[tuple[AgentAssetSpec, ...]] = (
     ),
     AgentAssetSpec(
         name=OPUS_SECURITY_AGENT_NAME,
-        version="1.0.0",
+        version="1.1.0",
         gating_config_key="agents.opus_security.enabled",
         is_enabled=_opus_security_enabled,
+        historic_versions=_OPUS_SECURITY_HISTORIC_VERSIONS,
     ),
 )
 
