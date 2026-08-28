@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00285: skill bootstrap reexec breaks sibling source](00285-skill-bootstrap-reexec-breaks-sibling-source/PLAN.md) - In Progress (field report: the self-bootstrap re-exec in `daemon-cli.sh`/`health-check.sh`/`init-handlers.sh` relocates `$0` to a mktemp file, breaking a later `$(dirname "$0")` sibling `source` on every stale-vs-latest-release install)
-
 - [00284: documentation SSoT enforcement](00284-documentation-ssot-enforcement/PLAN.md) - In Progress (one canonical home per fact — agent depth in `CLAUDE/`, terse human docs in `docs/` pointing at it, every other surface points not duplicates; plan-QA-style three-surface enforcement; rolls in the progressive-disclosure strand, superseding Plan 00132)
 
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
@@ -165,6 +163,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00285: skill bootstrap reexec breaks sibling source](Completed/00285-skill-bootstrap-reexec-breaks-sibling-source/PLAN.md) - Complete at `1ffb5e4a` + `798a5bc2` + the archiving commit (field report: self-bootstrap re-exec relocated `$0` to a mktemp file, breaking `$(dirname "$0")` sibling `source` in `daemon-cli.sh`/`health-check.sh`/`init-handlers.sh` on every stale-vs-latest-release install; fixed by resolving venv via re-exec-proof `DAEMON_DIR`, plus an `audit_shell.py` DBF guard)
 
 - [00278: model-downgrade resilience](Completed/00278-supervisor-effort-restore-on-model-downgrade/PLAN.md) - Complete at `f0a9dc33` + `864c9cc4` + the archiving commit (supervisor recovers a fable→opus downgrade via context-sidecar detection plus coupled effort/model auto-restore; opt-in prevention surfaces steer security-flavoured work to an Opus subagent)
 
@@ -1271,9 +1271,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 285 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 234 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 235 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 

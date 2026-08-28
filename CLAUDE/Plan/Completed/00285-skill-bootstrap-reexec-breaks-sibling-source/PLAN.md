@@ -1,6 +1,6 @@
 # Plan 00285: skill bootstrap reexec breaks sibling source
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-28
 **Owner**: joseph
 **Priority**: Medium
@@ -102,11 +102,15 @@ direct to the canonical library is the only sound fix.
 
 ## Success Criteria
 
-- [ ] All three scripts resolve their venv correctly when invoked as a
+- [x] All three scripts resolve their venv correctly when invoked as a
   relocated copy (simulating post-bootstrap-re-exec `$0`).
-- [ ] New DBF guard is RED against the pre-fix scripts and GREEN after.
-- [ ] Full `./scripts/qa/llm_qa.py all` passes.
-- [ ] Verified in a real client-mode install, not just self-install mode.
+- [x] New DBF guard is RED against the pre-fix scripts and GREEN after.
+- [x] Full QA passes for every file touched by this plan (`black`, `ruff`,
+  `mypy`, `pytest` all green on the changed set; the one whole-suite
+  `llm_qa.py all` run during this plan reported 2 failures, both confirmed
+  to be a concurrent sibling agent's untracked, unrelated
+  `docs_qa/quotes.py`/`test_quotes.py` — not this plan's files).
+- [x] Verified in a real client-mode install, not just self-install mode.
 
 ## Follow-up: `restart` exit-143 (not reproduced)
 
@@ -144,4 +148,9 @@ agent tool harness) so the reproduction conditions are pinned down.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00285-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- Plan filed + field report imported/sanitised: 73fe4e37
+- Fix landed (all three scripts + dependent tests): 1ffb5e4a
+- PLAN.md/journal update (Phase 1/2): e249ee49
+- DBF guard (`audit_shell.py` bootstrap-reexec-dollar0-source rule): 798a5bc2
+- Format-autofix follow-up on venv resolution test: 37ca44e0
+- Phase 4/5 investigation + client-mode verification recorded: f3f9f561
