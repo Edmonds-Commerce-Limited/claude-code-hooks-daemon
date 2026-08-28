@@ -1657,7 +1657,18 @@ generated-docs manifest declares — regenerate it instead),
 no fences, tables, numbered procedures or ssot-quote blocks, and a
 15-line body budget — block-eligible only when an edit ADDS a
 violation or GROWS an already-over-budget body; shrinking is
-silent).
+silent), `quote-drift` (an `<!-- ssot-quote: file.md#anchor -->`
+block whose body no longer matches its source section — or whose
+source file/anchor is missing entirely — block-eligible on the
+QUOTING edit; a too-short quote, below the documented minimum
+length, is flagged the same way since it verifies trivially and
+protects nothing).
+
+**Advisory only, never blocks**: `quote-source-stale` — editing a
+SOURCE section that other documents quote from names which
+quoting files now need re-checking (via the corpus's reverse quote
+index); the sweep re-verifies every quote anyway, so this is a
+heads-up, not a gate.
 
 A finding only denies the write when it is BLOCK severity AND the
 resolved mode for that check (`documentation.qa.check_modes`
@@ -2124,9 +2135,13 @@ At the start of each new session the doc corpus index is rebuilt
 `.claude/skills`, `.claude/agents`, and root-level `.md` files) and
 checked with the docs QA SWEEP-stage catalogue: `pointer-resolves`
 (dead links), `generated-doc-hand-edit` (a generated doc that looks
-hand-edited or stale against the daemon's own version), and
+hand-edited or stale against the daemon's own version),
 `rules-file-shape` (a `.claude/rules/*.md` file violating the
-pointer-only contract). Findings are injected once as advisory
+pointer-only contract), and `quote-drift` (an `ssot-quote` block
+whose body no longer matches its source section, or whose source
+file/anchor has disappeared — re-verified fresh from disk every
+sweep, so this is the backstop for `quote-source-stale`, which only
+advises at edit time). Findings are injected once as advisory
 context — the sweep never blocks.
 
 **When a drift report appears**: fix the listed findings (each names
