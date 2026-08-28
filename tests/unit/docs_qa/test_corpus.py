@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from claude_code_hooks_daemon.docs_qa.corpus import (
+    _CACHE_SCHEMA_VERSION,
     DocCorpus,
     DocRecord,
     QuoteRef,
@@ -253,6 +254,73 @@ class TestBuildAndSaveCorpus:
         assert "docs/Guide.md" not in second.documents
 
 
+class TestCacheSchemaVersioning:
+    def test_index_payload_carries_the_current_schema_version(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        payload = json.loads(index_path.read_text())
+        assert payload["schema_version"] == _CACHE_SCHEMA_VERSION
+
+    def test_cache_missing_schema_version_is_rejected(self, tmp_path: Path) -> None:
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        index_path.parent.mkdir(parents=True)
+        index_path.write_text(json.dumps({"documents": {}}))
+        assert load_cached_corpus(tmp_path, index_path) is None
+
+    def test_cache_with_mismatched_schema_version_is_rejected(self, tmp_path: Path) -> None:
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        index_path.parent.mkdir(parents=True)
+        index_path.write_text(
+            json.dumps({"schema_version": _CACHE_SCHEMA_VERSION - 1, "documents": {}})
+        )
+        assert load_cached_corpus(tmp_path, index_path) is None
+
+    def test_cache_with_no_schema_version_forces_a_full_rebuild_not_reuse(
+        self, tmp_path: Path
+    ) -> None:
+        """A pre-3.1h cache has no ``schema_version`` key at all. Even when a
+        record's mtime+size line up exactly with the file on disk, that
+        record must NOT be reused -- it may be missing fields (``quotes``,
+        ``block_hashes``) a newer check now depends on. This is the bug the
+        schema version fixes: reuse-by-mtime alone cannot see a field it
+        does not know to look for."""
+        _scaffold(tmp_path)
+        foo_path = tmp_path / "CLAUDE" / "Foo.md"
+        stat = foo_path.stat()
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        index_path.parent.mkdir(parents=True)
+        # Old-shape payload: correct mtime/size (so a naive reuse-check would
+        # accept it) but a deliberately wrong "links" value that must not
+        # survive into the rebuilt corpus, and no schema_version at all.
+        index_path.write_text(
+            json.dumps(
+                {
+                    "documents": {
+                        "CLAUDE/Foo.md": {
+                            "mtime_ns": stat.st_mtime_ns,
+                            "size": stat.st_size,
+                            "links": ["stale-value-must-not-be-reused.md"],
+                        }
+                    }
+                }
+            )
+        )
+        corpus = build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        assert corpus.documents["CLAUDE/Foo.md"].links == ("Bar.md",)
+
+    def test_cache_with_current_schema_version_still_reuses_unchanged_entries(
+        self, tmp_path: Path
+    ) -> None:
+        _scaffold(tmp_path)
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        first = build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        payload = json.loads(index_path.read_text())
+        assert payload["schema_version"] == _CACHE_SCHEMA_VERSION
+        second = build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        assert first.documents["CLAUDE/Foo.md"] == second.documents["CLAUDE/Foo.md"]
+
+
 class TestLoadCachedCorpus:
     def test_missing_index_returns_none(self, tmp_path: Path) -> None:
         index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
@@ -337,11 +405,18 @@ class TestQuoteExtractionAndReverseIndex:
         corpus = build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
         assert corpus.documents["CLAUDE/Foo.md"].quotes == ()
 
-    def test_legacy_cache_without_quotes_key_defaults_to_empty(self, tmp_path: Path) -> None:
+    def test_current_schema_cache_without_quotes_key_defaults_to_empty(
+        self, tmp_path: Path
+    ) -> None:
         index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
         index_path.parent.mkdir(parents=True)
         index_path.write_text(
-            json.dumps({"documents": {"a.md": {"mtime_ns": 1, "size": 1, "links": []}}})
+            json.dumps(
+                {
+                    "schema_version": _CACHE_SCHEMA_VERSION,
+                    "documents": {"a.md": {"mtime_ns": 1, "size": 1, "links": []}},
+                }
+            )
         )
         corpus = load_cached_corpus(tmp_path, index_path)
         assert corpus is not None
@@ -410,11 +485,18 @@ class TestStructuredBlockHashExtraction:
             == built.documents["CLAUDE/Foo.md"].block_hashes
         )
 
-    def test_legacy_cache_without_block_hashes_key_defaults_to_empty(self, tmp_path: Path) -> None:
+    def test_current_schema_cache_without_block_hashes_key_defaults_to_empty(
+        self, tmp_path: Path
+    ) -> None:
         index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
         index_path.parent.mkdir(parents=True)
         index_path.write_text(
-            json.dumps({"documents": {"a.md": {"mtime_ns": 1, "size": 1, "links": []}}})
+            json.dumps(
+                {
+                    "schema_version": _CACHE_SCHEMA_VERSION,
+                    "documents": {"a.md": {"mtime_ns": 1, "size": 1, "links": []}},
+                }
+            )
         )
         corpus = load_cached_corpus(tmp_path, index_path)
         assert corpus is not None

@@ -55,6 +55,59 @@ class TestFormatAdvisory:
             assert f"finding {i}" in text
         assert "more" not in text
 
+    def test_a_starved_check_still_gets_at_least_one_slot(self) -> None:
+        """Registration-order accumulation must not let one prolific check
+        (10 findings) starve out a check that only ever produces one
+        finding (Task 3.1h)."""
+        prolific = [
+            Finding(
+                check_id="at-import-census",
+                severity=Severity.ADVISE,
+                message=f"prolific {i}",
+                remediation="fix it",
+                path=f"CLAUDE/mod{i}.md",
+            )
+            for i in range(10)
+        ]
+        rare = [
+            Finding(
+                check_id="duplicate-block",
+                severity=Severity.ADVISE,
+                message="rare finding",
+                remediation="fix it",
+                path="CLAUDE/Other.md",
+            )
+        ]
+        text = format_advisory([*prolific, *rare])
+        assert "duplicate-block" in text
+        assert "rare finding" in text
+        # The prolific check must still be represented too.
+        assert "at-import-census" in text
+        omitted = len(prolific) + len(rare) - MAX_ADVISORY_FINDINGS_SHOWN
+        assert f"{omitted} more" in text
+
+    def test_block_severity_checks_are_round_robined_before_advise(self) -> None:
+        block_findings = [
+            Finding(
+                check_id="pointer-resolves",
+                severity=Severity.BLOCK,
+                message=f"block {i}",
+                remediation="fix it",
+                path=f"CLAUDE/b{i}.md",
+            )
+            for i in range(9)
+        ]
+        advise_finding = Finding(
+            check_id="quote-drift",
+            severity=Severity.ADVISE,
+            message="advise finding",
+            remediation="fix it",
+            path="CLAUDE/a.md",
+        )
+        text = format_advisory([*block_findings, advise_finding])
+        assert "quote-drift" in text
+        assert "advise finding" in text
+
     def test_over_the_cap_is_truncated_with_a_count_and_cli_pointer(self) -> None:
         findings = [
             Finding(

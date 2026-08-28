@@ -48,6 +48,15 @@ _MD_LINK_RE: Final[re.Pattern[str]] = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"
 
 _INDEX_TMP_SUFFIX: Final[str] = ".tmp"
 
+# Bumped whenever DocRecord gains/changes fields that a mtime+size-keyed
+# reuse would otherwise silently carry forward empty from an older cache
+# (Task 3.1h: 3.1e/3.1f added ``quotes``/``block_hashes`` with no version
+# gate, so a warm cache from an older daemon reused stale records with both
+# fields empty and every check depending on them reported clean). A missing
+# or mismatched ``schema_version`` in the on-disk payload is treated the
+# same as a corrupt cache: discard it and rebuild the whole index.
+_CACHE_SCHEMA_VERSION: Final[int] = 1
+
 _CLAUDE_MD_FILENAME: Final[str] = "CLAUDE.md"
 
 
@@ -219,6 +228,8 @@ def load_cached_corpus(project_root: Path, index_path: Path) -> DocCorpus | None
         payload = json.loads(index_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    if payload.get("schema_version") != _CACHE_SCHEMA_VERSION:
+        return None
     raw_documents = payload.get("documents", {})
     if not isinstance(raw_documents, dict):
         return None
@@ -230,17 +241,15 @@ def load_cached_corpus(project_root: Path, index_path: Path) -> DocCorpus | None
                 mtime_ns=int(entry["mtime_ns"]),
                 size=int(entry["size"]),
                 links=tuple(entry["links"]),
-                # Legacy caches predate the quote index (Task 3.1d) and have
-                # no "quotes" key -- absence means "not yet indexed", not
-                # "no quotes", but treating it as empty is safe: the next
-                # rebuild re-parses every changed file regardless.
+                # A schema-current payload always carries this key once a
+                # file has been indexed, but the ``.get`` default keeps a
+                # per-record parse permissive rather than schema-rejecting
+                # the whole cache over one field -- cross-schema gaps are
+                # already ruled out above by the version check.
                 quotes=tuple(
                     QuoteRef(source_path=ref["source_path"], anchor=ref["anchor"])
                     for ref in entry.get("quotes", [])
                 ),
-                # Legacy caches predate the block-hash index (Task 3.1f) and
-                # have no "block_hashes" key -- same absence-means-not-yet-
-                # indexed treatment as "quotes" above.
                 block_hashes=tuple(entry.get("block_hashes", [])),
             )
     except (KeyError, TypeError, ValueError):
@@ -264,6 +273,7 @@ def _save_corpus(corpus: DocCorpus, index_path: Path) -> None:
     """Atomic-replace write: tmp file in the same directory, then ``os.replace``."""
     index_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
+        "schema_version": _CACHE_SCHEMA_VERSION,
         "documents": {
             rel: {
                 "mtime_ns": record.mtime_ns,
@@ -275,7 +285,7 @@ def _save_corpus(corpus: DocCorpus, index_path: Path) -> None:
                 "block_hashes": list(record.block_hashes),
             }
             for rel, record in corpus.documents.items()
-        }
+        },
     }
     tmp_path = index_path.with_suffix(index_path.suffix + _INDEX_TMP_SUFFIX)
     tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

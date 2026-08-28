@@ -49,15 +49,60 @@ def format_block_reason(findings: list[Finding]) -> str:
     return "\n".join(lines)
 
 
+def _select_capped_findings(findings: list[Finding], cap: int) -> list[Finding]:
+    """The findings shown by a capped advisory, guaranteeing every distinct
+    check gets at least one slot before the remainder fills up.
+
+    Findings accumulate in check-registration order, so a naive ``[:cap]``
+    slice starves every check after whichever one produced the most
+    findings first (e.g. 76 ``at-import-census`` findings fill all 8 slots
+    before ``duplicate-block`` -- registered later -- ever shows one).
+
+    Two phases: (1) round-robin one finding per distinct check, ordered
+    BLOCK-severity checks before ADVISE (stable, so ties keep their
+    original registration order); (2) fill any remaining capacity from the
+    leftover findings in their original order. The result is re-sorted back
+    to original order for presentation.
+    """
+    if len(findings) <= cap:
+        return list(findings)
+
+    indices_by_check: dict[str, list[int]] = {}
+    for index, finding in enumerate(findings):
+        indices_by_check.setdefault(finding.check_id, []).append(index)
+
+    check_ids_by_severity = sorted(
+        indices_by_check,
+        key=lambda check_id: (
+            0 if findings[indices_by_check[check_id][0]].severity == Severity.BLOCK else 1
+        ),
+    )
+
+    selected: set[int] = set()
+    for check_id in check_ids_by_severity:
+        if len(selected) >= cap:
+            break
+        selected.add(indices_by_check[check_id][0])
+
+    for index in range(len(findings)):
+        if len(selected) >= cap:
+            break
+        selected.add(index)
+
+    return [findings[index] for index in sorted(selected)]
+
+
 def format_advisory(findings: list[Finding]) -> str:
     """Advisory-context text for non-blocking surfaces.
 
     Capped at :data:`MAX_ADVISORY_FINDINGS_SHOWN` bullets so a large corpus
     of drift never bloats a session's injected context; the CLI shows every
-    finding on demand.
+    finding on demand. Every distinct check with findings gets at least one
+    slot before the cap fills with the remainder (see
+    :func:`_select_capped_findings`).
     """
     lines = [_HEADER_ADVISORY]
-    shown = findings[:MAX_ADVISORY_FINDINGS_SHOWN]
+    shown = _select_capped_findings(findings, MAX_ADVISORY_FINDINGS_SHOWN)
     lines.extend(_format_finding(finding) for finding in shown)
     omitted = len(findings) - len(shown)
     if omitted > 0:

@@ -198,12 +198,18 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
   REAL dispatch of the built agent from the orchestrating session — full
   findings persisted in `AUDIT-dogfood-run-1.md` (9 new findings, 7 backlog
   confirmations, 6 tooling/definition follow-ups).
-- [ ] ⬜ **Task 3.1h**: Follow-ups flagged by 3.1f's delivery (both verified real):
+- [x] ✅ **Task 3.1h**: Follow-ups flagged by 3.1f's delivery (both verified real):
   (a) corpus cache-reuse gap — mtime/size-keyed reuse silently carries forward
   a pre-schema-extension record with empty new fields; add an index schema
   version that invalidates the whole cache on change; (b) sweep advisory cap
   starvation — checks accumulate in registration order so late checks never
   reach the capped 8 shown; give the cap per-check minimum representation.
+  Both fixed: `corpus.py` gained a `_CACHE_SCHEMA_VERSION` constant embedded
+  in the cache payload, discarding the whole index on mismatch/absence;
+  `report.py`'s `format_advisory` now round-robins one finding per distinct
+  check (BLOCK checks before ADVISE, stable) before filling remaining
+  capacity in registration order, so a prolific check can no longer starve
+  a rarer one out of the capped 8.
 - [ ] ⬜ **Task 3.2**: Dogfood-migration worklist (deferred by the branch cross-check;
   each verified, none blocking):
   - `CLAUDE/AgentTeam.md` (~20 instructive `run_all.sh` sites + stale "all 7
