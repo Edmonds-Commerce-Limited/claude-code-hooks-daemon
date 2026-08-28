@@ -1,6 +1,6 @@
 # Plan 00284: Documentation SSoT — one canonical home per fact, everything else points
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-28
 **Owner**: joseph
 **Priority**: High
@@ -332,16 +332,19 @@ section).
 
 ## Success Criteria
 
-- [ ] A written, agreed ruleset exists as `CLAUDE/DocumentationStrategy.md`, obeying
+- [x] A written, agreed ruleset exists as `CLAUDE/DocumentationStrategy.md`, obeying
   its own rules.
-- [ ] Duplication + stale-pointer detection ships as a bulk scanner with a CI-able
+- [x] Duplication + stale-pointer detection ships as a bulk scanner with a CI-able
   exit code, an edit-time guard, and a session sweep — config-driven, OFF by
-  default upstream, dogfooded here.
-- [ ] A `hooks-daemon-docs-qa` agent ships via the agent install subsystem and,
-  dispatched against this repo, produces a useful conflicting/distributed-truth
-  report (dogfood = its acceptance test).
-- [ ] Plan 00132 superseded; 00131 residue and 00116 reconciled, cited not redone.
-- [ ] Full QA green, daemon restart RUNNING, client-mode verified.
+  default upstream, dogfooded here (`.claude/hooks-daemon.yaml` warn modes).
+- [x] A `hooks-daemon-docs-qa` agent ships via the agent install subsystem and,
+  dispatched against this repo, produced `AUDIT-dogfood-run-1.md` — 9 new
+  findings, 7 backlog confirmations, 6 tooling follow-ups, all since actioned.
+- [x] Plan 00132 superseded (Task 1.4); 00131 residue tracked here; 00116 cited
+  two-ways at faa7f8f0, not redone.
+- [x] Full QA green (25/25, 15,457 tests, 95.4%), daemon RUNNING, client-mode
+  verified: fresh dummy-client install deploys both skills + agent gate, sweep
+  exits CI-ably and reports 0 findings after the Task 3.6 vendored-dir fix.
 
 ## Risks & Mitigations
 
@@ -359,4 +362,10 @@ section).
      JOURNAL/00284-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Plan scaffolded (counter 283 → 00284).
+- Phase 1 ruleset + human-doc gutting merged from the feature branch; canonical `CLAUDE/DocumentationStrategy.md` (R1–R13) live.
+- Phase 3 core: `docs_qa` package + three surfaces + CLI delivered across 62203a92…96afa291 (per-task hashes above).
+- Shipped agent + skill shim at 674f6a11; first real dogfood audit persisted at bf2a2c78 (`AUDIT-dogfood-run-1.md`).
 - Task 3.1h (docs_qa cache schema versioning + advisory cap starvation fix) delivered at a03f2bba.
+- Dogfood migration (Task 3.2) delivered across slices 33d4dd49 / 8e0b77ef / ae20aadb / 9f72e737 / 66c8771c / 7f34718c; repo sweep 168 → 34 advisories.
+- Tooling hardening: 129aee17 (T1–T6), 2aba56cd (3.4), 7c1899ff (3.5), 1dc3370a (3.6 — client sweep clean, client-mode verified).
+- Upgrade promotion staged at ce2e38c0 (config-changes manifest: `documentation.enabled`, `agents.docs_qa.enabled`, both `recommended: true`).
