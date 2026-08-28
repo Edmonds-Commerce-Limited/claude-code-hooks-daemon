@@ -210,14 +210,23 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
   check (BLOCK checks before ADVISE, stable) before filling remaining
   capacity in registration order, so a prolific check can no longer starve
   a rarer one out of the capped 8.
-- [ ] ⬜ **Task 3.2**: Dogfood-migration worklist (deferred by the branch cross-check;
-  each verified, none blocking):
-  - `CLAUDE/AgentTeam.md` (~20 instructive `run_all.sh` sites + stale "all 7
-    checks" counts) and `CLAUDE/Worktree.md` (~14 sites) → llm_qa.py + R5 cleanup
-  - `CLAUDE/PlanWorkflow.md` still teaches 3-digit plan numbering (`001-`) while
-    the system is 5-digit — the canonical deep doc is the wrong half of its pair
-  - release SKILL.md's four incompatible step numberings (review §A.2.2) — belongs
-    to skill thinning
+- [x] ✅ **Task 3.2**: Dogfood-migration worklist (delivered across slices A
+  33d4dd49, B 8e0b77ef, C ae20aadb, D 9f72e737, E 66c8771c, F this commit):
+  - ✅ `CLAUDE/AgentTeam.md` + `CLAUDE/Worktree.md` → llm_qa.py + R5 cleanup
+    (slice F): every instructive `run_all.sh` site now invokes
+    `./scripts/qa/llm_qa.py all`; stale "all 7 checks" counts replaced with
+    runner-enumerates phrasing; only SSoT-naming/script-internals mentions
+    remain. Triage duplicate-block #2 resolved: Worktree.md "Automation
+    Scripts" is canonical, AgentTeam.md's copied "What it does" procedures
+    replaced with pointers.
+  - ✅ `CLAUDE/PlanWorkflow.md` 3-digit plan numbering fixed (slice F): all
+    `XXX`/`001-` placeholders and examples now 5-digit (`NNNNN`/`00001-`).
+  - ✅ release SKILL.md step numberings reconciled (slice F): the divergent
+    15-item "What It Does" list and Process Flow ASCII replaced with pointers
+    to RELEASING.md "Pipeline Overview"; Orchestration stages renumbered to
+    cite RELEASING.md's real step numbers in ascending order, including the
+    previously-omitted Step 11 CLAUDE.md Guidance Audit gate. The skill is
+    repo-local (not shipped from src/), edited directly.
   - ✅ `CLAUDE/CLAUDE.md` prose index → routing table (R7d) — done in slice E
   - ✅ both `.claude/rules/` files now pass the pointer-only contract (slice E):
     hot-reload contract promoted to a registered `.claude/ccy/CLAUDE.md`

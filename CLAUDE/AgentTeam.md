@@ -214,7 +214,7 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 **Gate 2 - QA Agent:**
 
 - Spawns after Tester reports "tests pass"
-- Runs `./scripts/qa/run_all.sh` in developer's worktree
+- Runs `./scripts/qa/llm_qa.py all` in developer's worktree
 - Verifies daemon restarts successfully
 - Checks 95%+ coverage
 - Reports: "QA pass" → advance to Gate 3, OR "QA fail" → back to developer
@@ -314,7 +314,7 @@ All agents operate from `/workspace/untracked/worktrees/worktree-child-plan-NNNN
 2. Read PLAN.md to understand goals and success criteria
 3. **Write failing tests FIRST** (TDD - see [CLAUDE/CodeLifecycle/Features.md](CodeLifecycle/Features.md))
 4. Implement code to make tests pass
-5. Run `./scripts/qa/run_all.sh` (auto-fix what you can)
+5. Run `./scripts/qa/llm_qa.py all` (auto-fix what you can with `./scripts/qa/run_autofix.sh`)
 6. Verify daemon: `./bin/hooks-daemon restart && status`
 7. Commit with "Plan NNNNN: " prefix
 8. Update task to `ready_for_testing` status (NOT "completed")
@@ -394,7 +394,7 @@ SendMessage(
 
 1. Triggered after Tester reports "tests verified"
 2. `cd` to developer's worktree
-3. Run `./scripts/qa/run_all.sh` (all 7 checks)
+3. Run `./scripts/qa/llm_qa.py all` (every check must pass — the runner enumerates them; do not restate the count)
 4. Verify daemon restarts: `./bin/hooks-daemon restart && status`
 5. Check coverage: Must be 95%+ (shown in QA output)
 6. Verify no security issues (Bandit must pass)
@@ -413,7 +413,7 @@ SendMessage(
 SendMessage(
   type="message",
   recipient="team-lead",
-  content="QA complete for [task]. All 7 checks pass (magic values, format, lint, types, tests, security, dependencies). Coverage: XX.XX%. Daemon restarts successfully. Ready for senior review.",
+  content="QA complete for [task]. Every QA check passes. Coverage: XX.XX%. Daemon restarts successfully. Ready for senior review.",
   summary="QA verified - pass"
 )
 ```
@@ -686,7 +686,7 @@ WORKFLOW:
 2. Mark TaskList task #N as in_progress
 3. Write FAILING tests first (@CLAUDE/CodeLifecycle/Features.md)
 4. Implement code to make tests pass
-5. Run: ./scripts/qa/run_all.sh (MUST pass)
+5. Run: ./scripts/qa/llm_qa.py all (MUST pass)
 6. Verify: ./bin/hooks-daemon restart && status
 7. Commit: "Plan NNNNN: [description]"
 8. Update task status to "ready_for_testing"
@@ -762,7 +762,7 @@ See CLAUDE/QA.md for complete role definition. Key responsibilities:
 
 WORKFLOW:
 1. cd to worktree path above
-2. Run: ./scripts/qa/run_all.sh (all 7 checks)
+2. Run: ./scripts/qa/llm_qa.py all (every check must pass)
 3. Verify daemon: ./bin/hooks-daemon restart && status
 4. Check coverage: MUST be 95%+ (shown in QA output)
 5. Verify no security issues (Bandit must pass)
@@ -770,7 +770,7 @@ WORKFLOW:
 7. Report "QA verified" OR "QA failed with details"
 
 PASS CRITERIA:
-- All 7 QA checks pass (magic values, format, lint, types, tests, security, dependencies)
+- Every QA check passes (the runner enumerates them; do not restate the count)
 - Coverage ≥ 95%
 - Daemon restarts successfully
 - No security issues
@@ -779,7 +779,7 @@ PASS CRITERIA:
 REPORT FORMAT:
 If PASS:
   SendMessage(type="message", recipient="team-lead",
-    content="QA complete. All 7 checks pass. Coverage: XX%. Daemon restarts. Library/plugin separation verified. Ready for review.",
+    content="QA complete. Every QA check passes. Coverage: XX%. Daemon restarts. Library/plugin separation verified. Ready for review.",
     summary="QA verified - pass")
 
 If FAIL:
@@ -1112,7 +1112,7 @@ SendMessage(type="shutdown_request", recipient="honesty-checker-task-a", content
 
 ```bash
 cd /workspace/untracked/worktrees/worktree-plan-NNNNN
-./scripts/qa/run_all.sh  # Verify integration works
+./scripts/qa/llm_qa.py all  # Verify integration works
 ```
 
 ### Parent → Main Project (REQUIRES FINAL HONESTY CHECK + HUMAN APPROVAL)
@@ -1131,7 +1131,7 @@ git fetch origin
 git merge main --no-edit
 # ⚠️ Resolve conflicts HERE in the worktree (isolated, safe)
 
-./scripts/qa/run_all.sh  # QA MUST pass after sync
+./scripts/qa/llm_qa.py all  # QA MUST pass after sync
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
 # Expected: Status: RUNNING
@@ -1192,7 +1192,7 @@ git merge worktree-plan-NNNNN --no-edit
 # STEP 6: VERIFY MERGE SUCCEEDED IN MAIN
 # ===================================================================
 git status  # Should show clean state
-./scripts/qa/run_all.sh  # All QA MUST pass in main workspace
+./scripts/qa/llm_qa.py all  # All QA MUST pass in main workspace
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
 # Expected: Status: RUNNING
@@ -1345,7 +1345,7 @@ git status  # Confirm everything clean
 
 ### Lesson 4: Sequential QA Required
 
-**Problem**: Running `./scripts/qa/run_all.sh` in multiple worktrees simultaneously caused failures.
+**Problem**: Running the full QA suite in multiple worktrees simultaneously caused failures.
 
 **Root Cause**:
 
@@ -1442,7 +1442,7 @@ git status  # Confirm everything clean
 2. **Go back to worktree**: `cd /workspace/untracked/worktrees/worktree-plan-NNNNN`
 3. **Sync worktree with main FIRST**: `git merge main --no-edit`
 4. **Resolve conflicts in worktree** (isolated, safe)
-5. **Run QA in worktree**: `./scripts/qa/run_all.sh`
+5. **Run QA in worktree**: `./scripts/qa/llm_qa.py all`
 6. **NOW merge to main**: `cd /workspace && git merge worktree-plan-NNNNN`
 
 **Prevention**: ALWAYS sync worktree with main BEFORE merging to main.
@@ -1475,17 +1475,9 @@ Automates worktree creation, venv setup, editable install, and verification.
 ./scripts/setup_worktree.sh worktree-child-plan-NNNNN-task-a worktree-plan-NNNNN
 ```
 
-**What it does:**
-
-1. Validates branch name (must start with `worktree-`)
-2. Creates git worktree in `untracked/worktrees/`
-3. Creates the worktree's fingerprint-keyed Python venv (`{worktree}/untracked/venv-{slug}-py{MM}-{fingerprint}/` — see the "Venv layout" section in [SELF_INSTALL.md](SELF_INSTALL.md))
-4. Installs package in editable mode (`pip install -e ".[dev]"`)
-5. Verifies editable install points to worktree's own `src/`
-6. Creates daemon untracked directory
-7. Prints agent prompt template
-
-**See**: [CLAUDE/Worktree.md](Worktree.md) "Automation Scripts" section
+What it does (validation, venv creation, editable install, prompt template) is
+documented in [CLAUDE/Worktree.md](Worktree.md) "Automation Scripts" — the
+canonical home for worktree script mechanics.
 
 ### `scripts/validate_worktrees.sh` - Sequential QA Validation
 
@@ -1499,13 +1491,8 @@ Runs QA across all (or specific) worktrees sequentially.
 ./scripts/validate_worktrees.sh worktree-plan-NNNNN
 ```
 
-**What it does:**
-
-1. Checks venv exists and editable install is correct
-2. Runs `./scripts/qa/run_all.sh` from within each worktree
-3. Reports pass/fail summary for all worktrees
-
-**See**: [CLAUDE/Worktree.md](Worktree.md) "Automation Scripts" section
+What it does is documented in [CLAUDE/Worktree.md](Worktree.md) "Automation
+Scripts" — the canonical home for worktree script mechanics.
 
 ---
 
@@ -1550,7 +1537,7 @@ Each developer agent in their worktree:
 1. Marks task `in_progress`
 2. Writes failing tests FIRST (TDD)
 3. Implements handler to make tests pass
-4. Runs `./scripts/qa/run_all.sh`
+4. Runs `./scripts/qa/llm_qa.py all`
 5. Verifies daemon restarts successfully
 6. Commits with "Plan 00028: " prefix
 7. Updates task to `ready_for_testing` (NOT completed)
@@ -1645,13 +1632,13 @@ SendMessage(type="shutdown_request", recipient="honesty-checker-handler-a", cont
 # All 4 handlers merged to parent worktree
 # Run full QA in parent
 cd /workspace/untracked/worktrees/worktree-plan-00028
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
 
 # Sync worktree with main FIRST
 git merge main --no-edit
-./scripts/qa/run_all.sh  # Verify still passes after sync
+./scripts/qa/llm_qa.py all  # Verify still passes after sync
 
 # CRITICAL: Final Honesty Check on integrated code
 Task(subagent_type="general-purpose", team_name="plan-00028", name="final-honesty-checker",
@@ -1676,7 +1663,7 @@ cd /workspace
 git merge worktree-plan-00028 --no-edit
 
 # Verify QA in main
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
 
@@ -1779,7 +1766,7 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 
 - [ ] Write failing tests FIRST (TDD)
 - [ ] Implement code to pass tests
-- [ ] Run `./scripts/qa/run_all.sh` (MUST pass)
+- [ ] Run `./scripts/qa/llm_qa.py all` (MUST pass)
 - [ ] Verify daemon: `./bin/hooks-daemon restart && status`
 - [ ] Commit with "Plan NNNNN: " prefix
 - [ ] Update task to `ready_for_testing` (NOT completed)
@@ -1803,7 +1790,7 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 ### QA Agent Checklist (Gate 2)
 
 - [ ] Verify in developer's worktree
-- [ ] Run `./scripts/qa/run_all.sh` (all 7 checks)
+- [ ] Run `./scripts/qa/llm_qa.py all` (every check must pass)
 - [ ] Verify daemon restarts successfully
 - [ ] Check coverage ≥ 95%
 - [ ] Verify no security issues

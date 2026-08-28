@@ -6,7 +6,7 @@ Git worktree workflow for isolated, safe refactoring and development.
 # ✅ CORRECT ORDER:
 cd /workspace/untracked/worktrees/worktree-plan-00028
 git merge main --no-edit              # 1. Sync worktree with main FIRST
-./scripts/qa/run_all.sh              # 2. Verify QA still passes
+./scripts/qa/llm_qa.py all           # 2. Verify QA still passes
 cd /workspace
 git merge worktree-plan-00028        # 3. ONLY THEN merge to main
 
@@ -370,7 +370,7 @@ git status
 # ... do your work ...
 
 # Run QA within worktree
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 
 # Verify daemon loads with your changes
 ./bin/hooks-daemon restart
@@ -424,7 +424,7 @@ git fetch origin
 git merge main --no-edit
 # ⚠️ If there are conflicts, resolve them HERE in the worktree
 # ⚠️ Test thoroughly after merge - the worktree must pass all QA
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
 # Expected: Status: RUNNING
@@ -452,7 +452,7 @@ git merge worktree-plan-00028 --no-edit
 
 # STEP 6: Verify merge succeeded
 git status  # Should show clean state
-./scripts/qa/run_all.sh  # Verify all QA still passes
+./scripts/qa/llm_qa.py all  # Verify all QA still passes
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
 # Expected: Status: RUNNING
@@ -572,7 +572,7 @@ git branch -d worktree-child-plan-00028-handler-b
 # From parent worktree - verify everything works together
 cd /workspace/untracked/worktrees/worktree-plan-00028
 
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
 # Expected: Status: RUNNING
@@ -585,7 +585,7 @@ cd /workspace/untracked/worktrees/worktree-plan-00028
 # STEP 1: Sync worktree with main first
 cd /workspace/untracked/worktrees/worktree-plan-00028
 git merge main --no-edit
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 
 # STEP 2: Merge to main (after human approval)
 cd /workspace
@@ -656,7 +656,7 @@ The team lead operates from the **main workspace** and coordinates all worktree 
        DO NOT work in /workspace.
        Run the daemon CLI as ./bin/hooks-daemon from that worktree.
        Your task: Implement handler A. See TaskList for details.
-       Run ./scripts/qa/run_all.sh before committing.
+       Run ./scripts/qa/llm_qa.py all before committing.
        Verify daemon loads: ./bin/hooks-daemon restart"
    )
    ```
@@ -688,7 +688,7 @@ Each teammate MUST:
 - **Stay in their worktree** - never `cd /workspace`
 - **Use their own `./bin/hooks-daemon`** - it anchors to its own location, so
   the worktree's copy automatically uses the worktree-local venv
-- **Run QA before committing** - `./scripts/qa/run_all.sh`
+- **Run QA before committing** - `./scripts/qa/llm_qa.py all`
 - **Verify daemon loads** - `./bin/hooks-daemon restart`
 - **Communicate via `SendMessage`** - report completion, ask questions
 - **Mark tasks complete** via `TaskUpdate` when done
@@ -798,7 +798,7 @@ Runs QA sequentially across all (or specific) worktrees.
 
 **QA runs in worktrees MUST be sequential, NOT parallel.**
 
-Running `./scripts/qa/run_all.sh` in multiple worktrees simultaneously causes:
+Running the full QA suite in multiple worktrees simultaneously causes:
 
 1. **Daemon socket collisions**: Integration tests (`test_daemon_smoke.py`) start/stop daemons that compete for socket paths, causing `FileNotFoundError` and `AssertionError: Daemon still running after stop`
 2. **MyPy cache corruption**: Concurrent mypy processes writing to `.mypy_cache` causes type checker failures (`Library stubs not installed for "jsonschema"`)
@@ -1015,7 +1015,7 @@ $ git worktree list
   fingerprint-keyed venv and installs the package editable in one step)
 - [ ] `./bin/hooks-daemon` present in the worktree (it resolves that worktree's
   own venv automatically — no interpreter path to set)
-- [ ] QA scripts work: `./scripts/qa/run_all.sh`
+- [ ] QA scripts work: `./scripts/qa/llm_qa.py all`
 
 ### Before Merging Child → Parent:
 
@@ -1029,7 +1029,7 @@ $ git worktree list
 
 - [ ] ✋ **STEP 1**: ⚠️ **MERGED MAIN INTO WORKTREE FIRST** ⚠️ (`cd worktree && git merge main`)
 - [ ] ✋ **STEP 2**: Resolved any conflicts in parent worktree (NOT in main!)
-- [ ] ✋ **STEP 3**: Full QA passes in worktree (`./scripts/qa/run_all.sh`)
+- [ ] ✋ **STEP 3**: Full QA passes in worktree (`./scripts/qa/llm_qa.py all`)
 - [ ] ✋ **STEP 4**: Daemon restarts successfully in worktree (`./bin/hooks-daemon restart && status`)
 - [ ] ✋ **STEP 5**: Verified main workspace is clean (`git status` shows clean)
 - [ ] ✋ **STEP 6**: Committed or stashed any uncommitted changes in main workspace
@@ -1050,7 +1050,7 @@ $ git worktree list
 ### After Merging Parent → Main:
 
 - [ ] ✋ **STEP 11**: Verified merge succeeded (`git status` shows clean)
-- [ ] ✋ **STEP 12**: Full QA passes (`./scripts/qa/run_all.sh`)
+- [ ] ✋ **STEP 12**: Full QA passes (`./scripts/qa/llm_qa.py all`)
 - [ ] ✋ **STEP 13**: Daemon restarts successfully (`./bin/hooks-daemon restart && status`)
 - [ ] ✋ **STEP 14**: Pushed to origin successfully (`git push`)
 - [ ] ✋ **STEP 15**: Stopped parent worktree daemon (`$WT/.../daemon.cli stop`)
@@ -1217,7 +1217,7 @@ git branch -d worktree-child-plan-00028-task
 # Step 1: Sync worktree with main
 cd /workspace/untracked/worktrees/worktree-plan-00028
 git merge main --no-edit
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 
 # Step 2: Merge to main (after approval)
 cd /workspace
@@ -1236,7 +1236,7 @@ git branch -d worktree-plan-00028
 - Main project docs: `/workspace/CLAUDE.md`
 - Self-install mode: `CLAUDE/SELF_INSTALL.md`
 - Plan workflow: `CLAUDE/PlanWorkflow.md`
-- QA suite: `scripts/qa/run_all.sh`
+- QA suite: `./scripts/qa/llm_qa.py all` (check catalogue SSoT: `scripts/qa/run_all.sh`)
 - Code lifecycle: `CLAUDE/CodeLifecycle/General.md`
 - **Agent team workflow**: `CLAUDE/AgentTeam.md` (team coordination, lessons learned, prompts)
 - **Worktree setup**: `scripts/setup_worktree.sh` (automated creation + venv)

@@ -104,14 +104,14 @@ Plans specify **Recommended Executor** in the header:
 ```
 CLAUDE/
 └── Plan/
-    ├── 001-handler-implementation/
+    ├── 00001-handler-implementation/
     │   ├── PLAN.md                      # Main plan document
     │   ├── {supporting-docs*}.md        # Supporting analysis docs
     │   └── assets/                      # Diagrams, logs, etc.
-    ├── 002-config-refactoring/
+    ├── 00002-config-refactoring/
     │   ├── PLAN.md
     │   └── config-analysis.md
-    ├── 003-qa-improvements/
+    ├── 00003-qa-improvements/
     │   ├── PLAN.md
     │   └── coverage-report.md
     └── README.md                        # Index of all plans
@@ -119,7 +119,7 @@ CLAUDE/
 
 ### Plan Numbering
 
-- Plans are numbered sequentially: `001-`, `002-`, `003-`, etc.
+- Plans are numbered sequentially with 5-digit zero-padding: `00001-`, `00002-`, `00003-`, etc. (`NNNNN` in templates)
 - Use kebab-case for plan folder names
 - Plan numbers never change even if plan is cancelled
 
@@ -130,7 +130,7 @@ CLAUDE/
 Every `PLAN.md` must follow this structure:
 
 ```markdown
-# Plan XXX: [Plan Title]
+# Plan NNNNN: [Plan Title]
 
 **Status**: In Progress | Complete | Blocked | Cancelled
 **Created**: YYYY-MM-DD
@@ -175,9 +175,9 @@ Refer to detailed info in supporting docs as required
 
 ## Dependencies
 
-- Depends on: Plan 001 (Complete)
-- Blocks: Plan 003 (Not Started)
-- Related: Plan 002
+- Depends on: Plan 00001 (Complete)
+- Blocks: Plan 00003 (Not Started)
+- Related: Plan 00002
 
 ## Technical Decisions
 
@@ -435,7 +435,7 @@ When new work is identified:
 
 ### Step 2: Create Plan
 
-1. Create new folder: `CLAUDE/Plan/XXX-descriptive-name/`
+1. Create new folder: `CLAUDE/Plan/NNNNN-descriptive-name/`
 2. Copy plan template to `PLAN.md`
 3. Fill in overview, goals, and initial task breakdown
 4. Update `CLAUDE/Plan/README.md` with plan entry
@@ -467,7 +467,7 @@ When new work is identified:
 4. Update task status in real-time
 5. Document any blockers or changes
 6. **Run QA before each commit**
-7. Commit work with reference to plan: `Plan 001: Implement destructive git handler`
+7. Commit work with reference to plan: `Plan 00001: Implement destructive git handler`
 
 ### Failsafe Recovery Cron (while executing)
 
@@ -564,7 +564,7 @@ If TodoWrite list grows beyond 5 items or becomes multi-session:
 Use this template when creating new handlers for hook events.
 
 ````markdown
-# Plan XXX: [Handler Name] Handler
+# Plan NNNNN: [Handler Name] Handler
 
 **Status**: Not Started
 **Type**: Handler Implementation
@@ -666,7 +666,7 @@ The base and result type are chosen by the event: `PreToolUseHandlerBase`/`Gatin
 ### Feature Implementation Plan Template
 
 ```markdown
-# Plan XXX: [Feature Name]
+# Plan NNNNN: [Feature Name]
 
 **Status**: Not Started
 **Type**: Feature Implementation
@@ -706,7 +706,7 @@ The base and result type are chosen by the event: `PreToolUseHandlerBase`/`Gatin
 ### Bug Fix Plan Template
 
 ```markdown
-# Plan XXX: Fix [Bug Description]
+# Plan NNNNN: Fix [Bug Description]
 
 **Status**: Not Started
 **Type**: Bug Fix
@@ -739,7 +739,7 @@ The base and result type are chosen by the event: `PreToolUseHandlerBase`/`Gatin
 Use this template when improving existing code without changing behaviour.
 
 ```markdown
-# Plan XXX: Refactor [Component/Area]
+# Plan NNNNN: Refactor [Component/Area]
 
 **Status**: Not Started
 **Type**: Refactoring
@@ -877,13 +877,13 @@ Track these for each plan:
 Reference plans in commits:
 
 ```
-Plan 001: Implement destructive git handler
+Plan 00001: Implement destructive git handler
 
 - Add DestructiveGitHandler to block force push and reset --hard
 - Include tests for all blocked patterns
 - Register handler with priority 10
 
-Refs: CLAUDE/Plan/001-handler-implementation
+Refs: CLAUDE/Plan/00001-handler-implementation
 ```
 
 ### Branch Naming
@@ -891,9 +891,9 @@ Refs: CLAUDE/Plan/001-handler-implementation
 For larger plans, use feature branches:
 
 ```
-plan/001-destructive-git-handler
-plan/002-config-refactoring
-plan/003-tdd-enforcement
+plan/00001-destructive-git-handler
+plan/00002-config-refactoring
+plan/00003-tdd-enforcement
 ```
 
 ### Pre-Commit Verification
@@ -912,7 +912,7 @@ git add src/handlers/pre_tool_use/my_handler.py
 git add tests/handlers/pre_tool_use/test_my_handler.py
 
 # Commit with plan reference
-git commit -m "Plan 001: Implement destructive git handler"
+git commit -m "Plan 00001: Implement destructive git handler"
 ```
 
 ---
@@ -925,7 +925,7 @@ Maintain `CLAUDE/Plan/README.md`:
 # Plans Index
 
 ## Active Plans
-- [001: Destructive Git Handler](001-handler-implementation/PLAN.md) - In Progress
+- [00001: Destructive Git Handler](00001-handler-implementation/PLAN.md) - In Progress
 
 ## Completed Plans
 - None yet
@@ -967,7 +967,7 @@ User: "Implement a handler to block destructive sed commands"
 
 Agent:
 1. Checks CLAUDE/Plan/ for existing plan
-2. If none, creates Plan 001
+2. If none, creates Plan 00001 (via `CLAUDE/Plan/mkplan.bash`)
 3. Runs debug script to capture sed usage events
 4. Analyzes events to determine handler design
 5. Breaks down into TDD tasks
@@ -976,7 +976,7 @@ Agent:
    - Write failing test
    - Implement handler
    - Run QA suite
-8. Commits with "Plan 001: Implement sed blocker handler"
+8. Commits with "Plan 00001: Implement sed blocker handler"
 9. Ticks the task in PLAN.md and appends the narrative to the plan's JOURNAL/
 10. Marks complete when all QA passes
 ```

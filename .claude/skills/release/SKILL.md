@@ -63,25 +63,12 @@ Automate the complete release process: version updates, changelog generation, Op
 
 ## What It Does
 
-01. **Validates** environment (ABORT if any failure):
-    - Clean git state (no uncommitted changes)
-    - All QA checks passing (format, lint, types, tests, security)
-    - GitHub CLI authenticated
-    - No existing tag for target version
-02. **Determines** version bump (auto or manual)
-03. **Updates** version across all files
-04. **Generates** CHANGELOG.md entry from commits
-05. **Creates** release notes (RELEASES/vX.Y.Z.md)
-06. **Moves** `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/NN-*.md` into the versioned upgrade guide — BLOCKING, no task files may remain in `UNRELEASED/` after this step
-07. **Detects** breaking changes automatically and generates upgrade guide templates
-08. **Submits** to Opus agent for documentation review
-09. **🚨 UPGRADE GUIDE GATE** - Verify upgrade guide complete if breaking changes (BLOCKING)
-10. **🚨 QA VERIFICATION GATE** - Main Claude runs `./scripts/qa/llm_qa.py all` (BLOCKING)
-11. **🚨 CODE REVIEW GATE** - Main Claude reviews code diff since last tag (BLOCKING)
-12. **🚨 ACCEPTANCE TESTING GATE** - Main Claude executes acceptance tests: full suite for MAJOR/MINOR, targeted or skipped for PATCH (BLOCKING)
-13. **Commits** and pushes changes (only after gates pass)
-14. **Tags** release and creates GitHub release
-15. **Verifies** release published successfully
+Executes the release pipeline defined in
+**[RELEASING.md](../../../CLAUDE/development/RELEASING.md)** "Pipeline
+Overview" — the single source of truth for the steps, their order, their
+numbering, and which of them are BLOCKING gates. This skill does not restate
+that list; when a step number is cited anywhere in this file, it is
+RELEASING.md's numbering.
 
 **CRITICAL**: Release process ABORTS immediately on ANY validation failure or if blocking gates fail. NO auto-fixing of QA issues or git state.
 
@@ -95,54 +82,10 @@ Uses the specialized Release Agent (`.claude/agents/release-agent.md`):
 
 ## Process Flow
 
-```
-User runs /release
-    ↓
-Validate Environment
-    ↓
-Detect/Confirm Version
-    ↓
-Update Version Files
-    ↓
-Generate Changelog
-    ↓
-Create Release Notes
-    ↓
-🚨 MOVE UNRELEASED POST-UPGRADE TASKS (BLOCKING)
-    Move CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/NN-*.md
-    into the versioned upgrade guide
-    ABORT if any task file remains in UNRELEASED/
-    ↓
-Detect Breaking Changes (automatic)
-    ↓
-Generate Upgrade Guide Template (if breaking changes)
-    ↓
-Opus Review ←→ Fix Issues (if needed)
-    ↓
-🚨 UPGRADE GUIDE GATE (BLOCKING)
-    Main Claude verifies guide complete if breaking changes
-    ABORT if missing or incomplete
-    ↓
-🚨 QA VERIFICATION GATE (BLOCKING)
-    Main Claude runs: ./scripts/qa/llm_qa.py all
-    ABORT if any check fails
-    ↓
-🚨 CODE REVIEW GATE (BLOCKING)
-    Main Claude reviews git diff since last tag
-    ABORT if bugs/security issues found
-    ↓
-🚨 ACCEPTANCE TESTING GATE (BLOCKING)
-    MAJOR/MINOR: full test suite
-    PATCH + handler changes: targeted tests only
-    PATCH + no handler changes: skip (document reason)
-    ABORT if any test fails
-    ↓
-Commit & Push
-    ↓
-Create Tag & GitHub Release
-    ↓
-Verify & Report
-```
+See the "Pipeline Overview" in
+[RELEASING.md](../../../CLAUDE/development/RELEASING.md) — the canonical
+step-by-step flow. Any blocking-gate failure at any point ABORTS the release
+immediately.
 
 ## Output
 
@@ -191,7 +134,7 @@ Fix: Run ./scripts/qa/llm_qa.py all, fix issues, retry
 
 **Note**: Opus ONLY reviews release documentation (changelog/release notes), NOT code or QA issues.
 
-**Upgrade Guide Incomplete (Step 6.5 Gate Failure):**
+**Upgrade Guide Incomplete (Breaking Changes Check failure, RELEASING.md Step 9):**
 
 ```
 ❌ Breaking changes detected but upgrade guide incomplete
@@ -232,7 +175,7 @@ Fix: Use different version
 
 This skill orchestrates a multi-stage release process through main Claude. The release agent cannot spawn nested agents, so main Claude manages the workflow.
 
-### Stage 1: Release Agent Preparation
+### Stage 1: Release Agent Preparation (RELEASING.md Steps 1-6)
 
 Main Claude invokes the Release Agent (`.claude/agents/release-agent.md`) to:
 
@@ -245,7 +188,7 @@ Main Claude invokes the Release Agent (`.claude/agents/release-agent.md`) to:
 - **Generate upgrade guide templates (if breaking changes)**
 - Prepare summary for Opus review
 
-### Stage 2: Opus Documentation Review
+### Stage 2: Opus Documentation Review (RELEASING.md Step 7)
 
 Main Claude invokes ad-hoc Opus 4.5 agent to review:
 
@@ -257,7 +200,11 @@ Main Claude invokes ad-hoc Opus 4.5 agent to review:
 
 Opus does NOT review code or QA issues - only documentation.
 
-### Stage 3: Upgrade Guide Verification (Step 6.5 - BLOCKING GATE)
+### Stage 3: QA Verification Gate (RELEASING.md Step 8 - BLOCKING GATE)
+
+Main Claude runs full QA suite manually - see RELEASING.md Step 8.
+
+### Stage 4: Upgrade Guide Verification (RELEASING.md Step 9, Breaking Changes Check - BLOCKING GATE)
 
 **CRITICAL**: This gate is MANDATORY if breaking changes detected.
 
@@ -267,7 +214,7 @@ Main Claude executes:
 
    - Review Release Agent output for breaking changes
    - If breaking changes detected, proceed to verification
-   - If no breaking changes, skip to Step 7 (QA Gate)
+   - If no breaking changes, this gate passes with nothing to verify
 
 2. **Verify Upgrade Guide Exists**:
 
@@ -331,7 +278,7 @@ Main Claude executes:
    fi
    ```
 
-**If Step 6.5 FAILS**:
+**If this gate FAILS**:
 
 - ABORT release immediately
 - Display clear error message with guide location
@@ -339,29 +286,32 @@ Main Claude executes:
 - User must complete guide manually
 - User re-runs `/release` after completion
 
-**If Step 6.5 PASSES**:
+**If this gate PASSES**:
 
-- Proceed to Step 7 (QA Verification Gate)
+- Proceed to the remaining blocking gates below
 
-### Stage 4: QA Verification Gate (Step 7 - BLOCKING GATE)
+### Stage 5: Code Review Gate (RELEASING.md Step 10 - BLOCKING GATE)
 
-Main Claude runs full QA suite manually - see RELEASING.md Step 7.
+Main Claude reviews `git diff <last-tag>..HEAD -- src/` for bugs, security issues, and quality problems - see RELEASING.md Step 10.
 
-### Stage 4.5: Code Review Gate (Step 7.5 - BLOCKING GATE)
+### Stage 6: CLAUDE.md Guidance Audit (RELEASING.md Step 11 - BLOCKING GATE)
 
-Main Claude reviews `git diff <last-tag>..HEAD -- src/` for bugs, security issues, and quality problems - see RELEASING.md Step 7.5.
+Coverage of `get_claude_md()` is enforced by an integration test that Step 8's
+QA run already executes; confirm it explicitly - see RELEASING.md Step 11.
 
-### Stage 5: Acceptance Testing Gate (Step 8 - BLOCKING GATE)
+### Stage 7: Acceptance Testing Gate (RELEASING.md Step 12 - BLOCKING GATE)
 
 Main Claude executes acceptance tests - scope depends on bump type:
 
-- MAJOR/MINOR: full test suite - see RELEASING.md Step 8
+- MAJOR/MINOR: full test suite - see RELEASING.md Step 12
 - PATCH + handler changes: targeted tests for changed handlers only
 - PATCH + no handler changes: skip, document reason in release notes
 
-### Stage 6: Finalization (Steps 9-11)
+### Stage 8: Finalization (RELEASING.md Steps 13-15)
 
-Main Claude commits, tags, and publishes - see RELEASING.md Steps 9-11.
+Main Claude commits, tags, and publishes - see RELEASING.md Steps 13-15.
+Steps 14-15 (tag, GitHub release) are gated on `publish_authorised` in the
+release state file - an explicit human "yes, publish", every time.
 
 ## Documentation
 
@@ -373,7 +323,7 @@ This skill implements the process defined in the release documentation. For comp
 - UNRELEASED post-upgrade-tasks move (Step 6)
 - Breaking changes detection and upgrade guide generation
 - Upgrade guide verification gate
-- Acceptance testing requirements and FAIL-FAST cycle (Step 8)
+- Acceptance testing requirements and FAIL-FAST cycle (Step 12)
 - Version detection rules
 - Changelog generation format
 - Post-release procedures
