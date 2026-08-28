@@ -227,6 +227,10 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
     (worklist detail lives THERE). Headline: N1 venv layout stated four
     incompatible ways (severe), N2 68 non-allowlisted `@`-imports, N3
     priority table in 12 places with 3 wrong copies
+  - ✅ N1, N8, N9 fixed (slice A, commit 33d4dd49): SELF_INSTALL.md now the
+    canonical "Venv layout" home; stale spellings corrected/pointed in 7 docs;
+    three dead links repaired; BUG_REPORTING.md points at llm_qa.py.
+    Remaining: N2–N7.
 - [ ] ⬜ **Task 3.3**: Tooling/agent-definition follow-ups T1–T6 in
   `AUDIT-dogfood-run-1.md` (duplicate-block line numbers; worktree exclusion
   in the corpus indexer; agent-definition prompt fixes; shipped-vs-deployed
