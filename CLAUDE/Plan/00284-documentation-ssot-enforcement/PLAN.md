@@ -263,6 +263,12 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
   in the corpus indexer; agent-definition prompt fixes; shipped-vs-deployed
   copies in the generated-docs manifest) — commit 129aee17. Sweep findings
   dropped 96 → 42 (module-doc-budget 61 → 7, 0 remaining worktree mentions).
+- [ ] ⬜ **Task 3.5**: Per-file `docs-qa --lint` can serve STALE cross-document
+  results from the corpus cache — slice C observed the N5 duplicate-block pair
+  still reported by `--lint` after the fix was on disk (and after a daemon
+  restart); only a full `--sweep` re-indexed. Expected: a lint of file X must
+  refresh (at minimum) X's own corpus record before running cross-document
+  checks. TDD-reproduce, then fix in the lint entry path.
 
 ## Technical Decisions
 
