@@ -1930,21 +1930,6 @@ PostToolUse advisory (never blocks; ships disabled). When a `PLAN.md` Write/Edit
 
 **Configure** via `handlers.post_tool_use.goal_injection.options`: `mode: additive` (default) merges your `lines` (`{id, text, enabled}`) onto the built-in set — a matching `id` overrides in place; `mode: replace` uses only your lines. The fixed header marker line is never overridable or removable. Placeholders: `{plan_number}`, `{plan_title}`, `{plan_path}` (closed set — an unknown token skips the line). Optional authorisation lines (`subagents-encouraged`, `qa-review-subagents`) ship disabled; their vetted text points at `standing_authorisations` rather than asserting fresh consent — enable them only as a deliberate repository-owner act.
 
-<!-- handler: ccy-supervisor-integrity -->
-
-## ccy_supervisor_integrity — keep the ccy supervisor properly set up
-
-At session start this handler checks a ccy project (`.claude/ccy/`) whose supervisor is **armed** (`ccy.env` exports `CCY_CLAUDE_WRAPPER` referencing `claude-supervise.py`). It warns — never blocks — when the setup is brick-risky:
-
-- **`claude-supervise.py` missing** → the launcher's `exec` fails. Redeploy via a daemon upgrade or restore from git.
-- **not executable** → `chmod +x .claude/ccy/claude-supervise.py`.
-- **git-ignored** → it won't be committed; teammates get a broken supervisor. Add a `!claude-supervise.py` / `!ccy.env` whitelist line to `.claude/ccy/.gitignore` and commit the files.
-- **`ccy.deploy_supervisor: false` while armed+present** → the installer skips deploy on `false`, so upgrades never refresh `claude-supervise.py` and the project runs an increasingly stale supervisor. Set it to `true` (or disarm `CCY_CLAUDE_WRAPPER` if you truly want it off).
-
-It also detects a **stale running supervisor** (Plan 00164): when a daemon upgrade has put a NEWER `claude-supervise.py` on disk than the live process (compared by source fingerprint, not just version), it advises restarting ccy so the wrapper re-execs the updated supervisor. Nothing is broken meanwhile — the old supervisor keeps working until the session is relaunched.
-
-When you see this alert, fix the listed item(s) and commit the ccy files so the supervisor works for everyone.
-
 <!-- handler: git-upstream-checker -->
 
 ## git_upstream_checker — additive fetch + pull/cleanup advice on session start
@@ -2077,6 +2062,21 @@ At session start the transcript is scanned for the platform's own `model_refusal
 Dedupe state is PERSISTED to disk and survives a daemon restart: an ACTIVE record re-advises once per (session, identity); a RECOVERED record is noted at most once EVER, across every session; each distinct record's diagnostic snapshot is written at most once EVER.
 
 Options under `handlers.session_start.model_fallback_detector.options`: `snapshot_enabled` (default true), `snapshot_dir` (default `untracked/reports`), `snapshot_window_records` (default 20). Snapshots are never auto-committed.
+
+<!-- handler: ccy-supervisor-integrity -->
+
+## ccy_supervisor_integrity — keep the ccy supervisor properly set up
+
+At session start this handler checks a ccy project (`.claude/ccy/`) whose supervisor is **armed** (`ccy.env` exports `CCY_CLAUDE_WRAPPER` referencing `claude-supervise.py`). It warns — never blocks — when the setup is brick-risky:
+
+- **`claude-supervise.py` missing** → the launcher's `exec` fails. Redeploy via a daemon upgrade or restore from git.
+- **not executable** → `chmod +x .claude/ccy/claude-supervise.py`.
+- **git-ignored** → it won't be committed; teammates get a broken supervisor. Add a `!claude-supervise.py` / `!ccy.env` whitelist line to `.claude/ccy/.gitignore` and commit the files.
+- **`ccy.deploy_supervisor: false` while armed+present** → the installer skips deploy on `false`, so upgrades never refresh `claude-supervise.py` and the project runs an increasingly stale supervisor. Set it to `true` (or disarm `CCY_CLAUDE_WRAPPER` if you truly want it off).
+
+It also detects a **stale running supervisor** (Plan 00164): when a daemon upgrade has put a NEWER `claude-supervise.py` on disk than the live process (compared by source fingerprint, not just version), it advises restarting ccy so the wrapper re-execs the updated supervisor. Nothing is broken meanwhile — the old supervisor keeps working until the session is relaunched.
+
+When you see this alert, fix the listed item(s) and commit the ccy files so the supervisor works for everyone.
 
 <!-- handler: idle-housekeeping-advisory -->
 
