@@ -2096,6 +2096,8 @@ Configured in `.claude/hooks-daemon.yaml` under `handlers.user_prompt_submit.sta
 
 **Every entry ships disabled.** The handler is enabled so the options are discoverable, but nothing is authorised until the project turns it on — the daemon must never assert consent that was not given. Enabling one is a deliberate act by whoever owns the repository, and removing it withdraws the authorisation.
 
+**Tuning the cadence**: `prompt_interval` (default 5) and `interval_minutes` (default 15) set when a reinforcement is due. **Supervisor channel** (`supervisor_channel_enabled`, default **off**): when on AND a ccy supervisor is armed+live, a due reinforcement is typed by the supervisor as a real user-role line instead of folded hook-context; it FAILS OPEN to hook-context otherwise. Leave it off unless the deployed supervisor supports the `*.standing-auth-intent` signal — a running supervisor only learns it on a ccy relaunch, so enabling it against an older supervisor would silently drop reinforcements.
+
 <!-- handler: auto-approve-reads -->
 
 ## auto_approve_reads — gated on bypassPermissions mode
