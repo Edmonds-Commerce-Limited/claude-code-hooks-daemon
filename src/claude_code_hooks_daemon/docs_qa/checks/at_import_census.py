@@ -19,6 +19,7 @@ fault), downgraded to ADVISE for a path matching
 always ADVISE (no before/after to judge).
 """
 
+import logging
 import re
 from collections.abc import Sequence
 from fnmatch import fnmatch
@@ -32,6 +33,8 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Severity,
 )
 from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
+
+logger = logging.getLogger(__name__)
 
 CHECK_ID: Final[str] = "at-import-census"
 
@@ -111,10 +114,11 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
             continue
         try:
             content = abs_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as exc:
             # An unreadable or undecodable file must not abort the whole
             # SessionStart sweep (Plan 00287 N5) -- skip it, matching the
             # corpus's own UnicodeDecodeError handling.
+            logger.debug("at-import-census: skipping unreadable %s: %s", rel_path, exc)
             continue
         for target in extract_at_imports(content):
             if _is_resident(target, resident):

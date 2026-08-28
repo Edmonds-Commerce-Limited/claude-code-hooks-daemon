@@ -43,6 +43,7 @@ the doc corpus happens to have indexed — the manifest's declared scope is
 the authority here, not the corpus's audience-tree scope.
 """
 
+import logging
 import re
 from fnmatch import fnmatch
 from pathlib import Path
@@ -57,6 +58,8 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Severity,
 )
 from claude_code_hooks_daemon.version import __version__ as _DAEMON_VERSION
+
+logger = logging.getLogger(__name__)
 
 CHECK_ID: Final[str] = "generated-doc-hand-edit"
 
@@ -158,10 +161,14 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
     ):
         try:
             content = abs_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as exc:
             # An unreadable or undecodable file must not abort the whole
             # SessionStart sweep (Plan 00287 N5) -- skip it, matching the
             # corpus's own UnicodeDecodeError handling.
+            rel_path_for_log = abs_path.relative_to(context.project_root)
+            logger.debug(
+                "generated-doc-hand-edit: skipping unreadable %s: %s", rel_path_for_log, exc
+            )
             continue
         marker_version = _extract_marker_version(content)
         if marker_version is None or marker_version == _DAEMON_VERSION:

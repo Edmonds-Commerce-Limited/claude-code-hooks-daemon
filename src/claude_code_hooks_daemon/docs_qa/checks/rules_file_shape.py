@@ -35,6 +35,7 @@ resolves ``.claude/rules/*.md`` directly against the filesystem (the same
 independence rationale as ``generated_doc_hand_edit``).
 """
 
+import logging
 import re
 from dataclasses import dataclass
 from fnmatch import fnmatch
@@ -48,6 +49,8 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
+
+logger = logging.getLogger(__name__)
 
 CHECK_ID: Final[str] = "rules-file-shape"
 
@@ -253,10 +256,11 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         rel_path = str(path.relative_to(context.project_root))
         try:
             content = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as exc:
             # An unreadable or undecodable file must not abort the whole
             # SessionStart sweep (Plan 00287 N5) -- skip it, matching the
             # corpus's own UnicodeDecodeError handling.
+            logger.debug("rules-file-shape: skipping unreadable %s: %s", rel_path, exc)
             continue
         metrics = _measure(content)
         findings.extend(_element_findings_always_advise(rel_path, metrics))

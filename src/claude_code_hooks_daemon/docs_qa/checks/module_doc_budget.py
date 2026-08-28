@@ -30,6 +30,7 @@ BLOCK-eligible; unchanged is ADVISE; shrinking is silent. A path matching
 ``grandfather_allowlist`` is held to ADVISE-only regardless (R12).
 """
 
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -51,6 +52,8 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Severity,
 )
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_PLAN_DOC_BLOCK_LINES
+
+logger = logging.getLogger(__name__)
 
 CHECK_ID: Final[str] = "module-doc-budget"
 
@@ -84,13 +87,16 @@ _QUOTE_BLOCK_RE: Final[re.Pattern[str]] = re.compile(
 # tracked ``skills/hooks-daemon/`` source in self-install mode), so it is
 # excluded by full path prefix via corpus.is_vendored_daemon_install_path
 # instead, applied separately below.
-_EXCLUDED_DIR_NAMES: Final[frozenset[str]] = frozenset(
-    {
-        "untracked",
-        ".git",
-        Path(ProjectPath.CLAUDE_WORKTREES_DIR).name,
-    }
-) | COMMON_VENDORED_BUILD_DIR_NAMES
+_EXCLUDED_DIR_NAMES: Final[frozenset[str]] = (
+    frozenset(
+        {
+            "untracked",
+            ".git",
+            Path(ProjectPath.CLAUDE_WORKTREES_DIR).name,
+        }
+    )
+    | COMMON_VENDORED_BUILD_DIR_NAMES
+)
 
 
 def _matches_allowlist(rel_path: str, patterns: tuple[str, ...]) -> bool:
@@ -231,10 +237,11 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
             continue
         try:
             content = abs_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as exc:
             # An unreadable or undecodable file must not abort the whole
             # SessionStart sweep (Plan 00287 N5) -- skip it, matching the
             # corpus's own UnicodeDecodeError handling.
+            logger.debug("module-doc-budget: skipping unreadable %s: %s", rel_path, exc)
             continue
         registered = rel_path in context.policy.qa.registered_module_docs
         finding = _finding_for(rel_path, content, None, registered)

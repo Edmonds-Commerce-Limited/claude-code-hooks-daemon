@@ -26,6 +26,7 @@ re-read fresh from disk (the corpus stores references, never bodies) and
 every block re-verified, mirroring the EDIT-stage logic.
 """
 
+import logging
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Final
@@ -44,6 +45,8 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
+
+logger = logging.getLogger(__name__)
 
 CHECK_ID: Final[str] = "quote-drift"
 
@@ -157,10 +160,11 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
             continue
         try:
             content = abs_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as exc:
             # An unreadable or undecodable file must not abort the whole
             # SessionStart sweep (Plan 00287 N5) -- skip it, matching the
             # corpus's own UnicodeDecodeError handling.
+            logger.debug("quote-drift: skipping unreadable %s: %s", rel_path, exc)
             continue
         for block in parse_quote_blocks(content):
             finding = _verify_block(context.project_root, rel_path, block, Severity.ADVISE)

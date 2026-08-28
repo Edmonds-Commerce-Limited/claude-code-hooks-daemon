@@ -144,8 +144,10 @@ drive-by.
 
 ### Phase 6: Verification and closeout
 
-- [ ] ⬜ **Task 6.1**: Full QA: `./scripts/qa/llm_qa.py all` green.
-- [ ] ⬜ **Task 6.2**: `bin/hooks-daemon restart && bin/hooks-daemon status`
+- [x] ✅ **Task 6.1**: Full QA: `./scripts/qa/llm_qa.py all` green (25/25;
+  fixed a `silent-continue` self-scan regression the N5 guards introduced
+  by logging before skipping, mirroring `corpus.py`'s existing precedent).
+- [x] ✅ **Task 6.2**: `bin/hooks-daemon restart && bin/hooks-daemon status`
   → RUNNING.
 - [ ] ⬜ **Task 6.3**: Re-run `bin/hooks-daemon docs-qa --sweep` and report
   the finding-count delta against the review's 34-advisory baseline.

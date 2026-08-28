@@ -105,7 +105,15 @@ class TestIsInScope:
         not be indexed as documentation."""
         _scaffold(tmp_path)
         policy = DocumentationPolicy()
-        for heavy_dir in ("node_modules", "dist", "build", "target", ".venv", ".next", "third_party"):
+        for heavy_dir in (
+            "node_modules",
+            "dist",
+            "build",
+            "target",
+            ".venv",
+            ".next",
+            "third_party",
+        ):
             assert not is_in_scope(tmp_path / "docs" / heavy_dir / "README.md", tmp_path, policy)
 
     def test_unscoped_directory_is_excluded(self, tmp_path: Path) -> None:
