@@ -263,6 +263,12 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
   in the corpus indexer; agent-definition prompt fixes; shipped-vs-deployed
   copies in the generated-docs manifest) — commit 129aee17. Sweep findings
   dropped 96 → 42 (module-doc-budget 61 → 7, 0 remaining worktree mentions).
+- [x] ✅ **Task 3.4**: `docs-qa --lint <file>` refused a registered module doc
+  (`.claude/ccy/CLAUDE.md`) as "not a documentation file" even though the
+  EDIT-time handler (`docs_qa_edit`) lints it — the handler's scope union
+  included `is_module_doc_path`, the CLI's copy did not. Fixed by extracting
+  the shared union into `docs_qa.corpus.is_lintable_path` (SSoT) and having
+  both the handler and the CLI call it — commit 2aba56cd.
 - [ ] ⬜ **Task 3.5**: Per-file `docs-qa --lint` can serve STALE cross-document
   results from the corpus cache — slice C observed the N5 duplicate-block pair
   still reported by `--lint` after the fix was on disk (and after a daemon
