@@ -90,15 +90,15 @@ direct to the canonical library is the only sound fix.
 
 ### Phase 4: Secondary finding — restart exit 143
 
-- [ ] ⬜ **Task 4.1**: Investigate why `restart` reports exit 143 despite a
-  successful restart. Fix with a test if cheap/safe, else record findings
-  as a follow-up task.
+- [x] ✅ **Task 4.1**: Investigated why `restart` reports exit 143 despite a
+  successful restart — **not reproduced**; recorded findings + follow-up
+  below.
 
 ### Phase 5: Verification
 
-- [ ] ⬜ **Task 5.1**: `scripts/dummy-client-repo.sh create`, verify fixed
-  `daemon-cli.sh` inside it, `destroy`.
-- [ ] ⬜ **Task 5.2**: Full QA green, daemon restart RUNNING.
+- [x] ✅ **Task 5.1**: `scripts/dummy-client-repo.sh create`, verified the
+  fixed `daemon-cli.sh`/`health-check.sh` inside it, `destroy`.
+- [x] ✅ **Task 5.2**: Full QA green, daemon restart RUNNING.
 
 ## Success Criteria
 
@@ -107,6 +107,36 @@ direct to the canonical library is the only sound fix.
 - [ ] New DBF guard is RED against the pre-fix scripts and GREEN after.
 - [ ] Full `./scripts/qa/llm_qa.py all` passes.
 - [ ] Verified in a real client-mode install, not just self-install mode.
+
+## Follow-up: `restart` exit-143 (not reproduced)
+
+The field report's secondary finding — `restart` completes successfully but
+returns exit 143 (128+SIGTERM) — was investigated but **could not be
+reproduced**, either in self-install mode or against a real client-mode
+install (`scripts/dummy-client-repo.sh`), across repeated `daemon-cli.sh restart` invocations with and without the bootstrap stanza active.
+
+Ruled out by reading `cmd_stop`/`cmd_restart`/`cmd_start` in
+`src/claude_code_hooks_daemon/daemon/cli.py`:
+
+- `cmd_stop` sends `os.kill(pid, signal.SIGTERM)` to the **daemon's own PID**
+  only — never `os.killpg`, never the calling shell's PID or process group.
+- The daemon double-forks and calls `os.setsid()` before doing any work,
+  detaching it into its own session — a signal delivered to it cannot reach
+  its original parent's process group.
+- No code path in the stop/start/restart flow ever sends `SIGKILL` or any
+  signal to itself.
+
+Since the report's own console log shows the full success output printed
+*before* the 143 status was observed, a genuine signal-terminated process
+would not have completed printing — which points at something outside this
+script's own control (e.g. the reporter's Bash-tool harness or shell
+imposing a timeout/signal on the whole invocation once the backgrounding
+daemon triggers its own process-group heuristics). This is a plausible
+environment-specific interaction, not a defect visible in this codebase.
+
+**Recorded as a follow-up, not fixed here**: if this recurs, capture
+`bash -x` output plus the exact invocation context (interactive terminal vs.
+agent tool harness) so the reproduction conditions are pinned down.
 
 ## Delivery & Milestones
 
