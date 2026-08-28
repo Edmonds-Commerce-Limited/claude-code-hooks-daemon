@@ -107,20 +107,25 @@ Signalling contract mapped from `goal_injection` (authoritative reference is
   T-minute trigger via injected clock, silence between, per-session reset,
   automated-tick exclusion, loop-guard). 37 pass; handler 98% covered.
 
-### Phase 2: Channel routing in the handler
+### Phase 2: Channel routing in the handler ✅
 
-- [ ] ⬜ **Task 2.1**: Armed-detection helper — read the supervisor status file,
-  freshness-check it, return armed?/watching?.
-- [ ] ⬜ **Task 2.2**: On a reinforcement tick with a supervisor armed, write a
-  `<session>.standing-auth-intent` signal (atomic, fail-open, `{session_id,       ts, rendered_lines, source}` body) instead of injecting hook-context.
-  - [ ] ⬜ Fixed non-overridable machine-origin header, mirroring goal's header;
-    add a lockstep header-equality test.
-- [ ] ⬜ **Task 2.3**: Hook-context fallback when no supervisor is armed; the
+- [x] ✅ **Task 2.1**: Armed-detection helper — `armed_supervisor_live` in the
+  shared `utils/ccy_supervisor` (Phase 2a): config-armed AND pid-alive AND
+  source-current.
+- [x] ✅ **Task 2.2**: On a reinforcement tick with a supervisor armed, write a
+  `<session>.standing-auth-intent` signal (atomic, fail-open, `{ts, session_id, rendered_lines, source}` body) instead of injecting hook-context.
+  - [ ] ⬜ Fixed machine-origin header + lockstep test — DEFERRED to Phase 3:
+    the lines self-identify and the machine-origin marking is the supervisor's
+    `🤖 [ccy-supervisor` prefix, so the lockstep (daemon marker == supervisor
+    `_BOT_PREFIX`) belongs with the Phase 3 consumer where both ends exist.
+- [x] ✅ **Task 2.3**: Hook-context fallback when no supervisor is armed; the
   FIRST/establishing delivery is always immediate hook-context.
-- [ ] ⬜ **Task 2.4**: Loop-guard — detect the handler's own machine-origin
-  marker in an incoming prompt; do not count it, do not re-signal.
-- [ ] ⬜ **Task 2.5**: TDD — routing tests (armed→signal, unarmed→context,
-  first-always-context, loop-guard skips own marker).
+- [x] ✅ **Task 2.4**: Loop-guard — the handler's own supervisor-typed line
+  carries `🤖 [ccy-supervisor`, matched by `_is_automated_prompt` (Phase 1
+  marker fix), so it neither counts nor re-signals.
+- [x] ✅ **Task 2.5**: TDD — routing tests (armed→signal, unarmed→context,
+  write-fail→context, first-always-context, channel-off→never-routes,
+  no-project-context→context). 49 tests; handler 98.77%.
 
 ### Phase 3: Supervisor consumer (`claude-supervise.py`)
 

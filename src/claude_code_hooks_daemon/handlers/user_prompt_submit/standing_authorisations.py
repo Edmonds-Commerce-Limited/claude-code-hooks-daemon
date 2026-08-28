@@ -50,14 +50,23 @@ agent to ignore, disregard or override anything — enforced by a test, because
 that framing is both a worse prompt and a mechanism that should not exist.
 """
 
+import json
+import logging
+import os
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
+from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils import ccy_supervisor
+
+logger = logging.getLogger(__name__)
 
 # ── Config keys (mirrors command_hints' `_KEY_*` style) ────────────────────
 _KEY_ID: Final[str] = "id"
@@ -191,6 +200,65 @@ _MAX_TRACKED_SESSIONS: Final[int] = 512
 
 _UNKNOWN_SESSION: Final[str] = "unknown"
 
+# ── Supervisor channel (Plan 00283 Phase 2) ────────────────────────────────
+# When the channel is enabled AND a ccy supervisor is armed+live for this
+# project, a due reinforcement is written as a signal file the supervisor types
+# as a real user-role line (mirroring goal_injection's `<session>.goal-intent`
+# contract), instead of injecting folded hook-context. A real typed turn
+# outranks hook meta-context — the lower cadence buys the louder channel.
+#
+# Ships OFF (Decision, Plan 00283): a session's RUNNING supervisor only learns
+# to consume this signal when ccy is relaunched, not on a daemon restart. So
+# routing to a signal the running supervisor cannot yet read would silently drop
+# reinforcements in supervised sessions. Off → identical Phase 1 hook-context
+# behaviour; a project opts in only after its supervisor supports the signal.
+_DEFAULT_SUPERVISOR_CHANNEL_ENABLED: Final[bool] = False
+
+# Signal contract (mirrors goal_injection's, same context-sidecar directory).
+_SIGNAL_SUBDIR: Final[str] = "context-sidecar"
+# Deliberately NOT `.json` so the supervisor's sidecar reader never mistakes a
+# standing-auth signal for a context sidecar.
+_SIGNAL_SUFFIX: Final[str] = ".standing-auth-intent"
+_SESSION_ID_FALLBACK: Final[str] = "unknown"
+_UNSAFE_SESSION_CHARS: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9_.-]")
+_FIELD_TS: Final[str] = "ts"
+_FIELD_SESSION_ID: Final[str] = "session_id"
+_FIELD_RENDERED_LINES: Final[str] = "rendered_lines"
+_FIELD_SOURCE: Final[str] = "source"
+_SOURCE_REINFORCEMENT: Final[str] = "reinforcement"
+
+
+def write_standing_auth_signal(
+    session_id: str, rendered_lines: list[str], source: str
+) -> Path | None:
+    """Atomically write the ``<session>.standing-auth-intent`` signal file.
+
+    Failures are logged, never raised — this is a best-effort sensor signal and
+    must never break the prompt that triggered it. Returns the final path, or
+    None on failure (which the caller treats as "fall back to hook-context").
+    """
+    try:
+        target_dir = ProjectContext.daemon_untracked_dir() / _SIGNAL_SUBDIR
+        target_dir.mkdir(parents=True, exist_ok=True)
+        stem = _UNSAFE_SESSION_CHARS.sub("_", session_id) if session_id else _SESSION_ID_FALLBACK
+        final_path = target_dir / f"{stem}{_SIGNAL_SUFFIX}"
+        tmp_path = target_dir / f".{stem}.{os.getpid()}.tmp"
+        payload = {
+            _FIELD_TS: time.time(),
+            _FIELD_SESSION_ID: session_id,
+            _FIELD_RENDERED_LINES: rendered_lines,
+            _FIELD_SOURCE: source,
+        }
+        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+        tmp_path.replace(final_path)
+        return final_path
+    except RuntimeError as exc:
+        logger.warning("standing_authorisations: skipping signal (no project context): %s", exc)
+        return None
+    except OSError as exc:
+        logger.warning("standing_authorisations: failed to write signal: %s", exc)
+        return None
+
 
 @dataclass
 class _SessionState:
@@ -235,6 +303,11 @@ class StandingAuthorisationsHandler(UserPromptSubmitHandlerBase):
         # Cadence options (Plan 00283) — tunable via config; defaulted here.
         self._prompt_interval: int = _DEFAULT_PROMPT_INTERVAL
         self._interval_minutes: float = _DEFAULT_INTERVAL_MINUTES
+
+        # Supervisor channel (Plan 00283 Phase 2) — OFF by default. When on and a
+        # ccy supervisor is armed+live, a due reinforcement is routed to a signal
+        # the supervisor types as a real user-role line instead of hook-context.
+        self._supervisor_channel_enabled: bool = _DEFAULT_SUPERVISOR_CHANNEL_ENABLED
 
         # Per-session cadence state — bounded, FIFO.
         self._session_states: dict[str, _SessionState] = {}
@@ -287,6 +360,29 @@ class StandingAuthorisationsHandler(UserPromptSubmitHandlerBase):
         by_time = elapsed >= self._interval_minutes * _SECONDS_PER_MINUTE
         return by_prompts or by_time
 
+    def _route_reinforcement(self, session_id: str, lines: list[str]) -> list[str]:
+        """Route a due reinforcement, returning the hook-context to emit.
+
+        When the supervisor channel is enabled AND a ccy supervisor is armed+live
+        for this project, the reinforcement is written as a signal file (the
+        supervisor types it as a real user-role line) and this returns ``[]`` so
+        no hook-context is injected. In every other case — channel off, no
+        supervisor, no project context, or a failed signal write — it FAILS OPEN
+        to the folded hook-context, so a reinforcement is never silently lost.
+        """
+        if not self._supervisor_channel_enabled:
+            return lines
+        try:
+            project_root = ProjectContext.project_root()
+        except RuntimeError:
+            return lines
+        if not ccy_supervisor.armed_supervisor_live(project_root):
+            return lines
+        written = write_standing_auth_signal(session_id, lines, _SOURCE_REINFORCEMENT)
+        if written is None:
+            return lines
+        return []
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match any prompt-bearing UserPromptSubmit event."""
         return isinstance(hook_input.get(HookInputField.PROMPT), str)
@@ -322,10 +418,15 @@ class StandingAuthorisationsHandler(UserPromptSubmitHandlerBase):
         if not self._is_due(state, now):
             return BlockingResult(decision=Decision.ALLOW, context=[])
 
-        # Reinforce in the short form, and reset the cadence window.
+        # Reinforce, and reset the cadence window regardless of channel — the
+        # reinforcement has been delivered either as hook-context or as a
+        # supervisor-typed line. The router returns [] when it routed to the
+        # supervisor signal, else the short-form lines (hook fallback).
         state.last_delivery_ts = now
         state.prompts_since_last = 0
-        return BlockingResult(decision=Decision.ALLOW, context=self._resolve_entries(short=True))
+        lines = self._resolve_entries(short=True)
+        context = self._route_reinforcement(session_id, lines)
+        return BlockingResult(decision=Decision.ALLOW, context=context)
 
     def get_claude_md(self) -> str | None:
         """Document the SETTING, deliberately without restating the authorisations.

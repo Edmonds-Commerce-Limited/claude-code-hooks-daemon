@@ -13,6 +13,8 @@ dedicated test classes below:
   should not exist.
 """
 
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -20,11 +22,17 @@ import pytest
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.user_prompt_submit.standing_authorisations import (
+    _SIGNAL_SUBDIR,
+    _SIGNAL_SUFFIX,
+    _SOURCE_REINFORCEMENT,
     AUTHORISATION_COMMIT_PUSH_CADENCE,
     AUTHORISATION_SUBAGENT_DELEGATION,
     AUTHORISATION_WORKFLOWS,
     StandingAuthorisationsHandler,
+    write_standing_auth_signal,
 )
+
+_MODULE = "claude_code_hooks_daemon.handlers.user_prompt_submit.standing_authorisations"
 
 _PROMPT = "Please refactor the config loader and add tests for the new branch."
 
@@ -381,3 +389,156 @@ class TestClaudeMdGuidance:
         guidance = StandingAuthorisationsHandler().get_claude_md()
         assert guidance is not None
         assert "STANDING AUTHORISATION" not in guidance
+
+
+class TestWriteStandingAuthSignal:
+    """Plan 00283 Phase 2 — the signal writer mirrors goal_injection's contract."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_project_context(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            f"{_MODULE}.ProjectContext.daemon_untracked_dir",
+            classmethod(lambda cls: tmp_path),
+        )
+        self._untracked = tmp_path
+
+    def _read(self, session_id: str) -> dict[str, Any]:
+        path = self._untracked / _SIGNAL_SUBDIR / f"{session_id}{_SIGNAL_SUFFIX}"
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def test_writes_schema_fields(self) -> None:
+        lines = ["auth line one", "auth line two"]
+        path = write_standing_auth_signal("sess-1", lines, _SOURCE_REINFORCEMENT)
+        assert path is not None and path.exists()
+        data = self._read("sess-1")
+        assert data["session_id"] == "sess-1"
+        assert data["rendered_lines"] == lines
+        assert data["source"] == _SOURCE_REINFORCEMENT
+        assert isinstance(data["ts"], float)
+
+    def test_suffix_is_not_json(self) -> None:
+        """A `.json` suffix would be swept up by the supervisor's sidecar reader."""
+        path = write_standing_auth_signal("sess-2", ["x"], _SOURCE_REINFORCEMENT)
+        assert path is not None
+        assert path.suffix != ".json"
+        assert path.name.endswith(_SIGNAL_SUFFIX)
+
+    def test_unsafe_session_chars_sanitised(self) -> None:
+        path = write_standing_auth_signal("a/b c", ["x"], _SOURCE_REINFORCEMENT)
+        assert path is not None
+        assert path.name == f"a_b_c{_SIGNAL_SUFFIX}"
+
+    def test_fails_open_when_no_project_context(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _raise(cls: object) -> Path:
+            raise RuntimeError("no ctx")
+
+        monkeypatch.setattr(
+            f"{_MODULE}.ProjectContext.daemon_untracked_dir", classmethod(_raise)
+        )
+        assert write_standing_auth_signal("s", ["x"], _SOURCE_REINFORCEMENT) is None
+
+    def test_fails_open_on_oserror(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(Path, "mkdir", _raise)
+        assert write_standing_auth_signal("s", ["x"], _SOURCE_REINFORCEMENT) is None
+
+
+class TestSupervisorChannelRouting:
+    """Plan 00283 Phase 2 — a due reinforcement routes to the supervisor when armed.
+
+    Channel OFF (the shipped default) is identical to Phase 1: reinforcements are
+    folded hook-context. Channel ON routes to a signal file only when a ccy
+    supervisor is armed+live, and FAILS OPEN to hook-context otherwise, so a
+    reinforcement is never silently lost.
+    """
+
+    def _make(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        channel: bool,
+        armed: bool,
+        write_result: Path | None = Path("/x.standing-auth-intent"),
+    ) -> tuple[StandingAuthorisationsHandler, list[tuple[str, list[str], str]]]:
+        handler = StandingAuthorisationsHandler()
+        handler._clock = _FakeClock()
+        _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
+        handler._supervisor_channel_enabled = channel
+        monkeypatch.setattr(
+            f"{_MODULE}.ProjectContext.project_root", classmethod(lambda cls: Path("/proj"))
+        )
+        monkeypatch.setattr(
+            f"{_MODULE}.ccy_supervisor.armed_supervisor_live", lambda root: armed
+        )
+        calls: list[tuple[str, list[str], str]] = []
+
+        def _spy(session_id: str, lines: list[str], source: str) -> Path | None:
+            calls.append((session_id, lines, source))
+            return write_result
+
+        monkeypatch.setattr(f"{_MODULE}.write_standing_auth_signal", _spy)
+        return handler, calls
+
+    @staticmethod
+    def _drive_to_due(handler: StandingAuthorisationsHandler) -> Any:
+        handler.handle(_hook_input())  # first — full (establish)
+        result = None
+        for _ in range(handler._prompt_interval):
+            result = handler.handle(_hook_input())
+        return result
+
+    def test_first_delivery_is_hook_context_even_when_armed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        handler, calls = self._make(monkeypatch, channel=True, armed=True)
+        first = handler.handle(_hook_input())
+        assert first.context, "first delivery must be immediate hook-context"
+        assert calls == [], "the establishing delivery must never route to the supervisor"
+
+    def test_due_reinforcement_routes_to_signal_when_armed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        handler, calls = self._make(monkeypatch, channel=True, armed=True)
+        result = self._drive_to_due(handler)
+        assert result.context == [], "routed reinforcement injects no hook-context"
+        assert len(calls) == 1
+        _session, lines, source = calls[0]
+        assert lines and all("STANDING AUTHORISATION" in line for line in lines)
+        assert source == _SOURCE_REINFORCEMENT
+
+    def test_falls_back_to_context_when_not_armed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        handler, calls = self._make(monkeypatch, channel=True, armed=False)
+        result = self._drive_to_due(handler)
+        assert result.context, "unarmed → fold hook-context"
+        assert calls == [], "no signal written when no supervisor is armed"
+
+    def test_falls_back_to_context_when_signal_write_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        handler, calls = self._make(
+            monkeypatch, channel=True, armed=True, write_result=None
+        )
+        result = self._drive_to_due(handler)
+        assert result.context, "a failed signal write must fail open to hook-context"
+        assert len(calls) == 1, "the write was attempted before falling back"
+
+    def test_channel_off_never_routes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        handler, calls = self._make(monkeypatch, channel=False, armed=True)
+        result = self._drive_to_due(handler)
+        assert result.context, "channel off → Phase 1 hook-context behaviour"
+        assert calls == [], "channel off must never even check the supervisor"
+
+    def test_no_project_context_falls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        handler, calls = self._make(monkeypatch, channel=True, armed=True)
+
+        def _raise(cls: object) -> Path:
+            raise RuntimeError("uninitialised")
+
+        monkeypatch.setattr(f"{_MODULE}.ProjectContext.project_root", classmethod(_raise))
+        result = self._drive_to_due(handler)
+        assert result.context, "no project context → fold hook-context"
+        assert calls == [], "no signal attempted without a project root"
