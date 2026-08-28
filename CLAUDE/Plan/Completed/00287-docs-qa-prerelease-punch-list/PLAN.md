@@ -1,6 +1,6 @@
 # Plan 00287: docs-qa pre-release punch list
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-28
 **Owner**: joseph
 **Priority**: Medium
@@ -149,20 +149,25 @@ drive-by.
   by logging before skipping, mirroring `corpus.py`'s existing precedent).
 - [x] ✅ **Task 6.2**: `bin/hooks-daemon restart && bin/hooks-daemon status`
   → RUNNING.
-- [ ] ⬜ **Task 6.3**: Re-run `bin/hooks-daemon docs-qa --sweep` and report
-  the finding-count delta against the review's 34-advisory baseline.
-- [ ] ⬜ **Task 6.4**: Close the plan (Complete, `git mv` to `Completed/`,
+- [x] ✅ **Task 6.3**: Re-ran `bin/hooks-daemon docs-qa --sweep`: still 34
+  advisories (16 pointer-resolves, 8 at-import-census, 7 module-doc-budget,
+  3 duplicate-block) — zero delta against the review's baseline. Expected:
+  none of the fixes (CLI severity, grandfather allowlist, exclusion scope)
+  change what THIS repo's own dogfood corpus already reports; they close
+  gaps that only bite a different edit sequence or a client project with a
+  vendored `docs/` tree.
+- [x] ✅ **Task 6.4**: Close the plan (Complete, `git mv` to `Completed/`,
   README row move + stats recount, in one commit).
 
 ## Success Criteria
 
-- [ ] F1–F4 and N1 fixed, each with a regression test.
-- [ ] Cheap nits fixed (unguarded reads, `DocumentationStrategy.md`
+- [x] F1–F4 and N1 fixed, each with a regression test.
+- [x] Cheap nits fixed (unguarded reads, `DocumentationStrategy.md`
   phrasing).
-- [ ] `./scripts/qa/llm_qa.py all` fully green.
-- [ ] Daemon restarts and reports RUNNING.
-- [ ] `docs-qa --sweep` re-run and delta reported.
-- [ ] Deferred items (N2, N3, N3b, N5b) recorded as explicit unticked tasks
+- [x] `./scripts/qa/llm_qa.py all` fully green (25/25).
+- [x] Daemon restarts and reports RUNNING.
+- [x] `docs-qa --sweep` re-run and delta reported (34, zero delta).
+- [x] Deferred items (N2, N3, N3b, N5b) recorded as explicit unticked tasks
   above with rationale, not silently dropped.
 
 ## Delivery & Milestones
@@ -171,4 +176,10 @@ drive-by.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00287-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Milestone reached at <commit-hash>
+- F1: a4584178
+- F2: efb28ae4
+- F3: 90662646
+- F4: 58e260b6
+- N1: 0e81c6ad
+- N5 + cheap nits: ef88096e
+- Error-hiding self-scan fix: 94c41f61

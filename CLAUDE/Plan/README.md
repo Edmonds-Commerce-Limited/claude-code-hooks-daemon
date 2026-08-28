@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00287: docs-qa pre-release punch list](00287-docs-qa-prerelease-punch-list/PLAN.md) - In Progress (pre-release punch list from the post-completion Fable review of Plan 00284: CLI lint severity inflation, two checks ignoring `grandfather_allowlist`, client-scaling exclusions, and the missing HANDLER_REFERENCE.md docs for the docs_qa trio)
-
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
 
 - [00264: cap the size of a GitHub issue/PR comment](00264-github-comment-size-cap/PLAN.md) - Not Started (field report: agent sessions flooded two issues with 44,467- and 22,398-character comments until neither ticket's state was findable by the humans reading it; a PreToolUse cap on `gh` comment bodies steering the content into `JOURNAL/`, plus seven open questions the report's proposed design asserts rather than settles)
@@ -163,6 +161,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00287: docs-qa pre-release punch list](Completed/00287-docs-qa-prerelease-punch-list/PLAN.md) - Complete at `94c41f61` + the archiving commit (F1-F4 + N1 from the post-completion Fable review of Plan 00284: CLI lint severity inflation, two checks ignoring `grandfather_allowlist`, client-scaling exclusions, missing HANDLER_REFERENCE.md docs for the docs_qa trio, and a conflicting-truth in the docs-qa skill's own output contract; sweep re-verified at the same 34-advisory baseline)
 
 - [00286: plan-qa staged status/location coherence](Completed/00286-plan-qa-staged-status-location-coherence/PLAN.md) - Complete at `c7633e3f` + the archiving commit (adds the `archived-status-coherence` commit-gate check reading STAGED blobs, catching the git-mv-stages-rename-not-edits sequence that briefly landed Plan 00284 archived as In Progress)
 
@@ -1275,15 +1275,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 287 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 237 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 238 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 35 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 36 + 237 + 7 = **280 folders**, spanning
+- **Folder-to-number reconciliation**: 35 + 238 + 7 = **280 folders**, spanning
   **277 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
