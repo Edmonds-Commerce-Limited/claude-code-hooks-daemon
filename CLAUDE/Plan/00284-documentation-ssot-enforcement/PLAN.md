@@ -173,53 +173,30 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
 
 ### Phase 3: Implement (order per DESIGN-enforcement.md; TDD throughout)
 
-- [x] ✅ **Task 3.1a**: `DocumentationConfig` in `src/claude_code_hooks_daemon/config/models.py` + `docs_qa/`
-  package skeleton (types, policy mirror, corpus with link graph + cold/stale
-  rule) + `pointer-resolves` check + `hooks-daemon docs-qa` CLI
-  (`--sweep|--lint|--check-staged`, `--json`, exit 1 on findings).
-  Delivered at `62203a92` — 90 tests, 100% new-package coverage, live sweep
-  already surfacing real dead links. Note for 3.1e: corpus's plan-archive
-  exclusion approximates the archive dirs from the agent-tree name; consider
-  reading `plan_workflow.directory` instead.
-- [x] ✅ **Task 3.1b**: `generated-doc-hand-edit` (EDIT + SWEEP halves) + the
-  generated-docs manifest, pre-seeded with daemon artifacts. Delivered at
-  `d1a8a85a` — 28 tests, 100% package coverage, live-verified (lint blocks the
-  manifest default; sweep reads the real version marker as current). The
-  `<hooksdaemon>` section-in-CLAUDE.md omission is recorded as a decision in
-  the manifest defaults.
-- [x] ✅ **Task 3.1c**: `rules-file-shape` with structural worse-only semantics +
-  the surface handlers consuming the core. Delivered at `1e0fbf8e` (check) +
-  `9282f28c` (handlers + dogfood enablement, warn/advise modes, live-verified
-  on the real sockets: sweep flags this repo's two non-compliant rules files
-  and the dead links; warn-mode edit probe correctly advises instead of
-  denying). `docs_qa_commit_gate` deliberately DEFERRED to 3.1e with STAGED
-  context — mirrors plan_qa's own land-last commit-gate rollout order.
-- [x] ✅ **Task 3.1d**: `ssot-quote` verifier (`quote-drift`, `quote-source-stale`)
-  per the hardened §2.4 spec. Delivered at `2503a881` — 61 tests, package still
-  100%, live socket probe of a drifted quote correctly advised under warn mode.
-  80-char minimum quote floor; source read direct-from-disk as primary path;
-  reverse index cold-safe. Restart-snippet migration stays in Task 3.2.
-- [x] ✅ **Task 3.1e**: budgets/registry (`module-doc-budget`), `at-import-census`,
-  STAGED stage (`staged_context`, `docs_qa_commit_gate`) + two STAGED-only
-  checks (`rules-file-orphan-shrink`, `plan-promotion-disposition`), plus
-  STAGED registration for `pointer-resolves`/`quote-drift`.
-  `generated-doc-hand-edit` deliberately stays EDIT+SWEEP only (recorded
-  in its own module docstring — SWEEP already re-checks every generated
-  doc on disk regardless of write route, so a STAGED half would only
-  restate EDIT or SWEEP). `format_advisory` gained a compact cap
-  (`MAX_ADVISORY_FINDINGS_SHOWN`, 8) with a CLI pointer for the rest, so
-  the SWEEP report cannot bloat context once `module-doc-budget` starts
-  flagging this repo's several over-budget sub-`CLAUDE.md` files. Three
-  checkpoint commits.
-- [x] ✅ **Task 3.1f**: `duplicate-block` — advisory only, AFTER a hand-triaged
-  whole-repo run recorded in this folder. Delivered — new
-  `docs_qa/structured_blocks.py` + `block_hashes` on `DocRecord` +
-  `checks/duplicate_block.py` (EDIT + SWEEP, hard-coded advisory-only, no
-  `Severity.BLOCK` path in the code). Hand triage in
-  `TRIAGE-duplicate-block.md`: 11 shared blocks across 198 docs; floor
-  not adjusted — see the triage doc for the full evidence and reasoning.
+- [x] ✅ **Task 3.1a**: config model + `docs_qa/` skeleton + `pointer-resolves` +
+  CLI. Delivered `62203a92` (details: JOURNAL 26-08-28).
+- [x] ✅ **Task 3.1b**: `generated-doc-hand-edit` + generated-docs manifest.
+  Delivered `d1a8a85a`.
+- [x] ✅ **Task 3.1c**: `rules-file-shape` (worse-only) + `docs_qa_edit`/
+  `docs_qa_sweep` handlers + dogfood enablement (warn modes). Delivered
+  `1e0fbf8e` + `9282f28c`; commit gate deferred to 3.1e per plan_qa precedent.
+- [x] ✅ **Task 3.1d**: `ssot-quote` verifier (`quote-drift`,
+  `quote-source-stale`) per the hardened §2.4 spec. Delivered `2503a881`.
+- [x] ✅ **Task 3.1e**: STAGED stage + `docs_qa_commit_gate` + STAGED-only checks
+  - `module-doc-budget` + `at-import-census` + advisory cap. Delivered
+    `e2ff33df` / `bbe9015e` / `080ffd1b` (+ scope-gap fix `f5f06b31`);
+    generated-doc STAGED-half omission recorded in its module docstring.
+- [x] ✅ **Task 3.1f**: `duplicate-block` (hard-coded advisory-only) + the
+  mandatory hand-triage — see `TRIAGE-duplicate-block.md` (11 shared blocks /
+  198 docs; floor held). Delivered `96afa291`.
 - [ ] ⬜ **Task 3.1g**: `hooks-daemon-docs-qa` agent + docs-qa skill shim (via the
   Plan 00279 agent subsystem); dogfood dispatch doubles as acceptance test.
+- [ ] ⬜ **Task 3.1h**: Follow-ups flagged by 3.1f's delivery (both verified real):
+  (a) corpus cache-reuse gap — mtime/size-keyed reuse silently carries forward
+  a pre-schema-extension record with empty new fields; add an index schema
+  version that invalidates the whole cache on change; (b) sweep advisory cap
+  starvation — checks accumulate in registration order so late checks never
+  reach the capped 8 shown; give the cap per-check minimum representation.
 - [ ] ⬜ **Task 3.2**: Dogfood-migration worklist (deferred by the branch cross-check;
   each verified, none blocking):
   - `CLAUDE/AgentTeam.md` (~20 instructive `run_all.sh` sites + stale "all 7
