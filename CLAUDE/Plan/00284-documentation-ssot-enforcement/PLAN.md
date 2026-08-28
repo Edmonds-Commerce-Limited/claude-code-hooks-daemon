@@ -181,8 +181,12 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
   already surfacing real dead links. Note for 3.1e: corpus's plan-archive
   exclusion approximates the archive dirs from the agent-tree name; consider
   reading `plan_workflow.directory` instead.
-- [ ] ⬜ **Task 3.1b**: `generated-doc-hand-edit` (EDIT + SWEEP halves) + the
-  generated-docs manifest, pre-seeded with daemon artifacts.
+- [x] ✅ **Task 3.1b**: `generated-doc-hand-edit` (EDIT + SWEEP halves) + the
+  generated-docs manifest, pre-seeded with daemon artifacts. Delivered at
+  `d1a8a85a` — 28 tests, 100% package coverage, live-verified (lint blocks the
+  manifest default; sweep reads the real version marker as current). The
+  `<hooksdaemon>` section-in-CLAUDE.md omission is recorded as a decision in
+  the manifest defaults.
 - [ ] ⬜ **Task 3.1c**: `rules-file-shape` with structural worse-only semantics +
   the three surface handlers (`docs_qa_edit`, `docs_qa_commit_gate`,
   `docs_qa_sweep`) consuming the core.
