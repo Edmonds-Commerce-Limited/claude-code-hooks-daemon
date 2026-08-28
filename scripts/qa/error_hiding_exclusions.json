@@ -839,6 +839,12 @@
       "function": "_save",
       "rule": "log-and-continue",
       "reason": "Plan 00276: ledger persistence is best-effort by contract -- it runs inside PostToolUse and Stop handling, and an unwritable untracked dir must never break the tool call or the Stop event. The OSError is logged at warning; behaviour degrades to an empty ledger, which the Stop consult treats as 'nothing to defend' (fail-open)."
+    },
+    {
+      "file": "docs_qa/corpus.py",
+      "function": "load_cached_corpus",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00284: the corpus index is a rebuildable cache, not a source of truth -- a missing, unreadable, or malformed index.json is documented (module + function docstring) as 'treated as absent', and every caller has a defined fallback: build_and_save_corpus rebuilds it from a full filesystem scan, load_or_cold_corpus reports it as cold=True. Raising here would crash a SessionStart sweep or the docs-qa CLI over a cache file that regenerates itself on the next build, matching the cold/stale-index rule in DESIGN-enforcement.md."
     }
   ]
 }

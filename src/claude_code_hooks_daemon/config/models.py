@@ -757,6 +757,130 @@ class PlanWorkflowConfig(BaseModel):
     )
 
 
+class DocumentationTreesConfig(BaseModel):
+    """Names of the two audience-split documentation trees (Plan 00284).
+
+    Nested under ``documentation.trees``. The tree NAMES are per-project
+    configuration; the SPLIT itself is not optional once
+    ``documentation.enabled`` is true — see
+    ``CLAUDE/DocumentationStrategy.md`` R2/R3.
+
+    Attributes:
+        agent: Root directory of the agent-facing tree (verbose, owns depth)
+        human: Root directory of the human-facing tree (terse, may point at
+            the agent tree for full depth)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent: str = Field(default="CLAUDE", description="Root directory of the agent-facing tree")
+    human: str = Field(default="docs", description="Root directory of the human-facing tree")
+
+
+class DocumentationGeneratedDocEntry(BaseModel):
+    """One entry in the generated-docs manifest (R10).
+
+    Attributes:
+        glob: Path glob identifying the generated file(s)
+        generator: The command that regenerates them, shown in advisories
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    glob: str = Field(description="Path glob identifying the generated file(s)")
+    generator: str = Field(description="Command that regenerates the file(s)")
+
+
+def _default_generated_docs() -> list[DocumentationGeneratedDocEntry]:
+    """Pre-seed the manifest with the daemon's own generated artefact (R10)."""
+    return [
+        DocumentationGeneratedDocEntry(
+            glob=".claude/HOOKS-DAEMON.md",
+            generator="bin/hooks-daemon generate-docs",
+        )
+    ]
+
+
+class DocumentationQaConfig(BaseModel):
+    """Documentation QA subsystem policy (Plan 00284).
+
+    One policy shared by the three enforcement surfaces (edit-time handler,
+    commit gate, sweep) plus the ``docs-qa`` CLI, mirroring
+    ``plan_workflow.qa`` (Plan 00144).
+
+    Attributes:
+        edit_mode: Stage 1 (EDIT) enforcement mode — the default for
+            block-eligible checks that do not have their own
+            ``check_modes`` override
+        commit_gate_mode: Stage 2 (STAGED) git-commit gate enforcement mode
+        sweep_mode: Stage 3 (SWEEP) SessionStart sweep mode — never blocks
+        check_modes: Per-check override of ``edit_mode``/``commit_gate_mode``,
+            keyed by check id (e.g. ``rules-file-shape: block``)
+        grandfather_allowlist: File globs held to advise-only forever (R12)
+        generated_docs: Manifest of generated docs (R10), pre-seeded with the
+            daemon's own artefact
+        registered_module_docs: Registry of sub-``CLAUDE.md`` files that ARE
+            a canonical home rather than a routing table (R7d)
+        resident_at_imports: The ``@``-import allowlist (R6) — files permitted
+            to be resident-imported outside the deliberate root set
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    edit_mode: Literal["warn", "block"] = Field(
+        default="warn", description="Stage 1 (EDIT) enforcement mode"
+    )
+    commit_gate_mode: Literal["warn", "block"] = Field(
+        default="warn", description="Stage 2 (STAGED) commit-gate enforcement mode"
+    )
+    sweep_mode: Literal["advise", "off"] = Field(
+        default="advise", description="Stage 3 (SWEEP) SessionStart sweep mode"
+    )
+    check_modes: dict[str, Literal["warn", "block"]] = Field(
+        default_factory=dict, description="Per-check override of edit_mode/commit_gate_mode"
+    )
+    grandfather_allowlist: list[str] = Field(
+        default_factory=list, description="File globs held to advise-only forever (R12)"
+    )
+    generated_docs: list[DocumentationGeneratedDocEntry] = Field(
+        default_factory=_default_generated_docs,
+        description="Manifest of generated docs (R10), pre-seeded with the daemon's own artefact",
+    )
+    registered_module_docs: list[str] = Field(
+        default_factory=list,
+        description="Registry of sub-CLAUDE.md files that ARE a canonical home (R7d)",
+    )
+    resident_at_imports: list[str] = Field(
+        default_factory=lambda: ["CLAUDE.md"],
+        description="The @-import allowlist (R6)",
+    )
+
+
+class DocumentationConfig(BaseModel):
+    """Configuration for the documentation SSoT enforcement system (Plan 00284).
+
+    Ships OFF by default upstream (``enabled: false``); this repository turns
+    it on to dogfood it. Mirrors the ``plan_workflow`` precedent: one shared
+    top-level config block so the three enforcement surfaces (edit-time
+    handler, commit gate, sweep) and the CLI cannot fragment policy.
+
+    Attributes:
+        enabled: Master switch for the documentation QA HANDLERS. The
+            ``docs-qa`` CLI runs regardless — an explicit invocation is
+            consent.
+        trees: Names of the two audience-split documentation trees
+        qa: Documentation QA subsystem policy
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        default=False, description="Enable the documentation QA handlers (CLI always runs)"
+    )
+    trees: DocumentationTreesConfig = Field(default_factory=DocumentationTreesConfig)
+    qa: DocumentationQaConfig = Field(default_factory=DocumentationQaConfig)
+
+
 class AgentAssetGateConfig(BaseModel):
     """Gating config for one daemon-shipped agent asset (Plan 00279).
 
@@ -1062,6 +1186,7 @@ class Config(BaseModel):
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     project_handlers: ProjectHandlersConfig = Field(default_factory=ProjectHandlersConfig)
     plan_workflow: PlanWorkflowConfig = Field(default_factory=PlanWorkflowConfig)
+    documentation: DocumentationConfig = Field(default_factory=DocumentationConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     ccy: CcyConfig = Field(default_factory=CcyConfig)
     pseudo_events: dict[str, dict[str, Any]] = Field(

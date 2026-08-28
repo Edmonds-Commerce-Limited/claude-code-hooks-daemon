@@ -4276,6 +4276,108 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
+def cmd_docs_qa(args: argparse.Namespace) -> int:
+    """Run docs QA checks (Plan 00284): sweep or single-file lint.
+
+    Actions (mutually exclusive; default ``--sweep``):
+
+    - ``--sweep``: rebuild the doc corpus and evaluate it (SWEEP-stage
+      checks) — CI-able, exit 1 on any finding.
+    - ``--lint PATH``: run the EDIT-stage checks against one file's current
+      on-disk content.
+    - ``--check-staged``: NOT IMPLEMENTED in this slice (Plan 00284
+      Task 3.1a); prints a notice and exits 2.
+
+    Runs regardless of ``documentation.enabled`` — an explicit CLI
+    invocation is consent; ``enabled`` only gates the (not-yet-shipped)
+    handlers.
+
+    Args:
+        args: Parsed CLI arguments with ``sweep``, ``check_staged``,
+            ``lint``, ``json_output`` and optional ``project_root``.
+
+    Returns:
+        0 when clean, 1 when findings are reported, 2 on operational
+        errors (missing lint target, out-of-scope lint target, or
+        ``--check-staged``).
+    """
+    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.docs_qa.context import edit_context, sweep_context
+    from claude_code_hooks_daemon.docs_qa.corpus import build_and_save_corpus, is_in_scope
+    from claude_code_hooks_daemon.docs_qa.policy import policy_from_config
+    from claude_code_hooks_daemon.docs_qa.report import CLEAN_SCOPE_CORPUS, format_cli_report
+    from claude_code_hooks_daemon.docs_qa.runner import run_stage
+    from claude_code_hooks_daemon.docs_qa.types import CheckStage
+
+    resolved_root = resolve_tree_root(args)
+    if resolved_root is None:
+        return 2
+    project_root = resolved_root
+    config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+    policy = policy_from_config(config.documentation)
+
+    if getattr(args, "check_staged", False):
+        print(
+            "Docs QA: --check-staged is not implemented in this slice "
+            "(Plan 00284 Task 3.1a) — see CLAUDE/Plan/00284-documentation-"
+            "ssot-enforcement/PLAN.md Task 3.1e.",
+            file=sys.stderr,
+        )
+        return 2
+
+    if getattr(args, "lint", None) is not None:
+        # Resolve BEFORE scope-checking (mirrors the plan-qa Plan 00230
+        # lesson): a relative path must classify identically to its
+        # absolute form, and an unresolved relative path against an
+        # absolute-path scope check would silently read as "outside".
+        lint_path = Path(args.lint).resolve()
+        if not lint_path.is_file():
+            print(f"ERROR: Lint target does not exist: {lint_path}", file=sys.stderr)
+            return 2
+        if not is_in_scope(lint_path, project_root, policy):
+            print(
+                f"ERROR: Lint target is not a documentation file: {lint_path}\n"
+                f"       Expected a markdown file under one of the configured "
+                f"documentation trees, .claude/rules, .claude/skills, "
+                f".claude/agents, or the project root.",
+                file=sys.stderr,
+            )
+            return 2
+        context = edit_context(
+            project_root=project_root,
+            policy=policy,
+            file_path=lint_path,
+            file_content=lint_path.read_text(),
+            file_exists_before=True,
+        )
+        clean_scope = f"{lint_path.relative_to(project_root)} is clean"
+        findings = run_stage(CheckStage.EDIT, context)
+    else:
+        untracked_dir = _daemon_untracked_dir(project_root)
+        index_path = untracked_dir / "docs-qa" / "index.json"
+        corpus = build_and_save_corpus(project_root, policy, index_path)
+        context = sweep_context(project_root=project_root, policy=policy, corpus=corpus)
+        clean_scope = CLEAN_SCOPE_CORPUS
+        findings = run_stage(CheckStage.SWEEP, context)
+
+    if getattr(args, "json_output", False):
+        payload = [
+            {
+                "check_id": finding.check_id,
+                "severity": finding.severity.value,
+                "message": finding.message,
+                "remediation": finding.remediation,
+                "path": finding.path,
+            }
+            for finding in findings
+        ]
+        print(json.dumps(payload, indent=2))
+    else:
+        print(format_cli_report(findings, clean_scope))
+
+    return 1 if findings else 0
+
+
 def cmd_skill_scan(args: argparse.Namespace) -> int:
     """Run the skill-opportunity scan pipeline (Plan 00274).
 
@@ -5170,6 +5272,45 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_plan_qa.set_defaults(func=cmd_plan_qa)
+
+    # docs-qa command (Plan 00284) — sweep / single-file lint (staged: not
+    # implemented in this slice)
+    parser_docs_qa = subparsers.add_parser(
+        "docs-qa",
+        help="Run docs QA checks: --sweep (default, exit 1 on drift), --lint FILE",
+    )
+    parser_docs_qa.add_argument(
+        "--sweep",
+        action="store_true",
+        help="Rebuild the doc corpus and evaluate it for drift (default action)",
+    )
+    parser_docs_qa.add_argument(
+        "--check-staged",
+        dest="check_staged",
+        action="store_true",
+        help="Not implemented in this slice (Plan 00284 Task 3.1a); exits 2",
+    )
+    parser_docs_qa.add_argument(
+        "--lint",
+        type=Path,
+        metavar="FILE",
+        default=None,
+        help="Run edit-time checks against one doc file's on-disk content",
+    )
+    parser_docs_qa.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Emit findings as JSON",
+    )
+    parser_docs_qa.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_docs_qa.set_defaults(func=cmd_docs_qa)
 
     # skill-scan command (Plan 00274) — mine transcripts for skill candidates
     parser_skill_scan = subparsers.add_parser(
