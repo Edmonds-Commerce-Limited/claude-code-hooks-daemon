@@ -292,6 +292,49 @@ class TestQuoteDrift:
         assert "quote-drift" in out
 
 
+class TestLintSeverityMatchesHandler:
+    """F1 (Plan 00287): ``--lint`` must judge worse-only checks against the
+    file's OWN on-disk content, not treat it as brand new. Without
+    ``file_content_before`` every worse-only check compares against empty/
+    zero, so an unchanged, already-violating file reports BLOCK from the
+    CLI and ADVISE from the EDIT-stage handler for identical content."""
+
+    def test_unchanged_registered_module_doc_over_block_tier_is_advise_not_block(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        module_doc = root / "src" / "CLAUDE.md"
+        huge_body = "\n".join(f"line {i}" for i in range(1000))
+        module_doc.write_text(huge_body)
+        (root / ".claude" / "hooks-daemon.yaml").write_text(
+            "version: '2.0'\n"
+            "documentation:\n"
+            "  qa:\n"
+            "    registered_module_docs: ['src/CLAUDE.md']\n"
+        )
+
+        assert cmd_docs_qa(_args(root, lint=module_doc)) == 1
+        out = capsys.readouterr().out
+        assert "module-doc-budget" in out
+        assert "[block]" not in out
+        assert "[advise]" in out
+
+    def test_unchanged_rules_file_violation_is_advise_not_block(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        rules_dir = root / ".claude" / "rules"
+        rules_dir.mkdir(parents=True)
+        rules_file = rules_dir / "example.md"
+        rules_file.write_text("```\nfenced code, forbidden in rules files\n```\n")
+
+        assert cmd_docs_qa(_args(root, lint=rules_file)) == 1
+        out = capsys.readouterr().out
+        assert "rules-file-shape" in out
+        assert "[block]" not in out
+        assert "[advise]" in out
+
+
 class TestQuoteSourceStale:
     """``quote-source-stale`` needs a would-be-vs-on-disk DIFF to fire.
 

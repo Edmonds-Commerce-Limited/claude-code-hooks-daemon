@@ -4374,6 +4374,12 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
             file_path=lint_path,
             file_content=lint_content,
             file_exists_before=True,
+            # F1 (Plan 00287): an on-disk lint has, by definition, no pending
+            # change -- without this, every worse-only check compares the
+            # would-be content against EMPTY/zero and reports every existing
+            # violation as newly introduced (BLOCK), disagreeing with the
+            # EDIT-stage handler, which always has the real "before" content.
+            file_content_before=lint_content,
             corpus=corpus,
         )
         clean_scope = f"{lint_path.relative_to(project_root)} is clean"
