@@ -30,8 +30,10 @@ Dispatch the `hooks-daemon-docs-qa` agent (`Task` tool,
 /docs-qa CLAUDE/Plan/00284   # scoped to one plan folder's topic
 ```
 
-The agent is **read-only** — it reports findings to
-`untracked/reports/YYYY-MM-DD-docs-qa-<topic>.md` and never edits anything.
+The agent is **read-only** — it delivers findings **inline, as its final
+report**, and never edits anything or writes a report file on its own
+initiative. If you want the findings persisted (e.g. to
+`untracked/reports/`), name that target explicitly when dispatching it.
 Review its report and act on the findings yourself (or ask it to be
 dispatched again after you have made changes, to re-verify).
 

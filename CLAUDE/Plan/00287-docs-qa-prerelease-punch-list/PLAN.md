@@ -130,9 +130,10 @@ drive-by.
 
 ### Phase 5: N1 + cheap nits
 
-- [ ] ⬜ **Task 5.1**: Fix `skills/docs-qa/SKILL.md` to match the agent
+- [x] ✅ **Task 5.1**: Fix `skills/docs-qa/SKILL.md` to match the agent
   template's inline-report contract (drop the `untracked/reports/` claim);
-  redeploy the dogfood copy so `.claude/skills/docs-qa/` matches.
+  redeployed the dogfood copy via `install.skills.deploy_skills` so
+  `.claude/skills/docs-qa/` matches.
 - [ ] ⬜ **Task 5.2**: Guard the unreadable-file case in the sweep checks
   that read files directly from disk (`module_doc_budget.py`,
   `generated_doc_hand_edit.py`, `at_import_census.py`, `quote_drift.py`,
