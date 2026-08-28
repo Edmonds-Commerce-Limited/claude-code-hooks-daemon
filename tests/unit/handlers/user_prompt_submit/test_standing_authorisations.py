@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.handlers.user_prompt_submit.standing_authorisation
     AUTHORISATION_COMMIT_PUSH_CADENCE,
     AUTHORISATION_SUBAGENT_DELEGATION,
     AUTHORISATION_WORKFLOWS,
+    SUPERVISOR_CHANNEL_HEADER,
     StandingAuthorisationsHandler,
     write_standing_auth_signal,
 )
@@ -505,7 +506,8 @@ class TestSupervisorChannelRouting:
         assert result.context == [], "routed reinforcement injects no hook-context"
         assert len(calls) == 1
         _session, lines, source = calls[0]
-        assert lines and all("STANDING AUTHORISATION" in line for line in lines)
+        assert lines[0] == SUPERVISOR_CHANNEL_HEADER, "the fixed machine-origin header opens it"
+        assert "sub-agent delegation" in lines[1], "the body names the enabled authorisation"
         assert source == _SOURCE_REINFORCEMENT
 
     def test_falls_back_to_context_when_not_armed(

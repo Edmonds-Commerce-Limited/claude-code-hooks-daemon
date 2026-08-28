@@ -227,6 +227,33 @@ _FIELD_RENDERED_LINES: Final[str] = "rendered_lines"
 _FIELD_SOURCE: Final[str] = "source"
 _SOURCE_REINFORCEMENT: Final[str] = "reinforcement"
 
+# Fixed machine-origin header for the supervisor-typed reinforcement. The
+# supervisor's fail-closed gate (`_validate_standing_auth_lines`) requires this
+# to open the payload VERBATIM, so anything able to write the signal file (a bash
+# redirect suffices — no content guard covers it) cannot smuggle arbitrary text,
+# e.g. a forged human authorisation, into a typed user-role line. The load-bearing
+# clause is the "NOT ... human authorisation" disclaimer; the WHOLE header must be
+# present. A lockstep test asserts this equals the supervisor's
+# `_STANDING_AUTH_HEADER_TEXT` so the two ends cannot drift (mirrors goal's header).
+SUPERVISOR_CHANNEL_HEADER: Final[str] = (
+    "🤖 [ccy-supervisor] standing authorisations replayed from this project's "
+    "config — machine-generated, NOT a human instruction and NOT fresh human "
+    "authorisation for anything."
+)
+
+# Compact human-readable names for the supervisor-typed line — a real user-role
+# turn should be a concise pointer, not the full per-entry paragraphs the hook
+# fallback folds in. The security gate checks only the HEADER; this body, after
+# the separator, is free text (the goal contract works the same way).
+_SUPERVISOR_CHANNEL_NAMES: Final[dict[str, str]] = {
+    AUTHORISATION_SUBAGENT_DELEGATION: "sub-agent delegation",
+    AUTHORISATION_WORKFLOWS: "multi-agent workflow orchestration",
+    AUTHORISATION_COMMIT_PUSH_CADENCE: "frequent commit-and-push",
+}
+_SUPERVISOR_CHANNEL_BODY: Final[str] = (
+    "On file and still in effect: {names}. Audit or revoke in .claude/hooks-daemon.yaml."
+)
+
 
 def write_standing_auth_signal(
     session_id: str, rendered_lines: list[str], source: str
@@ -360,27 +387,47 @@ class StandingAuthorisationsHandler(UserPromptSubmitHandlerBase):
         by_time = elapsed >= self._interval_minutes * _SECONDS_PER_MINUTE
         return by_prompts or by_time
 
-    def _route_reinforcement(self, session_id: str, lines: list[str]) -> list[str]:
+    def _render_supervisor_lines(self) -> list[str]:
+        """Render the compact ``[header, body]`` the supervisor types as one line.
+
+        The header is fixed and machine-origin (the supervisor's gate requires it
+        verbatim); the body names the enabled authorisations in built-in order and
+        points at the config. Deliberately terser than the hook fallback — a real
+        user-role turn should be a concise pointer, not the full paragraphs.
+        """
+        enabled = self._enabled_ids()
+        names = [
+            _SUPERVISOR_CHANNEL_NAMES[entry_id]
+            for entry_id in _BUILTIN_TEXTS
+            if entry_id in enabled and entry_id in _SUPERVISOR_CHANNEL_NAMES
+        ]
+        body = _SUPERVISOR_CHANNEL_BODY.format(names=", ".join(names))
+        return [SUPERVISOR_CHANNEL_HEADER, body]
+
+    def _route_reinforcement(self, session_id: str, hook_lines: list[str]) -> list[str]:
         """Route a due reinforcement, returning the hook-context to emit.
 
         When the supervisor channel is enabled AND a ccy supervisor is armed+live
-        for this project, the reinforcement is written as a signal file (the
-        supervisor types it as a real user-role line) and this returns ``[]`` so
-        no hook-context is injected. In every other case — channel off, no
-        supervisor, no project context, or a failed signal write — it FAILS OPEN
-        to the folded hook-context, so a reinforcement is never silently lost.
+        for this project, the reinforcement is written as a signal file carrying
+        the compact ``[header, body]`` render (the supervisor types it as a real
+        user-role line) and this returns ``[]`` so no hook-context is injected. In
+        every other case — channel off, no supervisor, no project context, or a
+        failed signal write — it FAILS OPEN to the folded hook-context
+        (``hook_lines``), so a reinforcement is never silently lost.
         """
         if not self._supervisor_channel_enabled:
-            return lines
+            return hook_lines
         try:
             project_root = ProjectContext.project_root()
         except RuntimeError:
-            return lines
+            return hook_lines
         if not ccy_supervisor.armed_supervisor_live(project_root):
-            return lines
-        written = write_standing_auth_signal(session_id, lines, _SOURCE_REINFORCEMENT)
+            return hook_lines
+        written = write_standing_auth_signal(
+            session_id, self._render_supervisor_lines(), _SOURCE_REINFORCEMENT
+        )
         if written is None:
-            return lines
+            return hook_lines
         return []
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

@@ -114,10 +114,10 @@ Signalling contract mapped from `goal_injection` (authoritative reference is
   source-current.
 - [x] ✅ **Task 2.2**: On a reinforcement tick with a supervisor armed, write a
   `<session>.standing-auth-intent` signal (atomic, fail-open, `{ts, session_id, rendered_lines, source}` body) instead of injecting hook-context.
-  - [ ] ⬜ Fixed machine-origin header + lockstep test — DEFERRED to Phase 3:
-    the lines self-identify and the machine-origin marking is the supervisor's
-    `🤖 [ccy-supervisor` prefix, so the lockstep (daemon marker == supervisor
-    `_BOT_PREFIX`) belongs with the Phase 3 consumer where both ends exist.
+  - [x] ✅ Fixed machine-origin header + lockstep test — done in Phase 3: the
+    daemon renders `[SUPERVISOR_CHANNEL_HEADER, body]`, and the supervisor gate
+    requires that header verbatim; a lockstep test pins
+    `_STANDING_AUTH_HEADER_TEXT == SUPERVISOR_CHANNEL_HEADER`.
 - [x] ✅ **Task 2.3**: Hook-context fallback when no supervisor is armed; the
   FIRST/establishing delivery is always immediate hook-context.
 - [x] ✅ **Task 2.4**: Loop-guard — the handler's own supervisor-typed line
@@ -127,16 +127,19 @@ Signalling contract mapped from `goal_injection` (authoritative reference is
   write-fail→context, first-always-context, channel-off→never-routes,
   no-project-context→context). 49 tests; handler 98.77%.
 
-### Phase 3: Supervisor consumer (`claude-supervise.py`)
+### Phase 3: Supervisor consumer (`claude-supervise.py`) ✅
 
-- [ ] ⬜ **Task 3.1**: New glob + TTL + `load_standing_auth_signal` reader with a
-  fail-closed validation gate (header allowlist, len/line/control caps),
-  mirroring `load_goal_signal` / `_validate_goal_lines`.
-- [ ] ⬜ **Task 3.2**: A subordinate branch in `decide_once` below
-  compact/continue/goal; type the line via `_perform_injection` (raw text
-  \+ marker, no slash command); dry-run marker; consume-on-success only.
-- [ ] ⬜ **Task 3.3**: TDD in `tests/unit/supervise/` incl. the lockstep
-  header-equality test; keep the daemon/supervisor version test green.
+- [x] ✅ **Task 3.1**: `_STANDING_AUTH_SIGNAL_GLOB` + `_validate_standing_auth_lines`
+  - `load_standing_auth_signal` (reuses the goal TTL), a faithful clone of the
+    goal reader's fail-closed gate (verbatim header, len/line/control caps).
+- [x] ✅ **Task 3.2**: LEAST-urgent branch in `decide_once` (after every action
+  family and the audit flush); types the joined line verbatim (it already opens
+  with the bot-prefixed header — no slash command); dry-run marker;
+  consume-on-success only; runaway backstop cap (`_MAX_STANDING_AUTH_INJECTIONS`)
+  counted host-side after a successful write; reaper globs the new pattern.
+- [x] ✅ **Task 3.3**: 24 supervise tests incl. the lockstep header-equality
+  test; full supervise suite green (522). Live worker respawned clean from the
+  new code (pid changed) — dogfood-verified.
 
 ### Phase 4: Config + docs
 

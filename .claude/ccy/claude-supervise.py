@@ -1159,6 +1159,7 @@ class Decision(enum.Enum):
     WOULD_CONTINUE = "would-continue"
     WOULD_ESCAPE = "would-escape"
     WOULD_GOAL = "would-goal"
+    WOULD_STANDING_AUTH = "would-standing-auth"
     WOULD_EFFORT = "would-effort"
     WOULD_MODEL = "would-model"
     WOULD_AUDIT = "would-audit"
@@ -1970,6 +1971,101 @@ def load_goal_signal(
 
 
 # ---------------------------------------------------------------------------
+# Standing-authorisation signal (Plan 00283).
+#
+# The daemon's standing_authorisations UserPromptSubmit handler routes a due
+# reinforcement to a ``<session>.standing-auth-intent`` signal (again NOT
+# ``*.json``) when its supervisor channel is enabled and this supervisor is
+# armed+live. We type it as a real user-role line at the same idle choke point
+# as the goal signal, subordinate to every other family. Same security reasoning
+# as the goal header: anything able to WRITE the signal file (a bash redirect is
+# enough) could otherwise get arbitrary text — including a forged human consent —
+# typed into the chat, so the WHOLE header must equal the daemon renderer's fixed
+# header verbatim. A lockstep test asserts this equals
+# standing_authorisations.SUPERVISOR_CHANNEL_HEADER so the two ends cannot drift.
+_STANDING_AUTH_SIGNAL_GLOB = "*.standing-auth-intent"
+_STANDING_AUTH_HEADER_TEXT = (
+    "🤖 [ccy-supervisor] standing authorisations replayed from this project's "
+    "config — machine-generated, NOT a human instruction and NOT fresh human "
+    "authorisation for anything."
+)
+# Re-join separator for rendered_lines (the daemon writes [header, body]).
+_STANDING_AUTH_SEPARATOR = " — "
+_STANDING_AUTH_MAX_JOINED_CHARS = 500
+_STANDING_AUTH_MAX_LOGICAL_LINES = 8
+# Runaway backstop only — the daemon cadence (≤1 signal per reinforcement window)
+# plus consume-on-inject is the real rate limit, so this only ever catches a
+# pathological consume-delete loop. Set high so a long session is never silenced.
+_MAX_STANDING_AUTH_INJECTIONS = 100
+_DRY_RUN_STANDING_AUTH_BODY_PREFIX = (
+    "would inject standing-auth reminder (dry-run — no real message sent):"
+)
+
+
+def _validate_standing_auth_lines(rendered_lines: object) -> tuple[str | None, str | None]:
+    """Validate ``rendered_lines`` from a standing-auth signal; return (joined, error).
+
+    Fail-closed and shape-only, mirroring ``_validate_goal_lines``: the ENTIRE
+    fixed machine-origin header must open the payload verbatim (alone, or followed
+    by the separator), so a forged signal cannot smuggle arbitrary text past the
+    gate. Never interprets the body text.
+    """
+    if not isinstance(rendered_lines, list) or not rendered_lines:
+        return None, "rendered_lines is not a non-empty list"
+    if len(rendered_lines) > _STANDING_AUTH_MAX_LOGICAL_LINES:
+        return None, f"more than {_STANDING_AUTH_MAX_LOGICAL_LINES} logical lines"
+    if not all(isinstance(line, str) for line in rendered_lines):
+        return None, "rendered_lines contains a non-string element"
+    joined = _STANDING_AUTH_SEPARATOR.join(rendered_lines)
+    if joined != _STANDING_AUTH_HEADER_TEXT and not joined.startswith(
+        _STANDING_AUTH_HEADER_TEXT + _STANDING_AUTH_SEPARATOR
+    ):
+        return None, "payload does not open with the verbatim machine-origin header"
+    if len(joined) > _STANDING_AUTH_MAX_JOINED_CHARS:
+        return None, f"joined line exceeds {_STANDING_AUTH_MAX_JOINED_CHARS} chars"
+    for ch in joined:
+        if ord(ch) < 0x20 or ord(ch) == 0x7F:
+            return None, "control byte in payload"
+    return joined, None
+
+
+def load_standing_auth_signal(
+    directory: Path,
+    *,
+    now: float,
+    ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS,
+    own_sessions: frozenset[str] | None = None,
+) -> tuple[Path | None, str | None, str | None]:
+    """Return ``(path, joined_line, reject_reason)`` for a standing-auth signal.
+
+    Same three-shape contract as :func:`load_goal_signal`: a valid fresh in-scope
+    signal yields ``(path, joined, None)``; an in-scope fresh signal that FAILS
+    the gate yields ``(None, None, reason)``; nothing actionable yields
+    ``(None, None, None)``. Foreign-session and stale signals are skipped
+    silently. Reuses the goal TTL default — both are idle-consumed signals with
+    the same generous window.
+    """
+    if not directory.is_dir():
+        return None, None, None
+    for path in sorted(directory.glob(_STANDING_AUTH_SIGNAL_GLOB)):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None, None, f"unreadable/malformed standing-auth signal {path.name}"
+        if not isinstance(data, dict):
+            return None, None, f"standing-auth signal {path.name} is not a JSON object"
+        if not _session_in_scope(data.get("session_id"), own_sessions):
+            continue
+        if (now - _coerce_float(data.get("ts"))) > ttl_seconds:
+            continue
+        joined, error = _validate_standing_auth_lines(data.get("rendered_lines"))
+        if error is not None:
+            return None, None, f"standing-auth signal {path.name} rejected: {error}"
+        return path, joined, None
+    return None, None, None
+
+
+# ---------------------------------------------------------------------------
 # Manual model-switch signal (test trigger / deliberate override).
 #
 # Mirrors the goal-intent signal: a session-keyed file dropped into the
@@ -2091,8 +2187,8 @@ def reap_stale_sidecars(
     """Delete dead context-sidecar / compaction-signal files older than the TTL.
 
     Reaps ``*.json`` sidecars, ``*.compacting`` signals, ``*.goal-intent``
-    signals and ``*.model-switch-intent`` signals whose FILE MTIME
-    is older than ``ttl_seconds``. Mtime (not the JSON ``ts``) is used so a
+    signals, ``*.standing-auth-intent`` signals and ``*.model-switch-intent``
+    signals whose FILE MTIME is older than ``ttl_seconds``. Mtime (not the JSON ``ts``) is used so a
     malformed, truncated, or foreign file is reaped uniformly without a parse --
     a dead file is a dead file. The single newest-mtime ``*.json`` is ALWAYS
     spared, so the supervisor's current reading source is never removed even when
@@ -2114,6 +2210,7 @@ def reap_stale_sidecars(
         list(directory.glob(_CONTEXT_SIDECAR_GLOB))
         + list(directory.glob(_COMPACTION_SIGNAL_GLOB))
         + list(directory.glob(_GOAL_SIGNAL_GLOB))
+        + list(directory.glob(_STANDING_AUTH_SIGNAL_GLOB))
         + list(directory.glob(_MODEL_SWITCH_SIGNAL_GLOB))
     ):
         try:
@@ -2213,6 +2310,9 @@ class CompactStateMachine:
         # signals are consumed on injection, so this only ever matters under a
         # signal storm; per-process lifetime, never reset.
         self._goal_injections = 0
+        # Plan 00283: standing-authorisation reinforcement injections this process
+        # has fired. Runaway backstop only (see _MAX_STANDING_AUTH_INJECTIONS).
+        self._standing_auth_injections = 0
         # Plan 00278: effort-floor tracking. The last observed (session,
         # family) pair, an open downgrade episode ("session:family"), the
         # pending injection key ("session:family:target" — recomputed from
@@ -2530,6 +2630,15 @@ class CompactStateMachine:
         self._goal_injections += 1
 
     @property
+    def standing_auth_injections(self) -> int:
+        """How many standing-auth reinforcements this process has fired (Plan 00283)."""
+        return self._standing_auth_injections
+
+    def mark_standing_auth_injection(self) -> None:
+        """Count one standing-auth reinforcement against the runaway backstop (Plan 00283)."""
+        self._standing_auth_injections += 1
+
+    @property
     def dry_run_fired(self) -> bool:
         """True once a dry-run marker has been injected this session (Plan 00183)."""
         return self._dry_run_fired
@@ -2556,6 +2665,7 @@ class CompactStateMachine:
             "await_is_human": self._await_is_human,
             "dry_run_fired": self._dry_run_fired,
             "goal_injections": self._goal_injections,
+            "standing_auth_injections": self._standing_auth_injections,
             "last_model_session": self._last_model_session,
             "last_model_family": self._last_model_family,
             "downgrade_episode": self._downgrade_episode,
@@ -2594,6 +2704,8 @@ class CompactStateMachine:
             self._dry_run_fired = bool(state["dry_run_fired"])
         if "goal_injections" in state:
             self._goal_injections = _coerce_int(state["goal_injections"])
+        if "standing_auth_injections" in state:
+            self._standing_auth_injections = _coerce_int(state["standing_auth_injections"])
         if "last_model_session" in state:
             raw = state["last_model_session"]
             self._last_model_session = None if raw is None else str(raw)
@@ -3615,6 +3727,62 @@ def decide_once(
         submit = True
         deferred_log = None
         noop_reason_log = None
+    # ── Standing-authorisation reinforcement (Plan 00283) ───────────────────
+    # LEAST urgent of every injectable family: a reminder, not an action, so it
+    # fires only on a tick that would otherwise NOOP in MONITOR with nothing else
+    # pending — a real /compact, /model, /effort, goal, restore or audit flush
+    # always lands first. The daemon's standing_authorisations handler writes the
+    # signal on a due reinforcement when its supervisor channel is enabled; here
+    # we type it as one real user-role line. The HOST counts a successful
+    # injection (mark_standing_auth_injection); the signal is consumed on
+    # injection so it cannot re-fire. Reuses the goal signal TTL.
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+    ):
+        sa_path, sa_line, sa_reject = load_standing_auth_signal(
+            sidecar_dir,
+            now=facts.now_wall,
+            ttl_seconds=goal_signal_ttl_seconds,
+            own_sessions=own_sessions,
+        )
+        if sa_reject is not None:
+            # Fail-closed: an in-scope signal that failed the gate is dropped and
+            # the reason logged (deduped by write_noop).
+            noop_reason_log = f"{_NOOP_LOG_PREFIX}: {sa_reject}"
+        elif sa_path is not None and sa_line is not None:
+            if not can_inject:
+                if facts.idle and not facts.input_line_empty:
+                    deferred_log = f"{_DEFERRED_LOG_PREFIX} (standing-auth reminder pending)"
+                else:
+                    noop_reason_log = (
+                        f"{_NOOP_LOG_PREFIX}: standing-auth signal pending but session busy"
+                    )
+            elif machine.standing_auth_injections >= _MAX_STANDING_AUTH_INJECTIONS:
+                noop_reason_log = f"{_NOOP_LOG_PREFIX}: standing-auth injection cap reached"
+            else:
+                # Counted by the HOST only after a SUCCESSFUL injection, so a PTY
+                # write failure does not burn the backstop while the signal
+                # survives for retry. decide_once stays pure.
+                decision_value = Decision.WOULD_STANDING_AUTH.value
+                reason = "standing-auth signal -> would inject reminder"
+                if dry_run:
+                    payload = (
+                        f"{_format_bot_prefix(facts.now_wall)} "
+                        f"{_DRY_RUN_STANDING_AUTH_BODY_PREFIX} {sa_line}"
+                    )
+                else:
+                    # The joined line ALREADY opens with the bot-prefixed
+                    # machine-origin header, so it is typed verbatim as one real
+                    # user-role line — no slash command, no extra chrome.
+                    payload = sa_line
+                submit = True
+                # Consumed on injection (dry-run too) so it cannot re-fire.
+                consume_signal_path = str(sa_path)
+                deferred_log = None
+                noop_reason_log = None
     return TickOutcome(
         decision_value=decision_value,
         reason=reason,
@@ -3709,6 +3877,8 @@ def _apply_post_injection_bookkeeping(
     # never clobbers the worker's audit backlog; it merely doesn't carry it).
     if outcome.decision_value == Decision.WOULD_GOAL.value:
         machine.mark_goal_injection()
+    elif outcome.decision_value == Decision.WOULD_STANDING_AUTH.value:
+        machine.mark_standing_auth_injection()
     elif outcome.decision_value == Decision.WOULD_EFFORT.value:
         # The coupled branch is checked FIRST in decide_once, so if it was
         # armed, this tick's WOULD_EFFORT can only have come from it (Plan
