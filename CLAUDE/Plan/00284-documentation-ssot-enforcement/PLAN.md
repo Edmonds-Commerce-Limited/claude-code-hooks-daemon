@@ -129,7 +129,7 @@ scattered sibling plans.
   (Decision 3).
 - [x] ✅ **Task 1.3**: Decide handler shape — settled as Decision 5: sibling
   `docs_qa/` package on the plan_qa template.
-- [ ] 🔄 **Task 1.5** (edits done; final cross-check in flight): Execute Decision 3 on the feature branch: gut
+- [x] ✅ **Task 1.5**: Execute Decision 3 on the feature branch: gut
   `docs/PLAN_SYSTEM.md` to a human overview → `CLAUDE/PlanWorkflow.md`; fold
   `docs/QA-INFRASTRUCTURE.md` + `docs/QA-RUNNER-SETUP.md` into one accurate human
   QA doc; fix `CONTRIBUTING.md`'s forbidden handler skeleton; fix the five
