@@ -518,3 +518,119 @@ class TestStructuredBlockHashExtraction:
     def test_reverse_quote_index_empty_when_no_quoters(self, tmp_path: Path) -> None:
         corpus = DocCorpus(project_root=tmp_path, documents={})
         assert corpus.quoters_of("Source.md", "x") == ()
+
+
+class TestStructuredBlockLocations:
+    """Task 3.3 T1: block spans persisted alongside block hashes."""
+
+    def test_build_extracts_block_locations(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        (tmp_path / "CLAUDE" / "Foo.md").write_text(f"# Foo\n\n```bash\n{_LONG_FENCE_BODY}\n```\n")
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        corpus = build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        record = corpus.documents["CLAUDE/Foo.md"]
+        assert len(record.block_locations) == 1
+        assert record.block_locations[0].start_line == 3
+        assert record.block_locations[0].block_hash == record.block_hashes[0]
+
+    def test_no_structured_blocks_yields_empty_locations_tuple(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        corpus = build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        assert corpus.documents["CLAUDE/Foo.md"].block_locations == ()
+
+    def test_block_locations_round_trip_through_the_cache(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        (tmp_path / "CLAUDE" / "Foo.md").write_text(f"# Foo\n\n```bash\n{_LONG_FENCE_BODY}\n```\n")
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        built = build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        reloaded = load_cached_corpus(tmp_path, index_path)
+        assert reloaded is not None
+        assert (
+            reloaded.documents["CLAUDE/Foo.md"].block_locations
+            == built.documents["CLAUDE/Foo.md"].block_locations
+        )
+
+    def test_current_schema_cache_without_block_locations_key_defaults_to_empty(
+        self, tmp_path: Path
+    ) -> None:
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        index_path.parent.mkdir(parents=True)
+        index_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": _CACHE_SCHEMA_VERSION,
+                    "documents": {"a.md": {"mtime_ns": 1, "size": 1, "links": []}},
+                }
+            )
+        )
+        corpus = load_cached_corpus(tmp_path, index_path)
+        assert corpus is not None
+        assert corpus.documents["a.md"].block_locations == ()
+
+    def test_pre_v2_cache_without_block_locations_forces_a_full_rebuild(
+        self, tmp_path: Path
+    ) -> None:
+        """A v1 cache carries ``block_hashes`` but no ``block_locations`` --
+        even with matching mtime/size, it must not be reused as-is."""
+        _scaffold(tmp_path)
+        foo_path = tmp_path / "CLAUDE" / "Foo.md"
+        foo_path.write_text(f"# Foo\n\n```bash\n{_LONG_FENCE_BODY}\n```\n")
+        stat = foo_path.stat()
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        index_path.parent.mkdir(parents=True)
+        index_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "documents": {
+                        "CLAUDE/Foo.md": {
+                            "mtime_ns": stat.st_mtime_ns,
+                            "size": stat.st_size,
+                            "links": [],
+                            "block_hashes": ["stale"],
+                        }
+                    },
+                }
+            )
+        )
+        corpus = build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        assert len(corpus.documents["CLAUDE/Foo.md"].block_locations) == 1
+        assert corpus.documents["CLAUDE/Foo.md"].block_hashes[0] != "stale"
+
+
+class TestWorktreeExclusion:
+    """Task 3.3 T2: transient agent-worktree checkouts are never indexed."""
+
+    def test_claude_worktrees_dir_is_excluded(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        worktree_doc = tmp_path / ".claude" / "worktrees" / "agent-x" / "CLAUDE" / "Foo.md"
+        worktree_doc.parent.mkdir(parents=True)
+        worktree_doc.write_text("# Foo copy\n")
+        assert not is_in_scope(worktree_doc, tmp_path, DocumentationPolicy())
+
+    def test_untracked_worktrees_dir_is_excluded(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        worktree_doc = tmp_path / "untracked" / "worktrees" / "agent-x" / "CLAUDE" / "Foo.md"
+        worktree_doc.parent.mkdir(parents=True)
+        worktree_doc.write_text("# Foo copy\n")
+        assert not is_in_scope(worktree_doc, tmp_path, DocumentationPolicy())
+
+    def test_iter_corpus_paths_never_returns_worktree_copies(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        worktree_doc = tmp_path / ".claude" / "worktrees" / "agent-x" / "CLAUDE" / "Foo.md"
+        worktree_doc.parent.mkdir(parents=True)
+        worktree_doc.write_text("# Foo copy\n")
+        paths = iter_corpus_paths(tmp_path, DocumentationPolicy())
+        assert worktree_doc not in paths
+
+    def test_a_path_merely_containing_the_substring_worktrees_is_not_excluded(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression guard: exclusion is prefix-scoped, not a bare substring
+        # match -- a real doc dir that happens to be named similarly must
+        # not be swept up by accident.
+        (tmp_path / "CLAUDE" / "myworktrees-notes").mkdir(parents=True)
+        doc = tmp_path / "CLAUDE" / "myworktrees-notes" / "Real.md"
+        doc.write_text("# real doc\n")
+        assert is_in_scope(doc, tmp_path, DocumentationPolicy())

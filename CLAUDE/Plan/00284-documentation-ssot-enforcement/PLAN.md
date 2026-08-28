@@ -234,11 +234,22 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
     plain relative links (census now reports only root CLAUDE.md's 8
     grandfathered); `docs/CLAUDE.md` + `.claude/skills/CLAUDE.md` charters now
     point at DocumentationStrategy.md, routing tables kept.
-    Remaining: N3–N6.
-- [ ] ⬜ **Task 3.3**: Tooling/agent-definition follow-ups T1–T6 in
+  - ✅ N3, N5 fixed (slice C): `CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide`
+    (ssot-anchored) is now the single documented priority-band statement,
+    corrected to 56-65 advisory with real handler examples and `priority.py`
+    named as the R5 source; the other copies were pointed (ARCHITECTURE ×2,
+    HooksSystem, LLM-INSTALL, PlanWorkflow, QA, RELEASING, HANDLER_REFERENCE,
+    PROJECT_HANDLERS), ssot-quoted (CONFIGURATION, CONTRIBUTING) or corrected
+    inline (dev-handlers.md — client-deployed, so a quote source would dangle);
+    stale band docstrings in `constants/priority.py` + `core/handler.py` fixed.
+    N5: HooksSystem.md's core.utils import mirror now points at
+    PROJECT_HANDLERS.md, with `core/utils.py` docstrings as the API source.
+    Remaining: N4, N6.
+- [x] ✅ **Task 3.3**: Tooling/agent-definition follow-ups T1–T6 in
   `AUDIT-dogfood-run-1.md` (duplicate-block line numbers; worktree exclusion
   in the corpus indexer; agent-definition prompt fixes; shipped-vs-deployed
-  copies in the generated-docs manifest)
+  copies in the generated-docs manifest) — commit d7f6f5d4. Sweep findings
+  dropped 96 → 42 (module-doc-budget 61 → 7, 0 remaining worktree mentions).
 
 ## Technical Decisions
 

@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.docs_qa.corpus import is_module_doc_path
 from claude_code_hooks_daemon.docs_qa.types import (
     CheckContext,
@@ -65,8 +66,20 @@ _QUOTE_BLOCK_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 # Directories heavy enough that a SWEEP walk should never descend into them.
+# "untracked" already covers ProjectPath.WORKTREES_DIR
+# ("untracked/worktrees"); "worktrees" (the shared basename of BOTH worktree
+# roots -- ProjectPath.CLAUDE_WORKTREES_DIR is ".claude/worktrees", whose
+# ".claude" segment is not otherwise excluded) added for Task 3.3 T2 -- this
+# check does its OWN rglob walk rather than using docs_qa.corpus, so the
+# corpus's worktree exclusion (corpus._is_worktree_path) does not reach it.
 _EXCLUDED_DIR_NAMES: Final[frozenset[str]] = frozenset(
-    {"node_modules", "vendor", "untracked", ".git"}
+    {
+        "node_modules",
+        "vendor",
+        "untracked",
+        ".git",
+        Path(ProjectPath.CLAUDE_WORKTREES_DIR).name,
+    }
 )
 
 

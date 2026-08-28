@@ -170,6 +170,15 @@ _OPUS_SECURITY_HISTORIC_VERSIONS: Final[tuple[tuple[str, str], ...]] = (
     ("1.0.0", "9724c2afde95dd7f33a2e53a40849c1b"),
 )
 
+#: Historic docs-qa revisions. v1.0.0 instructed writing a report file to
+#: `untracked/reports/` unconditionally, conflicted with report-file harness
+#: policy, and lacked the live-vs-historical boundary guidance (Plan 00284
+#: Task 3.3 T3/T4). Ledgered so a pristine v1.0.0 deployment upgrades rather
+#: than being frozen as customised.
+_DOCS_QA_HISTORIC_VERSIONS: Final[tuple[tuple[str, str], ...]] = (
+    ("1.0.0", "98d4c311daada8526412c9d30433716f"),
+)
+
 SHIPPED_AGENTS: Final[tuple[AgentAssetSpec, ...]] = (
     AgentAssetSpec(
         name=DEDUPE_AGENT_NAME,
@@ -187,10 +196,10 @@ SHIPPED_AGENTS: Final[tuple[AgentAssetSpec, ...]] = (
     ),
     AgentAssetSpec(
         name=DOCS_QA_AGENT_NAME,
-        version="1.0.0",
+        version="1.1.0",
         gating_config_key="agents.docs_qa.enabled",
         is_enabled=_docs_qa_agent_enabled,
-        historic_versions=(),
+        historic_versions=_DOCS_QA_HISTORIC_VERSIONS,
     ),
 )
 

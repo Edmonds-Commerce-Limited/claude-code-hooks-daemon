@@ -270,6 +270,20 @@ class TestSweepStage:
         )
         assert _run_sweep(context) == []
 
+    def test_excludes_claude_worktrees_copies(self, tmp_path: Path) -> None:
+        """Task 3.3 T2: this check's OWN rglob walk (independent of
+        docs_qa.corpus) must also skip transient agent-worktree checkouts,
+        or every module CLAUDE.md gets re-flagged once per live worktree."""
+        worktree_doc = tmp_path / ".claude" / "worktrees" / "agent-x" / "src" / "foo" / "CLAUDE.md"
+        worktree_doc.parent.mkdir(parents=True)
+        worktree_doc.write_text(_LONG_BODY)
+        policy = DocumentationPolicy()
+
+        context = sweep_context(
+            project_root=tmp_path, policy=policy, corpus=DocCorpus(project_root=tmp_path)
+        )
+        assert _run_sweep(context) == []
+
 
 class TestMissingFilePathOrContent:
     def test_missing_file_path_or_content_produces_no_findings(self, tmp_path: Path) -> None:

@@ -906,6 +906,20 @@ documentation:
     generated_docs:
       - glob: ".claude/HOOKS-DAEMON.md"
         generator: "bin/hooks-daemon generate-docs"
+      # Task 3.3 T6: this repo's own .claude/skills/ and .claude/agents/ are
+      # DEPLOYED COPIES of the canonical sources under
+      # src/claude_code_hooks_daemon/skills/ and install/templates/agents/
+      # (self-install mode: source == deploy target, so they are currently
+      # byte-identical). Declaring them here stops generated-doc-hand-edit
+      # blocking the intended redeploy workflow, and stops a future
+      # docs-qa run filing the pair as an undeclared duplicate (the first
+      # dogfood audit run flagged exactly this shape for docs-qa/SKILL.md).
+      - glob: ".claude/skills/hooks-daemon/**/*.md"
+        generator: "scripts/upgrade_version.sh (redeploys src/claude_code_hooks_daemon/skills/hooks-daemon/)"
+      - glob: ".claude/skills/docs-qa/SKILL.md"
+        generator: "scripts/upgrade_version.sh (redeploys src/claude_code_hooks_daemon/skills/docs-qa/SKILL.md)"
+      - glob: ".claude/agents/hooks-daemon-*.md"
+        generator: "bin/hooks-daemon agents install <name> (redeploys install/templates/agents/)"
     registered_module_docs: []
     resident_at_imports: ["CLAUDE.md"]
 

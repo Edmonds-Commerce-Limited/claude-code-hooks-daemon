@@ -28,9 +28,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.quotes import parse_quote_blocks
-from claude_code_hooks_daemon.docs_qa.structured_blocks import extract_structured_block_hashes
+from claude_code_hooks_daemon.docs_qa.structured_blocks import (
+    BlockLocation,
+    extract_structured_block_locations,
+)
 from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
@@ -55,7 +59,20 @@ _INDEX_TMP_SUFFIX: Final[str] = ".tmp"
 # fields empty and every check depending on them reported clean). A missing
 # or mismatched ``schema_version`` in the on-disk payload is treated the
 # same as a corrupt cache: discard it and rebuild the whole index.
-_CACHE_SCHEMA_VERSION: Final[int] = 1
+# v2 (Task 3.3 T1): added ``block_locations`` (line spans alongside
+# ``block_hashes``) -- same reuse-carries-forward-empty hazard 3.1h fixed.
+_CACHE_SCHEMA_VERSION: Final[int] = 2
+
+# Task 3.3 T2: transient agent-worktree checkouts contain full copies of the
+# tracked doc tree. Indexing them made sweep counts fluctuate with how many
+# agents were live and drowned real findings in duplicate scans of the same
+# 9 tracked files (54 of 61 module-doc-budget findings in the first dogfood
+# audit run -- AUDIT-dogfood-run-1.md T2). Excluded the same way vendored
+# content is excluded elsewhere in this codebase: by rel-path prefix.
+_WORKTREE_ROOT_PREFIXES: Final[tuple[str, ...]] = (
+    ProjectPath.CLAUDE_WORKTREES_DIR,
+    ProjectPath.WORKTREES_DIR,
+)
 
 _CLAUDE_MD_FILENAME: Final[str] = "CLAUDE.md"
 
@@ -90,11 +107,28 @@ def extract_link_targets(text: str) -> list[str]:
     return targets
 
 
+def _is_worktree_path(rel_parts: tuple[str, ...]) -> bool:
+    """True for anything under a transient agent-worktree root (Task 3.3 T2).
+
+    Both worktree roots are two path segments (``.claude/worktrees`` and
+    ``untracked/worktrees``), so this compares the first two ``rel_parts``
+    against each configured prefix rather than assuming a fixed depth.
+    """
+    rel_path = "/".join(rel_parts)
+    return any(
+        rel_path == prefix or rel_path.startswith(prefix + "/")
+        for prefix in _WORKTREE_ROOT_PREFIXES
+    )
+
+
 def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> bool:
-    """Corpus SCOPE exclusions (DESIGN §2.1): changelog, releases, plan archives."""
+    """Corpus SCOPE exclusions (DESIGN §2.1): changelog, releases, plan
+    archives, and (Task 3.3 T2) transient agent-worktree checkouts."""
     if len(rel_parts) == 1 and rel_parts[0] == _CHANGELOG_FILENAME:
         return True
     if rel_parts and rel_parts[0] == _RELEASES_DIR_NAME:
+        return True
+    if _is_worktree_path(rel_parts):
         return True
     plan_completed = (policy.trees.agent, _PLAN_SUBDIR_NAME, _PLAN_COMPLETED_DIR_NAME)
     plan_cancelled = (policy.trees.agent, _PLAN_SUBDIR_NAME, _PLAN_CANCELLED_DIR_NAME)
@@ -174,6 +208,11 @@ class DocRecord:
     # fences, tables, list-runs of 3+ items) at or above the length floor --
     # see docs_qa.structured_blocks. Consumed by checks.duplicate_block.
     block_hashes: tuple[str, ...] = ()
+    # Same blocks as ``block_hashes``, same order, each carrying its
+    # 1-indexed inclusive line span (Task 3.3 T1) -- lets
+    # checks.duplicate_block cite ``path:start-end`` for both sides of a
+    # duplicate instead of just a bare filename.
+    block_locations: tuple[BlockLocation, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -251,6 +290,14 @@ def load_cached_corpus(project_root: Path, index_path: Path) -> DocCorpus | None
                     for ref in entry.get("quotes", [])
                 ),
                 block_hashes=tuple(entry.get("block_hashes", [])),
+                block_locations=tuple(
+                    BlockLocation(
+                        block_hash=loc["block_hash"],
+                        start_line=int(loc["start_line"]),
+                        end_line=int(loc["end_line"]),
+                    )
+                    for loc in entry.get("block_locations", [])
+                ),
             )
     except (KeyError, TypeError, ValueError):
         return None
@@ -283,6 +330,14 @@ def _save_corpus(corpus: DocCorpus, index_path: Path) -> None:
                     {"source_path": ref.source_path, "anchor": ref.anchor} for ref in record.quotes
                 ],
                 "block_hashes": list(record.block_hashes),
+                "block_locations": [
+                    {
+                        "block_hash": loc.block_hash,
+                        "start_line": loc.start_line,
+                        "end_line": loc.end_line,
+                    }
+                    for loc in record.block_locations
+                ],
             }
             for rel, record in corpus.documents.items()
         },
@@ -326,6 +381,7 @@ def build_and_save_corpus(
                 rel_path=rel_path, mtime_ns=stat.st_mtime_ns, size=stat.st_size, links=()
             )
             continue
+        block_locations = extract_structured_block_locations(text)
         documents[rel_path] = DocRecord(
             rel_path=rel_path,
             mtime_ns=stat.st_mtime_ns,
@@ -335,7 +391,8 @@ def build_and_save_corpus(
                 QuoteRef(source_path=block.source_path, anchor=block.anchor)
                 for block in parse_quote_blocks(text)
             ),
-            block_hashes=extract_structured_block_hashes(text),
+            block_hashes=tuple(loc.block_hash for loc in block_locations),
+            block_locations=block_locations,
         )
 
     corpus = DocCorpus(project_root=project_root, documents=documents, cold=False)

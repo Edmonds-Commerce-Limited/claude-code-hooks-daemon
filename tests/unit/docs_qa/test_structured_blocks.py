@@ -3,7 +3,9 @@
 from claude_code_hooks_daemon.docs_qa.structured_blocks import (
     MIN_BLOCK_LENGTH_CHARS,
     MIN_LIST_ITEMS,
+    BlockLocation,
     extract_structured_block_hashes,
+    extract_structured_block_locations,
     extract_structured_blocks,
 )
 
@@ -168,3 +170,74 @@ class TestMinBlockLengthConstant:
     def test_documented_floor_excludes_the_known_noisy_two_line_fence(self) -> None:
         noisy = "./bin/hooks-daemon restart\n./bin/hooks-daemon status"
         assert len(noisy) < MIN_BLOCK_LENGTH_CHARS
+
+
+class TestExtractStructuredBlockLocations:
+    """Task 3.3 T1: duplicate-block findings must be able to cite
+    ``path:start-end`` for both sides -- these tests pin the 1-indexed,
+    inclusive line span each :class:`BlockLocation` carries."""
+
+    def test_fenced_block_span_is_1_indexed_and_inclusive(self) -> None:
+        text = f"Some prose.\n\n{_fence(_LONG_FENCE_BODY)}\n\nMore prose.\n"
+        locations = extract_structured_block_locations(text)
+        assert len(locations) == 1
+        # Line 1: "Some prose.", line 2: blank, line 3: fence open.
+        fence_line_count = _fence(_LONG_FENCE_BODY).count("\n") + 1
+        assert locations[0].start_line == 3
+        assert locations[0].end_line == 3 + fence_line_count - 1
+
+    def test_table_span_covers_exactly_the_table_rows(self) -> None:
+        text = f"Prose.\n\n{_LONG_TABLE}\n\nMore prose.\n"
+        locations = extract_structured_block_locations(text)
+        assert len(locations) == 1
+        table_row_count = len(_LONG_TABLE.splitlines())
+        assert locations[0].start_line == 3
+        assert locations[0].end_line == 3 + table_row_count - 1
+
+    def test_list_span_covers_exactly_the_list_items(self) -> None:
+        locations = extract_structured_block_locations(_LONG_LIST)
+        assert len(locations) == 1
+        assert locations[0].start_line == 1
+        assert locations[0].end_line == len(_LONG_LIST.splitlines())
+
+    def test_two_blocks_report_independent_spans_in_document_order(self) -> None:
+        text = f"{_fence(_LONG_FENCE_BODY)}\n\n{_LONG_TABLE}\n"
+        locations = extract_structured_block_locations(text)
+        assert len(locations) == 2
+        assert locations[0].start_line == 1
+        assert locations[1].start_line > locations[0].end_line
+
+    def test_hash_matches_extract_structured_block_hashes(self) -> None:
+        text = f"{_fence(_LONG_FENCE_BODY)}\n\n{_LONG_TABLE}\n"
+        locations = extract_structured_block_locations(text)
+        assert tuple(loc.block_hash for loc in locations) == extract_structured_block_hashes(text)
+
+    def test_no_structured_blocks_yields_empty_tuple(self) -> None:
+        assert extract_structured_block_locations("Just plain prose, nothing here.\n") == ()
+
+    def test_below_floor_block_is_never_located(self) -> None:
+        text = f"Restart the daemon:\n\n{_fence('./bin/hooks-daemon restart')}\n"
+        assert extract_structured_block_locations(text) == ()
+
+    def test_location_is_a_frozen_dataclass_with_named_fields(self) -> None:
+        location = BlockLocation(block_hash="abc", start_line=1, end_line=2)
+        assert location.block_hash == "abc"
+        assert location.start_line == 1
+        assert location.end_line == 2
+
+    def test_ssot_quote_body_stripping_does_not_shift_later_block_line_numbers(self) -> None:
+        """A quote body used to be REMOVED entirely, shifting every line
+        after it -- the blank-out fix keeps line numbers stable."""
+        text = (
+            "Prose line 1.\n"
+            "<!-- ssot-quote: CLAUDE/Source.md#anchor -->\n"
+            "quoted body line\n"
+            "<!-- /ssot-quote -->\n"
+            "\n"
+            f"{_LONG_TABLE}\n"
+        )
+        locations = extract_structured_block_locations(text)
+        assert len(locations) == 1
+        # The table starts at line 6 in the ORIGINAL text, regardless of the
+        # 4-line quote span stripped ahead of it.
+        assert locations[0].start_line == 6
