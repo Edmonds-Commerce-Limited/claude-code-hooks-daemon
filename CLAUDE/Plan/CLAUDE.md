@@ -1,6 +1,6 @@
 # Plan Lifecycle
 
-See @CLAUDE/PlanWorkflow.md for full planning workflow, templates, and standards.
+See [CLAUDE/PlanWorkflow.md](../PlanWorkflow.md) for full planning workflow, templates, and standards.
 
 ## Plan Sources
 
@@ -28,7 +28,7 @@ CLAUDE/Plan/
 ### 1. Create
 
 - Create folder: `CLAUDE/Plan/NNNNN-description/`
-- Write `PLAN.md` following the template in @CLAUDE/PlanWorkflow.md
+- Write `PLAN.md` following the template in [CLAUDE/PlanWorkflow.md](../PlanWorkflow.md)
 - Add entry to `README.md` under **Active Plans**
 - If from a GitHub issue, include `**GitHub Issue**: #N` in the header
 
@@ -56,7 +56,7 @@ If a plan is reviewed and superseded:
 
 When all tasks are done and QA passes:
 
-1. **Update plan status** to `Complete` (NO completion date — git is the source of truth for "when"; cite the delivery commit hash(es) in the "Delivery & Milestones" section instead). See @CLAUDE/PlanWorkflow.md "Plan Completion Checklist".
+1. **Update plan status** to `Complete` (NO completion date — git is the source of truth for "when"; cite the delivery commit hash(es) in the "Delivery & Milestones" section instead). See [CLAUDE/PlanWorkflow.md](../PlanWorkflow.md) "Plan Completion Checklist".
 2. **Move folder** to `CLAUDE/Plan/Completed/NNNNN-description/`
 3. **Update `README.md`**:
    - Remove from **Active Plans**

@@ -259,7 +259,7 @@ self-install mode. If the bug came from a client install, reproduce it there.
 - [ ] Rebuild the fixture: `scripts/dummy-client-repo.sh create`
 - [ ] Reproduce the bug in client mode, then verify the fix there
 - [ ] Confirm the dogfood daemon still reports RUNNING
-- [ ] See: @CLAUDE/development/CLIENT-MODE-TESTING.md
+- [ ] See: [CLAUDE/development/CLIENT-MODE-TESTING.md](../development/CLIENT-MODE-TESTING.md)
 
 ### 6. Daemon Verification
 
@@ -382,6 +382,6 @@ pytest tests/integration/test_bug_daemon_loads.py -v
 
 **See Also**:
 
-- @CLAUDE/CodeLifecycle/Features.md - Feature development lifecycle
-- @CLAUDE/CodeLifecycle/General.md - General code changes
-- @CLAUDE/AcceptanceTests/GENERATING.md - Acceptance test generation
+- [CLAUDE/CodeLifecycle/Features.md](Features.md) - Feature development lifecycle
+- [CLAUDE/CodeLifecycle/General.md](General.md) - General code changes
+- [CLAUDE/AcceptanceTests/GENERATING.md](../AcceptanceTests/GENERATING.md) - Acceptance test generation

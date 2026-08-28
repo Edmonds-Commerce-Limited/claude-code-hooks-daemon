@@ -612,7 +612,7 @@ git branch -d worktree-plan-00028
 
 Worktrees are designed to work with Claude Code's **agent team mode** (`TeamCreate` / `SendMessage` / `Task` with `team_name`). The team lead orchestrates work from the main workspace while teammates operate in isolated worktrees.
 
-**For complete agent team workflow, see @CLAUDE/AgentTeam.md** - includes team lead/agent responsibilities, lessons learned from Wave 1 POC, and copy-paste agent prompts.
+**For complete agent team workflow, see [CLAUDE/AgentTeam.md](AgentTeam.md)** - includes team lead/agent responsibilities, lessons learned from Wave 1 POC, and copy-paste agent prompts.
 
 ### Architecture
 
@@ -1057,7 +1057,7 @@ $ git worktree list
 - [ ] ✋ **STEP 16**: ONLY NOW remove parent worktree folder
 - [ ] ✋ **STEP 17**: ONLY NOW delete parent branch
 - [ ] ✋ **STEP 18**: Final verification (`git status` clean)
-- [ ] ✋ **STEP 19**: Updated plan status to completed (see @CLAUDE/PlanWorkflow.md)
+- [ ] ✋ **STEP 19**: Updated plan status to completed (see [CLAUDE/PlanWorkflow.md](PlanWorkflow.md))
 - [ ] ✋ **STEP 20**: If agent team mode, `TeamDelete()` to clean up team resources
 
 **CRITICAL**: Never remove worktree/branch before merge is pushed successfully!

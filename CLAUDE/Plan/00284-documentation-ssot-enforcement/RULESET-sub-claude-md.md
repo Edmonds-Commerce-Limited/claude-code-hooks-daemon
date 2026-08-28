@@ -59,7 +59,7 @@ Ten files below root (census verified by filesystem walk, excluding `untracked/`
    helpers), plus tool-output format samples (`:107-207`). Its external references
    check out today (`scripts/run-qa-runner.sh`, `tests/unit/test_qa_runner.py` both
    exist), but an API restatement drifts on the next refactor by construction.
-5. **`CLAUDE/Plan/CLAUDE.md:3` vs the rest** — opens "See @CLAUDE/PlanWorkflow.md
+5. **`CLAUDE/Plan/CLAUDE.md:3` vs the rest** — opens "See `@CLAUDE/PlanWorkflow.md`
    for full planning workflow", then carries its own five-stage lifecycle including
    a completion checklist that PlanWorkflow.md also owns (REVIEW-fable A.2 finding
    10 territory: three plan-template/lifecycle homes).

@@ -20,14 +20,14 @@ These documents prevent shipping broken code by enforcing a complete testing pyr
 
 ### By Change Type
 
-- **@CLAUDE/CodeLifecycle/Features.md** - New features and handlers (most rigorous)
-- **@CLAUDE/CodeLifecycle/Bugs.md** - Bug fixes (reproduce → fix → verify)
-- **@CLAUDE/CodeLifecycle/General.md** - General code changes
+- **[CLAUDE/CodeLifecycle/Features.md](Features.md)** - New features and handlers (most rigorous)
+- **[CLAUDE/CodeLifecycle/Bugs.md](Bugs.md)** - Bug fixes (reproduce → fix → verify)
+- **[CLAUDE/CodeLifecycle/General.md](General.md)** - General code changes
 
 ### Supporting Documentation
 
-- **@CLAUDE/AcceptanceTests/GENERATING.md** - Acceptance test generation
-- **@CLAUDE/PlanWorkflow.md** - Planning workflow and templates
+- **[CLAUDE/AcceptanceTests/GENERATING.md](../AcceptanceTests/GENERATING.md)** - Acceptance test generation
+- **[CLAUDE/PlanWorkflow.md](../PlanWorkflow.md)** - Planning workflow and templates
 
 ## The Critical Gap This Solves
 
@@ -56,14 +56,14 @@ If daemon fails to start, **your change is not done** - fix it before committing
 
 Start with the document for your change type:
 
-| Change Type    | Read This                         |
-| -------------- | --------------------------------- |
-| New handler    | @CLAUDE/CodeLifecycle/Features.md |
-| New feature    | @CLAUDE/CodeLifecycle/Features.md |
-| Bug fix        | @CLAUDE/CodeLifecycle/Bugs.md     |
-| Refactoring    | @CLAUDE/CodeLifecycle/General.md  |
-| Documentation  | @CLAUDE/CodeLifecycle/General.md  |
-| Config changes | @CLAUDE/CodeLifecycle/General.md  |
+| Change Type    | Read This                                       |
+| -------------- | ----------------------------------------------- |
+| New handler    | [CLAUDE/CodeLifecycle/Features.md](Features.md) |
+| New feature    | [CLAUDE/CodeLifecycle/Features.md](Features.md) |
+| Bug fix        | [CLAUDE/CodeLifecycle/Bugs.md](Bugs.md)         |
+| Refactoring    | [CLAUDE/CodeLifecycle/General.md](General.md)   |
+| Documentation  | [CLAUDE/CodeLifecycle/General.md](General.md)   |
+| Config changes | [CLAUDE/CodeLifecycle/General.md](General.md)   |
 
 ## Existing Testing Infrastructure
 

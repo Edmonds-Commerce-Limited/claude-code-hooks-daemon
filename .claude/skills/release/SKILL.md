@@ -365,7 +365,7 @@ Main Claude commits, tags, and publishes - see RELEASING.md Steps 9-11.
 
 ## Documentation
 
-**📖 SINGLE SOURCE OF TRUTH:** @CLAUDE/development/RELEASING.md
+**📖 SINGLE SOURCE OF TRUTH:** [CLAUDE/development/RELEASING.md](../../../CLAUDE/development/RELEASING.md)
 
 This skill implements the process defined in the release documentation. For complete details on:
 

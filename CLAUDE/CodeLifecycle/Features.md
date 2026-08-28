@@ -35,7 +35,7 @@ Complete lifecycle from idea to production-ready feature with rigorous testing a
 3. Identify test scenarios (what needs to be blocked/allowed/advised)
 4. Get user approval (if applicable)
 
-**See**: @CLAUDE/PlanWorkflow.md for planning standards
+**See**: [CLAUDE/PlanWorkflow.md](../PlanWorkflow.md) for planning standards
 
 ## Phase 2: TDD Implementation (Red/Green/Refactor)
 
@@ -129,7 +129,7 @@ Integration tests verify handler works with daemon components.
    live in a client's own repository. They get the same check from
    `bin/hooks-daemon validate-project-handlers`, which shares the underlying
    primitive (`core/decision_capability.py`) so the two cannot drift. See
-   @CLAUDE/PROJECT_HANDLERS.md.
+   [CLAUDE/PROJECT_HANDLERS.md](../PROJECT_HANDLERS.md).
 
 2. **FrontController Integration** (if complex):
    Create `tests/integration/test_{handler}_integration.py` if handler has:
@@ -336,7 +336,7 @@ Self-install mode is NOT representative of a real client install.
 - [ ] Rebuild the fixture: `scripts/dummy-client-repo.sh create`
 - [ ] Verify the new behaviour in client mode (`dummy-client-repo.sh cli …`)
 - [ ] Confirm the dogfood daemon still reports RUNNING
-- [ ] See: @CLAUDE/development/CLIENT-MODE-TESTING.md
+- [ ] See: [CLAUDE/development/CLIENT-MODE-TESTING.md](../development/CLIENT-MODE-TESTING.md)
 
 ### 6. Acceptance Tests (Before Release)
 
@@ -399,7 +399,7 @@ Complete testing pyramid:
 
 **See Also**:
 
-- @CLAUDE/CodeLifecycle/Bugs.md - Bug fix lifecycle
-- @CLAUDE/CodeLifecycle/General.md - General code changes
-- @CLAUDE/AcceptanceTests/GENERATING.md - Acceptance test generation
-- @CLAUDE/PlanWorkflow.md - Planning standards
+- [CLAUDE/CodeLifecycle/Bugs.md](Bugs.md) - Bug fix lifecycle
+- [CLAUDE/CodeLifecycle/General.md](General.md) - General code changes
+- [CLAUDE/AcceptanceTests/GENERATING.md](../AcceptanceTests/GENERATING.md) - Acceptance test generation
+- [CLAUDE/PlanWorkflow.md](../PlanWorkflow.md) - Planning standards

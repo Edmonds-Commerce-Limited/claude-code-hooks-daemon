@@ -817,7 +817,7 @@ Use this template when improving existing code without changing behaviour.
 3. **After completing**: Mark ✅, run QA, commit with reference
 4. **Regularly**: Review the plan and edit it IN PLACE so it states current
    truth. Append the narrative of what happened to the plan's `JOURNAL/`
-   day-file — never to `PLAN.md`. See @CLAUDE/PlanJournalling.md.
+   day-file — never to `PLAN.md`. See [CLAUDE/PlanJournalling.md](PlanJournalling.md).
 
 ### Handling Changes
 

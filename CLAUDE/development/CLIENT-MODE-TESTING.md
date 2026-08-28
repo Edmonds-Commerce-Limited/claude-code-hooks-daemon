@@ -109,8 +109,8 @@ Verify in client mode — not just self-install — whenever a change touches:
 
 ## Definition of Done addition
 
-Add to the existing lifecycle checklists (@CLAUDE/CodeLifecycle/Features.md,
-@CLAUDE/CodeLifecycle/Bugs.md, @CLAUDE/CodeLifecycle/General.md):
+Add to the existing lifecycle checklists ([CLAUDE/CodeLifecycle/Features.md](../CodeLifecycle/Features.md),
+[CLAUDE/CodeLifecycle/Bugs.md](../CodeLifecycle/Bugs.md), [CLAUDE/CodeLifecycle/General.md](../CodeLifecycle/General.md)):
 
 - [ ] If the change touches paths/interpreters/wrappers/deployed assets:
   rebuilt `scripts/dummy-client-repo.sh create` and verified the behaviour
@@ -119,6 +119,6 @@ Add to the existing lifecycle checklists (@CLAUDE/CodeLifecycle/Features.md,
 
 ## Related
 
-- @CLAUDE/SELF_INSTALL.md — why this repo's layout is unusual
+- [CLAUDE/SELF_INSTALL.md](../SELF_INSTALL.md) — why this repo's layout is unusual
 - `tests/acceptance/test_install_sh_end_to_end.py` — the H-1 release gate that
   drives the same production install chain in a temp dir

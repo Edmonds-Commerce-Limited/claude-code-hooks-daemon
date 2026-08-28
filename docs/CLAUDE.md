@@ -1,6 +1,6 @@
 # SSOT Rule for docs/
 
-**Single Source of Truth**: Every piece of information lives in exactly one canonical file. Other files link to it — they do not summarise or duplicate it.
+**Single Source of Truth**: the documentation-SSoT rules live in [CLAUDE/DocumentationStrategy.md](../CLAUDE/DocumentationStrategy.md); the table below routes each human-docs topic to its canonical file.
 
 | Topic                                 | Canonical Source                   |
 | ------------------------------------- | ---------------------------------- |

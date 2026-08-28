@@ -40,8 +40,8 @@ This document provides project-specific guidance for running **agent teams with 
 Before creating an agent team, ensure:
 
 1. **System packages installed**: `python3-venv` (for creating virtual environments)
-2. **Worktree knowledge**: Read **@CLAUDE/Worktree.md** for git worktree mechanics
-3. **Plan exists**: Create plan in `CLAUDE/Plan/NNNNN-description/PLAN.md` following @CLAUDE/PlanWorkflow.md
+2. **Worktree knowledge**: Read **[CLAUDE/Worktree.md](Worktree.md)** for git worktree mechanics
+3. **Plan exists**: Create plan in `CLAUDE/Plan/NNNNN-description/PLAN.md` following [CLAUDE/PlanWorkflow.md](PlanWorkflow.md)
 4. **Tasks decomposed**: Plan has clear, independent tasks suitable for parallel execution
 5. **Main workspace clean**: `git status` shows no uncommitted changes
 
@@ -312,7 +312,7 @@ All agents operate from `/workspace/untracked/worktrees/worktree-child-plan-NNNN
 
 1. Read task from `TaskList`, mark `in_progress`
 2. Read PLAN.md to understand goals and success criteria
-3. **Write failing tests FIRST** (TDD - see @CLAUDE/CodeLifecycle/Features.md)
+3. **Write failing tests FIRST** (TDD - see [CLAUDE/CodeLifecycle/Features.md](CodeLifecycle/Features.md))
 4. Implement code to make tests pass
 5. Run `./scripts/qa/run_all.sh` (auto-fix what you can)
 6. Verify daemon: `./bin/hooks-daemon restart && status`
@@ -989,7 +989,7 @@ If THEATER:
 
 ## Daemon Isolation (CRITICAL)
 
-**See @CLAUDE/Worktree.md sections "Python Venv Setup" and "Daemon Process Isolation" for complete details.**
+**See [CLAUDE/Worktree.md](Worktree.md) sections "Python Venv Setup" and "Daemon Process Isolation" for complete details.**
 
 ### Summary
 
@@ -1419,7 +1419,7 @@ git status  # Confirm everything clean
 1. Verify each worktree has its own socket path: `ls .claude/hooks-daemon/untracked/`
 2. Check agent is actually in worktree: `pwd`
 3. Use explicit paths if needed (Plan 00028): `--pid-file` and `--socket` flags
-4. See @CLAUDE/Worktree.md "Daemon Process Isolation" section
+4. See [CLAUDE/Worktree.md](Worktree.md) "Daemon Process Isolation" section
 
 ### Agent Hit Turn Limit Without Committing
 
@@ -1485,7 +1485,7 @@ Automates worktree creation, venv setup, editable install, and verification.
 6. Creates daemon untracked directory
 7. Prints agent prompt template
 
-**See**: @CLAUDE/Worktree.md "Automation Scripts" section
+**See**: [CLAUDE/Worktree.md](Worktree.md) "Automation Scripts" section
 
 ### `scripts/validate_worktrees.sh` - Sequential QA Validation
 
@@ -1505,7 +1505,7 @@ Runs QA across all (or specific) worktrees sequentially.
 2. Runs `./scripts/qa/run_all.sh` from within each worktree
 3. Reports pass/fail summary for all worktrees
 
-**See**: @CLAUDE/Worktree.md "Automation Scripts" section
+**See**: [CLAUDE/Worktree.md](Worktree.md) "Automation Scripts" section
 
 ---
 
@@ -1697,7 +1697,7 @@ TeamDelete()
 
 **Phase 6: Plan Completion**
 
-Follow plan completion checklist from @CLAUDE/PlanWorkflow.md:
+Follow plan completion checklist from [CLAUDE/PlanWorkflow.md](PlanWorkflow.md):
 
 1. Update PLAN.md status to Complete (with accurate completion date)
 2. Move plan to `CLAUDE/Plan/Completed/`
@@ -1851,10 +1851,10 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 
 ## See Also
 
-- **@CLAUDE/Worktree.md** - Git worktree mechanics and detailed workflows
-- **@CLAUDE/PlanWorkflow.md** - Planning standards and templates
-- **@CLAUDE/CodeLifecycle/Features.md** - TDD workflow for features
-- **@CLAUDE/CodeLifecycle/General.md** - General code change lifecycle
+- **[CLAUDE/Worktree.md](Worktree.md)** - Git worktree mechanics and detailed workflows
+- **[CLAUDE/PlanWorkflow.md](PlanWorkflow.md)** - Planning standards and templates
+- **[CLAUDE/CodeLifecycle/Features.md](CodeLifecycle/Features.md)** - TDD workflow for features
+- **[CLAUDE/CodeLifecycle/General.md](CodeLifecycle/General.md)** - General code change lifecycle
 - **Plan 00028** - Daemon CLI explicit paths for isolation
 - **Plan 00029** - Fix markdown handler memory writes
 

@@ -183,8 +183,8 @@ Consider reverting the change.
 
 ## Documentation
 
-**SINGLE SOURCE OF TRUTH:** @docs/guides/CONFIGURATION.md for config syntax
-Handler options: @docs/guides/HANDLER_REFERENCE.md
+**SINGLE SOURCE OF TRUTH:** [docs/guides/CONFIGURATION.md](../../../docs/guides/CONFIGURATION.md) for config syntax
+Handler options: [docs/guides/HANDLER_REFERENCE.md](../../../docs/guides/HANDLER_REFERENCE.md)
 
 ## Version
 

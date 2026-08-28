@@ -63,9 +63,9 @@ After viewing the report, Claude asks whether to apply recommendations:
 
 **SINGLE SOURCE OF TRUTH:**
 
-- Handler options and values: @docs/guides/HANDLER_REFERENCE.md
-- Configuration format: @docs/guides/CONFIGURATION.md
-- Available handlers: @.claude/HOOKS-DAEMON.md
+- Handler options and values: [docs/guides/HANDLER_REFERENCE.md](../../../docs/guides/HANDLER_REFERENCE.md)
+- Configuration format: [docs/guides/CONFIGURATION.md](../../../docs/guides/CONFIGURATION.md)
+- Available handlers: [.claude/HOOKS-DAEMON.md](../../HOOKS-DAEMON.md)
 
 ## Version
 

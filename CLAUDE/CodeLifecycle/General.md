@@ -22,8 +22,8 @@ Standard process for any code modification that isn't a new feature or bug fix.
 
 **Don't use this for**:
 
-- New features/handlers → Use @CLAUDE/CodeLifecycle/Features.md
-- Bug fixes → Use @CLAUDE/CodeLifecycle/Bugs.md
+- New features/handlers → Use [CLAUDE/CodeLifecycle/Features.md](Features.md)
+- Bug fixes → Use [CLAUDE/CodeLifecycle/Bugs.md](Bugs.md)
 
 ## Quick Checklist
 
@@ -186,7 +186,7 @@ pass every self-install test and still be broken for every user.
 - [ ] Rebuild the fixture: `scripts/dummy-client-repo.sh create`
 - [ ] Verify the changed behaviour in client mode (`dummy-client-repo.sh cli …`)
 - [ ] Confirm the dogfood daemon still reports RUNNING
-- [ ] See: @CLAUDE/development/CLIENT-MODE-TESTING.md
+- [ ] See: [CLAUDE/development/CLIENT-MODE-TESTING.md](../development/CLIENT-MODE-TESTING.md)
 
 ## Common Change Types
 
@@ -370,16 +370,16 @@ changes
 
 ## When to Use Other Lifecycles
 
-| Change Description       | Use This Document                 |
-| ------------------------ | --------------------------------- |
-| Add new handler          | @CLAUDE/CodeLifecycle/Features.md |
-| Add new feature          | @CLAUDE/CodeLifecycle/Features.md |
-| Fix a bug                | @CLAUDE/CodeLifecycle/Bugs.md     |
-| Refactor code            | @CLAUDE/CodeLifecycle/General.md  |
-| Update docs              | @CLAUDE/CodeLifecycle/General.md  |
-| Update config            | @CLAUDE/CodeLifecycle/General.md  |
-| Improve tests            | @CLAUDE/CodeLifecycle/General.md  |
-| Performance optimization | @CLAUDE/CodeLifecycle/General.md  |
+| Change Description       | Use This Document                               |
+| ------------------------ | ----------------------------------------------- |
+| Add new handler          | [CLAUDE/CodeLifecycle/Features.md](Features.md) |
+| Add new feature          | [CLAUDE/CodeLifecycle/Features.md](Features.md) |
+| Fix a bug                | [CLAUDE/CodeLifecycle/Bugs.md](Bugs.md)         |
+| Refactor code            | This document                                   |
+| Update docs              | This document                                   |
+| Update config            | This document                                   |
+| Improve tests            | This document                                   |
+| Performance optimization | This document                                   |
 
 ## Summary
 
@@ -396,7 +396,7 @@ changes
 
 **See Also**:
 
-- @CLAUDE/CodeLifecycle/Features.md - Feature development
-- @CLAUDE/CodeLifecycle/Bugs.md - Bug fixes
-- @CLAUDE/AcceptanceTests/GENERATING.md - Acceptance test generation
-- @CLAUDE/PlanWorkflow.md - Planning standards
+- [CLAUDE/CodeLifecycle/Features.md](Features.md) - Feature development
+- [CLAUDE/CodeLifecycle/Bugs.md](Bugs.md) - Bug fixes
+- [CLAUDE/AcceptanceTests/GENERATING.md](../AcceptanceTests/GENERATING.md) - Acceptance test generation
+- [CLAUDE/PlanWorkflow.md](../PlanWorkflow.md) - Planning standards

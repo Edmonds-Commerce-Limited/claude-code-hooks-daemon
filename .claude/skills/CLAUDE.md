@@ -1,6 +1,6 @@
 # SSOT Rule for .claude/skills/
 
-**Single Source of Truth**: Each skill's documentation lives in its own `<skill>/SKILL.md`. Skills must not duplicate content from other canonical sources — they must link to them instead.
+**Single Source of Truth**: the documentation-SSoT rules live in [CLAUDE/DocumentationStrategy.md](../../CLAUDE/DocumentationStrategy.md) (R7b covers skills); each skill's own mechanics live in its `<skill>/SKILL.md`, and the table below routes shared topics to their canonical files.
 
 | Topic                             | Canonical Source                       |
 | --------------------------------- | -------------------------------------- |
