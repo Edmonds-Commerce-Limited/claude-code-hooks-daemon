@@ -289,3 +289,4 @@ section).
      JOURNAL/00284-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Plan scaffolded (counter 283 → 00284).
+- Task 3.1h (docs_qa cache schema versioning + advisory cap starvation fix) delivered at a03f2bba.
