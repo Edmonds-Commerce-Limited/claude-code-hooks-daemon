@@ -189,8 +189,16 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
 - [x] ✅ **Task 3.1f**: `duplicate-block` (hard-coded advisory-only) + the
   mandatory hand-triage — see `TRIAGE-duplicate-block.md` (11 shared blocks /
   198 docs; floor held). Delivered `96afa291`.
-- [ ] ⬜ **Task 3.1g**: `hooks-daemon-docs-qa` agent + docs-qa skill shim (via the
-  Plan 00279 agent subsystem); dogfood dispatch doubles as acceptance test.
+- [x] ✅ **Task 3.1g**: `hooks-daemon-docs-qa` agent + docs-qa skill shim (via the
+  Plan 00279 agent subsystem). Delivered `674f6a11`. `find-comment-blocks`
+  CLI (Decision 7) reuses the existing comment-extraction engine;
+  `install/skills.py` generalised to deploy every bundled skill dir.
+  Deterministic pipeline verified end to end against this repo
+  (168 sweep findings, 33 comment blocks in `src/`); a real `Task`-tool
+  dispatch of the agent was not possible from the executing session (no
+  Agent tool available there) — recorded as a follow-up in JOURNAL, see
+  `untracked/reports/2026-08-28-docs-qa-dogfood-acceptance.md` for the
+  manual stand-in run.
 - [ ] ⬜ **Task 3.1h**: Follow-ups flagged by 3.1f's delivery (both verified real):
   (a) corpus cache-reuse gap — mtime/size-keyed reuse silently carries forward
   a pre-schema-extension record with empty new fields; add an index schema
