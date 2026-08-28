@@ -104,18 +104,18 @@ drive-by.
 
 ### Phase 3: F3 — client-scaling exclusions
 
-- [ ] ⬜ **Task 3.1**: Failing tests: `corpus._is_excluded` must exclude
+- [x] ✅ **Task 3.1**: Failing tests: `corpus._is_excluded` must exclude
   common vendored/build directory names inside the configured trees
   (`node_modules`, `dist`, `build`, `target`, `.venv`, `.next`,
   `third_party`, in addition to the names already covered elsewhere).
-- [ ] ⬜ **Task 3.2**: Extend `corpus._is_excluded` with the missing names.
-- [ ] ⬜ **Task 3.3**: Failing test: `module_doc_budget`'s sweep must not
-  physically descend into an excluded directory (assert on pruning, not
-  just post-filtering).
-- [ ] ⬜ **Task 3.4**: Replace `module_doc_budget.py`'s unpruned
-  `project_root.rglob("CLAUDE.md")` with a pruned walk using the same
-  exclusion set, and extend `_EXCLUDED_DIR_NAMES` with the same missing
-  names as Task 3.2.
+- [x] ✅ **Task 3.2**: Extend `corpus._is_excluded` with the missing names
+  (added a shared `COMMON_VENDORED_BUILD_DIR_NAMES` constant).
+- [x] ✅ **Task 3.3**: Failing test: `module_doc_budget`'s sweep must not
+  physically descend into an excluded directory (assert on pruning via a
+  spying `os.walk`, not just post-filtering).
+- [x] ✅ **Task 3.4**: Replace `module_doc_budget.py`'s unpruned
+  `project_root.rglob("CLAUDE.md")` with a pruned `os.walk`, reusing
+  `COMMON_VENDORED_BUILD_DIR_NAMES` from `corpus.py`.
 
 ### Phase 4: F4 — document the docs-qa system
 

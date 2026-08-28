@@ -30,6 +30,7 @@ BLOCK-eligible; unchanged is ADVISE; shrinking is silent. A path matching
 ``grandfather_allowlist`` is held to ADVISE-only regardless (R12).
 """
 
+import os
 import re
 from dataclasses import dataclass
 from fnmatch import fnmatch
@@ -38,6 +39,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.docs_qa.corpus import (
+    COMMON_VENDORED_BUILD_DIR_NAMES,
     is_module_doc_path,
     is_vendored_daemon_install_path,
 )
@@ -84,13 +86,11 @@ _QUOTE_BLOCK_RE: Final[re.Pattern[str]] = re.compile(
 # instead, applied separately below.
 _EXCLUDED_DIR_NAMES: Final[frozenset[str]] = frozenset(
     {
-        "node_modules",
-        "vendor",
         "untracked",
         ".git",
         Path(ProjectPath.CLAUDE_WORKTREES_DIR).name,
     }
-)
+) | COMMON_VENDORED_BUILD_DIR_NAMES
 
 
 def _matches_allowlist(rel_path: str, patterns: tuple[str, ...]) -> bool:
@@ -196,16 +196,28 @@ def _run_edit(context: CheckContext) -> list[Finding]:
 
 
 def _iter_module_doc_paths(project_root: Path, agent_tree: str) -> list[str]:
-    """Every module-scoped CLAUDE.md on disk (``rglob`` always yields paths
-    under ``project_root``, so ``relative_to`` here cannot fail)."""
+    """Every module-scoped CLAUDE.md on disk.
+
+    F3 (Plan 00287): uses a PRUNED ``os.walk`` rather than ``Path.rglob`` --
+    ``rglob`` has no way to skip a directory once matched, so it physically
+    descends a huge ``node_modules``/``.git`` tree on every session start
+    even though the results are discarded a moment later by the
+    post-filter below. Pruning removes an excluded directory from
+    ``dirnames`` in place (the documented ``os.walk`` idiom), so the walk
+    never enters it at all.
+    """
     matches: list[str] = []
-    for path in project_root.rglob(_CLAUDE_MD_FILENAME):
-        rel_path = str(path.relative_to(project_root))
-        parts = rel_path.split("/")
-        if any(part in _EXCLUDED_DIR_NAMES for part in parts[:-1]):
+    for dirpath, dirnames, filenames in os.walk(project_root):
+        rel_dir_parts = Path(dirpath).relative_to(project_root).parts
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if name not in _EXCLUDED_DIR_NAMES
+            and not is_vendored_daemon_install_path((*rel_dir_parts, name))
+        ]
+        if _CLAUDE_MD_FILENAME not in filenames:
             continue
-        if is_vendored_daemon_install_path(tuple(parts[:-1])):
-            continue
+        rel_path = "/".join((*rel_dir_parts, _CLAUDE_MD_FILENAME))
         if is_module_doc_path(rel_path, agent_tree):
             matches.append(rel_path)
     return sorted(matches)

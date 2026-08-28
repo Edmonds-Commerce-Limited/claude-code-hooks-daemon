@@ -83,6 +83,26 @@ _HOOKS_DAEMON_INSTALL_PREFIX: Final[str] = ProjectPath.HOOKS_DAEMON_INSTALL_DIR
 
 _CLAUDE_MD_FILENAME: Final[str] = "CLAUDE.md"
 
+# F3 (Plan 00287): common vendored-dependency/build-output directory names.
+# A client's configured `trees.human` (default ``docs/``) can be a
+# Docusaurus/site root with its OWN `node_modules/`, `build/`, `.next/` --
+# scanning those indexes and dead-link-scans every package README on the
+# first corpus build. Shared with checks.module_doc_budget, which does its
+# OWN rglob walk (Task 3.3 T2 note) rather than using this corpus, so the
+# exclusion set has to be shared, not just the outcome.
+COMMON_VENDORED_BUILD_DIR_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "node_modules",
+        "vendor",
+        "dist",
+        "build",
+        "target",
+        ".venv",
+        ".next",
+        "third_party",
+    }
+)
+
 
 def is_module_doc_path(rel_path: str, agent_tree: str) -> bool:
     """True for any ``CLAUDE.md`` that is NOT a canonical root (repo or
@@ -143,8 +163,9 @@ def is_vendored_daemon_install_path(rel_parts: tuple[str, ...]) -> bool:
 
 def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> bool:
     """Corpus SCOPE exclusions (DESIGN §2.1): changelog, releases, plan
-    archives, (Task 3.3 T2) transient agent-worktree checkouts, and
-    (Task 3.6) a vendored daemon install."""
+    archives, (Task 3.3 T2) transient agent-worktree checkouts, (Task 3.6) a
+    vendored daemon install, and (F3, Plan 00287) common vendored-dependency
+    or build-output directories inside the configured trees."""
     if len(rel_parts) == 1 and rel_parts[0] == _CHANGELOG_FILENAME:
         return True
     if rel_parts and rel_parts[0] == _RELEASES_DIR_NAME:
@@ -152,6 +173,8 @@ def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> boo
     if _is_worktree_path(rel_parts):
         return True
     if is_vendored_daemon_install_path(rel_parts):
+        return True
+    if any(part in COMMON_VENDORED_BUILD_DIR_NAMES for part in rel_parts[:-1]):
         return True
     plan_completed = (policy.trees.agent, _PLAN_SUBDIR_NAME, _PLAN_COMPLETED_DIR_NAME)
     plan_cancelled = (policy.trees.agent, _PLAN_SUBDIR_NAME, _PLAN_CANCELLED_DIR_NAME)

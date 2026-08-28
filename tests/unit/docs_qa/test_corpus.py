@@ -99,6 +99,15 @@ class TestIsInScope:
             tmp_path / "CLAUDE" / "Plan" / "Cancelled" / "GONE.md", tmp_path, policy
         )
 
+    def test_vendored_build_dirs_inside_human_tree_are_excluded(self, tmp_path: Path) -> None:
+        """F3 (Plan 00287): a client whose ``docs/`` is a site root
+        (Docusaurus etc.) has its OWN node_modules/build/dist -- these must
+        not be indexed as documentation."""
+        _scaffold(tmp_path)
+        policy = DocumentationPolicy()
+        for heavy_dir in ("node_modules", "dist", "build", "target", ".venv", ".next", "third_party"):
+            assert not is_in_scope(tmp_path / "docs" / heavy_dir / "README.md", tmp_path, policy)
+
     def test_unscoped_directory_is_excluded(self, tmp_path: Path) -> None:
         _scaffold(tmp_path)
         assert not is_in_scope(tmp_path / "src" / "notes.md", tmp_path, DocumentationPolicy())

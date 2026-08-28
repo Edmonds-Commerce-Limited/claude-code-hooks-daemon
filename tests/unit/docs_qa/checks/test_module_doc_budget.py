@@ -1,11 +1,16 @@
 """Tests for check ``module-doc-budget`` (Plan 00284, Task 3.1e)."""
 
+import os
+from collections.abc import Callable, Generator
 from pathlib import Path
+
+import pytest
 
 from claude_code_hooks_daemon.docs_qa.checks.module_doc_budget import (
     CHECK_ID,
     CHECKS,
     UNREGISTERED_MODULE_DOC_LINE_BUDGET,
+    _iter_module_doc_paths,
 )
 from claude_code_hooks_daemon.docs_qa.context import edit_context, sweep_context
 from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus
@@ -286,7 +291,18 @@ class TestSweepStage:
         assert _run_sweep(context) == []
 
     def test_excludes_common_heavy_directories(self, tmp_path: Path) -> None:
-        for heavy_dir in ("node_modules", "untracked", ".git", "vendor"):
+        for heavy_dir in (
+            "node_modules",
+            "untracked",
+            ".git",
+            "vendor",
+            "dist",
+            "build",
+            "target",
+            ".venv",
+            ".next",
+            "third_party",
+        ):
             nested = tmp_path / heavy_dir / "sub"
             nested.mkdir(parents=True)
             (nested / "CLAUDE.md").write_text(_LONG_BODY)
@@ -296,6 +312,45 @@ class TestSweepStage:
             project_root=tmp_path, policy=policy, corpus=DocCorpus(project_root=tmp_path)
         )
         assert _run_sweep(context) == []
+
+    def test_walk_does_not_physically_descend_into_excluded_directories(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """F3 (Plan 00287): the walk must PRUNE excluded directories (never
+        enter them at all), not merely post-filter their results -- a plain
+        ``Path.rglob`` still physically descends a huge ``node_modules`` or
+        ``.git`` tree every session start even though its matches are later
+        discarded."""
+        (tmp_path / "node_modules" / "pkg").mkdir(parents=True)
+        (tmp_path / "node_modules" / "pkg" / "CLAUDE.md").write_text(_LONG_BODY)
+        (tmp_path / "src" / "foo").mkdir(parents=True)
+        (tmp_path / "src" / "foo" / "CLAUDE.md").write_text(_SHORT_BODY)
+
+        entered_dirs: list[str] = []
+        real_walk = os.walk
+
+        def _spying_walk(
+            top: str,
+            topdown: bool = True,
+            onerror: Callable[[OSError], object] | None = None,
+            followlinks: bool = False,
+        ) -> Generator[tuple[str, list[str], list[str]], None, None]:
+            for dirpath, dirnames, filenames in real_walk(
+                top, topdown=topdown, onerror=onerror, followlinks=followlinks
+            ):
+                entered_dirs.append(dirpath)
+                yield dirpath, dirnames, filenames
+
+        monkeypatch.setattr(os, "walk", _spying_walk)
+
+        matches = _iter_module_doc_paths(tmp_path, "CLAUDE")
+
+        assert "src/foo/CLAUDE.md" in matches
+        # Proves the walk went through os.walk at all (a pruned rglob never
+        # calls it) -- an empty entered_dirs would make the assertion below
+        # pass vacuously without actually exercising the pruning behaviour.
+        assert entered_dirs
+        assert not any("node_modules" in entered for entered in entered_dirs)
 
     def test_excludes_claude_worktrees_copies(self, tmp_path: Path) -> None:
         """Task 3.3 T2: this check's OWN rglob walk (independent of
