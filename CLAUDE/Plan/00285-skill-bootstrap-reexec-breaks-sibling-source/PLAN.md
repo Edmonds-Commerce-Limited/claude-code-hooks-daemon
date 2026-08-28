@@ -63,23 +63,23 @@ direct to the canonical library is the only sound fix.
 
 ### Phase 1: Import report + reproduce
 
-- [ ] ⬜ **Task 1.1**: Import and sanitise the field report into this folder
+- [x] ✅ **Task 1.1**: Import and sanitise the field report into this folder
   as `FIELD-REPORT.md`.
-- [ ] ⬜ **Task 1.2**: Write a failing acceptance test that runs
+- [x] ✅ **Task 1.2**: Write a failing acceptance test that runs
   `daemon-cli.sh`/`health-check.sh`/`init-handlers.sh` from a relocated
   copy (simulating post-re-exec `$0`) and asserts venv resolution still
   succeeds.
 
 ### Phase 2: Fix
 
-- [ ] ⬜ **Task 2.1**: Change all three scripts to anchor `RESOLVE_LIB` at
+- [x] ✅ **Task 2.1**: Change all three scripts to anchor `RESOLVE_LIB` at
   `$DAEMON_DIR/scripts/lib/resolve_venv.sh` and call `resolve_venv_python`
   directly, mirroring `install/templates/hooks-daemon`'s existing pattern.
-- [ ] ⬜ **Task 2.2**: Update `test_skill_scripts_venv_resolution.py`'s
+- [x] ✅ **Task 2.2**: Update `test_skill_scripts_venv_resolution.py`'s
   `test_wrapper_sources_resolver` (now asserts the canonical lib is
   sourced) and `test_health_check_honest_failure.py`'s stub location
   (now `scripts/lib/resolve_venv.sh` under the fixture's `DAEMON_DIR`).
-- [ ] ⬜ **Task 2.3**: Confirm the new acceptance test from Task 1.2 is GREEN.
+- [x] ✅ **Task 2.3**: Confirm the new acceptance test from Task 1.2 is GREEN.
 
 ### Phase 3: DBF guard
 
