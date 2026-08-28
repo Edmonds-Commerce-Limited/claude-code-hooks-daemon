@@ -140,17 +140,17 @@ scattered sibling plans.
 
 ### Phase 2: Enforcement design (post-review)
 
-All five Phase 2 designs are drafted in `DESIGN-enforcement.md` (this folder),
-pending critique review:
+All five Phase 2 designs are in `DESIGN-enforcement.md` (this folder),
+critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
 
-- [ ] 👁️ **Task 2.1**: Design the pure check core — drafted: `docs_qa/` package
+- [x] ✅ **Task 2.1**: Design the pure check core — drafted: `docs_qa/` package
   with a cached corpus index (link graph, quote index, block hashes) and ten
   declarative checks, each naming its stages and block-eligibility.
-- [ ] 👁️ **Task 2.2**: Design the three surfaces + config — drafted: edit /
+- [x] ✅ **Task 2.2**: Design the three surfaces + config — drafted: edit /
   commit-gate / sweep handlers + CLI over one core; top-level `documentation:`
   config block with per-check modes, grandfather allowlist, generated-doc
   manifest, module-doc registry; block-eligibility enforced structurally.
-- [ ] 👁️ **Task 2.3** (drafted in DESIGN-enforcement.md): Design the `hooks-daemon-docs-qa` agent — read-only agent
+- [x] ✅ **Task 2.3**: Design the `hooks-daemon-docs-qa` agent — read-only agent
   definition (system prompt embedding the DocumentationStrategy ruleset, report
   format with file:line citations, scan strategy for large doc trees), shipped
   through the Plan 00279 agent install subsystem (version + md5 ledger,
@@ -160,11 +160,11 @@ pending critique review:
   routes compose (on-demand primary / sweep-suggested / idle-housekeeping per
   Plan 00161). Per Decision 7 the agent explicitly hunts verbose comment blocks
   and treats them as documentation to cross-check.
-- [ ] 👁️ **Task 2.4** (drafted in DESIGN-enforcement.md): Design the `ssot-quote` mechanism (Decision 2): quote-block
+- [x] ✅ **Task 2.4**: Design the `ssot-quote` mechanism (Decision 2): quote-block
   markup, heading/marker anchoring, mdformat-normalised comparison, edit-time
   verification of the quoting file + corpus-index re-verification of quoters when
   a SOURCE is edited.
-- [ ] 👁️ **Task 2.5** (drafted in DESIGN-enforcement.md): Design the docs-qa SKILL — a thin SHIM/helper for the
+- [x] ✅ **Task 2.5**: Design the docs-qa SKILL — a thin SHIM/helper for the
   docs-qa sub-agent (USER-DIRECTED): the intent-triggered entry point that
   dispatches the agent, bundling the deterministic helper scripts the agent uses
   (find/list long comment blocks, and other finders). The skill carries no doc

@@ -15,7 +15,7 @@ src/claude_code_hooks_daemon/docs_qa/
 ├── types.py        # Finding, Severity, CheckStage (EDIT | STAGED | SWEEP)
 ├── context.py      # CheckContext: edited file + would-be content | staged set | tree
 ├── corpus.py       # DocCorpus: inventory, link graph, quote index, block-hash index
-├── config.py       # DocsQaPolicy parsed from the `documentation:` config block
+├── policy.py       # plain-values mirror of the typed config (plan_qa/types.py pattern)
 ├── report.py       # advisory/deny rendering, shared remedy text
 ├── runner.py       # stage orchestration, per-check mode resolution
 └── checks/         # one module per check, declarative registry (plan_qa pattern)
@@ -35,9 +35,22 @@ cannot be rebuilt per keystroke. `corpus.py` maintains a cached index under
 - a reverse index: source-file → its quoters, target-file → its linkers, so
   editing a SOURCE can cheaply surface stale quoters/linkers.
 
-Normalisation before any comparison: mdformat-equivalent reflow + whitespace
-collapse (RULESET supplement — otherwise the table formatter makes every quote
-false-drift).
+Normalisation before any comparison: run BOTH sides through the actual
+mdformat-gfm pipeline `markdown_table_formatter` uses — whitespace collapse
+alone equates neither its asterisk escaping (`*` → `\*`) nor its ordered-list
+renumbering, so anything weaker false-drifts on formatter churn.
+
+**Cold/stale-index rule (critique MUST-2)**: no block-eligible check may DENY
+on a cold or unvalidated-stale index — it degrades to advisory or skips, with
+the sweep as the backstop. The index is built/refreshed at daemon startup or
+SessionStart, never lazily inside a PreToolUse budget; `index.json` writes are
+atomic-replace (multiple sessions share one daemon — the status-line writer
+concurrency rules apply to this file too).
+
+**Corpus scope**: `CHANGELOG.md`, `RELEASES/`, and `CLAUDE/Plan/Completed/`
+are EXCLUDED from duplicate-block and link-graph traversal — archives are
+records and the changelog legitimately restates everything; unscoped, the
+index balloons and the false positives are guaranteed.
 
 ### The deterministic checks (R13-scoped; each names its stages and block-eligibility)
 
@@ -48,7 +61,7 @@ false-drift).
 | `quote-source-stale`         | editing a SOURCE span that has quoters (reverse index)                                            | EDIT (advise), SWEEP | never (advisory hand-off)                                                      |
 | `rules-file-shape`           | `.claude/rules/*.md` violating pointer-only form (R7a): fences/tables/procedures/over-budget body | EDIT, SWEEP          | yes (Decision 6's example)                                                     |
 | `rules-file-orphan-shrink`   | a rules-file shrink staging no same-commit canonical growth (promotion guard, RULESET §3)         | STAGED               | never                                                                          |
-| `generated-doc-hand-edit`    | Write/Edit to a manifest-declared generated doc                                                   | EDIT                 | yes                                                                            |
+| `generated-doc-hand-edit`    | Write/Edit to a manifest-declared generated doc; SWEEP: regeneration-marker/hash freshness        | EDIT, SWEEP          | yes (EDIT only)                                                                |
 | `duplicate-block`            | a structured block (R4 classes) hash-identical to one in a canonical doc, outside an ssot-quote   | EDIT, SWEEP          | never at first (00208/00214: hand-triaged whole-repo run before any promotion) |
 | `at-import-census`           | `@`-import outside the root-CLAUDE.md resident allowlist (R6)                                     | EDIT, SWEEP          | yes — NEW imports only                                                         |
 | `module-doc-budget`          | unregistered sub-CLAUDE.md over routing budget; registered one crossing size tiers (RULESET §2)   | EDIT, SWEEP          | grow-only, top tier only                                                       |
@@ -56,6 +69,37 @@ false-drift).
 
 Every check: grandfather allowlist honoured (R12), grow-only tiering where
 sized, remedy text naming the exact fix (plan_qa's `remedy.py` discipline).
+
+**Per-check refinements from the design critique** (all applied):
+
+- `pointer-resolves` block scope: block-capable ONLY for NEW plain markdown
+  links whose target FILE is missing. Anchor resolution is advisory-only until
+  the slug algorithm has soaked (slug variance is real); backticked prose
+  paths are advisory-only always; placeholder-token targets (`NNNNN`,
+  `X.Y.Z`, `{…}`, `*`, `<…>`) and example fences are skipped.
+- `rules-file-shape` applies R12 worse-only semantics STRUCTURALLY, not just
+  via allowlist: deny only an edit that ADDS a forbidden element or grows the
+  body; shrinking is silent; unchanged-but-fat advises. Every client with
+  template rules files starts non-compliant (this repo's two both fail the
+  contract today), so a naive day-one deny would fire on unrelated typo fixes.
+  The thinning edits themselves pass by construction.
+- `generated-doc-hand-edit` gains a SWEEP half (regeneration-marker/hash
+  freshness) — a write-time-only guard cannot see a Bash-redirect hand-edit or
+  one made before enablement (Core Standard 15 corollary).
+- `at-import-census` skips backtick-QUOTED occurrences — docs legitimately
+  quote `@`-import strings when describing the rule itself.
+
+**R5 (derived facts) tracing**: its deterministic half is the EXISTING
+`doc_truth` QA check in `scripts/qa`, extended with a declared fact registry —
+sweep-stage at most, not a new docs_qa check; unregistered contradictions are
+the agent's half. Also traced so absence reads as decision, not omission:
+R9's plan-citation-without-path is a sweep advisory folded into
+`pointer-resolves`; R4a marker audit is judgement-only (agent); R3 has no
+dedicated check — it is enforced by cross-tree `duplicate-block` hits + agent
+judgement, with `markdown_organization` keeping the location half (the
+`trees:` config keys exist for THOSE consumers, not for a check of their own);
+agent/skill file SIZE has no deterministic signal (only `module-doc-budget`
+survived review) — deliberately left to the agent's thin-pointer judgement.
 
 ## 2.2 The three surfaces + config
 
@@ -70,6 +114,12 @@ Thin consumers of the core, exactly the plan_qa trio:
   docs-qa agent (never auto-dispatch).
 - **CLI**: `hooks-daemon docs-qa --sweep | --lint <file> | --check-staged`
   (+ `--json`), exit 1 on findings — the CI hook.
+
+**Config parsing follows the real plan_qa precedent** (critique SHOULD-3):
+the typed pydantic model `DocumentationConfig` lives in `config/models.py`
+(`extra=forbid`, central validation) exactly as `PlanWorkflowConfig.qa` does;
+`docs_qa/policy.py` carries only a plain-values mirror. No in-package YAML
+parsing.
 
 **Config block** — top-level `documentation:` (the plan_workflow precedent),
 one shared home so the handlers cannot fragment policy (Decision 5):
@@ -135,21 +185,34 @@ Markup (works in any surface that tolerates HTML comments — .md everywhere):
 <!-- /ssot-quote -->
 ```
 
-- **Anchor**: a heading slug (GitHub-style) or an explicit
-  `<!-- ssot-anchor: name -->` marker in the source — never line numbers.
-  The addressed span is the anchor's section (to the next heading of same or
-  higher level, or the closing marker).
+- **Anchor**: ONE heading-slug algorithm pinned in code, with explicit
+  `<!-- ssot-anchor: name -->` markers PREFERRED for anything non-trivial —
+  this repo's headings carry emoji and colons ("🚨 CRITICAL: …"), where slug
+  implementations disagree. Never line numbers. The addressed span is the
+  anchor's section (to the next heading of same or higher level, or the
+  closing marker).
 - **Verification**: the quote body, normalised, must be a contiguous
-  substring of the normalised source span. EDIT-stage on the quoting file
-  (`quote-drift`, block-eligible); editing the SOURCE advises which quoters
-  now need re-checking (`quote-source-stale`, via the reverse index); SWEEP
-  re-verifies all.
+  substring of the normalised source span. Robustness requirements (critique
+  MUST-1): (i) normalisation runs BOTH sides through the same mdformat-gfm
+  pipeline the table formatter uses; (ii) section-span extraction is
+  FENCE-AWARE via a markdown parser — a `# heading`-looking line inside a
+  code fence must not terminate the span, and ssot markers inside fences do
+  not count; (iii) a documented MINIMUM quote length (a one-line quote is a
+  substring of almost anything — it verifies trivially and protects nothing);
+  (iv) a quote must come from a SINGLE section — verbatim text spanning two
+  sections fails by construction, documented so authors do not fight it.
+  EDIT-stage on the quoting file (`quote-drift`, block-eligible); editing the
+  SOURCE advises which quoters now need re-checking (`quote-source-stale`,
+  section-hash diff of would-be vs on-disk content); SWEEP re-verifies all.
 - **Budgets**: quoted blocks are excluded from module-doc size budgets
   (RULESET §2), removing the perverse incentive to point when quoting is
   safer. Rules files get no such exclusion — R7a forbids quotes there
   outright.
 - **Adoption seed**: the six-fold daemon-restart snippet converts to quotes
-  of one canonical section during the Task 3.2 migration.
+  of one canonical section during the Task 3.2 migration. The canonical
+  section lives OUTSIDE any generated block (natural owner:
+  `CLAUDE/CodeLifecycle/General.md`) — quoting a generated span would tie
+  every quoter to regeneration churn.
 
 ## 2.5 The docs-qa skill (shim)
 
