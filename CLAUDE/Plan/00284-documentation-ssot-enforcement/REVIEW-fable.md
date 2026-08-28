@@ -388,6 +388,18 @@ surface) can block; shrinking is silent; unchanged-but-bad advises. *Rationale: 
 dozens of standing violations; a day-one blocker would be disabled within a day (the
 Plan 00214 lesson).* [M].
 
+**R13 — Two enforcement instruments, cleanly divided.** Deterministic checks
+(handler / bulk scan / sweep) enforce only the mechanically-checkable subset of these
+rules: exact/near-exact copies, stale pointers, structural placement, declared
+manifests and budgets. The semantic remainder — conflicting truths, paraphrase
+drift, a truth scattered with no canonical home — is owned by the read-only
+`hooks-daemon-docs-qa` agent (D.10), which reports with citations and never edits or
+blocks. No deterministic check may attempt a semantic judgement; no rule in this
+document is "enforced" merely by hoping — each is tagged with its instrument.
+*Rationale: keeps the FP-discipline promise (00208/00214) — heuristic approximations
+of semantic questions are exactly the rules that get handlers disabled.* [M] for the
+division itself.
+
 ---
 
 ## D. Enforcement signal candidates
@@ -519,7 +531,8 @@ indexhood heuristically from phrases like "Files in This Directory" — that gue
 where FPs live. **Recommend: mechanical and safe, but pair it with R7d's real fix:
 delete or generate prose indexes.**
 
-**D.7 `plan-promotion-triage` (R8).**
+**D.7 `plan-promotion-triage` (R8).** \[DETERMINISTIC trigger; disposition judgement
+stays with the closing agent/human — the docs-qa agent can audit past dispositions\]
 Detects: commit staging a terminal-status flip for a plan whose folder contains
 supporting docs (non-PLAN/JOURNAL/CRITIQUE/REVIEW) with no disposition note staged.
 Surfaces: commit gate (extends `plan_qa`'s `terminal-state-atomic` family) + sweep
@@ -530,13 +543,13 @@ un-checkable, but the forcing function is the point: A.6 shows the failure is ab
 of the question, not wrong answers. **Recommend: advisory in the commit gate from day
 one (it composes with the existing plan_qa gate rather than a new handler).**
 
-**D.8 `no-new-at-imports`.**
+**D.8 `no-new-at-imports`.** [DETERMINISTIC]
 Detects: an `@`-style import added outside the allowlist. Skip backtick-quoted
 occurrences (the `CLAUDE/QA.md` quoted-lint-rule FP found in A.9).
 Surfaces: edit-time + bulk. Cost: trivial. FP: low with the backtick guard.
 **Recommend: advisory, then block for NEW files; existing 82 occurrences grandfathered.**
 
-**D.9 `generated-doc-hand-edit` (R10).**
+**D.9 `generated-doc-hand-edit` (R10).** [DETERMINISTIC]
 Detects: Write/Edit to a manifest-declared generated doc → advisory naming the source
 and regenerate command; sweep checks the regeneration marker/version for staleness.
 FP: essentially zero (the manifest is explicit; the daemon's own auto-commit path can be
@@ -662,11 +675,14 @@ expensive at startup, D.2 stays batch-only with no great loss.
 1. *Pointer vs duplicate*: bound by CONTENT CLASS, not sentence count — ≤3 orientation
    sentences plus surface-specific application notes are a pointer; any copied
    table/fence/procedure/enumeration/derived-fact is a duplicate (R4, R5).
-2. *Comments*: advisory/judgement only (E.7).
-3. *Agents/skills*: size-tier trigger + duplication hits + doc-marker headings,
-   advisory, grow-only tiering (D.5); plus an agents charter file (R7c).
+2. *Comments*: judgement only — no deterministic check; in-scope for the docs-qa
+   agent's sweep where a comment plainly carries a doc-owned truth (E.7).
+3. *Agents/skills*: size-tier trigger + duplication hits + doc-marker headings as
+   the DETERMINISTIC advisory (D.5, grow-only tiering); the restatement-vs-role-note
+   judgement goes to the docs-qa agent; plus an agents charter file (R7c).
 4. *Detection method*: link-graph + exact-block-hash fit edit-time (with a cached
-   index); shingling is batch/on-demand only, never blocking (D.1–D.3).
+   index); everything softer than exact — paraphrase, contradiction — is the
+   docs-qa AGENT's mandate, not a batch heuristic (D.3, D.10).
 5. *Generated docs*: explicit manifest, pre-seeded with the daemon's own artifacts;
    manifest entries exempt from duplication, checked instead for hand-edits and
    staleness (R10, D.9).
