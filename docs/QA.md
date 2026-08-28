@@ -49,13 +49,13 @@ patterns and their proper fixes are catalogued in
 ## The client-project QA runner (separate thing)
 
 Distinct from the repository's own QA suite, the daemon ships a small QA
-runner module (`src/claude_code_hooks_daemon/qa/`) for running checks like
-ESLint, TypeScript, Prettier, and CSpell against a *client* project, with
+runner module (`src/claude_code_hooks_daemon/qa/`) for running Python QA
+tools (Ruff, MyPy, Black, Pytest, Bandit) against a *client* project, with
 structured JSON output. Invoke it through the wrapper (which resolves the
 daemon's virtualenv for you):
 
 ```bash
-./scripts/run-qa-runner.sh <project-root> "eslint,typescript"
+./scripts/run-qa-runner.sh <project-root> "ruff,mypy"
 ```
 
 Its technical documentation lives with the module in

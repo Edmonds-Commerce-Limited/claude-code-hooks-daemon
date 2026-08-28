@@ -366,7 +366,7 @@ After any code change to the stop hook chain:
 4. Run full QA:
 
    ```bash
-   ./scripts/qa/run_all.sh
+   ./scripts/qa/llm_qa.py all
    ```
 
 5. In a live Claude Code session, verify that Claude auto-blocks when stopping without `STOPPING BECAUSE:`.

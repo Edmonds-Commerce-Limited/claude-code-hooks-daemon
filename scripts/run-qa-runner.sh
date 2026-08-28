@@ -11,7 +11,11 @@ _QA_RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _QA_RUNNER_REPO_ROOT="${_QA_RUNNER_DIR%/*}"
 
 PROJECT_ROOT="${1:-.}"
-TOOLS="${2:-eslint,typescript,prettier,cspell}"
+# Default mirrors the module CLI's own default (qa/runner.py --tools) — the
+# previous "eslint,typescript,prettier,cspell" default named tools the module
+# does not implement (it runs Python tools only), so the no-args invocation
+# silently asked for nothing runnable.
+TOOLS="${2:-ruff,mypy,black,pytest}"
 SAVE_RESULTS="${3:-true}"
 OUTPUT_DIR="${4:-}"
 

@@ -170,6 +170,19 @@ scattered sibling plans.
 
 - [ ] ⬜ **Task 3.1**: Placeholder — TDD per surface, bulk-scan CLI, daemon-restart
   verification, client-mode fixture verification, dogfood in this repo, full QA gate.
+- [ ] ⬜ **Task 3.2**: Dogfood-migration worklist (deferred by the branch cross-check;
+  each verified, none blocking):
+  - `CLAUDE/AgentTeam.md` (~20 instructive `run_all.sh` sites + stale "all 7
+    checks" counts) and `CLAUDE/Worktree.md` (~14 sites) → llm_qa.py + R5 cleanup
+  - `CLAUDE/PlanWorkflow.md` still teaches 3-digit plan numbering (`001-`) while
+    the system is 5-digit — the canonical deep doc is the wrong half of its pair
+  - release SKILL.md's four incompatible step numberings (review §A.2.2) — belongs
+    to skill thinning
+  - `CLAUDE/CLAUDE.md` prose index → routing table (R7d; currently grandfathered)
+  - both `.claude/rules/` files fail the pointer-only contract: promote
+    `ccy-supervisor-dogfooding.md`'s hot-reload contract to a canonical home
+    (natural fit: a registered `.claude/ccy/CLAUDE.md`), thin
+    `importing-reports.md` against root CLAUDE.md's Report Handling section
 
 ## Technical Decisions
 
