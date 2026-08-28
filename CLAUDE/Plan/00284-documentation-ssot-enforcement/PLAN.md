@@ -278,12 +278,18 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
   included `is_module_doc_path`, the CLI's copy did not. Fixed by extracting
   the shared union into `docs_qa.corpus.is_lintable_path` (SSoT) and having
   both the handler and the CLI call it — commit 2aba56cd.
-- [ ] ⬜ **Task 3.5**: Per-file `docs-qa --lint` can serve STALE cross-document
-  results from the corpus cache — slice C observed the N5 duplicate-block pair
-  still reported by `--lint` after the fix was on disk (and after a daemon
-  restart); only a full `--sweep` re-indexed. Expected: a lint of file X must
-  refresh (at minimum) X's own corpus record before running cross-document
-  checks. TDD-reproduce, then fix in the lint entry path.
+- [x] ✅ **Task 3.5**: Per-file `docs-qa --lint` could serve STALE
+  cross-document results from the corpus cache — slice C observed the N5
+  duplicate-block pair not surfacing via `--lint` after the fix was on disk
+  (and after a daemon restart); only a full `--sweep` re-indexed. Root cause:
+  `checks.duplicate_block`'s cross-document index only counts a shared block
+  hash once it sees it in TWO DISTINCT corpus entries, and `load_or_cold_corpus`
+  performs no staleness check at all — so the linted file's own cached record
+  never carried a hash it had just gained, and the pairing stayed invisible.
+  Fixed with `docs_qa.corpus.refresh_own_record`, called from both `docs-qa --lint` and `docs_qa_edit` right after the cache load, replacing the linted
+  file's own record with one built fresh from the content being linted; partner
+  records are left cache-aged by design (that is the sweep's job) — commit
+  7c1899ff.
 
 ## Technical Decisions
 
