@@ -6,6 +6,7 @@ assembles the registry consumed by :func:`docs_qa.runner.run_stage`.
 
 from claude_code_hooks_daemon.docs_qa.checks import (
     at_import_census,
+    duplicate_block,
     generated_doc_hand_edit,
     module_doc_budget,
     plan_promotion_disposition,
@@ -30,4 +31,5 @@ def all_checks() -> tuple[CheckSpec, ...]:
         *plan_promotion_disposition.CHECKS,
         *at_import_census.CHECKS,
         *module_doc_budget.CHECKS,
+        *duplicate_block.CHECKS,
     )

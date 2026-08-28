@@ -30,6 +30,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.quotes import parse_quote_blocks
+from claude_code_hooks_daemon.docs_qa.structured_blocks import extract_structured_block_hashes
 from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
@@ -160,6 +161,10 @@ class DocRecord:
     size: int
     links: tuple[str, ...]
     quotes: tuple[QuoteRef, ...] = ()
+    # Normalised sha256 hashes of this doc's structured blocks (R4 classes:
+    # fences, tables, list-runs of 3+ items) at or above the length floor --
+    # see docs_qa.structured_blocks. Consumed by checks.duplicate_block.
+    block_hashes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -233,6 +238,10 @@ def load_cached_corpus(project_root: Path, index_path: Path) -> DocCorpus | None
                     QuoteRef(source_path=ref["source_path"], anchor=ref["anchor"])
                     for ref in entry.get("quotes", [])
                 ),
+                # Legacy caches predate the block-hash index (Task 3.1f) and
+                # have no "block_hashes" key -- same absence-means-not-yet-
+                # indexed treatment as "quotes" above.
+                block_hashes=tuple(entry.get("block_hashes", [])),
             )
     except (KeyError, TypeError, ValueError):
         return None
@@ -263,6 +272,7 @@ def _save_corpus(corpus: DocCorpus, index_path: Path) -> None:
                 "quotes": [
                     {"source_path": ref.source_path, "anchor": ref.anchor} for ref in record.quotes
                 ],
+                "block_hashes": list(record.block_hashes),
             }
             for rel, record in corpus.documents.items()
         }
@@ -315,6 +325,7 @@ def build_and_save_corpus(
                 QuoteRef(source_path=block.source_path, anchor=block.anchor)
                 for block in parse_quote_blocks(text)
             ),
+            block_hashes=extract_structured_block_hashes(text),
         )
 
     corpus = DocCorpus(project_root=project_root, documents=documents, cold=False)

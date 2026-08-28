@@ -211,8 +211,13 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
   the SWEEP report cannot bloat context once `module-doc-budget` starts
   flagging this repo's several over-budget sub-`CLAUDE.md` files. Three
   checkpoint commits.
-- [ ] ⬜ **Task 3.1f**: `duplicate-block` — advisory only, AFTER a hand-triaged
-  whole-repo run recorded in this folder.
+- [x] ✅ **Task 3.1f**: `duplicate-block` — advisory only, AFTER a hand-triaged
+  whole-repo run recorded in this folder. Delivered — new
+  `docs_qa/structured_blocks.py` + `block_hashes` on `DocRecord` +
+  `checks/duplicate_block.py` (EDIT + SWEEP, hard-coded advisory-only, no
+  `Severity.BLOCK` path in the code). Hand triage in
+  `TRIAGE-duplicate-block.md`: 11 shared blocks across 198 docs; floor
+  not adjusted — see the triage doc for the full evidence and reasoning.
 - [ ] ⬜ **Task 3.1g**: `hooks-daemon-docs-qa` agent + docs-qa skill shim (via the
   Plan 00279 agent subsystem); dogfood dispatch doubles as acceptance test.
 - [ ] ⬜ **Task 3.2**: Dogfood-migration worklist (deferred by the branch cross-check;

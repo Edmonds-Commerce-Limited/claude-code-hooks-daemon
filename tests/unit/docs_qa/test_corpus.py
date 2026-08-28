@@ -377,6 +377,62 @@ class TestQuoteExtractionAndReverseIndex:
         quoters = corpus.quoters_of("Source.md", "x")
         assert quoters == ("A.md", "B.md")
 
+
+_LONG_FENCE_BODY = "\n".join(
+    f"echo 'line number {n} of a long fenced example block'" for n in range(6)
+)
+
+
+class TestStructuredBlockHashExtraction:
+    def test_build_extracts_block_hashes(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        (tmp_path / "CLAUDE" / "Foo.md").write_text(f"# Foo\n\n```bash\n{_LONG_FENCE_BODY}\n```\n")
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        corpus = build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        record = corpus.documents["CLAUDE/Foo.md"]
+        assert len(record.block_hashes) == 1
+
+    def test_no_structured_blocks_yields_empty_tuple(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        corpus = build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        assert corpus.documents["CLAUDE/Foo.md"].block_hashes == ()
+
+    def test_block_hashes_round_trip_through_the_cache(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        (tmp_path / "CLAUDE" / "Foo.md").write_text(f"# Foo\n\n```bash\n{_LONG_FENCE_BODY}\n```\n")
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        built = build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        reloaded = load_cached_corpus(tmp_path, index_path)
+        assert reloaded is not None
+        assert (
+            reloaded.documents["CLAUDE/Foo.md"].block_hashes
+            == built.documents["CLAUDE/Foo.md"].block_hashes
+        )
+
+    def test_legacy_cache_without_block_hashes_key_defaults_to_empty(self, tmp_path: Path) -> None:
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        index_path.parent.mkdir(parents=True)
+        index_path.write_text(
+            json.dumps({"documents": {"a.md": {"mtime_ns": 1, "size": 1, "links": []}}})
+        )
+        corpus = load_cached_corpus(tmp_path, index_path)
+        assert corpus is not None
+        assert corpus.documents["a.md"].block_hashes == ()
+
+    def test_identical_blocks_in_two_documents_hash_identically(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        (tmp_path / "CLAUDE" / "Foo.md").write_text(f"# Foo\n\n```bash\n{_LONG_FENCE_BODY}\n```\n")
+        (tmp_path / "docs" / "Guide.md").write_text(
+            f"# Guide, different prose\n\n```bash\n{_LONG_FENCE_BODY}\n```\n"
+        )
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        corpus = build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        assert (
+            corpus.documents["CLAUDE/Foo.md"].block_hashes
+            == corpus.documents["docs/Guide.md"].block_hashes
+        )
+
     def test_reverse_quote_index_empty_when_no_quoters(self, tmp_path: Path) -> None:
         corpus = DocCorpus(project_root=tmp_path, documents={})
         assert corpus.quoters_of("Source.md", "x") == ()
