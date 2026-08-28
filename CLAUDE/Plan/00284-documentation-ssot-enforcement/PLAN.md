@@ -187,9 +187,13 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
   manifest default; sweep reads the real version marker as current). The
   `<hooksdaemon>` section-in-CLAUDE.md omission is recorded as a decision in
   the manifest defaults.
-- [ ] ⬜ **Task 3.1c**: `rules-file-shape` with structural worse-only semantics +
-  the three surface handlers (`docs_qa_edit`, `docs_qa_commit_gate`,
-  `docs_qa_sweep`) consuming the core.
+- [x] ✅ **Task 3.1c**: `rules-file-shape` with structural worse-only semantics +
+  the surface handlers consuming the core. Delivered at `1e0fbf8e` (check) +
+  `9282f28c` (handlers + dogfood enablement, warn/advise modes, live-verified
+  on the real sockets: sweep flags this repo's two non-compliant rules files
+  and the dead links; warn-mode edit probe correctly advises instead of
+  denying). `docs_qa_commit_gate` deliberately DEFERRED to 3.1e with STAGED
+  context — mirrors plan_qa's own land-last commit-gate rollout order.
 - [ ] ⬜ **Task 3.1d**: `ssot-quote` verifier (`quote-drift`, `quote-source-stale`)
   per the hardened §2.4 spec + restart-snippet migration seed.
 - [ ] ⬜ **Task 3.1e**: budgets/registry (`module-doc-budget`), `at-import-census`,
