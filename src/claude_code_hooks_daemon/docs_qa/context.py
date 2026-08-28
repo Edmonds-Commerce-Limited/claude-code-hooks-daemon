@@ -7,17 +7,25 @@ Mirrors :mod:`claude_code_hooks_daemon.plan_qa.context`:
 - :func:`sweep_context` takes an ALREADY-BUILT :class:`DocCorpus`
   (:func:`docs_qa.corpus.build_and_save_corpus`) — building the corpus is
   the caller's job, so this stays a pure constructor.
-- :func:`staged_context` is a stub: the STAGED (git-commit-gate) surface is
-  not implemented in this slice (Plan 00284 Task 3.1a); it raises
-  ``NotImplementedError`` so a caller cannot silently no-op on it.
+- :func:`staged_context` (Task 3.1e) builds the staged-tree view via
+  :class:`~claude_code_hooks_daemon.plan_qa.gitfacts.GitFacts` — the SAME
+  read-only git plumbing plan_qa's commit gate uses (routed through
+  ``run_git``, never a raw subprocess spawn; reused directly rather than
+  reimplemented, matching how ``docs_qa.corpus`` already reuses
+  ``plan_qa.model.lines_outside_fences``).
 """
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import NoReturn
+from typing import Final
 
 from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.types import CheckContext
+from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
+
+_MARKDOWN_SUFFIX: Final[str] = ".md"
+_DELETE_STATUS: Final[str] = "D"
 
 
 def edit_context(
@@ -59,16 +67,43 @@ def sweep_context(
     return CheckContext(project_root=project_root, policy=policy, corpus=corpus)
 
 
-def staged_context(project_root: Path, policy: DocumentationPolicy) -> NoReturn:
-    """STAGED-stage context builder — not implemented in this slice.
+def staged_context(
+    project_root: Path,
+    policy: DocumentationPolicy,
+    commit_message: str | None = None,
+    pathspecs: Sequence[str] | None = None,
+) -> CheckContext:
+    """Build the STAGED-stage context: the commit's staged ``.md`` content.
 
-    The ``docs-qa --check-staged`` CLI action and the future
-    ``docs_qa_commit_gate`` handler both surface this as an explicit "not
-    implemented" result rather than calling this and letting it crash
-    uncaught.
+    ``pathspecs`` mirrors :class:`GitFacts`'s own contract: when the
+    inspected ``git commit`` invocation names paths directly, the STAGED
+    view is scoped to exactly those paths' working-tree-vs-HEAD content
+    (what THIS commit will actually contain), not the whole index.
     """
-    raise NotImplementedError(
-        "STAGED-stage docs QA context is not implemented in this slice "
-        "(Plan 00284 Task 3.1a) — see CLAUDE/Plan/00284-documentation-ssot-"
-        "enforcement/PLAN.md Task 3.1e"
+    gitfacts = GitFacts(project_root, pathspecs=pathspecs)
+    staged_documents: dict[str, str] = {}
+    for change in gitfacts.staged_changes():
+        if change.status == _DELETE_STATUS:
+            continue
+        if not change.path.endswith(_MARKDOWN_SUFFIX):
+            continue
+        if pathspecs:
+            # A pathspec'd commit ships the CURRENT WORKING TREE content of
+            # that path (see GitFacts.staged_changes' own docstring) --
+            # `git show :path` would read the INDEX instead, which can
+            # disagree with what this commit actually contains.
+            try:
+                content: str | None = (project_root / change.path).read_text(encoding="utf-8")
+            except OSError:
+                content = None
+        else:
+            content = gitfacts.staged_file_text(change.path)
+        if content is not None:
+            staged_documents[change.path] = content
+    return CheckContext(
+        project_root=project_root,
+        policy=policy,
+        staged_documents=staged_documents,
+        gitfacts=gitfacts,
+        commit_message=commit_message,
     )

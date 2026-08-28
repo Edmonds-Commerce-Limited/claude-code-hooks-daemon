@@ -4286,12 +4286,14 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
       checks) — CI-able, exit 1 on any finding.
     - ``--lint PATH``: run the EDIT-stage checks against one file's current
       on-disk content.
-    - ``--check-staged``: NOT IMPLEMENTED in this slice (Plan 00284
-      Task 3.1a); prints a notice and exits 2.
+    - ``--check-staged``: run the STAGED-stage checks against the staged
+      tree (Plan 00284 Task 3.1e) — a bare invocation inspects the index;
+      no pathspec-scoping support in this CLI (the commit-gate HANDLER
+      derives pathspecs from the actual ``git commit`` command line, which
+      the CLI has no equivalent of).
 
     Runs regardless of ``documentation.enabled`` — an explicit CLI
-    invocation is consent; ``enabled`` only gates the (not-yet-shipped)
-    handlers.
+    invocation is consent; ``enabled`` only gates the handlers.
 
     Args:
         args: Parsed CLI arguments with ``sweep``, ``check_staged``,
@@ -4299,14 +4301,17 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
 
     Returns:
         0 when clean, 1 when findings are reported, 2 on operational
-        errors (missing lint target, out-of-scope lint target, or
-        ``--check-staged``).
+        errors (missing or out-of-scope lint target).
     """
     from claude_code_hooks_daemon.config.models import Config
     from claude_code_hooks_daemon.docs_qa.checks.generated_doc_hand_edit import (
         matched_manifest_entry,
     )
-    from claude_code_hooks_daemon.docs_qa.context import edit_context, sweep_context
+    from claude_code_hooks_daemon.docs_qa.context import (
+        edit_context,
+        staged_context,
+        sweep_context,
+    )
     from claude_code_hooks_daemon.docs_qa.corpus import (
         build_and_save_corpus,
         is_in_scope,
@@ -4325,15 +4330,10 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     policy = policy_from_config(config.documentation)
 
     if getattr(args, "check_staged", False):
-        print(
-            "Docs QA: --check-staged is not implemented in this slice "
-            "(Plan 00284 Task 3.1a) — see CLAUDE/Plan/00284-documentation-"
-            "ssot-enforcement/PLAN.md Task 3.1e.",
-            file=sys.stderr,
-        )
-        return 2
-
-    if getattr(args, "lint", None) is not None:
+        clean_scope = CLEAN_SCOPE_CORPUS
+        context = staged_context(project_root=project_root, policy=policy)
+        findings = run_stage(CheckStage.STAGED, context)
+    elif getattr(args, "lint", None) is not None:
         # Resolve BEFORE scope-checking (mirrors the plan-qa Plan 00230
         # lesson): a relative path must classify identically to its
         # absolute form, and an unresolved relative path against an

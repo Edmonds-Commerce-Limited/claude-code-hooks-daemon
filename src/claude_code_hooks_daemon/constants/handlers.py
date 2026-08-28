@@ -625,6 +625,14 @@ class HandlerID:
         display_name="docs-qa-edit",
     )
 
+    # Docs QA commit gate (PreToolUse handler) — Plan 00284 Task 3.1e: STAGED
+    # cross-file checks over the staged tree on git commit (warn-first)
+    DOCS_QA_COMMIT_GATE = HandlerIDMeta(
+        class_name="DocsQaCommitGateHandler",
+        config_key="docs_qa_commit_gate",
+        display_name="docs-qa-commit-gate",
+    )
+
     # Staged lint gate (PreToolUse handler) — Plan 00268 Task 3.2: cheap
     # syntax-check backstop over staged Added/Copied/Modified files on git
     # commit, so a file that reached the index by any route other than

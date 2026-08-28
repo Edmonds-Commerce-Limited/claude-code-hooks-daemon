@@ -1,11 +1,13 @@
-"""Tests for the ``docs-qa`` CLI subcommand (Plan 00284, Task 3.1a)."""
+"""Tests for the ``docs-qa`` CLI subcommand (Plan 00284, Tasks 3.1a + 3.1e)."""
 
 import argparse
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.cli import cmd_docs_qa
 
 
@@ -35,6 +37,21 @@ def _scaffold(tmp_path: Path) -> Path:
     # Self-install marker so _daemon_untracked_dir resolves to root/untracked.
     (root / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
     return root
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+
+
+def _init_repo(root: Path) -> None:
+    _git(root, "init")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
 
 
 class TestSweep:
@@ -146,12 +163,29 @@ class TestLint:
 
 
 class TestCheckStaged:
-    def test_not_implemented_exits_two(
+    def test_clean_staged_tree_exits_zero(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        _init_repo(root)
+        _git(root, "add", "-A")
+
+        assert cmd_docs_qa(_args(root, check_staged=True)) == 0
+
+    def test_new_staged_broken_link_exits_one(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         root = _scaffold(tmp_path)
-        assert cmd_docs_qa(_args(root, check_staged=True)) == 2
-        assert "not implemented" in capsys.readouterr().err.lower()
+        (root / "CLAUDE" / "New.md").write_text("See [missing](Nope.md).\n")
+        _init_repo(root)
+        _git(root, "add", "-A")
+
+        assert cmd_docs_qa(_args(root, check_staged=True)) == 1
+        out = capsys.readouterr().out
+        assert "pointer-resolves" in out
+
+    def test_no_git_repo_is_clean(self, tmp_path: Path) -> None:
+        """No .git at all: GitFacts fails soft, so nothing is staged to check."""
+        root = _scaffold(tmp_path)
+        assert cmd_docs_qa(_args(root, check_staged=True)) == 0
 
 
 class TestGeneratedDocHandEdit:

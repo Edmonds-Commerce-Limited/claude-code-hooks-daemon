@@ -61,6 +61,12 @@ _EXEMPT_FROM_DENY_TEST: dict[str, str] = {
         "`warn`, so a playbook running the default configuration cannot reach "
         "the deny path. The warn path IS covered."
     ),
+    "DocsQaCommitGateHandler": (
+        "denies only under `documentation.qa.commit_gate_mode: block`; the "
+        "shipped default is `warn` -- the same warn-first rollout as "
+        "PlanQaCommitGateHandler, so a playbook running the default "
+        "configuration cannot reach the deny path. The warn path IS covered."
+    ),
     "VerificationResultGateHandler": (
         "denies only under `mode: block`; the shipped default is `warn` -- a "
         "deliberate warn-first rollout mirroring PlanQaCommitGateHandler, so a "

@@ -437,6 +437,10 @@ handlers:
       enabled: true        # Policy under top-level documentation.qa (edit_mode: warn)
       priority: 47
 
+    docs_qa_commit_gate:   # STAGED docs QA gate on git commit (Plan 00284)
+      enabled: true        # Warn-first rollout (documentation.qa.commit_gate_mode: warn)
+      priority: 47
+
     npm_command:           # Restricts npm commands to approved list
       enabled: true        # Enable for strict npm usage control
       priority: 49

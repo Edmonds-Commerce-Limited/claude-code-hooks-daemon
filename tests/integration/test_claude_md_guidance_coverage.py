@@ -95,6 +95,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "PipBreakSystemHandler": "T1 denies --break-system-packages",
     "PipeBlockerHandler": "T1 denies expensive pipes to head/tail",
     "DocsQaEditHandler": "T1 denies documentation writes that break the docs QA rules",
+    "DocsQaCommitGateHandler": "T2 fires on the commit whose contents are already staged",
     "PlanQaEditHandler": "T1 denies plan documents that break the QA rules",
     "PlanTimeEstimatesHandler": "T1 denies time estimates in plan documents",
     "QaSuppressionHandler": "T1 denies QA suppression annotations",

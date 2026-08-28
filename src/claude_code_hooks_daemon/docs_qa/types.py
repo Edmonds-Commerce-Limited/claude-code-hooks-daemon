@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus
+    from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 
 
 class CheckStage(StrEnum):
@@ -51,8 +52,8 @@ class CheckContext:
 
     Stage-specific slots are ``None`` when not applicable: an EDIT context
     carries the would-be file content; a SWEEP context carries a
-    :class:`~claude_code_hooks_daemon.docs_qa.corpus.DocCorpus`. STAGED is
-    not implemented in this slice (see ``docs_qa.context.staged_context``).
+    :class:`~claude_code_hooks_daemon.docs_qa.corpus.DocCorpus`; a STAGED
+    context carries the staged-tree view (Task 3.1e).
     """
 
     project_root: Path
@@ -66,8 +67,18 @@ class CheckContext:
     # check distinguish a NEW violation from a pre-existing one.
     file_content_before: str | None = None
 
-    # STAGED / SWEEP: the corpus index.
+    # SWEEP: the corpus index. EDIT: optionally attached (cheap, cached-only
+    # load) by a check that needs reverse-index lookups.
     corpus: "DocCorpus | None" = None
+
+    # STAGED stage (Task 3.1e): every staged Added/Copied/Modified/Renamed
+    # (new-side) ``.md`` file's STAGED content, keyed by repo-relative path.
+    # A deleted path carries no content and is never a key here.
+    staged_documents: dict[str, str] | None = None
+    # Read-only git plumbing (staged/HEAD content, staged_changes) for
+    # checks that need more than the flat staged_documents view.
+    gitfacts: "GitFacts | None" = None
+    commit_message: str | None = None
 
 
 CheckFn = Callable[[CheckContext], list[Finding]]

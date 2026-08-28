@@ -181,6 +181,10 @@ class Priority:
     # deliberately a different check id/domain so priority collision with 44
     # is avoided while staying in the same workflow band.
     DOCS_QA_EDIT = 47
+    # Same slot as DOCS_QA_EDIT, mirroring plan_qa_edit/plan_qa_commit_gate
+    # sharing priority 44 -- both trigger on disjoint tool shapes (Write/Edit
+    # vs git-commit Bash), so a shared priority never collides in practice.
+    DOCS_QA_COMMIT_GATE = 47
 
     NPM_COMMAND = 50
     VALIDATE_INSTRUCTION_CONTENT = 50

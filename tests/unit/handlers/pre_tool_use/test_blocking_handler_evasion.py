@@ -380,6 +380,7 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
 _COMMAND_ANCHORED_NOT_UNIT_TESTABLE: dict[str, str] = {
     "LspEnforcementHandler": "carries per-session state (block_once); needs a session fixture",
     "PlanQaCommitGateHandler": "inspects the staged git tree; needs a real repository",
+    "DocsQaCommitGateHandler": "inspects the staged git tree; needs a real repository",
     "DaemonRestartVerifierHandler": "needs ProjectContext wiring",
     "NpmCommandHandler": "needs ProjectContext wiring",
     "PlanNumberHelperHandler": "needs ProjectContext wiring",

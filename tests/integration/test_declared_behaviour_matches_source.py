@@ -83,6 +83,12 @@ _EXEMPT_FROM_BLOCKING_TAG: dict[str, str] = {
         "no check_modes overrides -- the same deliberate warn-first rollout as "
         "PlanQaCommitGateHandler."
     ),
+    "DocsQaCommitGateHandler": (
+        "denies only under `documentation.qa.commit_gate_mode: block` (or a "
+        "matching `check_modes` override), and the shipped default in "
+        "`.claude/hooks-daemon.yaml` is `commit_gate_mode: warn` -- the same "
+        "deliberate warn-first rollout as PlanQaCommitGateHandler itself."
+    ),
     "VerificationResultGateHandler": (
         "denies only under `mode: block`, and the shipped default is `warn` -- "
         "the same deliberate warn-first rollout as PlanQaCommitGateHandler. "

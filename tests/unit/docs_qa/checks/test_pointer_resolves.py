@@ -1,9 +1,11 @@
 """Tests for check ``pointer-resolves`` (Plan 00284, Task 3.1a)."""
 
+import subprocess
 from pathlib import Path
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.docs_qa.checks.pointer_resolves import CHECK_ID, CHECKS, _resolves
-from claude_code_hooks_daemon.docs_qa.context import edit_context, sweep_context
+from claude_code_hooks_daemon.docs_qa.context import edit_context, staged_context, sweep_context
 from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus, DocRecord
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy, DocumentationQaPolicy
 from claude_code_hooks_daemon.docs_qa.types import CheckContext, CheckStage, Finding, Severity
@@ -23,10 +25,33 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
     raise AssertionError("no SWEEP check registered")
 
 
+def _run_staged(context: CheckContext) -> list[Finding]:
+    for spec in CHECKS:
+        if spec.stage is CheckStage.STAGED:
+            return spec.run(context)
+    raise AssertionError("no STAGED check registered")
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+
+
+def _init_repo(root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    _git(root, "init")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
+
+
 class TestRegistration:
-    def test_registers_edit_and_sweep(self) -> None:
+    def test_registers_edit_staged_and_sweep(self) -> None:
         stages = {spec.stage for spec in CHECKS}
-        assert stages == {CheckStage.EDIT, CheckStage.SWEEP}
+        assert stages == {CheckStage.EDIT, CheckStage.STAGED, CheckStage.SWEEP}
         assert all(spec.check_id == CHECK_ID for spec in CHECKS)
 
 
@@ -217,6 +242,76 @@ class TestEditStageMissingPayload:
             project_root=tmp_path, policy=DocumentationPolicy(), file_path=tmp_path / "X.md"
         )
         assert _run_edit(context) == []
+
+
+class TestStagedStage:
+    def test_new_broken_link_in_a_new_file_is_block(self, tmp_path: Path) -> None:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE").mkdir()
+        (root / "CLAUDE" / "New.md").write_text("See [missing](Nope.md).\n")
+        _git(root, "add", "-A")
+
+        context = staged_context(project_root=root, policy=DocumentationPolicy())
+        findings = _run_staged(context)
+        assert len(findings) == 1
+        assert findings[0].severity is Severity.BLOCK
+        assert findings[0].path == "CLAUDE/New.md"
+
+    def test_pre_existing_broken_link_is_advise(self, tmp_path: Path) -> None:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE").mkdir()
+        (root / "CLAUDE" / "Existing.md").write_text("See [missing](Nope.md).\n")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-m", "initial")
+        (root / "CLAUDE" / "Existing.md").write_text("Intro. See [missing](Nope.md).\n")
+        _git(root, "add", "-A")
+
+        context = staged_context(project_root=root, policy=DocumentationPolicy())
+        findings = _run_staged(context)
+        assert len(findings) == 1
+        assert findings[0].severity is Severity.ADVISE
+
+    def test_clean_staged_file_produces_no_findings(self, tmp_path: Path) -> None:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE").mkdir()
+        (root / "CLAUDE" / "Target.md").write_text("# target\n")
+        (root / "CLAUDE" / "New.md").write_text("See [target](Target.md).\n")
+        _git(root, "add", "-A")
+
+        context = staged_context(project_root=root, policy=DocumentationPolicy())
+        assert _run_staged(context) == []
+
+    def test_grandfathered_new_file_is_advise(self, tmp_path: Path) -> None:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE").mkdir()
+        (root / "CLAUDE" / "New.md").write_text("See [missing](Nope.md).\n")
+        _git(root, "add", "-A")
+        policy = DocumentationPolicy(
+            qa=DocumentationQaPolicy(grandfather_allowlist=("CLAUDE/*.md",))
+        )
+
+        context = staged_context(project_root=root, policy=policy)
+        findings = _run_staged(context)
+        assert len(findings) == 1
+        assert findings[0].severity is Severity.ADVISE
+
+    def test_no_staged_documents_produces_no_findings(self, tmp_path: Path) -> None:
+        context = CheckContext(project_root=tmp_path, policy=DocumentationPolicy())
+        assert _run_staged(context) == []
+
+    def test_skippable_target_in_staged_content_produces_no_finding(self, tmp_path: Path) -> None:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE").mkdir()
+        (root / "CLAUDE" / "New.md").write_text("See [ext](https://example.com/nope).\n")
+        _git(root, "add", "-A")
+
+        context = staged_context(project_root=root, policy=DocumentationPolicy())
+        assert _run_staged(context) == []
 
 
 class TestSweepStage:

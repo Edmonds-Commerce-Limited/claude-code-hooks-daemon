@@ -1,4 +1,4 @@
-"""Check ``pointer-resolves`` (EDIT + SWEEP; DESIGN §2.1 refinements).
+"""Check ``pointer-resolves`` (EDIT + STAGED + SWEEP; DESIGN §2.1 refinements).
 
 R6 — "Links are plain and resolve": a plain markdown link
 ``[text](target)`` whose target FILE does not exist is a finding. This
@@ -140,7 +140,36 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
     return findings
 
 
-CHECKS: Final[tuple[CheckSpec, CheckSpec]] = (
+def _run_staged(context: CheckContext) -> list[Finding]:
+    """STAGED half: every staged ``.md`` doc's links, block-eligible for NEW ones.
+
+    "New" is judged against HEAD (via :attr:`CheckContext.gitfacts`), the
+    same distinction the EDIT half makes against ``file_content_before`` —
+    a link that was already broken before this commit is not this commit's
+    fault.
+    """
+    if context.staged_documents is None or context.gitfacts is None:
+        return []
+
+    findings: list[Finding] = []
+    for rel_path, content in sorted(context.staged_documents.items()):
+        grandfathered = _matches_allowlist(rel_path, context.policy.qa.grandfather_allowlist)
+        head_content = context.gitfacts.head_file_text(rel_path)
+        old_targets = set(extract_link_targets(head_content)) if head_content else set()
+        file_path = context.project_root / rel_path
+        for target in extract_link_targets(content):
+            if _is_skippable(target):
+                continue
+            if _resolves(context.project_root, file_path, target):
+                continue
+            is_new = target not in old_targets
+            severity = Severity.BLOCK if (is_new and not grandfathered) else Severity.ADVISE
+            findings.append(_finding(rel_path, target, severity))
+    return findings
+
+
+CHECKS: Final[tuple[CheckSpec, CheckSpec, CheckSpec]] = (
     CheckSpec(check_id=CHECK_ID, stage=CheckStage.EDIT, run=_run_edit),
+    CheckSpec(check_id=CHECK_ID, stage=CheckStage.STAGED, run=_run_staged),
     CheckSpec(check_id=CHECK_ID, stage=CheckStage.SWEEP, run=_run_sweep),
 )

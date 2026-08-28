@@ -1,4 +1,16 @@
-"""Check ``generated-doc-hand-edit`` (EDIT + SWEEP; R10, DESIGN §2.1).
+"""Check ``generated-doc-hand-edit`` (EDIT + SWEEP; R10, DESIGN section 2.1).
+
+Deliberately stays EDIT+SWEEP, no STAGED half (Task 3.1e decision). The
+DESIGN table lists this check as EDIT/SWEEP only, and that stays correct:
+EDIT catches a hand-edit the moment it happens, and SWEEP catches anything
+already on disk at the next session start regardless of how it got there
+(a script, a merge, content predating this check's rollout). A STAGED-only
+gap would be narrow -- content staged via a route other than Write/Edit
+within the SAME session a sweep has not run yet -- and freshness is a
+session-start concern (regenerate before you start working), not a
+per-commit gate concern the way a broken link or a drifted quote is.
+Adding STAGED here would flag the commit for something the sweep already
+owns, without covering anything EDIT+SWEEP together do not.
 
 R10 — "Generated docs are compliant SSoT; declare them": a doc generated
 from code is generation, not duplication, provided it is declared in the

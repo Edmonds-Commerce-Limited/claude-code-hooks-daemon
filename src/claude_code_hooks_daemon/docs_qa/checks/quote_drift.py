@@ -150,7 +150,29 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
     return findings
 
 
-CHECKS: Final[tuple[CheckSpec, CheckSpec]] = (
+def _run_staged(context: CheckContext) -> list[Finding]:
+    """STAGED half: every staged quoting doc, block-eligible like EDIT.
+
+    Mirrors the design table exactly: block-eligibility is "on the
+    QUOTING edit", not gated to new-only, so every staged quoting file's
+    findings are treated the same way EDIT treats a single file.
+    """
+    if context.staged_documents is None:
+        return []
+
+    findings: list[Finding] = []
+    for rel_path, content in sorted(context.staged_documents.items()):
+        grandfathered = _matches_allowlist(rel_path, context.policy.qa.grandfather_allowlist)
+        severity = Severity.ADVISE if grandfathered else Severity.BLOCK
+        for block in parse_quote_blocks(content):
+            finding = _verify_block(context.project_root, rel_path, block, severity)
+            if finding is not None:
+                findings.append(finding)
+    return findings
+
+
+CHECKS: Final[tuple[CheckSpec, CheckSpec, CheckSpec]] = (
     CheckSpec(check_id=CHECK_ID, stage=CheckStage.EDIT, run=_run_edit),
+    CheckSpec(check_id=CHECK_ID, stage=CheckStage.STAGED, run=_run_staged),
     CheckSpec(check_id=CHECK_ID, stage=CheckStage.SWEEP, run=_run_sweep),
 )

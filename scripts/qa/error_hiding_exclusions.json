@@ -851,6 +851,12 @@
       "function": "_rel_path",
       "rule": "return-none-on-error",
       "reason": "Plan 00284: ValueError from Path.relative_to means the edited file sits outside project_root -- a normal, expected 'not in documentation scope' outcome (e.g. a symlinked or otherwise foreign path), not an error condition. None is matches()'s existing signal to skip the handler, mirroring how docs_qa.corpus.is_in_scope treats the identical ValueError."
+    },
+    {
+      "file": "docs_qa/context.py",
+      "function": "staged_context",
+      "rule": "silent-fallback",
+      "reason": "Plan 00284 Task 3.1e: a pathspec'd git-commit path that cannot be read (deleted between git-diff and the read, permission error, race) has no content to check -- OSError maps to None, the same 'nothing to check' outcome the surrounding loop already gives a path with no staged content. The commit itself is not affected; this only decides whether THIS check has something to verify, and the caller (docs_qa_commit_gate) has its own fail-open contract for the whole gate."
     }
   ]
 }
