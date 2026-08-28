@@ -404,7 +404,7 @@ class TestWrappersUseResolver:
             "to $0, which does not survive the self-bootstrap re-exec."
         )
         assert 'resolve_venv_python "$DAEMON_DIR"' in content, (
-            f"{script_name} must call resolve_venv_python \"$DAEMON_DIR\" after "
+            f'{script_name} must call resolve_venv_python "$DAEMON_DIR" after '
             "sourcing the canonical library."
         )
         assert '$(dirname "$0")' not in content, (
