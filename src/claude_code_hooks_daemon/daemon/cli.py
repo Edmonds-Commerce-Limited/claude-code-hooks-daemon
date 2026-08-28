@@ -4302,6 +4302,9 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
         ``--check-staged``).
     """
     from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.docs_qa.checks.generated_doc_hand_edit import (
+        matched_manifest_entry,
+    )
     from claude_code_hooks_daemon.docs_qa.context import edit_context, sweep_context
     from claude_code_hooks_daemon.docs_qa.corpus import build_and_save_corpus, is_in_scope
     from claude_code_hooks_daemon.docs_qa.policy import policy_from_config
@@ -4334,12 +4337,20 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
         if not lint_path.is_file():
             print(f"ERROR: Lint target does not exist: {lint_path}", file=sys.stderr)
             return 2
-        if not is_in_scope(lint_path, project_root, policy):
+        lint_rel_path = str(lint_path.relative_to(project_root))
+        # A file is lintable if it is in the doc corpus's own scope OR it is
+        # named by the generated-docs manifest — the manifest may legitimately
+        # declare a path outside that scope (the default entry,
+        # .claude/HOOKS-DAEMON.md, is exactly this case), so the corpus scope
+        # alone is not the full lint-target contract.
+        in_manifest = matched_manifest_entry(lint_rel_path, policy.qa.generated_docs) is not None
+        if not is_in_scope(lint_path, project_root, policy) and not in_manifest:
             print(
                 f"ERROR: Lint target is not a documentation file: {lint_path}\n"
                 f"       Expected a markdown file under one of the configured "
                 f"documentation trees, .claude/rules, .claude/skills, "
-                f".claude/agents, or the project root.",
+                f".claude/agents, the project root, or the generated-docs "
+                f"manifest.",
                 file=sys.stderr,
             )
             return 2

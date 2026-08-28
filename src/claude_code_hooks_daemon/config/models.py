@@ -792,7 +792,19 @@ class DocumentationGeneratedDocEntry(BaseModel):
 
 
 def _default_generated_docs() -> list[DocumentationGeneratedDocEntry]:
-    """Pre-seed the manifest with the daemon's own generated artefact (R10)."""
+    """Pre-seed the manifest with the daemon's own generated artefact (R10).
+
+    Deliberately does NOT declare the ``<hooksdaemon>...</hooksdaemon>``
+    block the daemon also regenerates inside root ``CLAUDE.md`` on every
+    restart (see ``ClaudeMdInjector``). That block is generated content
+    living inside an otherwise hand-edited file — the manifest here is
+    glob-addressable at file granularity only, and a whole-file glob on
+    ``CLAUDE.md`` would wrongly flag every legitimate hand-edit to the rest
+    of the file. Section-level generation needs a different mechanism
+    (marker-bounded diffing, not a path glob) that this manifest does not
+    attempt; the omission is a decision, not an oversight (Plan 00284
+    Task 3.1b).
+    """
     return [
         DocumentationGeneratedDocEntry(
             glob=".claude/HOOKS-DAEMON.md",

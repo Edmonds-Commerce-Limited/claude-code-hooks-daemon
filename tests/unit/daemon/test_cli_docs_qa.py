@@ -152,3 +152,45 @@ class TestCheckStaged:
         root = _scaffold(tmp_path)
         assert cmd_docs_qa(_args(root, check_staged=True)) == 2
         assert "not implemented" in capsys.readouterr().err.lower()
+
+
+class TestGeneratedDocHandEdit:
+    """Default config pre-seeds the manifest with .claude/HOOKS-DAEMON.md."""
+
+    def test_lint_hand_edited_generated_doc_is_blocked(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        target = root / ".claude" / "HOOKS-DAEMON.md"
+        target.write_text("# hand edit, not via generate-docs\n")
+
+        assert cmd_docs_qa(_args(root, lint=target)) == 1
+        out = capsys.readouterr().out
+        assert "generated-doc-hand-edit" in out
+        assert "bin/hooks-daemon generate-docs" in out
+
+    def test_sweep_reports_stale_version_marker(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        target = root / ".claude" / "HOOKS-DAEMON.md"
+        target.write_text("> Generated on 2020-01-01 (v0.0.1) by `generate-docs`.\n")
+
+        assert cmd_docs_qa(_args(root, sweep=True)) == 1
+        out = capsys.readouterr().out
+        assert "generated-doc-hand-edit" in out
+        assert "0.0.1" in out
+
+    def test_sweep_runs_both_checks_together(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        (root / "CLAUDE" / "Foo.md").write_text("# Foo\n\n[missing](Nope.md)\n")
+        (root / ".claude" / "HOOKS-DAEMON.md").write_text(
+            "> Generated on 2020-01-01 (v0.0.1) by `generate-docs`.\n"
+        )
+
+        assert cmd_docs_qa(_args(root, sweep=True, json_output=True)) == 1
+        payload = json.loads(capsys.readouterr().out)
+        check_ids = {entry["check_id"] for entry in payload}
+        assert check_ids == {"pointer-resolves", "generated-doc-hand-edit"}
