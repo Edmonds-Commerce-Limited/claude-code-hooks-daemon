@@ -141,15 +141,18 @@ Signalling contract mapped from `goal_injection` (authoritative reference is
   test; full supervise suite green (522). Live worker respawned clean from the
   new code (pid changed) — dogfood-verified.
 
-### Phase 4: Config + docs
+### Phase 4: Config + docs ✅
 
-- [ ] ⬜ **Task 4.1**: Add `interval_minutes`, `prompt_interval`, and a
-  supervisor-channel toggle to the handler options (sane defaults 15 / 5 /
-  auto); read via the registry setattr pattern.
-- [ ] ⬜ **Task 4.2**: `config-changes/vX.Y.Z.yaml` entry (staged in
-  `UNRELEASED/config-changes/`) documenting the new options.
-- [ ] ⬜ **Task 4.3**: Update `get_claude_md()` and `HANDLER_REFERENCE.md` to
-  describe the new cadence and channel.
+- [x] ✅ **Task 4.1**: `prompt_interval` (5), `interval_minutes` (15) and
+  `supervisor_channel_enabled` (false) are wired automatically — the registry
+  maps option `foo` → attribute `_foo`, and the handler's `__init__` already
+  defines each with its default. No code change beyond the `__init__` defaults.
+- [x] ✅ **Task 4.2**: `UNRELEASED/config-changes/v3.57.0.yaml` documents the
+  three added options (channel `recommended: false, dormant: true` with the
+  redeploy-before-enable caution; cadence tunables as quiet additions).
+- [x] ✅ **Task 4.3**: `get_claude_md()` and `HANDLER_REFERENCE.md` updated for
+  the bounded cadence and the opt-in supervisor channel; the stale
+  "decays but never skips" (Plan 00223) paragraph replaced.
 
 ### Phase 5: Verification
 

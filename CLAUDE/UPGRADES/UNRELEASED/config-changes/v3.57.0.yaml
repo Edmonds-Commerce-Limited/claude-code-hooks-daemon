@@ -1,0 +1,55 @@
+version: "3.57.0"
+date: "UNRELEASED"
+breaking: false
+config_changes:
+  added:
+    - key: handlers.user_prompt_submit.standing_authorisations.options.prompt_interval
+      recommended: false
+      dormant: false
+      description: >-
+        NEW cadence tunable (Plan 00283), default 5. standing_authorisations no
+        longer injects the short-form authorisation text on EVERY prompt; it now
+        delivers the FULL text once per session to establish it, then reinforces
+        only on whichever comes first: this many HUMAN prompts, or
+        interval_minutes elapsed since the last delivery. Automated turns
+        (failsafe-recovery cron ticks, goal-injection lines, and the handler's
+        own supervisor-typed reinforcement) neither advance the counter nor earn
+        a reinforcement, so the reminder no longer rides every hourly cron tick.
+      migration_note: >-
+        No action needed. Lower it for more frequent reinforcement, raise it for
+        less. The old every-prompt behaviour is intentionally gone (it was
+        noisy); the bounded silence between reinforcements is at most this many
+        prompts or interval_minutes.
+    - key: handlers.user_prompt_submit.standing_authorisations.options.interval_minutes
+      recommended: false
+      dormant: false
+      description: >-
+        NEW cadence tunable (Plan 00283), default 15. The time half of the
+        reinforcement trigger: a reinforcement is due once this many minutes have
+        elapsed since the last delivery, even if prompt_interval has not been
+        reached. Evaluated at each prompt (the handler runs only on
+        UserPromptSubmit), so an idle session reinforces at most once per this
+        window, on its next prompt.
+      migration_note: >-
+        No action needed. Works together with prompt_interval (whichever fires
+        first).
+    - key: handlers.user_prompt_submit.standing_authorisations.options.supervisor_channel_enabled
+      recommended: false
+      dormant: true
+      description: >-
+        NEW opt-in channel (Plan 00283), default FALSE. When enabled AND a ccy
+        PTY supervisor is armed and live for the project, a due reinforcement is
+        written as a <session>.standing-auth-intent signal that the supervisor
+        types as a REAL user-role line (a stronger channel than folded
+        hook-additional-context), guarded by a fail-closed verbatim machine-origin
+        header so a forged signal cannot smuggle arbitrary text into a typed line.
+        When off, or when no supervisor is armed, or on any failure, it FAILS OPEN
+        to the existing folded hook-context — identical to the default behaviour.
+        The first (establishing) delivery of a session is always hook-context.
+      migration_note: >-
+        Deliberately NOT promoted. Leave it OFF unless the DEPLOYED supervisor
+        already supports the *.standing-auth-intent signal: a running supervisor
+        only learns to consume it on a ccy RELAUNCH (not a daemon restart), so
+        enabling it against an older supervisor would route reinforcements to a
+        signal nothing reads and silently drop them. Enable it only after the
+        supervisor has been redeployed and relaunched.
