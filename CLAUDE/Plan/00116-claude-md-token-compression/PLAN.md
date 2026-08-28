@@ -1,6 +1,7 @@
 # Plan 00116: CLAUDE.md Token Compression via Stateful Progressive Disclosure
 
 **Status**: Dormant (Phases 1–2 complete and merged; Phase 3 blocked on the tracker-wiring decision)
+**Related**: Plan 00284 (documentation SSoT enforcement) shipped the complementary half of this plan's motivation — one canonical home per fact with `@`-import/at-import census and pointer enforcement across the doc corpus. This plan's remaining Phase 3 (stateful disclosure of the daemon-injected `<hooksdaemon>` block) is NOT redone there and stays blocked on its own tracker-wiring decision; see `CLAUDE/DocumentationStrategy.md` for the ruleset 00284 delivered.
 **Created**: 2026-05-29
 **Owner**: Claude (research + planning agent)
 **Priority**: High
