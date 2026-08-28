@@ -282,27 +282,29 @@ class Handler(ABC):
 Either `handler_id` or `name` must be supplied — passing neither raises
 `ValueError`.
 
-**Handler Categories**:
+**Handler Categories** (priority bands: see the
+[Priority Guide](HANDLER_DEVELOPMENT.md#priority-guide), the single documented
+statement of the ranges):
 
-1. **Safety Handlers** (priority 10-20)
+1. **Safety Handlers**
 
    - Block destructive operations
    - Prevent data loss
    - Terminal: Yes
 
-2. **Code Quality Handlers** (priority 25-35)
+2. **Code Quality Handlers**
 
    - QA suppression blockers
    - Lint enforcement
    - Terminal: Yes
 
-3. **Workflow Handlers** (priority 36-55)
+3. **Workflow Handlers**
 
    - Enforce best practices
    - Provide guidance
    - Terminal: Configurable
 
-4. **Advisory Handlers** (priority 56-60)
+4. **Advisory Handlers**
 
    - Warnings and suggestions
    - Terminal: Usually No
@@ -538,16 +540,10 @@ These remain in individual projects due to project-specific logic:
 
 ## Priority Ranges
 
-**Recommended Priority Allocation**:
-
-```
-0-9:   Test handlers (hello world, architecture enforcement)
-10-20: Safety (destructive operations, data loss prevention)
-25-35: Code quality (QA suppression blockers, ESLint disable)
-36-55: Workflow enforcement (TDD, planning, web search)
-56-60: Advisory (warnings, suggestions, non-blocking)
-100+:  Logging, metrics, and cleanup
-```
+The priority bands are documented once, in the
+[Priority Guide](HANDLER_DEVELOPMENT.md#priority-guide); the band boundaries
+derive from `PriorityRange` in
+`src/claude_code_hooks_daemon/constants/priority.py`.
 
 **Why Priority Matters**:
 

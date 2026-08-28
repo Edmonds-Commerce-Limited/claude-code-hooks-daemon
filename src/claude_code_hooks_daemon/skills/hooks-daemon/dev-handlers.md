@@ -179,13 +179,15 @@ Choose the appropriate event type for your handler:
 
 ## Priority Guidelines
 
-Choose priority based on handler type:
+Choose priority based on handler type (bands defined by `PriorityRange` in
+the daemon's `constants/priority.py`, the source of truth):
 
+- **0-9**: Test fixtures only (no built-in handlers ship here)
 - **10-20**: Safety handlers (destructive operations)
-- **25-35**: Code quality (linting, TDD enforcement)
+- **25-35**: Code quality (linting, QA suppression)
 - **36-55**: Workflow (planning, project-specific rules)
-- **56-60**: Advisory (non-blocking guidance)
-- **100+**: Logging/cleanup
+- **56-65**: Advisory (non-blocking guidance)
+- **100+**: Logging/cleanup (reserved; no built-in handlers ship here)
 
 ## Testing Project Handlers
 

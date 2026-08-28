@@ -617,11 +617,8 @@ mv "$BACKUP_DIR" .claude/hooks
 
 ## Handler Priority Ranges
 
-- **5**: Test/debug handlers
-- **10-20**: Safety (destructive git, sed blocker)
-- **25-35**: Code quality (ESLint, TDD)
-- **36-55**: Workflow (planning, npm)
-- **56-60**: Advisory (British English, formatting)
+The priority bands are documented once, in the
+[Priority Guide](HANDLER_DEVELOPMENT.md#priority-guide).
 
 Lower priority = runs first. Terminal handlers stop dispatch chain.
 

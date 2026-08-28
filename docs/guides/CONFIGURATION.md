@@ -184,14 +184,28 @@ Priorities determine the order handlers execute within an event type. **Lower nu
 
 ### Priority Ranges
 
-| Range | Category     | Purpose                        | Examples                                                           |
-| ----- | ------------ | ------------------------------ | ------------------------------------------------------------------ |
-| 0-9   | Test         | Test and debug handlers        | reserved — no built-in handlers ship here                          |
-| 10-20 | Safety       | Prevent destructive operations | `destructive_git` (10), `sed_blocker` (10), `curl_pipe_shell` (15) |
-| 25-35 | Code Quality | Enforce development standards  | `lint_on_edit` (25), `qa_suppression` (30)                         |
-| 36-55 | Workflow     | Process and tool guidance      | `plan_workflow` (45), `npm_command` (50), `web_search_year` (55)   |
-| 56-60 | Advisory     | Non-blocking suggestions       | `british_english` (60)                                             |
-| 100+  | Logging      | Metrics and audit trails       | (none ship today; range reserved)                                  |
+The canonical statement of the bands is the agent-tree
+[Priority Guide](../../CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide); the band
+boundaries derive from `PriorityRange` in
+`src/claude_code_hooks_daemon/constants/priority.py`. Quoted here for
+convenience:
+
+<!-- ssot-quote: CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide -->
+
+| Priority Range | Type         | Examples                                                                                           |
+| -------------- | ------------ | -------------------------------------------------------------------------------------------------- |
+| 0-9            | Test         | Reserved for purpose-built test fixtures (`Priority.TEST_HANDLER`); no built-in handlers ship here |
+| 10-20          | Safety       | `destructive_git`, `sed_blocker`, `secret_file_guard`                                              |
+| 25-35          | Code Quality | `qa_suppression`, `lint_on_edit`, `comment_changelog`                                              |
+| 36-55          | Workflow     | `lsp_enforcement`, `plan_qa_edit`, `npm_command`                                                   |
+| 56-65          | Advisory     | `british_english`, `flaggable_work_advisor`, `model_fallback_detector`                             |
+| 100+           | Logging      | Reserved for logging/metrics/cleanup; no built-in handlers ship here                               |
+
+<!-- /ssot-quote -->
+
+Per-handler numbers are deliberately not listed: your project's config can
+override any handler's priority, and the shipped defaults live in
+`constants/priority.py`.
 
 ### Why Priority Matters
 

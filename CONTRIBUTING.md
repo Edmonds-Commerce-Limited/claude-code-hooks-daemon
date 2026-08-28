@@ -217,11 +217,24 @@ backward compatibility with pre-Layer-2 tags. It is not the source of truth.)
 
 ### Priority Ranges
 
-- **5**: Test/debug handlers (`Priority.TEST_HANDLER`; no built-in handlers ship here)
-- **10-20**: Safety handlers (destructive operations)
-- **25-35**: Code quality handlers (linting, TDD)
-- **36-55**: Workflow handlers (planning, npm)
-- **56-60**: Advisory handlers (spelling)
+The canonical statement of the bands is the
+[Priority Guide](CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide) (boundaries
+derive from `PriorityRange` in
+`src/claude_code_hooks_daemon/constants/priority.py`). Quoted here for
+convenience:
+
+<!-- ssot-quote: CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide -->
+
+| Priority Range | Type         | Examples                                                                                           |
+| -------------- | ------------ | -------------------------------------------------------------------------------------------------- |
+| 0-9            | Test         | Reserved for purpose-built test fixtures (`Priority.TEST_HANDLER`); no built-in handlers ship here |
+| 10-20          | Safety       | `destructive_git`, `sed_blocker`, `secret_file_guard`                                              |
+| 25-35          | Code Quality | `qa_suppression`, `lint_on_edit`, `comment_changelog`                                              |
+| 36-55          | Workflow     | `lsp_enforcement`, `plan_qa_edit`, `npm_command`                                                   |
+| 56-65          | Advisory     | `british_english`, `flaggable_work_advisor`, `model_fallback_detector`                             |
+| 100+           | Logging      | Reserved for logging/metrics/cleanup; no built-in handlers ship here                               |
+
+<!-- /ssot-quote -->
 
 ### Terminal vs Non-Terminal
 

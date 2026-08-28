@@ -423,7 +423,7 @@ Review checklist:
 
 - No bugs in `matches()`/`handle()` logic
 - No security anti-patterns
-- Priority ranges correct (10-20 safety, 25-35 quality, 36-55 workflow, 100+ logging)
+- Priority ranges correct (see the [Priority Guide](../HANDLER_DEVELOPMENT.md#priority-guide))
 - Tests exist for every handler change
 - Named constants (no magic values), SOLID principles
 - No debug code, workarounds, or leftover TODOs

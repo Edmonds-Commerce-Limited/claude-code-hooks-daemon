@@ -487,13 +487,9 @@ class HandlerB(Handler):
         super().__init__(handler_id=HandlerID.HANDLER_B, priority=51)
 ```
 
-**Priority Ranges:**
-
-- 5: Test handlers
-- 10-20: Safety handlers
-- 25-35: Code quality
-- 36-55: Workflow
-- 56-60: Advisory
+**Priority Ranges:** documented once in the
+[Priority Guide](../HANDLER_DEVELOPMENT.md#priority-guide); boundaries derive
+from `PriorityRange` in `src/claude_code_hooks_daemon/constants/priority.py`.
 
 ### HookResult Schema Validation
 

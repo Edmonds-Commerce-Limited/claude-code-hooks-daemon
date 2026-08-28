@@ -116,7 +116,7 @@ handlers:
         decision: allow
         reason_contains: ["2026", "current year"]
 
-  # Advisory Handlers (Priority 56-60)
+  # Advisory Handlers (Priority 56-65)
   british-english:
     event_type: PreToolUse
     priority: 56

@@ -39,12 +39,9 @@ class Handler(ABC):
         depends_on: List of handler names that must be enabled for this handler to work.
                    Used for validation at config load time (optional, default None).
 
-    Priority Ranges (Convention):
-        0-19:  Critical safety (destructive git, dangerous commands)
-        20-39: Code quality (ESLint, TDD enforcement)
-        40-59: Workflow (planning, npm conventions)
-        60-79: Advisory (British English, hints)
-        80-99: Logging/metrics (analytics, audit trails)
+    Priority Ranges: defined by ``PriorityRange`` in
+    ``constants/priority.py`` (the source of truth); documented in
+    CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide.
     """
 
     __slots__ = (

@@ -458,16 +458,28 @@ new_string = tool_input.get("new_string")
 
 ## Priority Guide
 
+<!-- ssot-anchor: priority-guide -->
+
+This section is the single documented statement of the priority bands. The
+band boundaries are defined by `PriorityRange` in
+`src/claude_code_hooks_daemon/constants/priority.py` — the source of truth
+they derive from (R5); every other document points here or quotes this
+section with an `ssot-quote` block.
+
 Choose priority based on handler type:
 
-| Priority Range | Type         | Examples                                              |
-| -------------- | ------------ | ----------------------------------------------------- |
-| 0-9            | Test         | Purpose-built test fixtures (`Priority.TEST_HANDLER`) |
-| 10-20          | Safety       | Destructive git, sed blocker, data loss prevention    |
-| 25-35          | Code Quality | QA suppression blockers, ESLint disable               |
-| 36-55          | Workflow     | TDD enforcement, plan validation, web search          |
-| 56-60          | Advisory     | British English warnings, suggestions                 |
-| 100+           | Logging      | Notification logger, session cleanup                  |
+| Priority Range | Type         | Examples                                                                                           |
+| -------------- | ------------ | -------------------------------------------------------------------------------------------------- |
+| 0-9            | Test         | Reserved for purpose-built test fixtures (`Priority.TEST_HANDLER`); no built-in handlers ship here |
+| 10-20          | Safety       | `destructive_git`, `sed_blocker`, `secret_file_guard`                                              |
+| 25-35          | Code Quality | `qa_suppression`, `lint_on_edit`, `comment_changelog`                                              |
+| 36-55          | Workflow     | `lsp_enforcement`, `plan_qa_edit`, `npm_command`                                                   |
+| 56-65          | Advisory     | `british_english`, `flaggable_work_advisor`, `model_fallback_detector`                             |
+| 100+           | Logging      | Reserved for logging/metrics/cleanup; no built-in handlers ship here                               |
+
+Per-handler numbers are deliberately not stated here: a project's config can
+override any handler's priority, and `constants/priority.py` holds the
+shipped defaults.
 
 **Lower priority = runs first**
 

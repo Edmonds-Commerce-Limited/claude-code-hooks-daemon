@@ -569,7 +569,7 @@ Use this template when creating new handlers for hook events.
 **Status**: Not Started
 **Type**: Handler Implementation
 **Event Type**: PreToolUse | PostToolUse | SessionStart | etc.
-**Priority Range**: [10-20 for safety, 25-35 for quality, 36-55 for workflow]
+**Priority Range**: [pick a band from the Priority Guide: CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide]
 
 ## Overview
 

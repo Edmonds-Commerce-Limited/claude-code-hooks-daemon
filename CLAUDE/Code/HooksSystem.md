@@ -592,13 +592,10 @@ class MyHandler(PreToolUseHandlerBase):
 
 ### Priority Ranges
 
-| Range | Category     | Examples                                |
-| ----- | ------------ | --------------------------------------- |
-| 5-9   | Architecture | Controller pattern enforcement          |
-| 10-20 | Safety       | Destructive git, sed blocker, data loss |
-| 21-30 | Code Quality | ESLint disable, TypeScript errors       |
-| 31-45 | Workflow     | TDD enforcement, plan validation        |
-| 46-60 | Advisory     | British English warnings, suggestions   |
+The priority bands are documented once, in the
+[Priority Guide](../HANDLER_DEVELOPMENT.md#priority-guide); the band
+boundaries derive from `PriorityRange` in
+`src/claude_code_hooks_daemon/constants/priority.py`.
 
 **Lower priority number = runs first.**
 
@@ -634,13 +631,11 @@ GatingResult(decision=Decision.ASK, reason="This requires confirmation because..
 
 ### Utility Functions
 
-```python
-from claude_code_hooks_daemon.core.utils import (
-    get_bash_command,   # Extract command from Bash tool input
-    get_file_path,      # Extract file path from Write/Edit tool input
-    get_file_content,   # Extract content from Write tool input
-)
-```
+The shared extraction helpers (`get_bash_command`, `get_file_path`,
+`get_file_content`) are shown in the
+[Project Handlers guide's Utility Functions section](../PROJECT_HANDLERS.md#utility-functions);
+their API documentation is the docstrings in
+`src/claude_code_hooks_daemon/core/utils.py`.
 
 ### Testing Approach
 

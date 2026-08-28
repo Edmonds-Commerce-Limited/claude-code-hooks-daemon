@@ -278,13 +278,10 @@ Return at least one acceptance test definition. Used for playbook generation and
 
 #### Priority Ranges (Convention)
 
-| Range | Category     | Examples                                |
-| ----- | ------------ | --------------------------------------- |
-| 0-19  | Safety       | Destructive git blocker, sed blocker    |
-| 20-39 | Code quality | ESLint disable blocker, TDD enforcement |
-| 40-59 | Workflow     | Vendor reminders, migration reminders   |
-| 60-79 | Advisory     | British English warnings, hints         |
-| 80-99 | Logging      | Analytics, audit trails                 |
+The priority bands are documented once, in the
+[Priority Guide](HANDLER_DEVELOPMENT.md#priority-guide); the band boundaries
+derive from `PriorityRange` in
+`src/claude_code_hooks_daemon/constants/priority.py`.
 
 ### Results and decisions
 

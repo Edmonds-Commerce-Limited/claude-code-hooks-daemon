@@ -3,13 +3,14 @@
 This module defines the execution priority for all handlers.
 Lower priority values execute first.
 
-Priority Ranges:
-- 5: Test handlers only
+Priority Ranges (see the ``PriorityRange`` class below, the authoritative
+boundaries; documented in CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide):
+- 0-9: Test handlers only (``Priority.TEST_HANDLER``)
 - 10-20: Safety and critical handlers (destructive operations, auto-approval)
-- 30-35: Code quality and QA enforcement
-- 40-55: Workflow and process enforcement
-- 60: Advisory and suggestions
-- 100: Logging, metrics, and cleanup
+- 25-35: Code quality and QA enforcement
+- 36-55: Workflow and process enforcement
+- 56-65: Advisory and suggestions
+- 100-199: Logging, metrics, and cleanup (reserved)
 
 Usage:
     from claude_code_hooks_daemon.constants import Priority

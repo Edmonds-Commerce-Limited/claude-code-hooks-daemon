@@ -2199,7 +2199,7 @@ handlers:
 
 ---
 
-### Advisory Handlers (Priority 56-60)
+### Advisory Handlers
 
 #### flaggable_work_advisor
 
@@ -3084,15 +3084,10 @@ handlers:
 
 ## Handler Priority System
 
-Priority determines execution order. Lower numbers run first.
-
-| Range | Category        | Examples                                                   |
-| ----- | --------------- | ---------------------------------------------------------- |
-| 5     | Test            | reserved — no built-in handlers ship here                  |
-| 10-20 | Safety          | destructive_git, sed_blocker, pip_break_system             |
-| 25-35 | Code Quality    | qa_suppression, lint_on_edit, markdown_organization        |
-| 36-55 | Workflow        | lsp_enforcement, gh_issue_comments, npm_command            |
-| 56-60 | Advisory        | british_english, daemon_docs_guard, flaggable_work_advisor |
-| 100   | Logging/Cleanup | (none ship today; range reserved)                          |
+Priority determines execution order. Lower numbers run first. The priority
+bands are documented once, in the agent-tree
+[Priority Guide](../../CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide); the band
+boundaries derive from `PriorityRange` in
+`src/claude_code_hooks_daemon/constants/priority.py`.
 
 When two handlers have the same priority, they run in registration order.
