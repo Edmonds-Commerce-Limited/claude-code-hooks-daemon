@@ -17,6 +17,16 @@ from claude_code_hooks_daemon.docs_qa.types import Finding, Severity
 _HEADER_BLOCK = "Docs QA violation(s) — fix before retrying:"
 _HEADER_ADVISORY = "Docs QA drift report:"
 
+# An advisory surface (SWEEP, warn-mode commit gate) is unbounded context
+# injected into every matching session — a project with several oversized
+# module docs (module-doc-budget) or a large corpus of stale links could
+# otherwise dump dozens of bullets into context every time. format_advisory
+# stays compact by showing only the first N findings and naming the CLI for
+# the rest; format_block_reason and format_cli_report are unaffected — a
+# deny reason must show every violation the agent needs to fix, and the CLI
+# report is read on demand, not injected automatically.
+MAX_ADVISORY_FINDINGS_SHOWN: Final[int] = 8
+
 # A clean report must describe exactly what was examined. A ``--lint`` of
 # one file must not read as "the whole corpus is clean" (same discipline as
 # plan_qa's CLEAN_SCOPE_TREE).
@@ -40,9 +50,22 @@ def format_block_reason(findings: list[Finding]) -> str:
 
 
 def format_advisory(findings: list[Finding]) -> str:
-    """Advisory-context text for non-blocking surfaces."""
+    """Advisory-context text for non-blocking surfaces.
+
+    Capped at :data:`MAX_ADVISORY_FINDINGS_SHOWN` bullets so a large corpus
+    of drift never bloats a session's injected context; the CLI shows every
+    finding on demand.
+    """
     lines = [_HEADER_ADVISORY]
-    lines.extend(_format_finding(finding) for finding in findings)
+    shown = findings[:MAX_ADVISORY_FINDINGS_SHOWN]
+    lines.extend(_format_finding(finding) for finding in shown)
+    omitted = len(findings) - len(shown)
+    if omitted > 0:
+        plural = "s" if omitted != 1 else ""
+        lines.append(
+            f"...and {omitted} more finding{plural} — run `docs-qa --sweep` "
+            "(or `--check-staged`) for the full report."
+        )
     return "\n".join(lines)
 
 

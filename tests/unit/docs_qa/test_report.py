@@ -2,6 +2,7 @@
 
 from claude_code_hooks_daemon.docs_qa.report import (
     CLEAN_SCOPE_CORPUS,
+    MAX_ADVISORY_FINDINGS_SHOWN,
     format_advisory,
     format_block_reason,
     format_cli_report,
@@ -37,6 +38,41 @@ class TestFormatAdvisory:
         text = format_advisory([_ADVISE_FINDING])
         assert "pointer-resolves" in text
         assert "Old.md" in text
+
+    def test_under_the_cap_shows_every_finding(self) -> None:
+        findings = [
+            Finding(
+                check_id="module-doc-budget",
+                severity=Severity.ADVISE,
+                message=f"finding {i}",
+                remediation="fix it",
+                path=f"src/mod{i}/CLAUDE.md",
+            )
+            for i in range(3)
+        ]
+        text = format_advisory(findings)
+        for i in range(3):
+            assert f"finding {i}" in text
+        assert "more" not in text
+
+    def test_over_the_cap_is_truncated_with_a_count_and_cli_pointer(self) -> None:
+        findings = [
+            Finding(
+                check_id="module-doc-budget",
+                severity=Severity.ADVISE,
+                message=f"finding {i}",
+                remediation="fix it",
+                path=f"src/mod{i}/CLAUDE.md",
+            )
+            for i in range(12)
+        ]
+        text = format_advisory(findings)
+        assert "finding 0" in text
+        assert f"finding {MAX_ADVISORY_FINDINGS_SHOWN - 1}" in text
+        assert f"finding {MAX_ADVISORY_FINDINGS_SHOWN}" not in text
+        omitted = len(findings) - MAX_ADVISORY_FINDINGS_SHOWN
+        assert f"{omitted} more" in text
+        assert "docs-qa" in text
 
 
 class TestFormatCliReport:

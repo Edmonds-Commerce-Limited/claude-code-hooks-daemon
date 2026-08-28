@@ -239,6 +239,21 @@ class TestBashMentionsProtectedPath:
         assert self._match("x = words[0].rsplit(y)") is None
         assert self._match("a = parts[0].split(z)") is None
 
+    def test_regex_non_greedy_quantifier_is_not_matched(self) -> None:
+        """Plan 00284 live dogfooding find: ``<`` and ``>`` are token
+        delimiters, so an HTML/XML-shaped regex like ``<a>.*?</a>`` isolates
+        a bare ``.*?`` token — an ordinary non-greedy quantifier. Its
+        literal residue after stripping glob chars is a single ``.``,
+        trivially found inside every dot-leading stem (``.secret``,
+        ``.vault-pass``, ``.vault-password``). Used AS the fnmatch pattern,
+        ``.*?`` then matches any of them (``.`` literal, ``*`` absorbs the
+        middle, ``?`` absorbs one trailing char), even though nothing here
+        names a protected file. The residue must clear the same
+        minimum-length floor the overlap check already uses before a
+        stem-fnmatch counts as a genuine truncation."""
+        assert self._match('_RE = re.compile(r"<a>.*?</a>")') is None
+        assert self._match(r'grep -oP "(?<=x).*?(?=y)" file.py') is None
+
     def test_no_echo_exemption(self) -> None:
         """Decision 9(c): unlike sed_blocker, echo buys no exemption."""
         assert self._match('echo ".vault-pass"') is not None

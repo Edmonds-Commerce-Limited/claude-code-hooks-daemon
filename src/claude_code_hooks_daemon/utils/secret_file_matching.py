@@ -437,7 +437,24 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
                     # result counts. This only catches a token whose residue
                     # is a PREFIX-compatible spelling of an anchored-start
                     # stem (e.g. ".vault-p*" vs stem ".vault-pass").
-                    if residue in stem_basename and fnmatch.fnmatch(stem_basename, basename):
+                    #
+                    # Plan 00284 live dogfooding find: a residue below
+                    # ``_MIN_GLOB_OVERLAP_CHARS`` is too generic to trust —
+                    # a bare ``.`` (the residue of a ``.*?`` regex
+                    # quantifier token, isolated whenever it sits between
+                    # ``<``/``>`` delimiters) is a substring of every
+                    # dot-leading stem, and used raw as the fnmatch pattern
+                    # it absorbs the rest via its own ``*``/``?``. Reusing
+                    # the overlap check's threshold here (not a separate
+                    # constant) because both gates encode the identical
+                    # concept: how many literal characters are needed
+                    # before a partial glob match is trusted as a genuine
+                    # truncation rather than coincidence.
+                    if (
+                        len(residue) >= _MIN_GLOB_OVERLAP_CHARS
+                        and residue in stem_basename
+                        and fnmatch.fnmatch(stem_basename, basename)
+                    ):
                         return pattern
                     # Plan 00272 gap fix (G2), GATED to leading-wildcard
                     # patterns only (over-blocking regression fix, same
