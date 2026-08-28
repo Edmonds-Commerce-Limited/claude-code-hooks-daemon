@@ -17,7 +17,7 @@ from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 
 if TYPE_CHECKING:
-    from claude_code_hooks_daemon.config.models import PlanWorkflowConfig
+    from claude_code_hooks_daemon.config.models import DocumentationConfig, PlanWorkflowConfig
     from claude_code_hooks_daemon.core.router import EventRouter
 
 logger = logging.getLogger(__name__)
@@ -220,6 +220,7 @@ class HandlerRegistry:
         project_languages: list[str] | None = None,
         project_exclude_paths: list[str] | None = None,
         plan_workflow: "PlanWorkflowConfig | None" = None,
+        documentation: "DocumentationConfig | None" = None,
     ) -> int:
         """Register all discovered handlers with the router.
 
@@ -233,6 +234,7 @@ class HandlerRegistry:
             workspace_root: Optional workspace root path for handlers
             project_languages: Project-level language filter from daemon.languages config
             plan_workflow: Optional PlanWorkflowConfig for plan-related handlers
+            documentation: Optional DocumentationConfig for documentation-related handlers
 
         Returns:
             Number of handlers registered
@@ -408,6 +410,19 @@ class HandlerRegistry:
                                     ),
                                 }
                                 for attr_key, attr_val in plan_attrs.items():
+                                    setattr(instance, f"_{attr_key}", attr_val)
+
+                            # Inject documentation config for documentation-tagged
+                            # handlers (Plan 00284) -- same DI idiom as plan_workflow
+                            # above. Injects a plain-values policy (built once here,
+                            # not per-dispatch) so handlers never touch pydantic.
+                            if documentation is not None and "documentation" in instance.tags:
+                                from claude_code_hooks_daemon.docs_qa.policy import (
+                                    policy_from_config,
+                                )
+
+                                doc_attrs = {"documentation": policy_from_config(documentation)}
+                                for attr_key, attr_val in doc_attrs.items():
                                     setattr(instance, f"_{attr_key}", attr_val)
 
                             router.register(event_type, instance)

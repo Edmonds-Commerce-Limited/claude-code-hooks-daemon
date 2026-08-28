@@ -76,6 +76,13 @@ _EXEMPT_FROM_BLOCKING_TAG: dict[str, str] = {
         "which is the same class of untruth this guard exists to prevent, pointed "
         "the other way."
     ),
+    "DocsQaEditHandler": (
+        "denies only when a finding is BLOCK severity AND the resolved mode for "
+        "its check id (`check_modes` override, else `edit_mode`) is `block`; the "
+        "shipped default in `.claude/hooks-daemon.yaml` is `edit_mode: warn` with "
+        "no check_modes overrides -- the same deliberate warn-first rollout as "
+        "PlanQaCommitGateHandler."
+    ),
     "VerificationResultGateHandler": (
         "denies only under `mode: block`, and the shipped default is `warn` -- "
         "the same deliberate warn-first rollout as PlanQaCommitGateHandler. "

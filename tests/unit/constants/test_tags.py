@@ -91,8 +91,8 @@ class TestTagLiteralType:
     def test_tag_literal_count(self) -> None:
         """Test that TagLiteral has expected number of values."""
         tag_literal_values = get_args(TagLiteral)
-        # Should have 43 tags (all HandlerTag constants)
-        assert len(tag_literal_values) == 43
+        # Should have 44 tags (all HandlerTag constants)
+        assert len(tag_literal_values) == 44
 
 
 class TestTagUsage:

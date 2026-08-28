@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import (
         DaemonConfig,
+        DocumentationConfig,
         PlanWorkflowConfig,
         PluginsConfig,
         ProjectHandlersConfig,
@@ -170,6 +171,7 @@ class DaemonController:
         project_exclude_paths: list[str] | None = None,
         pseudo_events_config: dict[str, dict[str, Any]] | None = None,
         plan_workflow: "PlanWorkflowConfig | None" = None,
+        documentation: "DocumentationConfig | None" = None,
         verdict_log: "VerdictLogConfig | None" = None,
     ) -> None:
         """Initialise the controller with handlers.
@@ -186,6 +188,7 @@ class DaemonController:
             project_exclude_paths: Project-level path-exclusion globs from daemon.exclude_paths
             pseudo_events_config: Optional pseudo-event configuration from hooks-daemon.yaml
             plan_workflow: Optional PlanWorkflowConfig for plan-related handlers
+            documentation: Optional DocumentationConfig for documentation-related handlers
             verdict_log: Optional VerdictLogConfig (Plan 00209) for the
                 per-decision audit log. None uses VerdictLogConfig()'s
                 defaults (enabled).
@@ -230,6 +233,7 @@ class DaemonController:
             project_languages=project_languages,
             project_exclude_paths=project_exclude_paths,
             plan_workflow=plan_workflow,
+            documentation=documentation,
         )
 
         logger.info("Registered %d built-in handlers", count)

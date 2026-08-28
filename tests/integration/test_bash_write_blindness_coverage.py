@@ -166,6 +166,12 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "tables written by heredoc are never reformatted; PATH-only, and the "
         "consequence is cosmetic drift rather than an unenforced rule",
     ),
+    "DocsQaEditHandler": (
+        _BLIND,
+        "mitigated, not closed: `docs_qa_sweep` re-checks the whole doc "
+        "corpus at session start regardless of how a file reached disk, "
+        "the same batch-equivalent mitigation `plan_qa_edit` relies on",
+    ),
     "PlanQaEditHandler": (
         _BLIND,
         "mitigated, not closed: `plan_qa_sweep` re-checks plan documents at "

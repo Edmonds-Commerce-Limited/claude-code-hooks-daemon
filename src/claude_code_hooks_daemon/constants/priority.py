@@ -177,6 +177,10 @@ class Priority:
     PLAN_QA_COMMIT_GATE = 44
     PLAN_WORKFLOW = 45
     AGENT_ISOLATION_ADVISOR = 46
+    # Plan 00284: sibling gate at the same edit-time layer as plan_qa_edit,
+    # deliberately a different check id/domain so priority collision with 44
+    # is avoided while staying in the same workflow band.
+    DOCS_QA_EDIT = 47
 
     NPM_COMMAND = 50
     VALIDATE_INSTRUCTION_CONTENT = 50
@@ -197,6 +201,10 @@ class Priority:
     SKILL_OPPORTUNITY_DETECTOR = 61
     SECRET_FILE_HYGIENE_CHECKER = 62
     MODEL_FALLBACK_DETECTOR = 63
+    # Plan 00284: whole-corpus docs drift report, same slot pattern as
+    # PLAN_QA_SWEEP -- next free SessionStart priority after the existing
+    # sequential allocation above.
+    DOCS_QA_SWEEP = 64
 
     # Advisory handlers (Priority: 55-65)
     CRITICAL_THINKING_ADVISORY = 55

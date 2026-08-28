@@ -433,6 +433,10 @@ handlers:
       enabled: true        # Enable for projects using CLAUDE/Plan/
       priority: 46
 
+    docs_qa_edit:          # EDIT-stage docs QA lint on documentation writes (Plan 00284)
+      enabled: true        # Policy under top-level documentation.qa (edit_mode: warn)
+      priority: 47
+
     npm_command:           # Restricts npm commands to approved list
       enabled: true        # Enable for strict npm usage control
       priority: 49
@@ -614,6 +618,10 @@ handlers:
                                # here because THIS estate does flaggable work and the diagnostic
                                # snapshots to untracked/reports/ help tune delegation config.
       priority: 63
+
+    docs_qa_sweep:  # Whole-corpus docs drift report at session start (Plan 00284; silent when clean)
+      enabled: true  # Policy under top-level documentation.qa; also builds/refreshes the corpus index
+      priority: 64
 
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
@@ -870,6 +878,32 @@ plan_workflow:
       # first-class escape hatch in the handler (the `MUST_..._BECAUSE`
       # idiom used by git_stash / root_recursion_guard), not a standing
       # relaxation here.
+
+# Documentation SSoT enforcement (Plan 00284). Ships disabled upstream;
+# dogfooded here. All surfaces advisory-first (warn/advise) while the
+# check catalogue is new -- flip edit_mode/commit_gate_mode to `block`
+# only after a clean rollout period, mirroring plan_workflow.qa's own
+# warn-first precedent.
+documentation:
+  enabled: true
+  trees:
+    agent: CLAUDE
+    human: docs
+  qa:
+    edit_mode: warn
+    commit_gate_mode: warn
+    sweep_mode: advise
+    check_modes: {}
+    # Versioned upgrade guides are historical records (R8/R9); the Task 3.1a
+    # sweep found real dead links there (files renamed/moved after the guide
+    # was written). Advisory-only forever, not a promise to fix them.
+    grandfather_allowlist:
+      - "CLAUDE/UPGRADES/**"
+    generated_docs:
+      - glob: ".claude/HOOKS-DAEMON.md"
+        generator: "bin/hooks-daemon generate-docs"
+    registered_module_docs: []
+    resident_at_imports: ["CLAUDE.md"]
 
 project_handlers:
   enabled: true

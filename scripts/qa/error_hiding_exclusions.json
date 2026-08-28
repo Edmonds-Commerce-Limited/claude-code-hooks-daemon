@@ -845,6 +845,12 @@
       "function": "load_cached_corpus",
       "rule": "return-none-on-error",
       "reason": "Plan 00284: the corpus index is a rebuildable cache, not a source of truth -- a missing, unreadable, or malformed index.json is documented (module + function docstring) as 'treated as absent', and every caller has a defined fallback: build_and_save_corpus rebuilds it from a full filesystem scan, load_or_cold_corpus reports it as cold=True. Raising here would crash a SessionStart sweep or the docs-qa CLI over a cache file that regenerates itself on the next build, matching the cold/stale-index rule in DESIGN-enforcement.md."
+    },
+    {
+      "file": "handlers/pre_tool_use/docs_qa_edit.py",
+      "function": "_rel_path",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00284: ValueError from Path.relative_to means the edited file sits outside project_root -- a normal, expected 'not in documentation scope' outcome (e.g. a symlinked or otherwise foreign path), not an error condition. None is matches()'s existing signal to skip the handler, mirroring how docs_qa.corpus.is_in_scope treats the identical ValueError."
     }
   ]
 }

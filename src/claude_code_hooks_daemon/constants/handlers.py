@@ -588,6 +588,16 @@ class HandlerID:
         display_name="plan-qa-sweep",
     )
 
+    # Docs QA sweep (SessionStart handler) — Plan 00284: whole-corpus docs
+    # drift report at session start (advisory, silent when clean). Also
+    # where the doc corpus index is built/refreshed explicitly, per the
+    # cold-index rule — never lazily inside a PreToolUse budget.
+    DOCS_QA_SWEEP = HandlerIDMeta(
+        class_name="DocsQaSweepHandler",
+        config_key="docs_qa_sweep",
+        display_name="docs-qa-sweep",
+    )
+
     # Plan QA edit lint (PreToolUse handler) — Plan 00144: Stage 1 checks on
     # the would-be PLAN.md content at Write/Edit time
     PLAN_QA_EDIT = HandlerIDMeta(
@@ -602,6 +612,17 @@ class HandlerID:
         class_name="PlanQaCommitGateHandler",
         config_key="plan_qa_commit_gate",
         display_name="plan-qa-commit-gate",
+    )
+
+    # Docs QA edit lint (PreToolUse handler) — Plan 00284: EDIT-stage checks
+    # on the would-be content of a documentation-scoped file at Write/Edit
+    # time. No commit-gate sibling ships yet: STAGED-stage docs QA is
+    # deliberately deferred (Task 3.1e), matching plan_qa's own rollout order
+    # (its commit gate "landed last, warn-first" after edit + sweep shipped).
+    DOCS_QA_EDIT = HandlerIDMeta(
+        class_name="DocsQaEditHandler",
+        config_key="docs_qa_edit",
+        display_name="docs-qa-edit",
     )
 
     # Staged lint gate (PreToolUse handler) — Plan 00268 Task 3.2: cheap

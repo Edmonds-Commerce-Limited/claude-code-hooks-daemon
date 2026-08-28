@@ -275,6 +275,10 @@ handlers:
       enabled: false       # Enable for projects using CLAUDE/Plan/
       priority: 44
 
+    docs_qa_edit:          # EDIT-stage docs QA lint on documentation writes (Plan 00284)
+      enabled: false       # Enable via top-level documentation.enabled: true; policy under documentation.qa
+      priority: 47
+
     validate_instruction_content: # Blocks ephemeral content in CLAUDE.md/README.md
       enabled: false       # Enable to prevent implementation logs in instruction files
       priority: 49
@@ -469,6 +473,10 @@ handlers:
       #   snapshot_dir: untracked/reports
       #   snapshot_window_records: 20
 
+    docs_qa_sweep:  # Whole-corpus docs drift report at session start (Plan 00284; silent when clean)
+      enabled: false  # Enable via top-level documentation.enabled: true; also builds/refreshes the corpus index
+      priority: 64
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     compaction_signal:  # Drops <session>.compacting for the PTY supervisor (opt-in)
@@ -646,3 +654,24 @@ handlers:
 #   directory: "CLAUDE/Plan"
 #   workflow_docs: "CLAUDE/PlanWorkflow.md"
 #   enforce_claude_code_sync: false
+
+# Documentation SSoT enforcement (Plan 00284): one canonical home per fact,
+# everything else points. OPT-IN: disabled by default. Enabling this feeds
+# policy to docs_qa_edit/docs_qa_sweep above (both already registered, but
+# their matches() stays false while documentation.enabled is false).
+# documentation:
+#   enabled: true
+#   trees:
+#     agent: CLAUDE
+#     human: docs
+#   qa:
+#     edit_mode: warn            # warn | block
+#     commit_gate_mode: warn     # warn | block (STAGED stage not yet implemented)
+#     sweep_mode: advise         # advise | off
+#     check_modes: {}            # per-check override, e.g. rules-file-shape: block
+#     grandfather_allowlist: []  # file globs; advise-only forever
+#     generated_docs:
+#       - glob: ".claude/HOOKS-DAEMON.md"
+#         generator: "bin/hooks-daemon generate-docs"
+#     registered_module_docs: []
+#     resident_at_imports: ["CLAUDE.md"]
