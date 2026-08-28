@@ -54,7 +54,7 @@ This will:
 3. Delegate to the version-specific Layer 2 installer which:
    - Checks for self-install mode (aborts if detected)
    - Verifies Python 3.11+ and installs uv if needed
-   - Creates isolated venv at `.claude/hooks-daemon/untracked/venv/`
+   - Creates isolated venv at `.claude/hooks-daemon/untracked/venv-{slug}-py{MM}-{fingerprint}/` (see the "Venv layout" section in [SELF_INSTALL.md](SELF_INSTALL.md))
    - Deploys hook forwarder scripts to `.claude/hooks/`
    - Generates `.claude/settings.json` for hook registration
    - Creates `.claude/hooks-daemon.env` environment file
@@ -91,7 +91,8 @@ If you prefer manual control over each step:
 > A hand-made `untracked/venv/` is the retired pre-v3.7.0 layout and
 > `resolve_venv.sh` refuses it, so every wrapper call then exits 5. Let the
 > installer create it, and find it afterwards with
-> `.claude/hooks-daemon/bin/hooks-daemon list-venvs`.
+> `.claude/hooks-daemon/bin/hooks-daemon list-venvs`. Canonical layout doc:
+> the "Venv layout" section in [SELF_INSTALL.md](SELF_INSTALL.md).
 
 ### 1. Verify Prerequisites
 

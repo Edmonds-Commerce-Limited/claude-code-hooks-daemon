@@ -173,7 +173,7 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 
 - Create parent worktree from main branch
 - Create child worktrees from parent branch (one per task)
-- Set up Python venv in each worktree (`python3 -m venv untracked/venv`)
+- Set up each worktree's own fingerprint-keyed venv via `scripts/setup_worktree.sh` — never `python3 -m venv` by hand (that builds the retired `untracked/venv/` layout, which the wrapper refuses with exit 5; see the "Venv layout" section in [SELF_INSTALL.md](SELF_INSTALL.md))
 - Create agent team with `TeamCreate`
 - Create tasks with `TaskCreate` (one per child worktree)
 - **Spawn 5 agents per task**: Developer, Tester, QA, Senior Reviewer, Honesty Checker
@@ -298,7 +298,7 @@ All agents operate from `/workspace/untracked/worktrees/worktree-child-plan-NNNN
 
 - `cd /workspace` (that's the team lead's workspace)
 - Work in parent worktree or other child worktrees
-- Use main workspace's venv (`/workspace/untracked/venv/`)
+- Use the main workspace's venv (`/workspace/untracked/venv-*/`) — your worktree resolves its own
 - Type responses in text (use SendMessage tool)
 - Claim final "completion" (only team lead can approve merge)
 
@@ -1372,8 +1372,8 @@ git status  # Confirm everything clean
 **Solution**:
 
 - **Every worktree needs its own venv**
-- Venv setup is mandatory: `python3 -m venv untracked/venv && pip install -e ".[dev]"`
-- Agent prompts include explicit `PYTHON=` path to worktree venv
+- Venv setup is mandatory — via `scripts/setup_worktree.sh`, which provisions the fingerprint-keyed layout (`untracked/venv-{slug}-py{MM}-{fingerprint}/`; see the "Venv layout" section in [SELF_INSTALL.md](SELF_INSTALL.md)). Never `python3 -m venv` by hand: that builds the retired `untracked/venv/` layout, which `resolve_venv.sh` refuses (exit 5)
+- Agents resolve the interpreter via `scripts/lib/resolve_venv.sh` or use `./bin/hooks-daemon` from the worktree root — never a hardcoded venv path
 
 **Prevention**: Use `scripts/setup_worktree.sh` to automate venv creation.
 
@@ -1479,7 +1479,7 @@ Automates worktree creation, venv setup, editable install, and verification.
 
 1. Validates branch name (must start with `worktree-`)
 2. Creates git worktree in `untracked/worktrees/`
-3. Creates Python venv at `{worktree}/untracked/venv/`
+3. Creates the worktree's fingerprint-keyed Python venv (`{worktree}/untracked/venv-{slug}-py{MM}-{fingerprint}/` — see the "Venv layout" section in [SELF_INSTALL.md](SELF_INSTALL.md))
 4. Installs package in editable mode (`pip install -e ".[dev]"`)
 5. Verifies editable install points to worktree's own `src/`
 6. Creates daemon untracked directory

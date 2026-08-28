@@ -770,7 +770,7 @@ Automates: worktree creation, venv setup, editable install, verification.
 
 1. Validates branch name (must start with `worktree-`)
 2. Creates git worktree in `untracked/worktrees/`
-3. Creates Python venv at `untracked/venv/`
+3. Creates the fingerprint-keyed Python venv (`untracked/venv-{slug}-py{MM}-{fingerprint}/` — see the "Venv layout" section in [SELF_INSTALL.md](SELF_INSTALL.md)) via `ensure_venv`
 4. Installs package in editable mode (`pip install -e ".[dev]"`)
 5. Verifies editable install points to worktree's own `src/`
 6. Creates daemon untracked directory
@@ -959,7 +959,7 @@ $ git worktree list
 │           ├── daemon-{hostname}.pid               # Main workspace daemon PID
 │           └── daemon-{hostname}.log               # Main workspace daemon log
 ├── untracked/                                      # Not tracked by git
-│   ├── venv/                                       # Main workspace venv
+│   ├── venv-{slug}-py{MM}-{fingerprint}/           # Main workspace venv
 │   └── worktrees/                                  # All worktrees here
 │       ├── worktree-plan-00028/                    # Parent (Plan) worktree
 │       │   ├── .claude/
@@ -971,7 +971,7 @@ $ git worktree list
 │       │   ├── src/claude_code_hooks_daemon/
 │       │   ├── tests/
 │       │   ├── scripts/qa/
-│       │   ├── untracked/venv/                     # Worktree's own venv
+│       │   ├── untracked/venv-{slug}-…/            # Worktree's own venv (fingerprint-keyed)
 │       │   └── ... (full copy of repo)
 │       ├── worktree-child-plan-00028-handler-a/    # Child (Task) worktree
 │       │   ├── .claude/hooks-daemon/untracked/     # Child's own daemon files
@@ -979,7 +979,7 @@ $ git worktree list
 │       │   └── ... (full copy, branched from parent)
 │       └── worktree-child-plan-00028-handler-b/    # Child (Task) worktree
 │           ├── .claude/hooks-daemon/untracked/     # Child's own daemon files
-│           ├── untracked/venv/                     # Child's own venv
+│           ├── untracked/venv-{slug}-…/            # Child's own venv (fingerprint-keyed)
 │           └── ... (full copy, branched from parent)
 ├── src/claude_code_hooks_daemon/                   # Main workspace source
 ├── tests/

@@ -10,7 +10,7 @@ When `self_install_mode: true` in `.claude/hooks-daemon.yaml`, the daemon runs f
 
 ```
 .claude/hooks-daemon/
-├── untracked/venv/              # Virtual environment
+├── untracked/venv-{slug}-py{MM}-{fingerprint}/  # Virtual environment (see "Venv layout" below)
 ├── untracked/socket             # Unix socket
 ├── untracked/daemon.pid         # PID file
 └── (daemon runs from pip package)
@@ -20,7 +20,7 @@ When `self_install_mode: true` in `.claude/hooks-daemon.yaml`, the daemon runs f
 
 ```
 /workspace/
-├── untracked/venv-py{MM}-{fp}/  # Virtual environment (fingerprint-keyed, v3.7.0+)
+├── untracked/venv-{slug}-py{MM}-{fingerprint}/  # Virtual environment (see "Venv layout" below)
 ├── untracked/venv/              # Legacy (pre-v3.7.0) — auto-deleted on upgrade
 ├── untracked/daemon-{host}.sock # Unix socket (hostname-scoped)
 ├── untracked/daemon-{host}.pid  # PID file (hostname-scoped)
@@ -30,11 +30,41 @@ When `self_install_mode: true` in `.claude/hooks-daemon.yaml`, the daemon runs f
     └── hooks-daemon.env         # Sets HOOKS_DAEMON_ROOT_DIR
 ```
 
+## Venv layout (canonical documented home)
+
+**This section is the canonical documented home for the venv directory layout.**
+The real source of truth is the code — `src/claude_code_hooks_daemon/daemon/paths.py`
+(`python_venv_fingerprint()` and `get_daemon_venv_path()`) composes the name —
+so this section states the derived fact once and every other doc points here.
+
+The venv directory is:
+
+```
+untracked/venv-{slug}-py{MM}-{fingerprint}/
+```
+
+- `{slug}` — derived from the absolute project root path (v3.19.1+); keeps a
+  host view (e.g. `/home/user/project`) and a container view (`/workspace`) of
+  the SAME bind-mounted project on separate venvs.
+- `py{MM}` — Python major+minor, e.g. `py311`.
+- `{fingerprint}` — `md5(sys.version | sys.base_prefix | platform.machine())[:8]`;
+  lets concurrent containers from the same image share one venv while distinct
+  Pythons get distinct venvs.
+
+In self-install mode (this repo) it lives under `{project}/untracked/`; in a
+normal client install under `{project}/.claude/hooks-daemon/untracked/`.
+
+**Never hand-build a venv and never hardcode this path** — the name changes
+with machine, path and Python. Use the `bin/hooks-daemon` wrapper, or resolve
+the interpreter via `scripts/lib/resolve_venv.sh` (see "Daemon CLI" below). A
+hand-made `untracked/venv/` is the retired pre-v3.7.0 layout: `resolve_venv.sh`
+refuses it and every wrapper call exits 5.
+
 ### Why the venv is fingerprint-keyed (v3.7.0+)
 
 Pre-v3.7.0 all installs shared a single `untracked/venv/`. That corrupts when the same project directory is opened in two different Python environments — e.g. inside a YOLO container (Fedora `/usr/bin/python3`) **and** directly on the desktop host (pyenv, homebrew, distro, or different arch).
 
-v3.7.0 derives a fingerprint from `md5(sys.version | sys.base_prefix | platform.machine())[:8]` and uses it as the venv suffix. Two containers from the same image share a venv; different Pythons get different venvs and never collide. The daemon auto-detects stamp mismatches and rebuilds on first use in a new environment. CI sets `HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1` (or relies on `CI=true`) to bypass bootstrap.
+v3.7.0 introduced the fingerprint suffix; v3.19.1 added the project-path slug. The daemon auto-detects stamp mismatches and rebuilds on first use in a new environment. CI sets `HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1` (or relies on `CI=true`) to bypass bootstrap.
 
 Manage venvs with:
 
@@ -325,7 +355,7 @@ Not from pip package in venv site-packages.
 # Confirm the install is importable and serving
 ./bin/hooks-daemon health
 # In self-install mode the code is served from /workspace/src/
-# NOT: /workspace/untracked/venv/lib/.../site-packages/...
+# NOT: /workspace/untracked/venv-*/lib/.../site-packages/...
 ```
 
 ## Switching Between Modes

@@ -464,7 +464,7 @@ The per-version upgrade guides in this directory complement the automated Layer 
 
 If you encounter upgrade issues:
 
-1. Check daemon logs: `.claude/hooks-daemon/untracked/venv/daemon.log`
+1. Check daemon logs: `.claude/hooks-daemon/bin/hooks-daemon logs` (the log lives at `.claude/hooks-daemon/untracked/daemon-{hostname}.log`, never inside the venv)
 2. Review upgrade guide "Known Issues" section
 3. Try rollback instructions
 4. File issue: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues

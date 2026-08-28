@@ -101,7 +101,7 @@ interpreter path to detect or hardcode.
 
 ## Handler Options Reference
 
-**📖 Single source of truth: [Handler Reference](../../docs/guides/HANDLER_REFERENCE.md)**
+**📖 Single source of truth: [Handler Reference](../../../docs/guides/HANDLER_REFERENCE.md)**
 
 Every handler's configurable options, values, defaults, and examples are documented there. Do not duplicate that content here.
 

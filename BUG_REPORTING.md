@@ -206,8 +206,11 @@ If you've identified and fixed a bug:
 3. **Verify tests pass**:
 
    ```bash
-   ./scripts/qa/run_all.sh
+   ./scripts/qa/llm_qa.py all
    ```
+
+   (LLM-optimised; `./scripts/qa/run_all.sh` is the same suite, verbose, for a
+   human at a terminal — agents must use `llm_qa.py`.)
 
 4. **Submit PR** with:
 

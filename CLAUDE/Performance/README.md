@@ -76,7 +76,7 @@ Ordered by measured impact. Full detail + magnitudes:
 - **Wave 1 — [Plan 00155](../Plan/Completed/00155-performance-tuning-wave-1-daemon-side/PLAN.md)** (landed):
   T1 + T4 + legacy-entry deletion. Pure-Python, daemon-side, no transport-contract
   risk, fully unit-testable. Measured results below.
-- **Wave 2 — [Plan 00156](../Plan/00156-performance-tuning-wave-2-drop-jq-slim-init/PLAN.md)** (landed):
+- **Wave 2 — [Plan 00156](../Plan/Completed/00156-performance-tuning-wave-2-drop-jq-slim-init/PLAN.md)** (landed):
   T2 (drop `jq` — the per-event JSON wrap/unwrap moves into the `python3`
   transport every wrapper already spawns) + T3 (portable tier of the `init.sh`
   slim: guarded `mkdir`, one fewer `tr` spawn in the hostname suffix). Touches
