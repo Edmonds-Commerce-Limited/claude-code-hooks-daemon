@@ -66,6 +66,13 @@ scattered sibling plans.
 - **Bulk scanner** (`hooks-daemon docs-qa` or similar, CI-able exit code) — a
   write-time rule cannot see what predates it (Core Standard 15 corollary).
 - **Session sweep** advisory surfacing drift once per session.
+- **A shipped `hooks-daemon-docs-qa` agent** (USER-DIRECTED): a read-only,
+  daemon-deployed agent — delivered via the Plan 00279 generic agent install
+  subsystem, like `hooks-daemon-plan-dedupe-scout` — that scans ALL project docs
+  for conflicting truths, distributed truths, and duplication. It covers the
+  semantic half the deterministic scanner cannot: paraphrase drift, two docs
+  asserting incompatible facts, a truth scattered across surfaces with no
+  canonical home. Reports findings with citations; never edits.
 - **Absorb the progressive-disclosure strand**: supersede Plan 00132; absorb Plan
   00131's deferred residue (scaffolding skill; dogfood migration of this repo's own
   memory/doc drift); reconcile with Plan 00116's just-in-time guidance delivery.
@@ -77,9 +84,10 @@ scattered sibling plans.
   moves the content (same stance as `plan_qa`).
 - Re-litigating what Plan 00131 shipped (untracked-memory block) or redoing Plan
   00116 — this plan builds on them.
-- A perfect semantic duplication detector. Exact/near-exact copy and stale-pointer
-  detection is the mechanically-checkable subset; genuine paraphrase drift is
-  advisory-sweep territory only.
+- Semantic duplication detection in the DETERMINISTIC checks. Exact/near-exact
+  copy and stale pointers are the mechanically-checkable subset; conflicting
+  truths and paraphrase drift belong to the `hooks-daemon-docs-qa` AGENT, which
+  reports rather than blocks — no deterministic check should attempt them.
 - Enforcing prose STYLE (per-audience verbosity is guidance, not a blocking rule)
   unless the review finds a cheap, low-false-positive signal.
 
@@ -125,6 +133,13 @@ scattered sibling plans.
   registry, `plan_qa`-style.
 - [ ] ⬜ **Task 2.2**: Design the three surfaces (edit-time lint, bulk/commit scan,
   session sweep), the config policy block, and the grandfathering allowlist.
+- [ ] ⬜ **Task 2.3**: Design the `hooks-daemon-docs-qa` agent — read-only agent
+  definition (system prompt embedding the DocumentationStrategy ruleset, report
+  format with file:line citations, scan strategy for large doc trees), shipped
+  through the Plan 00279 agent install subsystem (version + md5 ledger,
+  customisation detection, config-gated deploy). Decide how it is invoked:
+  on-demand dispatch, suggested by the session sweep when drift is found, and/or
+  an idle-housekeeping specialist (Plan 00161 integration).
 
 ### Phase 3: Implement (expanded after Phase 2)
 
@@ -165,6 +180,9 @@ link is the intended shape.
 - [ ] Duplication + stale-pointer detection ships as a bulk scanner with a CI-able
   exit code, an edit-time guard, and a session sweep — config-driven, OFF by
   default upstream, dogfooded here.
+- [ ] A `hooks-daemon-docs-qa` agent ships via the agent install subsystem and,
+  dispatched against this repo, produces a useful conflicting/distributed-truth
+  report (dogfood = its acceptance test).
 - [ ] Plan 00132 superseded; 00131 residue and 00116 reconciled, cited not redone.
 - [ ] Full QA green, daemon restart RUNNING, client-mode verified.
 
