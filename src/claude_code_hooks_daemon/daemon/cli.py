@@ -4314,6 +4314,7 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
         build_and_save_corpus,
         is_lintable_path,
         load_or_cold_corpus,
+        refresh_own_record,
     )
     from claude_code_hooks_daemon.docs_qa.policy import policy_from_config
     from claude_code_hooks_daemon.docs_qa.report import CLEAN_SCOPE_CORPUS, format_cli_report
@@ -4362,11 +4363,16 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
         untracked_dir = _daemon_untracked_dir(project_root)
         index_path = untracked_dir / "docs-qa" / "index.json"
         corpus = load_or_cold_corpus(project_root, index_path)
+        lint_content = lint_path.read_text()
+        # Task 3.5: the cache read above performs NO staleness check, so
+        # without this the lint target's own record can lag the file on
+        # disk -- refresh it in place before any cross-document check runs.
+        corpus = refresh_own_record(corpus, project_root, lint_path, lint_content)
         context = edit_context(
             project_root=project_root,
             policy=policy,
             file_path=lint_path,
-            file_content=lint_path.read_text(),
+            file_content=lint_content,
             file_exists_before=True,
             corpus=corpus,
         )

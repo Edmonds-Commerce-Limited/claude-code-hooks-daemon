@@ -381,6 +381,48 @@ def _save_corpus(corpus: DocCorpus, index_path: Path) -> None:
     tmp_path.replace(index_path)
 
 
+def refresh_own_record(
+    corpus: DocCorpus, project_root: Path, file_path: Path, content: str
+) -> DocCorpus:
+    """Return ``corpus`` with ``file_path``'s record replaced by one built
+    fresh from ``content`` -- the content actually being linted, never
+    whatever a possibly-stale on-disk cache last recorded for it.
+
+    ``load_or_cold_corpus`` performs no staleness check at all (that is
+    ``build_and_save_corpus``'s job, and it only runs at SessionStart/CLI
+    sweep time) -- so every EDIT-stage caller (``docs-qa --lint`` and
+    :class:`handlers.pre_tool_use.docs_qa_edit.DocsQaEditHandler`) must call
+    this immediately after loading the cache and before constructing the
+    check context. Without it, ``checks.duplicate_block``'s cross-document
+    index requires TWO *distinct corpus entries* sharing a hash before it
+    reports anything (``len(paths) >= 2`` in ``_hash_index``) -- so a block
+    the edit just introduced, matching an EXISTING partner, stays invisible
+    until a full sweep rebuilds the corpus, because the file's own stale
+    record never carried the new hash (Plan 00284 Task 3.5).
+
+    Every OTHER document's record is left exactly as loaded -- partner
+    staleness is accepted (that is the sweep's job); only the file actually
+    being linted must never lag its own content.
+    """
+    rel_path = str(file_path.relative_to(project_root))
+    block_locations = extract_structured_block_locations(content)
+    fresh_record = DocRecord(
+        rel_path=rel_path,
+        mtime_ns=0,
+        size=len(content.encode("utf-8")),
+        links=tuple(extract_link_targets(content)),
+        quotes=tuple(
+            QuoteRef(source_path=block.source_path, anchor=block.anchor)
+            for block in parse_quote_blocks(content)
+        ),
+        block_hashes=tuple(loc.block_hash for loc in block_locations),
+        block_locations=block_locations,
+    )
+    documents = dict(corpus.documents)
+    documents[rel_path] = fresh_record
+    return DocCorpus(project_root=corpus.project_root, documents=documents, cold=corpus.cold)
+
+
 def build_and_save_corpus(
     project_root: Path,
     policy: DocumentationPolicy,

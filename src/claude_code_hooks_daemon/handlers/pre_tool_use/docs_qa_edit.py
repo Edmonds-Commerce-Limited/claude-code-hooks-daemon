@@ -49,6 +49,7 @@ from claude_code_hooks_daemon.docs_qa.context import edit_context
 from claude_code_hooks_daemon.docs_qa.corpus import (
     is_lintable_path,
     load_or_cold_corpus,
+    refresh_own_record,
 )
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.report import format_advisory, format_block_reason
@@ -122,6 +123,10 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
         content_before = file_path.read_text(encoding="utf-8") if exists_before else None
         index_path = ProjectContext.daemon_untracked_dir() / _INDEX_DIR_NAME / _INDEX_FILE_NAME
         corpus = load_or_cold_corpus(project_root, index_path)
+        # Task 3.5: the cache read above performs NO staleness check, so
+        # without this the edited file's own record can lag the WOULD-BE
+        # content -- refresh it in place before any cross-document check runs.
+        corpus = refresh_own_record(corpus, project_root, file_path, content)
         context = edit_context(
             project_root=project_root,
             policy=policy,

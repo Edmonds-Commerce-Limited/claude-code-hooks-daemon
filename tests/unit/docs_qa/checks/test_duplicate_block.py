@@ -4,7 +4,7 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.docs_qa.checks.duplicate_block import CHECK_ID, CHECKS
 from claude_code_hooks_daemon.docs_qa.context import edit_context, sweep_context
-from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus, DocRecord
+from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus, DocRecord, refresh_own_record
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy, DocumentationQaPolicy
 from claude_code_hooks_daemon.docs_qa.structured_blocks import (
     extract_structured_block_hashes,
@@ -370,3 +370,58 @@ class TestLineRanges:
         assert "B.md" in messages
         assert "C.md" in messages
         assert partner_names == {"`A.md"}  # both findings are reported on A.md's own spans
+
+
+class TestStaleOwnRecordFromCache:
+    """Task 3.5 regression: ``load_or_cold_corpus`` never staleness-checks
+    anything, so without ``refresh_own_record`` a NEWLY introduced duplicate
+    is invisible -- ``_hash_index`` only counts a shared hash once it sees
+    it in TWO DISTINCT corpus entries, and the file being linted's stale
+    record never carried the hash it has just gained on disk."""
+
+    def test_a_newly_introduced_duplicate_is_invisible_without_the_refresh(
+        self, tmp_path: Path
+    ) -> None:
+        stale_own = DocRecord(rel_path="A.md", mtime_ns=1, size=1, links=(), block_hashes=())
+        corpus = DocCorpus(
+            project_root=tmp_path,
+            documents={
+                "A.md": stale_own,  # stale: built before A.md gained the shared block
+                "B.md": _record("B.md", block_hashes=_DUPLICATED_HASHES),
+            },
+        )
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "A.md",
+            file_content=_DUPLICATED_TEXT,
+            file_exists_before=True,
+            corpus=corpus,
+        )
+        # Demonstrates the bug: with the stale record left in place, the
+        # pairing is invisible even though A.md's fresh content genuinely
+        # duplicates B.md.
+        assert _run_edit(context) == []
+
+    def test_refresh_own_record_makes_the_same_duplicate_visible(self, tmp_path: Path) -> None:
+        stale_own = DocRecord(rel_path="A.md", mtime_ns=1, size=1, links=(), block_hashes=())
+        corpus = DocCorpus(
+            project_root=tmp_path,
+            documents={
+                "A.md": stale_own,
+                "B.md": _record("B.md", block_hashes=_DUPLICATED_HASHES),
+            },
+        )
+        refreshed = refresh_own_record(corpus, tmp_path, tmp_path / "A.md", _DUPLICATED_TEXT)
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "A.md",
+            file_content=_DUPLICATED_TEXT,
+            file_exists_before=True,
+            corpus=refreshed,
+        )
+        findings = _run_edit(context)
+        assert len(findings) == 1
+        assert findings[0].path == "A.md"
+        assert "B.md" in findings[0].message

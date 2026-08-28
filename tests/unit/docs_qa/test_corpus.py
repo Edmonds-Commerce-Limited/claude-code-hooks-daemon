@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.docs_qa.corpus import (
     iter_corpus_paths,
     load_cached_corpus,
     load_or_cold_corpus,
+    refresh_own_record,
 )
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy, DocumentationTreesPolicy
 
@@ -634,3 +635,54 @@ class TestWorktreeExclusion:
         doc = tmp_path / "CLAUDE" / "myworktrees-notes" / "Real.md"
         doc.write_text("# real doc\n")
         assert is_in_scope(doc, tmp_path, DocumentationPolicy())
+
+
+class TestRefreshOwnRecord:
+    """Task 3.5: a lint of file X must never see a stale record for X itself.
+
+    ``load_or_cold_corpus`` performs no staleness check at all -- these
+    tests seed a corpus whose record for the file being linted was built
+    from OLD content, then assert ``refresh_own_record`` replaces it with
+    one reflecting the content actually passed in.
+    """
+
+    def test_replaces_a_stale_record_for_the_linted_file(self, tmp_path: Path) -> None:
+        stale = DocRecord(rel_path="CLAUDE/X.md", mtime_ns=1, size=1, links=("stale-target.md",))
+        corpus = DocCorpus(project_root=tmp_path, documents={"CLAUDE/X.md": stale})
+        refreshed = refresh_own_record(
+            corpus, tmp_path, tmp_path / "CLAUDE" / "X.md", "# X\n\n[fresh](fresh-target.md)\n"
+        )
+        assert refreshed.documents["CLAUDE/X.md"].links == ("fresh-target.md",)
+
+    def test_inserts_a_record_when_none_existed_yet(self, tmp_path: Path) -> None:
+        corpus = DocCorpus(project_root=tmp_path, documents={})
+        refreshed = refresh_own_record(
+            corpus, tmp_path, tmp_path / "CLAUDE" / "New.md", "# New\n\n[a](b.md)\n"
+        )
+        assert refreshed.documents["CLAUDE/New.md"].links == ("b.md",)
+
+    def test_leaves_every_other_document_untouched(self, tmp_path: Path) -> None:
+        partner = DocRecord(rel_path="CLAUDE/Y.md", mtime_ns=1, size=1, links=("kept.md",))
+        corpus = DocCorpus(project_root=tmp_path, documents={"CLAUDE/Y.md": partner})
+        refreshed = refresh_own_record(
+            corpus, tmp_path, tmp_path / "CLAUDE" / "X.md", "# X\n\nno links\n"
+        )
+        assert refreshed.documents["CLAUDE/Y.md"] is partner
+
+    def test_preserves_the_cold_flag(self, tmp_path: Path) -> None:
+        cold_corpus = DocCorpus(project_root=tmp_path, documents={}, cold=True)
+        refreshed = refresh_own_record(cold_corpus, tmp_path, tmp_path / "CLAUDE" / "X.md", "# X\n")
+        assert refreshed.cold is True
+
+    def test_refreshed_block_hashes_reflect_the_content_being_linted(self, tmp_path: Path) -> None:
+        long_block = (
+            "```bash\n"
+            + "\n".join(f"echo 'line {n} of a block comfortably over the floor'" for n in range(6))
+            + "\n```\n"
+        )
+        stale = DocRecord(rel_path="CLAUDE/X.md", mtime_ns=1, size=1, links=(), block_hashes=())
+        corpus = DocCorpus(project_root=tmp_path, documents={"CLAUDE/X.md": stale})
+        refreshed = refresh_own_record(
+            corpus, tmp_path, tmp_path / "CLAUDE" / "X.md", f"# X\n\n{long_block}"
+        )
+        assert len(refreshed.documents["CLAUDE/X.md"].block_hashes) == 1
