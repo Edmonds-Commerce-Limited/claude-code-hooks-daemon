@@ -135,6 +135,12 @@
       "reason": "Best-effort observability signal for the PTY supervisor (Plan 00269), same contract as compaction_signal._write_signal: a PostToolUse advisory must never break the tool call that triggered it. Narrow excepts (RuntimeError for missing project context, OSError for the write) are logged at warning before returning None; callers (handler + inject-goal CLI) check for None and report/skip the latch."
     },
     {
+      "file": "handlers/user_prompt_submit/standing_authorisations.py",
+      "function": "write_standing_auth_signal",
+      "rule": "return-none-on-error",
+      "reason": "Best-effort supervisor-channel signal (Plan 00283), identical contract to goal_injection.write_goal_signal: a UserPromptSubmit advisory must never break the prompt that triggered it. Narrow excepts (RuntimeError for missing project context, OSError for the write) are logged at warning before returning None; the single caller (_route_reinforcement) treats None as 'fail open to folded hook-context', so a reinforcement is never lost."
+    },
+    {
       "file": "handlers/post_tool_use/goal_injection.py",
       "function": "_read_plan",
       "rule": "return-none-on-error",

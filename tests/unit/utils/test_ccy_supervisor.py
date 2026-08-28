@@ -184,7 +184,9 @@ class TestArmedSupervisorLive:
     def test_armed_but_dead_pid_is_false(self, tmp_path: Path) -> None:
         root = self._make_project(tmp_path, armed=True, script=True)
         script = root / ".claude" / "ccy" / "claude-supervise.py"
-        self._write_status(root, pid=4_000_000_000, source_hash=ccy_supervisor.hash_supervisor_source(script))
+        self._write_status(
+            root, pid=4_000_000_000, source_hash=ccy_supervisor.hash_supervisor_source(script)
+        )
         assert ccy_supervisor.armed_supervisor_live(root) is False
 
     def test_armed_but_stale_hash_is_false(self, tmp_path: Path) -> None:

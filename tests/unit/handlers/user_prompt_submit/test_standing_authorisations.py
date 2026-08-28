@@ -433,9 +433,7 @@ class TestWriteStandingAuthSignal:
         def _raise(cls: object) -> Path:
             raise RuntimeError("no ctx")
 
-        monkeypatch.setattr(
-            f"{_MODULE}.ProjectContext.daemon_untracked_dir", classmethod(_raise)
-        )
+        monkeypatch.setattr(f"{_MODULE}.ProjectContext.daemon_untracked_dir", classmethod(_raise))
         assert write_standing_auth_signal("s", ["x"], _SOURCE_REINFORCEMENT) is None
 
     def test_fails_open_on_oserror(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -470,9 +468,7 @@ class TestSupervisorChannelRouting:
         monkeypatch.setattr(
             f"{_MODULE}.ProjectContext.project_root", classmethod(lambda cls: Path("/proj"))
         )
-        monkeypatch.setattr(
-            f"{_MODULE}.ccy_supervisor.armed_supervisor_live", lambda root: armed
-        )
+        monkeypatch.setattr(f"{_MODULE}.ccy_supervisor.armed_supervisor_live", lambda root: armed)
         calls: list[tuple[str, list[str], str]] = []
 
         def _spy(session_id: str, lines: list[str], source: str) -> Path | None:
@@ -510,9 +506,7 @@ class TestSupervisorChannelRouting:
         assert "sub-agent delegation" in lines[1], "the body names the enabled authorisation"
         assert source == _SOURCE_REINFORCEMENT
 
-    def test_falls_back_to_context_when_not_armed(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_falls_back_to_context_when_not_armed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         handler, calls = self._make(monkeypatch, channel=True, armed=False)
         result = self._drive_to_due(handler)
         assert result.context, "unarmed → fold hook-context"
@@ -521,9 +515,7 @@ class TestSupervisorChannelRouting:
     def test_falls_back_to_context_when_signal_write_fails(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        handler, calls = self._make(
-            monkeypatch, channel=True, armed=True, write_result=None
-        )
+        handler, calls = self._make(monkeypatch, channel=True, armed=True, write_result=None)
         result = self._drive_to_due(handler)
         assert result.context, "a failed signal write must fail open to hook-context"
         assert len(calls) == 1, "the write was attempted before falling back"
