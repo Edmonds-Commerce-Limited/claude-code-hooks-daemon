@@ -481,7 +481,7 @@ Edit `tests/unit/strategies/tdd/test_tdd_strategy_registry.py`:
 #### 7. Run full QA
 
 ```bash
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 # Expected: ALL CHECKS PASSED
 ```
 

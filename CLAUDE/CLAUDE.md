@@ -10,6 +10,14 @@ This directory contains documentation optimized for LLM consumption (Claude, GPT
 
 ## Files
 
+### Documentation Policy
+
+**DocumentationStrategy.md** - The canonical documentation-SSoT ruleset
+
+- One canonical home per fact; every other surface points, never duplicates
+- Two-tree audience split (agent tree owns depth; human tree is terse)
+- Satellite surface contracts, plan-folder promotion, ssot-quote mechanism
+
 ### Architecture & Design
 
 **ARCHITECTURE.md** - System architecture and design decisions

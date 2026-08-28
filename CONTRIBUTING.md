@@ -140,16 +140,24 @@ literals. `HandlerID` gives the handler its stable config key, `Priority` places
 it in a documented band, and `HandlerTag` describes it — `terminal` is derived
 from `HandlerTag.TERMINAL` rather than passed separately.
 
+Subclass the base named after your EVENT (here `PreToolUseHandlerBase`), never
+`Handler` directly — each event base narrows `handle()` to the result type its
+event can deliver, and an integration test enforces this for every handler.
+The base is an ABC with FOUR abstract methods; implementing only
+`matches`/`handle` gives a class that cannot be instantiated. The canonical
+in-depth guide is [CLAUDE/HANDLER_DEVELOPMENT.md](CLAUDE/HANDLER_DEVELOPMENT.md).
+
 ```python
 # src/claude_code_hooks_daemon/handlers/pre_tool_use/my_handler.py
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult
+from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
 
-class MyHandler(Handler):
+class MyHandler(PreToolUseHandlerBase):
     """Short description of what this handler does."""
 
     def __init__(self) -> None:
@@ -166,12 +174,20 @@ class MyHandler(Handler):
             return False
         return "target" in command
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Execute handler logic."""
-        return HookResult(
+        return GatingResult(
             decision=Decision.DENY,
             reason="Explanation of why the operation was blocked, and what to do instead",
         )
+
+    def get_claude_md(self) -> str | None:
+        """Resident guidance for CLAUDE.md, or None if this handler needs none."""
+        return None
+
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        """Tests rendered into the release acceptance playbook."""
+        return []
 ```
 
 `Handler.__init__` still accepts a bare `name=` string; it is a deprecated alias

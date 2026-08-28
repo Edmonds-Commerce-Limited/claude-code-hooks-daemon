@@ -36,7 +36,7 @@ CLAUDE/Plan/
 
 - Work through tasks following TDD workflow
 - Update task status in `PLAN.md` as you go
-- Run QA before commits: `./scripts/qa/run_all.sh`
+- Run QA before commits: `./scripts/qa/llm_qa.py all`
 - Reference plan in commits: `Plan NNNNN: Description`
 - **Always commit the plan folder alongside the work it tracks.** `CLAUDE/Plan/*`
   files are tracked source, not temporary artifacts. Before every commit, check

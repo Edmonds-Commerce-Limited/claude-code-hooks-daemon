@@ -807,7 +807,7 @@ cd .claude/hooks-daemon
 ./scripts/qa/run_tests.sh
 
 # Check all QA passes
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 ```
 
 ---

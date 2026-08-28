@@ -1,5 +1,13 @@
 # Claude Code Hooks Daemon - LLM Context
 
+## Documentation Strategy (SSoT)
+
+Every durable fact has ONE canonical home: agent-facing depth in `CLAUDE/`,
+terse human docs in `docs/` (which may point into `CLAUDE/`). Every other
+surface — rules, skills, agents, sub-folder CLAUDE.md, comments, plan folders —
+POINTS at the canonical doc, never duplicates it. Full rules:
+[CLAUDE/DocumentationStrategy.md](CLAUDE/DocumentationStrategy.md).
+
 ## What This Is
 
 A daemon for Claude Code hooks using Unix socket IPC. It replaces a cold Python

@@ -145,8 +145,8 @@ Edit files in `/workspace/src/claude_code_hooks_daemon/`
 # Format and lint (auto-fixes)
 ./scripts/qa/run_autofix.sh
 
-# Full QA suite
-./scripts/qa/run_all.sh
+# Full QA suite (agent entry point; run_all.sh is the human-verbose variant)
+./scripts/qa/llm_qa.py all
 
 # Individual checks
 ./scripts/qa/run_tests.sh         # Pytest with 95% coverage

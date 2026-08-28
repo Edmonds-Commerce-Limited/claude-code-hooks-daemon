@@ -6,7 +6,7 @@ instead of 50+. Designed for AI coding assistants that prefer concise,
 machine-parseable output with pointers to detailed JSON.
 
 Usage:
-    ./scripts/qa/llm_qa.py all              # Run all 7 QA checks
+    ./scripts/qa/llm_qa.py all              # Run every QA check in the suite
     ./scripts/qa/llm_qa.py tests lint       # Run specific tools
     ./scripts/qa/llm_qa.py --read-only all  # Summarize existing JSON only
 """
