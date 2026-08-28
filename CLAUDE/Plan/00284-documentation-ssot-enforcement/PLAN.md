@@ -199,8 +199,18 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
   100%, live socket probe of a drifted quote correctly advised under warn mode.
   80-char minimum quote floor; source read direct-from-disk as primary path;
   reverse index cold-safe. Restart-snippet migration stays in Task 3.2.
-- [ ] ⬜ **Task 3.1e**: budgets/registry (`module-doc-budget`), `at-import-census`,
-  STAGED checks (`rules-file-orphan-shrink`, `plan-promotion-disposition`).
+- [x] ✅ **Task 3.1e**: budgets/registry (`module-doc-budget`), `at-import-census`,
+  STAGED stage (`staged_context`, `docs_qa_commit_gate`) + two STAGED-only
+  checks (`rules-file-orphan-shrink`, `plan-promotion-disposition`), plus
+  STAGED registration for `pointer-resolves`/`quote-drift`.
+  `generated-doc-hand-edit` deliberately stays EDIT+SWEEP only (recorded
+  in its own module docstring — SWEEP already re-checks every generated
+  doc on disk regardless of write route, so a STAGED half would only
+  restate EDIT or SWEEP). `format_advisory` gained a compact cap
+  (`MAX_ADVISORY_FINDINGS_SHOWN`, 8) with a CLI pointer for the rest, so
+  the SWEEP report cannot bloat context once `module-doc-budget` starts
+  flagging this repo's several over-budget sub-`CLAUDE.md` files. Three
+  checkpoint commits.
 - [ ] ⬜ **Task 3.1f**: `duplicate-block` — advisory only, AFTER a hand-triaged
   whole-repo run recorded in this folder.
 - [ ] ⬜ **Task 3.1g**: `hooks-daemon-docs-qa` agent + docs-qa skill shim (via the
