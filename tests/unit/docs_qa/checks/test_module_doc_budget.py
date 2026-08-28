@@ -284,6 +284,38 @@ class TestSweepStage:
         )
         assert _run_sweep(context) == []
 
+    def test_excludes_vendored_daemon_install_copies(self, tmp_path: Path) -> None:
+        """Task 3.6: this check's OWN rglob walk must also skip a CLIENT
+        project's vendored ``.claude/hooks-daemon/`` install, or every one of
+        the daemon's own module docs gets reported as the client's findings."""
+        vendored_doc = tmp_path / ".claude" / "hooks-daemon" / "src" / "foo" / "CLAUDE.md"
+        vendored_doc.parent.mkdir(parents=True)
+        vendored_doc.write_text(_LONG_BODY)
+        policy = DocumentationPolicy()
+
+        context = sweep_context(
+            project_root=tmp_path, policy=policy, corpus=DocCorpus(project_root=tmp_path)
+        )
+        assert _run_sweep(context) == []
+
+    def test_self_install_mode_is_unaffected(self, tmp_path: Path) -> None:
+        """Self-install mode (this repo) has no ``.claude/hooks-daemon/``
+        vendored copy -- a real module doc under a dir that merely CONTAINS
+        "hooks-daemon" in its path must still be swept and flagged."""
+        real_doc = (
+            tmp_path / "src" / "claude_code_hooks_daemon" / "skills" / "hooks-daemon" / "CLAUDE.md"
+        )
+        real_doc.parent.mkdir(parents=True)
+        real_doc.write_text(_LONG_BODY)
+        policy = DocumentationPolicy()
+
+        context = sweep_context(
+            project_root=tmp_path, policy=policy, corpus=DocCorpus(project_root=tmp_path)
+        )
+        findings = _run_sweep(context)
+        assert len(findings) == 1
+        assert findings[0].path == "src/claude_code_hooks_daemon/skills/hooks-daemon/CLAUDE.md"
+
 
 class TestMissingFilePathOrContent:
     def test_missing_file_path_or_content_produces_no_findings(self, tmp_path: Path) -> None:

@@ -637,6 +637,49 @@ class TestWorktreeExclusion:
         assert is_in_scope(doc, tmp_path, DocumentationPolicy())
 
 
+class TestVendoredDaemonInstallExclusion:
+    """Task 3.6: a CLIENT project's vendored ``.claude/hooks-daemon/`` install
+    contains a full copy of the daemon's own docs; scanning it reports the
+    daemon's own module docs as the client's findings."""
+
+    def test_claude_hooks_daemon_dir_is_excluded(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        vendored_doc = tmp_path / ".claude" / "hooks-daemon" / "CLAUDE" / "Foo.md"
+        vendored_doc.parent.mkdir(parents=True)
+        vendored_doc.write_text("# Foo copy\n")
+        assert not is_in_scope(vendored_doc, tmp_path, DocumentationPolicy())
+
+    def test_iter_corpus_paths_never_returns_vendored_daemon_copies(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        vendored_doc = tmp_path / ".claude" / "hooks-daemon" / "CLAUDE" / "Foo.md"
+        vendored_doc.parent.mkdir(parents=True)
+        vendored_doc.write_text("# Foo copy\n")
+        paths = iter_corpus_paths(tmp_path, DocumentationPolicy())
+        assert vendored_doc not in paths
+
+    def test_a_path_merely_containing_the_substring_hooks_daemon_is_not_excluded(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression guard: exclusion is prefix-scoped to ``.claude/hooks-daemon``
+        # exactly -- a real doc dir that happens to be named similarly (or a
+        # tracked source dir like ``src/.../skills/hooks-daemon`` in
+        # self-install mode) must not be swept up by accident.
+        (tmp_path / "CLAUDE" / "myhooks-daemon-notes").mkdir(parents=True)
+        doc = tmp_path / "CLAUDE" / "myhooks-daemon-notes" / "Real.md"
+        doc.write_text("# real doc\n")
+        assert is_in_scope(doc, tmp_path, DocumentationPolicy())
+
+    def test_self_install_mode_is_unaffected(self, tmp_path: Path) -> None:
+        """Self-install mode (this repo) has no ``.claude/hooks-daemon/``
+        vendored copy -- its own tracked docs under a real dir that merely
+        CONTAINS "hooks-daemon" in its path (e.g. ``.claude/skills/hooks-daemon/``,
+        which this exact repo ships) must stay in scope."""
+        skill_doc = tmp_path / ".claude" / "skills" / "hooks-daemon" / "SKILL.md"
+        skill_doc.parent.mkdir(parents=True)
+        skill_doc.write_text("# skill doc\n")
+        assert is_in_scope(skill_doc, tmp_path, DocumentationPolicy())
+
+
 class TestRefreshOwnRecord:
     """Task 3.5: a lint of file X must never see a stale record for X itself.
 

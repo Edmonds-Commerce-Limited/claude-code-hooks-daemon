@@ -87,6 +87,12 @@ class ProjectPath:
     WORKTREES_DIR = "untracked/worktrees"  # manually managed worktrees
     CLAUDE_WORKTREES_DIR = ".claude/worktrees"  # Claude Code managed worktrees (not configurable)
 
+    # Vendored daemon install root in a CLIENT project (Task 3.6). Empty/absent
+    # in self-install mode -- this repo runs the daemon from its own project
+    # root rather than from a vendored copy under here (CLAUDE.md "Self-Install
+    # Mode"), so exclusions keyed on this constant are inert in this repo.
+    HOOKS_DAEMON_INSTALL_DIR = f"{DaemonPath.CLAUDE_DIR}/{DaemonPath.HOOKS_DAEMON_DIR}"
+
     # Config files
     PYPROJECT_TOML = "pyproject.toml"
     SETUP_PY = "setup.py"

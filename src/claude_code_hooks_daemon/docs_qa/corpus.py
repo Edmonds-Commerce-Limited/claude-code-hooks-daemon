@@ -74,6 +74,13 @@ _WORKTREE_ROOT_PREFIXES: Final[tuple[str, ...]] = (
     ProjectPath.WORKTREES_DIR,
 )
 
+# Task 3.6: a CLIENT project's vendored daemon install (``.claude/hooks-daemon/``)
+# contains a full copy of the daemon's own tracked docs. Scanning it reports the
+# daemon's own module docs as the client's findings -- a client cannot act on
+# vendored files. Empty/absent in self-install mode (see the constant's own
+# docstring), so the exclusion is inert in this repo.
+_HOOKS_DAEMON_INSTALL_PREFIX: Final[str] = ProjectPath.HOOKS_DAEMON_INSTALL_DIR
+
 _CLAUDE_MD_FILENAME: Final[str] = "CLAUDE.md"
 
 
@@ -121,14 +128,30 @@ def _is_worktree_path(rel_parts: tuple[str, ...]) -> bool:
     )
 
 
+def is_vendored_daemon_install_path(rel_parts: tuple[str, ...]) -> bool:
+    """True for anything under the vendored daemon install dir (Task 3.6).
+
+    Exported for reuse by :mod:`checks.module_doc_budget`, which does its
+    OWN rglob walk rather than using this corpus (Task 3.3 T2 note) -- so the
+    exclusion primitive has to be shared, not just the outcome.
+    """
+    rel_path = "/".join(rel_parts)
+    return rel_path == _HOOKS_DAEMON_INSTALL_PREFIX or rel_path.startswith(
+        _HOOKS_DAEMON_INSTALL_PREFIX + "/"
+    )
+
+
 def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> bool:
     """Corpus SCOPE exclusions (DESIGN §2.1): changelog, releases, plan
-    archives, and (Task 3.3 T2) transient agent-worktree checkouts."""
+    archives, (Task 3.3 T2) transient agent-worktree checkouts, and
+    (Task 3.6) a vendored daemon install."""
     if len(rel_parts) == 1 and rel_parts[0] == _CHANGELOG_FILENAME:
         return True
     if rel_parts and rel_parts[0] == _RELEASES_DIR_NAME:
         return True
     if _is_worktree_path(rel_parts):
+        return True
+    if is_vendored_daemon_install_path(rel_parts):
         return True
     plan_completed = (policy.trees.agent, _PLAN_SUBDIR_NAME, _PLAN_COMPLETED_DIR_NAME)
     plan_cancelled = (policy.trees.agent, _PLAN_SUBDIR_NAME, _PLAN_CANCELLED_DIR_NAME)

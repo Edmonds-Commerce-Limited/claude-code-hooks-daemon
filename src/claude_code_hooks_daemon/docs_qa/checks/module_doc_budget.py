@@ -35,7 +35,10 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.paths import ProjectPath
-from claude_code_hooks_daemon.docs_qa.corpus import is_module_doc_path
+from claude_code_hooks_daemon.docs_qa.corpus import (
+    is_module_doc_path,
+    is_vendored_daemon_install_path,
+)
 from claude_code_hooks_daemon.docs_qa.types import (
     CheckContext,
     CheckSpec,
@@ -72,6 +75,11 @@ _QUOTE_BLOCK_RE: Final[re.Pattern[str]] = re.compile(
 # ".claude" segment is not otherwise excluded) added for Task 3.3 T2 -- this
 # check does its OWN rglob walk rather than using docs_qa.corpus, so the
 # corpus's worktree exclusion (corpus._is_worktree_path) does not reach it.
+# The same is true of a vendored daemon install (Task 3.6): its own basename
+# is not distinctive enough for this set (it also names this daemon's OWN
+# tracked ``skills/hooks-daemon/`` source in self-install mode), so it is
+# excluded by full path prefix via corpus.is_vendored_daemon_install_path
+# instead, applied separately below.
 _EXCLUDED_DIR_NAMES: Final[frozenset[str]] = frozenset(
     {
         "node_modules",
@@ -183,6 +191,8 @@ def _iter_module_doc_paths(project_root: Path, agent_tree: str) -> list[str]:
         rel_path = str(path.relative_to(project_root))
         parts = rel_path.split("/")
         if any(part in _EXCLUDED_DIR_NAMES for part in parts[:-1]):
+            continue
+        if is_vendored_daemon_install_path(tuple(parts[:-1])):
             continue
         if is_module_doc_path(rel_path, agent_tree):
             matches.append(rel_path)

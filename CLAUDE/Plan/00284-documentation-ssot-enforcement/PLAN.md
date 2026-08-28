@@ -290,6 +290,17 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
   file's own record with one built fresh from the content being linted; partner
   records are left cache-aged by design (that is the sweep's job) — commit
   7c1899ff.
+- [x] ✅ **Task 3.6**: client-mode dogfooding found `docs-qa --sweep` scanning
+  INSIDE a client's vendored `.claude/hooks-daemon/` install and reporting the
+  daemon's own module docs as the client's findings (9 module-doc-budget
+  advisories in a fresh dummy client repo, all under `.claude/hooks-daemon/**`).
+  `module_doc_budget`'s own `rglob` walk (independent of `docs_qa.corpus`, per
+  Task 3.3's worktree-exclusion note) had no exclusion for it. Fixed by adding
+  a shared `corpus.is_vendored_daemon_install_path` prefix check (new
+  `ProjectPath.HOOKS_DAEMON_INSTALL_DIR` constant) — wired into both the
+  corpus's own `_is_excluded` and `module_doc_budget`'s walk, mirroring Task
+  3.3's pattern. Verified in client mode: 9 findings → 0 mentioning
+  `.claude/hooks-daemon/`.
 
 ## Technical Decisions
 
