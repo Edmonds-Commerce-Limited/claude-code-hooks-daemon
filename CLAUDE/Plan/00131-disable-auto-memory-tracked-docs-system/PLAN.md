@@ -1,6 +1,6 @@
 # Plan 00131: Block Untracked Claude Memory + Tracked-Docs Progressive Disclosure
 
-**Status**: Dormant (Phases 1–5 shipped in v3.23.0; the deferred residue — Phase 4 scaffolding skill + Phase 6 dogfood migration — is now tracked by Plan 00284, the documentation-SSoT enforcement plan that absorbs the progressive-disclosure strand)
+**Status**: Dormant (Phases 1–5 shipped in v3.23.0. Of the deferred residue, Plan 00284 — now Complete — DELIVERED the Phase 6 dogfood migration (this repo's doc drift fully migrated, sweep-verified) and the `@`-import audit half of Phase 4 (shipped as the `at-import-census` check + `docs-qa` CLI/agent). Remaining here: only Phase 4's auto-build scaffolding for rules/skills, kept dormant as YAGNI until a client asks for it)
 **Created**: 2026-06-19
 **Owner**: joseph
 **Priority**: High
