@@ -1,78 +1,41 @@
 # CLAUDE Directory - LLM-Optimized Documentation
 
-This directory contains documentation optimized for LLM consumption (Claude, GPT, etc.) rather than human readers.
+This directory is the **agent tree**: verbose, information-dense documentation
+that owns the depth for every fact. The audience split (agent tree vs human
+`docs/` tree) is defined in [DocumentationStrategy.md](DocumentationStrategy.md)
+— the canonical documentation-SSoT ruleset.
 
-## Directory Purpose
+## Routing Table
 
-- **Target Audience**: AI coding assistants
-- **Format**: Markdown with high information density
-- **Content**: Technical specifications, architecture documentation, development guides
+| File                                                                   | Route here for                                                                      |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [DocumentationStrategy.md](DocumentationStrategy.md)                   | The documentation-SSoT rules: one canonical home per fact, satellite contracts      |
+| [ARCHITECTURE.md](ARCHITECTURE.md)                                     | System architecture and design decisions                                            |
+| [AgentTeam.md](AgentTeam.md)                                           | Agent team execution workflow                                                       |
+| [DEBUGGING_HOOKS.md](DEBUGGING_HOOKS.md)                               | Capturing hook event flows (`scripts/debug_hooks.sh`) before writing handlers       |
+| [DEBUGGING_STOP_HOOK.md](DEBUGGING_STOP_HOOK.md)                       | Diagnosing stop-hook failures to block                                              |
+| [DEBUGGING_TRANSCRIPTS.md](DEBUGGING_TRANSCRIPTS.md)                   | Post-mortem debugging via session transcripts                                       |
+| [HANDLER_DEVELOPMENT.md](HANDLER_DEVELOPMENT.md)                       | Creating new handlers: lifecycle, API, testing patterns                             |
+| [HANDLER_GROUPING_AND_EXPANSION.md](HANDLER_GROUPING_AND_EXPANSION.md) | Handler grouping and language-specific expansion design                             |
+| [LLM-INSTALL.md](LLM-INSTALL.md)                                       | Fresh installation into a project                                                   |
+| [LLM-UPDATE.md](LLM-UPDATE.md)                                         | Updating an existing installation                                                   |
+| [PROJECT_HANDLERS.md](PROJECT_HANDLERS.md)                             | Project-level handler developer guide                                               |
+| [PlanJournalling.md](PlanJournalling.md)                               | Per-plan journalling reference                                                      |
+| [PlanWorkflow.md](PlanWorkflow.md)                                     | Planning workflow, templates, and standards                                         |
+| [QA.md](QA.md)                                                         | The QA pipeline — source of truth for QA workflow                                   |
+| [SELF_INSTALL.md](SELF_INSTALL.md)                                     | Self-install (dogfood) mode guide                                                   |
+| [Worktree.md](Worktree.md)                                             | Git worktree workflow                                                               |
+| [AcceptanceTests/](AcceptanceTests/GENERATING.md)                      | Acceptance test generation and validation                                           |
+| [Architecture/](Architecture/StatusLine.md)                            | Component deep-dives (status line)                                                  |
+| [Code/](Code/HooksSystem.md)                                           | Hooks system internals                                                              |
+| [CodeLifecycle/](CodeLifecycle/README.md)                              | Mandatory lifecycles: features, bugs, general changes                               |
+| [Performance/](Performance/README.md)                                  | Performance baselines and measurements                                              |
+| [Plan/](Plan/README.md)                                                | Numbered development plans (see [Plan/CLAUDE.md](Plan/CLAUDE.md) for lifecycle)     |
+| [UPGRADES/](UPGRADES/README.md)                                        | Version upgrade guides, truth-changes and config-changes manifests                  |
+| [development/](development/CLAUDE.md)                                  | Daemon-repo contributor docs (QA patterns, releasing, lessons, client-mode testing) |
 
-## Files
-
-### Documentation Policy
-
-**DocumentationStrategy.md** - The canonical documentation-SSoT ruleset
-
-- One canonical home per fact; every other surface points, never duplicates
-- Two-tree audience split (agent tree owns depth; human tree is terse)
-- Satellite surface contracts, plan-folder promotion, ssot-quote mechanism
-
-### Architecture & Design
-
-**ARCHITECTURE.md** - System architecture and design decisions
-
-- Daemon architecture and component overview
-- Handler system design
-- Configuration system
-- Plugin architecture
-
-**HANDLER_DEVELOPMENT.md** - Guide for creating custom handlers
-
-- Handler lifecycle and API
-- Priority system
-- Testing patterns
-- Best practices
-
-**DEBUGGING_HOOKS.md** - Critical tool for introspecting hook event flows
-
-- Debug utility usage (`scripts/debug_hooks.sh`)
-- Capturing event sequences for scenarios
-- Analyzing logs to surgically decide which events to hook
-- From scenario to handler: complete workflow
-- Common debugging scenarios (planning mode, git ops, testing, etc.)
-
-### Installation & Setup
-
-**LLM-INSTALL.md** - LLM-optimized installation guide
-
-- Installation workflow for AI assistants
-- Troubleshooting common issues
-- Verification steps
-
-**LLM-UPDATE.md** - LLM-optimized update guide
-
-- Version detection and upgrade path determination
-- References RELEASES/ for version changelogs
-- References UPGRADES/ for migration guides
-- Config migration and rollback procedures
-
-### Troubleshooting & Support
-
-**BUG_REPORTING.md** (root directory) - Bug reporting and diagnostics
-
-- Debug info script usage (`scripts/debug_info.py`)
-- Automated diagnostic report generation
-- Common issues and solutions
-- Manual bug report template
-
-### Development & Contributing
-
-**development/** - Documentation for daemon repository development
-
-- **RELEASING.md** - Release process using `/release` skill
-- **QA.md** - QA pipeline and automation
-- For developers working on the daemon codebase itself
+Troubleshooting and bug reporting live at the repo root:
+[../BUG_REPORTING.md](../BUG_REPORTING.md).
 
 ## What NOT to Put Here
 
@@ -87,34 +50,3 @@ This directory contains documentation optimized for LLM consumption (Claude, GPT
 - ✅ Design specifications
 - ✅ LLM-specific installation/development guides
 - ✅ Technical deep-dives for AI context
-
-## Usage by LLMs
-
-When working on this project, LLMs should:
-
-1. Read README.md for overview and installation
-2. Check ARCHITECTURE.md for system design
-3. **Use DEBUGGING_HOOKS.md to introspect event flows before writing handlers**
-4. Reference HANDLER_DEVELOPMENT.md for creating handlers
-5. Use LLM-INSTALL.md for installation assistance
-6. **Use LLM-UPDATE.md for updating existing installations**
-7. Check BUG_REPORTING.md when troubleshooting issues
-8. **Use development/RELEASING.md when publishing releases**
-9. Read source code docstrings for API details
-
-### Handler Development Workflow
-
-**CRITICAL**: Always debug first, develop second:
-
-1. Identify scenario ("enforce TDD", "block destructive git", etc.)
-2. **Use `scripts/debug_hooks.sh` to capture event flow** (DEBUGGING_HOOKS.md)
-3. Analyse logs to determine which event type and what data is available
-4. Write tests (TDD)
-5. Implement handler (HANDLER_DEVELOPMENT.md)
-6. Debug again to verify handler intercepts correctly
-
-## Maintenance
-
-- Keep documentation concise and information-dense
-- Update when architecture or design patterns change
-- Delete outdated docs rather than accumulating them

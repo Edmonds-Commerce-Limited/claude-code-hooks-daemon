@@ -218,11 +218,14 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
     the system is 5-digit — the canonical deep doc is the wrong half of its pair
   - release SKILL.md's four incompatible step numberings (review §A.2.2) — belongs
     to skill thinning
-  - `CLAUDE/CLAUDE.md` prose index → routing table (R7d; currently grandfathered)
-  - both `.claude/rules/` files fail the pointer-only contract: promote
-    `ccy-supervisor-dogfooding.md`'s hot-reload contract to a canonical home
-    (natural fit: a registered `.claude/ccy/CLAUDE.md`), thin
-    `importing-reports.md` against root CLAUDE.md's Report Handling section
+  - ✅ `CLAUDE/CLAUDE.md` prose index → routing table (R7d) — done in slice E
+  - ✅ both `.claude/rules/` files now pass the pointer-only contract (slice E):
+    hot-reload contract promoted to a registered `.claude/ccy/CLAUDE.md`
+    (`documentation.qa.registered_module_docs`); `ccy-supervisor-dogfooding.md`
+    thinned to an 11-line pointer body; `importing-reports.md` thinned to a
+    13-line pointer body against root CLAUDE.md's Report Handling section, with
+    its identifier-replacement table promoted into
+    `CLAUDE/development/DOC-CONVENTIONS.md`
   - **Audit run 1 additions**: findings N1–N9 in `AUDIT-dogfood-run-1.md`
     (worklist detail lives THERE). Headline: N1 venv layout stated four
     incompatible ways (severe), N2 68 non-allowlisted `@`-imports, N3
@@ -244,7 +247,10 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
     stale band docstrings in `constants/priority.py` + `core/handler.py` fixed.
     N5: HooksSystem.md's core.utils import mirror now points at
     PROJECT_HANDLERS.md, with `core/utils.py` docstrings as the API source.
-    Remaining: N4, N6.
+    Remaining: N4.
+  - ✅ N6 fixed (slice E): `CLAUDE/development/CLAUDE.md` rewritten as a
+    13-line routing table covering all 5 files, audience framing corrected to
+    point at DocumentationStrategy.md (R3).
 - [x] ✅ **Task 3.3**: Tooling/agent-definition follow-ups T1–T6 in
   `AUDIT-dogfood-run-1.md` (duplicate-block line numbers; worktree exclusion
   in the corpus indexer; agent-definition prompt fixes; shipped-vs-deployed

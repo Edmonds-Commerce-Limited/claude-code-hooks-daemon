@@ -920,7 +920,11 @@ documentation:
         generator: "scripts/upgrade_version.sh (redeploys src/claude_code_hooks_daemon/skills/docs-qa/SKILL.md)"
       - glob: ".claude/agents/hooks-daemon-*.md"
         generator: "bin/hooks-daemon agents install <name> (redeploys install/templates/agents/)"
-    registered_module_docs: []
+    registered_module_docs:
+      # Canonical home for the ccy supervisor hot-reload contract
+      # (Plan 00284 Task 3.2 slice E — promoted from
+      # .claude/rules/ccy-supervisor-dogfooding.md).
+      - ".claude/ccy/CLAUDE.md"
     resident_at_imports: ["CLAUDE.md"]
 
 # Daemon-shipped agent assets (Plan 00279). docs_qa dogfoods the Plan 00284

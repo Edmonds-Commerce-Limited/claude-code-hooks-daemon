@@ -56,6 +56,30 @@ impossible to check. The tag travels with the block, survives copy-paste into
 another document, and is mechanically enforceable — which is what stops the
 convention decaying.
 
+## Anonymising imported reports: what to strip, what to write instead
+
+This repository is public, so an imported report (see root `CLAUDE.md`'s
+"Report Handling" section for the workflow rule) has its reporter-specific
+identifiers replaced with these conventions before it is committed:
+
+| Remove                                                      | Replace with                                                 |
+| ----------------------------------------------------------- | ------------------------------------------------------------ |
+| Filenames and paths from the reporting project              | a generic description (`a playbook`, `the config file`)      |
+| Directory layout (`service/`, `apps/app/…`)                 | omit, or a neutral placeholder                               |
+| Host, server and service names                              | `host-a`, `host-b` (the existing convention)                 |
+| Client / employer / org names                               | `client-a`, `ClientA` (the existing convention)              |
+| Branch names, ticket and issue numbers from another tracker | omit — they carry roadmap detail and resolve to nothing here |
+| Domain class, table and column names                        | `SamplePolicy`, `FooRule`                                    |
+| Quoted user utterances                                      | paraphrase                                                   |
+| Real session UUIDs and transcript paths                     | `00000000-0000-0000-0000-000000000000`, or delete the line   |
+| Personal home directories                                   | `/home/user`                                                 |
+
+If a stripped identifier is likely to recur, add it to the `sensitive_content`
+deny-list as well — the automated guards only ever catch identifiers someone
+has already enumerated. When moving a report out of `untracked/`, use `mv`
+rather than `git mv`: the source location is gitignored, so git does not track
+it.
+
 ## Daemon CLI invocations must name a real subcommand
 
 A `bin/hooks-daemon <subcommand>` invocation inside a shell-tagged fence is
