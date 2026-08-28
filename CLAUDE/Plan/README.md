@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00285: skill bootstrap reexec breaks sibling source](00285-skill-bootstrap-reexec-breaks-sibling-source/PLAN.md) - In Progress (field report: the self-bootstrap re-exec in `daemon-cli.sh`/`health-check.sh`/`init-handlers.sh` relocates `$0` to a mktemp file, breaking a later `$(dirname "$0")` sibling `source` on every stale-vs-latest-release install)
+
 - [00284: documentation SSoT enforcement](00284-documentation-ssot-enforcement/PLAN.md) - In Progress (one canonical home per fact — agent depth in `CLAUDE/`, terse human docs in `docs/` pointing at it, every other surface points not duplicates; plan-QA-style three-surface enforcement; rolls in the progressive-disclosure strand, superseding Plan 00132)
 
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
@@ -1267,11 +1269,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 284 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 285 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 234 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
