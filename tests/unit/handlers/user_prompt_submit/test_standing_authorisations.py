@@ -331,6 +331,28 @@ class TestAutomatedPromptsAreIgnored:
         own = _hook_input("🤖 [ccy-supervisor] standing-authorisation reminder — ...")
         assert handler.handle(own).context == []
 
+    def test_timestamped_supervisor_nudge_is_silent(self) -> None:
+        """The REAL supervisor prefix carries a timestamp INSIDE the brackets.
+
+        Live supervisor traffic is ``🤖 [ccy-supervisor 2026-08-28 10:51:04]
+        continue`` — the invariant provenance marker is ``🤖 [ccy-supervisor``
+        (no closing bracket, mirroring the supervisor's own ``_BOT_PREFIX``),
+        not a literal ``🤖 [ccy-supervisor]``. A timestamped nudge must be
+        recognised as automated, or every compact/continue nudge would count as
+        a human prompt and drag reinforcements forward.
+        """
+        handler = StandingAuthorisationsHandler()
+        clock = _FakeClock()
+        handler._clock = clock
+        _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
+        handler.handle(_hook_input())  # first — full
+        # A flood of TIMESTAMPED nudges must never, by themselves, earn a
+        # reinforcement — they are automated. With the buggy literal-`]` marker
+        # these count as human prompts and the fifth fires a reinforcement.
+        for _ in range(20):
+            nudge = _hook_input("🤖 [ccy-supervisor 2026-08-28 10:51:04] continue")
+            assert handler.handle(nudge).context == []
+
     def test_automated_ticks_do_not_advance_the_prompt_counter(self) -> None:
         """Interleaved automated ticks must not bring a reinforcement forward."""
         handler = StandingAuthorisationsHandler()
