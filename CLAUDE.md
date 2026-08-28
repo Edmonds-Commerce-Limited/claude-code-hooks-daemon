@@ -1714,7 +1714,14 @@ block-eligible, unchanged advises, shrinking is silent).
 SOURCE section that other documents quote from names which
 quoting files now need re-checking (via the corpus's reverse quote
 index); the sweep re-verifies every quote anyway, so this is a
-heads-up, not a gate.
+heads-up, not a gate. `duplicate-block` — a structured block
+(fenced code, table, or list run of 3+ items) whose content, after
+normalisation, is identical to one already in a DIFFERENT indexed
+document; requires a warm corpus (silent on a cold one — no
+cross-document comparison is possible yet) and is hard-coded
+advisory-only: it has no block path at all, pending a hand-triaged
+whole-repo run before any promotion (see
+`CLAUDE/Plan/00284-documentation-ssot-enforcement/`).
 
 A finding only denies the write when it is BLOCK severity AND the
 resolved mode for that check (`documentation.qa.check_modes`
@@ -2188,12 +2195,17 @@ whose body no longer matches its source section, or whose source
 file/anchor has disappeared — re-verified fresh from disk every
 sweep, so this is the backstop for `quote-source-stale`, which only
 advises at edit time), `at-import-census` (an `@path.md` import
-outside the resident allowlist, found anywhere in the corpus), and
+outside the resident allowlist, found anywhere in the corpus),
 `module-doc-budget` (every sub-folder `CLAUDE.md` re-measured
 against its line budget — SWEEP has no before/after to judge
 worse-only against, so a block-eligible-at-EDIT finding is always
-reported here as advisory). Findings are injected once as advisory
-context — the sweep never blocks.
+reported here as advisory), and `duplicate-block` (a structured
+block — fenced code, table, or list run of 3+ items — whose
+normalised content matches one in a DIFFERENT document; always
+advisory, with no block path at all — see its own module
+docstring for why promotion needs a fresh hand-triaged whole-repo
+run first). Findings are injected once as advisory context — the
+sweep never blocks.
 
 **The injected report is capped**: only the first
 `MAX_ADVISORY_FINDINGS_SHOWN` (8) findings are shown, with a
