@@ -127,7 +127,7 @@ scattered sibling plans.
   rules, itself obeying them (pointed at from `CLAUDE.md`, not duplicated).
 - [ ] ⬜ **Task 1.3**: Decide handler shape — extend `markdown_organization` vs a new
   sibling handler + `docs_qa` check core. Record as a Technical Decision.
-- [ ] ⬜ **Task 1.4**: Supersede Plan 00132 (status flip + archive move + README row,
+- [x] ✅ **Task 1.4**: Supersede Plan 00132 (status flip + archive move + README row,
   atomically) citing this plan; mark the absorbed 00131 residue as tracked here.
 
 ### Phase 2: Enforcement design (post-review)

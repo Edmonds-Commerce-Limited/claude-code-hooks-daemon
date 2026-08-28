@@ -1,6 +1,9 @@
 # Plan 00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes
 
-**Status**: Not Started (pending proposal)
+**Status**: Superseded (by Plan 00284, which absorbs this plan's intent — a
+post-write progressive-disclosure nudge is one surface of the full
+documentation-SSoT enforcement system; see
+`CLAUDE/Plan/00284-documentation-ssot-enforcement/PLAN.md`)
 **Created**: 2026-06-19
 **Owner**: joseph
 

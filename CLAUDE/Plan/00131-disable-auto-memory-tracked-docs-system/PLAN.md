@@ -1,6 +1,6 @@
 # Plan 00131: Block Untracked Claude Memory + Tracked-Docs Progressive Disclosure
 
-**Status**: Dormant (Phases 1–5 shipped in v3.23.0; Phase 4 scaffolding-skill + Phase 6 dogfood deferred to follow-ups)
+**Status**: Dormant (Phases 1–5 shipped in v3.23.0; the deferred residue — Phase 4 scaffolding skill + Phase 6 dogfood migration — is now tracked by Plan 00284, the documentation-SSoT enforcement plan that absorbs the progressive-disclosure strand)
 **Created**: 2026-06-19
 **Owner**: joseph
 **Priority**: High

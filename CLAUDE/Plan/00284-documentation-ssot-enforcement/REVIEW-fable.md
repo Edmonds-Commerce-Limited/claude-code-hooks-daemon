@@ -431,7 +431,7 @@ Ownership summary:
 | D.9 generated-doc-hand-edit                                 | DETERMINISTIC                                                                                                       |
 | Scattered truth with no canonical home                      | AGENT only — no deterministic shape exists                                                                          |
 
-**D.1 `pointer-resolves` (stale links).**
+**D.1 `pointer-resolves` (stale links).** [DETERMINISTIC]
 Detects: markdown links + `@`-imports + (optionally) backticked repo paths whose target
 does not exist on disk; case mismatches on case-sensitive targets.
 Surfaces: edit-time (only links present in the written content — a handful of `stat`
@@ -448,6 +448,7 @@ Cost: trivial. **Recommend: ship first — highest value/risk ratio; A.3 shows s
 standing hits.**
 
 **D.2 `no-duplicate-block` (verbatim/near-verbatim structured duplication).**
+[DETERMINISTIC — its ambiguous hits are handed to the agent for adjudication, D.10]
 Detects: a fenced code block, table, or numbered-list run ≥ N lines (suggest 5) whose
 normalised hash appears in 2+ non-generated doc-surface files.
 Surfaces: bulk scan + sweep primarily. Edit-time is feasible against an in-memory index
@@ -462,18 +463,23 @@ That is a true positive under R4 but the project may choose to keep it — so ei
 command-fence blocks. **Recommend: advisory-only until a whole-repo run is
 hand-triaged (00208/00214 discipline), then block only on NEW duplicates (R12).**
 
-**D.3 near-duplicate paraphrase (shingling/minhash).**
+**D.3 near-duplicate paraphrase + conflicting truths.** [AGENT]
 Detects: paragraph-level near-copies (the `python-developer.md` principles restatement —
-"same eight, same order, different wording" — is invisible to D.2).
-Surfaces: batch/sweep ONLY — corpus-wide minhash does not belong in a PreToolUse path,
-and edit-time novelty means the index is stale exactly when it matters.
-FP assessment: high by construction — two docs legitimately discussing the same topic in
-their own scope will shingle-overlap. **Recommend: advisory sweep at a conservative
-similarity threshold, capped findings per run; better still, position it as an on-demand
-audit subcommand (`docs-qa --near-dupes`) rather than a recurring gate. Never blocking.
-Answers Open Question 4: exact-block edit-time via cached index; shingling batch-only.**
+"same eight, same order, different wording" — is invisible to D.2), and the harder case
+D.2 can never see: two docs asserting INCOMPATIBLE facts (the acceptance-test skill vs
+GENERATING.md inversion, the three priority-band schemes).
+Ownership: this is the docs-qa agent's core mandate. A deterministic shingling/minhash
+pass has FPs by construction (two docs legitimately discussing one topic in their own
+scope shingle-overlap) and, crucially, cannot distinguish "duplicate" from
+"contradiction" — the distinction that matters most (a contradiction is worse than a
+copy). **Recommend: do NOT ship deterministic shingling as a recurring gate. At most,
+keep a cheap shingle pass as an internal PRE-FILTER the agent's orchestration can use to
+shortlist candidate file pairs for a large tree (D.10) — its FPs then cost agent
+attention, not user trust. Answers Open Question 4: exact-block edit-time via cached
+index; everything softer than exact goes to the agent.**
 
-**D.4 `derived-fact-drift` (R5 enforcement).**
+**D.4 `derived-fact-drift` (R5 enforcement).** \[SPLIT — registered facts
+DETERMINISTIC; unregistered factual contradictions belong to the agent\]
 Detects: a stated value of a registered derived fact (QA check count, handler count,
 current version, step totals, venv path shape) that disagrees with its generator; and
 optionally ANY numeric claim adjacent to a registered fact's keywords outside the source
@@ -489,7 +495,9 @@ skip values inside quotation marks/parenthetical history, per-fact line allowlis
 **Recommend: advisory; block only for a small hand-picked fact set (current version
 string in non-RELEASES docs is nearly FP-free).**
 
-**D.5 `surface-budget` / thin-pointer heuristic (R7, Open Question 3).**
+**D.5 `surface-budget` / thin-pointer heuristic (R7, Open Question 3).** \[SPLIT —
+size tiers + marker headings DETERMINISTIC advisory; the restatement-vs-application
+judgement is the agent's\]
 Detects: a skill body / agent file / rules file exceeding a size tier, OR containing
 "general-doc" markers (headings like `## Engineering Principles`; ≥2 D.2 duplicate
 hits; fenced code skeletons in an agent file).
@@ -502,7 +510,7 @@ only growth blocks, and only in `block` mode with a `MUST_EXCEED_..._BECAUSE` es
 Combining size with D.2 hits gives the honest signal. **Recommend: advisory, tiered;
 never block on size alone.**
 
-**D.6 `index-completeness`.**
+**D.6 `index-completeness`.** [DETERMINISTIC]
 Detects: a file declaring itself an index of a directory (opt-in frontmatter
 `indexes: <dir>`, or the R7d registration) whose listing disagrees with the directory.
 Surfaces: sweep + bulk.
@@ -534,6 +542,69 @@ and regenerate command; sweep checks the regeneration marker/version for stalene
 FP: essentially zero (the manifest is explicit; the daemon's own auto-commit path can be
 recognised or simply tolerated as advisory). **Recommend: ship early; protects clients
 from the B.6 scenario.**
+
+**D.10 The `hooks-daemon-docs-qa` agent (semantic half — design recommendation).**
+
+*Deployment*: read-only agent via the Plan 00279 generic agent install subsystem;
+`hooks-daemon-plan-dedupe-scout` is the template for tone and self-restraint (it
+explicitly refuses to carry general knowledge and reports candidates with reasons,
+never a verdict — both properties transfer directly).
+
+*Scan strategy for large doc trees* (it cannot read everything into one context):
+
+1. **Inventory pass, not content pass.** First build a cheap map from tool output,
+   not file reads: the configured surface roster (canonical trees, satellites),
+   file sizes, and headings (`Grep` for `^#{1,3} ` per file). Headings are the
+   topic index — the part-A drift clustered under nameable topics (QA commands,
+   release steps, priority bands, venv paths), each discoverable from headings and
+   a handful of keyword greps.
+2. **Topic-sharded deep reads.** For each candidate topic (heading co-occurrence
+   across 2+ files, or a keyword hit list), read ONLY the implicated sections/files
+   and adjudicate: same fact? which copy is canonical? do they agree? This bounds
+   per-topic context regardless of tree size. For trees too large even for the
+   inventory in one context, the agent dispatches per-topic sub-readers if its
+   harness allows, or processes topics in sequence and appends findings as it goes.
+3. **Deterministic pre-seed.** Feed it the bulk scanner's machine findings
+   (D.1/D.2/D.4 output) as its starting worklist — the agent's judgement is most
+   valuable ADJUDICATING mechanical hits (true duplicate vs blessed idiom vs
+   application note) and extending from them to the paraphrase/contradiction
+   neighbours the machine cannot see. This also keeps repeat runs cheap: triage the
+   delta, not the corpus.
+4. **Freshness tiebreaker without guessing**: when two copies disagree, `git log -1 --format=%cI -- <file>` per copy tells it which copy moved last — usually the
+   migrated-forward truth (A.1's pattern: the canonical docs were updated, the
+   satellites were not). Report the evidence, not a unilateral verdict on which is
+   "right" — that call is the human's, exactly as the dedupe-scout does.
+
+*Report format*: one markdown report file (the `idle_housekeeping` convention:
+`untracked/reports/` by default; a plan folder when run for a plan). Per finding:
+**id** (stable slug so re-runs can diff), **class** (`conflicting-truth` |
+`paraphrase-duplicate` | `scattered-truth-no-home` | `adjudicated-mechanical-hit`),
+**severity** (conflict > duplicate > scatter), **each copy as file:line + a ≤2-line
+quote**, **which copy the evidence suggests is current** (with the git-date evidence),
+and **suggested remediation** (which file becomes/holds the canonical home, which
+copies become pointers). Plus a summary table and an explicit "adjudicated as fine"
+list — recording NON-findings is what stops the next run re-litigating them, and is
+the grandfathering input for the deterministic allowlist.
+
+*Invocation routes* (all three, they compose):
+
+1. **On-demand** — the primary route: a human or the executing agent dispatches it
+   (Task 1.2's dogfood migration should be its first real run — the report IS the
+   migration worklist, and doubles as the agent's acceptance test against part A of
+   this review: it should independently rediscover A.1, A.2.2, A.2.6).
+2. **Sweep-suggested** — the SessionStart docs sweep, when it has findings past a
+   threshold (or a staleness clock since the last report), ADVISES dispatching the
+   agent; it never auto-dispatches (a SessionStart hook must stay cheap, and
+   spawning agents is the session's call — same restraint as `plan_number_helper`'s
+   dedupe-scout suggestion, which is explicitly "a SUGGESTION — it never blocks").
+3. **Idle-housekeeping specialist** (Plan 00161 / `idle_housekeeping_advisory`) —
+   register it in the housekeeping roster: report-only, read-only, strictly lower
+   priority than real work. This is the natural periodic route for clients since it
+   costs an idle session, not a working one.
+
+Cadence guard: whatever the route, rate-limit by report freshness (skip if a report
+younger than N days exists and the doc tree's git mtime has not advanced) — the
+corpus changes slowly and semantic re-scans are the expensive half.
 
 **Latency note for the edit-time surface**: D.1/D.4/D.5/D.8/D.9 are per-file
 regex+stat work — comfortably inside the daemon's ~1.8 ms dispatch envelope's order of
