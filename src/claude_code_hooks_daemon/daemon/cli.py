@@ -87,6 +87,7 @@ from claude_code_hooks_daemon.daemon.validation import (
     is_hooks_daemon_repo,
     is_inside_daemon_directory,
 )
+from claude_code_hooks_daemon.docs_qa.comment_finder import DEFAULT_MIN_BLOCK_LINES
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.hook_registration import (
@@ -4401,6 +4402,48 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
+def cmd_find_comment_blocks(args: argparse.Namespace) -> int:
+    """List long comment blocks under the given paths (Plan 00284 Task 3.1g).
+
+    Deterministic finder feeding the ``hooks-daemon-docs-qa`` agent's
+    worklist (Decision 7: verbose comments that function as documentation).
+    Lists candidates only — never judges content, never blocks anything.
+
+    Args:
+        args: Parsed CLI arguments with ``paths`` (files/dirs), ``min_lines``
+            and ``json_output``.
+
+    Returns:
+        0 when no blocks are found, 1 when findings are reported.
+    """
+    from claude_code_hooks_daemon.docs_qa.comment_finder import find_long_comment_blocks
+
+    resolved_paths = [Path(p).resolve() for p in args.paths]
+    findings = find_long_comment_blocks(resolved_paths, min_lines=args.min_lines)
+
+    if getattr(args, "json_output", False):
+        payload = [
+            {
+                "path": str(finding.path),
+                "start_line": finding.start_line,
+                "end_line": finding.end_line,
+                "line_count": finding.line_count,
+                "preview": finding.preview,
+            }
+            for finding in findings
+        ]
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"{len(findings)} finding(s)")
+        for finding in findings:
+            print(
+                f"  {finding.path}:{finding.start_line}-{finding.end_line} "
+                f"({finding.line_count} lines) {finding.preview}"
+            )
+
+    return 1 if findings else 0
+
+
 def cmd_skill_scan(args: argparse.Namespace) -> int:
     """Run the skill-opportunity scan pipeline (Plan 00274).
 
@@ -5334,6 +5377,32 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_docs_qa.set_defaults(func=cmd_docs_qa)
+
+    # find-comment-blocks command (Plan 00284 Task 3.1g) — deterministic
+    # finder feeding the hooks-daemon-docs-qa agent's worklist (Decision 7)
+    parser_find_comment_blocks = subparsers.add_parser(
+        "find-comment-blocks",
+        help="List long comment blocks under PATHS (feeds the docs-qa agent's worklist)",
+    )
+    parser_find_comment_blocks.add_argument(
+        "paths",
+        nargs="+",
+        help="Files and/or directories to scan (directories are expanded recursively)",
+    )
+    parser_find_comment_blocks.add_argument(
+        "--min-lines",
+        dest="min_lines",
+        type=int,
+        default=DEFAULT_MIN_BLOCK_LINES,
+        help=f"Minimum block length in lines to report (default: {DEFAULT_MIN_BLOCK_LINES})",
+    )
+    parser_find_comment_blocks.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Emit findings as JSON",
+    )
+    parser_find_comment_blocks.set_defaults(func=cmd_find_comment_blocks)
 
     # skill-scan command (Plan 00274) — mine transcripts for skill candidates
     parser_skill_scan = subparsers.add_parser(

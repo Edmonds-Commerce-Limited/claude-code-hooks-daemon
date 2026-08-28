@@ -52,6 +52,7 @@ _AGENT_FILE_MODE: Final[int] = 0o644
 
 DEDUPE_AGENT_NAME: Final[str] = "hooks-daemon-plan-dedupe-scout"
 OPUS_SECURITY_AGENT_NAME: Final[str] = "hooks-daemon-opus-security"
+DOCS_QA_AGENT_NAME: Final[str] = "hooks-daemon-docs-qa"
 
 _MD_SUFFIX: Final[str] = ".md"
 
@@ -143,6 +144,10 @@ def _opus_security_enabled(config: Config) -> bool:
     return config.agents.opus_security.enabled
 
 
+def _docs_qa_agent_enabled(config: Config) -> bool:
+    return config.agents.docs_qa.enabled
+
+
 # Historic dedupe-scout revisions, harvested from this repository's git
 # history (every blob the template ever shipped as, including the pre-marker
 # content current at the time this subsystem was introduced). Without these,
@@ -179,6 +184,13 @@ SHIPPED_AGENTS: Final[tuple[AgentAssetSpec, ...]] = (
         gating_config_key="agents.opus_security.enabled",
         is_enabled=_opus_security_enabled,
         historic_versions=_OPUS_SECURITY_HISTORIC_VERSIONS,
+    ),
+    AgentAssetSpec(
+        name=DOCS_QA_AGENT_NAME,
+        version="1.0.0",
+        gating_config_key="agents.docs_qa.enabled",
+        is_enabled=_docs_qa_agent_enabled,
+        historic_versions=(),
     ),
 )
 

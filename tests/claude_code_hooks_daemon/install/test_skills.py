@@ -184,3 +184,58 @@ class TestDeploySkills:
         target_dir = temp_project / ".claude" / "skills" / "hooks-daemon"
         assert target_dir.exists()
         # TODO: Add version file check when implemented
+
+
+class TestDeployMultipleSkills:
+    """Plan 00284: the bundled skills/ directory now ships more than one
+    skill (hooks-daemon + docs-qa) — every subdirectory must deploy."""
+
+    @pytest.fixture
+    def daemon_source_two_skills(self, tmp_path: Path) -> Generator[Path, None, None]:
+        source = tmp_path / "daemon-source-two"
+        source.mkdir()
+        skills_root = source / "skills"
+
+        hooks_daemon_dir = skills_root / "hooks-daemon"
+        hooks_daemon_dir.mkdir(parents=True)
+        (hooks_daemon_dir / "SKILL.md").write_text("# Hooks Daemon Skill\n")
+
+        docs_qa_dir = skills_root / "docs-qa"
+        docs_qa_dir.mkdir(parents=True)
+        (docs_qa_dir / "SKILL.md").write_text("# Docs QA Skill\n")
+        scripts_dir = docs_qa_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "find-comment-blocks.sh").write_text("#!/bin/bash\necho blocks\n")
+
+        yield source
+
+        if source.exists():
+            shutil.rmtree(source)
+
+    def test_deploys_every_bundled_skill(
+        self, temp_project: Path, daemon_source_two_skills: Path
+    ) -> None:
+        deploy_skills(daemon_source_two_skills, temp_project)
+
+        skills_dir = temp_project / ".claude" / "skills"
+        assert (skills_dir / "hooks-daemon" / "SKILL.md").read_text() == "# Hooks Daemon Skill\n"
+        assert (skills_dir / "docs-qa" / "SKILL.md").read_text() == "# Docs QA Skill\n"
+
+    def test_docs_qa_scripts_made_executable(
+        self, temp_project: Path, daemon_source_two_skills: Path
+    ) -> None:
+        deploy_skills(daemon_source_two_skills, temp_project)
+
+        script = (
+            temp_project / ".claude" / "skills" / "docs-qa" / "scripts" / "find-comment-blocks.sh"
+        )
+        assert script.stat().st_mode & 0o100
+
+    def test_real_bundled_skills_directory_deploys_both(self, temp_project: Path) -> None:
+        """Acceptance check against the REAL repository layout, not a fixture."""
+        real_daemon_source = Path(__file__).resolve().parents[3]
+        deploy_skills(real_daemon_source, temp_project)
+
+        skills_dir = temp_project / ".claude" / "skills"
+        assert (skills_dir / "hooks-daemon" / "SKILL.md").is_file()
+        assert (skills_dir / "docs-qa" / "SKILL.md").is_file()

@@ -909,6 +909,12 @@ documentation:
     registered_module_docs: []
     resident_at_imports: ["CLAUDE.md"]
 
+# Daemon-shipped agent assets (Plan 00279). docs_qa dogfoods the Plan 00284
+# hooks-daemon-docs-qa auditor in THIS repo; ships disabled upstream.
+agents:
+  docs_qa:
+    enabled: true
+
 project_handlers:
   enabled: true
   path: .claude/project-handlers

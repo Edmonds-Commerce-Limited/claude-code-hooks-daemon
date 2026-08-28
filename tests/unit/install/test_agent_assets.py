@@ -16,6 +16,7 @@ from claude_code_hooks_daemon.install.agent_assets import (
     AGENT_VERSION_MARKER_PREFIX,
     AGENTS_DIR_PARTS,
     DEDUPE_AGENT_NAME,
+    DOCS_QA_AGENT_NAME,
     OPUS_SECURITY_AGENT_NAME,
     SHIPPED_AGENTS,
     AgentAction,
@@ -43,11 +44,11 @@ def _spec(name: str) -> AgentAssetSpec:
 
 
 def _enabled_config(**kwargs: object) -> Config:
-    """Config with plan_workflow + opus-security agent enabled."""
+    """Config with plan_workflow + opus-security + docs-qa agents enabled."""
     return Config.model_validate(
         {
             "plan_workflow": {"enabled": True},
-            "agents": {"opus_security": {"enabled": True}},
+            "agents": {"opus_security": {"enabled": True}, "docs_qa": {"enabled": True}},
         }
     )
 
@@ -57,6 +58,7 @@ class TestRegistry:
         names = {spec.name for spec in SHIPPED_AGENTS}
         assert DEDUPE_AGENT_NAME in names
         assert OPUS_SECURITY_AGENT_NAME in names
+        assert DOCS_QA_AGENT_NAME in names
 
     def test_every_agent_name_is_namespaced(self) -> None:
         for spec in SHIPPED_AGENTS:
@@ -84,6 +86,12 @@ class TestRegistry:
     def test_opus_security_disabled_by_default(self) -> None:
         spec = _spec(OPUS_SECURITY_AGENT_NAME)
         assert spec.gating_config_key == "agents.opus_security.enabled"
+        assert not spec.is_enabled(Config())
+        assert spec.is_enabled(_enabled_config())
+
+    def test_docs_qa_agent_disabled_by_default(self) -> None:
+        spec = _spec(DOCS_QA_AGENT_NAME)
+        assert spec.gating_config_key == "agents.docs_qa.enabled"
         assert not spec.is_enabled(Config())
         assert spec.is_enabled(_enabled_config())
 

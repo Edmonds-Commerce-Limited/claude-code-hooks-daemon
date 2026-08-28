@@ -921,6 +921,8 @@ class AgentsConfig(BaseModel):
     Attributes:
         opus_security: Quarantine executor for safeguard-flaggable security
             work (``hooks-daemon-opus-security``). Ships disabled.
+        docs_qa: Read-only documentation-SSoT auditor
+            (``hooks-daemon-docs-qa``, Plan 00284). Ships disabled.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -928,6 +930,10 @@ class AgentsConfig(BaseModel):
     opus_security: AgentAssetGateConfig = Field(
         default_factory=AgentAssetGateConfig,
         description="hooks-daemon-opus-security quarantine agent (ships disabled)",
+    )
+    docs_qa: AgentAssetGateConfig = Field(
+        default_factory=AgentAssetGateConfig,
+        description="hooks-daemon-docs-qa documentation auditor agent (ships disabled)",
     )
 
 
