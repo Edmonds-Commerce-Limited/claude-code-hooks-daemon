@@ -1,6 +1,6 @@
 # Plan 00286: plan qa staged status location coherence
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-28
 **Owner**: joseph
 **Priority**: Medium
@@ -63,14 +63,14 @@ currently says.
 
 ### Phase 1: Reproduce and design
 
-- [ ] ⬜ **Task 1.1**: Reproduce the field sequence in a scratch git repo:
+- [x] ✅ **Task 1.1**: Reproduce the field sequence in a scratch git repo:
   stage a status flip to terminal in the worktree, `git mv` the folder
   without re-adding, and confirm `location-status-coherence`'s COMMIT
   registration misses it (worktree already shows the flip).
 
 ### Phase 2: TDD implementation
 
-- [ ] ⬜ **Task 2.1**: Write failing tests for a new
+- [x] ✅ **Task 2.1**: Write failing tests for a new
   `archived-status-coherence` check under
   `tests/unit/plan_qa/checks/test_archived_status_coherence.py`, covering:
   the field sequence (rename staged, flip not re-added → BLOCK), a correct
@@ -78,34 +78,34 @@ currently says.
   fresh into the archive dir (BLOCK), an unparseable/missing status header
   staged into the archive dir (BLOCK), and legacy-allowlist downgrade to
   ADVISE.
-- [ ] ⬜ **Task 2.2**: Implement
+- [x] ✅ **Task 2.2**: Implement
   `src/claude_code_hooks_daemon/plan_qa/checks/archived_status_coherence.py`
   reading staged blobs via `GitFacts.staged_file_text`, following the
   conventions in `terminal_state_atomic.py` and `common.py`.
-- [ ] ⬜ **Task 2.3**: Register the check in
+- [x] ✅ **Task 2.3**: Register the check in
   `src/claude_code_hooks_daemon/plan_qa/checks/__init__.py`.
 
 ### Phase 3: Verification
 
-- [ ] ⬜ **Task 3.1**: Run the full unit suite for `plan_qa` and QA
+- [x] ✅ **Task 3.1**: Run the full unit suite for `plan_qa` and QA
   (`./scripts/qa/llm_qa.py all`) fully green.
-- [ ] ⬜ **Task 3.2**: `bin/hooks-daemon restart && bin/hooks-daemon status`
+- [x] ✅ **Task 3.2**: `bin/hooks-daemon restart && bin/hooks-daemon status`
   → RUNNING.
-- [ ] ⬜ **Task 3.3**: Live-verify `plan-qa --check-staged` against a
+- [x] ✅ **Task 3.3**: Live-verify `plan-qa --check-staged` against a
   synthesised staged state reproducing today's field case, and confirm a
   correct atomic archive commit stays clean.
-- [ ] ⬜ **Task 3.4**: Update `docs/guides/HANDLER_REFERENCE.md`'s
+- [x] ✅ **Task 3.4**: Update `docs/guides/HANDLER_REFERENCE.md`'s
   `plan_qa_commit_gate` invariants list to name the new check.
 
 ## Success Criteria
 
-- [ ] `archived-status-coherence` check exists, is registered at
+- [x] `archived-status-coherence` check exists, is registered at
   `Stage.COMMIT`, and is BLOCK level (ADVISE for legacy-allowlisted plans).
-- [ ] The exact field sequence (rename staged, content flip not re-added) is
+- [x] The exact field sequence (rename staged, content flip not re-added) is
   now flagged by `plan-qa --check-staged`.
-- [ ] A correct atomic archive commit (terminal status staged + move staged
+- [x] A correct atomic archive commit (terminal status staged + move staged
   together) produces no finding from the new check.
-- [ ] Full QA suite green; daemon restarts and reports RUNNING.
+- [x] Full QA suite green; daemon restarts and reports RUNNING.
 
 ## Delivery & Milestones
 
@@ -113,4 +113,5 @@ currently says.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00286-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- (filled in on completion)
+- Plan scaffolded and indexed at 07da31ea.
+- Check implemented, registered, documented and verified at c7633e3f (QA 25/25; daemon RUNNING; live-verified: staged non-terminal status under Completed/ flagged as BLOCK, correct atomic archive silent).
