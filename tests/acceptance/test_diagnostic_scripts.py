@@ -50,6 +50,7 @@ SRC_ROOT = REPO_ROOT / "src" / "claude_code_hooks_daemon"
 SKILL_SCRIPTS = SRC_ROOT / "skills" / "hooks-daemon" / "scripts"
 DAEMON_CLI_SH = SKILL_SCRIPTS / "daemon-cli.sh"
 HEALTH_CHECK_SH = SKILL_SCRIPTS / "health-check.sh"
+INIT_HANDLERS_SH = SKILL_SCRIPTS / "init-handlers.sh"
 RESOLVE_VENV_SH = SKILL_SCRIPTS / "_resolve-venv.sh"
 SKILL_UPGRADE_SH = SKILL_SCRIPTS / "upgrade.sh"
 PATHS_PY = SRC_ROOT / "daemon" / "paths.py"
@@ -272,6 +273,77 @@ def test_health_check_runs_without_module_not_found_error(tmp_path: Path) -> Non
         f"health-check.sh output must include its banner sections, proving "
         f"the script reached the daemon-CLI dispatch step. "
         f"stdout={result.stdout!r}"
+    )
+
+
+_RELOCATION_CASES = [
+    (DAEMON_CLI_SH, ["status"], "Daemon:"),
+    (HEALTH_CHECK_SH, [], "Health Check"),
+    (INIT_HANDLERS_SH, [], "Project Handler Scaffolding"),
+]
+
+
+@pytest.mark.parametrize(
+    "script_path, extra_args, expected_marker",
+    _RELOCATION_CASES,
+    ids=[case[0].name for case in _RELOCATION_CASES],
+)
+def test_diagnostic_script_survives_relocated_invocation(
+    tmp_path: Path, script_path: Path, extra_args: list[str], expected_marker: str
+) -> None:
+    """Plan 00285: venv resolution must survive a relocated ``$0``.
+
+    Reproduces the production failure mode from the Plan 00285 field report:
+    the self-bootstrap stanza's ``exec bash "$tmpfile" --already-bootstrapped
+    "$@"`` relocates the running script to a mktemp path with no sibling
+    ``_resolve-venv.sh`` on disk. The old ``source "$(dirname "$0")/..."``
+    line then looks in the wrong directory and the script dies before ever
+    reaching daemon-CLI dispatch — on EVERY invocation where the local
+    script differs from the latest release (i.e. any install that is not on
+    the newest version).
+
+    This test simulates the relocation directly — copying the script body to
+    an unrelated directory with no sibling shim — rather than depending on a
+    real network round trip through the bootstrap stanza. Bootstrap itself is
+    disabled (``HOOKS_DAEMON_SKIP_BOOTSTRAP=1``) so this isolates the
+    ``$0``-relative lookup bug from the bootstrap network path (covered
+    separately by ``test_stale_diagnostic_script_self_bootstraps_on_first_invocation``).
+    """
+    project_root, _ = _build_diagnostic_fixture(tmp_path)
+
+    relocated_dir = tmp_path / "relocated-invocation-site"
+    relocated_dir.mkdir()
+    relocated_script = relocated_dir / script_path.name
+    relocated_script.write_bytes(script_path.read_bytes())
+    relocated_script.chmod(relocated_script.stat().st_mode | stat.S_IEXEC)
+    # Deliberately NOT copying _resolve-venv.sh alongside it: this is exactly
+    # the on-disk state after a real self-bootstrap re-exec, where the
+    # mktemp copy has no sibling shim at all.
+
+    env = os.environ.copy()
+    env["HOME"] = str(project_root.parent)
+    env["HOOKS_DAEMON_SKIP_BOOTSTRAP"] = "1"
+
+    result = subprocess.run(
+        [BASH, str(relocated_script), *extra_args],
+        capture_output=True,
+        text=True,
+        cwd=project_root,
+        env=env,
+        check=False,
+    )
+
+    combined = result.stdout + "\n" + result.stderr
+    assert "_resolve-venv.sh" not in combined or "No such file or directory" not in combined, (
+        f"{script_path.name}: venv resolution must not depend on the script's "
+        f"own directory — it must not look for a sibling _resolve-venv.sh that "
+        f"does not exist at the relocated invocation site. "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert expected_marker in result.stdout, (
+        f"{script_path.name}: expected to reach {expected_marker!r} in stdout, "
+        f"proving venv resolution succeeded despite relocation. "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
 
 

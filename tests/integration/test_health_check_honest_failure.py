@@ -8,10 +8,13 @@ leaving the operator nothing to act on.
 Fix: an ``EXIT`` trap that, on a non-zero exit, prints a clear reason (script
 name, exit code, failing line) to stderr. On success it stays silent.
 
-This test copies health-check.sh next to a stub ``_resolve-venv.sh`` that
-exits non-zero, runs it against a synthetic project, and asserts the script
-exits non-zero WITH a reason on stderr (no silent failure). Bootstrap is
-skipped via ``HOOKS_DAEMON_SKIP_BOOTSTRAP=1`` to keep the test offline.
+This test copies health-check.sh into a synthetic ``DAEMON_DIR`` with a stub
+``scripts/lib/resolve_venv.sh`` that exits non-zero (Plan 00285: health-check.sh
+now sources the canonical library via ``$DAEMON_DIR/scripts/lib/resolve_venv.sh``
+directly, not a sibling ``_resolve-venv.sh`` resolved relative to ``$0``), runs
+it against a synthetic project, and asserts the script exits non-zero WITH a
+reason on stderr (no silent failure). Bootstrap is skipped via
+``HOOKS_DAEMON_SKIP_BOOTSTRAP=1`` to keep the test offline.
 """
 
 from __future__ import annotations
@@ -36,16 +39,23 @@ _TIMEOUT_SECONDS = 30
 
 
 def _setup(tmp_path: Path) -> Path:
-    """Project with a copied health-check.sh + a failing stub _resolve-venv.sh."""
+    """Project with a copied health-check.sh + a failing stub resolve_venv.sh.
+
+    Plan 00285: health-check.sh sources
+    ``$DAEMON_DIR/scripts/lib/resolve_venv.sh`` directly (DAEMON_DIR =
+    ``<project_root>/.claude/hooks-daemon``), so the stub lives there instead
+    of next to the copied script.
+    """
     project = tmp_path / "project"
-    scripts_dir = project / ".claude" / "hooks-daemon" / "scripts"
-    scripts_dir.mkdir(parents=True)
+    daemon_scripts_dir = project / ".claude" / "hooks-daemon" / "scripts"
+    lib_dir = daemon_scripts_dir / "lib"
+    lib_dir.mkdir(parents=True)
     (project / ".claude" / "hooks-daemon.yaml").write_text("self_install_mode: false\n")
 
-    shutil.copy(HEALTH_CHECK, scripts_dir / "health-check.sh")
-    # Stub sibling that dies non-zero under set -e (simulates a venv-resolution
+    shutil.copy(HEALTH_CHECK, daemon_scripts_dir / "health-check.sh")
+    # Stub that dies non-zero under set -e (simulates a venv-resolution
     # failure) — the exact silent-exit shape the trap must make honest.
-    (scripts_dir / "_resolve-venv.sh").write_text("#!/bin/bash\nexit 3\n")
+    (lib_dir / "resolve_venv.sh").write_text("#!/bin/bash\nexit 3\n")
     return project
 
 

@@ -385,12 +385,32 @@ class TestWrappersUseResolver:
         )
 
     @pytest.mark.parametrize("script_name", WRAPPER_SCRIPTS)
-    def test_wrapper_sources_resolver(self, script_name: str) -> None:
+    def test_wrapper_sources_canonical_resolver(self, script_name: str) -> None:
+        """Plan 00285: wrappers source the canonical lib via DAEMON_DIR directly.
+
+        Previously each wrapper sourced the co-located ``_resolve-venv.sh``
+        shim via ``$(dirname "$0")``, which breaks after the self-bootstrap
+        stanza's re-exec relocates ``$0`` to a mktemp file with no sibling
+        shim on disk. The fix anchors resolution to ``DAEMON_DIR`` (a full
+        checkout of the daemon repo, so ``scripts/lib/resolve_venv.sh``
+        always exists there), which is re-exec-proof because it is derived
+        from ``PROJECT_ROOT`` (walked up from ``$(pwd)``), not from ``$0``.
+        """
         script = SKILL_SCRIPTS_DIR / script_name
         content = script.read_text()
-        assert "_resolve-venv.sh" in content, (
-            f"{script_name} must source _resolve-venv.sh to pick up "
-            "fingerprint-keyed venv resolution."
+        assert '$DAEMON_DIR/scripts/lib/resolve_venv.sh"' in content, (
+            f"{script_name} must source the canonical resolve_venv.sh library "
+            'via "$DAEMON_DIR/scripts/lib/resolve_venv.sh" — not a path relative '
+            "to $0, which does not survive the self-bootstrap re-exec."
+        )
+        assert 'resolve_venv_python "$DAEMON_DIR"' in content, (
+            f"{script_name} must call resolve_venv_python \"$DAEMON_DIR\" after "
+            "sourcing the canonical library."
+        )
+        assert '$(dirname "$0")' not in content, (
+            f"{script_name} must not resolve any path relative to $0 — that is "
+            "exactly the pattern that breaks after the self-bootstrap re-exec "
+            "relocates $0 to a mktemp file (Plan 00285)."
         )
 
 
