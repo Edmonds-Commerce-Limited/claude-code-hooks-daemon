@@ -111,6 +111,7 @@ class TestRegistryCatalogue:
             "index-at-birth",
             "counter-sanity",
             "terminal-state-atomic",
+            "archived-status-coherence",
             "same-commit-plan-doc",
             "plan-ref-format",
             "journal-entry-with-progress",
@@ -135,8 +136,8 @@ class TestRegistryCatalogue:
         assert len(by_stage[Stage.EDIT]) == 14
         # 5 commit-only + 5 dual tree checks + 2 journal COMMIT checks (Plan 00163)
         # + plan-shrink-without-journal (Plan 00190) + index-row-length (Plan 00218)
-        # + index-no-log
-        assert len(by_stage[Stage.COMMIT]) == 15
+        # + index-no-log + archived-status-coherence (Plan 00286)
+        assert len(by_stage[Stage.COMMIT]) == 16
         # 3 sweep-only + 5 dual tree checks + 2 journal SWEEP checks (Plan 00163)
         # + index-row-length (Plan 00218) + index-no-log + 5 document-rule sweep
         # twins and the journal-dayfile-naming sweep twin (Plan 00230)

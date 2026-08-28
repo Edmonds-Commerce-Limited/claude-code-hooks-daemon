@@ -13,6 +13,7 @@ documentation can be generated from it.
 
 from claude_code_hooks_daemon.plan_qa.checks import (
     archive_immutability,
+    archived_status_coherence,
     claim_spotcheck_queue,
     counter_sanity,
     dormant_honesty,
@@ -81,6 +82,7 @@ def all_checks() -> tuple[CheckSpec, ...]:
         index_at_birth.CHECK,
         counter_sanity.CHECK,
         terminal_state_atomic.CHECK,
+        archived_status_coherence.CHECK,
         same_commit_plan_doc.CHECK,
         plan_ref_format.CHECK,
         journal_entry_with_progress.CHECK,
