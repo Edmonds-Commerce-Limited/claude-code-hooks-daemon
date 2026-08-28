@@ -171,10 +171,25 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
   body of its own — per the skills charter it points, and per Decision 7 the
   scripts are finders feeding the agent's worklist, never gates.
 
-### Phase 3: Implement (expanded after Phase 2)
+### Phase 3: Implement (order per DESIGN-enforcement.md; TDD throughout)
 
-- [ ] ⬜ **Task 3.1**: Placeholder — TDD per surface, bulk-scan CLI, daemon-restart
-  verification, client-mode fixture verification, dogfood in this repo, full QA gate.
+- [ ] ⬜ **Task 3.1a**: `DocumentationConfig` in `src/claude_code_hooks_daemon/config/models.py` + `docs_qa/`
+  package skeleton (types, policy mirror, corpus with link graph + cold/stale
+  rule) + `pointer-resolves` check + `hooks-daemon docs-qa` CLI
+  (`--sweep|--lint|--check-staged`, `--json`, exit 1 on findings).
+- [ ] ⬜ **Task 3.1b**: `generated-doc-hand-edit` (EDIT + SWEEP halves) + the
+  generated-docs manifest, pre-seeded with daemon artifacts.
+- [ ] ⬜ **Task 3.1c**: `rules-file-shape` with structural worse-only semantics +
+  the three surface handlers (`docs_qa_edit`, `docs_qa_commit_gate`,
+  `docs_qa_sweep`) consuming the core.
+- [ ] ⬜ **Task 3.1d**: `ssot-quote` verifier (`quote-drift`, `quote-source-stale`)
+  per the hardened §2.4 spec + restart-snippet migration seed.
+- [ ] ⬜ **Task 3.1e**: budgets/registry (`module-doc-budget`), `at-import-census`,
+  STAGED checks (`rules-file-orphan-shrink`, `plan-promotion-disposition`).
+- [ ] ⬜ **Task 3.1f**: `duplicate-block` — advisory only, AFTER a hand-triaged
+  whole-repo run recorded in this folder.
+- [ ] ⬜ **Task 3.1g**: `hooks-daemon-docs-qa` agent + docs-qa skill shim (via the
+  Plan 00279 agent subsystem); dogfood dispatch doubles as acceptance test.
 - [ ] ⬜ **Task 3.2**: Dogfood-migration worklist (deferred by the branch cross-check;
   each verified, none blocking):
   - `CLAUDE/AgentTeam.md` (~20 instructive `run_all.sh` sites + stale "all 7
@@ -191,70 +206,25 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
 
 ## Technical Decisions
 
-All seven §E questions from `REVIEW-fable.md` were put to the user one at a time
-and settled (USER-DIRECTED throughout; details and evidence in the review and in
-`RULESET-sub-claude-md.md`):
+Seven user decisions settled 2026-08-28 (full context: `REVIEW-fable.md` §E,
+`RULESET-sub-claude-md.md`, JOURNAL 26-08-28). Their normative content is now
+CANONICAL in `CLAUDE/DocumentationStrategy.md` (R1–R13); one line each here:
 
-### Decision 1: Two docs sites; the SPLIT is mandatory, the NAMES are config
-
-Two documentation trees: HUMAN (here `docs/` — friendly, digestible prose) and
-AGENT (here `CLAUDE/` — verbose, information-dense; humans may read it but should
-expect that register). The AGENT tree always owns the depth; human docs may point
-into it. Tree NAMES/locations are per-project config; the human/agent split itself
-is NOT optional — when the system is enabled, it enforces it. The plan dir is a
-subdir of the agent tree (the plan system is primarily for agents).
-
-### Decision 2: First-class `ssot-quote` mechanism instead of an idiom allowlist
-
-A small verbatim excerpt MAY repeat anywhere IF wrapped in metadata naming its
-source (file + anchor). The checker mechanically verifies each quote against its
-source span and reports drift. Deliberate repetition (e.g. the six-fold
-daemon-restart snippet) becomes tracked quotation, not a violation — no allowlist.
-Anchor by heading/marker, not line numbers; normalise against mdformat before
-comparing (RULESET supplement).
-
-### Decision 3: Gut the drifted heavyweight human docs NOW, on a feature branch
-
-`docs/PLAN_SYSTEM.md` (1,580 lines) becomes a short human overview pointing at
-`CLAUDE/PlanWorkflow.md`; the QA doc pair folds into one accurate human doc;
-`CONTRIBUTING.md`'s forbidden handler skeleton is corrected. Work happens on a
-feature branch with a proper final cross-check before merging — not directly on
-the default branch.
-
-### Decision 4: Sub-CLAUDE.md files — outside-reader test + registry; `.claude/rules` are pointers ONLY
-
-Docs PURELY about files in their folder (programming hints, module invariants)
-stay path-proximate, governed by the outside-reader content test
-(`RULESET-sub-claude-md.md`): six qualifying / five disqualifying content classes.
-A sub-CLAUDE.md may be a canonical home only via config REGISTRATION; unregistered
-ones get a routing budget, registered ones plan-doc-size-style grow-only tiers.
-FIRM: `.claude/rules/*.md` must be pointers only (frontmatter + trigger + ≤2
-imperative lines + links to the agent tree or a registered CLAUDE.md); both
-existing rules files currently fail this and need promotion-then-thinning.
-
-### Decision 5: Sibling `docs_qa/` package on the plan_qa template
-
-Pure check core + declarative registry; thin edit-time handler, commit gate,
-session sweep and a `hooks-daemon docs-qa` CLI consume it. `markdown_organization`
-keeps location + memory policy unchanged. One shared config block governs both so
-policy cannot fragment.
-
-### Decision 6: Block-capable, default-warn; block is a per-project ratchet
-
-Deny is the point (e.g. verbose body content written into a `.claude/rules` file
-is denied at write time). Everything SHIPS advisory (`warn`) everywhere; `block`
-is a per-check, per-project ratchet like plan QA's `commit_gate_mode`. This repo
-dogfoods the ratchet first. Crisp low-FP checks (broken new link, ssot-quote
-mismatch, rules-file shape) are the block candidates; fuzzy signals never block.
-
-### Decision 7: Comments — the docs-qa agent treats verbose comment blocks AS documentation
-
-No new deterministic blocking comment check (no low-FP signal exists; the
-discriminator is semantic). The docs-qa AGENT explicitly hunts verbose comment
-blocks and cross-checks them for SSoT violations like any other doc surface.
-Deterministic HELPER tooling (find/list long comment blocks) ships as scripts
-inside a docs-qa SKILL, feeding the agent's worklist — finders, not gates.
-`comment_changelog`/`comment_size` remain the mechanical backstops.
+1. **Two docs sites** — human + agent trees; NAMES are config, the SPLIT is
+   mandatory when enabled; agent tree owns depth; plan dir under it.
+2. **`ssot-quote` mechanism** — tracked verbatim quotation with source-naming
+   metadata, mechanically drift-checked; replaces any idiom allowlist (R4b).
+3. **Gut drifted human docs NOW, on a feature branch** with a final
+   cross-check before merge. (Executed: Task 1.5.)
+4. **Sub-CLAUDE.md** — outside-reader test + config registry; firm:
+   `.claude/rules/*.md` are pointers ONLY (R7a/R7d).
+5. **Sibling `docs_qa/` package** on the plan_qa template; one shared config
+   block (R13 architecture).
+6. **Block-capable, default-warn** — `block` is a per-check, per-project
+   ratchet; fuzzy signals can never deny (structural block-eligibility).
+7. **Comments** — the docs-qa agent hunts verbose comment blocks and treats
+   them as documentation; finder scripts ship in a skill SHIM for the agent;
+   no new deterministic comment check.
 
 ## Open Questions
 
