@@ -27,8 +27,18 @@ def edit_context(
     file_content: str,
     file_exists_before: bool,
     file_content_before: str | None = None,
+    corpus: DocCorpus | None = None,
 ) -> CheckContext:
-    """Build the EDIT-stage context: would-be file content only."""
+    """Build the EDIT-stage context: would-be file content, optionally with a corpus.
+
+    ``corpus`` is optional and only used by checks that need reverse-index
+    lookups (``quote-source-stale``); the primary EDIT-stage checks
+    (``pointer-resolves``, ``generated-doc-hand-edit``, ``rules-file-shape``,
+    ``quote-drift``) never need it — file-existence and quote verification
+    both read directly from disk. A caller wanting reverse lookups should
+    pass a CHEAP corpus (:func:`docs_qa.corpus.load_or_cold_corpus`), never
+    one built inside this call — see the cold-index rule.
+    """
     return CheckContext(
         project_root=project_root,
         policy=policy,
@@ -36,6 +46,7 @@ def edit_context(
         file_content=file_content,
         file_exists_before=file_exists_before,
         file_content_before=file_content_before,
+        corpus=corpus,
     )
 
 

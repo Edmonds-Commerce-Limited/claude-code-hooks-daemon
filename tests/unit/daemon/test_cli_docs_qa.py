@@ -194,3 +194,89 @@ class TestGeneratedDocHandEdit:
         payload = json.loads(capsys.readouterr().out)
         check_ids = {entry["check_id"] for entry in payload}
         assert check_ids == {"pointer-resolves", "generated-doc-hand-edit"}
+
+
+class TestQuoteDrift:
+    _LONG_SENTENCE = (
+        "This is a real sentence that is long enough to clear the minimum "
+        "quote length floor for verification purposes."
+    )
+
+    def test_lint_drifted_quote_is_blocked(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        (root / "CLAUDE" / "Bar.md").write_text(f"## Anchor\n\n{self._LONG_SENTENCE}\n")
+        quoter = root / "CLAUDE" / "Quoter.md"
+        quoter.write_text(
+            "<!-- ssot-quote: CLAUDE/Bar.md#anchor -->\nThis text has drifted entirely "
+            "from the source and no longer matches at all really.\n<!-- /ssot-quote -->\n"
+        )
+
+        assert cmd_docs_qa(_args(root, lint=quoter)) == 1
+        out = capsys.readouterr().out
+        assert "quote-drift" in out
+        assert "drift" in out.lower()
+
+    def test_lint_clean_quote_exits_zero(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        (root / "CLAUDE" / "Bar.md").write_text(f"## Anchor\n\n{self._LONG_SENTENCE}\n")
+        quoter = root / "CLAUDE" / "Quoter.md"
+        quoter.write_text(
+            f"<!-- ssot-quote: CLAUDE/Bar.md#anchor -->\n{self._LONG_SENTENCE}\n"
+            "<!-- /ssot-quote -->\n"
+        )
+
+        assert cmd_docs_qa(_args(root, lint=quoter)) == 0
+
+    def test_sweep_reports_drifted_quote(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = _scaffold(tmp_path)
+        (root / "CLAUDE" / "Bar.md").write_text(f"## Anchor\n\n{self._LONG_SENTENCE}\n")
+        (root / "CLAUDE" / "Quoter.md").write_text(
+            "<!-- ssot-quote: CLAUDE/Bar.md#anchor -->\nThis text has drifted entirely "
+            "from the source and no longer matches at all really.\n<!-- /ssot-quote -->\n"
+        )
+
+        assert cmd_docs_qa(_args(root, sweep=True)) == 1
+        out = capsys.readouterr().out
+        assert "quote-drift" in out
+
+
+class TestQuoteSourceStale:
+    """``quote-source-stale`` needs a would-be-vs-on-disk DIFF to fire.
+
+    ``--lint`` checks one file's current content against itself (there is
+    no "before"), so this check is structurally always silent through the
+    CLI — it only ever fires through the PreToolUse handler's real Edit/
+    Write diff. These tests pin that ``--lint`` stays clean (never crashes,
+    never false-positives) both with and without a prebuilt corpus index.
+    """
+
+    _LONG_SENTENCE = (
+        "This is a real sentence that is long enough to clear the minimum "
+        "quote length floor for verification purposes."
+    )
+
+    def test_lint_of_a_known_source_file_is_silent(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        source = root / "CLAUDE" / "Bar.md"
+        source.write_text(f"## Anchor\n\n{self._LONG_SENTENCE}\n")
+        (root / "CLAUDE" / "Quoter.md").write_text(
+            f"<!-- ssot-quote: CLAUDE/Bar.md#anchor -->\n{self._LONG_SENTENCE}\n"
+            "<!-- /ssot-quote -->\n"
+        )
+        # Sweep first so a corpus index exists (quote-source-stale reads it,
+        # never builds one, at --lint time) -- still silent, since --lint
+        # has no diff to offer it.
+        cmd_docs_qa(_args(root, sweep=True))
+
+        assert cmd_docs_qa(_args(root, lint=source)) == 0
+
+    def test_lint_of_source_without_a_prebuilt_index_is_cold_safe(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        source = root / "CLAUDE" / "Bar.md"
+        source.write_text(f"## Anchor\n\n{self._LONG_SENTENCE}\n")
+        # No prior --sweep, so no untracked/docs-qa/index.json exists.
+        assert cmd_docs_qa(_args(root, lint=source)) == 0

@@ -7,6 +7,8 @@ assembles the registry consumed by :func:`docs_qa.runner.run_stage`.
 from claude_code_hooks_daemon.docs_qa.checks import (
     generated_doc_hand_edit,
     pointer_resolves,
+    quote_drift,
+    quote_source_stale,
     rules_file_shape,
 )
 from claude_code_hooks_daemon.docs_qa.types import CheckSpec
@@ -18,4 +20,6 @@ def all_checks() -> tuple[CheckSpec, ...]:
         *pointer_resolves.CHECKS,
         *generated_doc_hand_edit.CHECKS,
         *rules_file_shape.CHECKS,
+        *quote_drift.CHECKS,
+        *quote_source_stale.CHECKS,
     )

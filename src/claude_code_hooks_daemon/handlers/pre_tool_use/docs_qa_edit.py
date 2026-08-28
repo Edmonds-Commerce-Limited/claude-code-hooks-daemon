@@ -16,9 +16,16 @@ declared in the generated-docs manifest — the manifest may legitimately
 name a path outside the corpus scope (``.claude/HOOKS-DAEMON.md`` is
 exactly this case, see ``docs_qa.checks.generated_doc_hand_edit``).
 
-Deliberately hot-path cheap: no filesystem corpus scan, no git subprocess
-— single-file invariants only (cross-file checks belong to the future
-commit gate and the sweep). Not yet covering a Bash-authored ``.md`` write
+Deliberately hot-path cheap: the primary checks (``pointer-resolves``,
+``generated-doc-hand-edit``, ``rules-file-shape``, ``quote-drift``) need no
+corpus and no git subprocess — single-file invariants only. One check,
+``quote-source-stale``, DOES need the corpus's reverse quote index, so this
+handler loads (never BUILDS) the cached corpus via
+:func:`docs_qa.corpus.load_or_cold_corpus` — one cheap JSON read, not a
+filesystem scan (the cold-index rule: building is SessionStart/CLI-only).
+If no cache exists yet (a session before the sweep has run), the corpus is
+``cold`` and ``quote-source-stale`` degrades to silence — never a false
+positive, never a crash. Not yet covering a Bash-authored ``.md`` write
 (the same detection ``lint_on_edit`` uses) — deferred; Write/Edit is the
 primary surface for this slice.
 """
@@ -33,7 +40,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.docs_qa.checks.generated_doc_hand_edit import matched_manifest_entry
 from claude_code_hooks_daemon.docs_qa.context import edit_context
-from claude_code_hooks_daemon.docs_qa.corpus import is_in_scope
+from claude_code_hooks_daemon.docs_qa.corpus import is_in_scope, load_or_cold_corpus
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.report import format_advisory, format_block_reason
 from claude_code_hooks_daemon.docs_qa.runner import run_stage
@@ -47,6 +54,9 @@ _FIELD_CONTENT: Final[str] = "content"
 _FIELD_OLD_STRING: Final[str] = "old_string"
 _FIELD_NEW_STRING: Final[str] = "new_string"
 _FIELD_REPLACE_ALL: Final[str] = "replace_all"
+
+_INDEX_DIR_NAME: Final[str] = "docs-qa"
+_INDEX_FILE_NAME: Final[str] = "index.json"
 
 _SINGLE_REPLACEMENT: Final[int] = 1
 
@@ -103,6 +113,8 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
         assert policy is not None  # matches() only returns True when this is set
 
         content_before = file_path.read_text(encoding="utf-8") if exists_before else None
+        index_path = ProjectContext.daemon_untracked_dir() / _INDEX_DIR_NAME / _INDEX_FILE_NAME
+        corpus = load_or_cold_corpus(project_root, index_path)
         context = edit_context(
             project_root=project_root,
             policy=policy,
@@ -110,6 +122,7 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
             file_content=content,
             file_exists_before=exists_before,
             file_content_before=content_before,
+            corpus=corpus,
         )
         findings = run_stage(CheckStage.EDIT, context)
         if not findings:
@@ -177,7 +190,18 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
             "no fences, tables, numbered procedures or ssot-quote blocks, and a\n"
             "15-line body budget — block-eligible only when an edit ADDS a\n"
             "violation or GROWS an already-over-budget body; shrinking is\n"
-            "silent).\n"
+            "silent), `quote-drift` (an `<!-- ssot-quote: file.md#anchor -->`\n"
+            "block whose body no longer matches its source section — or whose\n"
+            "source file/anchor is missing entirely — block-eligible on the\n"
+            "QUOTING edit; a too-short quote, below the documented minimum\n"
+            "length, is flagged the same way since it verifies trivially and\n"
+            "protects nothing).\n"
+            "\n"
+            "**Advisory only, never blocks**: `quote-source-stale` — editing a\n"
+            "SOURCE section that other documents quote from names which\n"
+            "quoting files now need re-checking (via the corpus's reverse quote\n"
+            "index); the sweep re-verifies every quote anyway, so this is a\n"
+            "heads-up, not a gate.\n"
             "\n"
             "A finding only denies the write when it is BLOCK severity AND the\n"
             "resolved mode for that check (`documentation.qa.check_modes`\n"

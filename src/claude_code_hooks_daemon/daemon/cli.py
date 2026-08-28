@@ -4307,7 +4307,11 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
         matched_manifest_entry,
     )
     from claude_code_hooks_daemon.docs_qa.context import edit_context, sweep_context
-    from claude_code_hooks_daemon.docs_qa.corpus import build_and_save_corpus, is_in_scope
+    from claude_code_hooks_daemon.docs_qa.corpus import (
+        build_and_save_corpus,
+        is_in_scope,
+        load_or_cold_corpus,
+    )
     from claude_code_hooks_daemon.docs_qa.policy import policy_from_config
     from claude_code_hooks_daemon.docs_qa.report import CLEAN_SCOPE_CORPUS, format_cli_report
     from claude_code_hooks_daemon.docs_qa.runner import run_stage
@@ -4355,12 +4359,19 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
+        # A cheap CACHE read only (never a build) — the cold-index rule.
+        # Powers quote-source-stale's reverse lookup; every other EDIT check
+        # ignores it. Cold (no cache yet) degrades that one check to silence.
+        untracked_dir = _daemon_untracked_dir(project_root)
+        index_path = untracked_dir / "docs-qa" / "index.json"
+        corpus = load_or_cold_corpus(project_root, index_path)
         context = edit_context(
             project_root=project_root,
             policy=policy,
             file_path=lint_path,
             file_content=lint_path.read_text(),
             file_exists_before=True,
+            corpus=corpus,
         )
         clean_scope = f"{lint_path.relative_to(project_root)} is clean"
         findings = run_stage(CheckStage.EDIT, context)

@@ -6,6 +6,7 @@ from pathlib import Path
 from claude_code_hooks_daemon.docs_qa.corpus import (
     DocCorpus,
     DocRecord,
+    QuoteRef,
     build_and_save_corpus,
     extract_link_targets,
     is_in_scope,
@@ -274,3 +275,80 @@ class TestDocCorpusHelpers:
             },
         )
         assert corpus.document_paths() == ("a.md", "b.md")
+
+
+class TestQuoteExtractionAndReverseIndex:
+    def test_build_extracts_quote_refs(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        (tmp_path / "CLAUDE" / "Foo.md").write_text(
+            "# Foo\n\n<!-- ssot-quote: CLAUDE/Bar.md#anchor -->\n"
+            + ("word " * 20)
+            + "\n<!-- /ssot-quote -->\n"
+        )
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        corpus = build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        record = corpus.documents["CLAUDE/Foo.md"]
+        assert record.quotes == (QuoteRef(source_path="CLAUDE/Bar.md", anchor="anchor"),)
+
+    def test_quote_refs_round_trip_through_the_cache(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        (tmp_path / "CLAUDE" / "Foo.md").write_text(
+            "# Foo\n\n<!-- ssot-quote: CLAUDE/Bar.md#anchor -->\nbody\n<!-- /ssot-quote -->\n"
+        )
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        reloaded = load_cached_corpus(tmp_path, index_path)
+        assert reloaded is not None
+        assert reloaded.documents["CLAUDE/Foo.md"].quotes == (
+            QuoteRef(source_path="CLAUDE/Bar.md", anchor="anchor"),
+        )
+
+    def test_no_quote_blocks_yields_empty_tuple(self, tmp_path: Path) -> None:
+        _scaffold(tmp_path)
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        corpus = build_and_save_corpus(tmp_path, DocumentationPolicy(), index_path)
+        assert corpus.documents["CLAUDE/Foo.md"].quotes == ()
+
+    def test_legacy_cache_without_quotes_key_defaults_to_empty(self, tmp_path: Path) -> None:
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        index_path.parent.mkdir(parents=True)
+        index_path.write_text(
+            json.dumps({"documents": {"a.md": {"mtime_ns": 1, "size": 1, "links": []}}})
+        )
+        corpus = load_cached_corpus(tmp_path, index_path)
+        assert corpus is not None
+        assert corpus.documents["a.md"].quotes == ()
+
+    def test_reverse_quote_index_finds_quoters(self, tmp_path: Path) -> None:
+        corpus = DocCorpus(
+            project_root=tmp_path,
+            documents={
+                "A.md": DocRecord(
+                    rel_path="A.md",
+                    mtime_ns=1,
+                    size=1,
+                    links=(),
+                    quotes=(QuoteRef(source_path="Source.md", anchor="x"),),
+                ),
+                "B.md": DocRecord(
+                    rel_path="B.md",
+                    mtime_ns=1,
+                    size=1,
+                    links=(),
+                    quotes=(QuoteRef(source_path="Source.md", anchor="x"),),
+                ),
+                "C.md": DocRecord(
+                    rel_path="C.md",
+                    mtime_ns=1,
+                    size=1,
+                    links=(),
+                    quotes=(QuoteRef(source_path="Other.md", anchor="y"),),
+                ),
+            },
+        )
+        quoters = corpus.quoters_of("Source.md", "x")
+        assert quoters == ("A.md", "B.md")
+
+    def test_reverse_quote_index_empty_when_no_quoters(self, tmp_path: Path) -> None:
+        corpus = DocCorpus(project_root=tmp_path, documents={})
+        assert corpus.quoters_of("Source.md", "x") == ()

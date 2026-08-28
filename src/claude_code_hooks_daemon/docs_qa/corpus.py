@@ -1,10 +1,15 @@
-"""Doc corpus: inventory + link graph over the two documentation trees (Plan 00284).
+"""Doc corpus: inventory, link graph and quote refs (Plan 00284).
 
-This slice (Task 3.1a) only needs doc inventory and outbound plain-markdown
-links — the piece :mod:`checks.pointer_resolves` consumes at the SWEEP
-stage. A reverse index (source -> quoters, target -> linkers) is future
-work for the ``quote-drift``/``quote-source-stale`` checks (DESIGN
-§2.1/§2.4) and is deliberately not built here.
+Per-document inventory (outbound plain-markdown links, :mod:`checks.pointer_resolves`
+at SWEEP) plus a lightweight quote reference list (source_path, anchor) per
+document — the REVERSE half of the ``ssot-quote`` mechanism
+(:mod:`checks.quote_drift`, :mod:`checks.quote_source_stale`, DESIGN
+§2.4): given a SOURCE file+anchor being edited, :meth:`DocCorpus.quoters_of`
+answers "which documents quote this section" without re-scanning the whole
+tree. The index deliberately does NOT store quote BODY text — only the
+reference — so `quote-drift` verification always re-reads the quoting
+file's actual content (EDIT: already in hand; SWEEP: read fresh from disk),
+never a possibly-stale cached body.
 
 The index is cached at a caller-supplied JSON path (the CLI/handler
 resolves ``untracked/docs-qa/index.json`` via the daemon's untracked-dir
@@ -24,6 +29,7 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
+from claude_code_hooks_daemon.docs_qa.quotes import parse_quote_blocks
 from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
@@ -115,18 +121,30 @@ def iter_corpus_paths(project_root: Path, policy: DocumentationPolicy) -> list[P
 
 
 @dataclass(frozen=True)
+class QuoteRef:
+    """A lightweight reference to one ``ssot-quote`` block's declared source.
+
+    Deliberately carries no body text — see the module docstring for why.
+    """
+
+    source_path: str
+    anchor: str
+
+
+@dataclass(frozen=True)
 class DocRecord:
-    """One indexed document: identity + its outbound plain-markdown links."""
+    """One indexed document: identity, outbound links, and quote references."""
 
     rel_path: str
     mtime_ns: int
     size: int
     links: tuple[str, ...]
+    quotes: tuple[QuoteRef, ...] = ()
 
 
 @dataclass(frozen=True)
 class DocCorpus:
-    """The doc inventory + link graph.
+    """The doc inventory + link graph + quote reference index.
 
     ``cold`` is True when this corpus was NOT loaded from a valid on-disk
     cache (no cache file yet, or it failed to parse) — see the module
@@ -142,6 +160,25 @@ class DocCorpus:
     def document_paths(self) -> tuple[str, ...]:
         """Every indexed relative path, sorted."""
         return tuple(sorted(self.documents))
+
+    def quoters_of(self, source_path: str, anchor: str) -> tuple[str, ...]:
+        """Every indexed document's rel_path that quotes ``source_path#anchor``.
+
+        The REVERSE half of the quote index — used by ``quote-source-stale``
+        to name which quoting files need re-checking when a source section
+        changes. Linear scan: the corpus is a few hundred documents at most,
+        and this is called at most once per edited source file, not per
+        keystroke.
+        """
+        return tuple(
+            sorted(
+                rel_path
+                for rel_path, record in self.documents.items()
+                if any(
+                    ref.source_path == source_path and ref.anchor == anchor for ref in record.quotes
+                )
+            )
+        )
 
 
 def load_cached_corpus(project_root: Path, index_path: Path) -> DocCorpus | None:
@@ -168,6 +205,14 @@ def load_cached_corpus(project_root: Path, index_path: Path) -> DocCorpus | None
                 mtime_ns=int(entry["mtime_ns"]),
                 size=int(entry["size"]),
                 links=tuple(entry["links"]),
+                # Legacy caches predate the quote index (Task 3.1d) and have
+                # no "quotes" key -- absence means "not yet indexed", not
+                # "no quotes", but treating it as empty is safe: the next
+                # rebuild re-parses every changed file regardless.
+                quotes=tuple(
+                    QuoteRef(source_path=ref["source_path"], anchor=ref["anchor"])
+                    for ref in entry.get("quotes", [])
+                ),
             )
     except (KeyError, TypeError, ValueError):
         return None
@@ -191,7 +236,14 @@ def _save_corpus(corpus: DocCorpus, index_path: Path) -> None:
     index_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "documents": {
-            rel: {"mtime_ns": record.mtime_ns, "size": record.size, "links": list(record.links)}
+            rel: {
+                "mtime_ns": record.mtime_ns,
+                "size": record.size,
+                "links": list(record.links),
+                "quotes": [
+                    {"source_path": ref.source_path, "anchor": ref.anchor} for ref in record.quotes
+                ],
+            }
             for rel, record in corpus.documents.items()
         }
     }
@@ -239,6 +291,10 @@ def build_and_save_corpus(
             mtime_ns=stat.st_mtime_ns,
             size=stat.st_size,
             links=tuple(extract_link_targets(text)),
+            quotes=tuple(
+                QuoteRef(source_path=block.source_path, anchor=block.anchor)
+                for block in parse_quote_blocks(text)
+            ),
         )
 
     corpus = DocCorpus(project_root=project_root, documents=documents, cold=False)

@@ -47,10 +47,17 @@ def _edit_input(
 
 
 def _patched_root(root: Path) -> Any:
-    target = (
-        "claude_code_hooks_daemon.handlers.pre_tool_use.docs_qa_edit.ProjectContext.project_root"
+    """Patch both ``project_root`` and ``daemon_untracked_dir`` for the handler module.
+
+    Every ``matches()``/``handle()`` call goes through this — ``handle()``
+    now also loads a (cheap, cold-safe) corpus via ``daemon_untracked_dir``.
+    """
+    module = "claude_code_hooks_daemon.handlers.pre_tool_use.docs_qa_edit.ProjectContext"
+    return patch.multiple(
+        module,
+        project_root=staticmethod(lambda: root),
+        daemon_untracked_dir=staticmethod(lambda: root / "untracked"),
     )
-    return patch(target, return_value=root)
 
 
 class TestInit:
@@ -219,6 +226,62 @@ class TestHandleContentResolution:
         target.write_text("a a a\n")
         with _patched_root(tmp_path):
             result = _handler().handle(_edit_input(target, "a", "b", replace_all=True))
+        assert result.decision == Decision.ALLOW
+
+
+class TestQuoteSourceStaleWiring:
+    """Proves the handler loads a real corpus (not None) for the reverse lookup."""
+
+    def test_edit_to_a_quoted_source_section_advises_via_the_real_corpus(
+        self, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.docs_qa.corpus import build_and_save_corpus
+
+        (tmp_path / "CLAUDE").mkdir()
+        long_sentence = (
+            "This is a real sentence that is long enough to clear the "
+            "minimum quote length floor for verification purposes."
+        )
+        source = tmp_path / "CLAUDE" / "Source.md"
+        source.write_text(f"## Anchor\n\n{long_sentence}\n")
+        (tmp_path / "CLAUDE" / "Quoter.md").write_text(
+            f"<!-- ssot-quote: CLAUDE/Source.md#anchor -->\n{long_sentence}\n"
+            "<!-- /ssot-quote -->\n"
+        )
+        policy = DocumentationPolicy(enabled=True, qa=DocumentationQaPolicy(edit_mode="warn"))
+        handler = _handler(policy)
+
+        with _patched_root(tmp_path):
+            index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+            build_and_save_corpus(tmp_path, policy, index_path)
+            result = handler.handle(
+                _edit_input(
+                    source,
+                    long_sentence,
+                    "The section content has now genuinely changed entirely.",
+                )
+            )
+        assert result.decision == Decision.ALLOW
+        assert any("quote-source-stale" in item for item in result.context)
+        assert any("CLAUDE/Quoter.md" in item for item in result.context)
+
+    def test_no_prebuilt_corpus_is_cold_safe(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE").mkdir()
+        long_sentence = (
+            "This is a real sentence that is long enough to clear the "
+            "minimum quote length floor for verification purposes."
+        )
+        source = tmp_path / "CLAUDE" / "Source.md"
+        source.write_text(f"## Anchor\n\n{long_sentence}\n")
+        handler = _handler(
+            DocumentationPolicy(enabled=True, qa=DocumentationQaPolicy(edit_mode="warn"))
+        )
+        with _patched_root(tmp_path):
+            # No index.json exists yet -- load_or_cold_corpus must degrade
+            # to a cold, empty corpus rather than raising.
+            result = handler.handle(
+                _edit_input(source, long_sentence, "Unrelated new content entirely.")
+            )
         assert result.decision == Decision.ALLOW
 
 

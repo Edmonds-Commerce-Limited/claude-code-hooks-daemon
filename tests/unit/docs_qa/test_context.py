@@ -29,6 +29,18 @@ class TestEditContext:
         assert context.file_content_before == "# Foo (old)\n"
         assert context.corpus is None
 
+    def test_optional_corpus_is_attached_when_supplied(self, tmp_path: Path) -> None:
+        corpus = DocCorpus(project_root=tmp_path, documents={})
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE" / "Foo.md",
+            file_content="# Foo\n",
+            file_exists_before=False,
+            corpus=corpus,
+        )
+        assert context.corpus is corpus
+
     def test_file_content_before_defaults_to_none(self, tmp_path: Path) -> None:
         context = edit_context(
             project_root=tmp_path,
