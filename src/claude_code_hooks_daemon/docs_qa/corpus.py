@@ -167,6 +167,40 @@ def is_in_scope(path: Path, project_root: Path, policy: DocumentationPolicy) -> 
     return False
 
 
+def is_lintable_path(
+    rel_path: str, path: Path, project_root: Path, policy: DocumentationPolicy
+) -> bool:
+    """Whether ``path`` is a file the docs QA EDIT stage will lint.
+
+    Single source of truth for the scope union both surfaces that run the
+    EDIT stage need to agree on: :class:`handlers.pre_tool_use.docs_qa_edit.
+    DocsQaEditHandler` (Plan 00284 Task 3.4) and the ``docs-qa --lint`` CLI.
+    Before this helper existed the two independently re-derived the same
+    three-way union and drifted -- the CLI's copy omitted the
+    :func:`is_module_doc_path` arm, so a registered module doc the EDIT
+    handler happily linted was refused by the CLI as "not a documentation
+    file" (``.claude/ccy/CLAUDE.md`` was the file that exposed the gap).
+
+    In scope: the doc corpus's own scope (:func:`is_in_scope`), OR a path
+    declared in the generated-docs manifest (which may legitimately name a
+    path outside the corpus scope -- ``.claude/HOOKS-DAEMON.md`` is exactly
+    this case), OR any module-scoped ``CLAUDE.md`` (:func:`is_module_doc_path`,
+    deliberately wider than the corpus scope).
+    """
+    # Deferred: docs_qa.checks/__init__ imports checks.duplicate_block, which
+    # imports DocCorpus from this module -- a module-level import here would
+    # be circular.
+    from claude_code_hooks_daemon.docs_qa.checks.generated_doc_hand_edit import (
+        matched_manifest_entry,
+    )
+
+    return (
+        is_in_scope(path, project_root, policy)
+        or matched_manifest_entry(rel_path, policy.qa.generated_docs) is not None
+        or is_module_doc_path(rel_path, policy.trees.agent)
+    )
+
+
 def iter_corpus_paths(project_root: Path, policy: DocumentationPolicy) -> list[Path]:
     """Every in-scope documentation file under ``project_root``, sorted."""
     candidates: set[Path] = set()

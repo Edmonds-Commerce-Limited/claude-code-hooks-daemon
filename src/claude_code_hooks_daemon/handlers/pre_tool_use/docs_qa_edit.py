@@ -45,11 +45,9 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
-from claude_code_hooks_daemon.docs_qa.checks.generated_doc_hand_edit import matched_manifest_entry
 from claude_code_hooks_daemon.docs_qa.context import edit_context
 from claude_code_hooks_daemon.docs_qa.corpus import (
-    is_in_scope,
-    is_module_doc_path,
+    is_lintable_path,
     load_or_cold_corpus,
 )
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
@@ -104,11 +102,7 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
         rel_path = self._rel_path(file_path, project_root)
         if rel_path is None:
             return False
-        return (
-            is_in_scope(file_path, project_root, policy)
-            or matched_manifest_entry(rel_path, policy.qa.generated_docs) is not None
-            or is_module_doc_path(rel_path, policy.trees.agent)
-        )
+        return is_lintable_path(rel_path, file_path, project_root, policy)
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         project_root = ProjectContext.project_root()

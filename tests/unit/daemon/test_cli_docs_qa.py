@@ -140,6 +140,20 @@ class TestLint:
         assert cmd_docs_qa(_args(root, lint=outsider)) == 2
         assert "not a documentation file" in capsys.readouterr().err.lower()
 
+    def test_lint_module_doc_path_is_in_scope(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A sub-folder ``CLAUDE.md`` is module-doc-scoped, not corpus-scoped
+        (Plan 00284 Task 3.4) — the EDIT-time handler lints it via
+        ``is_module_doc_path``, and the CLI must accept the same target
+        instead of refusing it as "not a documentation file"."""
+        root = _scaffold(tmp_path)
+        module_doc = root / "src" / "CLAUDE.md"
+        module_doc.write_text("# Module doc\n\nShort body.\n")
+
+        assert cmd_docs_qa(_args(root, lint=module_doc)) == 0
+        assert "not a documentation file" not in capsys.readouterr().err.lower()
+
     def test_lint_clean_file_does_not_claim_the_corpus_is_clean(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
