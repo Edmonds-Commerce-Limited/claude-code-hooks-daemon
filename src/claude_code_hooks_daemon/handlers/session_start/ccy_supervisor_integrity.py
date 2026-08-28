@@ -9,8 +9,6 @@ advisory surfaces those states loudly so the project is set up properly; it
 never blocks. Non-ccy projects and un-armed setups are silent no-ops.
 """
 
-import hashlib
-import json
 import logging
 import os
 import re
@@ -22,6 +20,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils import ccy_supervisor
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
@@ -31,8 +30,6 @@ _CCY_DIR_PARTS: tuple[str, str] = (".claude", "ccy")
 _SUPERVISOR_SCRIPT_NAME = "claude-supervise.py"
 _CCY_ENV_NAME = "ccy.env"
 _CONFIG_REL_PARTS: tuple[str, str] = (".claude", "hooks-daemon.yaml")
-_WRAPPER_EXPORT_KEY = "CCY_CLAUDE_WRAPPER"
-_COMMENT_PREFIX = "#"
 _GIT_CHECK_IGNORE_TIMEOUT_SECONDS = 5
 # git check-ignore exits 0 when the path IS ignored, 1 when it is NOT — both are
 # valid answers. Anything else (git unavailable, a fatal error) is a genuine
@@ -41,18 +38,8 @@ _GIT_IGNORED_RETURNCODE = 0
 _GIT_NOT_IGNORED_RETURNCODE = 1
 
 # Stale-supervisor detection (Plan 00164 Phase 3). The running supervisor writes
-# its identity here; we compare it against the on-disk claude-supervise.py.
-_SUPERVISE_SUBDIR = "supervise"
-_SUPERVISOR_STATUS_FILENAME = "supervisor-status.json"
-# Untracked runtime dir relative to the project root, per install mode. Mirrors
-# ProjectContext.daemon_untracked_dir() / the supervisor's _daemon_untracked_dir.
-_SELF_INSTALL_MARKER_PARTS: tuple[str, str] = ("src", "claude_code_hooks_daemon")
-_SELF_INSTALL_UNTRACKED_PARTS: tuple[str, ...] = ("untracked",)
-_NORMAL_UNTRACKED_PARTS: tuple[str, ...] = (".claude", "hooks-daemon", "untracked")
-# Length of the sha256 hex prefix used as the source fingerprint. MUST match the
-# supervisor's compute_source_hash (claude-supervise.py) or every launch reads
-# as stale. Cross-process contract; the algorithm is trivial and stable.
-_SOURCE_HASH_HEX_LEN = 12
+# its identity to the status file read via the shared ``ccy_supervisor`` util;
+# we compare its fingerprint against the on-disk claude-supervise.py.
 _VERSION_RE = re.compile(r"""__version__\s*=\s*["']([^"']+)["']""")
 
 
@@ -89,20 +76,7 @@ class CcySupervisorIntegrityHandler(SessionStartHandlerBase):
 
     def _is_armed(self, ccy_env: Path) -> bool:
         """Armed = a non-comment line exports the wrapper referencing the script."""
-        if not ccy_env.is_file():
-            return False
-        try:
-            content = ccy_env.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            logger.debug("Could not read %s: %s", ccy_env, exc)
-            return False
-        for raw in content.splitlines():
-            stripped = raw.strip()
-            if stripped.startswith(_COMMENT_PREFIX):
-                continue
-            if _WRAPPER_EXPORT_KEY in stripped and _SUPERVISOR_SCRIPT_NAME in stripped:
-                return True
-        return False
+        return ccy_supervisor.is_armed(ccy_env)
 
     def _git_ignored(self, project_root: Path, rel_path: str) -> bool:
         """Return True only when git positively reports ``rel_path`` as ignored.
@@ -144,62 +118,26 @@ class CcySupervisorIntegrityHandler(SessionStartHandlerBase):
     # Stale-supervisor detection (Plan 00164 Phase 3)
     # ------------------------------------------------------------------
 
-    def _daemon_untracked_dir(self, project_root: Path) -> Path:
-        """Resolve the daemon untracked dir (install-mode-aware) from the root.
+    # These four delegate to the shared ``ccy_supervisor`` util (Plan 00283 DRY
+    # extraction): the ``standing_authorisations`` channel router needs the same
+    # liveness/arming logic, so it lives in one place. Kept as thin instance
+    # methods because existing tests call and patch them on the handler.
 
-        Mirrors the supervisor's ``_daemon_untracked_dir`` so both agree on where
-        the status file lives, without importing ProjectContext (this handler is
-        often invoked with a fallback cwd root).
-        """
-        if project_root.joinpath(*_SELF_INSTALL_MARKER_PARTS).exists():
-            return project_root.joinpath(*_SELF_INSTALL_UNTRACKED_PARTS)
-        return project_root.joinpath(*_NORMAL_UNTRACKED_PARTS)
+    def _daemon_untracked_dir(self, project_root: Path) -> Path:
+        """Resolve the daemon untracked dir (install-mode-aware) from the root."""
+        return ccy_supervisor.daemon_untracked_dir(project_root)
 
     def _hash_supervisor_source(self, path: Path) -> str:
         """Short sha256 fingerprint of ``path`` — MUST match the supervisor's."""
-        digest = hashlib.sha256(path.read_bytes(), usedforsecurity=False)
-        return digest.hexdigest()[:_SOURCE_HASH_HEX_LEN]
+        return ccy_supervisor.hash_supervisor_source(path)
 
     def _pid_alive(self, pid: object) -> bool:
-        """Return True iff ``pid`` is a live process we can see.
-
-        ``os.kill(pid, 0)`` raises ESRCH when the process is gone and EPERM when
-        it exists but is owned by another user (still alive). Non-int / invalid
-        pids are treated as not-alive.
-        """
-        if not isinstance(pid, int) or pid <= 0:
-            return False
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        except OSError as exc:
-            logger.debug("pid liveness check failed for %s: %s", pid, exc)
-            return False
-        return True
+        """Return True iff ``pid`` is a live process we can see."""
+        return ccy_supervisor.pid_alive(pid)
 
     def _read_supervisor_status(self, project_root: Path) -> dict[str, Any]:
-        """Read the running supervisor's status file.
-
-        Returns an EMPTY dict when the file is absent or unreadable/invalid — a
-        typed default the caller treats as "no supervisor advertised" (an empty
-        dict is falsy), rather than conflating absence with an error via None.
-        """
-        status_path = (
-            self._daemon_untracked_dir(project_root)
-            / _SUPERVISE_SUBDIR
-            / _SUPERVISOR_STATUS_FILENAME
-        )
-        if not status_path.is_file():
-            return {}
-        try:
-            data = json.loads(status_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            logger.debug("Could not read supervisor status %s: %s", status_path, exc)
-            return {}
-        return data if isinstance(data, dict) else {}
+        """Read the running supervisor's status file (empty dict when absent)."""
+        return ccy_supervisor.read_supervisor_status(project_root)
 
     def _parse_ondisk_version(self, script: Path) -> str:
         """Extract ``__version__`` from the on-disk supervisor (``?`` if absent)."""
