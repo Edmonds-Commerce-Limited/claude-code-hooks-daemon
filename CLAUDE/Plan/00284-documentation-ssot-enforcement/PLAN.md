@@ -122,14 +122,14 @@ scattered sibling plans.
   test), file:line-cited drift evidence (structured facts drift, prose mostly
   does not; agents lack a charter and hold most violations), 9 enforcement
   signals with FP assessments, and 7 human-judgement questions (its §E).
-- [ ] ⬜ **Task 1.2**: Write the canonical policy doc `CLAUDE/DocumentationStrategy.md`
+- [x] ✅ **Task 1.2**: Write the canonical policy doc `CLAUDE/DocumentationStrategy.md`
   — the SSoT for the SSoT rules, itself obeying them (pointed at from `CLAUDE.md`,
   not duplicated) — incorporating all seven Technical Decisions, the review's
   12-rule draft (its §C) and the sub-CLAUDE.md supplement. On the feature branch
   (Decision 3).
 - [x] ✅ **Task 1.3**: Decide handler shape — settled as Decision 5: sibling
   `docs_qa/` package on the plan_qa template.
-- [ ] ⬜ **Task 1.5**: Execute Decision 3 on the feature branch: gut
+- [ ] 🔄 **Task 1.5** (edits done; final cross-check in flight): Execute Decision 3 on the feature branch: gut
   `docs/PLAN_SYSTEM.md` to a human overview → `CLAUDE/PlanWorkflow.md`; fold
   `docs/QA-INFRASTRUCTURE.md` + `docs/QA-RUNNER-SETUP.md` into one accurate human
   QA doc; fix `CONTRIBUTING.md`'s forbidden handler skeleton; fix the five
