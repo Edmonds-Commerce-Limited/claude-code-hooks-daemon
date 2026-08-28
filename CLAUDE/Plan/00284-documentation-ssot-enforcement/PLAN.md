@@ -173,10 +173,14 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
 
 ### Phase 3: Implement (order per DESIGN-enforcement.md; TDD throughout)
 
-- [ ] ⬜ **Task 3.1a**: `DocumentationConfig` in `src/claude_code_hooks_daemon/config/models.py` + `docs_qa/`
+- [x] ✅ **Task 3.1a**: `DocumentationConfig` in `src/claude_code_hooks_daemon/config/models.py` + `docs_qa/`
   package skeleton (types, policy mirror, corpus with link graph + cold/stale
   rule) + `pointer-resolves` check + `hooks-daemon docs-qa` CLI
   (`--sweep|--lint|--check-staged`, `--json`, exit 1 on findings).
+  Delivered at `62203a92` — 90 tests, 100% new-package coverage, live sweep
+  already surfacing real dead links. Note for 3.1e: corpus's plan-archive
+  exclusion approximates the archive dirs from the agent-tree name; consider
+  reading `plan_workflow.directory` instead.
 - [ ] ⬜ **Task 3.1b**: `generated-doc-hand-edit` (EDIT + SWEEP halves) + the
   generated-docs manifest, pre-seeded with daemon artifacts.
 - [ ] ⬜ **Task 3.1c**: `rules-file-shape` with structural worse-only semantics +
