@@ -2088,7 +2088,9 @@ When the session is idle and caught up (repeated no-op failsafe-recovery ticks),
 
 ## standing_authorisations — a project can record a standing request
 
-Some instructions are conditional on the user having asked ("unless the user requested it"). A request made in conversation does not survive the session, so this project can record one in config instead, and the daemon replays it on each prompt.
+Some instructions are conditional on the user having asked ("unless the user requested it"). A request made in conversation does not survive the session, so this project can record one in config instead, and the daemon replays it.
+
+**Cadence (Plan 00283)**: the FULL text is delivered once per session to establish it, then reinforced only on whichever comes first — a few human prompts, or a set number of minutes elapsed. Automated turns (failsafe-recovery ticks, goal-injection lines) neither count nor trigger a reinforcement, so the reminder does not ride every cron tick.
 
 Configured in `.claude/hooks-daemon.yaml` under `handlers.user_prompt_submit.standing_authorisations.options.authorisations`, as a list of `{id, enabled}` entries. Built-in ids: `subagent-delegation`, `workflow-orchestration`, `commit-push-cadence`.
 
