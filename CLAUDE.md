@@ -1639,6 +1639,35 @@ Confusing these is the single most common plan-hygiene failure: narrative AND du
 
 **Task status icons**: ⬜ not started, 🔄 in progress, ✅ complete. Include a Success Criteria section and break work into phases.
 
+<!-- handler: docs-qa-edit -->
+
+## docs_qa_edit — documentation writes are linted in real time
+
+Every Write/Edit of a documentation-scoped file (the two audience
+trees, `.claude/rules`, `.claude/skills`, `.claude/agents`, a
+root-level `.md`, or a path declared in the generated-docs
+manifest) is checked against the docs QA EDIT-stage catalogue on the
+content the file WOULD have.
+
+**Checks**: `pointer-resolves` (a plain markdown link whose target
+file does not exist — block-eligible only for a link NEW in this
+edit), `generated-doc-hand-edit` (hand-editing a file the
+generated-docs manifest declares — regenerate it instead),
+`rules-file-shape` (`.claude/rules/*.md` must stay pointer-only:
+no fences, tables, numbered procedures or ssot-quote blocks, and a
+15-line body budget — block-eligible only when an edit ADDS a
+violation or GROWS an already-over-budget body; shrinking is
+silent).
+
+A finding only denies the write when it is BLOCK severity AND the
+resolved mode for that check (`documentation.qa.check_modes`
+override, or `documentation.qa.edit_mode` otherwise) is `block`.
+Everything else — an ADVISE-severity finding, or a BLOCK finding
+under a `warn`-mode check — surfaces as advisory context instead.
+
+Lint any file on demand:
+`bin/hooks-daemon docs-qa --lint <file>`.
+
 <!-- handler: enforce-npm-commands -->
 
 ## npm_command — use llm: prefixed npm commands
@@ -2085,6 +2114,33 @@ At session start this handler checks a ccy project (`.claude/ccy/`) whose superv
 It also detects a **stale running supervisor** (Plan 00164): when a daemon upgrade has put a NEWER `claude-supervise.py` on disk than the live process (compared by source fingerprint, not just version), it advises restarting ccy so the wrapper re-execs the updated supervisor. Nothing is broken meanwhile — the old supervisor keeps working until the session is relaunched.
 
 When you see this alert, fix the listed item(s) and commit the ccy files so the supervisor works for everyone.
+
+<!-- handler: docs-qa-sweep -->
+
+## docs_qa_sweep — documentation drift report at session start
+
+At the start of each new session the doc corpus index is rebuilt
+(link graph over the two audience trees, `.claude/rules`,
+`.claude/skills`, `.claude/agents`, and root-level `.md` files) and
+checked with the docs QA SWEEP-stage catalogue: `pointer-resolves`
+(dead links), `generated-doc-hand-edit` (a generated doc that looks
+hand-edited or stale against the daemon's own version), and
+`rules-file-shape` (a `.claude/rules/*.md` file violating the
+pointer-only contract). Findings are injected once as advisory
+context — the sweep never blocks.
+
+**When a drift report appears**: fix the listed findings (each names
+its exact remediation) as part of your documentation housekeeping,
+then re-check with:
+
+```
+bin/hooks-daemon docs-qa --sweep
+```
+
+The CLI exits 1 while findings remain (CI-able). Single-file lint:
+`docs-qa --lint <file>`. Policy lives under `documentation.qa` in
+`.claude/hooks-daemon.yaml` (modes, per-check overrides, grandfather
+allowlist, generated-docs manifest).
 
 <!-- handler: idle-housekeeping-advisory -->
 
