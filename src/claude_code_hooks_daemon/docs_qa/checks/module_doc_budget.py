@@ -229,7 +229,13 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         abs_path = context.project_root / rel_path
         if not abs_path.is_file():
             continue
-        content = abs_path.read_text(encoding="utf-8")
+        try:
+            content = abs_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            # An unreadable or undecodable file must not abort the whole
+            # SessionStart sweep (Plan 00287 N5) -- skip it, matching the
+            # corpus's own UnicodeDecodeError handling.
+            continue
         registered = rel_path in context.policy.qa.registered_module_docs
         finding = _finding_for(rel_path, content, None, registered)
         if finding is not None:

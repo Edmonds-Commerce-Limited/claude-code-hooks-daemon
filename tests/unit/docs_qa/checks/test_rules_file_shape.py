@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.docs_qa.checks.rules_file_shape import (
     CHECK_ID,
     CHECKS,
@@ -437,6 +439,31 @@ class TestSweepStage:
         findings = _run_sweep(context)
         assert len(findings) == 1
         assert "budget" in findings[0].message.lower()
+
+    def test_unreadable_file_is_skipped_not_fatal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """N5 (Plan 00287): an unreadable file must not abort the whole
+        SessionStart sweep."""
+        target = _rules_path(tmp_path, "unreadable.md")
+        target.write_text(_FRONTMATTER + "```\nfenced\n```\n")
+
+        original_read_text = Path.read_text
+
+        def _raising_read_text(
+            self: Path, encoding: str | None = None, errors: str | None = None
+        ) -> str:
+            if self == target:
+                raise OSError("permission denied")
+            return original_read_text(self, encoding=encoding, errors=errors)
+
+        monkeypatch.setattr(Path, "read_text", _raising_read_text)
+        context = sweep_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            corpus=DocCorpus(project_root=tmp_path, documents={}),
+        )
+        assert _run_sweep(context) == []
 
     def test_a_directory_matching_the_glob_is_skipped(self, tmp_path: Path) -> None:
         rules_dir = tmp_path / ".claude" / "rules"

@@ -380,6 +380,31 @@ class TestSweepStage:
         )
         assert _run_sweep(context) == []
 
+    def test_unreadable_file_is_skipped_not_fatal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """N5 (Plan 00287): an unreadable file must not abort the whole
+        SessionStart sweep."""
+        (tmp_path / "src" / "foo").mkdir(parents=True)
+        target = tmp_path / "src" / "foo" / "CLAUDE.md"
+        target.write_text(_LONG_BODY)
+        policy = DocumentationPolicy()
+
+        original_read_text = Path.read_text
+
+        def _raising_read_text(
+            self: Path, encoding: str | None = None, errors: str | None = None
+        ) -> str:
+            if self == target:
+                raise OSError("permission denied")
+            return original_read_text(self, encoding=encoding, errors=errors)
+
+        monkeypatch.setattr(Path, "read_text", _raising_read_text)
+        context = sweep_context(
+            project_root=tmp_path, policy=policy, corpus=DocCorpus(project_root=tmp_path)
+        )
+        assert _run_sweep(context) == []
+
     def test_self_install_mode_is_unaffected(self, tmp_path: Path) -> None:
         """Self-install mode (this repo) has no ``.claude/hooks-daemon/``
         vendored copy -- a real module doc under a dir that merely CONTAINS

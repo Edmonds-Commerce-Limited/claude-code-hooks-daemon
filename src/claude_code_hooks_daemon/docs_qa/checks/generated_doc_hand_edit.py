@@ -156,7 +156,14 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
     for abs_path, entry in _iter_manifest_matches(
         context.project_root, context.policy.qa.generated_docs
     ):
-        marker_version = _extract_marker_version(abs_path.read_text(encoding="utf-8"))
+        try:
+            content = abs_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            # An unreadable or undecodable file must not abort the whole
+            # SessionStart sweep (Plan 00287 N5) -- skip it, matching the
+            # corpus's own UnicodeDecodeError handling.
+            continue
+        marker_version = _extract_marker_version(content)
         if marker_version is None or marker_version == _DAEMON_VERSION:
             continue
         rel_path = str(abs_path.relative_to(context.project_root))

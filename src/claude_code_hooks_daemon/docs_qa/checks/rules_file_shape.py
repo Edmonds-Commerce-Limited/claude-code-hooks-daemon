@@ -251,7 +251,14 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         if not path.is_file():
             continue
         rel_path = str(path.relative_to(context.project_root))
-        metrics = _measure(path.read_text(encoding="utf-8"))
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            # An unreadable or undecodable file must not abort the whole
+            # SessionStart sweep (Plan 00287 N5) -- skip it, matching the
+            # corpus's own UnicodeDecodeError handling.
+            continue
+        metrics = _measure(content)
         findings.extend(_element_findings_always_advise(rel_path, metrics))
     return findings
 

@@ -134,12 +134,12 @@ drive-by.
   template's inline-report contract (drop the `untracked/reports/` claim);
   redeployed the dogfood copy via `install.skills.deploy_skills` so
   `.claude/skills/docs-qa/` matches.
-- [ ] ⬜ **Task 5.2**: Guard the unreadable-file case in the sweep checks
+- [x] ✅ **Task 5.2**: Guard the unreadable-file case in the sweep checks
   that read files directly from disk (`module_doc_budget.py`,
   `generated_doc_hand_edit.py`, `at_import_census.py`, `quote_drift.py`,
-  `rules_file_shape.py`) — skip with a finding or log rather than aborting
-  the whole SessionStart sweep.
-- [ ] ⬜ **Task 5.3**: Fix the stale "Until those ship…" phrasing and the
+  `rules_file_shape.py`) — each now catches `(OSError, UnicodeDecodeError)`
+  and skips the file, mirroring `corpus.py`'s existing precedent.
+- [x] ✅ **Task 5.3**: Fixed the stale "Until those ship…" phrasing and the
   pre-archive plan path in `CLAUDE/DocumentationStrategy.md`.
 
 ### Phase 6: Verification and closeout

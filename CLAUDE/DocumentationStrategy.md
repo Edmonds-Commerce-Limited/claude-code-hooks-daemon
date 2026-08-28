@@ -2,8 +2,9 @@
 
 **This file is the canonical home for the project's documentation-SSoT rules.**
 Every other statement of these rules anywhere in the repository is a pointer to
-this file. Provenance: Plan 00284 (`CLAUDE/Plan/00284-documentation-ssot-enforcement/`),
-whose review documents carry the evidence behind each rule.
+this file. Provenance: Plan 00284
+(`CLAUDE/Plan/Completed/00284-documentation-ssot-enforcement/`), whose review
+documents carry the evidence behind each rule.
 
 ## The model
 
@@ -163,11 +164,15 @@ per-project ratchet.
 
 ## Enforcement status
 
-Implementation is tracked by Plan 00284
-(`CLAUDE/Plan/00284-documentation-ssot-enforcement/PLAN.md`): the `docs_qa`
-check core and its three surfaces, the `ssot-quote` verifier, the module-doc
-registry, the generated-doc manifest, the `hooks-daemon-docs-qa` agent, and the
-docs-qa skill (a thin shim that dispatches the agent, bundling its
-deterministic finder scripts). Until those ship, this document is binding as
-POLICY: follow the rules when writing or moving documentation, and treat
-violations you encounter as defects worth fixing.
+Enforcement shipped in Plan 00284
+(`CLAUDE/Plan/Completed/00284-documentation-ssot-enforcement/PLAN.md`): the
+`docs_qa` check core and its three surfaces (`docs_qa_edit`,
+`docs_qa_commit_gate`, `docs_qa_sweep` — see
+[docs/guides/HANDLER_REFERENCE.md](../docs/guides/HANDLER_REFERENCE.md)), the
+`ssot-quote` verifier, the module-doc registry, the generated-doc manifest,
+the `hooks-daemon-docs-qa` agent, and the docs-qa skill (a thin shim that
+dispatches the agent, bundling its deterministic finder scripts). This
+document remains binding as POLICY regardless: follow the rules when writing
+or moving documentation, and treat violations you encounter as defects worth
+fixing — the deterministic checks catch a mechanically-checkable subset, not
+the whole ruleset.

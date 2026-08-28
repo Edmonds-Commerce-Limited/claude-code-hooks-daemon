@@ -82,7 +82,20 @@ def _verify_block(
             f"point at its new location. {_REMEDY_TAIL}",
             severity,
         )
-    source_text = source_abs.read_text(encoding="utf-8")
+    try:
+        source_text = source_abs.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        # An unreadable or undecodable source file must not abort the whole
+        # sweep/edit check (Plan 00287 N5) -- report it the same way a
+        # missing source file is reported.
+        return _finding(
+            rel_path,
+            f"`{rel_path}` quotes `{block.source_path}#{block.anchor}`, but the "
+            "source file could not be read.",
+            f"Fix `{block.source_path}`'s permissions/encoding, or update the "
+            f"ssot-quote marker to point at its new location. {_REMEDY_TAIL}",
+            severity,
+        )
     span = resolve_anchor_span(source_text, block.anchor)
     if span is None:
         return _finding(
@@ -142,7 +155,13 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         abs_path = context.project_root / rel_path
         if not abs_path.is_file():
             continue
-        content = abs_path.read_text(encoding="utf-8")
+        try:
+            content = abs_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            # An unreadable or undecodable file must not abort the whole
+            # SessionStart sweep (Plan 00287 N5) -- skip it, matching the
+            # corpus's own UnicodeDecodeError handling.
+            continue
         for block in parse_quote_blocks(content):
             finding = _verify_block(context.project_root, rel_path, block, Severity.ADVISE)
             if finding is not None:

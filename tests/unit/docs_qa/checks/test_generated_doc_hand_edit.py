@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.docs_qa.checks.generated_doc_hand_edit import CHECK_ID, CHECKS
 from claude_code_hooks_daemon.docs_qa.context import edit_context, sweep_context
 from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus
@@ -172,6 +174,32 @@ class TestSweepStageFreshness:
         (tmp_path / ".claude").mkdir()
         target = tmp_path / ".claude" / "HOOKS-DAEMON.md"
         target.write_text("# Some other doc with no marker at all\n")
+        context = sweep_context(
+            project_root=tmp_path,
+            policy=_policy(_ENTRY),
+            corpus=DocCorpus(project_root=tmp_path, documents={}),
+        )
+        assert _run_sweep(context) == []
+
+    def test_unreadable_file_is_skipped_not_fatal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """N5 (Plan 00287): an unreadable file must not abort the whole
+        SessionStart sweep."""
+        (tmp_path / ".claude").mkdir()
+        target = tmp_path / ".claude" / "HOOKS-DAEMON.md"
+        target.write_text("> Generated on 2020-01-01 (v0.0.1) by `x`.\n")
+
+        original_read_text = Path.read_text
+
+        def _raising_read_text(
+            self: Path, encoding: str | None = None, errors: str | None = None
+        ) -> str:
+            if self == target:
+                raise OSError("permission denied")
+            return original_read_text(self, encoding=encoding, errors=errors)
+
+        monkeypatch.setattr(Path, "read_text", _raising_read_text)
         context = sweep_context(
             project_root=tmp_path,
             policy=_policy(_ENTRY),

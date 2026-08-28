@@ -3,6 +3,8 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.docs_qa.checks.quote_drift import CHECK_ID, CHECKS
 from claude_code_hooks_daemon.docs_qa.context import edit_context, staged_context, sweep_context
@@ -311,6 +313,61 @@ class TestSweepStage:
         quoter.unlink()  # indexed, but gone by the time the sweep re-reads it
         context = sweep_context(project_root=tmp_path, policy=policy, corpus=corpus)
         assert _run_sweep(context) == []
+
+    def test_unreadable_quoting_file_is_skipped_not_fatal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """N5 (Plan 00287): an unreadable quoting file must not abort the
+        whole SessionStart sweep."""
+        (tmp_path / "CLAUDE").mkdir()
+        source = tmp_path / "CLAUDE" / "Source.md"
+        source.write_text(f"## Anchor\n\n{_LONG_SENTENCE}\n")
+        quoter = tmp_path / "CLAUDE" / "Quoter.md"
+        quoter.write_text(_quote_block("CLAUDE/Source.md", "anchor", _LONG_SENTENCE))
+        policy = DocumentationPolicy()
+        corpus = _build_corpus(tmp_path, policy)
+
+        original_read_text = Path.read_text
+
+        def _raising_read_text(
+            self: Path, encoding: str | None = None, errors: str | None = None
+        ) -> str:
+            if self == quoter:
+                raise OSError("permission denied")
+            return original_read_text(self, encoding=encoding, errors=errors)
+
+        monkeypatch.setattr(Path, "read_text", _raising_read_text)
+        context = sweep_context(project_root=tmp_path, policy=policy, corpus=corpus)
+        assert _run_sweep(context) == []
+
+    def test_unreadable_source_file_is_reported_not_fatal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """N5 (Plan 00287): an unreadable SOURCE file (the quote's target)
+        must not crash the check either -- report it, the same way a
+        missing source file is reported."""
+        (tmp_path / "CLAUDE").mkdir()
+        source = tmp_path / "CLAUDE" / "Source.md"
+        source.write_text(f"## Anchor\n\n{_LONG_SENTENCE}\n")
+        quoter = tmp_path / "CLAUDE" / "Quoter.md"
+        quoter.write_text(_quote_block("CLAUDE/Source.md", "anchor", _LONG_SENTENCE))
+        policy = DocumentationPolicy()
+        corpus = _build_corpus(tmp_path, policy)
+
+        original_read_text = Path.read_text
+
+        def _raising_read_text(
+            self: Path, encoding: str | None = None, errors: str | None = None
+        ) -> str:
+            if self == source:
+                raise OSError("permission denied")
+            return original_read_text(self, encoding=encoding, errors=errors)
+
+        monkeypatch.setattr(Path, "read_text", _raising_read_text)
+        context = sweep_context(project_root=tmp_path, policy=policy, corpus=corpus)
+        findings = _run_sweep(context)
+        assert len(findings) == 1
+        assert "could not be read" in findings[0].message
 
     def test_document_with_no_quotes_is_skipped_cheaply(self, tmp_path: Path) -> None:
         (tmp_path / "CLAUDE").mkdir()
