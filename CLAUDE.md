@@ -1639,6 +1639,28 @@ Confusing these is the single most common plan-hygiene failure: narrative AND du
 
 **Task status icons**: ⬜ not started, 🔄 in progress, ✅ complete. Include a Success Criteria section and break work into phases.
 
+<!-- handler: docs-qa-commit-gate -->
+
+## docs_qa_commit_gate — STAGED docs checks at git commit
+
+Every `git commit` is checked against the STAGED tree's docs QA
+invariants: `pointer-resolves` (a new dead link in a staged
+documentation file) and `quote-drift` (a staged `ssot-quote` block
+that no longer verifies against its source). In
+`commit_gate_mode: warn` (the rollout default) violations appear
+as advisory context — read them and amend the commit content
+BEFORE committing; in `block` mode they deny the commit with the
+exact remediation.
+
+`generated-doc-hand-edit` deliberately has no STAGED half — EDIT
+catches a hand-edit the moment it happens and SWEEP catches
+anything already on disk at the next session start, so a
+commit-time check would only ever restate one of those two.
+
+Check the staged tree any time without committing:
+`bin/hooks-daemon docs-qa --check-staged`.
+Commits inside nested/vendor repos or foreign worktrees are exempt.
+
 <!-- handler: docs-qa-edit -->
 
 ## docs_qa_edit — documentation writes are linted in real time
