@@ -89,21 +89,23 @@ Signalling contract mapped from `goal_injection` (authoritative reference is
 
 ## Tasks
 
-### Phase 1: Cadence rework (handler-only, no supervisor dependency)
+### Phase 1: Cadence rework (handler-only, no supervisor dependency) ✅
 
-- [ ] ⬜ **Task 1.1**: Replace `_FULL_TEXT_DELIVERIES` decay with cadence state.
-  - [ ] ⬜ Track per session: last-delivery timestamp, prompts-since-last count.
-  - [ ] ⬜ Deliver full text on the first delivery of a session; short form after.
-  - [ ] ⬜ Reinforce when `prompts_since_last >= prompt_interval` OR
+- [x] ✅ **Task 1.1**: Replace `_FULL_TEXT_DELIVERIES` decay with cadence state.
+  - [x] ✅ Track per session: last-delivery timestamp, prompts-since-last count
+    (new `_SessionState` dataclass, injectable `_clock`).
+  - [x] ✅ Deliver full text on the first delivery of a session; short form after.
+  - [x] ✅ Reinforce when `prompts_since_last >= prompt_interval` OR
     `minutes_since_last >= interval_minutes`; else stay silent.
-  - [ ] ⬜ Keep the bounded/FIFO per-session map shape; reset on daemon restart.
-- [ ] ⬜ **Task 1.2**: Exclude automated ticks from the prompt counter.
-  - [ ] ⬜ Determine a ROBUST signal for "automated prompt" (investigate
-    `hook_input` fields first — do not text-match brittle prose). If none is
-    clean, count all prompts and rely on the 15-min OR-gate; document the
-    decision in the code.
-- [ ] ⬜ **Task 1.3**: TDD — cadence tests (first-full, N-prompt trigger,
-  T-minute trigger via injected clock, silence between, restart reset).
+  - [x] ✅ Keep the bounded/FIFO per-session map shape; reset on daemon restart.
+- [x] ✅ **Task 1.2**: Exclude automated ticks from the prompt counter.
+  - [x] ✅ Robust signal chosen: match a small set of STABLE machine-origin
+    markers (`FAILSAFE RECOVERY CHECK`, `🤖 [ccy-supervisor]`) — Claude Code
+    exposes no automated-vs-human flag. The supervisor marker also gives the
+    Phase 2/3 loop-guard for free.
+- [x] ✅ **Task 1.3**: TDD — cadence tests (first-full, N-prompt trigger,
+  T-minute trigger via injected clock, silence between, per-session reset,
+  automated-tick exclusion, loop-guard). 37 pass; handler 98% covered.
 
 ### Phase 2: Channel routing in the handler
 

@@ -168,58 +168,104 @@ class TestMatches:
         assert StandingAuthorisationsHandler().matches({"prompt": 42}) is False
 
 
-class TestDecayNotCooldown:
-    """Task 3.3 — the rate limit must never SKIP a prompt.
+class _FakeClock:
+    """A settable monotonic-ish clock for exercising the time-based cadence."""
 
-    Phase 1's finding is that a system-prompt restriction re-sent on every
-    request is answered only by a per-prompt channel. A cooldown that skips
-    prompts would leave windows where the restriction is unopposed — exactly
-    the SessionStart failure this handler exists to avoid. So the text decays
-    to a short form; it never stops arriving.
+    def __init__(self, start: float = 1_000.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+class TestCadence:
+    """Plan 00283 — first full, then reinforce on 5 prompts OR 15 min.
+
+    This SUPERSEDES Plan 00223's "decay never skips a prompt". The old property
+    injected the short form on every single prompt; that was reliable but noisy,
+    and it rode along on every automated failsafe-recovery tick. The reliability
+    argument (a per-request system-prompt restriction needs an answer that
+    survives compaction) is preserved by a DIFFERENT mechanism: the reinforcement
+    still arrives many times per session, bounded to at most `prompt_interval`
+    prompts or `interval_minutes` apart — a small, bounded silence, not the
+    unbounded once-ever silence that made SessionStart injection fail.
     """
 
-    def test_it_still_fires_on_every_prompt_long_after_the_decay(self) -> None:
-        handler = StandingAuthorisationsHandler()
-        _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
-        for _ in range(50):
-            assert handler.handle(
-                _hook_input()
-            ).context, "a skipped prompt is a cooldown, not a decay"
-
-    def test_early_deliveries_carry_the_full_text(self) -> None:
+    def test_first_prompt_delivers_the_full_text(self) -> None:
         handler = StandingAuthorisationsHandler()
         _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
         first = " ".join(handler.handle(_hook_input()).context)
         assert "without pausing to ask permission" in first
 
-    def test_the_text_shortens_once_the_point_has_been_made(self) -> None:
+    def test_prompts_between_reinforcements_are_silent(self) -> None:
+        """The whole point: no per-prompt spam between reinforcements."""
         handler = StandingAuthorisationsHandler()
+        clock = _FakeClock()
+        handler._clock = clock
+        _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
+        handler.handle(_hook_input())  # first — full
+        # The next (prompt_interval - 1) prompts, within the time window, are silent.
+        for _ in range(handler._prompt_interval - 1):
+            assert handler.handle(_hook_input()).context == []
+
+    def test_reinforces_after_prompt_interval(self) -> None:
+        handler = StandingAuthorisationsHandler()
+        clock = _FakeClock()
+        handler._clock = clock
+        _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
+        handler.handle(_hook_input())  # first — full
+        result = None
+        for _ in range(handler._prompt_interval):
+            result = handler.handle(_hook_input())
+        assert result is not None
+        assert result.context, "reinforcement must fire once prompt_interval is reached"
+
+    def test_reinforces_after_time_interval_even_with_few_prompts(self) -> None:
+        handler = StandingAuthorisationsHandler()
+        clock = _FakeClock()
+        handler._clock = clock
+        _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
+        handler.handle(_hook_input())  # first — full
+        # One more prompt, but well past the time window: the timer fires it.
+        clock.advance(handler._interval_minutes * 60 + 1)
+        assert handler.handle(_hook_input()).context
+
+    def test_reinforcement_is_the_short_form(self) -> None:
+        handler = StandingAuthorisationsHandler()
+        clock = _FakeClock()
+        handler._clock = clock
         _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
         first = " ".join(handler.handle(_hook_input()).context)
-        later = ""
-        for _ in range(10):
-            later = " ".join(handler.handle(_hook_input()).context)
+        clock.advance(handler._interval_minutes * 60 + 1)
+        later = " ".join(handler.handle(_hook_input()).context)
+        assert later, "sanity: a reinforcement was delivered"
         assert len(later) < len(first)
 
-    def test_the_short_form_still_names_where_it_is_recorded(self) -> None:
-        """A decayed authorisation that cannot be audited is not a request."""
+    def test_short_form_still_names_where_it_is_recorded(self) -> None:
         handler = StandingAuthorisationsHandler()
+        clock = _FakeClock()
+        handler._clock = clock
         _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
-        later = ""
-        for _ in range(10):
-            later = " ".join(handler.handle(_hook_input()).context)
+        handler.handle(_hook_input())
+        clock.advance(handler._interval_minutes * 60 + 1)
+        later = " ".join(handler.handle(_hook_input()).context)
         assert "hooks-daemon.yaml" in later
 
-    def test_the_short_form_is_still_never_a_countermand(self) -> None:
+    def test_short_form_is_still_never_a_countermand(self) -> None:
         handler = StandingAuthorisationsHandler()
+        clock = _FakeClock()
+        handler._clock = clock
         _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION, AUTHORISATION_WORKFLOWS)
-        later = ""
-        for _ in range(10):
-            later = " ".join(handler.handle(_hook_input()).context).lower()
+        handler.handle(_hook_input())
+        clock.advance(handler._interval_minutes * 60 + 1)
+        later = " ".join(handler.handle(_hook_input()).context).lower()
         for forbidden in ("ignore", "disregard", "override", "overrule", "bypass"):
             assert forbidden not in later
 
-    def test_decay_is_tracked_per_session(self) -> None:
+    def test_cadence_is_tracked_per_session(self) -> None:
         """A new session gets the full text again — it has not been told yet."""
         handler = StandingAuthorisationsHandler()
         _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
@@ -236,7 +282,65 @@ class TestDecayNotCooldown:
         _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
         for index in range(600):
             handler.handle({**_hook_input(), "session_id": f"session-{index}"})
-        assert len(handler._delivery_counts) <= 512
+        assert len(handler._session_states) <= 512
+
+    def test_reinforcement_never_skipped_longer_than_the_bound(self) -> None:
+        """The reliability floor: silence is bounded, never once-ever.
+
+        Over a long run of prompts with the clock advancing a little each time,
+        the reinforcement must keep arriving — at least once every
+        prompt_interval prompts.
+        """
+        handler = StandingAuthorisationsHandler()
+        clock = _FakeClock()
+        handler._clock = clock
+        _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
+        handler.handle(_hook_input())  # first — full
+        deliveries = 0
+        prompts = 40
+        for _ in range(prompts):
+            clock.advance(1.0)  # tiny, so the timer never fires; only the counter
+            if handler.handle(_hook_input()).context:
+                deliveries += 1
+        # With only the prompt-counter in play, expect ~prompts / prompt_interval.
+        assert deliveries >= prompts // handler._prompt_interval - 1
+
+
+class TestAutomatedPromptsAreIgnored:
+    """Task 1.2 + Task 2.4 — automated ticks neither count nor deliver.
+
+    A failsafe-recovery cron tick, a goal-injection line, or this handler's OWN
+    supervisor-typed reinforcement all arrive as UserPromptSubmit events. None
+    is a human prompt, so none should advance the prompt counter or trigger a
+    reinforcement — otherwise the reinforcement rides every hourly cron tick
+    (the exact spam this plan removes) and a supervisor-typed line re-triggers
+    itself (an injection loop).
+    """
+
+    def test_failsafe_recovery_tick_is_silent(self) -> None:
+        handler = StandingAuthorisationsHandler()
+        _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
+        handler.handle(_hook_input())  # first — full
+        tick = _hook_input("**FAILSAFE RECOVERY CHECK (automated hourly safety net ...)**")
+        assert handler.handle(tick).context == []
+
+    def test_supervisor_marker_prompt_is_silent_loop_guard(self) -> None:
+        handler = StandingAuthorisationsHandler()
+        _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
+        handler.handle(_hook_input())  # first — full
+        own = _hook_input("🤖 [ccy-supervisor] standing-authorisation reminder — ...")
+        assert handler.handle(own).context == []
+
+    def test_automated_ticks_do_not_advance_the_prompt_counter(self) -> None:
+        """Interleaved automated ticks must not bring a reinforcement forward."""
+        handler = StandingAuthorisationsHandler()
+        clock = _FakeClock()
+        handler._clock = clock
+        _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
+        handler.handle(_hook_input())  # first — full
+        # A flood of automated ticks must not, by themselves, earn a reinforcement.
+        for _ in range(20):
+            assert handler.handle(_hook_input("**FAILSAFE RECOVERY CHECK ...**")).context == []
 
 
 class TestClaudeMdGuidance:
