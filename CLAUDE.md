@@ -1652,6 +1652,17 @@ as advisory context — read them and amend the commit content
 BEFORE committing; in `block` mode they deny the commit with the
 exact remediation.
 
+**Advisory only, never block, cross-file by nature**:
+`rules-file-orphan-shrink` — a staged `.claude/rules/*.md` shrink
+with no staged growth anywhere in the canonical agent tree (R7a's
+promote-then-thin transition rule, mechanically approximated: a
+false positive is expected when the promotion happened in an
+earlier commit or the content was genuinely obsolete).
+`plan-promotion-disposition` — a staged terminal-status flip of a
+`PLAN.md` whose folder has supporting docs, where the staged
+closing journal entry mentions none of PROMOTE/HISTORICAL/DELETE
+(R8; a plain keyword scan — false negatives are expected).
+
 `generated-doc-hand-edit` deliberately has no STAGED half — EDIT
 catches a hand-edit the moment it happens and SWEEP catches
 anything already on disk at the next session start, so a
