@@ -194,8 +194,11 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
   and the dead links; warn-mode edit probe correctly advises instead of
   denying). `docs_qa_commit_gate` deliberately DEFERRED to 3.1e with STAGED
   context — mirrors plan_qa's own land-last commit-gate rollout order.
-- [ ] ⬜ **Task 3.1d**: `ssot-quote` verifier (`quote-drift`, `quote-source-stale`)
-  per the hardened §2.4 spec + restart-snippet migration seed.
+- [x] ✅ **Task 3.1d**: `ssot-quote` verifier (`quote-drift`, `quote-source-stale`)
+  per the hardened §2.4 spec. Delivered at `2503a881` — 61 tests, package still
+  100%, live socket probe of a drifted quote correctly advised under warn mode.
+  80-char minimum quote floor; source read direct-from-disk as primary path;
+  reverse index cold-safe. Restart-snippet migration stays in Task 3.2.
 - [ ] ⬜ **Task 3.1e**: budgets/registry (`module-doc-budget`), `at-import-census`,
   STAGED checks (`rules-file-orphan-shrink`, `plan-promotion-disposition`).
 - [ ] ⬜ **Task 3.1f**: `duplicate-block` — advisory only, AFTER a hand-triaged
