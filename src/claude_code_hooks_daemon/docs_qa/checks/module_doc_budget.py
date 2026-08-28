@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.docs_qa.corpus import is_module_doc_path
 from claude_code_hooks_daemon.docs_qa.types import (
     CheckContext,
     CheckSpec,
@@ -75,19 +76,6 @@ def _strip_quote_blocks(content: str) -> str:
 
 def _line_count(content: str) -> int:
     return len(_strip_quote_blocks(content).splitlines())
-
-
-def _is_module_doc(rel_path: str, agent_tree: str) -> bool:
-    """True for any CLAUDE.md that is NOT a canonical root (repo or agent-tree)."""
-    parts = rel_path.split("/")
-    if parts[-1] != _CLAUDE_MD_FILENAME:
-        return False
-    if len(parts) == 1:
-        return False  # repo-root CLAUDE.md
-    agent_tree_norm = agent_tree.strip("/")
-    if len(parts) == 2 and parts[0] == agent_tree_norm:
-        return False  # {trees.agent}/CLAUDE.md
-    return True
 
 
 @dataclass(frozen=True)
@@ -167,7 +155,7 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     if context.file_path is None or context.file_content is None:
         return []
     rel_path = str(context.file_path.relative_to(context.project_root))
-    if not _is_module_doc(rel_path, context.policy.trees.agent):
+    if not is_module_doc_path(rel_path, context.policy.trees.agent):
         return []
     registered = rel_path in context.policy.qa.registered_module_docs
     finding = _finding_for(rel_path, context.file_content, context.file_content_before, registered)
@@ -183,7 +171,7 @@ def _iter_module_doc_paths(project_root: Path, agent_tree: str) -> list[str]:
         parts = rel_path.split("/")
         if any(part in _EXCLUDED_DIR_NAMES for part in parts[:-1]):
             continue
-        if _is_module_doc(rel_path, agent_tree):
+        if is_module_doc_path(rel_path, agent_tree):
             matches.append(rel_path)
     return sorted(matches)
 

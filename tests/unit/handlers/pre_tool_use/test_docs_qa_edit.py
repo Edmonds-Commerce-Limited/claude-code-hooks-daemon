@@ -97,6 +97,16 @@ class TestMatches:
         with _patched_root(tmp_path):
             assert _handler(policy).matches(_write_input(target, "x")) is True
 
+    def test_matches_module_scoped_claude_md_outside_every_tracked_tree(
+        self, tmp_path: Path
+    ) -> None:
+        """Live scope gap this test guards: src/CLAUDE.md is outside the
+        corpus's own scope entirely, but module-doc-budget must still be
+        reachable at EDIT time for exactly this shape of path."""
+        target = tmp_path / "src" / "CLAUDE.md"
+        with _patched_root(tmp_path):
+            assert _handler().matches(_write_input(target, "x")) is True
+
     def test_ignores_files_outside_docs_scope(self, tmp_path: Path) -> None:
         target = tmp_path / "src" / "module.py"
         with _patched_root(tmp_path):

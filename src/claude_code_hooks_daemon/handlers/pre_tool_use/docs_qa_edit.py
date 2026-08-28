@@ -11,10 +11,17 @@ violating, a SWEEP-only signal) can never be escalated by mode alone.
 
 Scope is the union docs_qa recognises for EDIT-stage checking: the doc
 corpus's own scope (the two audience trees, ``.claude/rules``,
-``.claude/skills``, ``.claude/agents``, root-level ``.md``) OR a path
+``.claude/skills``, ``.claude/agents``, root-level ``.md``), OR a path
 declared in the generated-docs manifest — the manifest may legitimately
 name a path outside the corpus scope (``.claude/HOOKS-DAEMON.md`` is
-exactly this case, see ``docs_qa.checks.generated_doc_hand_edit``).
+exactly this case, see ``docs_qa.checks.generated_doc_hand_edit``) — OR any
+module-scoped ``CLAUDE.md`` (:func:`docs_qa.corpus.is_module_doc_path`).
+That third arm is deliberately WIDER than the corpus scope: a file like
+``src/CLAUDE.md`` or ``.claude/ccy/CLAUDE.md`` sits outside every tree the
+corpus tracks, yet is exactly what ``module-doc-budget`` exists to police
+(RULESET section 2) — without this arm the check would be permanently
+unreachable at EDIT time for the very files it targets, catching drift
+only retrospectively at the next SWEEP.
 
 Deliberately hot-path cheap: the primary checks (``pointer-resolves``,
 ``generated-doc-hand-edit``, ``rules-file-shape``, ``quote-drift``) need no
@@ -40,7 +47,11 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.docs_qa.checks.generated_doc_hand_edit import matched_manifest_entry
 from claude_code_hooks_daemon.docs_qa.context import edit_context
-from claude_code_hooks_daemon.docs_qa.corpus import is_in_scope, load_or_cold_corpus
+from claude_code_hooks_daemon.docs_qa.corpus import (
+    is_in_scope,
+    is_module_doc_path,
+    load_or_cold_corpus,
+)
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.report import format_advisory, format_block_reason
 from claude_code_hooks_daemon.docs_qa.runner import run_stage
@@ -93,8 +104,10 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
         rel_path = self._rel_path(file_path, project_root)
         if rel_path is None:
             return False
-        return is_in_scope(file_path, project_root, policy) or (
-            matched_manifest_entry(rel_path, policy.qa.generated_docs) is not None
+        return (
+            is_in_scope(file_path, project_root, policy)
+            or matched_manifest_entry(rel_path, policy.qa.generated_docs) is not None
+            or is_module_doc_path(rel_path, policy.trees.agent)
         )
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
@@ -178,9 +191,12 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
             "\n"
             "Every Write/Edit of a documentation-scoped file (the two audience\n"
             "trees, `.claude/rules`, `.claude/skills`, `.claude/agents`, a\n"
-            "root-level `.md`, or a path declared in the generated-docs\n"
-            "manifest) is checked against the docs QA EDIT-stage catalogue on the\n"
-            "content the file WOULD have.\n"
+            "root-level `.md`, a path declared in the generated-docs manifest,\n"
+            "or ANY sub-folder `CLAUDE.md` regardless of tree — that last arm\n"
+            "is deliberately wider than the corpus scope, since a module doc\n"
+            "like `src/CLAUDE.md` sits outside every tracked tree yet is\n"
+            "exactly what `module-doc-budget` polices) is checked against the\n"
+            "docs QA EDIT-stage catalogue on the content the file WOULD have.\n"
             "\n"
             "**Checks**: `pointer-resolves` (a plain markdown link whose target\n"
             "file does not exist — block-eligible only for a link NEW in this\n"

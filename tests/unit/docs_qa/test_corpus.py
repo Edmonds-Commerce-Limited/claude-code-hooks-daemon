@@ -10,6 +10,7 @@ from claude_code_hooks_daemon.docs_qa.corpus import (
     build_and_save_corpus,
     extract_link_targets,
     is_in_scope,
+    is_module_doc_path,
     iter_corpus_paths,
     load_cached_corpus,
     load_or_cold_corpus,
@@ -105,6 +106,17 @@ class TestIsInScope:
         (tmp_path / "CLAUDE" / "notes.txt").write_text("x")
         assert not is_in_scope(tmp_path / "CLAUDE" / "notes.txt", tmp_path, DocumentationPolicy())
 
+    def test_module_doc_outside_every_tracked_tree_is_still_module_scoped(
+        self, tmp_path: Path
+    ) -> None:
+        """The live scope gap this test guards: ``src/CLAUDE.md`` is not
+        agent tree, human tree, or a satellite dir, so ``is_in_scope`` is
+        (correctly) False for it -- but ``is_module_doc_path`` must be True,
+        since module-doc-budget exists specifically to police files exactly
+        like this one."""
+        assert not is_in_scope(tmp_path / "src" / "CLAUDE.md", tmp_path, DocumentationPolicy())
+        assert is_module_doc_path("src/CLAUDE.md", "CLAUDE")
+
     def test_respects_configured_tree_names(self, tmp_path: Path) -> None:
         (tmp_path / "AgentDocs").mkdir()
         (tmp_path / "AgentDocs" / "X.md").write_text("x")
@@ -112,6 +124,22 @@ class TestIsInScope:
             trees=DocumentationTreesPolicy(agent="AgentDocs", human="HumanDocs")
         )
         assert is_in_scope(tmp_path / "AgentDocs" / "X.md", tmp_path, policy)
+
+
+class TestIsModuleDocPath:
+    def test_repo_root_claude_md_is_not_module_scoped(self) -> None:
+        assert not is_module_doc_path("CLAUDE.md", "CLAUDE")
+
+    def test_agent_tree_root_claude_md_is_not_module_scoped(self) -> None:
+        assert not is_module_doc_path("CLAUDE/CLAUDE.md", "CLAUDE")
+
+    def test_non_claude_md_filename_is_not_module_scoped(self) -> None:
+        assert not is_module_doc_path("src/Other.md", "CLAUDE")
+
+    def test_nested_claude_md_anywhere_is_module_scoped(self) -> None:
+        assert is_module_doc_path("src/foo/CLAUDE.md", "CLAUDE")
+        assert is_module_doc_path(".claude/ccy/CLAUDE.md", "CLAUDE")
+        assert is_module_doc_path("CLAUDE/strategies/tdd/CLAUDE.md", "CLAUDE")
 
     def test_path_equal_to_project_root_is_excluded(self, tmp_path: Path) -> None:
         # An edge case where the "path" resolves to empty relative parts —

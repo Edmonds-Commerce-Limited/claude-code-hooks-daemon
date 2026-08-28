@@ -47,6 +47,26 @@ _MD_LINK_RE: Final[re.Pattern[str]] = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"
 
 _INDEX_TMP_SUFFIX: Final[str] = ".tmp"
 
+_CLAUDE_MD_FILENAME: Final[str] = "CLAUDE.md"
+
+
+def is_module_doc_path(rel_path: str, agent_tree: str) -> bool:
+    """True for any ``CLAUDE.md`` that is NOT a canonical root (repo or
+    agent-tree). Deliberately WIDER than :func:`is_in_scope`'s tracked-corpus
+    scope (``module-doc-budget``'s own contract, RULESET section 2 — a
+    module doc like ``src/CLAUDE.md`` or ``.claude/ccy/CLAUDE.md`` sits
+    outside every tree ``is_in_scope`` recognises, yet is squarely what the
+    budget check exists to police)."""
+    parts = rel_path.split("/")
+    if parts[-1] != _CLAUDE_MD_FILENAME:
+        return False
+    if len(parts) == 1:
+        return False  # repo-root CLAUDE.md
+    agent_tree_norm = agent_tree.strip("/")
+    if len(parts) == 2 and parts[0] == agent_tree_norm:
+        return False  # {trees.agent}/CLAUDE.md
+    return True
+
 
 def extract_link_targets(text: str) -> list[str]:
     """Every plain markdown link target in ``text``, outside fenced code blocks.
