@@ -2086,6 +2086,98 @@ handlers:
 
 ---
 
+#### docs_qa_edit
+
+| Property       | Value          |
+| -------------- | -------------- |
+| **Config key** | `docs_qa_edit` |
+| **Priority**   | 47             |
+| **Type**       | Blocking       |
+| **Event**      | PreToolUse     |
+
+**Description:** Lints every Write/Edit of a documentation-scoped file in real time, running the docs QA EDIT-stage checks against the content the file *would* have after the tool call. Ships as the write-time half of the documentation SSoT enforcement system (`CLAUDE/DocumentationStrategy.md`); the cross-file half is [`docs_qa_commit_gate`](#docs_qa_commit_gate) and the whole-corpus half is [`docs_qa_sweep`](#docs_qa_sweep).
+
+**Fires when:** a Write/Edit targets a file in-scope for the doc corpus (the two audience trees `documentation.trees.agent`/`documentation.trees.human`, `.claude/rules`, `.claude/skills`, `.claude/agents`, a root-level `.md`, a path declared in `documentation.qa.generated_docs`, or any sub-folder `CLAUDE.md` regardless of tree).
+
+**Enforcement mode:** honours `documentation.qa.edit_mode` (`warn` | `block`, default `warn`) as the default for checks without a `check_modes` override.
+
+**Checks:** `pointer-resolves` (a plain markdown link whose target file does not exist — block-eligible only for a link NEW in this edit), `generated-doc-hand-edit` (hand-editing a file `documentation.qa.generated_docs` declares — regenerate it instead), `rules-file-shape` (`.claude/rules/*.md` must stay pointer-only: no fences, tables, numbered procedures or `ssot-quote` blocks, and a 15-line body budget — block-eligible only when an edit adds a violation or grows an already-over-budget body), `quote-drift` (an `<!-- ssot-quote: file.md#anchor -->` block whose body no longer matches its source section, or whose source is missing entirely), `at-import-census` (an `@path.md` import outside `documentation.qa.resident_at_imports` — block-eligible only for an import NEW in this edit), `module-doc-budget` (a sub-folder `CLAUDE.md` outside the two canonical roots gets a line budget: unregistered stays advisory-only under ~40 lines, a doc listed in `documentation.qa.registered_module_docs` gets a larger block tier instead, worse-only).
+
+Every block-eligible check honours `documentation.qa.grandfather_allowlist` — a matching path is held to ADVISE-only regardless of mode (R12).
+
+**Policy configuration:** all three docs QA surfaces (this handler, `docs_qa_commit_gate`, `docs_qa_sweep`) plus the `docs-qa` CLI share ONE policy block under the top-level `documentation` key — not per-handler `options`:
+
+```yaml
+documentation:
+  enabled: true                # master switch for the docs QA HANDLERS (CLI always runs)
+  trees:
+    agent: CLAUDE               # root of the agent-facing (verbose) tree
+    human: docs                 # root of the human-facing (terse) tree
+  qa:
+    edit_mode: warn              # Stage 1 EDIT lint: warn | block
+    commit_gate_mode: warn       # Stage 2 STAGED commit gate: warn | block
+    sweep_mode: advise           # Stage 3 SessionStart sweep: advise | off
+    check_modes: {}              # per-check override, e.g. {rules-file-shape: block}
+    grandfather_allowlist: []    # file globs held to advise-only forever (R12)
+    generated_docs:               # manifest of generated docs (R10)
+      - glob: ".claude/HOOKS-DAEMON.md"
+        generator: "bin/hooks-daemon generate-docs"
+    registered_module_docs: []   # sub-CLAUDE.md files that ARE a canonical home (R7d)
+    resident_at_imports:         # the @-import allowlist (R6)
+      - "CLAUDE.md"
+```
+
+`documentation.enabled` gates only the three HANDLERS — the `docs-qa` CLI always runs regardless, since an explicit invocation is consent. `generated_docs` is pre-seeded with the daemon's own `.claude/HOOKS-DAEMON.md` entry; extend it for a project's own generated docs. `resident_at_imports` defaults to `["CLAUDE.md"]` — the deliberate resident set an `@`-import from root `CLAUDE.md` is exempt from `at-import-census`.
+
+The handler itself is enabled/prioritised in the usual place:
+
+```yaml
+handlers:
+  pre_tool_use:
+    docs_qa_edit:
+      enabled: true
+      priority: 47
+```
+
+**CLI:** lint any file on demand with `.claude/hooks-daemon/bin/hooks-daemon docs-qa --lint <file>` (add `--json` for machine-readable output).
+
+---
+
+#### docs_qa_commit_gate
+
+| Property       | Value                 |
+| -------------- | --------------------- |
+| **Config key** | `docs_qa_commit_gate` |
+| **Priority**   | 47                    |
+| **Type**       | Blocking              |
+| **Event**      | PreToolUse            |
+
+**Description:** On a `git commit` Bash command, evaluates the *staged* tree against the cross-file docs QA invariants a single-file edit hook cannot see.
+
+**Fires when:** a Bash command tokenises to a `git commit`. Commits inside nested/vendor repos or foreign worktrees are exempt.
+
+**Enforcement mode:** honours `documentation.qa.commit_gate_mode` (`warn` | `block`, default `warn`). In `warn` (the rollout default) findings render as advisory context — read them and amend the commit content before it lands; `block` denies the commit.
+
+**Checks:** `pointer-resolves` (a new dead link in a staged documentation file) and `quote-drift` (a staged `ssot-quote` block that no longer verifies against its source) are block-eligible. `rules-file-orphan-shrink` (advisory-only) flags a staged `.claude/rules/*.md` shrink with no staged growth anywhere in the canonical agent tree, a mechanical approximation of the "promote then thin" transition rule. `plan-promotion-disposition` (advisory-only) flags a staged terminal-status flip of a `PLAN.md` whose folder has supporting docs, where the staged closing journal entry mentions none of PROMOTE/HISTORICAL/DELETE.
+
+`generated-doc-hand-edit` deliberately has no STAGED-stage check — EDIT catches a hand-edit the moment it happens and SWEEP catches anything already on disk at the next session start, so a commit-time check would only restate one of those two.
+
+**Policy configuration:** shares the top-level `documentation` block documented under [`docs_qa_edit`](#docs_qa_edit).
+
+**CLI:** check the staged tree any time without committing with `.claude/hooks-daemon/bin/hooks-daemon docs-qa --check-staged`.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    docs_qa_commit_gate:
+      enabled: true
+      priority: 47
+```
+
+---
+
 #### npm_command
 
 | Property       | Value         |
@@ -2685,6 +2777,41 @@ handlers:
     plan_qa_sweep:
       enabled: true
       priority: 57
+```
+
+---
+
+#### docs_qa_sweep
+
+| Property       | Value           |
+| -------------- | --------------- |
+| **Config key** | `docs_qa_sweep` |
+| **Priority**   | 64              |
+| **Type**       | Advisory        |
+| **Event**      | SessionStart    |
+
+**Description:** At the start of each new session, rebuilds the doc corpus index (link graph over the two audience trees, `.claude/rules`, `.claude/skills`, `.claude/agents`, and root-level `.md` files) and checks it with the docs QA SWEEP-stage catalogue, injecting a compact drift report as advisory context. Never blocks; silent when the corpus is clean.
+
+**Checks:** `pointer-resolves` (dead links), `generated-doc-hand-edit` (a generated doc that looks hand-edited or stale against the daemon's own version), `rules-file-shape` (a `.claude/rules/*.md` file violating the pointer-only contract), `quote-drift` (re-verified fresh from disk every sweep — the backstop for the advisory-only `quote-source-stale` check, which only fires at edit time), `at-import-census` (an `@path.md` import outside the resident allowlist, found anywhere in the corpus), `module-doc-budget` (every sub-folder `CLAUDE.md` re-measured against its line budget — SWEEP has no before/after to judge worse-only against, so a block-eligible-at-EDIT finding is always reported here as advisory), and `duplicate-block` (a structured block — fenced code, table, or list run of 3+ items — whose normalised content matches one in a DIFFERENT document; always advisory, with no block path at all).
+
+The injected report is capped at the first 8 findings, with a trailing `...and N more` line naming the CLI for the rest — the CLI report itself is never capped.
+
+**Fires when:** a new (non-resumed) session starts with `documentation.enabled` true and `sweep_mode: advise`.
+
+**Enforcement mode:** honours `documentation.qa.sweep_mode` (`advise` | `off`, default `advise`).
+
+**Policy configuration:** shares the top-level `documentation` block documented under [`docs_qa_edit`](#docs_qa_edit).
+
+**CLI:** the same catalogue runs against the current tree with `.claude/hooks-daemon/bin/hooks-daemon docs-qa --sweep`, which exits 1 while findings remain (CI-able); add `--json` for machine-readable output.
+
+**Config example:**
+
+```yaml
+handlers:
+  session_start:
+    docs_qa_sweep:
+      enabled: true
+      priority: 64
 ```
 
 ---

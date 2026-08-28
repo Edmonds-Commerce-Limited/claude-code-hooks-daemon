@@ -119,12 +119,14 @@ drive-by.
 
 ### Phase 4: F4 — document the docs-qa system
 
-- [ ] ⬜ **Task 4.1**: Add `docs_qa_edit`, `docs_qa_commit_gate`,
+- [x] ✅ **Task 4.1**: Add `docs_qa_edit`, `docs_qa_commit_gate`,
   `docs_qa_sweep` sections to `docs/guides/HANDLER_REFERENCE.md`, at the
   same depth/format as the `plan_qa` trio, accurate to the shipped code
   (options and defaults sourced from the daemon's config model classes).
-- [ ] ⬜ **Task 4.2**: Add the `documentation:` top-level config block
-  (`trees`, `qa.*`) to the same reference doc.
+- [x] ✅ **Task 4.2**: Add the `documentation:` top-level config block
+  (`trees`, `qa.*`) to the same reference doc (documented under
+  `docs_qa_edit`, mirroring how `plan_workflow.qa` is documented under
+  `plan_qa_edit`).
 
 ### Phase 5: N1 + cheap nits
 
