@@ -83,23 +83,23 @@ drive-by.
 
 ### Phase 1: F1 — CLI lint severity inflation
 
-- [ ] ⬜ **Task 1.1**: Regression test proving `cmd_docs_qa --lint` and the
+- [x] ✅ **Task 1.1**: Regression test proving `cmd_docs_qa --lint` and the
   EDIT-stage handler disagree on severity for identical unchanged content
   (RED).
-- [ ] ⬜ **Task 1.2**: Pass `file_content_before=lint_content` in
+- [x] ✅ **Task 1.2**: Pass `file_content_before=lint_content` in
   `cmd_docs_qa`'s `--lint` branch (daemon CLI) so an on-disk lint is treated
   as "no pending change" (GREEN).
-- [ ] ⬜ **Task 1.3**: Confirm the fix via `rules-file-shape` and
+- [x] ✅ **Task 1.3**: Confirm the fix via `rules-file-shape` and
   `module-doc-budget` worse-only fixtures through the CLI.
 
 ### Phase 2: F2 — grandfather allowlist ignored by two checks
 
-- [ ] ⬜ **Task 2.1**: Failing tests: a grandfathered file's new `@`-import
+- [x] ✅ **Task 2.1**: Failing tests: a grandfathered file's new `@`-import
   and a grandfathered file's new-over-budget module doc must downgrade to
   ADVISE in block mode.
-- [ ] ⬜ **Task 2.2**: Add `grandfather_allowlist` consultation to
+- [x] ✅ **Task 2.2**: Add `grandfather_allowlist` consultation to
   `at_import_census.py` (mirrors `pointer_resolves.py`'s pattern).
-- [ ] ⬜ **Task 2.3**: Add `grandfather_allowlist` consultation to
+- [x] ✅ **Task 2.3**: Add `grandfather_allowlist` consultation to
   `module_doc_budget.py` (mirrors `rules_file_shape.py`'s pattern).
 
 ### Phase 3: F3 — client-scaling exclusions

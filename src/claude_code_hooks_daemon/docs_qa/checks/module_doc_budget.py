@@ -26,11 +26,13 @@ a verification.
 
 Worse-only semantics for the registered-doc block tier mirror
 rules-file-shape exactly: growing while already over the block tier is
-BLOCK-eligible; unchanged is ADVISE; shrinking is silent.
+BLOCK-eligible; unchanged is ADVISE; shrinking is silent. A path matching
+``grandfather_allowlist`` is held to ADVISE-only regardless (R12).
 """
 
 import re
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Final
 
@@ -89,6 +91,10 @@ _EXCLUDED_DIR_NAMES: Final[frozenset[str]] = frozenset(
         Path(ProjectPath.CLAUDE_WORKTREES_DIR).name,
     }
 )
+
+
+def _matches_allowlist(rel_path: str, patterns: tuple[str, ...]) -> bool:
+    return any(fnmatch(rel_path, pattern) for pattern in patterns)
 
 
 def _strip_quote_blocks(content: str) -> str:
@@ -152,10 +158,13 @@ def _finding_for(
     content: str,
     content_before: str | None,
     registered: bool,
+    grandfathered: bool = False,
 ) -> Finding | None:
     """plan-doc-size's own tiering, mirrored: shrinking is silent, a
     non-growing edit never escalates past ADVISE, and the highest breached
-    tier otherwise sets the severity (worse-only, like rules-file-shape)."""
+    tier otherwise sets the severity (worse-only, like rules-file-shape).
+    A path matching ``grandfather_allowlist`` is held to ADVISE-only (R12),
+    the same downgrade every other block-eligible check applies."""
     line_count = _line_count(content)
     if content_before is not None:
         old_line_count = _line_count(content_before)
@@ -168,7 +177,7 @@ def _finding_for(
     breached = next((tier for tier in _tiers_for(registered) if line_count > tier.max_lines), None)
     if breached is None:
         return None
-    severity = breached.severity if grows else Severity.ADVISE
+    severity = breached.severity if (grows and not grandfathered) else Severity.ADVISE
     return _finding(rel_path, line_count, breached, severity)
 
 
@@ -179,7 +188,10 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     if not is_module_doc_path(rel_path, context.policy.trees.agent):
         return []
     registered = rel_path in context.policy.qa.registered_module_docs
-    finding = _finding_for(rel_path, context.file_content, context.file_content_before, registered)
+    grandfathered = _matches_allowlist(rel_path, context.policy.qa.grandfather_allowlist)
+    finding = _finding_for(
+        rel_path, context.file_content, context.file_content_before, registered, grandfathered
+    )
     return [finding] if finding is not None else []
 
 

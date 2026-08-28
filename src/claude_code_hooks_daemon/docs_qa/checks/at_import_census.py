@@ -14,10 +14,13 @@ line filter.
 
 Block eligibility mirrors ``pointer-resolves`` exactly: NEW imports only
 at EDIT (an import already present before the edit is not this edit's
-fault); SWEEP is always ADVISE (no before/after to judge).
+fault), downgraded to ADVISE for a path matching
+``grandfather_allowlist`` (R12 — held to advise-only forever); SWEEP is
+always ADVISE (no before/after to judge).
 """
 
 import re
+from collections.abc import Sequence
 from fnmatch import fnmatch
 from typing import Final
 
@@ -55,6 +58,10 @@ def _is_resident(target: str, resident_at_imports: tuple[str, ...]) -> bool:
     return any(fnmatch(target, pattern) for pattern in resident_at_imports)
 
 
+def _matches_allowlist(rel_path: str, patterns: Sequence[str]) -> bool:
+    return any(fnmatch(rel_path, pattern) for pattern in patterns)
+
+
 def _finding(rel_path: str, target: str, severity: Severity) -> Finding:
     return Finding(
         check_id=CHECK_ID,
@@ -75,6 +82,7 @@ def _run_edit(context: CheckContext) -> list[Finding]:
         return []
     rel_path = str(context.file_path.relative_to(context.project_root))
     resident = context.policy.qa.resident_at_imports
+    grandfathered = _matches_allowlist(rel_path, context.policy.qa.grandfather_allowlist)
     old_targets = (
         set(extract_at_imports(context.file_content_before))
         if context.file_content_before is not None
@@ -86,7 +94,7 @@ def _run_edit(context: CheckContext) -> list[Finding]:
         if _is_resident(target, resident):
             continue
         is_new = target not in old_targets
-        severity = Severity.BLOCK if is_new else Severity.ADVISE
+        severity = Severity.BLOCK if (is_new and not grandfathered) else Severity.ADVISE
         findings.append(_finding(rel_path, target, severity))
     return findings
 

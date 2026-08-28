@@ -170,6 +170,33 @@ class TestRegisteredBudget:
         assert _run_edit(context) == []
 
 
+class TestGrandfatherAllowlist:
+    def test_grandfathered_registered_doc_growing_past_block_tier_is_advise(
+        self, tmp_path: Path
+    ) -> None:
+        """F2 (Plan 00287): grandfather_allowlist must downgrade a NEW
+        over-block-tier finding to ADVISE, mirroring rules-file-shape and
+        pointer-resolves -- R12's "held to advise-only forever" promise."""
+        (tmp_path / "src" / "foo").mkdir(parents=True)
+        policy = DocumentationPolicy(
+            qa=DocumentationQaPolicy(
+                registered_module_docs=("src/foo/CLAUDE.md",),
+                grandfather_allowlist=("src/foo/CLAUDE.md",),
+            )
+        )
+        huge_body = "\n".join(f"line {i}" for i in range(1000))
+        context = edit_context(
+            project_root=tmp_path,
+            policy=policy,
+            file_path=tmp_path / "src" / "foo" / "CLAUDE.md",
+            file_content=huge_body,
+            file_exists_before=False,
+        )
+        findings = _run_edit(context)
+        assert len(findings) == 1
+        assert findings[0].severity is Severity.ADVISE
+
+
 class TestQuoteBlocksExcludedFromCount:
     def test_ssot_quote_body_does_not_count_toward_the_budget(self, tmp_path: Path) -> None:
         (tmp_path / "src" / "foo").mkdir(parents=True)

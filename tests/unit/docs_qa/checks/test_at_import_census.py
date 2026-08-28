@@ -107,6 +107,25 @@ class TestEditStage:
         )
         assert _run_edit(context) == []
 
+    def test_new_non_resident_import_in_grandfathered_file_is_advise(self, tmp_path: Path) -> None:
+        """F2 (Plan 00287): grandfather_allowlist must downgrade a NEW
+        non-resident import to ADVISE, mirroring pointer-resolves and
+        rules-file-shape -- R12's "held to advise-only forever" promise."""
+        (tmp_path / "CLAUDE").mkdir()
+        policy = DocumentationPolicy(
+            qa=DocumentationQaPolicy(grandfather_allowlist=("CLAUDE/New.md",))
+        )
+        context = edit_context(
+            project_root=tmp_path,
+            policy=policy,
+            file_path=tmp_path / "CLAUDE" / "New.md",
+            file_content="See @CLAUDE/Other.md for details.\n",
+            file_exists_before=False,
+        )
+        findings = _run_edit(context)
+        assert len(findings) == 1
+        assert findings[0].severity is Severity.ADVISE
+
     def test_missing_file_path_or_content_produces_no_findings(self, tmp_path: Path) -> None:
         context_no_path = CheckContext(
             project_root=tmp_path, policy=DocumentationPolicy(), file_content="x"
