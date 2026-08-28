@@ -247,7 +247,14 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
     stale band docstrings in `constants/priority.py` + `core/handler.py` fixed.
     N5: HooksSystem.md's core.utils import mirror now points at
     PROJECT_HANDLERS.md, with `core/utils.py` docstrings as the API source.
-    Remaining: N4.
+  - ✅ N4 fixed (slice D): LLM-INSTALL.md ssot-anchored as canonical for all
+    five shared blocks; LLM-UPDATE.md's copies now ssot-quote them (debug
+    snippet enriched over the 80-char quote floor; Support list flattened so
+    quote markers sit at column 0).
+  - ✅ Triage quote-candidate #3 fixed (slice D): QA.md#qa-summary-example
+    anchored canonical; CodeLifecycle/General.md now ssot-quotes it. Candidates
+    #5/#7 are N4 above; #6 was already closed as N5 (slice C); #2
+    (AgentTeam/Worktree) stays with its own worklist line.
   - ✅ N6 fixed (slice E): `CLAUDE/development/CLAUDE.md` rewritten as a
     13-line routing table covering all 5 files, audience framing corrected to
     point at DocumentationStrategy.md (R3).

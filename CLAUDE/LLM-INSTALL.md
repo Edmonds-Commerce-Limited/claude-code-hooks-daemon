@@ -346,6 +346,8 @@ Add a `### Hooks Daemon` section to the **project's root `CLAUDE.md`** so future
 
 ### Check if Section Exists
 
+<!-- ssot-anchor: claude-md-check-snippet -->
+
 ```bash
 grep -n "### Hooks Daemon" CLAUDE.md 2>/dev/null || echo "MISSING - add section"
 ```
@@ -353,6 +355,8 @@ grep -n "### Hooks Daemon" CLAUDE.md 2>/dev/null || echo "MISSING - add section"
 ### Add or Update the Section
 
 If missing (or outdated), append the following to the **bottom** of the project's root `CLAUDE.md`:
+
+<!-- ssot-anchor: claude-md-section-template -->
 
 ```markdown
 ### Hooks Daemon
@@ -379,11 +383,15 @@ After editing `.claude/hooks-daemon.yaml` — restart the daemon using the `hook
 
 Verify `.claude/hooks-daemon.yaml` has the restart-reminder header (new installs add it automatically; older installs may be missing it):
 
+<!-- ssot-anchor: config-header-check-snippet -->
+
 ```bash
 grep -q "AFTER EDITING THIS FILE" .claude/hooks-daemon.yaml && echo "OK" || echo "Header missing"
 ```
 
 If missing, prepend this comment block to the top of `.claude/hooks-daemon.yaml`:
+
+<!-- ssot-anchor: config-header-template -->
 
 ```yaml
 # Claude Code Hooks Daemon - Handler Configuration
@@ -539,7 +547,10 @@ handlers:
 
 **Generate full debug report:**
 
+<!-- ssot-anchor: debug-report-snippet -->
+
 ```bash
+# Generate the full diagnostic report (attach it to any bug report)
 .claude/hooks-daemon/scripts/debug_info.py /tmp/debug_report.md
 ```
 

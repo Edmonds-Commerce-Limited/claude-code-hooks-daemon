@@ -93,7 +93,10 @@ pytest tests/unit/path/to/test_module.py --cov=src/path/to/module.py --cov-repor
 
 **Expected output**: one `✅ PASSED` line per check, then the overall verdict.
 The runner enumerates its own checks — do not hardcode the list or the count
-here, it goes stale as the suite grows.
+here, it goes stale as the suite grows. The illustrative output below is
+quoted from [CLAUDE/QA.md](../QA.md), the source of truth for the QA pipeline:
+
+<!-- ssot-quote: CLAUDE/QA.md#qa-summary-example -->
 
 ```
 ========================================
@@ -104,6 +107,8 @@ QA Summary
 
 Overall Status: ✅ ALL CHECKS PASSED
 ```
+
+<!-- /ssot-quote -->
 
 **If any check fails**: Fix issues and re-run.
 

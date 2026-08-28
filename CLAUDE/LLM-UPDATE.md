@@ -423,13 +423,20 @@ After upgrading, verify the `### Hooks Daemon` section in the project's root `CL
 
 ### Check
 
+<!-- ssot-quote: CLAUDE/LLM-INSTALL.md#claude-md-check-snippet -->
+
 ```bash
 grep -n "### Hooks Daemon" CLAUDE.md 2>/dev/null || echo "MISSING - add section"
 ```
 
+<!-- /ssot-quote -->
+
 ### Update if Missing or Outdated
 
-If the section is missing, add it. If it exists but references old paths or commands, update it in place. The canonical content is:
+If the section is missing, add it. If it exists but references old paths or commands, update it in place. The canonical template lives in
+[LLM-INSTALL.md](LLM-INSTALL.md); quoted here for convenience:
+
+<!-- ssot-quote: CLAUDE/LLM-INSTALL.md#claude-md-section-template -->
 
 ```markdown
 ### Hooks Daemon
@@ -452,17 +459,25 @@ After editing `.claude/hooks-daemon.yaml` — restart the daemon using the `hook
 **Documentation**: `.claude/hooks-daemon/CLAUDE/LLM-INSTALL.md`
 ```
 
+<!-- /ssot-quote -->
+
 Keep the section terse — 10 lines maximum. Do not duplicate if already present; update in place.
 
 ### Also: Check Config Header
 
 Verify `.claude/hooks-daemon.yaml` has the restart-reminder header:
 
+<!-- ssot-quote: CLAUDE/LLM-INSTALL.md#config-header-check-snippet -->
+
 ```bash
 grep -q "AFTER EDITING THIS FILE" .claude/hooks-daemon.yaml && echo "OK" || echo "Header missing"
 ```
 
+<!-- /ssot-quote -->
+
 If missing, prepend this comment block to the top of `.claude/hooks-daemon.yaml`:
+
+<!-- ssot-quote: CLAUDE/LLM-INSTALL.md#config-header-template -->
 
 ```yaml
 # Claude Code Hooks Daemon - Handler Configuration
@@ -478,6 +493,8 @@ If missing, prepend this comment block to the top of `.claude/hooks-daemon.yaml`
 # Full handler reference: .claude/hooks-daemon/CLAUDE/HANDLER_DEVELOPMENT.md
 
 ```
+
+<!-- /ssot-quote -->
 
 ---
 
@@ -1127,22 +1144,27 @@ The feedback file can be shared with project maintainers to improve the upgrade 
 
 If you encounter update issues:
 
-1. **Check daemon logs**:
+**Check daemon logs**:
 
-   ```bash
-   .claude/hooks-daemon/bin/hooks-daemon logs
-   ```
+```bash
+.claude/hooks-daemon/bin/hooks-daemon logs
+```
 
-2. **Run debug script**:
+**Run the debug script**:
 
-   ```bash
-   .claude/hooks-daemon/scripts/debug_info.py /tmp/debug_report.md
-   ```
+<!-- ssot-quote: CLAUDE/LLM-INSTALL.md#debug-report-snippet -->
 
-3. **Report issue**:
+```bash
+# Generate the full diagnostic report (attach it to any bug report)
+.claude/hooks-daemon/scripts/debug_info.py /tmp/debug_report.md
+```
 
-   - GitHub: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
-   - Include: current version, target version, error output, daemon logs
+<!-- /ssot-quote -->
+
+**Report the issue**:
+
+- GitHub: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
+- Include: current version, target version, error output, daemon logs
 
 ---
 

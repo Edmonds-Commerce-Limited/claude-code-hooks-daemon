@@ -59,6 +59,8 @@ is the single source of truth for which checks exist — this document deliberat
 does not restate the list or the count, because a hardcoded number here went stale
 the moment a check was added.
 
+<!-- ssot-anchor: qa-summary-example -->
+
 ```
 ========================================
 QA Summary
