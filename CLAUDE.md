@@ -1678,9 +1678,12 @@ Commits inside nested/vendor repos or foreign worktrees are exempt.
 
 Every Write/Edit of a documentation-scoped file (the two audience
 trees, `.claude/rules`, `.claude/skills`, `.claude/agents`, a
-root-level `.md`, or a path declared in the generated-docs
-manifest) is checked against the docs QA EDIT-stage catalogue on the
-content the file WOULD have.
+root-level `.md`, a path declared in the generated-docs manifest,
+or ANY sub-folder `CLAUDE.md` regardless of tree — that last arm
+is deliberately wider than the corpus scope, since a module doc
+like `src/CLAUDE.md` sits outside every tracked tree yet is
+exactly what `module-doc-budget` polices) is checked against the
+docs QA EDIT-stage catalogue on the content the file WOULD have.
 
 **Checks**: `pointer-resolves` (a plain markdown link whose target
 file does not exist — block-eligible only for a link NEW in this
