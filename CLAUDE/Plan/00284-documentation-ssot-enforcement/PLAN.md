@@ -248,7 +248,7 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
 - [x] ✅ **Task 3.3**: Tooling/agent-definition follow-ups T1–T6 in
   `AUDIT-dogfood-run-1.md` (duplicate-block line numbers; worktree exclusion
   in the corpus indexer; agent-definition prompt fixes; shipped-vs-deployed
-  copies in the generated-docs manifest) — commit d7f6f5d4. Sweep findings
+  copies in the generated-docs manifest) — commit 129aee17. Sweep findings
   dropped 96 → 42 (module-doc-budget 61 → 7, 0 remaining worktree mentions).
 
 ## Technical Decisions
