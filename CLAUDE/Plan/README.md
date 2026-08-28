@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00283: standing-auth cadence + supervisor-typed channel](00283-standing-auth-cadence-supervisor-channel/PLAN.md) - In Progress (rework the every-prompt `standing_authorisations` injection: first full, then reinforce every 15 min OR 5 prompts, and route reinforcement through the ccy supervisor as a real typed line where armed, hook-context fallback otherwise)
-
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
 
 - [00264: cap the size of a GitHub issue/PR comment](00264-github-comment-size-cap/PLAN.md) - Not Started (field report: agent sessions flooded two issues with 44,467- and 22,398-character comments until neither ticket's state was findable by the humans reading it; a PreToolUse cap on `gh` comment bodies steering the content into `JOURNAL/`, plus seven open questions the report's proposed design asserts rather than settles)
@@ -171,6 +169,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Completed Plans
 
 - [00278: model-downgrade resilience](Completed/00278-supervisor-effort-restore-on-model-downgrade/PLAN.md) - Complete at `f0a9dc33` + `864c9cc4` + the archiving commit (supervisor recovers a fable→opus downgrade via context-sidecar detection plus coupled effort/model auto-restore; opt-in prevention surfaces steer security-flavoured work to an Opus subagent)
+
+- [00283: standing-auth cadence + supervisor-typed channel](Completed/00283-standing-auth-cadence-supervisor-channel/PLAN.md) - Complete at `faf4fae0` + the archiving commit (bounded reinforcement cadence + opt-in ccy-supervisor-typed channel for `standing_authorisations`, plus a shared `utils/ccy_supervisor` liveness util)
 
 - [00282: generate-docs null-priority crash](Completed/00282-generate-docs-null-priority-crash/PLAN.md) - Complete at `86ca861a` + the archiving commit (both doc generators aborted with a NoneType-vs-int sort crash when a handler config omitted `priority:`; fixed via a shared `resolve_priority` helper across both generators and the `registry.py` guard, plus CLI traceback logging and two-handler regression tests)
 
@@ -1271,15 +1271,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 283 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 233 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 234 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 6 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 37 + 230 + 6 = **273 folders**, spanning
+- **Folder-to-number reconciliation**: 36 + 231 + 6 = **273 folders**, spanning
   **270 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

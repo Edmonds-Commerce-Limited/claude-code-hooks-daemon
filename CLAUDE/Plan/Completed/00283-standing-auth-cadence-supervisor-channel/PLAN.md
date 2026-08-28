@@ -1,6 +1,6 @@
 # Plan 00283: Standing-auth reinforcement cadence + supervisor-typed channel
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-28
 **Owner**: joseph / Claude
 **Priority**: Medium
@@ -154,14 +154,22 @@ Signalling contract mapped from `goal_injection` (authoritative reference is
   the bounded cadence and the opt-in supervisor channel; the stale
   "decays but never skips" (Plan 00223) paragraph replaced.
 
-### Phase 5: Verification
+### Phase 5: Verification ✅
 
-- [ ] ⬜ **Task 5.1**: Full QA (`./scripts/qa/llm_qa.py all`), daemon restart
-  RUNNING, guidance-coverage gate green.
-- [ ] ⬜ **Task 5.2**: Client-mode check IF any path/interpreter/wrapper/asset
-  surface was touched (the signal dir + supervisor status file are
-  install-mode-dependent, so this is likely required).
-- [ ] ⬜ **Task 5.3**: Update/extend the handler's `get_acceptance_tests()`.
+- [x] ✅ **Task 5.1**: Full QA 25/25 (14,973 tests, 95.2% coverage); daemon
+  RUNNING; guidance-coverage gate green. Needed an `error_hiding` allowlist for
+  `write_standing_auth_signal` (same fail-open contract as `write_goal_signal`)
+  and black reflow of two test files.
+- [x] ✅ **Task 5.2**: Client-mode verified — the production installer provisioned
+  a real client install (daemon RUNNING in `.claude/hooks-daemon/untracked/`,
+  exactly the `_NORMAL_UNTRACKED_PARTS` the util resolves); a UserPromptSubmit
+  fired through the client hook wrapper returned exit 0 with the handler
+  correctly silent by default; dogfood daemon undisturbed.
+- [x] ✅ **Task 5.3**: Reviewed — the existing "silent by default" acceptance
+  test remains accurate (more so now that even enabled entries are cadence-gated).
+  The cadence needs enabled config + multiple prompts and the channel needs a
+  live armed supervisor, so neither is expressible as a single-command
+  acceptance test; kept the existing one rather than adding a non-functional stub.
 
 ## Technical Decisions
 
@@ -186,13 +194,13 @@ naturally.
 
 ## Success Criteria
 
-- [ ] First prompt of a session delivers the full text; subsequent prompts are
+- [x] First prompt of a session delivers the full text; subsequent prompts are
   silent until N-prompts or T-minutes, then deliver the short form.
-- [ ] Armed+watching supervisor → reinforcement arrives as a real typed line;
+- [x] Armed+watching supervisor → reinforcement arrives as a real typed line;
   unarmed → folded hook-context; first delivery always hook-context.
-- [ ] No injection loop from the supervisor-typed line (own-marker guard).
-- [ ] Ships disabled upstream unchanged; never blocks; 95%+ coverage.
-- [ ] Full QA passes; daemon restarts RUNNING; supervisor version test green.
+- [x] No injection loop from the supervisor-typed line (own-marker guard).
+- [x] Ships disabled upstream unchanged; never blocks; 95%+ coverage.
+- [x] Full QA passes; daemon restarts RUNNING; supervisor version test green.
 
 ## Dependencies
 
@@ -204,4 +212,10 @@ naturally.
 
 <!-- Curated milestones + delivery commit hashes; blow-by-blow in JOURNAL/. -->
 
-- (none yet)
+- Phase 1 (cadence rework): `c7edc83f`; hermeticity fix `4c16553c`
+- Phase-1 marker bug fix (timestamped ccy-supervisor nudges): `833eb88f`
+- Phase 2a (shared `ccy_supervisor` liveness util, DRY): `d96d7bb7`
+- Phase 2b (default-off channel routing): `fceb7148`
+- Phase 3 (supervisor consumer + Phase 2b header amendment): `c0027a28`
+- Phase 4 (config options + docs): `4509a887`
+- Phase 5 QA (error_hiding allowlist + black): `faf4fae0`
