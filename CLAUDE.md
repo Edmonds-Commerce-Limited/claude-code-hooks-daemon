@@ -1695,7 +1695,17 @@ block whose body no longer matches its source section — or whose
 source file/anchor is missing entirely — block-eligible on the
 QUOTING edit; a too-short quote, below the documented minimum
 length, is flagged the same way since it verifies trivially and
-protects nothing).
+protects nothing), `at-import-census` (an `@path.md` import
+outside `documentation.qa.resident_at_imports` re-inlines eagerly
+and defeats progressive disclosure — block-eligible only for an
+import NEW in this edit; backtick spans and fenced code are
+skipped so a doc may still quote the pattern to describe it),
+`module-doc-budget` (a sub-folder `CLAUDE.md` outside the two
+canonical roots gets a line budget: unregistered stays
+advisory-only under ~40 lines; a doc listed in
+`documentation.qa.registered_module_docs` gets the larger
+plan-doc-size block tier instead, worse-only — growing past it is
+block-eligible, unchanged advises, shrinking is silent).
 
 **Advisory only, never blocks**: `quote-source-stale` — editing a
 SOURCE section that other documents quote from names which
