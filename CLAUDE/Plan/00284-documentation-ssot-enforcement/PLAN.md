@@ -112,12 +112,16 @@ scattered sibling plans.
 
 ### Phase 1: Firm up the rules (review-driven)
 
-- [ ] 🔄 **Task 1.1**: Dispatch a **Fable review agent** (read-only) to pressure-test
+- [x] ✅ **Task 1.1**: Dispatch a **Fable review agent** (read-only) to pressure-test
   the "right picture": survey every doc surface in THIS repo, find existing
   duplication and stale pointers as evidence, and imagine how OTHER hooks-daemon
   client projects would drift. It returns a proposed written ruleset, open questions
   it cannot settle, and candidate mechanically-checkable signals each with a
   false-positive assessment. Output: `REVIEW-fable.md` in this folder.
+  DELIVERED — see `REVIEW-fable.md`: 12-rule draft ruleset (content-class pointer
+  test), file:line-cited drift evidence (structured facts drift, prose mostly
+  does not; agents lack a charter and hold most violations), 9 enforcement
+  signals with FP assessments, and 7 human-judgement questions (its §E).
 - [ ] ⬜ **Task 1.2**: Resolve the remaining open questions (below), then write the
   canonical policy doc `CLAUDE/DocumentationStrategy.md` — the SSoT for the SSoT
   rules, itself obeying them (pointed at from `CLAUDE.md`, not duplicated).
