@@ -14,7 +14,7 @@
 
 Complete quality assurance for the Claude Code Hooks Daemon consists of **three layers**:
 
-1. **Automated QA** (`./scripts/qa/run_all.sh`) - Fast, deterministic checks
+1. **Automated QA** (`./scripts/qa/llm_qa.py all`) - Fast, deterministic checks
 2. **Sub-Agent QA** (via Task tool) - Deep architectural review and value verification
 3. **Acceptance Testing** (Agentic) - Real-world scenario validation performed by AI agents before release
 
@@ -27,14 +27,18 @@ Complete quality assurance for the Claude Code Hooks Daemon consists of **three 
 ### Running Automated QA
 
 ```bash
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 ```
+
+Agents MUST use `llm_qa.py all` — the `enforce_llm_qa` project handler denies a
+direct `run_all.sh` invocation by an agent. `run_all.sh` remains the
+human-at-a-terminal entry point and runs the same suite with verbose output.
 
 ### The Automated Checks
 
 `scripts/qa/run_all.sh` is the single source of truth for **which** checks exist
-and how many. Run it, or `./scripts/qa/llm_qa.py all` for the LLM-optimised
-output, to see the current set. The notes below cover the ones with
+and how many. Run `./scripts/qa/llm_qa.py all` (the same suite, LLM-optimised
+output) to see the current set. The notes below cover the ones with
 requirements a reader needs to know in advance; they are not the full list, and
 this section deliberately carries no count — an earlier version claimed seven
 while the runner ran considerably more.
@@ -103,7 +107,7 @@ Verify code meets quality standards (format, lint, types, coverage, security).
 
 WORKFLOW:
 1. cd to target directory
-2. Run: ./scripts/qa/run_all.sh (every check it runs)
+2. Run: ./scripts/qa/llm_qa.py all (every check it runs)
 3. Verify daemon: ./bin/hooks-daemon restart && status
 4. Check coverage: MUST be 95%+ (shown in QA output)
 5. Verify no security issues (Bandit must pass)
@@ -380,7 +384,7 @@ Your fix might have affected earlier tests. Full re-run ensures no regressions.
 2. Execute tests sequentially
 3. **If bug found**: STOP immediately
 4. Fix bug using TDD (write failing test, implement fix, verify)
-5. Run FULL QA: `./scripts/qa/run_all.sh` (must pass 100%)
+5. Run FULL QA: `./scripts/qa/llm_qa.py all` (must pass 100%)
 6. Restart daemon: `./bin/hooks-daemon restart`
 7. **Regenerate playbook** (to reflect fix)
 8. **RESTART from Test 1.1** (not from where you left off)
@@ -430,7 +434,7 @@ All plugin handlers MUST implement `get_acceptance_tests()` - empty arrays are r
 ### For Individual Work (No Agent Teams)
 
 1. **During development**: Write tests first (TDD)
-2. **Before committing**: Run `./scripts/qa/run_all.sh` (automated QA)
+2. **Before committing**: Run `./scripts/qa/llm_qa.py all` (automated QA)
 3. **Fix any issues**: Use `./scripts/qa/run_autofix.sh` for format/lint
 4. **Verify daemon**: `./bin/hooks-daemon restart && status`
 5. **For significant work**: Spawn QA Agent for deep review
@@ -559,7 +563,7 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 1. Read failure details in `/workspace/untracked/qa/*.json`
 2. Fix issues
 3. Run `./scripts/qa/run_autofix.sh` (for format/lint)
-4. Re-run `./scripts/qa/run_all.sh`
+4. Re-run `./scripts/qa/llm_qa.py all`
 5. Repeat until all pass
 
 ### Sub-Agent QA Fails
@@ -590,8 +594,8 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 ### Commands
 
 ```bash
-# Run all automated QA
-./scripts/qa/run_all.sh
+# Run all automated QA (agents; run_all.sh is the human entry point)
+./scripts/qa/llm_qa.py all
 
 # Auto-fix format and lint issues
 ./scripts/qa/run_autofix.sh

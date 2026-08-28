@@ -32,8 +32,9 @@ Run QA checks quickly and report results. This agent **ONLY RUNS TOOLS** - it do
 Execute the full QA suite and capture output:
 
 ```bash
-# Run all QA checks with verbose output
-./scripts/qa/run_all.sh 2>&1 | tee /tmp/qa_full_$(date +%Y%m%d_%H%M%S).log
+# Run all QA checks (LLM-optimised: ~2 lines per check on stdout,
+# structured JSON detail written to untracked/qa/*.json — no tee needed)
+./scripts/qa/llm_qa.py all
 
 # Store individual results
 QA_LOG_DIR="/tmp/qa_logs_$(date +%Y%m%d_%H%M%S)"
@@ -127,6 +128,7 @@ Overall: ✅ PASS / ❌ FAIL
 ## Error Handling
 
 If a QA script fails to run:
+
 ```
 ⚠️ Script Execution Error
 
@@ -143,6 +145,7 @@ Check script exists and has correct permissions.
 ## Usage
 
 Invoke from main Claude:
+
 ```
 Use the qa-runner agent to execute QA checks and report results.
 ```

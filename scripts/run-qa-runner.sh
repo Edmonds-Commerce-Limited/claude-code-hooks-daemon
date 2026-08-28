@@ -43,7 +43,7 @@ echo ""
 # CANNOT import the package: the venv is built with
 # include-system-site-packages = false, so this script previously died with
 # "ModuleNotFoundError: No module named 'claude_code_hooks_daemon'" — the exact
-# failure docs/QA-RUNNER-SETUP.md warns readers about, in the very wrapper it
+# failure docs/QA.md warns readers about, in the very wrapper it
 # tells them to use instead. Stderr is NOT silenced: a resolver failure must
 # surface to the operator rather than degrade silently.
 # shellcheck source=lib/resolve_venv.sh

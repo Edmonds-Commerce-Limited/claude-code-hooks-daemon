@@ -15,7 +15,7 @@ authorised run.**
 
 A release is a decision about **scope**, and scope is not visible from inside
 the repository: only the human knows which work belongs in the bundle. A clean
-tree, 20/20 QA and a bumped version say a release *would be sound*, never that
+tree, a fully green QA run and a bumped version say a release *would be sound*, never that
 it is *wanted now*.
 
 **A release may legitimately span a compaction, and must then be FINISHED** — a
@@ -76,7 +76,7 @@ Automate the complete release process: version updates, changelog generation, Op
 07. **Detects** breaking changes automatically and generates upgrade guide templates
 08. **Submits** to Opus agent for documentation review
 09. **🚨 UPGRADE GUIDE GATE** - Verify upgrade guide complete if breaking changes (BLOCKING)
-10. **🚨 QA VERIFICATION GATE** - Main Claude runs `./scripts/qa/run_all.sh` (BLOCKING)
+10. **🚨 QA VERIFICATION GATE** - Main Claude runs `./scripts/qa/llm_qa.py all` (BLOCKING)
 11. **🚨 CODE REVIEW GATE** - Main Claude reviews code diff since last tag (BLOCKING)
 12. **🚨 ACCEPTANCE TESTING GATE** - Main Claude executes acceptance tests: full suite for MAJOR/MINOR, targeted or skipped for PATCH (BLOCKING)
 13. **Commits** and pushes changes (only after gates pass)
@@ -124,7 +124,7 @@ Opus Review ←→ Fix Issues (if needed)
     ABORT if missing or incomplete
     ↓
 🚨 QA VERIFICATION GATE (BLOCKING)
-    Main Claude runs: ./scripts/qa/run_all.sh (8 checks)
+    Main Claude runs: ./scripts/qa/llm_qa.py all
     ABORT if any check fails
     ↓
 🚨 CODE REVIEW GATE (BLOCKING)
@@ -176,7 +176,7 @@ Fix: Commit or stash changes, then retry
 
 ```
 ❌ Tests failing: 3 failed, 1165 passed
-Fix: Run ./scripts/qa/run_all.sh, fix issues, retry
+Fix: Run ./scripts/qa/llm_qa.py all, fix issues, retry
 ```
 
 **Opus Rejects (Documentation Issues Only):**

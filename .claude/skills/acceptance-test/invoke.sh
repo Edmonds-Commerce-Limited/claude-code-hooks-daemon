@@ -162,7 +162,7 @@ Enter FAIL-FAST cycle: TDD fix -> QA -> restart -> retest ALL from beginning.
 1. STOP testing immediately
 2. Investigate root cause of failure
 3. Fix bug using TDD (write failing test -> implement fix -> verify)
-4. Run FULL QA: \`./scripts/qa/run_all.sh\` (must pass 100%)
+4. Run FULL QA: \`./scripts/qa/llm_qa.py all\` (must pass 100%)
 5. Restart daemon: \`./bin/hooks-daemon restart\`
 6. **RESTART acceptance testing FROM TEST 1** (not from where you left off)
 7. Continue until ALL tests pass with ZERO code changes

@@ -170,7 +170,7 @@ Check the output summary:
   1. Review failed test details from output
   2. Investigate root cause
   3. Fix handler bug using TDD
-  4. Run full QA: \`./scripts/qa/run_all.sh\`
+  4. Run full QA: \`./scripts/qa/llm_qa.py all\`
   5. Restart daemon
   6. **Re-run \`/acceptance-test all\` from scratch**
   7. Repeat until passed=100%, failed=0, errors=0

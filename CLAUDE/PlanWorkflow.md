@@ -256,18 +256,16 @@ Run the complete QA suite before marking any task complete:
 
 ```bash
 # Run ALL QA checks (REQUIRED before commits)
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 ```
 
 ### What Gets Checked
 
-| Check           | Tool   | Requirement                      |
-| --------------- | ------ | -------------------------------- |
-| Code Formatting | Black  | Auto-formats (line length 100)   |
-| Linting         | Ruff   | Auto-fixes violations            |
-| Type Checking   | MyPy   | Strict mode, all functions typed |
-| Tests           | Pytest | 95% minimum coverage             |
-| Security        | Bandit | No HIGH severity issues          |
+`scripts/qa/run_all.sh` is the single source of truth for which checks exist —
+do not trust any written enumeration of them (this section previously carried a
+five-row table that had drifted, including a security requirement weaker than
+the real zero-findings-at-all-severities policy). Full QA policy:
+[CLAUDE/QA.md](QA.md).
 
 ### QA Task Format
 
@@ -276,7 +274,7 @@ Always include QA verification as a subtask:
 ```markdown
 - [ ] ⬜ **Implement feature X**
   - [ ] ⬜ Write implementation
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
+  - [ ] ⬜ Run QA: `./scripts/qa/llm_qa.py all`
   - [ ] ⬜ Fix any issues
   - [ ] ⬜ Verify all checks pass
 ```
@@ -628,7 +626,7 @@ Use this template when creating new handlers for hook events.
 
 - [ ] ⬜ Register handler in config
 - [ ] ⬜ Update handler count in CLAUDE.md
-- [ ] ⬜ Run full QA suite: `./scripts/qa/run_all.sh`
+- [ ] ⬜ Run full QA suite: `./scripts/qa/llm_qa.py all`
 - [ ] ⬜ Test with live Claude Code session
 - [ ] ⬜ Update documentation
 
@@ -693,7 +691,7 @@ The base and result type are chosen by the event: `PreToolUseHandlerBase`/`Gatin
 
 ### Phase 3: Integration & QA
 - [ ] ⬜ Integrate with existing code
-- [ ] ⬜ Run full QA: `./scripts/qa/run_all.sh`
+- [ ] ⬜ Run full QA: `./scripts/qa/llm_qa.py all`
 - [ ] ⬜ Fix any QA issues
 - [ ] ⬜ Update documentation
 
@@ -725,7 +723,7 @@ The base and result type are chosen by the event: `PreToolUseHandlerBase`/`Gatin
 - [ ] ⬜ Identify root cause
 - [ ] ⬜ Implement fix (make test pass)
 - [ ] ⬜ Add additional regression tests
-- [ ] ⬜ Run full QA: `./scripts/qa/run_all.sh`
+- [ ] ⬜ Run full QA: `./scripts/qa/llm_qa.py all`
 - [ ] ⬜ Verify fix works in live testing
 
 ## Success Criteria
@@ -774,7 +772,7 @@ Use this template when improving existing code without changing behaviour.
 - [ ] ⬜ Verify no behavior changes
 
 ### Phase 3: Verification
-- [ ] ⬜ Run full QA: `./scripts/qa/run_all.sh`
+- [ ] ⬜ Run full QA: `./scripts/qa/llm_qa.py all`
 - [ ] ⬜ Compare before/after behavior
 - [ ] ⬜ Update documentation if needed
 
@@ -904,7 +902,7 @@ Before committing, always verify:
 
 ```bash
 # Run full QA suite
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 
 # Check git status
 git status
@@ -957,7 +955,7 @@ When Claude Code (or other AI agents) work on this project:
     - See CLAUDE/DEBUGGING_HOOKS.md for complete guide
 05. **Follow TDD workflow** - Write failing tests before implementation
 06. **Update task status in real-time** as you work
-07. **Run QA before commits** - `./scripts/qa/run_all.sh` must pass
+07. **Run QA before commits** - `./scripts/qa/llm_qa.py all` must pass
 08. **Document blockers immediately** if you get stuck
 09. **Ask user for approval** before marking plan complete
 10. **Reference plans in all commits** for traceability
