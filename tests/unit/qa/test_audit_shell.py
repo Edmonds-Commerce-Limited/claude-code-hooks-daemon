@@ -240,3 +240,63 @@ class TestRealRepoScan:
             "Shell scripts contain unmarked error suppression. Either fix the "
             f"code or add '# shell-audit: allow -- <reason>' marker. Offenders: {offenders}"
         )
+
+
+class TestDetectsBootstrapReexecDollar0Source:
+    """Plan 00285 DBF guard: $0-relative resolution after a self-bootstrap re-exec.
+
+    The self-bootstrap stanza's ``exec bash "$tmpfile" --already-bootstrapped
+    "$@"`` relocates the running script's own $0 to a mktemp path. Any later
+    ``$0``-relative path resolution (e.g. ``source "$(dirname "$0")/sibling.sh"``)
+    then silently breaks on every install whose local script differs from the
+    latest release — exactly the bug this rule exists to make unrepresentable.
+    """
+
+    _STANZA = (
+        "# === SELF-BOOTSTRAP BEGIN (marker) ===\n"
+        "echo bootstrapping\n"
+        "# === SELF-BOOTSTRAP END ===\n"
+    )
+
+    def test_flags_dirname_dollar0_after_bootstrap_stanza(self) -> None:
+        src = f'#!/bin/bash\n{self._STANZA}source "$(dirname "$0")/sibling.sh"\n'
+        violations = audit_text(src, "<test>")
+        assert "bootstrap-reexec-dollar0-source" in _rules(violations)
+        offending = [v for v in violations if v.rule == "bootstrap-reexec-dollar0-source"]
+        assert offending[0].line == 5
+
+    def test_allows_dirname_dollar0_when_no_bootstrap_stanza_present(self) -> None:
+        # A script that never re-execs itself never relocates $0 — this
+        # pattern is completely safe there, so it must not be flagged.
+        src = '#!/bin/bash\nsource "$(dirname "$0")/sibling.sh"\n'
+        violations = audit_text(src, "<test>")
+        assert "bootstrap-reexec-dollar0-source" not in _rules(violations)
+
+    def test_allows_dollar0_relative_resolution_before_the_stanza(self) -> None:
+        # Referencing $0 BEFORE the bootstrap stanza runs is fine — the re-exec
+        # has not happened yet at that point in program order.
+        src = f'#!/bin/bash\nsource "$(dirname "$0")/before.sh"\n{self._STANZA}'
+        violations = audit_text(src, "<test>")
+        assert "bootstrap-reexec-dollar0-source" not in _rules(violations)
+
+    def test_flags_unquoted_dirname_dollar0(self) -> None:
+        src = f"#!/bin/bash\n{self._STANZA}source $(dirname $0)/sibling.sh\n"
+        violations = audit_text(src, "<test>")
+        assert "bootstrap-reexec-dollar0-source" in _rules(violations)
+
+    def test_repo_skill_scripts_directory_is_clean(self) -> None:
+        """Self-scan: the three fixed scripts must never regress this class."""
+        skills_dir = (
+            REPO_ROOT / "src" / "claude_code_hooks_daemon" / "skills" / "hooks-daemon" / "scripts"
+        )
+        assert skills_dir.is_dir()
+        violations: list[Violation] = []
+        for shell_script in skills_dir.rglob("*.sh"):
+            violations.extend(audit_file(shell_script))
+        offenders = [
+            f"{v.file}:{v.line}" for v in violations if v.rule == "bootstrap-reexec-dollar0-source"
+        ]
+        assert offenders == [], (
+            "Skill scripts use $0-relative path resolution after a "
+            f"self-bootstrap re-exec stanza. Offenders: {offenders}"
+        )

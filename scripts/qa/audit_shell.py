@@ -25,10 +25,23 @@ The marker REQUIRES a ``-- <reason>`` suffix. A bare ``# shell-audit: allow``
 is itself a violation (``marker-missing-reason``) — documenting the reason
 is the whole point.
 
+A second, unrelated rule (Plan 00285 DBF guard) also lives here:
+``bootstrap-reexec-dollar0-source`` flags ``$0``-relative path resolution
+(``dirname "$0"``, ``${0%/*}``) appearing AFTER a self-bootstrap re-exec
+stanza (``# === SELF-BOOTSTRAP BEGIN`` ... ``END``). That stanza's
+``exec bash "$tmpfile" --already-bootstrapped "$@"`` relocates the running
+script's own ``$0`` to a mktemp path, so a later sibling ``source`` resolved
+relative to it silently breaks on every install whose local script differs
+from the latest release — the exact bug daemon-cli.sh/health-check.sh/
+init-handlers.sh shipped with. It shares this file (and its scan/JSON/marker
+plumbing) rather than living standalone because both rules are "shell
+scripts doing something structurally unsound", and the QA pipeline already
+wires one ``shell_audit`` check.
+
 Usage:
-    scripts/qa/audit_shell.py                          # scan scripts/
+    scripts/qa/audit_shell.py                          # scan scripts/ + skill scripts/
     scripts/qa/audit_shell.py --json                   # emit JSON for QA
-    scripts/qa/audit_shell.py --scan-dir some/other    # custom root
+    scripts/qa/audit_shell.py --scan-dir some/other    # custom root (single dir)
     scripts/qa/audit_shell.py --output /tmp/x.json     # custom output
 
 Exit codes:
@@ -47,6 +60,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SCAN_DIR = REPO_ROOT / "scripts"
+# Plan 00285: the self-bootstrap stanza (and therefore the
+# bootstrap-reexec-dollar0-source rule) only ever appears in the deployed
+# skill scripts, which live outside scripts/ — scan both by default so the
+# new rule actually covers the files it exists to protect.
+DEFAULT_SKILL_SCAN_DIR = (
+    REPO_ROOT / "src" / "claude_code_hooks_daemon" / "skills" / "hooks-daemon" / "scripts"
+)
 DEFAULT_OUTPUT = REPO_ROOT / "untracked" / "qa" / "shell_audit.json"
 
 # Three shapes of "drop stderr + drop exit code" in a single command.
@@ -59,6 +79,17 @@ _DOUBLE_SUPPRESS_PATTERNS = [
 
 _MARKER_WITH_REASON = re.compile(r"#\s*shell-audit:\s*allow\s*--\s*\S")
 _MARKER_WITHOUT_REASON = re.compile(r"#\s*shell-audit:\s*allow\b")
+
+# Plan 00285 DBF guard: a script that self-bootstraps by `exec`-ing a
+# freshly-downloaded copy of itself relocates its own $0 to a mktemp path.
+# Any LATER path resolution relative to $0 (a sibling `source`, most often)
+# then silently breaks on every install whose local script differs from the
+# latest release — the exact bug daemon-cli.sh/health-check.sh/
+# init-handlers.sh shipped with. Only checked AFTER the bootstrap stanza:
+# referencing $0 before the re-exec point is unaffected by it.
+_BOOTSTRAP_BEGIN_MARKER = "SELF-BOOTSTRAP BEGIN"
+_BOOTSTRAP_END_MARKER = "SELF-BOOTSTRAP END"
+_DOLLAR0_RELATIVE_PATTERN = re.compile(r'dirname\s+"?\$0"?|\$\{0%/\*\}')
 
 
 @dataclass
@@ -138,6 +169,62 @@ def audit_text(source: str, filepath: str) -> list[Violation]:
             )
         )
 
+    violations.extend(_audit_bootstrap_reexec_dollar0(lines, filepath))
+    return violations
+
+
+def _find_bootstrap_end_index(lines: list[str]) -> int | None:
+    """Line index (0-based) of the SELF-BOOTSTRAP END marker, or None."""
+    for idx, line in enumerate(lines):
+        if _BOOTSTRAP_END_MARKER in line:
+            return idx
+    return None
+
+
+def _audit_bootstrap_reexec_dollar0(lines: list[str], filepath: str) -> list[Violation]:
+    """Flag $0-relative path resolution appearing AFTER a self-bootstrap stanza.
+
+    A script with no bootstrap stanza never relocates its own $0, so this
+    rule only applies once ``SELF-BOOTSTRAP BEGIN`` is present at all, and
+    only to lines after the matching ``SELF-BOOTSTRAP END`` marker — a
+    reference to $0 before the re-exec point is unaffected by it.
+    """
+    if not any(_BOOTSTRAP_BEGIN_MARKER in line for line in lines):
+        return []
+
+    end_idx = _find_bootstrap_end_index(lines)
+    start_idx = end_idx + 1 if end_idx is not None else 0
+
+    violations: list[Violation] = []
+    for idx in range(start_idx, len(lines)):
+        raw_line = lines[idx]
+        code = _strip_inline_comment(raw_line)
+
+        if not _DOLLAR0_RELATIVE_PATTERN.search(code):
+            continue
+        if _has_marker_with_reason(raw_line):
+            continue
+        if idx > start_idx and _has_marker_with_reason(lines[idx - 1]):
+            continue
+
+        violations.append(
+            Violation(
+                file=filepath,
+                line=idx + 1,
+                rule="bootstrap-reexec-dollar0-source",
+                message=(
+                    "$0-relative path resolution after a self-bootstrap re-exec "
+                    'stanza is unsound: `exec bash "$tmpfile" --already-bootstrapped '
+                    '"$@"` relocates $0 to a mktemp path, so a sibling lookup based '
+                    "on it silently breaks on every install whose local script "
+                    "differs from the latest release (Plan 00285). Anchor to a value "
+                    "derived from PROJECT_ROOT/DAEMON_DIR instead, or add "
+                    "'# shell-audit: allow -- <reason>' if this reference genuinely "
+                    "predates the re-exec."
+                ),
+            )
+        )
+
     return violations
 
 
@@ -205,8 +292,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--scan-dir",
         type=Path,
-        default=DEFAULT_SCAN_DIR,
-        help="Directory to scan (default: scripts/)",
+        default=None,
+        help="Directory to scan (default: scripts/ AND the skill scripts dir, both)",
     )
     parser.add_argument(
         "--output",
@@ -216,11 +303,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if not args.scan_dir.is_dir():
-        print(f"shell-audit: scan dir does not exist: {args.scan_dir}", file=sys.stderr)
-        return 1
+    scan_dirs = (
+        [args.scan_dir]
+        if args.scan_dir is not None
+        else [
+            DEFAULT_SCAN_DIR,
+            DEFAULT_SKILL_SCAN_DIR,
+        ]
+    )
 
-    violations = audit_directory(args.scan_dir)
+    for scan_dir in scan_dirs:
+        if not scan_dir.is_dir():
+            print(f"shell-audit: scan dir does not exist: {scan_dir}", file=sys.stderr)
+            return 1
+
+    violations = [v for scan_dir in scan_dirs for v in audit_directory(scan_dir)]
 
     if args.json:
         _write_json(violations, args.output)

@@ -83,7 +83,7 @@ direct to the canonical library is the only sound fix.
 
 ### Phase 3: DBF guard
 
-- [ ] ⬜ **Task 3.1**: Add a QA check (shell-audit family) that flags a
+- [x] ✅ **Task 3.1**: Add a QA check (shell-audit family) that flags a
   script containing the `# === SELF-BOOTSTRAP BEGIN` marker and, after it,
   a `$(dirname "$0")`/`$0`-relative `source` — proves RED against the
   unfixed scripts before the fix lands, GREEN after.
