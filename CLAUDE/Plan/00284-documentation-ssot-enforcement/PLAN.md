@@ -194,11 +194,10 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
   CLI (Decision 7) reuses the existing comment-extraction engine;
   `install/skills.py` generalised to deploy every bundled skill dir.
   Deterministic pipeline verified end to end against this repo
-  (168 sweep findings, 33 comment blocks in `src/`); a real `Task`-tool
-  dispatch of the agent was not possible from the executing session (no
-  Agent tool available there) — recorded as a follow-up in JOURNAL, see
-  `untracked/reports/2026-08-28-docs-qa-dogfood-acceptance.md` for the
-  manual stand-in run.
+  (168 sweep findings, 33 comment blocks in `src/`). Acceptance closed by a
+  REAL dispatch of the built agent from the orchestrating session — full
+  findings persisted in `AUDIT-dogfood-run-1.md` (9 new findings, 7 backlog
+  confirmations, 6 tooling/definition follow-ups).
 - [ ] ⬜ **Task 3.1h**: Follow-ups flagged by 3.1f's delivery (both verified real):
   (a) corpus cache-reuse gap — mtime/size-keyed reuse silently carries forward
   a pre-schema-extension record with empty new fields; add an index schema
@@ -218,6 +217,14 @@ critiqued by the review agent and amended (2 MUST + 5 SHOULD findings applied):
     `ccy-supervisor-dogfooding.md`'s hot-reload contract to a canonical home
     (natural fit: a registered `.claude/ccy/CLAUDE.md`), thin
     `importing-reports.md` against root CLAUDE.md's Report Handling section
+  - **Audit run 1 additions**: findings N1–N9 in `AUDIT-dogfood-run-1.md`
+    (worklist detail lives THERE). Headline: N1 venv layout stated four
+    incompatible ways (severe), N2 68 non-allowlisted `@`-imports, N3
+    priority table in 12 places with 3 wrong copies
+- [ ] ⬜ **Task 3.3**: Tooling/agent-definition follow-ups T1–T6 in
+  `AUDIT-dogfood-run-1.md` (duplicate-block line numbers; worktree exclusion
+  in the corpus indexer; agent-definition prompt fixes; shipped-vs-deployed
+  copies in the generated-docs manifest)
 
 ## Technical Decisions
 
