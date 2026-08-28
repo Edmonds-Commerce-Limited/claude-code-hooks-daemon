@@ -2180,12 +2180,25 @@ checked with the docs QA SWEEP-stage catalogue: `pointer-resolves`
 (dead links), `generated-doc-hand-edit` (a generated doc that looks
 hand-edited or stale against the daemon's own version),
 `rules-file-shape` (a `.claude/rules/*.md` file violating the
-pointer-only contract), and `quote-drift` (an `ssot-quote` block
+pointer-only contract), `quote-drift` (an `ssot-quote` block
 whose body no longer matches its source section, or whose source
 file/anchor has disappeared — re-verified fresh from disk every
 sweep, so this is the backstop for `quote-source-stale`, which only
-advises at edit time). Findings are injected once as advisory
+advises at edit time), `at-import-census` (an `@path.md` import
+outside the resident allowlist, found anywhere in the corpus), and
+`module-doc-budget` (every sub-folder `CLAUDE.md` re-measured
+against its line budget — SWEEP has no before/after to judge
+worse-only against, so a block-eligible-at-EDIT finding is always
+reported here as advisory). Findings are injected once as advisory
 context — the sweep never blocks.
+
+**The injected report is capped**: only the first
+`MAX_ADVISORY_FINDINGS_SHOWN` (8) findings are shown, with a
+trailing `...and N more` line naming the CLI for the rest — a
+corpus with several oversized module docs (this repo's own
+`strategies/`/`tdd` sub-`CLAUDE.md` files are hundreds of lines
+over budget) would otherwise dump dozens of bullets into every
+session's context. The CLI report below is never capped.
 
 **When a drift report appears**: fix the listed findings (each names
 its exact remediation) as part of your documentation housekeeping,
