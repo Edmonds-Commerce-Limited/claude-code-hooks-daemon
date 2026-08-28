@@ -53,3 +53,43 @@ config_changes:
         enabling it against an older supervisor would route reinforcements to a
         signal nothing reads and silently drop them. Enable it only after the
         supervisor has been redeployed and relaunched.
+    - key: documentation.enabled
+      recommended: true
+      dormant: true
+      description: >-
+        NEW opt-in documentation-SSoT enforcement system (Plan 00284), default
+        FALSE. When enabled, three surfaces keep a project's documentation
+        corpus honest against a one-canonical-home-per-fact ruleset
+        (CLAUDE/DocumentationStrategy.md): a PreToolUse edit-time lint
+        (docs_qa_edit), a git-commit gate (docs_qa_commit_gate) and a
+        SessionStart drift sweep (docs_qa_sweep), sharing one check catalogue —
+        dead pointers, ssot-quote drift, pointer-only rules-file shape,
+        hand-edited generated docs, at-import census, module-doc budgets, and
+        advisory duplicate-block detection. The `hooks-daemon docs-qa` CLI
+        (--sweep / --lint / --check-staged) always works regardless of this
+        switch. Policy lives under documentation.qa (modes default to
+        warn/advise; block is a per-check ratchet via check_modes); the two
+        audience-tree names are configurable under documentation.trees.
+      migration_note: >-
+        Opt in deliberately: enable it, run `hooks-daemon docs-qa --sweep`,
+        triage the initial findings (grandfather_allowlist exists for legacy
+        docs), and only then consider promoting individual checks to block
+        mode. Everything ships warn-first, so enabling is safe — it adds
+        advisory context, not denials.
+    - key: agents.docs_qa.enabled
+      recommended: true
+      dormant: true
+      description: >-
+        NEW opt-in deployable agent (Plan 00284), default FALSE. When enabled,
+        `hooks-daemon agents install hooks-daemon-docs-qa` deploys a read-only
+        documentation-SSoT auditor agent to .claude/agents/: it hunts the
+        semantic half the deterministic checks cannot see — conflicting truths,
+        paraphrase duplicates, stale derived facts, and verbose source-comment
+        blocks acting as documentation — and reports file:line findings with
+        remediations, never editing. A companion `docs-qa` skill (deployed with
+        the daemon's skills) is the dispatch shim for it.
+      migration_note: >-
+        Pairs naturally with documentation.enabled — the agent leans on the
+        deterministic `docs-qa` CLI output first and spends its judgement on
+        what those checks cannot decide. Its first run doubles as a migration
+        worklist for the project's existing doc drift.
