@@ -169,9 +169,9 @@ behaviour is byte-identical to today, pinned by tests.
 
 ### Phase 6: Docs, manifests, dogfood
 
-- [ ] ⬜ **Task 6.1**: Stage `UNRELEASED/config-changes/` entry (`layout`
+- [x] ✅ **Task 6.1**: Stage `UNRELEASED/config-changes/` entry (`layout`
   added) and a truth-changes entry for the Shape-A behaviour fixes.
-- [ ] ⬜ **Task 6.2**: Document the block (HANDLER_REFERENCE / agent tree),
+- [x] ✅ **Task 6.2**: Document the block (HANDLER_REFERENCE / agent tree),
   regenerate generated docs.
 - [ ] ⬜ **Task 6.3**: Dogfood: declare this repo's own layout in
   `.claude/hooks-daemon.yaml`, full QA, daemon restart verification, and a
