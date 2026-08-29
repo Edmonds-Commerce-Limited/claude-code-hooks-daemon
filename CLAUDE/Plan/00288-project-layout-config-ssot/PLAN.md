@@ -1,0 +1,159 @@
+# Plan 00288: Project-layout config SSoT
+
+**Status**: Not Started
+**Created**: 2026-08-29
+**Owner**: joseph
+**Priority**: Medium
+**Recommended Executor**: Sonnet
+**Execution Strategy**: Sub-Agent Orchestration
+
+## Overview
+
+Directory truths — which dir is source, test, human docs, agent docs, plans,
+vendor/build — are today declared in dozens of independent places: two config
+homes that some consumers bypass (`documentation.trees` is ignored by
+`markdown_organization`, which hardcodes `CLAUDE/`+`docs/` and would BLOCK a
+project that configured different tree names; `plan_workflow.directory` is
+ignored by three handlers that regex-hardcode `CLAUDE/Plan/`), plus four-plus
+conflicting hardcoded vendored/build-dir sets and no config home at all for
+source/test dir names. The full cited inventory is in
+[DESIGN-layout-ssot.md](DESIGN-layout-ssot.md) §1.
+
+This plan gives the project ONE layout surface: a new top-level `layout:`
+config block for the truths that have no home, and a `ProjectLayout` runtime
+facade composing it with the existing homes so every handler reads one API and
+none re-declares a truth. It is Core Standard 10 and DocumentationStrategy R5
+applied to config, a follow-on in the Plan 00284 docs-SSoT programme. It also
+adds the owner-directed enforcement: markdown already on disk under source/test
+dirs must follow the SSoT pattern (collocated `CLAUDE.md` allowed as module
+docs), delivered as a sweep-only `docs_qa` check that cannot double-report with
+`markdown_organization`'s write-time gate.
+
+Backwards compatibility is non-negotiable: with no `layout:` block configured,
+behaviour is byte-identical to today, pinned by tests.
+
+## Goals
+
+- One top-level `layout:` block (source_dirs, test_dirs, config_dirs,
+  vendor_dirs; `mode: additive|replace`) with empty, behaviour-preserving
+  defaults.
+- A `ProjectLayout` facade as the single handler-facing API over layout truths,
+  composing the new block with `documentation.trees`,
+  `plan_workflow.directory` and the plan archive dirs — those keys stay where
+  they are (facade over migration; see DESIGN §2a and decision D2).
+- Consumption refactors C1–C8 (DESIGN §5): every ≥2-consumer directory truth
+  read from the facade or one canonical constant; the
+  `markdown_organization`-vs-`documentation.trees` conflict dissolved.
+- One reviewed canonical vendored/build dir core constant, swapped in per
+  consumer against a measured before/after diff table (DESIGN §3).
+- New sweep-only `docs_qa` check `source-tree-markdown` flagging
+  non-`CLAUDE.md` markdown in source/test dirs to point/promote (DESIGN §4).
+- Client upgrade impact: nothing changes until a project adopts the block
+  (DESIGN §7); `config-changes` and truth-changes manifest entries staged.
+
+## Non-Goals
+
+- Moving `documentation.trees` / `plan_workflow.directory` under `layout:`
+  (unless the human picks Option B at the design gate).
+- Filesystem sniffing to infer layout at startup.
+- Self-install marker consolidation (daemon identity, not project layout).
+- Ansible playbook-segment conventions (ecosystem-defined, not project layout).
+- Per-language TDD/qa_suppression `_SKIP_DIRECTORIES` pair consolidation
+  (single-domain DRY fix, no config involvement — recorded so it is not
+  re-derived).
+- Unifying `markdown_organization`'s regex option dialect with the glob
+  dialect (breaking change to existing option values).
+- A "every major source dir must HAVE a CLAUDE.md" presence check (decision
+  D3 — deferred pending the owner's reading of their own direction).
+
+## Context & Background
+
+- [DESIGN-layout-ssot.md](DESIGN-layout-ssot.md) — the full analysis: cited
+  inventory, schema proposal, additive/replace semantics, check design,
+  decisions D1–D4, client-impact argument.
+- Plan 00284 (`Completed/00284-documentation-ssot-enforcement/`) — the
+  programme this extends; `documentation:` block and `docs_qa` package are the
+  structural precedent, as `plan_workflow:` was for it.
+- Plan 00287 F3 — introduced `COMMON_VENDORED_BUILD_DIR_NAMES` and the
+  vendored-daemon corpus exclusion this plan generalises.
+
+## Tasks
+
+### Phase 1: Design approval gate (BLOCKING — no implementation before it)
+
+- [ ] ⬜ **Task 1.1**: Human reviews DESIGN-layout-ssot.md and rules on D1
+  (block name `layout:` vs `project:`), D2 (facade vs full key migration),
+  D3 (CLAUDE.md presence check wanted?), D4 (README.md allowed under source
+  dirs?). Record the rulings in this plan's Technical Decisions and the
+  JOURNAL.
+
+### Phase 2: Schema + facade (TDD)
+
+- [ ] ⬜ **Task 2.1**: `LayoutConfig` pydantic model (tests first: defaults,
+  `extra="forbid"`, mode literal), wired as `Config.layout`.
+- [ ] ⬜ **Task 2.2**: `ProjectLayout` frozen facade + builder from `Config`
+  (tests: zero-config composition equals today's built-ins; additive and
+  replace semantics; membership helpers).
+- [ ] ⬜ **Task 2.3**: Registry injection (`self._project_layout`, mirroring
+  `_project_exclude_paths`) + plumbing into the `plan_qa`/`docs_qa` contexts.
+
+### Phase 3: Canonical vendored/build core (measured)
+
+- [ ] ⬜ **Task 3.1**: Produce the per-consumer before/after diff table for
+  the proposed core set; accept or keep-as-domain-extra each delta.
+- [ ] ⬜ **Task 3.2**: Ship the core constant and swap the four whole-project
+  consumers onto it (C2), with regression tests per consumer.
+
+### Phase 4: Consumption refactors (each with before/after pin tests)
+
+- [ ] ⬜ **Task 4.1**: C3 — `markdown_organization` reads the facade for doc
+  trees, plan dir, archive dirs.
+- [ ] ⬜ **Task 4.2**: C4 — plan-dir regex handlers (`goal_injection`,
+  `recovery_cron_advisor`, `plan_workflow`, `plan_number_helper`) read the
+  facade.
+- [ ] ⬜ **Task 4.3**: C5 — main-repo code dirs from the facade
+  (`worktree_file_copy`, `same_commit_plan_doc`, `path_existence`).
+- [ ] ⬜ **Task 4.4**: C6 — `tdd_enforcement` consults declared
+  source/test dirs before per-language inference; `test_path_map` unchanged.
+- [ ] ⬜ **Task 4.5**: C7 — `british_english` docs dirs from the facade.
+- [ ] ⬜ **Task 4.6**: C8 drive-bys — worktree regex derived from its
+  constant; dead `ProjectPath` client-layout members removed or re-scoped;
+  stale "eight callers" count de-numbered; phantom default-exclude guidance
+  in `comment_size`/`comment_changelog`/`security_antipattern` fixed
+  (implement or reword).
+
+### Phase 5: source-tree-markdown check
+
+- [ ] ⬜ **Task 5.1**: New sweep-only `docs_qa` check per DESIGN §4b (TDD:
+  fixtures for flagged/allowed/fixture/grandfathered cases), ADVISE severity,
+  scope from the facade.
+- [ ] ⬜ **Task 5.2**: Handler guidance + `docs-qa` CLI coverage +
+  HANDLER_REFERENCE entry; confirm no double-report with
+  `markdown_organization` via an integration test.
+
+### Phase 6: Docs, manifests, dogfood
+
+- [ ] ⬜ **Task 6.1**: Stage `UNRELEASED/config-changes/` entry (`layout`
+  added) and a truth-changes entry for the Shape-A behaviour fixes.
+- [ ] ⬜ **Task 6.2**: Document the block (HANDLER_REFERENCE / agent tree),
+  regenerate generated docs.
+- [ ] ⬜ **Task 6.3**: Dogfood: declare this repo's own layout in
+  `.claude/hooks-daemon.yaml`, full QA, daemon restart verification, and a
+  client-mode check via `scripts/dummy-client-repo.sh` (config paths
+  changed).
+
+## Success Criteria
+
+- [ ] With no `layout:` block, every refactored consumer's behaviour is
+  pinned unchanged by tests.
+- [ ] No handler or check package re-declares a ≥2-consumer directory truth;
+  grep evidence recorded for the C1–C7 truths.
+- [ ] A project configuring non-default `documentation.trees` is treated
+  consistently by `markdown_organization` and `docs_qa`.
+- [ ] `source-tree-markdown` reports on-disk violations in sweep and never
+  fires at edit time.
+- [ ] Full QA passes; daemon restart verified; client-mode fixture verified.
+
+## Delivery & Milestones
+
+- Design + plan committed (this commit).
