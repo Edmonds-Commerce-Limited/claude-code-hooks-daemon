@@ -70,6 +70,7 @@ from claude_code_hooks_daemon.docs_qa.checks.generated_doc_hand_edit import (
 from claude_code_hooks_daemon.docs_qa.corpus import (
     COMMON_VENDORED_BUILD_DIR_NAMES,
     is_vendored_daemon_install_path,
+    matches_scope_exclude,
 )
 from claude_code_hooks_daemon.docs_qa.types import (
     CheckContext,
@@ -186,6 +187,8 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         if _is_fixture_path(rel_path):
             continue
         if matched_manifest_entry(rel_path, context.policy.qa.generated_docs) is not None:
+            continue
+        if matches_scope_exclude(rel_path, context.policy.qa.scope_exclude_globs):
             continue
         if _matches_allowlist(rel_path, context.policy.qa.grandfather_allowlist):
             continue

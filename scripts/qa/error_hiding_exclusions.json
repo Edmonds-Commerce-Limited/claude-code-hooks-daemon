@@ -9,6 +9,12 @@
       "reason": "Plan 00279: agent-asset sync at daemon start is deliberately best-effort, mirroring the fail-open startup contract (_validate_config, ClaudeMdInjector): an unwritable .claude/agents/, an invalid config (already reported by the degraded-mode path), or a mocked non-Path workspace_root must not stop the daemon serving hooks. The failure is logged at ERROR, so nothing is concealed; the deploy is re-attempted on every restart and available on demand via `hooks-daemon agents install`."
     },
     {
+      "file": "daemon/controller.py",
+      "function": "_sync_directory_role_rules",
+      "rule": "log-and-continue",
+      "reason": "Plan 00288 D5: directory-role-rules sync at daemon start is deliberately best-effort, the EXACT sibling contract to _sync_agent_assets directly above it in the same file (and in this file's first entry): an unwritable .claude/rules/ (OSError), an invalid config already reported by the degraded-mode path (ValueError), or a mocked non-Path workspace_root (TypeError) must not stop the daemon serving hooks. The failure is logged at ERROR, so nothing is concealed; the deploy re-attempts on every restart."
+    },
+    {
       "file": "handlers/session_start/model_fallback_detector.py",
       "function": "_scan_transcript",
       "rule": "log-and-continue",

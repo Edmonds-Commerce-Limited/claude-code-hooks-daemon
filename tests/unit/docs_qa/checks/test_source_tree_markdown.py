@@ -142,6 +142,26 @@ class TestAllowedInPlace:
         assert _run_sweep(context) == []
 
 
+class TestScopeExcludeGlobs:
+    def test_scope_excluded_path_is_not_flagged(self, tmp_path: Path) -> None:
+        (tmp_path / "src" / "pkg" / "skills").mkdir(parents=True)
+        (tmp_path / "src" / "pkg" / "skills" / "SKILL.md").write_text("shipped payload")
+        policy = DocumentationPolicy(
+            qa=DocumentationQaPolicy(scope_exclude_globs=("src/pkg/skills/**",)),
+        )
+        context = _context(tmp_path, layout=_layout(source_dirs=("src",)), policy=policy)
+        assert _run_sweep(context) == []
+
+    def test_non_matching_scope_exclude_still_flags(self, tmp_path: Path) -> None:
+        (tmp_path / "src" / "pkg").mkdir(parents=True)
+        (tmp_path / "src" / "pkg" / "NOTES.md").write_text("notes")
+        policy = DocumentationPolicy(
+            qa=DocumentationQaPolicy(scope_exclude_globs=("src/other/**",)),
+        )
+        context = _context(tmp_path, layout=_layout(source_dirs=("src",)), policy=policy)
+        assert [f.path for f in _run_sweep(context)] == ["src/pkg/NOTES.md"]
+
+
 class TestGrandfatherAllowlist:
     def test_grandfathered_path_is_suppressed(self, tmp_path: Path) -> None:
         (tmp_path / "src" / "pkg").mkdir(parents=True)

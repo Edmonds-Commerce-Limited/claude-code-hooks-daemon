@@ -824,6 +824,15 @@ plugins:
       enabled: true
       priority: 35
 
+# Project layout truths (Plan 00288): which dirs are source/test. Read only
+# through the ProjectLayout facade, which composes this with
+# documentation.trees and plan_workflow.directory. mode: additive means
+# these EXTEND the built-in per-language/test-dir conventions.
+layout:
+  source_dirs: ["src"]
+  test_dirs: ["tests"]
+  mode: additive
+
 # Plan workflow configuration (single source of truth for plan tracking)
 plan_workflow:
   enabled: true
@@ -918,6 +927,15 @@ documentation:
       - "CLAUDE/UPGRADES/v[0-9]*/**"
       - "PLAN-v[0-9]*.md"
       - "*archived*.md"
+      # Plan 00288 Task 6.3: the daemon's shipped payload markdown under
+      # src/ -- skills, guides and install templates are ASSETS deployed to
+      # clients, not documentation living in the wrong place, so the
+      # source-tree-markdown check must not ask for them to be promoted.
+      # Permanent and deliberate, hence scope exclusion rather than the
+      # grandfather allowlist (which marks legacy debt).
+      - "src/claude_code_hooks_daemon/skills/**"
+      - "src/claude_code_hooks_daemon/guides/**"
+      - "src/claude_code_hooks_daemon/install/templates/**"
     generated_docs:
       - glob: ".claude/HOOKS-DAEMON.md"
         generator: "bin/hooks-daemon generate-docs"

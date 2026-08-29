@@ -160,12 +160,15 @@ def is_vendored_daemon_install_path(rel_parts: tuple[str, ...]) -> bool:
     )
 
 
-def _matches_scope_exclude(rel_path: str, patterns: tuple[str, ...]) -> bool:
+def matches_scope_exclude(rel_path: str, patterns: tuple[str, ...]) -> bool:
     """Whether ``rel_path`` matches a configured ``scope_exclude_globs``
     entry (Plan 00289) -- FROZEN historical records (a versioned upgrade
-    guide, a self-labelled archived draft) that must be invisible to every
-    corpus-driven check, not merely capped at ADVISE the way
-    ``grandfather_allowlist`` caps a still-indexed file.
+    guide, a self-labelled archived draft) or deliberate non-corpus payload
+    (Plan 00288: the daemon's shipped skill/guide/template markdown under
+    ``src/``) that must be invisible to every docs-qa path judgement, not
+    merely capped at ADVISE the way ``grandfather_allowlist`` caps a
+    still-indexed file. Public because ``source_tree_markdown`` applies the
+    same exclusion to paths OUTSIDE the corpus's own scope.
 
     Checked against both the full ``rel_path`` (for a directory-scoped
     pattern like ``CLAUDE/UPGRADES/v[0-9]*/**``) AND the bare basename (for
@@ -202,7 +205,7 @@ def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> boo
         return True
     if rel_parts[: len(plan_cancelled)] == plan_cancelled:
         return True
-    if _matches_scope_exclude("/".join(rel_parts), policy.qa.scope_exclude_globs):
+    if matches_scope_exclude("/".join(rel_parts), policy.qa.scope_exclude_globs):
         return True
     return False
 
