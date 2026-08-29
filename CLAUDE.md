@@ -388,6 +388,14 @@ its own `HOSTNAME`, so it cannot disturb the dogfood daemon.
 ./scripts/debug_hooks.sh start   # Debug hook events
 ```
 
+### LSP / Pyright Diagnostics
+
+`pyrightconfig.json` is the SSoT for Python import resolution (venv via the
+`untracked/venv` symlink, first-party imports from `src/`). A flood of
+"Import could not be resolved" diagnostics while `pyright --project /workspace`
+runs clean means a STALE language server, not broken code — `pkill -f pyright-langserver` and it respawns fresh. Full diagnosis and fixes:
+[CLAUDE/development/LSP.md](CLAUDE/development/LSP.md).
+
 ## Hostname-Based Isolation
 
 **Multi-Environment Support**: Each unique hostname gets isolated daemon runtime files, preventing conflicts when running multiple instances (containers, machines, etc.).
