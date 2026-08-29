@@ -2344,7 +2344,11 @@ handlers:
 
 **Description:** Warns about American English spellings in content files (.md, .ejs, .html, .txt). Checks for common American spellings and suggests British equivalents (e.g. `color` to `colour`, `organize` to `organise`). Non-blocking -- allows the operation but adds a warning.
 
-**Checked directories:** `private_html`, `docs`, `CLAUDE`
+**Checked directories:** the project's configured agent/human documentation
+trees (`documentation.trees.agent`/`.human`, default `CLAUDE`/`docs`), plus
+the `private_html` extra. The doc-tree names are read from the
+`ProjectLayout` facade, so a project configuring non-default tree names is
+checked consistently rather than against the hardcoded default.
 
 **Config example:**
 
@@ -2354,6 +2358,8 @@ handlers:
     british_english:
       enabled: true
       priority: 60
+      options:
+        extra_check_directories: [private_html] # additive on top of the doc trees
 ```
 
 ---
@@ -2792,7 +2798,7 @@ handlers:
 
 **Description:** At the start of each new session, rebuilds the doc corpus index (link graph over the two audience trees, `.claude/rules`, `.claude/skills`, `.claude/agents`, and root-level `.md` files) and checks it with the docs QA SWEEP-stage catalogue, injecting a compact drift report as advisory context. Never blocks; silent when the corpus is clean.
 
-**Checks:** `pointer-resolves` (dead links), `generated-doc-hand-edit` (a generated doc that looks hand-edited or stale against the daemon's own version), `rules-file-shape` (a `.claude/rules/*.md` file violating the pointer-only contract), `quote-drift` (re-verified fresh from disk every sweep — the backstop for the advisory-only `quote-source-stale` check, which only fires at edit time), `at-import-census` (an `@path.md` import outside the resident allowlist, found anywhere in the corpus), `module-doc-budget` (every sub-folder `CLAUDE.md` re-measured against its line budget — SWEEP has no before/after to judge worse-only against, so a block-eligible-at-EDIT finding is always reported here as advisory), and `duplicate-block` (a structured block — fenced code, table, or list run of 3+ items — whose normalised content matches one in a DIFFERENT document; always advisory, with no block path at all).
+**Checks:** `pointer-resolves` (dead links), `generated-doc-hand-edit` (a generated doc that looks hand-edited or stale against the daemon's own version), `rules-file-shape` (a `.claude/rules/*.md` file violating the pointer-only contract), `quote-drift` (re-verified fresh from disk every sweep — the backstop for the advisory-only `quote-source-stale` check, which only fires at edit time), `at-import-census` (an `@path.md` import outside the resident allowlist, found anywhere in the corpus), `module-doc-budget` (every sub-folder `CLAUDE.md` re-measured against its line budget — SWEEP has no before/after to judge worse-only against, so a block-eligible-at-EDIT finding is always reported here as advisory), `duplicate-block` (a structured block — fenced code, table, or list run of 3+ items — whose normalised content matches one in a DIFFERENT document; always advisory, with no block path at all), and `source-tree-markdown` (Plan 00288: a `.md` file under a declared `layout.source_dirs`/`test_dirs` entry that is not a `CLAUDE.md`, `README.md`, generated-docs entry, or test-fixture file — SWEEP-only by design so it never double-reports with `markdown_organization`'s write-time location gate; silent when no `layout:` source/test dirs are declared).
 
 The injected report is capped at the first 8 findings, with a trailing `...and N more` line naming the CLI for the rest — the CLI report itself is never capped.
 

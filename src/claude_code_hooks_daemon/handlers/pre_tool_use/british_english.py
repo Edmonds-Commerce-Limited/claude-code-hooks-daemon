@@ -1,7 +1,7 @@
 """BritishEnglishHandler - warns about American English spellings in content files."""
 
 import re
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -13,6 +13,18 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
+
+# Fallback doc-tree dirs, used only when no ProjectLayout facade was
+# injected. Mirror the Config defaults exactly (DocumentationTreesConfig
+# agent/human), same convention as markdown_organization's fallbacks.
+_FALLBACK_AGENT_DOCS_DIR: Final[str] = "CLAUDE"
+_FALLBACK_HUMAN_DOCS_DIR: Final[str] = "docs"
+
+# Non-layout extra: a directory this project checks that is NOT a
+# documentation-tree truth (it is a handler BEHAVIOUR default, Plan 00288
+# Task 4.5/C7), so it stays a handler option rather than moving into the
+# facade.
+_DEFAULT_EXTRA_CHECK_DIRECTORIES: Final[tuple[str, ...]] = ("private_html",)
 
 
 class BritishEnglishHandler(PreToolUseHandlerBase):
@@ -32,7 +44,6 @@ class BritishEnglishHandler(PreToolUseHandlerBase):
     }
 
     CHECK_EXTENSIONS: ClassVar[list[str]] = [".md", ".ejs", ".html", ".txt"]
-    CHECK_DIRECTORIES: ClassVar[list[str]] = ["private_html", "docs", "CLAUDE"]
 
     def __init__(self) -> None:
         # Non-terminal (terminal=False) - allows operation but adds warning context
@@ -47,6 +58,24 @@ class BritishEnglishHandler(PreToolUseHandlerBase):
                 HandlerTag.NON_TERMINAL,
             ],
         )
+        # Config option: extra directories to check, additive on top of the
+        # ProjectLayout facade's agent/human docs trees (Plan 00288 Task 4.5).
+        # Set via setattr after __init__ from handler options.
+        self._extra_check_directories: list[str] = list(_DEFAULT_EXTRA_CHECK_DIRECTORIES)
+
+    @property
+    def CHECK_DIRECTORIES(self) -> list[str]:
+        """Effective directories to check: facade docs trees + extras.
+
+        Reads the ProjectLayout facade's agent_docs_dir/human_docs_dir
+        instead of hardcoding CLAUDE/docs; falls back to the matching Config
+        defaults when no facade was injected, so zero-config behaviour is
+        unchanged.
+        """
+        layout = self._project_layout
+        agent_dir = layout.agent_docs_dir if layout is not None else _FALLBACK_AGENT_DOCS_DIR
+        human_dir = layout.human_docs_dir if layout is not None else _FALLBACK_HUMAN_DOCS_DIR
+        return [*self._extra_check_directories, human_dir, agent_dir]
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing content files with potential American spellings."""

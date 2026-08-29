@@ -43,6 +43,33 @@ class TestBritishEnglishHandler:
         assert "CLAUDE" in handler.CHECK_DIRECTORIES
         assert "docs" in handler.CHECK_DIRECTORIES
 
+    def test_check_directories_keeps_private_html_extra(self, handler):
+        """The non-layout extra (private_html) stays present by default."""
+        assert "private_html" in handler.CHECK_DIRECTORIES
+
+    def test_check_directories_honours_facade_doc_trees(self, handler):
+        """A reconfigured human/agent docs tree is honoured (Plan 00288
+        Task 4.5): the docs-dir names are read from the ProjectLayout
+        facade instead of the hardcoded CLAUDE/docs pair."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="AGENT_DOCS",
+            human_docs_dir="documentation",
+            plan_dir="AGENT_DOCS/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+        assert "AGENT_DOCS" in handler.CHECK_DIRECTORIES
+        assert "documentation" in handler.CHECK_DIRECTORIES
+        assert "CLAUDE" not in handler.CHECK_DIRECTORIES
+        assert "docs" not in handler.CHECK_DIRECTORIES
+        # The non-layout extra is unaffected by facade reconfiguration.
+        assert "private_html" in handler.CHECK_DIRECTORIES
+
     # matches() - Positive Cases: Write tool with American spellings
     def test_matches_write_md_file_with_color(self, handler):
         """Should match Write to .md file containing 'color'."""
