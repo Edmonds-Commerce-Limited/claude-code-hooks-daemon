@@ -93,3 +93,44 @@ config_changes:
         deterministic `docs-qa` CLI output first and spends its judgement on
         what those checks cannot decide. Its first run doubles as a migration
         worklist for the project's existing doc drift.
+    - key: layout
+      recommended: false
+      dormant: true
+      description: >-
+        NEW top-level config block (Plan 00288): `source_dirs`, `test_dirs`,
+        `config_dirs`, `vendor_dirs` (each `list[str] = []`) plus
+        `mode: additive|replace`. Every list defaults to empty, which means
+        byte-identical behaviour to today — pinned by tests. A `ProjectLayout`
+        runtime facade composes this block with the existing config homes
+        (`documentation.trees`, `plan_workflow.directory`,
+        `plan_workflow.qa.completed_dir`/`cancelled_dir`) into ONE
+        handler-facing API, so a growing set of consumers (markdown_organization,
+        goal_injection, recovery_cron_advisor, plan_workflow, plan_number_helper,
+        worktree_file_copy, same_commit_plan_doc, path_existence,
+        tdd_enforcement, british_english) read declared directory names instead
+        of hardcoding them.
+      migration_note: >-
+        No action needed for the default layout (src/, tests/, etc. inferred
+        per-language as before). Declare `layout.source_dirs`/`test_dirs` if
+        your project uses non-conventional directory names and wants
+        `tdd_enforcement` and the shipped `.claude/rules/` directory-role
+        pointer files to recognise them; `mode: replace` stands the declared
+        list alone instead of merging onto the built-in.
+    - key: documentation.qa.scope_exclude_globs
+      recommended: false
+      dormant: false
+      description: >-
+        NEW option (Plan 00289), default `[]`. File globs excluded from the
+        documentation corpus ENTIRELY — not merely capped at ADVISE severity
+        the way `grandfather_allowlist` caps a still-indexed file. Intended for
+        FROZEN historical records (a versioned upgrade guide, a self-labelled
+        archived draft) whose links and structured blocks should never be
+        re-verified against current truth. A scope-excluded file is invisible
+        to `pointer-resolves`, `duplicate-block` and every other corpus-driven
+        check.
+      migration_note: >-
+        No action needed with the empty default. If your project keeps
+        versioned/archived documentation snapshots inside the tracked doc
+        corpus and `documentation.enabled` is true, add globs for them here
+        instead of `grandfather_allowlist` (which still indexes and partially
+        checks the file).

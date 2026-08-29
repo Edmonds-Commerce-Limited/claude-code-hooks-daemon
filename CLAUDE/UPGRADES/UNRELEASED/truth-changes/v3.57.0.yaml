@@ -1,0 +1,77 @@
+version: "3.57.0"
+truth_changes:
+  - was: >
+      Several handlers hardcoded `CLAUDE/` (agent docs), `docs/` (human docs)
+      and `CLAUDE/Plan/` (plan directory) regardless of a project's
+      `documentation.trees` / `plan_workflow.directory` config —
+      markdown_organization, goal_injection, recovery_cron_advisor,
+      plan_workflow, plan_number_helper, worktree_file_copy,
+      same_commit_plan_doc, path_existence and british_english each
+      re-declared the same truth independently. A project that configured a
+      non-default tree or plan-directory name was treated inconsistently by
+      those handlers — `markdown_organization` in particular would BLOCK a
+      write to the project's own configured human/agent doc tree because it
+      only recognised the defaults.
+    now: >
+      Plan 00288's `ProjectLayout` runtime facade fixes this: every handler
+      named above now reads ONE composed API instead of a hardcoded literal.
+      This changes behaviour ONLY for a project that has configured a
+      NON-DEFAULT `documentation.trees.agent`/`human` or
+      `plan_workflow.directory` value, and always IN THAT PROJECT'S FAVOUR —
+      what was previously blocked or inconsistently applied is now treated
+      correctly. A project using the defaults (`CLAUDE/`, `docs/`,
+      `CLAUDE/Plan/`) sees no behaviour change.
+
+      `tdd_enforcement` additionally now consults `layout.source_dirs`/
+      `test_dirs` (when declared) BEFORE its existing per-language inference;
+      `test_path_map` is unchanged and still the flat-placement override.
+  - was: >
+      Four independent, hand-maintained vendored/build-directory name sets
+      existed across the codebase, silently drifted apart:
+      `docs_qa.corpus.COMMON_VENDORED_BUILD_DIR_NAMES` (8 names),
+      `strategies.lint.common.COMMON_SKIP_PATHS` (11, including a redundant
+      `rust_strategy.py` duplicate of `target/`), `worktree_seed_suggestions`'s
+      `_EXCLUDED_DIRECTORY_NAMES` (14), `validate_eslint_on_write`'s
+      `SKIP_PATHS` (5, matched by unsafe bare substring), and 2 of
+      `error_hiding_blocker`'s 5 default exclude globs. See
+      `CLAUDE/Plan/00288-project-layout-config-ssot/MEASUREMENT-vendored-dirs.md`
+      for the full cited before/after table.
+    now: >
+      All five now derive from one reviewed `CORE_VENDORED_BUILD_DIR_NAMES`
+      constant (11 names: node_modules, vendor, third_party, dist, build,
+      .build, target, .next, .venv, venv, coverage) plus each consumer's own
+      documented domain extras. Each consumer newly skips the deltas
+      measured as ACCEPT-eligible — e.g. the doc corpus now also excludes
+      `.build`/`venv`/`coverage`; lint now also excludes `.next`/`third_party`
+      (and drops the redundant `target/` duplicate); `error_hiding_blocker`'s
+      default excludes grow from 2 to 11 vendored/build globs. NONE of the
+      newly-skipped names exist in this repository, so this repo's own
+      dogfood behaviour is unchanged; for a client with a `.next/`,
+      `third_party/`, `.build/`, `venv/` or `coverage/` directory, content in
+      it is no longer scanned/indexed/lint-checked where it previously was.
+
+      `validate_eslint_on_write`'s matcher was ALSO fixed as a precondition
+      of this swap: the old bare-substring check would have newly skipped
+      first-party paths like `src/builder/x.ts` (contains "build") once
+      `build`/`venv` joined its skip set. It now uses the same slash-bounded
+      containment matcher `strategies.lint.common` already used, so growing
+      the skip set no longer risks silently disabling ESLint on unrelated
+      first-party files.
+  - was: >
+      `.claude/rules/` held only whatever a project hand-authored itself. No
+      daemon-shipped rule pointed a directory role at its enforcement or
+      convention.
+    now: >
+      On the FIRST daemon restart after upgrading past this version (Plan
+      00288, D5), 7 new pointer files appear under a project's `.claude/rules/`
+      — one per directory role (source dirs, test dirs, the human and agent
+      doc trees, `.claude/skills/`, `.claude/agents/`, and the plan directory,
+      the last one only when `plan_workflow.enabled` is true). Each is scoped
+      by a `paths:` glob computed from the project's OWN configured layout at
+      deploy time and routes to the daemon's `CLAUDE/DirectoryRoles.md`
+      reference. This is a SMOOTH-UPGRADE addition, not an opt-in: it needs no
+      config change, and hand-editing a deployed rule is a SUPPORTED
+      customisation — the daemon detects a customised file and never touches
+      it again, even across further upgrades or a project's own layout config
+      changes (which otherwise refresh a pristine rule's `paths:` glob
+      automatically).
