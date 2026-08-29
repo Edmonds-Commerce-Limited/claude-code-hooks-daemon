@@ -62,11 +62,17 @@ class LifecyclePhase(Enum):
 
 # ─── Path patterns ────────────────────────────────────────────────────────────
 
-# Matches: CLAUDE/Plan/<digits>-<name>/PLAN.md (NOT inside Completed/)
-_PLAN_PATH_RE: Final[re.Pattern[str]] = re.compile(
-    r"CLAUDE/Plan/(\d+-[^/]+)/PLAN\.md$",
-    re.IGNORECASE,
-)
+# The plan-dir portion of the trigger pattern (<plan_dir>/<digits>-<name>/
+# PLAN.md, NOT inside Completed/) is built per-handler-instance from the
+# ProjectLayout facade's plan_dir (Plan 00288 Task 4.2), not this literal
+# fallback — see RecoveryCronAdvisorHandler._plan_dir() and
+# _plan_path_pattern() below.
+_FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
+
+
+def _plan_path_pattern(plan_dir: str) -> re.Pattern[str]:
+    """Compile the trigger pattern for the given configured plan directory."""
+    return re.compile(rf"{re.escape(plan_dir)}/(\d+-[^/]+)/PLAN\.md$", re.IGNORECASE)
 
 # Excluded: anything already in the Completed/ archive
 _COMPLETED_SEGMENT: Final[str] = "/Completed/"
@@ -211,16 +217,17 @@ _COMPLETION_GUIDANCE: Final[str] = (
 # ─── Phase detection helper ───────────────────────────────────────────────────
 
 
-def _is_plan_path(file_path: str) -> tuple[bool, str]:
+def _is_plan_path(file_path: str, plan_dir: str = _FALLBACK_PLAN_DIR) -> tuple[bool, str]:
     """Return (matches, plan_folder) for a file path.
 
-    Returns (True, folder_name) when the path is an active PLAN.md.
-    Returns (False, '') when excluded (Completed/) or not a plan path.
+    Returns (True, folder_name) when the path is an active PLAN.md under
+    ``plan_dir``. Returns (False, '') when excluded (Completed/) or not a
+    plan path.
     """
     normalized = file_path.replace("\\", "/")
     if _COMPLETED_SEGMENT in normalized:
         return False, ""
-    m = _PLAN_PATH_RE.search(normalized)
+    m = _plan_path_pattern(plan_dir).search(normalized)
     if not m:
         return False, ""
     return True, m.group(1)
@@ -293,7 +300,9 @@ def _edit_results_in_status_complete(new_string: str, old_string: str) -> bool:
     return False
 
 
-def _detect_lifecycle_phase(hook_input: dict[str, Any]) -> LifecyclePhase | None:
+def _detect_lifecycle_phase(
+    hook_input: dict[str, Any], plan_dir: str = _FALLBACK_PLAN_DIR
+) -> LifecyclePhase | None:
     """Detect the plan lifecycle phase from a PostToolUse hook input.
 
     Returns the detected LifecyclePhase or None if this event is not relevant.
@@ -318,7 +327,7 @@ def _detect_lifecycle_phase(hook_input: dict[str, Any]) -> LifecyclePhase | None
         return None
 
     file_path = get_file_path(hook_input) or ""
-    is_plan, _folder = _is_plan_path(file_path)
+    is_plan, _folder = _is_plan_path(file_path, plan_dir)
     if not is_plan:
         return None
 
@@ -418,6 +427,11 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         """
         return True
 
+    def _plan_dir(self) -> str:
+        """Configured plan directory (facade, or the matching default)."""
+        layout = self._project_layout
+        return layout.plan_dir if layout is not None else _FALLBACK_PLAN_DIR
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Return True if this event represents a plan lifecycle moment.
 
@@ -425,7 +439,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         detected phase is cached on the instance and reused by handle() for the
         same event, so detection runs once per event rather than twice.
         """
-        self._cached_phase = _detect_lifecycle_phase(hook_input)
+        self._cached_phase = _detect_lifecycle_phase(hook_input, self._plan_dir())
         return self._cached_phase is not None
 
     def _resolve_phase(self, hook_input: dict[str, Any]) -> LifecyclePhase | None:
@@ -439,7 +453,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         self._cached_phase = None
         if cached is not None:
             return cached
-        return _detect_lifecycle_phase(hook_input)
+        return _detect_lifecycle_phase(hook_input, self._plan_dir())
 
     def _should_advise_progress(self, plan_folder: str) -> bool:
         """Record a progress edit for plan_folder and return whether to advise.
@@ -483,7 +497,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         it falls back to the shared _MKPLAN_SENTINEL_KEY bucket.
         """
         file_path = get_file_path(hook_input) or ""
-        _, plan_folder = _is_plan_path(file_path)
+        _, plan_folder = _is_plan_path(file_path, self._plan_dir())
         return plan_folder or _MKPLAN_SENTINEL_KEY
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:

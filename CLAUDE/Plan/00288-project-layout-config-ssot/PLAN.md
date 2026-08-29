@@ -124,14 +124,14 @@ behaviour is byte-identical to today, pinned by tests.
   [MEASUREMENT-vendored-dirs.md](MEASUREMENT-vendored-dirs.md) — 11-name core,
   21 ACCEPT deltas, 0 KEEP-LOCAL deltas, 13 retained domain extras; eslint
   matcher fix is a Task 3.2 precondition.
-- [ ] ⬜ **Task 3.2**: Ship the core constant and swap the four whole-project
+- [x] ✅ **Task 3.2**: Ship the core constant and swap the four whole-project
   consumers onto it (C2), with regression tests per consumer.
 
 ### Phase 4: Consumption refactors (each with before/after pin tests)
 
 - [x] ✅ **Task 4.1**: C3 — `markdown_organization` reads the facade for doc
   trees, plan dir, archive dirs.
-- [ ] ⬜ **Task 4.2**: C4 — plan-dir regex handlers (`goal_injection`,
+- [x] ✅ **Task 4.2**: C4 — plan-dir regex handlers (`goal_injection`,
   `recovery_cron_advisor`, `plan_workflow`, `plan_number_helper`) read the
   facade.
 - [ ] ⬜ **Task 4.3**: C5 — main-repo code dirs from the facade
@@ -147,10 +147,10 @@ behaviour is byte-identical to today, pinned by tests.
 
 ### Phase 5: source-tree-markdown check
 
-- [ ] ⬜ **Task 5.1**: New sweep-only `docs_qa` check per DESIGN §4b (TDD:
+- [x] ✅ **Task 5.1**: New sweep-only `docs_qa` check per DESIGN §4b (TDD:
   fixtures for flagged/allowed/fixture/grandfathered cases), ADVISE severity,
   scope from the facade.
-- [ ] ⬜ **Task 5.2**: Handler guidance + `docs-qa` CLI coverage +
+- [x] ✅ **Task 5.2**: Handler guidance + `docs-qa` CLI coverage +
   HANDLER_REFERENCE entry; confirm no double-report with
   `markdown_organization` via an integration test.
 

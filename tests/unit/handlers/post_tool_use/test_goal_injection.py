@@ -290,6 +290,34 @@ class TestGoalInjectionHandler:
         plan = self._write_plan()
         assert handler.matches(self._hook_input(plan, tool="Edit")) is True
 
+    def test_matches_honours_non_default_plan_dir_from_facade(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """A project-configured plan_workflow.directory (via the ProjectLayout
+        facade) is honoured for the trigger pattern, not the CLAUDE/Plan/
+        literal (Plan 00288 Task 4.2)."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="Plans",
+            plan_archive_dirs=("Completed",),
+        )
+        plan_dir = self._project / "Plans" / _PLAN_FOLDER
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        plan_file = plan_dir / "PLAN.md"
+        plan_file.write_text(_plan_md(), encoding="utf-8")
+        assert handler.matches(self._hook_input(plan_file)) is True
+        # The old default location no longer matches once a non-default
+        # plan_dir is configured.
+        default_plan = self._write_plan()
+        assert handler.matches(self._hook_input(default_plan)) is False
+
     def test_no_match_completed_plan(self, handler: GoalInjectionHandler) -> None:
         plan_dir = self._project / "CLAUDE" / "Plan" / "Completed" / _PLAN_FOLDER
         plan_dir.mkdir(parents=True)

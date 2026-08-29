@@ -133,14 +133,16 @@ _QA_REVIEW_LINE_TEXT: Final[str] = (
 )
 
 # ── Trigger detection ──────────────────────────────────────────────────────
-# Matches CLAUDE/Plan/<digits>-<name>/PLAN.md, NOT inside Completed/ — the
-# same shape recovery_cron_advisor uses for the same trigger surface.
-_PLAN_PATH_RE: Final[re.Pattern[str]] = re.compile(r"CLAUDE/Plan/(\d+-[^/]+)/PLAN\.md$")
+# The plan-dir portion of the trigger pattern (<plan_dir>/<digits>-<name>/
+# PLAN.md, NOT inside Completed/ — the same shape recovery_cron_advisor uses
+# for the same trigger surface) is built per-instance from the ProjectLayout
+# facade's plan_dir (Plan 00288 Task 4.2), not this literal fallback — see
+# _FALLBACK_PLAN_DIR and _plan_dir()/_plan_path_pattern() below.
+_FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 _COMPLETED_SEGMENT: Final[str] = "/Completed/"
 _STATUS_IN_PROGRESS_RE: Final[re.Pattern[str]] = re.compile(
     r"^\*\*Status\*\*:\s*In Progress\s*$", re.MULTILINE
 )
-_PLAN_DIR_PREFIX: Final[str] = "CLAUDE/Plan/"
 _PLAN_MD_FILENAME: Final[str] = "PLAN.md"
 _TITLE_HEADING_PREFIX: Final[str] = "# "
 # Strips a redundant "Plan NNNNN: " lead-in from the heading text, since the
@@ -368,6 +370,19 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         """Opt-in: only useful when a PTY supervisor is watching."""
         return False
 
+    def _plan_dir(self) -> str:
+        """Configured plan directory (facade, or the matching default)."""
+        layout = self._project_layout
+        return layout.plan_dir if layout is not None else _FALLBACK_PLAN_DIR
+
+    def _plan_path_pattern(self) -> re.Pattern[str]:
+        """Compile the trigger pattern from the configured plan directory.
+
+        Matches ``<plan_dir>/<digits>-<name>/PLAN.md`` (the ``/Completed/``
+        exclusion is checked separately by callers via _COMPLETED_SEGMENT).
+        """
+        return re.compile(rf"{re.escape(self._plan_dir())}/(\d+-[^/]+)/PLAN\.md$")
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True for a Write/Edit landing on an ACTIVE plan's PLAN.md."""
         if hook_input.get(HookInputField.TOOL_NAME) not in (ToolName.WRITE, ToolName.EDIT):
@@ -376,13 +391,13 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         normalized = file_path.replace("\\", "/")
         if _COMPLETED_SEGMENT in normalized:
             return False
-        return _PLAN_PATH_RE.search(normalized) is not None
+        return self._plan_path_pattern().search(normalized) is not None
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Render and write the goal-intent signal; always ALLOW."""
         file_path = get_file_path(hook_input) or ""
         normalized = file_path.replace("\\", "/")
-        match = _PLAN_PATH_RE.search(normalized)
+        match = self._plan_path_pattern().search(normalized)
         if match is None:
             return BlockingResult(decision=Decision.ALLOW)
         folder = match.group(1)
@@ -400,7 +415,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         joined = render_goal_line(
             plan_number,
             extract_plan_title(plan_text),
-            f"{_PLAN_DIR_PREFIX}{folder}",
+            f"{self._plan_dir()}/{folder}",
             mode=self._mode,
             raw_lines=self._lines,
         )

@@ -1,6 +1,6 @@
 """PlanWorkflowHandler - provides guidance for plan creation."""
 
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -13,6 +13,10 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.remedy import remedy_markdown_list
+
+# Fallback plan directory, used only when no ProjectLayout facade was
+# injected. Mirrors PlanWorkflowConfig.directory's default exactly.
+_FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 
 
 class PlanWorkflowHandler(PreToolUseHandlerBase):
@@ -31,8 +35,13 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
             ],
         )
 
+    def _plan_dir(self) -> str:
+        """Configured plan directory (facade, or the matching default)."""
+        layout = self._project_layout
+        return layout.plan_dir if layout is not None else _FALLBACK_PLAN_DIR
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if writing PLAN.md in CLAUDE/Plan/ directory."""
+        """Check if writing PLAN.md in the configured plan directory."""
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         if tool_name != ToolName.WRITE:
             return False
@@ -41,9 +50,10 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
         if not file_path:
             return False
 
-        # Match CLAUDE/Plan/*/PLAN.md (case-insensitive)
+        # Match {plan_dir}/*/PLAN.md (case-insensitive)
         normalized = file_path.replace("\\", "/")
-        return "CLAUDE/Plan/" in normalized and normalized.lower().endswith("/plan.md")
+        plan_dir_marker = f"{self._plan_dir()}/"
+        return plan_dir_marker in normalized and normalized.lower().endswith("/plan.md")
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Provide guidance about plan workflow."""

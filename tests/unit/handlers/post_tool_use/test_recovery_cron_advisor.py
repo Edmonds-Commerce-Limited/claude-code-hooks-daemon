@@ -352,6 +352,35 @@ class TestMatches:
         hook_input = _write_input("/workspace/src/main.py", "code")
         assert handler.matches(hook_input) is False
 
+    def test_matches_honours_non_default_plan_dir_from_facade(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        """A project-configured plan_workflow.directory (via the ProjectLayout
+        facade) is honoured for the trigger pattern (Plan 00288 Task 4.2)."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="Plans",
+            plan_archive_dirs=("Completed",),
+        )
+        hook_input = _write_input(
+            "/workspace/Plans/00042-my-plan/PLAN.md",
+            "# Plan\n\n**Status**: Not Started\n",
+        )
+        assert handler.matches(hook_input) is True
+        # The old default location no longer matches.
+        default_hook_input = _write_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            "# Plan\n\n**Status**: Not Started\n",
+        )
+        assert handler.matches(default_hook_input) is False
+
     def test_does_not_match_completed_directory(self, handler: RecoveryCronAdvisorHandler) -> None:
         """matches() returns False for PLAN.md inside Completed/."""
         hook_input = _write_input(

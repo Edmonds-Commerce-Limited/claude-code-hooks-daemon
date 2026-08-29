@@ -53,6 +53,34 @@ class TestPlanWorkflowHandler:
         }
         assert handler.matches(hook_input) is True
 
+    def test_matches_honours_non_default_plan_dir_from_facade(
+        self, handler: PlanWorkflowHandler
+    ) -> None:
+        """A project-configured plan_workflow.directory (via the ProjectLayout
+        facade) is honoured, not the CLAUDE/Plan/ literal (Plan 00288 Task 4.2)."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="Plans",
+            plan_archive_dirs=("Completed",),
+        )
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/Plans/001-test-plan/PLAN.md"},
+        }
+        assert handler.matches(hook_input) is True
+        default_hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/001-test-plan/PLAN.md"},
+        }
+        assert handler.matches(default_hook_input) is False
+
     def test_matches_write_with_windows_path(self, handler: PlanWorkflowHandler) -> None:
         """Handler matches Write operation with Windows-style path."""
         hook_input: dict[str, Any] = {
