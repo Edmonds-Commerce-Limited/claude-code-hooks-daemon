@@ -51,7 +51,10 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
-from claude_code_hooks_daemon.plan_qa.types import DEFAULT_PLAN_DOC_BLOCK_LINES
+from claude_code_hooks_daemon.plan_qa.types import (
+    DEFAULT_PLAN_DOC_ADVISORY_LINES,
+    DEFAULT_PLAN_DOC_BLOCK_LINES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +69,16 @@ UNREGISTERED_MODULE_DOC_LINE_BUDGET: Final[int] = 40
 # rather than inventing a separate number for the same "generous ceiling"
 # concept.
 _REGISTERED_BLOCK_LINES: Final[int] = DEFAULT_PLAN_DOC_BLOCK_LINES
+
+# Registered module doc's ADVISORY threshold: plan_qa's own advisory-tier
+# line-count constant, NOT the unregistered 40-line routing/guard budget. A
+# registered doc is a canonical home (R7d), not a routing table, so it must
+# not be measured against the routing-table budget at all -- reusing that
+# constant here was the bug this pair of tiers exists to fix (a registered
+# doc between 40 and 350 lines was wrongly reported at the unregistered
+# tier, with an "or register it" remediation that made no sense for a doc
+# that was already registered).
+_REGISTERED_ADVISORY_LINES: Final[int] = DEFAULT_PLAN_DOC_ADVISORY_LINES
 
 # Marker-to-marker strip of ssot-quote block bodies (DESIGN section 2.4's
 # budget note) -- not fence-aware, a deliberate simplification for a size
@@ -121,12 +134,19 @@ class _Tier:
 
 
 def _tiers_for(registered: bool) -> tuple[_Tier, ...]:
-    """Registered docs get a block tier ABOVE the shared advisory tier;
-    unregistered docs get the advisory tier only (never block-eligible)."""
-    advisory = _Tier("advisory", UNREGISTERED_MODULE_DOC_LINE_BUDGET, Severity.ADVISE)
+    """Registered docs get their OWN (larger) advisory tier plus a block
+    tier above it; unregistered docs get the routing-table advisory tier
+    only (never block-eligible). A registered doc is a canonical home, not
+    a routing table (R7d) -- it must never be measured against the
+    unregistered budget."""
     if not registered:
-        return (advisory,)
-    return (_Tier("block", _REGISTERED_BLOCK_LINES, Severity.BLOCK), advisory)
+        return (
+            _Tier("advisory-unregistered", UNREGISTERED_MODULE_DOC_LINE_BUDGET, Severity.ADVISE),
+        )
+    return (
+        _Tier("block", _REGISTERED_BLOCK_LINES, Severity.BLOCK),
+        _Tier("advisory-registered", _REGISTERED_ADVISORY_LINES, Severity.ADVISE),
+    )
 
 
 def _finding(rel_path: str, line_count: int, tier: _Tier, severity: Severity) -> Finding:
@@ -138,6 +158,18 @@ def _finding(rel_path: str, line_count: int, tier: _Tier, severity: Severity) ->
         remediation = (
             f"Trim `{rel_path}` back under {tier.max_lines} lines, or extract "
             "durable detail into a linked supporting document."
+        )
+    elif tier.name == "advisory-registered":
+        message = (
+            f"`{rel_path}` is {line_count} lines, over the registered module "
+            f"doc advisory tier of {tier.max_lines} lines."
+        )
+        remediation = (
+            f"Consider trimming `{rel_path}` back under {tier.max_lines} "
+            "lines, or extract durable detail into a linked supporting "
+            "document. It is already registered as a canonical module-local "
+            f"home, so it has until {_REGISTERED_BLOCK_LINES} lines before "
+            "this escalates to a block-eligible finding."
         )
     else:
         message = (

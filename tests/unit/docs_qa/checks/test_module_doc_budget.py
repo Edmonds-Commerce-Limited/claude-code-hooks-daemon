@@ -106,7 +106,14 @@ class TestUnregisteredBudget:
 
 
 class TestRegisteredBudget:
-    def test_registered_under_block_tier_is_advise(self, tmp_path: Path) -> None:
+    def test_registered_well_under_advisory_tier_is_clean(self, tmp_path: Path) -> None:
+        """A registered doc is a canonical home (R7d), not a routing table --
+        it must be measured against the registered advisory tier (350
+        lines), never the unregistered 40-line routing/guard budget. This is
+        the module-doc-budget bug: ``.claude/ccy/CLAUDE.md`` (65 lines,
+        registered) was reported against the wrong tier with an "or
+        register it" remediation that made no sense for an already
+        registered doc."""
         (tmp_path / "src" / "foo").mkdir(parents=True)
         policy = DocumentationPolicy(
             qa=DocumentationQaPolicy(registered_module_docs=("src/foo/CLAUDE.md",))
@@ -118,9 +125,25 @@ class TestRegisteredBudget:
             file_content=_LONG_BODY,
             file_exists_before=False,
         )
+        assert _run_edit(context) == []
+
+    def test_registered_over_advisory_under_block_tier_is_advise(self, tmp_path: Path) -> None:
+        (tmp_path / "src" / "foo").mkdir(parents=True)
+        policy = DocumentationPolicy(
+            qa=DocumentationQaPolicy(registered_module_docs=("src/foo/CLAUDE.md",))
+        )
+        body = "\n".join(f"line {i}" for i in range(400))  # over 350, under 900
+        context = edit_context(
+            project_root=tmp_path,
+            policy=policy,
+            file_path=tmp_path / "src" / "foo" / "CLAUDE.md",
+            file_content=body,
+            file_exists_before=False,
+        )
         findings = _run_edit(context)
         assert len(findings) == 1
         assert findings[0].severity is Severity.ADVISE
+        assert "register it" not in findings[0].remediation
 
     def test_registered_growing_past_block_tier_is_block(self, tmp_path: Path) -> None:
         (tmp_path / "src" / "foo").mkdir(parents=True)
@@ -255,6 +278,23 @@ class TestSweepStage:
         (tmp_path / "CLAUDE.md").write_text(_LONG_BODY)
         (tmp_path / "CLAUDE" / "CLAUDE.md").write_text(_LONG_BODY)
         policy = DocumentationPolicy()
+
+        context = sweep_context(
+            project_root=tmp_path, policy=policy, corpus=DocCorpus(project_root=tmp_path)
+        )
+        assert _run_sweep(context) == []
+
+    def test_registered_well_under_advisory_tier_is_clean_in_sweep(self, tmp_path: Path) -> None:
+        """Sweep-side counterpart of the EDIT-arm regression above: the
+        registry must be consulted here too, or a registered doc keeps
+        being reported against the unregistered budget by the sweep even
+        after the EDIT arm is fixed."""
+        (tmp_path / "CLAUDE").mkdir()
+        (tmp_path / "src" / "foo").mkdir(parents=True)
+        (tmp_path / "src" / "foo" / "CLAUDE.md").write_text(_LONG_BODY)
+        policy = DocumentationPolicy(
+            qa=DocumentationQaPolicy(registered_module_docs=("src/foo/CLAUDE.md",))
+        )
 
         context = sweep_context(
             project_root=tmp_path, policy=policy, corpus=DocCorpus(project_root=tmp_path)
