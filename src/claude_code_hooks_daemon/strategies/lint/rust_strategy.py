@@ -9,7 +9,6 @@ _LANGUAGE_NAME = "Rust"
 _EXTENSIONS: tuple[str, ...] = (".rs",)
 _DEFAULT_LINT_COMMAND = "rustc --edition 2021 --crate-type lib -Z parse-only {file}"
 _EXTENDED_LINT_COMMAND = "clippy-driver {file}"
-_EXTRA_SKIP_PATHS: tuple[str, ...] = ("target/",)
 
 
 class RustLintStrategy:
@@ -37,7 +36,9 @@ class RustLintStrategy:
 
     @property
     def skip_paths(self) -> tuple[str, ...]:
-        return COMMON_SKIP_PATHS + _EXTRA_SKIP_PATHS
+        # "target/" is already in COMMON_SKIP_PATHS (Plan 00288 Task 3.2 --
+        # was a redundant duplicate here, dropped).
+        return COMMON_SKIP_PATHS
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Rust lint strategy."""

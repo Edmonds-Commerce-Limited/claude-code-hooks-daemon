@@ -31,6 +31,37 @@ class TestCommonSkipPaths:
     def test_common_skip_paths_contains_venv_no_dot(self) -> None:
         assert "venv/" in COMMON_SKIP_PATHS
 
+    def test_common_skip_paths_contains_next(self) -> None:
+        # Plan 00288 Task 3.2: newly-accepted core delta.
+        assert ".next/" in COMMON_SKIP_PATHS
+
+    def test_common_skip_paths_contains_third_party(self) -> None:
+        # Plan 00288 Task 3.2: newly-accepted core delta.
+        assert "third_party/" in COMMON_SKIP_PATHS
+
+    def test_common_skip_paths_keeps_pycache_and_git_as_domain_extras(self) -> None:
+        # Not part of the core; lint keeps these two as its own extras
+        # (measurement doc §3).
+        assert "__pycache__/" in COMMON_SKIP_PATHS
+        assert ".git/" in COMMON_SKIP_PATHS
+
+    def test_common_skip_paths_has_exact_membership(self) -> None:
+        assert set(COMMON_SKIP_PATHS) == {
+            "node_modules/",
+            "vendor/",
+            "third_party/",
+            "dist/",
+            "build/",
+            ".build/",
+            "target/",
+            ".next/",
+            ".venv/",
+            "venv/",
+            "coverage/",
+            "__pycache__/",
+            ".git/",
+        }
+
 
 class TestMatchesSkipPath:
     def test_matches_node_modules(self) -> None:

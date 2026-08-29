@@ -1,18 +1,18 @@
 """Shared constants and utilities for lint strategies - DRY."""
 
-# Common paths to skip across ALL languages (vendor, build, etc.)
-COMMON_SKIP_PATHS: tuple[str, ...] = (
-    "node_modules/",
-    "dist/",
-    "vendor/",
-    ".build/",
-    "coverage/",
-    ".venv/",
-    "venv/",
-    "__pycache__/",
-    ".git/",
-    "target/",
-    "build/",
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
+
+# Lint's own domain extras (Plan 00288 Task 3.2, measurement doc §3): a byte-
+# compiled cache and VCS internals, neither of which is "vendored/build" but
+# both harmless to skip when linting.
+_LINT_EXTRA_SKIP_PATH_NAMES: tuple[str, ...] = ("__pycache__", ".git")
+
+# Common paths to skip across ALL languages (vendor, build, etc.) -- the
+# canonical core plus lint's own extras, each slash-suffixed so a skip
+# pattern never matches a FILE sharing the bare name (see
+# ``matches_skip_path``).
+COMMON_SKIP_PATHS: tuple[str, ...] = tuple(
+    f"{name}/" for name in (*sorted(CORE_VENDORED_BUILD_DIR_NAMES), *_LINT_EXTRA_SKIP_PATH_NAMES)
 )
 
 
