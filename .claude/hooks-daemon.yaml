@@ -935,6 +935,34 @@ documentation:
         generator: "scripts/upgrade_version.sh (redeploys src/claude_code_hooks_daemon/skills/docs-qa/SKILL.md)"
       - glob: ".claude/agents/hooks-daemon-*.md"
         generator: "bin/hooks-daemon agents install <name> (redeploys install/templates/agents/)"
+      # Plan 00288 D5: the 7 shipped directory-role .claude/rules/ pointer
+      # files, same self-install-only reasoning as the agents entry above --
+      # this repo's own deployed copy should always track
+      # install/directory_role_rules.py's body templates, dogfooding the
+      # deploy engine rather than diverging from it. The never-clobber-
+      # customised contract those files ALSO carry (like agents) is real for
+      # CLIENTS: a hand-edit there is a supported, permanently-preserved
+      # customisation, and this manifest entry is deliberately NOT part of
+      # the daemon's shipped default `generated_docs` list, so a client's
+      # own generated-doc-hand-edit check never fires on their legitimate
+      # customisation. Declaring it only HERE nudges an agent working in
+      # THIS repo toward the correct edit route (the Python source, then a
+      # daemon restart) instead of hand-editing the deployed artefact and
+      # silently diverging dogfood from what ships.
+      - glob: ".claude/rules/source-dirs.md"
+        generator: "bin/hooks-daemon restart (redeploys install/directory_role_rules.py)"
+      - glob: ".claude/rules/test-dirs.md"
+        generator: "bin/hooks-daemon restart (redeploys install/directory_role_rules.py)"
+      - glob: ".claude/rules/human-docs.md"
+        generator: "bin/hooks-daemon restart (redeploys install/directory_role_rules.py)"
+      - glob: ".claude/rules/agent-docs.md"
+        generator: "bin/hooks-daemon restart (redeploys install/directory_role_rules.py)"
+      - glob: ".claude/rules/claude-skills.md"
+        generator: "bin/hooks-daemon restart (redeploys install/directory_role_rules.py)"
+      - glob: ".claude/rules/claude-agents.md"
+        generator: "bin/hooks-daemon restart (redeploys install/directory_role_rules.py)"
+      - glob: ".claude/rules/plan-dir.md"
+        generator: "bin/hooks-daemon restart (redeploys install/directory_role_rules.py)"
     registered_module_docs:
       # Canonical home for the ccy supervisor hot-reload contract
       # (Plan 00284 Task 3.2 slice E — promoted from
