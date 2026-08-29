@@ -153,7 +153,7 @@ behaviour is byte-identical to today, pinned by tests.
 
 ### Phase 5b: Shipped directory-role rules (D5)
 
-- [ ] ⬜ **Task 5b.1**: Canonical directory-roles doc in the agent tree
+- [x] ✅ **Task 5b.1**: Canonical directory-roles doc in the agent tree
   (each directory role: what belongs there, what does not, where the depth
   lives) — the single SSoT body the rules point at.
 - [ ] ⬜ **Task 5b.2**: Shipped `.claude/rules/` pointer files (R7a-compliant,

@@ -15,6 +15,7 @@ that owns the depth for every fact. The audience split (agent tree vs human
 | [DEBUGGING_HOOKS.md](DEBUGGING_HOOKS.md)                               | Capturing hook event flows (`scripts/debug_hooks.sh`) before writing handlers       |
 | [DEBUGGING_STOP_HOOK.md](DEBUGGING_STOP_HOOK.md)                       | Diagnosing stop-hook failures to block                                              |
 | [DEBUGGING_TRANSCRIPTS.md](DEBUGGING_TRANSCRIPTS.md)                   | Post-mortem debugging via session transcripts                                       |
+| [DirectoryRoles.md](DirectoryRoles.md)                                 | Directory roles: what markdown belongs in each directory, and what enforces it      |
 | [HANDLER_DEVELOPMENT.md](HANDLER_DEVELOPMENT.md)                       | Creating new handlers: lifecycle, API, testing patterns                             |
 | [HANDLER_GROUPING_AND_EXPANSION.md](HANDLER_GROUPING_AND_EXPANSION.md) | Handler grouping and language-specific expansion design                             |
 | [LLM-INSTALL.md](LLM-INSTALL.md)                                       | Fresh installation into a project                                                   |
