@@ -52,7 +52,7 @@ import, or re-run the CLI.
 window reload. `.vscode/` is git-ignored here (per-developer preference), so
 pin your interpreter locally if your editor needs it:
 `.vscode/settings.json` with `python.defaultInterpreterPath` set to
-`${workspaceFolder}/untracked/venv/bin/python`.
+`${workspaceFolder}/untracked/venv/bin/python`. <!-- python-var-guidance-exempt: editor interpreter pinning via the stable venv symlink, not shell-invocation guidance -->
 
 ## Known non-issues
 
