@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00289: docs gold standard zero findings](00289-docs-gold-standard-zero-findings/PLAN.md) - In Progress (drives the whole-repo `docs-qa --sweep` from 34 advisories to zero: two checker bug fixes — `pointer-resolves` absolute-path resolution, `module-doc-budget` registered-doc tiering — plus a new corpus scope-exclusion mechanism for frozen historical records, split across a src half and a docs half)
-
 - [00288: project-layout config SSoT](00288-project-layout-config-ssot/PLAN.md) - Not Started (a top-level `layout:` block + `ProjectLayout` facade as the single home for which-dir-is-what truths, consumption refactors for the handlers that hardcode them, and a sweep-only docs_qa check for markdown under source/test dirs; design done, awaiting the human's D1–D4 rulings)
 
 - [00280: workflow agent model cap in standing authorisation](00280-workflow-agent-model-cap-authorisation/PLAN.md) - Not Started (extend the built-in `workflow-orchestration` standing authorisation with a configurable model cap for workflow/sub-agents — default: Sonnet encouraged, Opus as required, Fable banned)
@@ -165,6 +163,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00289: docs gold standard zero findings](Completed/00289-docs-gold-standard-zero-findings/PLAN.md) - Complete at `671b6eb7` + `01312f29` + the archiving commit (whole-repo `docs-qa --sweep` driven from 34 advisories to zero: two checker bug fixes, a new `scope_exclude_globs` corpus exclusion, a live-template link fix, root `CLAUDE.md` `@`-import conversion, module-doc thinning/promotion, and the `release-agent.md` duplicate)
 
 - [00287: docs-qa pre-release punch list](Completed/00287-docs-qa-prerelease-punch-list/PLAN.md) - Complete at `94c41f61` + the archiving commit (F1-F4 + N1 from the post-completion Fable review of Plan 00284: CLI lint severity inflation, two checks ignoring `grandfather_allowlist`, client-scaling exclusions, missing HANDLER_REFERENCE.md docs for the docs_qa trio, and a conflicting-truth in the docs-qa skill's own output contract; sweep re-verified at the same 34-advisory baseline)
 
@@ -1279,15 +1279,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 289 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 238 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 239 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 37 + 238 + 7 = **282 folders**, spanning
+- **Folder-to-number reconciliation**: 36 + 239 + 7 = **282 folders**, spanning
   **279 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1296,9 +1296,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   00145, 00191, 00195, 00210, 00258 — abandoned drafts, numbers burned by
   transient probes (00195 during the v3.51.0 acceptance run, 00258 during the
   v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a sub-agent
-  that then found Plan 00208 already covered the work). Plan 00289
-  (this plan) is on disk as its own folder, added to the 279 distinct
-  numbers above. 279 + 10 = 289. ✅
+  that then found Plan 00208 already covered the work). Plan 00289 is on
+  disk under `Completed/`, counted in the 279 distinct numbers above.
+  279 + 10 = 289. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267

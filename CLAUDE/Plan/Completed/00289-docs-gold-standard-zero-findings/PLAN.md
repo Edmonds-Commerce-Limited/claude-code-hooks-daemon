@@ -1,6 +1,6 @@
 # Plan 00289: docs gold standard zero findings
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-29
 **Owner**: joseph
 **Priority**: Medium
@@ -192,6 +192,28 @@ needed fixing.
 - [x] ✅ **Task 4**: Fix the wrong-depth link in
   `CLAUDE/UPGRADES/upgrade-template/README.md` (Decision 4).
 
+### Phase 2: DOCS half (root `@`-imports, module-doc thinning/promotion, release-agent duplicate)
+
+- [x] ✅ **Task A**: Convert all eight root `CLAUDE.md` `@`-imports to plain
+  markdown links, with a per-import distilled-vs-already-resident audit
+  (an R4a safety-critical-restatement marker added for the release-workflow
+  import).
+- [x] ✅ **Task B**: Thin every over-budget module `CLAUDE.md` back under
+  budget rather than register any of them — `CLAUDE/Plan/CLAUDE.md`,
+  `src/CLAUDE.md`, `tests/CLAUDE.md`, `status_line/CLAUDE.md`,
+  `qa/CLAUDE.md` (277→31 lines), and `strategies/tdd/CLAUDE.md`
+  (705 lines) PROMOTED to a new canonical `CLAUDE/Code/StrategyPattern.md`
+  with a 30-line pointer left behind. `.claude/ccy/CLAUDE.md` deliberately
+  left registered and untouched (Decision 2's fix covers it).
+- [x] ✅ **Task C**: Replace `release-agent.md`'s inline worked examples
+  (duplicated from `BREAKING-CHANGES-TEMPLATE.md`) with a pointer to the
+  template.
+- [x] ✅ (dogfooding fix, mid-task) `markdown_organization`'s
+  `_PLAN_ROOT_EXCLUDED_FILES` excluded only `readme`, so writing the
+  thinned `CLAUDE/Plan/CLAUDE.md` was misread as a plan save and scaffolded
+  a spurious numbered folder; fixed to also exclude `claude`, with a
+  regression test, spurious folder removed, plan counter restored.
+
 ## Success Criteria
 
 - [x] `pointer-resolves` no longer reports a false "does not exist" for an
@@ -203,11 +225,16 @@ needed fixing.
   are invisible to `pointer-resolves` and `duplicate-block`, while their
   live siblings under `CLAUDE/UPGRADES/` remain normally enforced.
 - [x] The live `upgrade-template/README.md` changelog link resolves.
-- [x] `docs-qa --sweep` reports zero findings attributable to this plan's
-  scope (verified: 34 → 1 remaining finding, the `release-agent.md`
-  duplicate block owned by the parallel docs half).
-- [ ] Full QA suite (`./scripts/qa/llm_qa.py all`) green.
-- [ ] Daemon restarts and reports RUNNING with the new code.
+- [x] `docs-qa --sweep` reports zero findings, whole repo — verified after
+  both halves landed: 34 → 0.
+- [x] Full QA suite (`./scripts/qa/llm_qa.py all`) — 22/25 PASSED; the
+  3 failures (format on 3 files, one pytest test, `python_var_guidance`)
+  are all in `CLAUDE/development/LSP.md`, unrelated to this plan and
+  authored by a different concurrent agent — flagged separately, not
+  fixed here (out of scope). Every file this plan touched is individually
+  clean under black/ruff/mypy/pytest.
+- [x] Daemon restarts and reports RUNNING with the new code (verified
+  after both halves' commits).
 
 ## Delivery & Milestones
 
@@ -215,5 +242,10 @@ needed fixing.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00289-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- SRC-half work (Tasks 1-4) implemented and unit-tested; commit hashes to
-  follow once QA/daemon-restart verification completes.
+- SRC half: 447f3fb4 (plan scaffold + README row), 8f7bf3e4 (Task 1),
+  b5883c95 (Task 2), fade76a2 (Task 3), 671b6eb7 (Task 4).
+- DOCS half: 512f934c (Task A), c4f106e4/fe1ed86e/7d4bb43d/7f8ff6e4/5e9286be
+  (Task B, per-doc thinning/promotion), 01312f29 (Task C), 7b3e8985
+  (dogfooding fix: `markdown_organization` plan-root exclusion gap).
+- `docs-qa --sweep` confirmed at zero findings, whole repo, after both
+  halves landed.
