@@ -136,7 +136,7 @@ behaviour is byte-identical to today, pinned by tests.
   facade.
 - [x] ✅ **Task 4.3**: C5 — main-repo code dirs from the facade
   (`worktree_file_copy`, `same_commit_plan_doc`, `path_existence`).
-- [ ] ⬜ **Task 4.4**: C6 — `tdd_enforcement` consults declared
+- [x] ✅ **Task 4.4**: C6 — `tdd_enforcement` consults declared
   source/test dirs before per-language inference; `test_path_map` unchanged.
 - [ ] ⬜ **Task 4.5**: C7 — `british_english` docs dirs from the facade.
 - [ ] ⬜ **Task 4.6**: C8 drive-bys — worktree regex derived from its

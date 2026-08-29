@@ -191,6 +191,50 @@ class TestTddEnforcementHandler:
         # Without /src/ or other production source directories, should NOT match
         assert handler.matches(hook_input) is False
 
+    def test_matches_honours_declared_source_dir_from_facade(self, handler):
+        """A declared layout.source_dirs entry gates TDD for a file
+        per-language inference would MISS (Plan 00288 Task 4.4): 'backend/'
+        is not in Python's own (/src/,) _SOURCE_DIRECTORIES, so without the
+        facade this file would never match."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=("backend",),
+            test_dirs=("tests",),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/backend/my_module.py"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_honours_declared_test_dir_from_facade(self, handler):
+        """A file under a declared layout.test_dirs entry is never itself
+        gated as a production source (Plan 00288 Task 4.4)."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=("qa-suite",),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/src/qa-suite/my_module.py"},
+        }
+        assert handler.matches(hook_input) is False
+
     def test_matches_missing_file_path_returns_false(self, handler):
         """Should NOT match when file_path is missing."""
         hook_input = {"tool_name": "Write", "tool_input": {}}

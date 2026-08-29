@@ -242,8 +242,25 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         if strategy.should_skip(file_path, content):
             return False
 
+        # Declared layout dirs (Plan 00288 Task 4.4/C6) are consulted FIRST:
+        # a project stating "this dir is a test dir" or "this dir is source"
+        # is a FACT that outranks per-language inference, the same priority
+        # test_path_map already has over inferred candidate paths. In
+        # zero-config this changes nothing — the facade's built-in test_dirs
+        # is exactly the same COMMON_TEST_DIRECTORIES set every strategy's
+        # is_test_file() already checks, and source_dirs has no built-in (see
+        # core/project_layout.py), so is_source_path() never fires and
+        # resolution falls through to strategy.is_production_source() exactly
+        # as before.
+        layout = self._project_layout
+        if layout is not None and layout.is_test_path(file_path):
+            return False
+
         if strategy.is_test_file(file_path):
             return False
+
+        if layout is not None and layout.is_source_path(file_path):
+            return True
 
         return strategy.is_production_source(file_path)
 
