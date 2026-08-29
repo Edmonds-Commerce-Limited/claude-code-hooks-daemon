@@ -74,6 +74,7 @@ def _plan_path_pattern(plan_dir: str) -> re.Pattern[str]:
     """Compile the trigger pattern for the given configured plan directory."""
     return re.compile(rf"{re.escape(plan_dir)}/(\d+-[^/]+)/PLAN\.md$", re.IGNORECASE)
 
+
 # Excluded: anything already in the Completed/ archive
 _COMPLETED_SEGMENT: Final[str] = "/Completed/"
 

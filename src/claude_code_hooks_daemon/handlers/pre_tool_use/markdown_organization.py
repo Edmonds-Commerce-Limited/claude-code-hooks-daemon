@@ -171,10 +171,10 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         rather than only when the facade's archive dirs happen to omit it.
         """
         layout = self._project_layout
-        archive_dirs = layout.plan_archive_dirs if layout is not None else _FALLBACK_PLAN_ARCHIVE_DIRS
-        return frozenset(
-            {name.lower() for name in archive_dirs} | set(_LEGACY_PLAN_ARCHIVE_EXTRAS)
+        archive_dirs = (
+            layout.plan_archive_dirs if layout is not None else _FALLBACK_PLAN_ARCHIVE_DIRS
         )
+        return frozenset({name.lower() for name in archive_dirs} | set(_LEGACY_PLAN_ARCHIVE_EXTRAS))
 
     def normalize_path(self, file_path: str) -> str:
         """Normalize file path to project-relative format.
@@ -960,9 +960,7 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         # 'archive' extra — see _plan_archive_dirs_lower)
         if folder_name in self._plan_archive_dirs_lower():
             # For subdirectories, validate the SECOND path segment
-            subdir_match = re.match(
-                rf"^{escaped_prefix}[^/]+/([^/]+)/", normalized, re.IGNORECASE
-            )
+            subdir_match = re.match(rf"^{escaped_prefix}[^/]+/([^/]+)/", normalized, re.IGNORECASE)
             if subdir_match:
                 folder_name = subdir_match.group(1)
             else:
