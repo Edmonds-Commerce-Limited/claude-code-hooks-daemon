@@ -3,8 +3,10 @@
 import json
 from pathlib import Path
 
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.docs_qa.corpus import (
     _CACHE_SCHEMA_VERSION,
+    COMMON_VENDORED_BUILD_DIR_NAMES,
     DocCorpus,
     DocRecord,
     QuoteRef,
@@ -117,8 +119,18 @@ class TestIsInScope:
             ".venv",
             ".next",
             "third_party",
+            # Plan 00288 Task 3.2: newly-accepted core deltas (measurement §3).
+            ".build",
+            "venv",
+            "coverage",
         ):
             assert not is_in_scope(tmp_path / "docs" / heavy_dir / "README.md", tmp_path, policy)
+
+    def test_common_vendored_build_dir_names_is_the_core_alias(self) -> None:
+        """Plan 00288 Task 3.2: corpus's verdict is ACCEPT-all with zero
+        domain extras, so the public name is a straight re-export of the
+        canonical core -- no separate membership to drift out of sync."""
+        assert COMMON_VENDORED_BUILD_DIR_NAMES == CORE_VENDORED_BUILD_DIR_NAMES
 
     def test_unscoped_directory_is_excluded(self, tmp_path: Path) -> None:
         _scaffold(tmp_path)

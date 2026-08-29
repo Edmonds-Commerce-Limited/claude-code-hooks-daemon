@@ -29,6 +29,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.quotes import parse_quote_blocks
@@ -91,18 +92,15 @@ _CLAUDE_MD_FILENAME: Final[str] = "CLAUDE.md"
 # first corpus build. Shared with checks.module_doc_budget, which does its
 # OWN rglob walk (Task 3.3 T2 note) rather than using this corpus, so the
 # exclusion set has to be shared, not just the outcome.
-COMMON_VENDORED_BUILD_DIR_NAMES: Final[frozenset[str]] = frozenset(
-    {
-        "node_modules",
-        "vendor",
-        "dist",
-        "build",
-        "target",
-        ".venv",
-        ".next",
-        "third_party",
-    }
-)
+#
+# Plan 00288 Task 3.2: corpus's per-consumer verdict (see
+# MEASUREMENT-vendored-dirs.md §3) is ACCEPT every delta from the canonical
+# core with ZERO domain extras kept local -- so this name is a straight
+# re-export of the core constant, not an independently-maintained set. Kept
+# under its original name so existing importers (``core/project_layout.py``'s
+# facade builder, ``checks/module_doc_budget.py``) and the pinned membership
+# tests need no change.
+COMMON_VENDORED_BUILD_DIR_NAMES: Final[frozenset[str]] = CORE_VENDORED_BUILD_DIR_NAMES
 
 
 def is_module_doc_path(rel_path: str, agent_tree: str) -> bool:
