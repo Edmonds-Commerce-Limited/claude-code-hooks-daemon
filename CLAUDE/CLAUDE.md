@@ -28,6 +28,7 @@ that owns the depth for every fact. The audience split (agent tree vs human
 | [AcceptanceTests/](AcceptanceTests/GENERATING.md)                      | Acceptance test generation and validation                                           |
 | [Architecture/](Architecture/StatusLine.md)                            | Component deep-dives (status line)                                                  |
 | [Code/](Code/HooksSystem.md)                                           | Hooks system internals                                                              |
+| [Code/StrategyPattern.md](Code/StrategyPattern.md)                     | Language-aware handler Strategy Pattern archetype                                   |
 | [CodeLifecycle/](CodeLifecycle/README.md)                              | Mandatory lifecycles: features, bugs, general changes                               |
 | [Performance/](Performance/README.md)                                  | Performance baselines and measurements                                              |
 | [Plan/](Plan/README.md)                                                | Numbered development plans (see [Plan/CLAUDE.md](Plan/CLAUDE.md) for lifecycle)     |
