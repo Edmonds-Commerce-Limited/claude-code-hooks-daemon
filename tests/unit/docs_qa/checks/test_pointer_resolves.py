@@ -97,6 +97,24 @@ class TestEditStageNewFile:
         )
         assert _run_edit(context) == []
 
+    def test_fully_qualified_absolute_path_link_resolves(self, tmp_path: Path) -> None:
+        """A link written as the project's own fully-qualified filesystem path
+        (e.g. ``/workspace/CHANGELOG.md`` when ``project_root`` IS
+        ``/workspace``) must resolve directly, not be mistaken for the
+        repo-root-relative convention (which would double the root segment
+        and report a false "does not exist").
+        """
+        (tmp_path / "CLAUDE").mkdir()
+        (tmp_path / "Target.md").write_text("# target\n")
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE" / "New.md",
+            file_content=f"See [target]({tmp_path / 'Target.md'}).\n",
+            file_exists_before=False,
+        )
+        assert _run_edit(context) == []
+
     def test_anchor_is_stripped_before_existence_check(self, tmp_path: Path) -> None:
         (tmp_path / "CLAUDE").mkdir()
         (tmp_path / "CLAUDE" / "Target.md").write_text("# target\n")
@@ -228,6 +246,16 @@ class TestResolvesDirect:
         directly to pin the fallback.
         """
         assert _resolves(tmp_path, None, "#only-a-fragment") is True
+
+    def test_fully_qualified_path_does_not_double_root(self, tmp_path: Path) -> None:
+        """Regression: naive ``project_root / target.lstrip("/")`` handling
+        of a leading ``/`` doubled the root segment for a target that is
+        already the project's own fully-qualified path (``/workspace/x``
+        under ``project_root == /workspace`` became ``/workspace/workspace/x``),
+        so a real file was reported as missing.
+        """
+        (tmp_path / "Real.md").write_text("# real\n")
+        assert _resolves(tmp_path, None, str(tmp_path / "Real.md")) is True
 
 
 class TestEditStageMissingPayload:

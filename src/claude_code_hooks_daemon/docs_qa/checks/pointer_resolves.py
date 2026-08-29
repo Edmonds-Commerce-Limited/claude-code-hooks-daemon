@@ -66,8 +66,18 @@ def _strip_fragment(target: str) -> str:
 def _resolves(project_root: Path, file_path: Path | None, target: str) -> bool:
     """Whether ``target`` (file-existence only; no anchor resolution) resolves.
 
-    Repo-root-relative (leading ``/``) resolves against ``project_root``;
-    otherwise relative-to-the-file is tried first, then relative-to-root as
+    A leading ``/`` is ambiguous between two conventions this project's docs
+    both use: (a) a fully-qualified absolute filesystem path — an author
+    wrote the project's own on-disk path, e.g. ``/workspace/CHANGELOG.md``
+    when ``project_root`` genuinely IS ``/workspace`` — and (b)
+    repo-root-relative shorthand (GitHub-style ``/CHANGELOG.md`` meaning
+    "from the repo root"). The literal path is tried FIRST: naively
+    stripping the leading ``/`` and joining under ``project_root`` for case
+    (a) DOUBLES the root segment (``/workspace/workspace/...``) and falsely
+    reports a real file as missing. Only when the literal path does not
+    exist does this fall back to the repo-root-relative join.
+
+    Otherwise relative-to-the-file is tried first, then relative-to-root as
     a fallback (a plain link written without a leading ``/`` commonly means
     "from the repo root" in this project's own docs).
     """
@@ -75,6 +85,8 @@ def _resolves(project_root: Path, file_path: Path | None, target: str) -> bool:
     if not file_target:
         return True
     if file_target.startswith("/"):
+        if Path(file_target).exists():
+            return True
         return (project_root / file_target.lstrip("/")).exists()
     if file_path is not None and (file_path.parent / file_target).exists():
         return True
