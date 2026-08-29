@@ -109,12 +109,12 @@ behaviour is byte-identical to today, pinned by tests.
 
 ### Phase 2: Schema + facade (TDD)
 
-- [ ] ⬜ **Task 2.1**: `LayoutConfig` pydantic model (tests first: defaults,
+- [x] ✅ **Task 2.1**: `LayoutConfig` pydantic model (tests first: defaults,
   `extra="forbid"`, mode literal), wired as `Config.layout`.
-- [ ] ⬜ **Task 2.2**: `ProjectLayout` frozen facade + builder from `Config`
+- [x] ✅ **Task 2.2**: `ProjectLayout` frozen facade + builder from `Config`
   (tests: zero-config composition equals today's built-ins; additive and
   replace semantics; membership helpers).
-- [ ] ⬜ **Task 2.3**: Registry injection (`self._project_layout`, mirroring
+- [x] ✅ **Task 2.3**: Registry injection (`self._project_layout`, mirroring
   `_project_exclude_paths`) + plumbing into the `plan_qa`/`docs_qa` contexts.
 
 ### Phase 3: Canonical vendored/build core (measured)
