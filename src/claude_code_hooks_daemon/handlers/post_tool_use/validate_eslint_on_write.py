@@ -18,10 +18,12 @@ from claude_code_hooks_daemon.constants import (
     Timeout,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
+from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 
@@ -32,7 +34,16 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
     """Run ESLint validation on TypeScript/TSX files after write."""
 
     VALIDATE_EXTENSIONS: ClassVar[list[str]] = [".ts", ".tsx"]
-    SKIP_PATHS: ClassVar[list[str]] = ["node_modules", "dist", ".build", "coverage", "test-results"]
+    # Plan 00288 Task 3.2: core (11 names) plus this handler's own extra,
+    # "test-results" (Playwright/JS test artifacts) -- see
+    # MEASUREMENT-vendored-dirs.md §3. Slash-suffixed and matched via
+    # ``matches_skip_path``'s slash-bounded containment, NOT the old bare
+    # substring check -- a bare check would newly skip first-party paths
+    # like ``src/builder/x.ts`` ("build") or ``src/venvtool.ts`` ("venv")
+    # once the set grew to include those short, common tokens.
+    SKIP_PATHS: ClassVar[tuple[str, ...]] = tuple(
+        f"{name}/" for name in (*sorted(CORE_VENDORED_BUILD_DIR_NAMES), "test-results")
+    )
 
     def __init__(self, workspace_root: str | Path | None = None) -> None:
         """
@@ -80,7 +91,7 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
             return False
 
         # Skip build artifacts
-        if any(skip in file_path for skip in self.SKIP_PATHS):
+        if matches_skip_path(file_path, self.SKIP_PATHS):
             return False
 
         # File must exist. A formality for Write/Edit; load-bearing for Bash,

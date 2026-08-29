@@ -198,7 +198,20 @@ class TestValidateEslintOnWriteHandler:
 
     @pytest.mark.parametrize(
         "skip_path",
-        ["dist", ".build", "coverage", "test-results"],
+        [
+            "dist",
+            ".build",
+            "coverage",
+            "test-results",
+            # Plan 00288 Task 3.2: newly-accepted core deltas.
+            "vendor",
+            "build",
+            "target",
+            ".venv",
+            "venv",
+            ".next",
+            "third_party",
+        ],
     )
     def test_does_not_match_build_artifacts(
         self, handler: ValidateEslintOnWriteHandler, tmp_path: Path, skip_path: str
@@ -215,6 +228,44 @@ class TestValidateEslintOnWriteHandler:
         }
 
         assert handler.matches(hook_input) is False
+
+    def test_matches_first_party_dir_named_builder(
+        self, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00288 Task 3.2 precondition: the old bare-substring matcher
+        would skip ``src/builder/x.ts`` because it contains "build". The
+        matcher must be slash-bounded so this first-party path is still
+        checked."""
+        src_dir = tmp_path / "src" / "builder"
+        src_dir.mkdir(parents=True)
+        test_file = src_dir / "x.ts"
+        test_file.write_text("const x = 1;")
+
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+
+        assert handler.matches(hook_input) is True
+
+    def test_matches_first_party_file_named_venvtool(
+        self, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00288 Task 3.2 precondition: the old bare-substring matcher
+        would skip ``src/venvtool.ts`` because it contains "venv". The
+        matcher must be slash-bounded so this first-party file is still
+        checked."""
+        src_dir = tmp_path / "src"
+        src_dir.mkdir(parents=True)
+        test_file = src_dir / "venvtool.ts"
+        test_file.write_text("const x = 1;")
+
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+
+        assert handler.matches(hook_input) is True
 
     def test_does_not_match_nonexistent_file(
         self, handler: ValidateEslintOnWriteHandler, tmp_path: Path
