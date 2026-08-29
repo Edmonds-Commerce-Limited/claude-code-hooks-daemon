@@ -451,42 +451,10 @@ If breaking changes detected, generate upgrade guide in CLAUDE/UPGRADES/:
 - **Migration**: Be actionable and precise (config examples, exact steps)
 - **Guide Links**: Use relative paths from RELEASES/ directory: `../CLAUDE/UPGRADES/v{major}/v{old}-to-v{new}/v{old}-to-v{new}.md`
 
-**Examples**:
-
-**Handler Removal** (v2.11.0):
-
-```markdown
-### Handler Removals
-
-- **`validate_sitemap`** (PostToolUse) - Removed in v2.11.0
-  - **Why**: Project-specific validation code that doesn't belong in core daemon. This handler reminded users to validate sitemap files after editing markdown in `CLAUDE/Sitemap/`, which is specific to one project's workflow.
-  - **Migration**: Remove from config, or migrate to project-level handlers (`.claude/project-handlers/`) if needed. See upgrade guide for recreation example.
-  - **Guide**: [v2.10-to-v2.11 Upgrade Guide](../CLAUDE/UPGRADES/v2/v2.10-to-v2.11/v2.10-to-v2.11.md)
-```
-
-**Handler Rename** (v2.12.0):
-
-````markdown
-### Handler Renames
-
-- **`lint_on_edit`** (renamed from `validate_eslint_on_write`) - Renamed in v2.12.0
-  - **Why**: Handler extended from ESLint-only to 9 languages (Python, JavaScript, TypeScript, Ruby, PHP, Go, Rust, Java, C/C++, Shell) using Strategy Pattern architecture. The old name was too specific.
-  - **Migration**: Update `.claude/hooks-daemon.yaml` config to use new handler name:
-    ```yaml
-    # Before (v2.11.0)
-    handlers:
-      post_tool_use:
-        validate_eslint_on_write:
-          enabled: true
-
-    # After (v2.12.0)
-    handlers:
-      post_tool_use:
-        lint_on_edit:
-          enabled: true
-    ```
-  - **Guide**: [v2.11-to-v2.12 Upgrade Guide](../CLAUDE/UPGRADES/v2/v2.11-to-v2.12/v2.11-to-v2.12.md)
-````
+**Examples**: worked removal/rename/multiple-change examples live in the
+canonical template,
+[BREAKING-CHANGES-TEMPLATE.md](../../CLAUDE/UPGRADES/upgrade-template/BREAKING-CHANGES-TEMPLATE.md)
+— follow its examples verbatim rather than a copy here.
 
 **Important**:
 
