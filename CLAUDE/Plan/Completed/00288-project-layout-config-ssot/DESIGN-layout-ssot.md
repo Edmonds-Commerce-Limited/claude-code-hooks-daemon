@@ -4,7 +4,7 @@ Design analysis for a single top-level configuration surface recording which
 directory is what (source, test, human docs, agent docs, plans, vendor/build),
 consumed by every handler that needs the answer. This is Core Standard 10
 ("config is truth, code reads config, never hardcode") and
-[DocumentationStrategy.md](../../DocumentationStrategy.md) R5 (derived facts
+[DocumentationStrategy.md](../../../DocumentationStrategy.md) R5 (derived facts
 stated only by their source) applied to CONFIG rather than prose — a follow-on
 in the Plan 00284 documentation-SSoT programme.
 
