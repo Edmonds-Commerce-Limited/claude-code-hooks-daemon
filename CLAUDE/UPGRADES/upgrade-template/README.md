@@ -494,4 +494,4 @@ If you encounter issues during upgrade:
 - [Upgrade system documentation](../README.md)
 - [Handler development guide](../../HANDLER_DEVELOPMENT.md)
 - [Release notes](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/releases/tag/vX.Z.0)
-- [Full changelog](../../CHANGELOG.md)
+- [Full changelog](../../../CHANGELOG.md)
