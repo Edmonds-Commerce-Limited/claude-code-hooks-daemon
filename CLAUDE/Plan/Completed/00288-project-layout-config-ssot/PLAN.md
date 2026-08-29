@@ -1,6 +1,6 @@
 # Plan 00288: Project-layout config SSoT
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-29
 **Owner**: joseph
 **Priority**: Medium
@@ -173,23 +173,27 @@ behaviour is byte-identical to today, pinned by tests.
   added) and a truth-changes entry for the Shape-A behaviour fixes.
 - [x] ✅ **Task 6.2**: Document the block (HANDLER_REFERENCE / agent tree),
   regenerate generated docs.
-- [ ] ⬜ **Task 6.3**: Dogfood: declare this repo's own layout in
-  `.claude/hooks-daemon.yaml`, full QA, daemon restart verification, and a
-  client-mode check via `scripts/dummy-client-repo.sh` (config paths
-  changed).
+- [x] ✅ **Task 6.3**: Dogfood: declared `layout: {source_dirs: [src], test_dirs: [tests]}` in `.claude/hooks-daemon.yaml` with scope-exclusions
+  for the shipped payload markdown under `src/` (skills/guides/templates),
+  made `source-tree-markdown` honour `scope_exclude_globs` (TDD, commit
+  e8dea14b), full QA 25/25 PASSED, daemon RUNNING, dummy client verified
+  (6 rules deployed, sweep 0).
 
 ## Success Criteria
 
-- [ ] With no `layout:` block, every refactored consumer's behaviour is
+- [x] With no `layout:` block, every refactored consumer's behaviour is
   pinned unchanged by tests.
-- [ ] No handler or check package re-declares a ≥2-consumer directory truth;
-  grep evidence recorded for the C1–C7 truths.
-- [ ] A project configuring non-default `documentation.trees` is treated
-  consistently by `markdown_organization` and `docs_qa`.
-- [ ] `source-tree-markdown` reports on-disk violations in sweep and never
-  fires at edit time.
-- [ ] Full QA passes; daemon restart verified; client-mode fixture verified.
+- [x] No handler or check package re-declares a ≥2-consumer directory truth;
+  grep evidence recorded for the C1–C7 truths (DESIGN §1 +
+  MEASUREMENT-vendored-dirs.md + per-task journal entries).
+- [x] A project configuring non-default `documentation.trees` is treated
+  consistently by `markdown_organization` and `docs_qa` (Task 4.1 test).
+- [x] `source-tree-markdown` reports on-disk violations in sweep and never
+  fires at edit time (integration test, f6f52d74).
+- [x] Full QA passes (25/25); daemon restart verified; client-mode fixture
+  verified (deploy + idempotence + config-refresh + customisation-preserve).
 
 ## Delivery & Milestones
 
-- Design + plan committed (this commit).
+- Design + plan committed; all phases delivered across commits 3aa68a72 →
+  e8dea14b (see JOURNAL/ for the per-task record).
