@@ -159,12 +159,12 @@ behaviour is byte-identical to today, pinned by tests.
 - [x] ✅ **Task 5b.1**: Canonical directory-roles doc in the agent tree
   (each directory role: what belongs there, what does not, where the depth
   lives) — the single SSoT body the rules point at.
-- [ ] ⬜ **Task 5b.2**: Shipped `.claude/rules/` pointer files (R7a-compliant,
+- [x] ✅ **Task 5b.2**: Shipped `.claude/rules/` pointer files (R7a-compliant,
   paths-glob scoped: `src/**/*.md`, `tests/**/*.md`, human tree, agent tree,
   `.claude/skills/**`, `.claude/agents/**`, plan dir) deployed by the
   installer with md5-ledger upgrade semantics; globs derived from the
   project's configured layout at deploy time, not hardcoded.
-- [ ] ⬜ **Task 5b.3**: Dogfood the rules in this repo; verify deploy +
+- [x] ✅ **Task 5b.3**: Dogfood the rules in this repo; verify deploy +
   upgrade in the dummy client fixture.
 
 ### Phase 6: Docs, manifests, dogfood
