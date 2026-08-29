@@ -905,6 +905,56 @@ class DocumentationConfig(BaseModel):
     qa: DocumentationQaConfig = Field(default_factory=DocumentationQaConfig)
 
 
+class LayoutConfig(BaseModel):
+    """Project directory-layout truths that have no other config home (Plan 00288).
+
+    Sibling truths that DO already have a home — doc tree names
+    (``documentation.trees``), the plan directory
+    (``plan_workflow.directory``) and its archive dir names
+    (``plan_workflow.qa.completed_dir``/``cancelled_dir``) — are
+    deliberately NOT duplicated here; the ``ProjectLayout`` runtime facade
+    (``core/project_layout.py``) composes this block WITH those homes into
+    one handler-facing API (DESIGN-layout-ssot.md §2a, decision D2).
+
+    Every list is empty by default (byte-identical zero-config behaviour) and
+    ADDITIVE onto the relevant built-in convention/constant unless ``mode``
+    is ``replace`` — in which case a list the project actually SET stands
+    alone, while a list left unset still falls back to the built-in (DESIGN
+    §2c; mirrors how ``secret_file_guard`` scopes its own ``mode`` to the
+    option it governs).
+
+    Attributes:
+        source_dirs: Extra source directory names/globs, e.g. ``["backend/src"]``
+        test_dirs: Extra test directory names/globs, e.g. ``["e2e"]``
+        config_dirs: Extra config directory names, extending the built-in ``config``
+        vendor_dirs: Extra vendored/build directory names, extending the
+            canonical vendored/build set
+        mode: ``additive`` (default — declared lists extend built-ins) or
+            ``replace`` (a SET list stands alone; an unset list keeps its
+            built-in)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_dirs: list[str] = Field(
+        default_factory=list, description="Extra source directory names/globs"
+    )
+    test_dirs: list[str] = Field(
+        default_factory=list, description="Extra test directory names/globs"
+    )
+    config_dirs: list[str] = Field(
+        default_factory=list,
+        description="Extra config directory names, extending the built-in 'config'",
+    )
+    vendor_dirs: list[str] = Field(
+        default_factory=list,
+        description="Extra vendored/build directory names, extending the canonical set",
+    )
+    mode: Literal["additive", "replace"] = Field(
+        default="additive", description="additive: extend built-ins; replace: SET lists stand alone"
+    )
+
+
 class AgentAssetGateConfig(BaseModel):
     """Gating config for one daemon-shipped agent asset (Plan 00279).
 
@@ -1206,6 +1256,9 @@ class Config(BaseModel):
         plugins: Plugin system configuration
         project_handlers: Project-level handler configuration
         ccy: ccy container-workflow configuration (Plan 00147)
+        layout: Project directory-layout truths with no other config home
+            (Plan 00288); composed with other homes by the ``ProjectLayout``
+            facade (``core/project_layout.py``)
     """
 
     model_config = ConfigDict(extra="allow")
@@ -1217,6 +1270,7 @@ class Config(BaseModel):
     project_handlers: ProjectHandlersConfig = Field(default_factory=ProjectHandlersConfig)
     plan_workflow: PlanWorkflowConfig = Field(default_factory=PlanWorkflowConfig)
     documentation: DocumentationConfig = Field(default_factory=DocumentationConfig)
+    layout: LayoutConfig = Field(default_factory=LayoutConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     ccy: CcyConfig = Field(default_factory=CcyConfig)
     pseudo_events: dict[str, dict[str, Any]] = Field(
