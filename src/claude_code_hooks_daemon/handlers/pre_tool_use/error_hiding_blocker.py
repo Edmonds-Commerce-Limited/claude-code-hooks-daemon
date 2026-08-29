@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_path
@@ -39,12 +40,18 @@ _CONFIG_HINT_HANDLER = "handlers.pre_tool_use.error_hiding_blocker"
 # generated/vendored trees and test-fixture code (which legitimately contains
 # error-hiding patterns) are never scanned. Clients extend this via the
 # ``exclude_paths`` option and/or the project-level ``daemon.exclude_paths``.
-_DEFAULT_EXCLUDE_GLOBS: Final[tuple[str, ...]] = (
-    "**/vendor/**",
-    "**/node_modules/**",
+#
+# Plan 00288 Task 3.2: the vendored/build half derives from the canonical
+# core (measurement doc §3, ACCEPT all deltas); the fixture-semantics half
+# is a different category and stays local to this handler.
+_FIXTURE_EXCLUDE_GLOBS: Final[tuple[str, ...]] = (
     "**/tests/fixtures/**",
     "**/tests/assets/**",
     "**/__fixtures__/**",
+)
+_DEFAULT_EXCLUDE_GLOBS: Final[tuple[str, ...]] = (
+    tuple(f"**/{name}/**" for name in sorted(CORE_VENDORED_BUILD_DIR_NAMES))
+    + _FIXTURE_EXCLUDE_GLOBS
 )
 
 

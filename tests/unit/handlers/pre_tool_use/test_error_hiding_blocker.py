@@ -339,6 +339,26 @@ class TestErrorHidingBlockerExcludePaths:
     def test_default_skips_vendor(self, handler: ErrorHidingBlockerHandler) -> None:
         assert handler.matches(make_write_input("/proj/vendor/pkg/x.sh", _SHELL_HIDE)) is False
 
+    @pytest.mark.parametrize(
+        "vendored_dir",
+        [
+            "dist",
+            "build",
+            ".build",
+            "target",
+            ".venv",
+            "venv",
+            ".next",
+            "third_party",
+            "coverage",
+        ],
+    )
+    def test_default_skips_core_vendored_build_dirs(
+        self, handler: ErrorHidingBlockerHandler, vendored_dir: str
+    ) -> None:
+        """Plan 00288 Task 3.2: newly-accepted core deltas (measurement §3)."""
+        assert handler.matches(make_write_input(f"/proj/{vendored_dir}/x.sh", _SHELL_HIDE)) is False
+
     def test_real_source_still_blocked(self, handler: ErrorHidingBlockerHandler) -> None:
         assert handler.matches(make_write_input("/proj/src/deploy.sh", _SHELL_HIDE)) is True
 
