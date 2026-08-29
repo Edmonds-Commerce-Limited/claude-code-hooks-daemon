@@ -1866,6 +1866,110 @@ PostToolUse advisory (never blocks). When a configured command is detected in a 
 
 **Configure** via `handlers.post_tool_use.command_hints.options`: `mode: additive` (default) appends your `hints` list to the built-in set — a project entry whose `id` matches a built-in one overrides it; `mode: replace` discards the built-in set entirely and uses only your list. Each hint: `id`, `pattern` (a literal command name, matched at the start of a shell segment — path-qualified and `env`-prefixed spellings are recognised, but it never fires on the word appearing as an unrelated argument), `hint` (the reminder text), `ttl_seconds`, and optional `min_calls_between` (secondary count-based gate). Disable with `handlers.post_tool_use.command_hints.enabled: false`.
 
+<!-- handler: git-hooks-executable-fixer -->
+
+## git_hooks_executable_fixer — auto-fixes non-executable git hooks
+
+When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
+
+<!-- handler: lint-on-edit -->
+
+## lint_on_edit — source writes are linted, and a failure DENIES
+
+Every `Write`/`Edit` to a Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin or
+Dart file is linted immediately. A lint failure DENIES the tool call.
+
+**Ansible YAML is covered too, and only Ansible YAML.** A `.yml`/`.yaml` file is
+linted when it is plausibly a playbook or a role task file — by Ansible's own
+conventions (`playbooks/`, `roles/`, `tasks/`, `handlers/`, `site.yml`,
+`play-*`, `playbook-*`) or by carrying a top-level `- hosts:` / `- import_playbook:`
+line wherever it sits. Everything else sharing the extension is left alone:
+`.github/workflows/`, `hooks-daemon.yaml`, `docker-compose*`, `group_vars/`,
+`host_vars/`, inventories, and any vault file (never read — it is encrypted).
+The cheap tier is `ansible-playbook --syntax-check`, which is what catches a
+play that will not LOAD: an unbalanced quote inside a `shell:` block aborts the
+whole play at parse time, before `#` means comment. Full `ansible-lint` runs at
+the `extended` tier. The linter runs from the nearest directory containing
+`ansible.cfg`, because roles and collections resolve relative to it.
+
+**Bash-authored files are linted too.** A file a command writes with `>`, `>>`,
+`tee` or a `cat <<EOF` heredoc gets the same treatment — so the heredoc route is
+no longer the quiet way to land unparseable source. A command can author several
+files at once (`tee a.py b.py`); each is linted and the first failure is
+reported. Two boundaries are deliberate:
+
+- **Relocation is NOT linted.** `cp`, `mv`, `install` and `dd` move bytes that
+  were already on disk, so denying them would report a defect the command did
+  not introduce and leave you repairing a file you never wrote.
+- **A target that does not exist is NOT linted.** The path is inferred from the
+  command text, so a command that failed leaves nothing to check.
+
+Opt out with `handlers.post_tool_use.lint_on_edit.options.lint_bash_writes: false`, which leaves `Write`/`Edit` linting untouched.
+
+**The write has ALREADY landed on disk.** A PostToolUse denial is a failure
+report, not a rollback — the file exists, with your content in it. Fix the
+reported problems with `Edit`. Do NOT re-`Write` the file from scratch: that
+rewrites content already on disk from memory, and loses anything you no longer
+have in hand.
+
+A denial also cancels every sibling tool call batched in the same turn, so
+re-issue those separately.
+
+Each language runs a cheap syntax check first (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) and then an optional deeper linter (`ruff`,
+`shellcheck`, `golangci-lint`, `rubocop`, …). Tools are resolved from the
+daemon's venv before `PATH`.
+
+**A linter that is not installed never blocks.** You get an advisory saying it
+was not found and the write stands — so that message means the check was
+SKIPPED, not that it passed. That leniency is specific to THIS handler:
+`.ts`/`.tsx` files are handled by `validate_eslint_on_write`, which denies on
+a timeout and on any failure to run ESLint.
+
+Narrow it under `handlers.post_tool_use.lint_on_edit.options`: `languages`
+restricts which languages are checked, `command_overrides` replaces a
+language's `default`/`extended` command (set `extended: null` to run only the
+syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
+globs. The project-wide `daemon.exclude_paths` applies here too; the two are
+additive and neither overrides the other.
+
+<!-- handler: validate-eslint-on-write -->
+
+## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
+
+A `Write`/`Edit` to a `.ts` or `.tsx` file is run through ESLint. Reported
+errors DENY the tool call.
+
+**A Bash-authored `.ts`/`.tsx` file is checked too** — one written with `>`,
+`>>`, `tee` or a `cat <<EOF` heredoc. A file the command merely RELOCATES
+(`cp`, `mv`, `install`, `dd`) is not: those bytes were already on disk. Opt out
+with `handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes: false`, which leaves `Write`/`Edit` checking untouched.
+
+**The write has ALREADY landed on disk.** The denial is a failure report, not
+a rollback — the file exists with your content in it. Fix the reported problems
+with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
+sibling tool calls that were cancelled alongside the denied one.
+
+**This is STRICTER than `lint_on_edit`, which covers the other languages.**
+That handler ALLOWs when its linter is missing or when the check times out;
+this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
+Do not carry "a missing linter never blocks" across to TypeScript.
+
+**Enforcement is gated on `llm:` scripts in `package.json`.** With none
+present this handler only advises — and suggests adding `llm:lint` — so silence
+is not evidence that a `.ts` file is clean.
+
+<!-- handler: goal-injection -->
+
+## goal_injection — plan-start goal signal for the ccy supervisor
+
+PostToolUse advisory (never blocks; ships disabled). When a `PLAN.md` Write/Edit under `CLAUDE/Plan/` (never `Completed/`) results in `**Status**: In Progress`, the daemon writes a `<session>.goal-intent` signal; the ccy PTY supervisor — if armed and watching — types a single-line `/goal 🤖 [ccy-supervisor] ...` message into the foreground chat. Fires once per plan per session (state-based: the first qualifying edit in a NEW session re-fires, re-establishing the goal after a restart). Manual fallback / debug tool: `bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` in the environment, i.e. run it from the session to be targeted).
+
+**An injected goal is machine-generated** — it always opens with the machine-origin marker and a 'NOT human authorisation' clause, and can never satisfy any human-gated rule (release publishing, artefact publishing, unproven branch deletion).
+
+**Concurrent plans are tracked in a goal ledger** (Plan 00276): the /goal slot holds ONE condition (last writer wins), so every emission is recorded in `goal-ledger.json` under the daemon untracked dir. Emitting a goal while another ledgered plan is still In Progress injects a displacement advisory naming that plan, and the Stop hook challenges unexplained stops on behalf of EVERY still-live ledgered plan. Entries retire when their plan reaches a terminal status or is archived.
+
+**Configure** via `handlers.post_tool_use.goal_injection.options`: `mode: additive` (default) merges your `lines` (`{id, text, enabled}`) onto the built-in set — a matching `id` overrides in place; `mode: replace` uses only your lines. The fixed header marker line is never overridable or removable. Placeholders: `{plan_number}`, `{plan_title}`, `{plan_path}` (closed set — an unknown token skips the line). Optional authorisation lines (`subagents-encouraged`, `qa-review-subagents`) ship disabled; their vetted text points at `standing_authorisations` rather than asserting fresh consent — enable them only as a deliberate repository-owner act.
+
 <!-- handler: recovery-cron-advisor -->
 
 ## recovery_cron_advisor — failsafe recovery cron lifecycle advisory
@@ -1938,110 +2042,6 @@ handlers:
     recovery_cron_advisor:
       enabled: false
 ```
-
-<!-- handler: git-hooks-executable-fixer -->
-
-## git_hooks_executable_fixer — auto-fixes non-executable git hooks
-
-When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
-
-<!-- handler: lint-on-edit -->
-
-## lint_on_edit — source writes are linted, and a failure DENIES
-
-Every `Write`/`Edit` to a Python, Shell, Go, PHP, Ruby, Rust, Swift, Kotlin or
-Dart file is linted immediately. A lint failure DENIES the tool call.
-
-**Ansible YAML is covered too, and only Ansible YAML.** A `.yml`/`.yaml` file is
-linted when it is plausibly a playbook or a role task file — by Ansible's own
-conventions (`playbooks/`, `roles/`, `tasks/`, `handlers/`, `site.yml`,
-`play-*`, `playbook-*`) or by carrying a top-level `- hosts:` / `- import_playbook:`
-line wherever it sits. Everything else sharing the extension is left alone:
-`.github/workflows/`, `hooks-daemon.yaml`, `docker-compose*`, `group_vars/`,
-`host_vars/`, inventories, and any vault file (never read — it is encrypted).
-The cheap tier is `ansible-playbook --syntax-check`, which is what catches a
-play that will not LOAD: an unbalanced quote inside a `shell:` block aborts the
-whole play at parse time, before `#` means comment. Full `ansible-lint` runs at
-the `extended` tier. The linter runs from the nearest directory containing
-`ansible.cfg`, because roles and collections resolve relative to it.
-
-**Bash-authored files are linted too.** A file a command writes with `>`, `>>`,
-`tee` or a `cat <<EOF` heredoc gets the same treatment — so the heredoc route is
-no longer the quiet way to land unparseable source. A command can author several
-files at once (`tee a.py b.py`); each is linted and the first failure is
-reported. Two boundaries are deliberate:
-
-- **Relocation is NOT linted.** `cp`, `mv`, `install` and `dd` move bytes that
-  were already on disk, so denying them would report a defect the command did
-  not introduce and leave you repairing a file you never wrote.
-- **A target that does not exist is NOT linted.** The path is inferred from the
-  command text, so a command that failed leaves nothing to check.
-
-Opt out with `handlers.post_tool_use.lint_on_edit.options.lint_bash_writes: false`, which leaves `Write`/`Edit` linting untouched.
-
-**The write has ALREADY landed on disk.** A PostToolUse denial is a failure
-report, not a rollback — the file exists, with your content in it. Fix the
-reported problems with `Edit`. Do NOT re-`Write` the file from scratch: that
-rewrites content already on disk from memory, and loses anything you no longer
-have in hand.
-
-A denial also cancels every sibling tool call batched in the same turn, so
-re-issue those separately.
-
-Each language runs a cheap syntax check first (`python -m py_compile`, `bash -n`, `go vet`, `php -l`, …) and then an optional deeper linter (`ruff`,
-`shellcheck`, `golangci-lint`, `rubocop`, …). Tools are resolved from the
-daemon's venv before `PATH`.
-
-**A linter that is not installed never blocks.** You get an advisory saying it
-was not found and the write stands — so that message means the check was
-SKIPPED, not that it passed. That leniency is specific to THIS handler:
-`.ts`/`.tsx` files are handled by `validate_eslint_on_write`, which denies on
-a timeout and on any failure to run ESLint.
-
-Narrow it under `handlers.post_tool_use.lint_on_edit.options`: `languages`
-restricts which languages are checked, `command_overrides` replaces a
-language's `default`/`extended` command (set `extended: null` to run only the
-syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
-globs. The project-wide `daemon.exclude_paths` applies here too; the two are
-additive and neither overrides the other.
-
-<!-- handler: goal-injection -->
-
-## goal_injection — plan-start goal signal for the ccy supervisor
-
-PostToolUse advisory (never blocks; ships disabled). When a `PLAN.md` Write/Edit under `CLAUDE/Plan/` (never `Completed/`) results in `**Status**: In Progress`, the daemon writes a `<session>.goal-intent` signal; the ccy PTY supervisor — if armed and watching — types a single-line `/goal 🤖 [ccy-supervisor] ...` message into the foreground chat. Fires once per plan per session (state-based: the first qualifying edit in a NEW session re-fires, re-establishing the goal after a restart). Manual fallback / debug tool: `bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` in the environment, i.e. run it from the session to be targeted).
-
-**An injected goal is machine-generated** — it always opens with the machine-origin marker and a 'NOT human authorisation' clause, and can never satisfy any human-gated rule (release publishing, artefact publishing, unproven branch deletion).
-
-**Concurrent plans are tracked in a goal ledger** (Plan 00276): the /goal slot holds ONE condition (last writer wins), so every emission is recorded in `goal-ledger.json` under the daemon untracked dir. Emitting a goal while another ledgered plan is still In Progress injects a displacement advisory naming that plan, and the Stop hook challenges unexplained stops on behalf of EVERY still-live ledgered plan. Entries retire when their plan reaches a terminal status or is archived.
-
-**Configure** via `handlers.post_tool_use.goal_injection.options`: `mode: additive` (default) merges your `lines` (`{id, text, enabled}`) onto the built-in set — a matching `id` overrides in place; `mode: replace` uses only your lines. The fixed header marker line is never overridable or removable. Placeholders: `{plan_number}`, `{plan_title}`, `{plan_path}` (closed set — an unknown token skips the line). Optional authorisation lines (`subagents-encouraged`, `qa-review-subagents`) ship disabled; their vetted text points at `standing_authorisations` rather than asserting fresh consent — enable them only as a deliberate repository-owner act.
-
-<!-- handler: validate-eslint-on-write -->
-
-## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
-
-A `Write`/`Edit` to a `.ts` or `.tsx` file is run through ESLint. Reported
-errors DENY the tool call.
-
-**A Bash-authored `.ts`/`.tsx` file is checked too** — one written with `>`,
-`>>`, `tee` or a `cat <<EOF` heredoc. A file the command merely RELOCATES
-(`cp`, `mv`, `install`, `dd`) is not: those bytes were already on disk. Opt out
-with `handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes: false`, which leaves `Write`/`Edit` checking untouched.
-
-**The write has ALREADY landed on disk.** The denial is a failure report, not
-a rollback — the file exists with your content in it. Fix the reported problems
-with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
-sibling tool calls that were cancelled alongside the denied one.
-
-**This is STRICTER than `lint_on_edit`, which covers the other languages.**
-That handler ALLOWs when its linter is missing or when the check times out;
-this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
-Do not carry "a missing linter never blocks" across to TypeScript.
-
-**Enforcement is gated on `llm:` scripts in `package.json`.** With none
-present this handler only advises — and suggests adding `llm:lint` — so silence
-is not evidence that a `.ts` file is clean.
 
 <!-- handler: git-upstream-checker -->
 
@@ -2211,13 +2211,18 @@ outside the resident allowlist, found anywhere in the corpus),
 `module-doc-budget` (every sub-folder `CLAUDE.md` re-measured
 against its line budget — SWEEP has no before/after to judge
 worse-only against, so a block-eligible-at-EDIT finding is always
-reported here as advisory), and `duplicate-block` (a structured
+reported here as advisory), `duplicate-block` (a structured
 block — fenced code, table, or list run of 3+ items — whose
 normalised content matches one in a DIFFERENT document; always
 advisory, with no block path at all — see its own module
 docstring for why promotion needs a fresh hand-triaged whole-repo
-run first). Findings are injected once as advisory context — the
-sweep never blocks.
+run first), and `source-tree-markdown` (Plan 00288: a `.md` file
+under a declared source/test directory — via the `ProjectLayout`
+facade — that is not a `CLAUDE.md`/`README.md`/generated/fixture
+file; SWEEP-only by design, so it never double-reports with
+`markdown_organization`'s write-time location gate, and stays
+silent when no `layout:` source/test dirs are declared). Findings
+are injected once as advisory context — the sweep never blocks.
 
 **The injected report is capped**: only the first
 `MAX_ADVISORY_FINDINGS_SHOWN` (8) findings are shown, with a
