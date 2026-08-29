@@ -5,7 +5,7 @@ import dataclasses
 import pytest
 
 from claude_code_hooks_daemon.config.models import Config
-from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+from claude_code_hooks_daemon.core.project_layout import ProjectLayout, main_repo_code_dirs
 from claude_code_hooks_daemon.docs_qa.corpus import COMMON_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.strategies.tdd.common import COMMON_TEST_DIRECTORIES
 
@@ -147,3 +147,38 @@ class TestFrozen:
         layout = ProjectLayout.from_config(Config())
         with pytest.raises(dataclasses.FrozenInstanceError):
             layout.source_dirs = ("nope",)
+
+
+class TestMainRepoCodeDirs:
+    """main_repo_code_dirs() -- the shared "main repo code dirs" truth used
+    by worktree_file_copy, same-commit-plan-doc, and path-existence (C5)."""
+
+    def test_none_layout_returns_pre_facade_literal(self) -> None:
+        assert main_repo_code_dirs(None) == ("src", "tests", "config")
+
+    def test_zero_config_layout_is_a_superset_of_pre_facade_literal(self) -> None:
+        """The real (non-None) zero-config facade widens test_dirs (adds
+        test/, __tests__/, spec/) but never loses src/tests/config."""
+        layout = ProjectLayout.from_config(Config())
+        result = main_repo_code_dirs(layout)
+        assert {"src", "tests", "config"}.issubset(set(result))
+
+    def test_declared_source_dirs_are_included(self) -> None:
+        """A declared source_dirs list is honoured -- and since it is no
+        longer empty, the "src" fallback (which only applies when
+        source_dirs is undeclared) does not additionally force "src" in."""
+        config = Config.model_validate({"layout": {"source_dirs": ["backend"]}})
+        layout = ProjectLayout.from_config(config)
+        assert "backend" in main_repo_code_dirs(layout)
+        assert "src" not in main_repo_code_dirs(layout)
+
+    def test_declared_config_dirs_are_included(self) -> None:
+        config = Config.model_validate({"layout": {"config_dirs": ["settings"]}})
+        layout = ProjectLayout.from_config(config)
+        assert "settings" in main_repo_code_dirs(layout)
+        assert "config" in main_repo_code_dirs(layout)  # additive default
+
+    def test_no_duplicate_entries(self) -> None:
+        layout = ProjectLayout.from_config(Config())
+        result = main_repo_code_dirs(layout)
+        assert len(result) == len(set(result))

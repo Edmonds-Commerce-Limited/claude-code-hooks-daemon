@@ -7,6 +7,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.project_layout import main_repo_code_dirs
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
 # Both worktree root prefixes — untracked/ is manually managed, .claude/ is Claude Code managed
@@ -49,10 +50,14 @@ class WorktreeFileCopyHandler(PreToolUseHandlerBase):
         if not re.search(r"\b(cp|mv|rsync)\b", command, re.IGNORECASE):
             return False
 
-        # Check patterns
+        # Check patterns — the "main repo code dirs" alternation is built
+        # from the ProjectLayout facade (Plan 00288 Task 4.3/C5) rather than
+        # hardcoded, so a project declaring extra source/test/config dirs is
+        # also protected.
+        code_dirs = "|".join(re.escape(d) for d in main_repo_code_dirs(self._project_layout))
         patterns = [
-            rf"{_WORKTREE_RE}/[^/\s]+/\S+\s+.*\b(src/|tests/|config/)",
-            rf"rsync.*{_WORKTREE_RE}.*\b(src|tests|config)\b",
+            rf"{_WORKTREE_RE}/[^/\s]+/\S+\s+.*\b({code_dirs})/",
+            rf"rsync.*{_WORKTREE_RE}.*\b({code_dirs})\b",
         ]
 
         for pattern in patterns:

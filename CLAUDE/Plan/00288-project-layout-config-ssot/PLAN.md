@@ -134,7 +134,7 @@ behaviour is byte-identical to today, pinned by tests.
 - [x] ✅ **Task 4.2**: C4 — plan-dir regex handlers (`goal_injection`,
   `recovery_cron_advisor`, `plan_workflow`, `plan_number_helper`) read the
   facade.
-- [ ] ⬜ **Task 4.3**: C5 — main-repo code dirs from the facade
+- [x] ✅ **Task 4.3**: C5 — main-repo code dirs from the facade
   (`worktree_file_copy`, `same_commit_plan_doc`, `path_existence`).
 - [ ] ⬜ **Task 4.4**: C6 — `tdd_enforcement` consults declared
   source/test dirs before per-language inference; `test_path_map` unchanged.

@@ -121,3 +121,32 @@ class TestFindings:
         findings = CHECK.run(context)
         assert len(findings) == 1
         assert findings[0].message.count("src/missing") == 10
+
+    def test_declared_source_dir_from_facade_is_checked(self, tmp_path: Path) -> None:
+        """A project-declared layout.source_dirs entry is honoured (Plan
+        00288 Task 4.3): "main repo code dirs" is read from the
+        ProjectLayout facade instead of the hardcoded src/tests/config
+        triple."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        layout = ProjectLayout(
+            source_dirs=("backend",),
+            test_dirs=("tests",),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+        content = "# Plan 00042: Widget\n\nSee `backend/missing.py` for details.\n"
+        context = CheckContext(
+            project_root=tmp_path,
+            plan_dir_rel=_PLAN_DIR_REL,
+            file_path=tmp_path / "CLAUDE/Plan/00042-widget/PLAN.md",
+            file_content=content,
+            layout=layout,
+        )
+        findings = CHECK.run(context)
+        assert len(findings) == 1
+        assert "backend/missing.py" in findings[0].message

@@ -15,6 +15,7 @@ write-time-only registration could only ever catch it by coincidence.
 import re
 from typing import Final
 
+from claude_code_hooks_daemon.core.project_layout import main_repo_code_dirs
 from claude_code_hooks_daemon.plan_qa.checks.common import (
     DocumentRuleChecks,
     DocumentTarget,
@@ -37,18 +38,28 @@ _WORK_NOT_BEGUN_STATUSES: Final[frozenset[PlanStatus]] = frozenset(
 )
 
 _INLINE_CODE_RE: Final[re.Pattern[str]] = re.compile(r"`([^`\n]+)`")
-_PROJECT_PATH_RE: Final[re.Pattern[str]] = re.compile(r"^(?:src/|tests/|config/)[A-Za-z0-9_./-]+$")
 _MAX_REPORTED_PATHS: Final[int] = 10
+
+
+def _project_path_pattern(context: CheckContext) -> re.Pattern[str]:
+    """Match a project-path-shaped inline-code span.
+
+    "Main repo code dirs" is read from the ProjectLayout facade (Plan 00288
+    Task 4.3/C5) instead of the hardcoded src/tests/config triple.
+    """
+    code_dirs = "|".join(re.escape(d) for d in main_repo_code_dirs(context.layout))
+    return re.compile(rf"^(?:{code_dirs})/[A-Za-z0-9_./-]+$")
 
 
 def _rule(context: CheckContext, target: DocumentTarget) -> list[Finding]:
     if target.in_archive or target.doc.status in _WORK_NOT_BEGUN_STATUSES:
         return []
 
+    project_path_re = _project_path_pattern(context)
     missing: list[str] = []
     for line in lines_outside_fences(target.text):
         for span in _INLINE_CODE_RE.findall(line):
-            if not _PROJECT_PATH_RE.match(span):
+            if not project_path_re.match(span):
                 continue
             if span in missing:
                 continue

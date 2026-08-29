@@ -9,6 +9,7 @@ describes.
 import re
 from typing import Final
 
+from claude_code_hooks_daemon.core.project_layout import main_repo_code_dirs
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
     CheckSpec,
@@ -20,7 +21,6 @@ from claude_code_hooks_daemon.plan_qa.types import (
 CHECK_ID: Final[str] = "same-commit-plan-doc"
 
 _PLAN_REF_RE: Final[re.Pattern[str]] = re.compile(r"[Pp]lan\s+0*(\d{1,5})")
-_CODE_PREFIXES: Final[tuple[str, ...]] = ("src/", "tests/", "config/")
 
 
 def _run(context: CheckContext) -> list[Finding]:
@@ -31,8 +31,11 @@ def _run(context: CheckContext) -> list[Finding]:
     if not plan_numbers:
         return []
 
+    # "Main repo code dirs" read from the ProjectLayout facade (Plan 00288
+    # Task 4.3/C5) instead of the hardcoded src/tests/config triple.
+    code_prefixes = tuple(f"{d}/" for d in main_repo_code_dirs(context.layout))
     staged_changes = context.gitfacts.staged_changes()
-    touches_code = any(change.path.startswith(_CODE_PREFIXES) for change in staged_changes)
+    touches_code = any(change.path.startswith(code_prefixes) for change in staged_changes)
     if not touches_code:
         return []
 

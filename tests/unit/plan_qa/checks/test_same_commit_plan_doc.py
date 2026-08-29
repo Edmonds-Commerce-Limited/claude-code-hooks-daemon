@@ -122,3 +122,34 @@ class TestFindings:
         context = _context(repo, "Plan 00042: add test")
         findings = CHECK.run(context)
         assert len(findings) == 1
+
+    def test_declared_source_dir_from_facade_counts(self, repo: Path) -> None:
+        """A project-declared layout.source_dirs entry is honoured (Plan
+        00288 Task 4.3): "main repo code dirs" is read from the
+        ProjectLayout facade instead of the hardcoded src/tests/config
+        triple."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        backend_dir = repo / "backend"
+        backend_dir.mkdir()
+        (backend_dir / "thing.py").write_text("x = 1\n")
+        _git(repo, "add", "-A")
+        layout = ProjectLayout(
+            source_dirs=("backend",),
+            test_dirs=("tests",),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+        context = CheckContext(
+            project_root=repo,
+            plan_dir_rel=_PLAN_DIR_REL,
+            gitfacts=GitFacts(repo),
+            commit_message="Plan 00042: implement thing",
+            layout=layout,
+        )
+        findings = CHECK.run(context)
+        assert len(findings) == 1

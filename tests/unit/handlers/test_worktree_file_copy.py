@@ -352,3 +352,28 @@ class TestWorktreeFileCopyHandler:
             "tool_input": {"command": "ls .claude/worktrees/branch/"},
         }
         assert handler.matches(hook_input) is False
+
+    def test_matches_honours_declared_source_dir_from_facade(self, handler):
+        """A project-declared layout.source_dirs entry is also protected
+        (Plan 00288 Task 4.3): "main repo code dirs" is read from the
+        ProjectLayout facade instead of the hardcoded src/tests/config
+        triple."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=("backend",),
+            test_dirs=("tests",),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "cp untracked/worktrees/feature-branch/backend/test.py backend/"
+            },
+        }
+        assert handler.matches(hook_input) is True

@@ -187,3 +187,36 @@ class ProjectLayout:
             plan_dir=config.plan_workflow.directory,
             plan_archive_dirs=archive_dirs,
         )
+
+
+# "Main repo code dirs" (DESIGN §1b, C5): the top-level dirs several
+# consumers (worktree_file_copy, same-commit-plan-doc, path-existence) treat
+# as "this is real project code", independently of ``source_dirs``' role as
+# a per-language TDD inference input. ``source_dirs`` has no cross-language
+# built-in (see the module docstring), so it is empty by default -- this
+# fallback restores "src" for that case specifically, matching every
+# consumer's pre-facade hardcoded literal.
+_MAIN_REPO_SOURCE_FALLBACK: Final[tuple[str, ...]] = ("src",)
+
+
+def main_repo_code_dirs(layout: ProjectLayout | None) -> tuple[str, ...]:
+    """Effective "main repo code dirs" truth shared by C5's three consumers.
+
+    Composes ``source_dirs`` (falling back to ``("src",)`` when undeclared —
+    see :data:`_MAIN_REPO_SOURCE_FALLBACK`), ``test_dirs``, and
+    ``config_dirs``. Zero-config behaviour is a SAFE SUPERSET of the
+    pre-facade literal ``("src", "tests", "config")``, never a subset: the
+    facade's ``test_dirs`` built-in additionally recognises ``test/``,
+    ``__tests__/`` and ``spec/`` (the same cross-language convention
+    :class:`ProjectLayout` already uses for TDD), so a project using one of
+    those names now gets it also recognised as a main-repo code dir where it
+    previously was not. ``config_dirs`` matches the old default exactly
+    (``("config",)``).
+
+    ``layout=None`` (a consumer constructed outside the registry, as unit
+    tests do) returns the pre-facade literal directly.
+    """
+    if layout is None:
+        return (*_MAIN_REPO_SOURCE_FALLBACK, "tests", "config")
+    source_dirs = layout.source_dirs or _MAIN_REPO_SOURCE_FALLBACK
+    return tuple(dict.fromkeys((*source_dirs, *layout.test_dirs, *layout.config_dirs)))
