@@ -241,6 +241,7 @@ def _validate_installation(project_root: Path) -> Path:
     # Load config to check self_install_mode
     # FAIL FAST: Invalid config must be surfaced immediately
     self_install = False
+    config_dict: dict[str, Any] | None = None
     if config_file.exists():
         try:
             # Initialize ProjectContext BEFORE config validation
@@ -255,9 +256,7 @@ def _validate_installation(project_root: Path) -> Path:
             # FAIL FAST: Format Pydantic errors with user-friendly messages
             from claude_code_hooks_daemon.config.validation_ux import format_validation_error
 
-            friendly_msg = format_validation_error(
-                e, config_dict if "config_dict" in dir() else None
-            )
+            friendly_msg = format_validation_error(e, config_dict)
             print(
                 f"ERROR: Invalid configuration in {config_file}:\n\n{friendly_msg}\n\n"
                 "Fix the configuration file and try again.",
