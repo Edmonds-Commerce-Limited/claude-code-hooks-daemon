@@ -23,7 +23,11 @@ spawning `jq` and `python3`, not the daemon — see
 
 ### The Release Rule (NON-NEGOTIABLE)
 
-**ALL releases MUST use the `/release` skill or follow @CLAUDE/development/RELEASING.md exactly.**
+**ALL releases MUST use the `/release` skill or follow
+[CLAUDE/development/RELEASING.md](CLAUDE/development/RELEASING.md) exactly.**
+
+<!-- R4a safety-critical restatement: the human-gating and state-file rules
+below compress CLAUDE/development/RELEASING.md, the canonical release doc. -->
 
 ### 🚨 A RELEASE IS HUMAN-GATED — NEVER SELF-INITIATED
 
@@ -120,7 +124,7 @@ The `/release` skill includes TWO mandatory blocking gates that MUST pass before
 | Edit CHANGELOG.md      | ❌ FORBIDDEN (outside release) |
 | Edit RELEASES/\*.md    | ❌ FORBIDDEN (outside release) |
 
-**See @CLAUDE/development/RELEASING.md for complete release workflow documentation.**
+**See [CLAUDE/development/RELEASING.md](CLAUDE/development/RELEASING.md) for complete release workflow documentation.**
 
 ---
 
@@ -238,9 +242,9 @@ diagnostic dumps, screenshots of someone else's terminal.
 
 **MANDATORY**: Read these documents BEFORE implementing changes:
 
-- **Before implementing features**: @CLAUDE/CodeLifecycle/Features.md
-- **Before fixing bugs**: @CLAUDE/CodeLifecycle/Bugs.md
-- **For all code changes**: @CLAUDE/CodeLifecycle/General.md
+- **Before implementing features**: [CLAUDE/CodeLifecycle/Features.md](CLAUDE/CodeLifecycle/Features.md) — the full testing pyramid; unit tests alone are never "done"
+- **Before fixing bugs**: [CLAUDE/CodeLifecycle/Bugs.md](CLAUDE/CodeLifecycle/Bugs.md) — reproduce with a failing test BEFORE fixing, then fix minimally
+- **For all code changes**: [CLAUDE/CodeLifecycle/General.md](CLAUDE/CodeLifecycle/General.md) — autofix, full QA and daemon restart before every commit
 
 ### The Non-Negotiable Rule
 
@@ -551,7 +555,7 @@ All non-trivial work must follow the planning workflow:
 5. **Update plan** as work progresses
 6. **Complete plan** with summary and results
 
-**See @CLAUDE/PlanWorkflow.md for complete workflow and templates**
+**See [CLAUDE/PlanWorkflow.md](CLAUDE/PlanWorkflow.md) for complete workflow and templates**
 
 **Current plans**: See `CLAUDE/Plan/README.md` for active/completed plans
 
@@ -671,7 +675,7 @@ Projects can define their own handlers in `.claude/project-handlers/`. These are
 
 ## Active Configuration
 
-See @.claude/HOOKS-DAEMON.md for the current active handler summary, generated from live config.
+See [.claude/HOOKS-DAEMON.md](.claude/HOOKS-DAEMON.md) for the current active handler summary, generated from live config.
 
 **Regenerate**: `./bin/hooks-daemon generate-docs`
 
@@ -729,7 +733,7 @@ daemon:
 - **CLAUDE/SELF_INSTALL.md** - Self-install mode details
 - **CLAUDE/LLM-INSTALL.md** - Installation guide
 - **CLAUDE/LLM-UPDATE.md** - Update guide
-- **@CLAUDE/PlanWorkflow.md** - Planning workflow and standards
+- **CLAUDE/PlanWorkflow.md** - Planning workflow and standards
 - **CLAUDE/Plan/** - Implementation plans directory
 - **CLAUDE/development/LESSONS.md** - Durable engineering & process lessons
 - **CLAUDE/development/DOC-CONVENTIONS.md** - Markdown conventions: the ```` ```claude-code ```` fence for Claude Code chat invocations, and what the doc-truth checker enforces
