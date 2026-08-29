@@ -289,6 +289,13 @@ class DaemonController:
         # silently and never fatal.
         self._sync_agent_assets(workspace_root, config_path)
 
+        # Sync shipped .claude/rules/ directory-role pointer files (Plan
+        # 00288 D5), mirroring the agent-asset sync above: deploys/refreshes
+        # on every restart so a layout/documentation config change gets a
+        # fresh paths: glob without waiting for a reinstall. Same best-effort
+        # contract — never fatal to daemon startup.
+        self._sync_directory_role_rules(workspace_root, config_path)
+
     def _sync_agent_assets(self, workspace_root: Path, config_path: Path) -> None:
         """Run the config-driven agent-asset lifecycle sync (Plan 00279)."""
         from claude_code_hooks_daemon.install.agent_assets import deploy_agents_if_enabled
@@ -307,6 +314,24 @@ class DaemonController:
             logger.error("Agent-asset sync failed (daemon continues): %s", exc)
         for message in messages:
             logger.info("Agent assets: %s", message)
+
+    def _sync_directory_role_rules(self, workspace_root: Path, config_path: Path) -> None:
+        """Run the config-driven directory-role-rules lifecycle sync (Plan 00288)."""
+        from claude_code_hooks_daemon.install.directory_role_rules import (
+            sync_directory_role_rules_if_enabled,
+        )
+
+        messages: list[str] = []
+        try:
+            messages = sync_directory_role_rules_if_enabled(workspace_root, config_path).messages
+        except (OSError, ValueError, TypeError) as exc:
+            # Same fail-open contract as _sync_agent_assets: an unwritable
+            # .claude/rules/ (OSError), an invalid config (ValueError), or a
+            # non-Path workspace_root in a mocked unit-test initialise
+            # (TypeError) must not stop the daemon serving hooks.
+            logger.error("Directory-role-rules sync failed (daemon continues): %s", exc)
+        for message in messages:
+            logger.info("Directory-role rules: %s", message)
 
     def _load_plugins(self, plugins_config: "PluginsConfig", workspace_root: Path) -> int:
         """Load and register plugin handlers.
