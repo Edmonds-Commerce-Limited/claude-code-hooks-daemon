@@ -298,7 +298,7 @@ Three non-negotiable rules (already honoured by `context_sidecar.py`, `thread_re
 2. **Reads are fail-silent and defensive.** A missing / malformed / partial / foreign-schema file yields **no segment**, never an exception — a broken status line is worse than a missing element. Wrap the `handle()` body so any unexpected error returns `HookResult(context=[])`.
 3. **In-process shared mutable state is lock-guarded.** State touched from more than one thread (e.g. a poster's rate-limit counter) uses a `threading.Lock` around the check-and-update. Per-instance caches (e.g. `supervisor_indicator`'s memoised pid) are per-process — never assume you are the sole writer of a shared *file*.
 
-The paired **writer-side** guidance lives at the top of `.claude/ccy/claude-supervise.py`; the package-level checklist is in `src/claude_code_hooks_daemon/handlers/status_line/CLAUDE.md`.
+The paired **writer-side** guidance lives at the top of `.claude/ccy/claude-supervise.py`; the handler package's `src/claude_code_hooks_daemon/handlers/status_line/CLAUDE.md` is an edit-guard pointer back to this section.
 
 ---
 
