@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.docs_qa.checks import (
     quote_source_stale,
     rules_file_orphan_shrink,
     rules_file_shape,
+    source_tree_markdown,
 )
 from claude_code_hooks_daemon.docs_qa.types import CheckSpec
 
@@ -32,4 +33,5 @@ def all_checks() -> tuple[CheckSpec, ...]:
         *at_import_census.CHECKS,
         *module_doc_budget.CHECKS,
         *duplicate_block.CHECKS,
+        *source_tree_markdown.CHECKS,
     )

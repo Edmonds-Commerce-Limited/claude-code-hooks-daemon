@@ -15,7 +15,7 @@ Policy comes from ``documentation`` via the registry's DOCUMENTATION-tag
 injection (``_documentation``) — zero per-handler options.
 """
 
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
@@ -32,6 +32,9 @@ from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command_for_docs,
 )
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 
 _SWEEP_MODE_ADVISE: Final[str] = "advise"
 _INDEX_DIR_NAME: Final[str] = "docs-qa"
@@ -59,6 +62,9 @@ class DocsQaSweepHandler(SessionStartHandlerBase):
         )
         # Injected by the registry for DOCUMENTATION-tagged handlers.
         self._documentation: DocumentationPolicy | None = None
+        # Injected onto every handler instance (Plan 00288); consulted here
+        # so the source-tree-markdown check has scope to work with.
+        self._project_layout: ProjectLayout | None = None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         if is_resume_session(hook_input):
@@ -76,7 +82,9 @@ class DocsQaSweepHandler(SessionStartHandlerBase):
         project_root = ProjectContext.project_root()
         index_path = ProjectContext.daemon_untracked_dir() / _INDEX_DIR_NAME / _INDEX_FILE_NAME
         corpus = build_and_save_corpus(project_root, policy, index_path)
-        context = sweep_context(project_root=project_root, policy=policy, corpus=corpus)
+        context = sweep_context(
+            project_root=project_root, policy=policy, corpus=corpus, layout=self._project_layout
+        )
 
         findings = run_stage(CheckStage.SWEEP, context)
         if not findings:
@@ -107,13 +115,18 @@ class DocsQaSweepHandler(SessionStartHandlerBase):
             "`module-doc-budget` (every sub-folder `CLAUDE.md` re-measured\n"
             "against its line budget — SWEEP has no before/after to judge\n"
             "worse-only against, so a block-eligible-at-EDIT finding is always\n"
-            "reported here as advisory), and `duplicate-block` (a structured\n"
+            "reported here as advisory), `duplicate-block` (a structured\n"
             "block — fenced code, table, or list run of 3+ items — whose\n"
             "normalised content matches one in a DIFFERENT document; always\n"
             "advisory, with no block path at all — see its own module\n"
             "docstring for why promotion needs a fresh hand-triaged whole-repo\n"
-            "run first). Findings are injected once as advisory context — the\n"
-            "sweep never blocks.\n"
+            "run first), and `source-tree-markdown` (Plan 00288: a `.md` file\n"
+            "under a declared source/test directory — via the `ProjectLayout`\n"
+            "facade — that is not a `CLAUDE.md`/`README.md`/generated/fixture\n"
+            "file; SWEEP-only by design, so it never double-reports with\n"
+            "`markdown_organization`'s write-time location gate, and stays\n"
+            "silent when no `layout:` source/test dirs are declared). Findings\n"
+            "are injected once as advisory context — the sweep never blocks.\n"
             "\n"
             "**The injected report is capped**: only the first\n"
             "`MAX_ADVISORY_FINDINGS_SHOWN` (8) findings are shown, with a\n"

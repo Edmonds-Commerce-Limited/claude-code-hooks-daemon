@@ -4306,6 +4306,7 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
         errors (missing or out-of-scope lint target).
     """
     from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.docs_qa.context import (
         edit_context,
         staged_context,
@@ -4389,7 +4390,10 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
         untracked_dir = _daemon_untracked_dir(project_root)
         index_path = untracked_dir / "docs-qa" / "index.json"
         corpus = build_and_save_corpus(project_root, policy, index_path)
-        context = sweep_context(project_root=project_root, policy=policy, corpus=corpus)
+        layout = ProjectLayout.from_config(config)
+        context = sweep_context(
+            project_root=project_root, policy=policy, corpus=corpus, layout=layout
+        )
         clean_scope = CLEAN_SCOPE_CORPUS
         findings = run_stage(CheckStage.SWEEP, context)
 
