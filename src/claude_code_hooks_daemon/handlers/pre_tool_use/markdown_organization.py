@@ -28,8 +28,27 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
 
 logger = logging.getLogger(__name__)
 
-# Known CLAUDE/Plan/ subdirectories that should allow nested plan folders
-_PLAN_SUBDIRECTORIES: Final[tuple[str, ...]] = ("completed", "cancelled", "archive")
+# Fallback directory-role truths, used only when no ProjectLayout facade was
+# injected (e.g. a handler constructed directly in a unit test rather than
+# via the registry). These mirror the Config defaults exactly
+# (DocumentationTreesConfig.agent/human, PlanWorkflowConfig.directory,
+# PlanWorkflowQaConfig.completed_dir) so behaviour is unchanged either way.
+_FALLBACK_AGENT_DOCS_DIR: Final[str] = "CLAUDE"
+_FALLBACK_HUMAN_DOCS_DIR: Final[str] = "docs"
+_FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
+_FALLBACK_PLAN_ARCHIVE_DIRS: Final[tuple[str, ...]] = ("Completed",)
+
+# Legacy plan-archive subdirectory names that predate plan_workflow.qa's
+# completed_dir/cancelled_dir config and have no config home of their own —
+# kept as permanent additive extras alongside the facade's archive dir names.
+# 'archive' has no config home at all. 'cancelled' must ALSO be listed here
+# even though plan_workflow.qa.cancelled_dir exists: that field defaults to
+# None (meaning "no separate dir; cancelled plans archive under
+# completed_dir"), so the facade's default plan_archive_dirs is ("Completed",)
+# only — yet the pre-facade hardcoded behaviour always recognised a literal
+# CLAUDE/Plan/Cancelled/ subdirectory regardless of config. Dropping this
+# extra would silently block that folder for every zero-config project.
+_LEGACY_PLAN_ARCHIVE_EXTRAS: Final[tuple[str, ...]] = ("archive", "cancelled")
 
 # Files in the plan directory root that are NOT plan files (excluded from interception)
 _PLAN_ROOT_EXCLUDED_FILES: Final[frozenset[str]] = frozenset({"readme", "claude"})
@@ -129,6 +148,34 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         # Set allow_untracked_claude_memory: true to opt out and restore the old behaviour.
         self._allow_untracked_claude_memory: bool = DEFAULT_ALLOW_UNTRACKED_CLAUDE_MEMORY
 
+    def _agent_docs_dir(self) -> str:
+        """Root of the agent-facing doc tree (facade, or the matching default)."""
+        layout = self._project_layout
+        return layout.agent_docs_dir if layout is not None else _FALLBACK_AGENT_DOCS_DIR
+
+    def _human_docs_dir(self) -> str:
+        """Root of the human-facing doc tree (facade, or the matching default)."""
+        layout = self._project_layout
+        return layout.human_docs_dir if layout is not None else _FALLBACK_HUMAN_DOCS_DIR
+
+    def _plan_dir(self) -> str:
+        """Configured plan directory (facade, or the matching default)."""
+        layout = self._project_layout
+        return layout.plan_dir if layout is not None else _FALLBACK_PLAN_DIR
+
+    def _plan_archive_dirs_lower(self) -> frozenset[str]:
+        """Lower-cased plan archive dir names, plus the legacy 'archive' extra.
+
+        'archive' predates plan_workflow.qa's completed_dir/cancelled_dir and
+        has no config home of its own, so it is preserved unconditionally
+        rather than only when the facade's archive dirs happen to omit it.
+        """
+        layout = self._project_layout
+        archive_dirs = layout.plan_archive_dirs if layout is not None else _FALLBACK_PLAN_ARCHIVE_DIRS
+        return frozenset(
+            {name.lower() for name in archive_dirs} | set(_LEGACY_PLAN_ARCHIVE_EXTRAS)
+        )
+
     def normalize_path(self, file_path: str) -> str:
         """Normalize file path to project-relative format.
 
@@ -150,7 +197,14 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
 
         # For absolute paths, find first occurrence of project markers
         # and strip everything before it
-        project_markers = ["CLAUDE/", "src/", ".claude/", "docs/", "eslint-rules/", "untracked/"]
+        project_markers = [
+            f"{self._agent_docs_dir()}/",
+            "src/",
+            ".claude/",
+            f"{self._human_docs_dir()}/",
+            "eslint-rules/",
+            "untracked/",
+        ]
         for marker in project_markers:
             if marker in normalized:
                 # Find the marker and strip everything before it
@@ -880,6 +934,48 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
                 return False  # Allowed - matches a custom pattern
         return True  # Blocked - no pattern matched
 
+    def _check_plan_folder_path(self, normalized: str, plan_dir_prefix: str) -> bool:
+        """Validate a path already known to be under the plan directory.
+
+        Args:
+            normalized: Project-relative normalized path
+            plan_dir_prefix: Lower-cased plan directory prefix with trailing
+                slash (e.g. ``"claude/plan/"``)
+
+        Returns:
+            True if the location is INVALID (should be blocked)
+        """
+        escaped_prefix = re.escape(plan_dir_prefix)
+
+        # Extract plan folder pattern: {plan_dir}/{folder}/PLAN.md
+        # OR: {plan_dir}/{subdirectory}/{folder}/PLAN.md
+        plan_match = re.match(rf"^{escaped_prefix}([^/]+)/", normalized, re.IGNORECASE)
+        if not plan_match:
+            return False  # File directly in the plan dir root — allow
+
+        folder_name = plan_match.group(1).lower()
+
+        # Check if the first segment is a known archive subdirectory
+        # (plan_workflow.qa.completed_dir/cancelled_dir plus the legacy
+        # 'archive' extra — see _plan_archive_dirs_lower)
+        if folder_name in self._plan_archive_dirs_lower():
+            # For subdirectories, validate the SECOND path segment
+            subdir_match = re.match(
+                rf"^{escaped_prefix}[^/]+/([^/]+)/", normalized, re.IGNORECASE
+            )
+            if subdir_match:
+                folder_name = subdir_match.group(1)
+            else:
+                return False  # Subdirectory without nested plan folder - allow
+
+        # Validate folder name has numeric prefix
+        number_match = re.match(r"^(\d+)-", folder_name)
+        if not number_match:
+            return True  # Block - missing plan number
+
+        # Validate plan number has at least 3 digits
+        return len(number_match.group(1)) < 3  # Block - insufficient digits
+
     def _check_builtin_paths(self, normalized: str) -> bool:
         """Check path against built-in allowed locations.
 
@@ -897,55 +993,35 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         if re.match(r"^src/claude_code_hooks_daemon/skills/.*\.md$", normalized, re.IGNORECASE):
             return False  # Allow
 
-        # 1. CLAUDE/ - Allow all files and subdirectories, BUT validate plan number format
-        if normalized.lower().startswith("claude/"):
-            # Special validation for CLAUDE/Plan/ directories
-            if normalized.lower().startswith("claude/plan/"):
-                # Extract plan folder pattern: CLAUDE/Plan/{folder}/PLAN.md
-                # OR: CLAUDE/Plan/{subdirectory}/{folder}/PLAN.md
-                plan_match = re.match(r"^claude/plan/([^/]+)/", normalized, re.IGNORECASE)
-                if plan_match:
-                    folder_name = plan_match.group(1).lower()
+        # 1. Plan directory (facade: plan_workflow.directory) - validate plan
+        # number folder format. Checked BEFORE the agent-docs-tree branch
+        # below: the plan directory is not guaranteed to be nested under it
+        # (a project may configure them independently), though by default
+        # ("CLAUDE/Plan" under "CLAUDE") it is.
+        plan_dir_prefix = self._plan_dir().strip("/").lower() + "/"
+        if normalized.lower().startswith(plan_dir_prefix):
+            return self._check_plan_folder_path(normalized, plan_dir_prefix)
 
-                    # Check if first segment is a known subdirectory (Completed, Cancelled, Archive)
-                    if folder_name in _PLAN_SUBDIRECTORIES:
-                        # For subdirectories, validate the SECOND path segment
-                        subdir_match = re.match(
-                            r"^claude/plan/[^/]+/([^/]+)/", normalized, re.IGNORECASE
-                        )
-                        if subdir_match:
-                            folder_name = subdir_match.group(1)
-                        else:
-                            # Subdirectory without nested plan folder - allow
-                            return False
-
-                    # Validate folder name has numeric prefix
-                    number_match = re.match(r"^(\d+)-", folder_name)
-                    if number_match:
-                        # Validate plan number has at least 3 digits
-                        plan_number = number_match.group(1)
-                        if len(plan_number) < 3:
-                            return True  # Block - insufficient digits
-                        # Plan number is valid (3+ digits) - allow
-                        return False
-                    else:
-                        # No numeric prefix - block
-                        return True  # Block - missing plan number
-            return False  # Allow all other CLAUDE/ files
-
-        # 5. docs/ - Human-facing documentation
-        if normalized.lower().startswith("docs/"):
+        # 2. Agent-facing doc tree (facade: documentation.trees.agent) -
+        # allow all files and subdirectories.
+        agent_dir_prefix = self._agent_docs_dir().strip("/").lower() + "/"
+        if normalized.lower().startswith(agent_dir_prefix):
             return False  # Allow
 
-        # 6. untracked/ - Temporary docs
+        # 3. Human-facing doc tree (facade: documentation.trees.human)
+        human_dir_prefix = self._human_docs_dir().strip("/").lower() + "/"
+        if normalized.lower().startswith(human_dir_prefix):
+            return False  # Allow
+
+        # 4. untracked/ - Temporary docs
         if normalized.lower().startswith("untracked/"):
             return False  # Allow
 
-        # 7. RELEASES/ - Release notes
+        # 5. RELEASES/ - Release notes
         if normalized.lower().startswith("releases/"):
             return False  # Allow
 
-        # 8. eslint-rules/ - ESLint rule docs
+        # 6. eslint-rules/ - ESLint rule docs
         if re.match(r"^eslint-rules/.*\.md$", normalized, re.IGNORECASE):
             return False  # Allow
 

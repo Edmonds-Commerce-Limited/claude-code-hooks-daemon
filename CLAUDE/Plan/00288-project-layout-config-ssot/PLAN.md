@@ -129,7 +129,7 @@ behaviour is byte-identical to today, pinned by tests.
 
 ### Phase 4: Consumption refactors (each with before/after pin tests)
 
-- [ ] ⬜ **Task 4.1**: C3 — `markdown_organization` reads the facade for doc
+- [x] ✅ **Task 4.1**: C3 — `markdown_organization` reads the facade for doc
   trees, plan dir, archive dirs.
 - [ ] ⬜ **Task 4.2**: C4 — plan-dir regex handlers (`goal_injection`,
   `recovery_cron_advisor`, `plan_workflow`, `plan_number_helper`) read the

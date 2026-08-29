@@ -301,6 +301,116 @@ class TestMarkdownOrganizationHandler:
         write_input["tool_input"]["file_path"] = "untracked/test.md"
         assert handler.matches(write_input) is False
 
+    # --- ProjectLayout facade (Plan 00288 Task 4.1) ---
+
+    def test_matches_blocks_default_docs_dir_name_when_human_tree_reconfigured(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Baseline for the next test: with a reconfigured human tree, the
+        OLD default name 'docs/' is no longer special-cased by the facade
+        (though it may still be picked up by a monorepo/dependency rule —
+        here it simply falls through to 'no rule matched')."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="documentation",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+        write_input["tool_input"]["file_path"] = "docs/guide.md"
+        assert handler.matches(write_input) is True  # Blocked - docs/ is no longer the human tree
+
+    def test_matches_allows_non_default_human_docs_dir_from_facade(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """A project configuring documentation.trees.human: documentation is
+        treated CONSISTENTLY by markdown_organization and docs_qa (DESIGN
+        §1a's live conflict): the reconfigured human tree name is honoured
+        via the ProjectLayout facade instead of the hardcoded 'docs/'."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="documentation",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+        write_input["tool_input"]["file_path"] = "documentation/guide.md"
+        assert handler.matches(write_input) is False  # Allowed via the facade's human_docs_dir
+
+    def test_matches_honours_non_default_agent_docs_dir_from_facade(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """A reconfigured agent tree name is honoured via the facade too."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="AGENT_DOCS",
+            human_docs_dir="docs",
+            plan_dir="AGENT_DOCS/Plan",
+            plan_archive_dirs=("Completed",),
+        )
+        write_input["tool_input"]["file_path"] = "AGENT_DOCS/architecture.md"
+        assert handler.matches(write_input) is False  # Allowed via the facade's agent_docs_dir
+
+    def test_matches_honours_non_default_plan_dir_from_facade(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """A plan directory NOT nested under the agent docs tree is still
+        validated (plan-number folder format) via the facade's plan_dir,
+        independently of agent_docs_dir."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="Plans",
+            plan_archive_dirs=("Completed",),
+        )
+        write_input["tool_input"]["file_path"] = "Plans/00001-my-plan/PLAN.md"
+        assert handler.matches(write_input) is False  # Allowed - valid plan number folder
+
+        write_input["tool_input"]["file_path"] = "Plans/bad-name/PLAN.md"
+        assert handler.matches(write_input) is True  # Blocked - missing plan number
+
+    def test_matches_honours_facade_plan_archive_dirs(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """A project-configured archive dir name (plan_workflow.qa.completed_dir)
+        is honoured, alongside the always-recognised legacy 'archive'/'cancelled'
+        extras (see _LEGACY_PLAN_ARCHIVE_EXTRAS)."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler._project_layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=(),
+            config_dirs=("config",),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Done",),
+        )
+        write_input["tool_input"]["file_path"] = "CLAUDE/Plan/Done/00051-thing/PLAN.md"
+        assert handler.matches(write_input) is False  # Allowed via the configured archive dir
+
     # --- vendor/ as implicit monorepo (PHP Composer) ---
 
     def test_matches_returns_false_for_vendor_docs_subdir(
