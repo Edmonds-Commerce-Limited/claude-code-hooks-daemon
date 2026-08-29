@@ -119,8 +119,11 @@ behaviour is byte-identical to today, pinned by tests.
 
 ### Phase 3: Canonical vendored/build core (measured)
 
-- [ ] ⬜ **Task 3.1**: Produce the per-consumer before/after diff table for
-  the proposed core set; accept or keep-as-domain-extra each delta.
+- [x] ✅ **Task 3.1**: Produce the per-consumer before/after diff table for
+  the proposed core set; accept or keep-as-domain-extra each delta. See
+  [MEASUREMENT-vendored-dirs.md](MEASUREMENT-vendored-dirs.md) — 11-name core,
+  21 ACCEPT deltas, 0 KEEP-LOCAL deltas, 13 retained domain extras; eslint
+  matcher fix is a Task 3.2 precondition.
 - [ ] ⬜ **Task 3.2**: Ship the core constant and swap the four whole-project
   consumers onto it (C2), with regression tests per consumer.
 
