@@ -1856,32 +1856,6 @@ After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-
 bin/hooks-daemon format-markdown <path>
 ```
 
-<!-- handler: validate-eslint-on-write -->
-
-## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
-
-A `Write`/`Edit` to a `.ts` or `.tsx` file is run through ESLint. Reported
-errors DENY the tool call.
-
-**A Bash-authored `.ts`/`.tsx` file is checked too** — one written with `>`,
-`>>`, `tee` or a `cat <<EOF` heredoc. A file the command merely RELOCATES
-(`cp`, `mv`, `install`, `dd`) is not: those bytes were already on disk. Opt out
-with `handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes: false`, which leaves `Write`/`Edit` checking untouched.
-
-**The write has ALREADY landed on disk.** The denial is a failure report, not
-a rollback — the file exists with your content in it. Fix the reported problems
-with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
-sibling tool calls that were cancelled alongside the denied one.
-
-**This is STRICTER than `lint_on_edit`, which covers the other languages.**
-That handler ALLOWs when its linter is missing or when the check times out;
-this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
-Do not carry "a missing linter never blocks" across to TypeScript.
-
-**Enforcement is gated on `llm:` scripts in `package.json`.** With none
-present this handler only advises — and suggests adding `llm:lint` — so silence
-is not evidence that a `.ts` file is clean.
-
 <!-- handler: command-hints -->
 
 ## command_hints — advisory reminders after specific commands
@@ -2042,6 +2016,32 @@ PostToolUse advisory (never blocks; ships disabled). When a `PLAN.md` Write/Edit
 **Concurrent plans are tracked in a goal ledger** (Plan 00276): the /goal slot holds ONE condition (last writer wins), so every emission is recorded in `goal-ledger.json` under the daemon untracked dir. Emitting a goal while another ledgered plan is still In Progress injects a displacement advisory naming that plan, and the Stop hook challenges unexplained stops on behalf of EVERY still-live ledgered plan. Entries retire when their plan reaches a terminal status or is archived.
 
 **Configure** via `handlers.post_tool_use.goal_injection.options`: `mode: additive` (default) merges your `lines` (`{id, text, enabled}`) onto the built-in set — a matching `id` overrides in place; `mode: replace` uses only your lines. The fixed header marker line is never overridable or removable. Placeholders: `{plan_number}`, `{plan_title}`, `{plan_path}` (closed set — an unknown token skips the line). Optional authorisation lines (`subagents-encouraged`, `qa-review-subagents`) ship disabled; their vetted text points at `standing_authorisations` rather than asserting fresh consent — enable them only as a deliberate repository-owner act.
+
+<!-- handler: validate-eslint-on-write -->
+
+## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
+
+A `Write`/`Edit` to a `.ts` or `.tsx` file is run through ESLint. Reported
+errors DENY the tool call.
+
+**A Bash-authored `.ts`/`.tsx` file is checked too** — one written with `>`,
+`>>`, `tee` or a `cat <<EOF` heredoc. A file the command merely RELOCATES
+(`cp`, `mv`, `install`, `dd`) is not: those bytes were already on disk. Opt out
+with `handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes: false`, which leaves `Write`/`Edit` checking untouched.
+
+**The write has ALREADY landed on disk.** The denial is a failure report, not
+a rollback — the file exists with your content in it. Fix the reported problems
+with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
+sibling tool calls that were cancelled alongside the denied one.
+
+**This is STRICTER than `lint_on_edit`, which covers the other languages.**
+That handler ALLOWs when its linter is missing or when the check times out;
+this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
+Do not carry "a missing linter never blocks" across to TypeScript.
+
+**Enforcement is gated on `llm:` scripts in `package.json`.** With none
+present this handler only advises — and suggests adding `llm:lint` — so silence
+is not evidence that a `.ts` file is clean.
 
 <!-- handler: git-upstream-checker -->
 
