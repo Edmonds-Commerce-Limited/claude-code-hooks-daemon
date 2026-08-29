@@ -50,6 +50,7 @@ from claude_code_hooks_daemon.constants.handlers import (
     HandlerIDMeta,
     HandlerKey,
 )
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.constants.paths import DaemonPath, ProjectPath
 from claude_code_hooks_daemon.constants.priority import Priority
@@ -65,6 +66,7 @@ from claude_code_hooks_daemon.constants.tools import ToolName, ToolNameLiteral
 from claude_code_hooks_daemon.constants.validation import ValidationLimit
 
 __all__ = [
+    "CORE_VENDORED_BUILD_DIR_NAMES",
     "RETIRED_HANDLERS",
     # Config key constants
     "ConfigKey",
