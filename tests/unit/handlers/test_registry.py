@@ -248,6 +248,42 @@ class TestRegisterAll:
         handler_names = [h.name for h in pre_handlers.handlers]
         assert "destructive-git" not in handler_names
 
+    def test_register_all_injects_project_layout_onto_every_handler(
+        self, registry: HandlerRegistry, router: EventRouter
+    ) -> None:
+        """register_all threads project_layout onto every handler instance
+        (Plan 00288), mirroring the project_exclude_paths precedent."""
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        layout = ProjectLayout(
+            source_dirs=("engine",),
+            test_dirs=("tests",),
+            config_dirs=("config",),
+            vendor_dirs=frozenset({"node_modules"}),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed", "Cancelled"),
+        )
+
+        registry.register_all(router, project_layout=layout)
+
+        all_handlers = router.get_all_handlers()
+        pre_handlers = all_handlers.get("PreToolUse", [])
+        assert pre_handlers
+        assert all(h._project_layout is layout for h in pre_handlers)
+
+    def test_register_all_defaults_project_layout_to_none(
+        self, registry: HandlerRegistry, router: EventRouter
+    ) -> None:
+        """No project_layout passed -- every handler's slot reads as None."""
+        registry.register_all(router)
+
+        all_handlers = router.get_all_handlers()
+        pre_handlers = all_handlers.get("PreToolUse", [])
+        assert pre_handlers
+        assert all(h._project_layout is None for h in pre_handlers)
+
     def test_register_all_with_priority_override(
         self, registry: HandlerRegistry, router: EventRouter
     ) -> None:

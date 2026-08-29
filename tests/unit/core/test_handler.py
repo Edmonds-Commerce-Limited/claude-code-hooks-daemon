@@ -243,6 +243,28 @@ class TestProjectLevelInjectionSlotsAreInitialised:
         assert handler._project_exclude_paths == ["**/vendored/**"]
         assert handler._project_languages == ["python"]
 
+    def test_project_layout_reads_as_none_before_injection(self) -> None:
+        """`_project_layout` (Plan 00288) follows the same contract."""
+        handler = ConcreteHandler(handler_id="bare")
+        assert handler._project_layout is None
+
+    def test_project_layout_can_be_overwritten_by_the_registry(self) -> None:
+        from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+
+        handler = ConcreteHandler(handler_id="bare")
+        layout = ProjectLayout(
+            source_dirs=(),
+            test_dirs=(),
+            config_dirs=(),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=(),
+        )
+        handler._project_layout = layout
+        assert handler._project_layout is layout
+
 
 class TestHandlerProperties:
     """Test Handler properties."""

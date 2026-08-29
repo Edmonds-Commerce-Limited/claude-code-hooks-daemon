@@ -40,6 +40,7 @@ if TYPE_CHECKING:
         ProjectHandlersConfig,
     )
     from claude_code_hooks_daemon.core.handler import Handler
+    from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerDiscovery
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,7 @@ class DaemonController:
         plan_workflow: "PlanWorkflowConfig | None" = None,
         documentation: "DocumentationConfig | None" = None,
         verdict_log: "VerdictLogConfig | None" = None,
+        project_layout: "ProjectLayout | None" = None,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -192,6 +194,8 @@ class DaemonController:
             verdict_log: Optional VerdictLogConfig (Plan 00209) for the
                 per-decision audit log. None uses VerdictLogConfig()'s
                 defaults (enabled).
+            project_layout: Optional ProjectLayout facade (Plan 00288) injected
+                onto every handler instance
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -234,6 +238,7 @@ class DaemonController:
             project_exclude_paths=project_exclude_paths,
             plan_workflow=plan_workflow,
             documentation=documentation,
+            project_layout=project_layout,
         )
 
         logger.info("Registered %d built-in handlers", count)

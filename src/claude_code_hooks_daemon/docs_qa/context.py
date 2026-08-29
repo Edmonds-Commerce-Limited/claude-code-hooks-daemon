@@ -17,12 +17,15 @@ Mirrors :mod:`claude_code_hooks_daemon.plan_qa.context`:
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.types import CheckContext
 from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _DELETE_STATUS: Final[str] = "D"
@@ -36,6 +39,7 @@ def edit_context(
     file_exists_before: bool,
     file_content_before: str | None = None,
     corpus: DocCorpus | None = None,
+    layout: "ProjectLayout | None" = None,
 ) -> CheckContext:
     """Build the EDIT-stage context: would-be file content, optionally with a corpus.
 
@@ -46,6 +50,9 @@ def edit_context(
     both read directly from disk. A caller wanting reverse lookups should
     pass a CHEAP corpus (:func:`docs_qa.corpus.load_or_cold_corpus`), never
     one built inside this call — see the cold-index rule.
+
+    ``layout`` (Plan 00288) is optional and made AVAILABLE on the context;
+    no check consults it yet.
     """
     return CheckContext(
         project_root=project_root,
@@ -55,6 +62,7 @@ def edit_context(
         file_exists_before=file_exists_before,
         file_content_before=file_content_before,
         corpus=corpus,
+        layout=layout,
     )
 
 
@@ -62,9 +70,10 @@ def sweep_context(
     project_root: Path,
     policy: DocumentationPolicy,
     corpus: DocCorpus,
+    layout: "ProjectLayout | None" = None,
 ) -> CheckContext:
     """Build the SWEEP-stage context from an already-built corpus."""
-    return CheckContext(project_root=project_root, policy=policy, corpus=corpus)
+    return CheckContext(project_root=project_root, policy=policy, corpus=corpus, layout=layout)
 
 
 def staged_context(
@@ -72,6 +81,7 @@ def staged_context(
     policy: DocumentationPolicy,
     commit_message: str | None = None,
     pathspecs: Sequence[str] | None = None,
+    layout: "ProjectLayout | None" = None,
 ) -> CheckContext:
     """Build the STAGED-stage context: the commit's staged ``.md`` content.
 
@@ -79,6 +89,8 @@ def staged_context(
     inspected ``git commit`` invocation names paths directly, the STAGED
     view is scoped to exactly those paths' working-tree-vs-HEAD content
     (what THIS commit will actually contain), not the whole index.
+    ``layout`` (Plan 00288) is optional and made AVAILABLE on the context;
+    no check consults it yet.
     """
     gitfacts = GitFacts(project_root, pathspecs=pathspecs)
     staged_documents: dict[str, str] = {}
@@ -105,5 +117,6 @@ def staged_context(
         policy=policy,
         staged_documents=staged_documents,
         gitfacts=gitfacts,
+        layout=layout,
         commit_message=commit_message,
     )

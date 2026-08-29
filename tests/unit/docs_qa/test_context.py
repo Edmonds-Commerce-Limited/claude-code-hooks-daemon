@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 from claude_code_hooks_daemon.docs_qa.context import edit_context, staged_context, sweep_context
 from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
@@ -176,3 +177,57 @@ class TestStagedContext:
                 project_root=root, policy=DocumentationPolicy(), pathspecs=["CLAUDE/A.md"]
             )
         assert context.staged_documents == {}
+
+
+def _layout() -> ProjectLayout:
+    return ProjectLayout(
+        source_dirs=(),
+        test_dirs=(),
+        config_dirs=(),
+        vendor_dirs=frozenset(),
+        agent_docs_dir="CLAUDE",
+        human_docs_dir="docs",
+        plan_dir="CLAUDE/Plan",
+        plan_archive_dirs=("Completed", "Cancelled"),
+    )
+
+
+class TestLayoutThreading:
+    """Plan 00288: `layout` is threaded through onto the context, unchanged."""
+
+    def test_edit_context_carries_layout(self, tmp_path: Path) -> None:
+        layout = _layout()
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE" / "Foo.md",
+            file_content="# Foo\n",
+            file_exists_before=False,
+            layout=layout,
+        )
+        assert context.layout is layout
+
+    def test_sweep_context_carries_layout(self, tmp_path: Path) -> None:
+        layout = _layout()
+        corpus = DocCorpus(project_root=tmp_path, documents={})
+        context = sweep_context(
+            project_root=tmp_path, policy=DocumentationPolicy(), corpus=corpus, layout=layout
+        )
+        assert context.layout is layout
+
+    def test_staged_context_carries_layout(self, tmp_path: Path) -> None:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        layout = _layout()
+        context = staged_context(project_root=root, policy=DocumentationPolicy(), layout=layout)
+        assert context.layout is layout
+
+    def test_layout_defaults_to_none(self, tmp_path: Path) -> None:
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE" / "Foo.md",
+            file_content="# Foo\n",
+            file_exists_before=False,
+        )
+        assert context.layout is None

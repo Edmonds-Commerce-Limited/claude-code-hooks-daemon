@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 from claude_code_hooks_daemon.plan_qa.context import (
     edit_context,
     staged_context,
@@ -331,4 +332,69 @@ class TestEditContext:
     def test_level_type_reexport_sanity(self) -> None:
         # Guard against accidental enum drift between surfaces.
         assert Level.BLOCK.value == "block"
+
+
+class TestLayoutThreading:
+    """Plan 00288: `layout` is threaded through onto the context, unchanged."""
+
+    def _layout(self) -> ProjectLayout:
+        return ProjectLayout(
+            source_dirs=(),
+            test_dirs=(),
+            config_dirs=(),
+            vendor_dirs=frozenset(),
+            agent_docs_dir="CLAUDE",
+            human_docs_dir="docs",
+            plan_dir="CLAUDE/Plan",
+            plan_archive_dirs=("Completed", "Cancelled"),
+        )
+
+    def test_sweep_context_carries_layout(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        layout = self._layout()
+        context = sweep_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=_Policy(),
+            today=date(2026, 7, 7),
+            layout=layout,
+        )
+        assert context.layout is layout
+
+    def test_staged_context_carries_layout(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        layout = self._layout()
+        context = staged_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=_Policy(),
+            layout=layout,
+        )
+        assert context.layout is layout
+
+    def test_edit_context_carries_layout(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        layout = self._layout()
+        context = edit_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=_Policy(),
+            file_path=root / "CLAUDE/Plan/00002-new/PLAN.md",
+            file_content="# Plan 00002: new\n",
+            file_exists_before=False,
+            layout=layout,
+        )
+        assert context.layout is layout
+
+    def test_layout_defaults_to_none(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        context = edit_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=_Policy(),
+            file_path=root / "CLAUDE/Plan/00002-new/PLAN.md",
+            file_content="# Plan 00002: new\n",
+            file_exists_before=False,
+        )
+        assert context.layout is None
         assert Level.ADVISE.value == "advise"

@@ -18,12 +18,15 @@ from collections.abc import Sequence
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 from claude_code_hooks_daemon.plan_qa.model import README_FILENAME, PlanTree
 from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, PlanDocSizeLimits
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 
 
 class JournalPolicy(Protocol):
@@ -165,8 +168,15 @@ def sweep_context(
     plan_dir_rel: str,
     policy: QaPolicy,
     today: date,
+    layout: "ProjectLayout | None" = None,
 ) -> CheckContext:
-    """Build the Stage 3 (SWEEP) context: full tree + readme + git facts."""
+    """Build the Stage 3 (SWEEP) context: full tree + readme + git facts.
+
+    ``layout`` (Plan 00288) is threaded straight through when the calling
+    surface has a :class:`~claude_code_hooks_daemon.core.project_layout.ProjectLayout`
+    available -- no check consults it yet (consumption refactors are later
+    plan tasks), this only makes it AVAILABLE on the context.
+    """
     tree, readme = _tree_and_readme(project_root, plan_dir_rel, policy)
     return _with_journal(
         CheckContext(
@@ -182,6 +192,7 @@ def sweep_context(
             readme=readme,
             gitfacts=GitFacts(project_root),
             today=today,
+            layout=layout,
         ),
         policy,
     )
@@ -193,6 +204,7 @@ def staged_context(
     policy: QaPolicy,
     commit_message: str | None = None,
     pathspecs: Sequence[str] | None = None,
+    layout: "ProjectLayout | None" = None,
 ) -> CheckContext:
     """Build the Stage 2 (COMMIT) context: staged git facts + tree views.
 
@@ -204,6 +216,8 @@ def staged_context(
             commit will actually contain — the working tree for those
             paths, not just the index. ``None`` (a bare commit) preserves
             the original index-based behaviour.
+        layout: Optional ProjectLayout facade (Plan 00288), made AVAILABLE
+            on the context; no check consults it yet.
     """
     tree, readme = _tree_and_readme(project_root, plan_dir_rel, policy)
     return _with_journal(
@@ -220,6 +234,7 @@ def staged_context(
             readme=readme,
             gitfacts=GitFacts(project_root, pathspecs=pathspecs),
             commit_message=commit_message,
+            layout=layout,
         ),
         policy,
     )
@@ -234,6 +249,7 @@ def edit_context(
     file_exists_before: bool,
     file_content_before: str | None = None,
     today: date | None = None,
+    layout: "ProjectLayout | None" = None,
 ) -> CheckContext:
     """Build the Stage 1 (EDIT) context: would-be file content only.
 
@@ -241,6 +257,8 @@ def edit_context(
     surface already read; the append-only journal check consults it so it
     stays a pure function. ``None`` for a creation. ``today`` is supplied by
     the (impure) handler so the day-file-naming check stays deterministic.
+    ``layout`` (Plan 00288) is optional and made AVAILABLE on the context;
+    no check consults it yet.
     """
     return _with_journal(
         CheckContext(
@@ -257,6 +275,7 @@ def edit_context(
             file_exists_before=file_exists_before,
             file_content_before=file_content_before,
             today=today,
+            layout=layout,
         ),
         policy,
     )

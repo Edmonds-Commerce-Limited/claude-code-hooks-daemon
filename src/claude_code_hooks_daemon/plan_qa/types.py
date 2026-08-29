@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
+    from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
     from claude_code_hooks_daemon.plan_qa.model import PlanTree
     from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex
@@ -157,6 +158,11 @@ class CheckContext:
     tree: "PlanTree | None" = None
     readme: "ReadmeIndex | None" = None
     today: date | None = None
+
+    # The ProjectLayout facade (Plan 00288), when the calling surface has one
+    # available. AVAILABLE only at this phase -- no check consults it yet;
+    # consumption refactors are later plan tasks (C1-C8).
+    layout: "ProjectLayout | None" = None
 
     @property
     def plan_dir(self) -> Path:

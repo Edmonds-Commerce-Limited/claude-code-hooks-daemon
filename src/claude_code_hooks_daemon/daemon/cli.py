@@ -2481,6 +2481,7 @@ def _build_initialised_controller(config: Config, project_path: Path) -> "Daemon
     Returns:
         The initialised DaemonController.
     """
+    from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.daemon.controller import DaemonController
 
     controller = DaemonController()
@@ -2496,6 +2497,7 @@ def _build_initialised_controller(config: Config, project_path: Path) -> "Daemon
         plan_workflow=config.plan_workflow,
         documentation=config.documentation,
         verdict_log=config.daemon.verdict_log,
+        project_layout=ProjectLayout.from_config(config),
     )
     return controller
 

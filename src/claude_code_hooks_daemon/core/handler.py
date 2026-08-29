@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
     from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
     from claude_code_hooks_daemon.core.hook_result import HookResult
+    from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.core.rule import Rule
 
 
@@ -47,6 +48,7 @@ class Handler(ABC):
     __slots__ = (
         "_project_exclude_paths",
         "_project_languages",
+        "_project_layout",
         "config_key",
         "depends_on",
         "handler_id",
@@ -59,6 +61,7 @@ class Handler(ABC):
 
     _project_languages: list[str] | None
     _project_exclude_paths: list[str] | None
+    _project_layout: ProjectLayout | None
 
     def __init__(
         self,
@@ -120,6 +123,7 @@ class Handler(ABC):
         # unnecessary; the registry still overwrites both (Plan 00251).
         self._project_languages = None
         self._project_exclude_paths = None
+        self._project_layout = None
 
     def __repr__(self) -> str:
         """Return string representation."""

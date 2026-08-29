@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.core.handler import Handler
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import DocumentationConfig, PlanWorkflowConfig
+    from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.core.router import EventRouter
 
 logger = logging.getLogger(__name__)
@@ -221,6 +222,7 @@ class HandlerRegistry:
         project_exclude_paths: list[str] | None = None,
         plan_workflow: "PlanWorkflowConfig | None" = None,
         documentation: "DocumentationConfig | None" = None,
+        project_layout: "ProjectLayout | None" = None,
     ) -> int:
         """Register all discovered handlers with the router.
 
@@ -235,6 +237,8 @@ class HandlerRegistry:
             project_languages: Project-level language filter from daemon.languages config
             plan_workflow: Optional PlanWorkflowConfig for plan-related handlers
             documentation: Optional DocumentationConfig for documentation-related handlers
+            project_layout: Optional ProjectLayout facade (Plan 00288) injected
+                onto every handler instance, mirroring project_exclude_paths
 
         Returns:
             Number of handlers registered
@@ -384,6 +388,11 @@ class HandlerRegistry:
                             # Inject project-level path-exclusion default (Plan 00150) so the
                             # content blockers inherit daemon.exclude_paths on top of their own.
                             instance._project_exclude_paths = project_exclude_paths
+
+                            # Inject the ProjectLayout facade (Plan 00288) so handlers can
+                            # read directory-role truths from one API instead of
+                            # hardcoding or re-declaring them.
+                            instance._project_layout = project_layout
 
                             # Inject plan_workflow config for planning-tagged handlers
                             # This overrides any handler-level options (top-level is source of truth)
