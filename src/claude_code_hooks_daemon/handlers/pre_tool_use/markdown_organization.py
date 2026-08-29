@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 _PLAN_SUBDIRECTORIES: Final[tuple[str, ...]] = ("completed", "cancelled", "archive")
 
 # Files in the plan directory root that are NOT plan files (excluded from interception)
-_PLAN_ROOT_EXCLUDED_FILES: Final[frozenset[str]] = frozenset({"readme"})
+_PLAN_ROOT_EXCLUDED_FILES: Final[frozenset[str]] = frozenset({"readme", "claude"})
 
 # Basename prefixes marking a daemon-owned, non-plan file at the plan root:
 # hidden snapshots ('.plan-template-default.md') and template files

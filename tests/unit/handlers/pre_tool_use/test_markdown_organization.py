@@ -666,6 +666,19 @@ class TestPlanningModeIntegration:
         assert handler.is_planning_mode_write("CLAUDE/Plan/README.md") is False
         assert handler.is_planning_mode_write("/workspace/CLAUDE/Plan/readme.md") is False
 
+    def test_does_not_detect_claude_md_in_plan_directory(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """The plan directory's own CLAUDE.md is never a plan-mode save.
+
+        Regression: editing CLAUDE/Plan/CLAUDE.md (the directory's lifecycle
+        doc) scaffolded a spurious numbered plan folder and consumed a plan
+        number from the git counter.
+        """
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        assert handler.is_planning_mode_write("CLAUDE/Plan/CLAUDE.md") is False
+        assert handler.is_planning_mode_write("/workspace/CLAUDE/Plan/claude.md") is False
+
     def test_does_not_detect_daemon_owned_dot_and_underscore_files(
         self, handler: MarkdownOrganizationHandler
     ) -> None:
