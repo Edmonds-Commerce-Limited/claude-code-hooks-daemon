@@ -1,6 +1,6 @@
 # Plan 00288: Project-layout config SSoT
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-29
 **Owner**: joseph
 **Priority**: Medium
@@ -81,11 +81,31 @@ behaviour is byte-identical to today, pinned by tests.
 
 ### Phase 1: Design approval gate (BLOCKING — no implementation before it)
 
-- [ ] ⬜ **Task 1.1**: Human reviews DESIGN-layout-ssot.md and rules on D1
-  (block name `layout:` vs `project:`), D2 (facade vs full key migration),
-  D3 (CLAUDE.md presence check wanted?), D4 (README.md allowed under source
-  dirs?). Record the rulings in this plan's Technical Decisions and the
-  JOURNAL.
+- [x] ✅ **Task 1.1**: Rulings recorded (see Technical Decisions). The owner's
+  landing mandate ("coordinate this work, land both plans") delegated the gate
+  to the coordinator, which adopted every DESIGN recommendation as the
+  conservative default; each ruling is reversible pre-release if the owner
+  overrules.
+
+## Technical Decisions
+
+- **D1 — block name `layout:`** (adopted as recommended): named for exactly
+  what it holds, matching `documentation:`/`plan_workflow:` style.
+- **D2 — Option A, facade** (adopted as recommended): existing keys stay
+  canonical; `ProjectLayout` unifies ACCESS, no alias/migration machinery.
+- **D3 — enforce shape (i), defer presence (ii)** (adopted as recommended):
+  markdown that IS present in source/test dirs must follow the SSoT pattern; a
+  "major dirs must HAVE a CLAUDE.md" presence check stays a recorded non-goal.
+- **D4 — `README.md` allowed in place under source dirs** (adopted as
+  recommended): conventional package entry point; flagging it would be noise.
+- **D5 — shipped directory-role rules** (owner mandate, post-design): the
+  release ships `.claude/rules/` pointer files, paths-glob scoped per directory
+  role (source, tests, human docs, agent docs, skills, sub-agents, plans), each
+  ≤15 lines per R7a, pointing at ONE canonical directory-roles document in the
+  agent tree. Every directory gets a clear role and a clear rule; the rule
+  bodies are SSoT docs, the `.claude/rules` files only route. Deployed by the
+  installer alongside the existing shipped assets; upgrade path via the Plan
+  00279 md5-ledger mechanism so client edits are never clobbered.
 
 ### Phase 2: Schema + facade (TDD)
 
@@ -130,6 +150,19 @@ behaviour is byte-identical to today, pinned by tests.
 - [ ] ⬜ **Task 5.2**: Handler guidance + `docs-qa` CLI coverage +
   HANDLER_REFERENCE entry; confirm no double-report with
   `markdown_organization` via an integration test.
+
+### Phase 5b: Shipped directory-role rules (D5)
+
+- [ ] ⬜ **Task 5b.1**: Canonical directory-roles doc in the agent tree
+  (each directory role: what belongs there, what does not, where the depth
+  lives) — the single SSoT body the rules point at.
+- [ ] ⬜ **Task 5b.2**: Shipped `.claude/rules/` pointer files (R7a-compliant,
+  paths-glob scoped: `src/**/*.md`, `tests/**/*.md`, human tree, agent tree,
+  `.claude/skills/**`, `.claude/agents/**`, plan dir) deployed by the
+  installer with md5-ledger upgrade semantics; globs derived from the
+  project's configured layout at deploy time, not hardcoded.
+- [ ] ⬜ **Task 5b.3**: Dogfood the rules in this repo; verify deploy +
+  upgrade in the dummy client fixture.
 
 ### Phase 6: Docs, manifests, dogfood
 
