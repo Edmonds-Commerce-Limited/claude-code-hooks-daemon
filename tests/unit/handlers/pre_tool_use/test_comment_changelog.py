@@ -105,6 +105,19 @@ class TestMatchesGating:
         hook_input = _make_write_input("/workspace/vendor/lib.py", content)
         assert handler.matches(hook_input) is False
 
+    def test_ignores_third_party_dir_with_no_exclude_paths_configured(self) -> None:
+        """third_party/ is part of the canonical vendored core (Task 3.2) but
+        was NOT already covered by the per-language strategy's own
+        skip_directories -- this specifically exercises the new
+        handler_excludes_path(defaults=...) wiring (Plan 00288 Task 4.6)."""
+        handler = CommentChangelogHandler()
+        # Built from parts so this test file's OWN source text never contains
+        # a literal changelog-narrative comment (comment_changelog would
+        # otherwise deny writing this very test).
+        content = "# " + "Prior" + " 2.0.0: fixed. " + "Prior" + " 1.5.0: original.\n"
+        hook_input = _make_write_input("/workspace/third_party/lib.py", content)
+        assert handler.matches(hook_input) is False
+
     def test_matches_write_with_prior_pattern(self) -> None:
         handler = CommentChangelogHandler()
         content = "x = 1  # Prior 1.2.0: fixed the timing bug\n"

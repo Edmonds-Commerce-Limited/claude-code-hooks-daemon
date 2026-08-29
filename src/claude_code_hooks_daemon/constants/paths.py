@@ -41,47 +41,21 @@ class DaemonPath:
 
 
 class ProjectPath:
-    """Project-relative path constants.
+    """Client-project path constants that are genuinely daemon-wide.
 
-    These define standard project structure paths.
+    This class used to also carry a much larger set of "client project
+    layout" members (doc dirs, plan dirs, test dirs, source dirs — a
+    project's OWN structure, as opposed to the daemon's). Per-project
+    layout truths now have a proper home: the ``layout:`` config block and
+    the ``ProjectLayout`` runtime facade (``core/project_layout.py``,
+    Plan 00288). A repo-wide measurement
+    (``CLAUDE/Plan/00288-project-layout-config-ssot/MEASUREMENT-vendored-dirs.md``)
+    found every one of those removed members had ZERO live callers — dead
+    code, not a migration in progress — so they were deleted rather than
+    re-scoped. The three members that remain are genuinely daemon-wide
+    (worktree root conventions and the vendored install path), not
+    per-project client layout, so they stay here.
     """
-
-    # Documentation directories
-    CLAUDE_DOC_DIR = "CLAUDE"
-    PLAN_DIR = "CLAUDE/Plan"
-    PLAN_COMPLETED_DIR = "CLAUDE/Plan/Completed"
-    RELEASES_DIR = "RELEASES"
-    UPGRADES_DIR = "UPGRADES"
-
-    # Documentation files
-    PLAN_WORKFLOW_DOC = "CLAUDE/PlanWorkflow.md"
-    ARCHITECTURE_DOC = "CLAUDE/ARCHITECTURE.md"
-    HANDLER_DEVELOPMENT_DOC = "CLAUDE/HANDLER_DEVELOPMENT.md"
-    DEBUGGING_HOOKS_DOC = "CLAUDE/DEBUGGING_HOOKS.md"
-    SELF_INSTALL_DOC = "CLAUDE/SELF_INSTALL.md"
-    CLAUDE_MD = "CLAUDE.md"
-    README_MD = "README.md"
-    CONTRIBUTING_MD = "CONTRIBUTING.md"
-
-    # Plan files
-    PLAN_FILE = "PLAN.md"
-    PLAN_README = "CLAUDE/Plan/README.md"
-
-    # Script directories
-    SCRIPTS_DIR = "scripts"
-    QA_SCRIPTS_DIR = "scripts/qa"
-
-    # Test directories
-    TESTS_DIR = "tests"
-    UNIT_TESTS_DIR = "tests/unit"
-    INTEGRATION_TESTS_DIR = "tests/integration"
-
-    # Source directories
-    SRC_DIR = "src"
-    HANDLERS_DIR = "src/claude_code_hooks_daemon/handlers"
-    CONFIG_DIR = "src/claude_code_hooks_daemon/config"
-    CORE_DIR = "src/claude_code_hooks_daemon/core"
-    DAEMON_DIR = "src/claude_code_hooks_daemon/daemon"
 
     # Worktree directories
     WORKTREES_DIR = "untracked/worktrees"  # manually managed worktrees
@@ -92,8 +66,3 @@ class ProjectPath:
     # root rather than from a vendored copy under here (CLAUDE.md "Self-Install
     # Mode"), so exclusions keyed on this constant are inert in this repo.
     HOOKS_DAEMON_INSTALL_DIR = f"{DaemonPath.CLAUDE_DIR}/{DaemonPath.HOOKS_DAEMON_DIR}"
-
-    # Config files
-    PYPROJECT_TOML = "pyproject.toml"
-    SETUP_PY = "setup.py"
-    REQUIREMENTS_TXT = "requirements.txt"

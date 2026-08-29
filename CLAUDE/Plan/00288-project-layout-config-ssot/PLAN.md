@@ -139,7 +139,7 @@ behaviour is byte-identical to today, pinned by tests.
 - [x] ✅ **Task 4.4**: C6 — `tdd_enforcement` consults declared
   source/test dirs before per-language inference; `test_path_map` unchanged.
 - [x] ✅ **Task 4.5**: C7 — `british_english` docs dirs from the facade.
-- [ ] ⬜ **Task 4.6**: C8 drive-bys — worktree regex derived from its
+- [x] ✅ **Task 4.6**: C8 drive-bys — worktree regex derived from its
   constant; dead `ProjectPath` client-layout members removed or re-scoped;
   stale "eight callers" count de-numbered; phantom default-exclude guidance
   in `comment_size`/`comment_changelog`/`security_antipattern` fixed

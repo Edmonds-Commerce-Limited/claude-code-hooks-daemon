@@ -203,12 +203,14 @@ def handler_excludes_path(
     """Whether a handler should skip ``file_path`` given all three exclude sources.
 
     This is the handler-facing decision, defined ONCE. It was previously copied
-    into six handlers as a private ``_is_excluded`` — byte-identical in five, with
-    ``error_hiding_blocker`` differing only by prepending its own defaults and
-    dropping the short-circuit. Two further handlers are owed the same behaviour
-    (Plan 00150's Non-Goals deferred ``tdd_enforcement`` and ``lint_on_edit``),
-    which is what turned "add a seventh copy" into "extract the one that exists"
-    (Plan 00251).
+    into several handlers as a private ``_is_excluded`` — byte-identical in most,
+    with ``error_hiding_blocker`` differing only by prepending its own defaults
+    and dropping the short-circuit — which is what turned "paste another copy"
+    into "extract the one that exists" (Plan 00251). The exact number of
+    current callers is deliberately NOT stated here: it drifts every time a
+    handler adopts this function without this docstring being updated in the
+    same change (Plan 00288 DESIGN §1c). Grep for callers of
+    ``handler_excludes_path`` for the current count.
 
     The three sources are ADDITIVE and none overrides another: built-in
     ``defaults``, the project-wide ``daemon.exclude_paths``, and the handler's own

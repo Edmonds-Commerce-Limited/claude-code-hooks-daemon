@@ -2,10 +2,12 @@
 
 Handlers use it to let a client project exempt paths (test fixtures of
 deliberately-broken code, code that legitimately suppresses errors) via
-gitignore-style globs. The set of handlers is deliberately NOT enumerated here:
-this docstring said "three" while six consumed it, and Plan 00251 makes it
-eight. `handler_excludes_path` is the single entry point they share, so grep for
-its callers rather than trusting a number in prose.
+gitignore-style globs. The set of handlers is deliberately NOT enumerated
+here: an earlier revision of this docstring stated a specific count, and it
+went stale the next time a handler adopted `handler_excludes_path` without
+this file being updated in the same change (an R5 violation in miniature —
+Plan 00288 DESIGN §1c). `handler_excludes_path` is the single entry point
+they share, so grep for its callers rather than trusting a number in prose.
 """
 
 from __future__ import annotations
@@ -203,12 +205,12 @@ class TestResolveProjectRoot:
 class TestHandlerExcludesPath:
     """One definition of the handler-facing exclusion decision (Plan 00251).
 
-    `_is_excluded` was copy-pasted into six handlers — byte-identical in five of
-    them, with `error_hiding_blocker` differing only by prepending its own
-    defaults and dropping a short-circuit. Two more handlers are owed the same
-    behaviour (Plan 00150's Non-Goals deferred `tdd_enforcement` and
-    `lint_on_edit`), so this exists to be called eight times rather than pasted
-    eight times.
+    `_is_excluded` was copy-pasted into several handlers — byte-identical in
+    most of them, with `error_hiding_blocker` differing only by prepending
+    its own defaults and dropping a short-circuit. `handler_excludes_path`
+    exists to be CALLED by every consumer rather than pasted into each one;
+    grep its callers for the current count rather than trusting a number
+    here (see this file's module docstring).
     """
 
     def test_a_handler_pattern_excludes(self) -> None:

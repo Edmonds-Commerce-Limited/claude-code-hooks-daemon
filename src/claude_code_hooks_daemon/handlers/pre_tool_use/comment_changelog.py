@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_path
@@ -47,6 +48,22 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 _MODE_BLOCK: Final[str] = "block"
 _MODE_WARN: Final[str] = "warn"
 _DEFAULT_MAX_HISTORY_ENTRIES: Final[int] = 1
+
+# Built-in default excludes so the "vendor/build/fixture dirs are skipped by
+# default" guidance in get_claude_md() below is actually true (Plan 00288
+# Task 4.6/C8 — it previously named these defaults without passing any to
+# handler_excludes_path). The vendored/build half derives from the canonical
+# core (Task 3.2); the fixture-semantics half is a different category and
+# mirrors error_hiding_blocker's local convention.
+_FIXTURE_EXCLUDE_GLOBS: Final[tuple[str, ...]] = (
+    "**/tests/fixtures/**",
+    "**/tests/assets/**",
+    "**/__fixtures__/**",
+)
+_DEFAULT_EXCLUDE_GLOBS: Final[tuple[str, ...]] = (
+    tuple(f"**/{name}/**" for name in sorted(CORE_VENDORED_BUILD_DIR_NAMES))
+    + _FIXTURE_EXCLUDE_GLOBS
+)
 
 _FIELD_CONTENT: Final[str] = "content"
 _FIELD_NEW_STRING: Final[str] = "new_string"
@@ -216,6 +233,7 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
             file_path,
             handler_patterns=self._exclude_paths,
             project_patterns=self._project_exclude_paths,
+            defaults=_DEFAULT_EXCLUDE_GLOBS,
         )
 
     def _find_violations(

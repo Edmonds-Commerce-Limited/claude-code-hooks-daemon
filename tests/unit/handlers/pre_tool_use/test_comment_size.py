@@ -284,6 +284,36 @@ class TestGuardClauses:
         hook_input = _make_write_input("/workspace/src/generated/mod.py", content)
         assert handler.matches(hook_input) is False
 
+    def test_matches_false_for_vendor_dir_with_no_exclude_paths_configured(
+        self, handler: CommentSizeHandler
+    ) -> None:
+        """vendor/build dirs are skipped BY DEFAULT (Plan 00288 Task 4.6),
+        matching the get_claude_md() guidance -- no exclude_paths option
+        needs to be set for this."""
+        content = "x = 1  # " + ("y" * 401) + "\n"
+        hook_input = _make_write_input("/workspace/vendor/acme/lib.py", content)
+        assert handler.matches(hook_input) is False
+
+    def test_matches_false_for_test_fixture_dir_with_no_exclude_paths_configured(
+        self, handler: CommentSizeHandler
+    ) -> None:
+        """Test fixture dirs are skipped BY DEFAULT (Plan 00288 Task 4.6)."""
+        content = "x = 1  # " + ("y" * 401) + "\n"
+        hook_input = _make_write_input("/workspace/tests/fixtures/broken.py", content)
+        assert handler.matches(hook_input) is False
+
+    def test_matches_false_for_third_party_dir_with_no_exclude_paths_configured(
+        self, handler: CommentSizeHandler
+    ) -> None:
+        """third_party/ is part of the canonical vendored core (Task 3.2) but
+        was NOT already covered by the per-language strategy's own
+        skip_directories -- this specifically exercises the new
+        handler_excludes_path(defaults=...) wiring, not the pre-existing
+        strategy-level skip."""
+        content = "x = 1  # " + ("y" * 401) + "\n"
+        hook_input = _make_write_input("/workspace/third_party/lib/mod.py", content)
+        assert handler.matches(hook_input) is False
+
     def test_apply_language_filter_is_idempotent(self, handler: CommentSizeHandler) -> None:
         handler._languages = ["Python"]
         handler._apply_language_filter()

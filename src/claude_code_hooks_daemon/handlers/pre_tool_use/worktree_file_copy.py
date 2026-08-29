@@ -13,8 +13,10 @@ from claude_code_hooks_daemon.core.utils import get_bash_command
 # Both worktree root prefixes — untracked/ is manually managed, .claude/ is Claude Code managed
 _WORKTREE_PREFIXES = (ProjectPath.WORKTREES_DIR, ProjectPath.CLAUDE_WORKTREES_DIR)
 
-# Regex alternation matching either worktree root (used in pattern strings below)
-_WORKTREE_RE = r"(?:untracked/worktrees|\.claude/worktrees)"
+# Regex alternation matching either worktree root (used in pattern strings below).
+# Derived from _WORKTREE_PREFIXES (Plan 00288 Task 4.6/C8) rather than a second,
+# independently hardcoded literal that could drift from it.
+_WORKTREE_RE = "(?:" + "|".join(re.escape(prefix) for prefix in _WORKTREE_PREFIXES) + ")"
 
 
 class WorktreeFileCopyHandler(PreToolUseHandlerBase):
