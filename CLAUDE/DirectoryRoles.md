@@ -14,8 +14,9 @@ from the project's configured layout: `documentation.trees.agent/human` for
 the two doc trees, `plan_workflow.directory` (plus
 `plan_workflow.qa.completed_dir/cancelled_dir`) for the plan directory, and
 the top-level `layout:` block (`source_dirs`, `test_dirs`, `config_dirs`,
-`vendor_dirs`) for the rest. Handler options and defaults:
-[docs/guides/HANDLER_REFERENCE.md](../docs/guides/HANDLER_REFERENCE.md).
+`vendor_dirs`) for the rest — schema, defaults and the handlers that consume
+it:
+[docs/guides/HANDLER_REFERENCE.md § Directory Layout](../docs/guides/HANDLER_REFERENCE.md#directory-layout-layout).
 
 ## The rule in one sentence
 

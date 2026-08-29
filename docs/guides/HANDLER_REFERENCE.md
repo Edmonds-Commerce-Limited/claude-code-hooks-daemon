@@ -46,7 +46,7 @@ A file is exempt if it matches the union of the project-wide list, the handler's
 
 **Built-in defaults** (always skipped, no config needed):
 
-- `error_hiding_blocker`: `vendor/`, `node_modules/`, `tests/fixtures/`, `tests/assets/`, `__fixtures__/` (added in v3.35.0 for parity with its siblings).
+- `error_hiding_blocker`: the canonical vendored/build-directory core (`node_modules`, `vendor`, `third_party`, `dist`, `build`, `.build`, `target`, `.next`, `.venv`, `venv`, `coverage`) plus `tests/fixtures/`, `tests/assets/`, `__fixtures__/` (added in v3.35.0 for parity with its siblings; core swap in Plan 00288).
 - `security_antipattern`: `vendor/`, `node_modules/`, `tests/fixtures/`, `tests/assets/`, docs, and rule-definition dirs (via `should_skip()`).
 - `qa_suppression`: per-language vendor / build / `node_modules` directories.
 
@@ -63,6 +63,49 @@ handlers:
         exclude_paths:
           - "generated/**"
 ```
+
+---
+
+## Directory Layout (`layout:`)
+
+A cross-cutting top-level block (Plan 00288) for project directory-role
+truths that had no config home before it: which directories are source,
+which are test, which hold config, and which extras extend the built-in
+vendored/build set. Consumed via `ProjectLayout`, a runtime facade
+(`core/project_layout.py`) that composes this block WITH the truths that
+already had a home — `documentation.trees.agent`/`.human` (see
+`british_english` above) and `plan_workflow.directory` (see the plan-QA
+handlers) — into one API, so no handler re-declares a directory-name
+truth independently.
+
+Handlers currently reading the facade: `markdown_organization`,
+`goal_injection`, `recovery_cron_advisor`, `plan_workflow`,
+`plan_number_helper`, `worktree_file_copy`, `same_commit_plan_doc`,
+`path_existence`, `tdd_enforcement`, `british_english`, and the shipped
+`.claude/rules/` directory-role pointer files (deployed by
+`install/directory_role_rules.py`; see `CLAUDE/DirectoryRoles.md` for
+what belongs in each role).
+
+Every list defaults to empty — **byte-identical behaviour to a project
+with no `layout:` block at all**. `source_dirs`/`test_dirs`/`config_dirs`
+extend (or, under `mode: replace`, stand alone in place of) the built-in
+per-language/cross-language conventions; `vendor_dirs` extends the
+canonical vendored/build-directory core (11 names: `node_modules`,
+`vendor`, `third_party`, `dist`, `build`, `.build`, `target`, `.next`,
+`.venv`, `venv`, `coverage`).
+
+```yaml
+layout:
+  source_dirs: ["backend/src"] # extra source dirs (no cross-language built-in exists yet)
+  test_dirs: ["e2e"] # extends the built-in tests/, test/, __tests__/, spec/
+  config_dirs: [] # extends the built-in "config"
+  vendor_dirs: ["proto-gen"] # extends the canonical vendored/build core
+  mode: additive # additive (default): extend built-ins; replace: a SET list stands alone
+```
+
+**`mode: replace` only replaces a list the project actually SET** — an
+unset list still falls back to its built-in even under `replace` (the
+same scoping `secret_file_guard` already uses for its own `mode`).
 
 ---
 
@@ -1526,7 +1569,7 @@ handlers:
 | --------------- | ----------- | ------- | ------------------------------------------------------------------------------------------------------ |
 | `exclude_paths` | `list[str]` | `[]`    | Gitignore-style globs exempting files from scanning. Unioned with `daemon.exclude_paths` and defaults. |
 
-**Built-in exclusions:** `vendor/`, `node_modules/`, `tests/fixtures/`, `tests/assets/`, `__fixtures__/`. Use `exclude_paths` for fixtures of deliberately-broken code instead of disabling the handler.
+**Built-in exclusions:** the canonical vendored/build-directory core (`node_modules`, `vendor`, `third_party`, `dist`, `build`, `.build`, `target`, `.next`, `.venv`, `venv`, `coverage`) plus `tests/fixtures/`, `tests/assets/`, `__fixtures__/`. Use `exclude_paths` for fixtures of deliberately-broken code instead of disabling the handler.
 
 **Config example:**
 
@@ -2463,7 +2506,7 @@ handlers:
 | **Type**       | Advisory                   |
 | **Event**      | PostToolUse                |
 
-**Description:** Runs ESLint validation on TypeScript/TSX files after they are written. Automatically checks for lint errors after file writes and reports issues. Skips files in `node_modules`, `dist`, `.build`, `coverage`, and `test-results` directories.
+**Description:** Runs ESLint validation on TypeScript/TSX files after they are written. Automatically checks for lint errors after file writes and reports issues. Skips files under the canonical vendored/build-directory core (`node_modules`, `vendor`, `third_party`, `dist`, `build`, `.build`, `target`, `.next`, `.venv`, `venv`, `coverage`) plus `test-results`, matched by slash-bounded path containment (Plan 00288) so a first-party path like `src/builder/x.ts` is never wrongly skipped.
 
 **Checked extensions:** `.ts`, `.tsx`
 
