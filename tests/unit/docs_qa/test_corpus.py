@@ -17,7 +17,11 @@ from claude_code_hooks_daemon.docs_qa.corpus import (
     load_or_cold_corpus,
     refresh_own_record,
 )
-from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy, DocumentationTreesPolicy
+from claude_code_hooks_daemon.docs_qa.policy import (
+    DocumentationPolicy,
+    DocumentationQaPolicy,
+    DocumentationTreesPolicy,
+)
 
 
 def _scaffold(root: Path) -> None:
@@ -135,6 +139,49 @@ class TestIsInScope:
         like this one."""
         assert not is_in_scope(tmp_path / "src" / "CLAUDE.md", tmp_path, DocumentationPolicy())
         assert is_module_doc_path("src/CLAUDE.md", "CLAUDE")
+
+    def test_scope_excluded_glob_is_excluded(self, tmp_path: Path) -> None:
+        """A ``scope_exclude_globs`` match is invisible to the corpus
+        entirely (Plan 00289) -- unlike ``grandfather_allowlist``, which
+        still indexes the file and merely caps its severity."""
+        (tmp_path / "CLAUDE" / "UPGRADES" / "v2" / "v2.0-to-v2.1").mkdir(parents=True)
+        policy = DocumentationPolicy(
+            qa=DocumentationQaPolicy(scope_exclude_globs=("CLAUDE/UPGRADES/v[0-9]*/**",))
+        )
+        assert not is_in_scope(
+            tmp_path / "CLAUDE" / "UPGRADES" / "v2" / "v2.0-to-v2.1" / "README.md",
+            tmp_path,
+            policy,
+        )
+
+    def test_scope_exclude_globs_matches_by_basename_too(self, tmp_path: Path) -> None:
+        """A slash-less pattern (e.g. ``PLAN-v[0-9]*.md``) targets the
+        FILENAME's own shape, not any directory segment sharing the same
+        substring -- so it must be checked against the basename, not just
+        the full path (a naive full-path-only fnmatch would never match a
+        slash-less pattern against a nested file at all)."""
+        (tmp_path / "CLAUDE" / "Plan" / "00100-venv-ssot").mkdir(parents=True)
+        policy = DocumentationPolicy(
+            qa=DocumentationQaPolicy(scope_exclude_globs=("PLAN-v[0-9]*.md",))
+        )
+        assert not is_in_scope(
+            tmp_path / "CLAUDE" / "Plan" / "00100-venv-ssot" / "PLAN-v1.md", tmp_path, policy
+        )
+        # A live PLAN.md in the same directory is unaffected.
+        assert is_in_scope(
+            tmp_path / "CLAUDE" / "Plan" / "00100-venv-ssot" / "PLAN.md", tmp_path, policy
+        )
+
+    def test_scope_exclude_globs_does_not_exclude_sibling_live_dirs(self, tmp_path: Path) -> None:
+        """A frozen ``v2/**``/``v3/**`` exclusion must not swallow the LIVE
+        siblings under the same ``CLAUDE/UPGRADES/`` parent (README,
+        ``upgrade-template/``, ``UNRELEASED/``, ``truth-changes/``,
+        ``config-changes/``)."""
+        (tmp_path / "CLAUDE" / "UPGRADES").mkdir(parents=True)
+        policy = DocumentationPolicy(
+            qa=DocumentationQaPolicy(scope_exclude_globs=("CLAUDE/UPGRADES/v[0-9]*/**",))
+        )
+        assert is_in_scope(tmp_path / "CLAUDE" / "UPGRADES" / "README.md", tmp_path, policy)
 
     def test_respects_configured_tree_names(self, tmp_path: Path) -> None:
         (tmp_path / "AgentDocs").mkdir()

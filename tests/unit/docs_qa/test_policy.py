@@ -30,6 +30,7 @@ class TestDefaults:
         assert policy.qa.generated_docs == ()
         assert policy.qa.registered_module_docs == ()
         assert policy.qa.resident_at_imports == DEFAULT_RESIDENT_AT_IMPORTS
+        assert policy.qa.scope_exclude_globs == ()
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class _FakeQaConfig:
     )
     registered_module_docs: list[str] = field(default_factory=lambda: ["src/foo/CLAUDE.md"])
     resident_at_imports: list[str] = field(default_factory=lambda: ["CLAUDE.md", "Extra.md"])
+    scope_exclude_globs: list[str] = field(default_factory=lambda: ["CLAUDE/UPGRADES/v[0-9]*/**"])
 
 
 @dataclass(frozen=True)
@@ -80,6 +82,7 @@ class TestPolicyFromConfig:
         assert policy.qa.generated_docs[0].generator == "make docs"
         assert policy.qa.registered_module_docs == ("src/foo/CLAUDE.md",)
         assert policy.qa.resident_at_imports == ("CLAUDE.md", "Extra.md")
+        assert policy.qa.scope_exclude_globs == ("CLAUDE/UPGRADES/v[0-9]*/**",)
 
     def test_uses_the_real_pydantic_config_shape(self) -> None:
         """The real config model must satisfy the structural Protocol."""

@@ -30,6 +30,7 @@ class TestDefaults:
         assert qa.grandfather_allowlist == []
         assert qa.registered_module_docs == []
         assert qa.resident_at_imports == ["CLAUDE.md"]
+        assert qa.scope_exclude_globs == []
 
     def test_generated_docs_pre_seeded_with_hooks_daemon_md(self) -> None:
         entries = DocumentationConfig().qa.generated_docs
@@ -58,6 +59,7 @@ class TestConfigCarriesADocumentationBlock:
                     "generated_docs": [{"glob": "docs/GEN.md", "generator": "make docs"}],
                     "registered_module_docs": ["src/foo/CLAUDE.md"],
                     "resident_at_imports": ["CLAUDE.md", "AgentDocs/Extra.md"],
+                    "scope_exclude_globs": ["CLAUDE/UPGRADES/v[0-9]*/**"],
                 },
             }
         }
@@ -73,6 +75,7 @@ class TestConfigCarriesADocumentationBlock:
             "CLAUDE.md",
             "AgentDocs/Extra.md",
         ]
+        assert config.documentation.qa.scope_exclude_globs == ["CLAUDE/UPGRADES/v[0-9]*/**"]
 
 
 class TestStrictValidation:

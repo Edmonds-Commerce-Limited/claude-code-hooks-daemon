@@ -46,6 +46,7 @@ class DocumentationQaPolicy:
     generated_docs: tuple[GeneratedDocEntry, ...] = ()
     registered_module_docs: tuple[str, ...] = ()
     resident_at_imports: tuple[str, ...] = DEFAULT_RESIDENT_AT_IMPORTS
+    scope_exclude_globs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,9 @@ class QaConfigProtocol(Protocol):
     @property
     def resident_at_imports(self) -> Sequence[str]: ...
 
+    @property
+    def scope_exclude_globs(self) -> Sequence[str]: ...
+
 
 class DocumentationConfigProtocol(Protocol):
     """Structural view of ``DocumentationConfig``."""
@@ -136,5 +140,6 @@ def policy_from_config(config: DocumentationConfigProtocol) -> DocumentationPoli
             ),
             registered_module_docs=tuple(qa.registered_module_docs),
             resident_at_imports=tuple(qa.resident_at_imports),
+            scope_exclude_globs=tuple(qa.scope_exclude_globs),
         ),
     )

@@ -25,6 +25,7 @@ corpus when no cache exists yet (Cold/stale-index rule, DESIGN §2.1).
 import json
 import re
 from dataclasses import dataclass, field
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Final
 
@@ -161,11 +162,32 @@ def is_vendored_daemon_install_path(rel_parts: tuple[str, ...]) -> bool:
     )
 
 
+def _matches_scope_exclude(rel_path: str, patterns: tuple[str, ...]) -> bool:
+    """Whether ``rel_path`` matches a configured ``scope_exclude_globs``
+    entry (Plan 00289) -- FROZEN historical records (a versioned upgrade
+    guide, a self-labelled archived draft) that must be invisible to every
+    corpus-driven check, not merely capped at ADVISE the way
+    ``grandfather_allowlist`` caps a still-indexed file.
+
+    Checked against both the full ``rel_path`` (for a directory-scoped
+    pattern like ``CLAUDE/UPGRADES/v[0-9]*/**``) AND the bare basename (for
+    a filename-SHAPE pattern like ``PLAN-v[0-9]*.md``, which targets the
+    file's own naming convention regardless of which directory it lives
+    in -- a plain fnmatch of a slash-less pattern against the full path
+    would never match a nested file at all, since fnmatch requires the
+    whole string to match and a slash-less pattern has no wildcard to
+    absorb the leading directory segments).
+    """
+    basename = rel_path.rsplit("/", 1)[-1]
+    return any(fnmatch(rel_path, pattern) or fnmatch(basename, pattern) for pattern in patterns)
+
+
 def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> bool:
     """Corpus SCOPE exclusions (DESIGN §2.1): changelog, releases, plan
     archives, (Task 3.3 T2) transient agent-worktree checkouts, (Task 3.6) a
-    vendored daemon install, and (F3, Plan 00287) common vendored-dependency
-    or build-output directories inside the configured trees."""
+    vendored daemon install, (F3, Plan 00287) common vendored-dependency or
+    build-output directories inside the configured trees, and (Plan 00289)
+    a project-configured ``scope_exclude_globs`` entry."""
     if len(rel_parts) == 1 and rel_parts[0] == _CHANGELOG_FILENAME:
         return True
     if rel_parts and rel_parts[0] == _RELEASES_DIR_NAME:
@@ -181,6 +203,8 @@ def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> boo
     if rel_parts[: len(plan_completed)] == plan_completed:
         return True
     if rel_parts[: len(plan_cancelled)] == plan_cancelled:
+        return True
+    if _matches_scope_exclude("/".join(rel_parts), policy.qa.scope_exclude_globs):
         return True
     return False
 

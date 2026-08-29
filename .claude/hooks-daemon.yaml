@@ -898,11 +898,26 @@ documentation:
     commit_gate_mode: warn
     sweep_mode: advise
     check_modes: {}
-    # Versioned upgrade guides are historical records (R8/R9); the Task 3.1a
-    # sweep found real dead links there (files renamed/moved after the guide
-    # was written). Advisory-only forever, not a promise to fix them.
-    grandfather_allowlist:
-      - "CLAUDE/UPGRADES/**"
+    grandfather_allowlist: []
+    # Plan 00289: frozen historical records are excluded from the corpus
+    # ENTIRELY, not merely capped at advisory severity the way
+    # grandfather_allowlist caps a still-indexed file. A versioned upgrade
+    # guide (CLAUDE/UPGRADES/v2/**, v3/**) is a record of what was true when
+    # it was written (PlanWorkflow.md's "truth is enforced on LIVE plans,
+    # never on the historical record") -- its dead relative links are
+    # permanent noise, not debt. The LIVE siblings under CLAUDE/UPGRADES/
+    # (README.md, upgrade-template/, UNRELEASED/, truth-changes/,
+    # config-changes/) are deliberately NOT matched by the v[0-9]* glob, so
+    # they stay normally enforced. The two filename-shape patterns are the
+    # same principle applied to individual files rather than a directory: a
+    # superseded plan draft kept alongside its live PLAN.md
+    # (PLAN-v1.md), and any file that self-labels itself an archived record
+    # in its own name (*archived*.md, e.g.
+    # CLAUDE/AcceptanceTests/PLAYBOOK-v1-manual-archived.md).
+    scope_exclude_globs:
+      - "CLAUDE/UPGRADES/v[0-9]*/**"
+      - "PLAN-v[0-9]*.md"
+      - "*archived*.md"
     generated_docs:
       - glob: ".claude/HOOKS-DAEMON.md"
         generator: "bin/hooks-daemon generate-docs"

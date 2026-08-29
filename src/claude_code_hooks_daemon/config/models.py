@@ -835,6 +835,14 @@ class DocumentationQaConfig(BaseModel):
             a canonical home rather than a routing table (R7d)
         resident_at_imports: The ``@``-import allowlist (R6) — files permitted
             to be resident-imported outside the deliberate root set
+        scope_exclude_globs: File globs excluded from the doc corpus
+            entirely (Plan 00289) — for FROZEN historical records (a
+            versioned upgrade guide, a self-labelled archived draft) whose
+            links and structured blocks are never re-verified against
+            current truth, unlike ``grandfather_allowlist`` (which still
+            indexes the file and merely caps its severity at ADVISE). A
+            scope-excluded file is invisible to ``pointer-resolves``,
+            ``duplicate-block`` and every other corpus-driven check.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -865,6 +873,10 @@ class DocumentationQaConfig(BaseModel):
     resident_at_imports: list[str] = Field(
         default_factory=lambda: ["CLAUDE.md"],
         description="The @-import allowlist (R6)",
+    )
+    scope_exclude_globs: list[str] = Field(
+        default_factory=list,
+        description="File globs excluded from the doc corpus entirely (frozen historical records)",
     )
 
 
