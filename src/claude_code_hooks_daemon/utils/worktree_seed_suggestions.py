@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.worktree_seed import DEFAULT_SEED_MODE, SeedEntry
 from claude_code_hooks_daemon.utils.git_repo import run_git
@@ -53,25 +54,26 @@ _LOCAL_CONFIG_PATTERNS: Final[tuple[str, ...]] = (
     ".secrets",
 )
 
-# Directory names whose ignored contents are never local configuration —
-# dependencies, build output and tool caches. Matched against any path segment.
-_EXCLUDED_DIRECTORY_NAMES: Final[frozenset[str]] = frozenset(
+# Seed's own domain extras (Plan 00288 Task 3.2, measurement doc §3): tool
+# caches encountered while scanning gitignored paths, VCS internals, and this
+# daemon's own scratch convention -- none of these is "vendored/build", but
+# a seed candidate found inside one is always incidental.
+_SEED_EXTRA_EXCLUDED_DIRECTORY_NAMES: Final[frozenset[str]] = frozenset(
     {
         ".git",
         ".mypy_cache",
         ".pytest_cache",
         ".ruff_cache",
         ".tox",
-        ".venv",
         "__pycache__",
-        "build",
-        "dist",
-        "node_modules",
-        "target",
         "untracked",
-        "vendor",
-        "venv",
     }
+)
+
+# Directory names whose ignored contents are never local configuration —
+# dependencies, build output and tool caches. Matched against any path segment.
+_EXCLUDED_DIRECTORY_NAMES: Final[frozenset[str]] = (
+    CORE_VENDORED_BUILD_DIR_NAMES | _SEED_EXTRA_EXCLUDED_DIRECTORY_NAMES
 )
 
 # A worktree seeds paths at or near the top of the tree; something buried deep

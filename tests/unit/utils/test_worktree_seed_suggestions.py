@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.core.worktree_seed import (
     SeedEntry,
 )
 from claude_code_hooks_daemon.utils.worktree_seed_suggestions import (
+    _EXCLUDED_DIRECTORY_NAMES,
     diff_seed_config,
     suggest_seed_entries,
 )
@@ -102,6 +103,34 @@ class TestSuggestSeedEntries:
             (directory / ".env.local").write_text("nested\n", encoding="utf-8")
 
         assert suggest_seed_entries(repo) == []
+
+    def test_excluded_directory_names_has_exact_membership(self) -> None:
+        """Plan 00288 Task 3.2: core plus seed's own tool-cache/VCS/daemon
+        extras (measurement doc §3)."""
+        assert _EXCLUDED_DIRECTORY_NAMES == frozenset(
+            {
+                # Core (11 names).
+                "node_modules",
+                "vendor",
+                "third_party",
+                "dist",
+                "build",
+                ".build",
+                "target",
+                ".next",
+                ".venv",
+                "venv",
+                "coverage",
+                # Seed's own domain extras.
+                ".git",
+                ".mypy_cache",
+                ".pytest_cache",
+                ".ruff_cache",
+                ".tox",
+                "__pycache__",
+                "untracked",
+            }
+        )
 
     def test_a_prefixed_env_file_is_suggested(self, repo: Path) -> None:
         """A dotfile is not the only shape a local env file takes. This repo's
