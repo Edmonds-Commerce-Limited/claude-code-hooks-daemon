@@ -19,7 +19,8 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess used only for the trusted, hardcoded rustc build invocation (no shell, no user input)
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -213,8 +214,20 @@ def _parse_sha256sums(text: str, asset_name: str) -> str | None:
 
 
 def _default_fetch(url: str) -> bytes:
-    """The real network fetch — never exercised in unit tests (always mocked)."""
-    with urllib.request.urlopen(url, timeout=_FETCH_TIMEOUT_SECONDS) as response:
+    """The real network fetch — never exercised in unit tests (always mocked).
+
+    Only ``https://`` URLs are ever opened: every caller builds ``url`` from
+    :data:`_GITHUB_RELEASE_BASE`, which is a hardcoded ``https://`` literal,
+    so this is a defence-in-depth scheme check rather than a live code path
+    -- it removes the bandit B310 finding (urlopen permitting ``file:``/
+    custom schemes) by construction instead of asserting the risk away.
+    """
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https":
+        raise ValueError(f"refusing to fetch non-https URL: {url!r}")
+    with urllib.request.urlopen(
+        url, timeout=_FETCH_TIMEOUT_SECONDS
+    ) as response:  # nosec B310 - scheme validated to https above
         return bytes(response.read())
 
 

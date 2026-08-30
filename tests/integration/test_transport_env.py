@@ -15,6 +15,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+from claude_code_hooks_daemon.constants import Timeout
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TRANSPORT_ENV_SH = _REPO_ROOT / "scripts" / "install" / "transport_env.sh"
 
@@ -30,7 +32,12 @@ source "{_TRANSPORT_ENV_SH}"
 append_transport_probe_env_lines "{project_root}" "{env_file}" "{venv_python}"
 """
     bash = shutil.which("bash") or "/bin/bash"
-    return subprocess.run([bash, "-c", script], capture_output=True, text=True, timeout=30)
+    return subprocess.run(
+        [bash, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=Timeout.REQUEST_DEFAULT,
+    )
 
 
 def _write_config(project_root: Path, transport_lines: str) -> None:

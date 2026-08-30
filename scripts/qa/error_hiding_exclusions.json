@@ -57,6 +57,12 @@
       "reason": "Plan 00272: shell-token symlink probe. A candidate token is arbitrary text sliced out of a Bash command, so Path(token).is_symlink() can raise OSError for shapes that are simply not paths (over-long prose fragments). The except body assigns is_symlink = False — the documented answer for a non-path token, not a hidden error: the raw token is still matched against the protected globs, so nothing is concealed and the guard can only get STRICTER by continuing. Raising would let a crafted token crash the deny path — failing open."
     },
     {
+      "file": "utils/secret_file_matching.py",
+      "function": "_expand_glob_token",
+      "rule": "silent-continue",
+      "reason": "Plan 00272 filesystem-truth glob expansion: tries a candidate token against MULTIPLE search bases (project root, then process cwd) in a loop, because a relative token could plausibly resolve against either. base.glob(pattern_str) raises OSError for an unreadable base directory and ValueError for a malformed glob pattern (e.g. an unbalanced bracket sliced out of arbitrary Bash-command text) — the standard batch-iteration pattern (matching scripts/qa/check_skill_references.py::scan_directory and check_sensitive_content.py::_compile_public_patterns in this same file): one unusable base/pattern combination must not abort trying the remaining ones. Every base is still tried, so this can only make the guard MISS an expansion (fail toward the stricter heuristic stem-overlap match in find_protected_mention, never toward silently allowing something through), and no exception here ever conceals a genuine glob match."
+    },
+    {
       "file": "config/models.py",
       "function": "load_or_default",
       "rule": "silent-pass",
@@ -453,6 +459,12 @@
       "reason": "Process management during installation: nested try/except/pass for OS signal operations (kill, SIGTERM, SIGKILL). Inner exceptions (ProcessLookupError) indicate the process already died — a success condition. Outer try handles unexpected signal failures gracefully."
     },
     {
+      "file": "install/transport_probe.py",
+      "function": "_verify_digest",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00290 Phase 5: this function's own documented contract (docstring: 'True/False if the manifest exists and names this binary; None if no manifest available -- nothing to verify against, not a failure') already establishes None as 'cannot verify, not a failure'. An OSError reading the relay binary's own bytes to hash it (removed/permission-changed between the earlier is_file() check and this read -- a TOCTOU the caller cannot prevent) is exactly the same 'cannot verify' outcome as a missing manifest, so it maps to the identical documented None. The caller (probe_transport) surfaces relay_digest_verified=None as 'unknown', never as a false pass -- the deploy-time advisory table (render_table) prints 'unknown (no manifest)' rather than silently reporting a digest match that never happened."
+    },
+    {
       "file": "plugins/loader.py",
       "function": "load_handler",
       "rule": "return-none-on-error",
@@ -764,7 +776,7 @@
     {
       "file": "scripts/upgrade_version.sh",
       "lines": [
-        351
+        376
       ],
       "rule": "shell-|| true",
       "reason": "Plan 00200 Task 5.4: `run_pre_install_checks ... \"false\" || true`. The function's own documented contract (fail_on_error=false): 'returns non-zero but doesn't exit', and it already prints any warnings found. The trailing `|| true` exists only to stop `set -e` treating that documented non-fatal return as script-terminating -- the function's own visible warnings are the diagnostic, not this line."
@@ -772,7 +784,7 @@
     {
       "file": "scripts/upgrade_version.sh",
       "lines": [
-        705
+        730
       ],
       "rule": "shell-&>/dev/null",
       "reason": "Plan 00200 Task 5.4: `if ! git ... rev-parse \"$TARGET_VERSION\" &>/dev/null; then fail_fast \"Version $TARGET_VERSION not found...\"` -- exit code explicitly checked, specific error printed on failure."

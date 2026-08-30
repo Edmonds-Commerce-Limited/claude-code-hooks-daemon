@@ -42,11 +42,32 @@ def get_installed_hook_scripts() -> dict[str, str]:
 def generate_fresh_hook_scripts() -> dict[str, str]:
     """Generate fresh hook scripts using installer logic.
 
+    Plan 00290: the installer's ``create_forwarder_script`` only ever writes
+    the plain (relay-disabled) template — the relay/nc rungs are applied as a
+    SEPARATE post-deploy rewrite step (``forwarder_generator.regenerate_deployed_hooks``,
+    invoked by ``scripts/install/hooks_deploy.sh`` after the plain copy). A
+    project whose OWN ``daemon.transport`` config has opted into either rung
+    (this repo dogfoods ``relay_enabled: true``) legitimately deploys forwarders
+    that differ from the bare template by exactly that generated transform, so
+    the comparison must apply the SAME transform this project's real deploy
+    step would apply, using this project's actual resolved config — not the
+    installer defaults.
+
     Returns:
         Dict mapping hook filename to expected content
     """
     # Import installer functions
     from install import create_forwarder_script, create_status_line_script
+
+    from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir
+    from claude_code_hooks_daemon.install.forwarder_generator import (
+        generate_forwarder_content,
+        load_transport_config,
+    )
+
+    project_root = get_project_root()
+    transport = load_transport_config(project_root)
+    untracked_dir = get_event_socket_dir(project_root).parent
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_hooks_dir = Path(tmpdir) / "hooks"
@@ -65,14 +86,24 @@ def generate_fresh_hook_scripts() -> dict[str, str]:
 
         scripts = {}
 
-        # Generate forwarder scripts
+        # Generate forwarder scripts, then apply this project's real transport
+        # transform on top — exactly what the actual deploy pipeline does.
         for hook_name, event_name in daemon_hooks.items():
             create_forwarder_script(tmp_hooks_dir, hook_name, event_name)
-            scripts[hook_name] = (tmp_hooks_dir / hook_name).read_text()
+            plain_content = (tmp_hooks_dir / hook_name).read_text()
+            scripts[hook_name] = generate_forwarder_content(
+                plain_content, hook_name, transport, untracked_dir
+            )
 
-        # Generate status-line script
+        # Generate status-line script. regenerate_deployed_hooks transforms
+        # EVERY file under .claude/hooks/ (it iterates the directory, not the
+        # wired-event map), so status-line gets the same transport transform
+        # as every other forwarder.
         create_status_line_script(tmp_hooks_dir)
-        scripts["status-line"] = (tmp_hooks_dir / "status-line").read_text()
+        plain_status_line = (tmp_hooks_dir / "status-line").read_text()
+        scripts["status-line"] = generate_forwarder_content(
+            plain_status_line, "status-line", transport, untracked_dir
+        )
 
         return scripts
 

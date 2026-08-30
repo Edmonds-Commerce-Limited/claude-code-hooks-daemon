@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.install.forwarder_generator import (
     build_relay_guard_block,
     generate_forwarder_content,
@@ -267,7 +268,10 @@ def test_generated_forwarder_is_syntactically_valid_bash() -> None:
     )
 
     result = subprocess.run(
-        ["bash", "-n", "-c", content], capture_output=True, text=True, timeout=10
+        ["bash", "-n", "-c", content],
+        capture_output=True,
+        text=True,
+        timeout=Timeout.VALIDATION_CHECK,
     )
     assert result.returncode == 0, result.stderr
 
@@ -341,6 +345,9 @@ def test_every_real_hook_generates_valid_bash_when_enabled(hook_file: str) -> No
     content = generate_forwarder_content(source, hook_file, transport, Path("/proj/untracked"))
 
     result = subprocess.run(
-        ["bash", "-n", "-c", content], capture_output=True, text=True, timeout=10
+        ["bash", "-n", "-c", content],
+        capture_output=True,
+        text=True,
+        timeout=Timeout.VALIDATION_CHECK,
     )
     assert result.returncode == 0, f"{hook_file}: {result.stderr}"

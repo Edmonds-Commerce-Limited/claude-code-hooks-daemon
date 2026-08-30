@@ -820,7 +820,12 @@ def cmd_status(args: argparse.Namespace) -> int:
     # today's status output byte-for-byte.
     try:
         transport_config = Config.find_and_load(project_path).daemon.transport
-    except (FileNotFoundError, PydanticValidationError):
+    except (FileNotFoundError, PydanticValidationError) as exc:
+        # Config is legitimately absent/invalid for a bare `status` probe (no
+        # project config yet, or a config mid-edit) -- fall back to "transport
+        # section unknown" rather than crashing status reporting, but log so
+        # the failure is never indistinguishable from "no config file at all".
+        logger.debug("cmd_status: could not resolve daemon.transport config: %s", exc)
         transport_config = None
     if transport_config is not None and (
         transport_config.relay_enabled or transport_config.nc_enabled

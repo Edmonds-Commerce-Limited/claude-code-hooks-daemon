@@ -138,6 +138,20 @@ def _run_wrapper(
     env["HOOKS_DAEMON_ROOT_DIR"] = str(_REPO_ROOT)
     env["CLAUDE_HOOKS_SOCKET_PATH"] = str(sock_path)
     env["CLAUDE_HOOKS_PID_PATH"] = str(pid_path)
+    # Test-isolation fix (mirrors Plan 00290 Phase 6 dogfood finding, see
+    # test_relay_guard_fail_open.py): this repo's own real per-event sockets
+    # legitimately exist on disk when the relay rung is dogfooded, and the
+    # relay guard `exec`s straight past send_request_stdin whenever it finds
+    # a live socket at the baked default path -- silently answering this
+    # test's synthetic payload with the REAL daemon instead of the fake
+    # `_RecordingSocketServer`. Redirecting HOOKS_DAEMON_EVENTS_DIR to an
+    # empty directory makes the guard's `-S "$_rl_sock"` check fail so every
+    # wrapper falls through to the legacy send_request_stdin/forward_stop_event
+    # path this test actually exercises, regardless of this project's own
+    # transport config.
+    isolated_events_dir = pid_path.parent / "no-relay-sockets"
+    isolated_events_dir.mkdir(exist_ok=True)
+    env["HOOKS_DAEMON_EVENTS_DIR"] = str(isolated_events_dir)
     if strip_jq:
         shim_dir = _make_broken_jq_dir(pid_path.parent)
         env["PATH"] = shim_dir + os.pathsep + env.get("PATH", "")

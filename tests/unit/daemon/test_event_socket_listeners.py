@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.config.models import DaemonConfig, TransportConfig
-from claude_code_hooks_daemon.constants import Priority
+from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.events import wired_event_metas
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
@@ -29,7 +29,9 @@ class _EchoHandler(Handler):
     """Records the last dispatched hook_input and always allows."""
 
     def __init__(self) -> None:
-        super().__init__(name="echo_handler", priority=Priority.TEST_HANDLER, terminal=True)
+        super().__init__(
+            handler_id=HandlerID.TEST_SERVER, priority=Priority.TEST_HANDLER, terminal=True
+        )
         self.last_hook_input: dict[str, Any] | None = None
 
     def matches(self, hook_input: dict) -> bool:

@@ -24,7 +24,7 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess used only for the trusted `nc -h` capability probe (no shell, no user input)
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -93,7 +93,10 @@ def _probe_nc() -> tuple[bool, bool]:
     if nc_path is None:
         return False, False
     try:
-        result = subprocess.run(
+        # SECURITY: nc_path is resolved via shutil.which("nc") above -- a
+        # fixed, hardcoded command name, never user input -- with a fixed
+        # argument list, no shell, and a bounded timeout.
+        result = subprocess.run(  # nosec B603 - fixed command/args resolved via shutil.which, no shell, no user input
             [nc_path, "-h"],
             capture_output=True,
             text=True,

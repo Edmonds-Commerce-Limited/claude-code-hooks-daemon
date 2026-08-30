@@ -12,6 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from claude_code_hooks_daemon.constants import Timeout
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOKS_DEPLOY_SH = _REPO_ROOT / "scripts" / "install" / "hooks_deploy.sh"
 _SOURCE_HOOKS_DIR = _REPO_ROOT / ".claude" / "hooks"
@@ -29,7 +31,12 @@ set -euo pipefail
 source "{_HOOKS_DEPLOY_SH}"
 deploy_all_hooks "{project_root}" "{daemon_dir}" "{install_mode}" "{venv_python}"
 """
-    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    return subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=Timeout.REQUEST_DEFAULT,
+    )
 
 
 def _seed_daemon_dir(daemon_dir: Path) -> None:
