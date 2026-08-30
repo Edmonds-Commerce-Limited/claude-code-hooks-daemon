@@ -29,6 +29,9 @@ import pytest
 HOOKS_DIR = Path("/workspace/.claude/hooks")
 _EXIT_OK = 0
 _EXIT_HARD_BLOCK = 2
+# Generous ceiling for one forwarder round-trip (daemon answer is sub-second;
+# the margin covers a cold daemon restart under concurrent-agent load).
+_FORWARDER_TIMEOUT_SECONDS = 60
 
 _PRE_TOOL_USE_PAYLOAD = (
     b'{"tool_name":"Bash","tool_input":{"command":"true"},'
@@ -63,7 +66,7 @@ def _run_forwarder_with_socket_stdin(
             cwd=str(cwd) if cwd is not None else None,
         )
         child.close()
-        out, err = proc.communicate(timeout=60)
+        out, err = proc.communicate(timeout=_FORWARDER_TIMEOUT_SECONDS)
         return proc.returncode, out, err
     finally:
         parent.close()
