@@ -4663,6 +4663,75 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tool_report(args: argparse.Namespace) -> int:
+    """Produce the tools-vs-tokens usage report (Plan 00293).
+
+    Scans the project's Claude Code session transcripts for per-tool call
+    counts, pairs them with the measured schema token costs, and prints a
+    ranked recommendation report. RECOMMENDS only — nothing is disabled.
+    Privacy: only tool names and counts are read out of the transcripts;
+    content never reaches the report.
+
+    Args:
+        args: Parsed CLI arguments with optional ``project_root``,
+            ``transcripts_dir`` (override for tests/unusual layouts),
+            ``json_output`` and ``no_write``.
+
+    Returns:
+        0 on success (a project with no transcripts yet still reports),
+        2 on operational errors.
+    """
+    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.tool_report.analyser import (
+        analyse_transcripts,
+        transcripts_root_for,
+    )
+    from claude_code_hooks_daemon.tool_report.report import (
+        build_report,
+        render_markdown,
+        report_to_json,
+    )
+
+    resolved_root = resolve_tree_root(args)
+    if resolved_root is None:
+        return 2
+    project_root = resolved_root
+    config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+
+    override = getattr(args, "transcripts_dir", None)
+    transcripts_root = Path(override) if override else transcripts_root_for(project_root)
+
+    summary = analyse_transcripts(transcripts_root)
+    report = build_report(
+        summary,
+        never_want=config.tool_policy.never_want_map(),
+        low_use_max_calls=config.tool_policy.low_use_max_calls,
+    )
+    markdown = render_markdown(report)
+    payload = report_to_json(report)
+
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2))
+    else:
+        print(markdown)
+
+    if not getattr(args, "no_write", False):
+        reports_dir = _daemon_untracked_dir(project_root) / "reports"
+        try:
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            (reports_dir / "tool-report.md").write_text(markdown, encoding="utf-8")
+            (reports_dir / "tool-report.json").write_text(
+                json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            print(f"ERROR: cannot write report files: {exc}", file=sys.stderr)
+            return 2
+        if not getattr(args, "json_output", False):
+            print(f"Report written to {reports_dir}/tool-report.{{md,json}}")
+
+    return 0
+
+
 _BUG_REPORT_LOG_LINES = 100
 _BUG_REPORT_DIR_NAME = "bug-reports"
 _BUG_REPORT_ENV_VARS = (
@@ -5429,6 +5498,39 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_plan_qa.set_defaults(func=cmd_plan_qa)
+
+    # tool-report command (Plan 00293) — tools-vs-tokens usage report
+    parser_tool_report = subparsers.add_parser(
+        "tool-report",
+        help="Report tool usage from session transcripts vs schema token costs (recommends only)",
+    )
+    parser_tool_report.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Print the machine-readable report instead of markdown",
+    )
+    parser_tool_report.add_argument(
+        "--no-write",
+        dest="no_write",
+        action="store_true",
+        help="Do not write report files under the daemon untracked/reports/ dir",
+    )
+    parser_tool_report.add_argument(
+        "--transcripts-dir",
+        dest="transcripts_dir",
+        metavar="PATH",
+        default=None,
+        help="Transcripts directory override (default: ~/.claude/projects/<project-slug>)",
+    )
+    parser_tool_report.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_tool_report.set_defaults(func=cmd_tool_report)
 
     # docs-qa command (Plan 00284) — sweep / single-file lint (staged: not
     # implemented in this slice)

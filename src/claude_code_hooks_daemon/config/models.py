@@ -1313,6 +1313,49 @@ class CcyConfig(BaseModel):
     )
 
 
+class NeverWantToolConfig(BaseModel):
+    """One project-declared never-want tool (Plan 00293).
+
+    Attributes:
+        tool: The tool name as Claude Code knows it (e.g. ``Artifact``).
+        reason: Why the project never wants it — surfaced verbatim in the
+            tool-report and any advisory, so write it for a human reader.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool: str = Field(min_length=1, description="Tool name as Claude Code knows it")
+    reason: str = Field(default="", description="Why the project never wants this tool")
+
+
+class ToolPolicyConfig(BaseModel):
+    """Project tool policy for the tools-vs-tokens report (Plan 00293).
+
+    Ships empty: the daemon must never assert a never-want the project did
+    not declare. Declaring one only changes what the REPORT recommends (and,
+    where a handler offers its own enforcement option, what an advisory may
+    point at) — nothing is ever disabled automatically from here.
+
+    Attributes:
+        never_want: Tools this project has decided it never wants.
+        low_use_max_calls: Highest total observed call count the report still
+            classes as ``low-use`` (above it a tool is ``keep``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    never_want: list[NeverWantToolConfig] = Field(
+        default_factory=list, description="Project-declared never-want tools"
+    )
+    low_use_max_calls: int = Field(
+        default=2, ge=0, description="Highest total call count still classed as low-use"
+    )
+
+    def never_want_map(self) -> dict[str, str]:
+        """The declarations as ``{tool: reason}`` for report building."""
+        return {entry.tool: entry.reason for entry in self.never_want}
+
+
 class Config(BaseModel):
     """Root configuration model for hooks daemon.
 
@@ -1340,6 +1383,7 @@ class Config(BaseModel):
     layout: LayoutConfig = Field(default_factory=LayoutConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     ccy: CcyConfig = Field(default_factory=CcyConfig)
+    tool_policy: ToolPolicyConfig = Field(default_factory=ToolPolicyConfig)
     pseudo_events: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description="Pseudo-event configurations keyed by pseudo-event name",

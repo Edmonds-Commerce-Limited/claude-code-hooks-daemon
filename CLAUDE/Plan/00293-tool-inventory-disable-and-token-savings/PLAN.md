@@ -101,15 +101,15 @@ Artifact the enforcement lives in the blocker itself, not a separate advisory.
 
 ### Phase 2: Analyser + report
 
-- [ ] ⬜ **Task 2.1**: TDD the transcript tool-usage analyser (per-tool call
+- [x] ✅ **Task 2.1**: TDD the transcript tool-usage analyser (per-tool call
   counts across a project's session JSONLs, bounded reads, never loading
   whole transcripts into memory; reuse existing transcript-reading utilities
   where the daemon has them).
-- [ ] ⬜ **Task 2.2**: TDD the report generator: ranked table (tool, schema
+- [x] ✅ **Task 2.2**: TDD the report generator: ranked table (tool, schema
   token estimate, calls observed, sessions observed, recommendation tier
   never-want / never-used / low-use / keep), machine-readable JSON +
   human-readable markdown output under `untracked/reports/`.
-- [ ] ⬜ **Task 2.3**: CLI wiring (`bin/hooks-daemon tool-report`) + config
+- [x] ✅ **Task 2.3**: CLI wiring (`bin/hooks-daemon tool-report`) + config
   block for project-declared never-wants (validated, `extra="forbid"`,
   ships empty).
 

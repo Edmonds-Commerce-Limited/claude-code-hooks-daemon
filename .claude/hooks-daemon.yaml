@@ -49,6 +49,15 @@ daemon:
     relay_binary: null         # null = <untracked>/bin/hooks-relay
     relay_source: build        # build from relay/hooks_relay.rs via relay/build.sh
 
+# Plan 00293: project-declared never-want tools for the tools-vs-tokens
+# report (`bin/hooks-daemon tool-report`). Declaring one changes what the
+# report RECOMMENDS — enforcement for Artifact is the blocker's own
+# source_disable option below.
+tool_policy:
+  never_want:
+    - tool: Artifact
+      reason: "publishing leaves the repository; source-disabled via artifact_publish_blocker"
+
 # Built-in handler configuration
 # Handlers run in priority order (lower number = earlier execution)
 # Priority ranges: 5=test, 10-20=safety, 25-45=workflow, 50-60=tool usage
