@@ -335,7 +335,14 @@ def main(argv: list[str] | None = None) -> int:
 
     rewritten = regenerate_deployed_hooks(project_root, hooks_dir)
     if rewritten:
-        print(f"forwarder_generator: inserted relay guard into {len(rewritten)} forwarder(s)")
+        transport = load_transport_config(project_root)
+        if transport.relay_enabled:
+            action = "applied relay guard to"
+        elif transport.nc_enabled:
+            action = "applied nc transport rung to"
+        else:
+            action = "stripped transport transforms from"
+        print(f"forwarder_generator: {action} {len(rewritten)} forwarder(s)")
     return 0
 
 
