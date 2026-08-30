@@ -489,6 +489,88 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
     return None
 
 
+def find_protected_mention_strict(command: str, patterns: tuple[str, ...]) -> str | None:
+    """First protected glob a token of ``command`` mentions, requiring a REAL
+    on-disk match for any glob-shaped token, else ``None``.
+
+    ``find_protected_mention`` treats a glob-shaped token (``.vault-p*``) as a
+    possible mention purely from its literal SPELLING, on purpose: for a
+    secret, a false positive is cheap and a false negative is not, so
+    ``secret_file_guard`` accepts over-blocking (see that function's
+    docstring). That trade-off does not hold for every consumer — a quarantine
+    artefact glob defaulting to ``*-opus-security-DETAIL*``/``*-opus-security-
+    DETAIL.md`` caused an ordinary ``grep -c pattern docs/*.md`` to be denied
+    with no DETAIL file anywhere on disk, because the token ``*.md`` fnmatches
+    the second seed pattern's literal stem regardless of what actually exists
+    (canary-php-qa-ci-upgrade-26-08-30.md, Finding 6). This variant keeps
+    literal-token matching identical, but for a GLOB-shaped token it expands
+    the glob against the filesystem (project root, then cwd) and only counts
+    it as a mention when at least one resulting path is itself protected.
+    """
+    if not command or not patterns:
+        return None
+    project_root = resolve_project_root()
+    for token in _tokenise(command):
+        for form in _normalised_token_forms(token):
+            for pattern in patterns:
+                if path_matches_globs(form, (pattern,), project_root=project_root):
+                    return pattern
+            if any(char in form for char in _GLOB_CHARS):
+                match = _expand_glob_token(form, patterns, project_root)
+                if match is not None:
+                    return match
+        real = _realpath_if_resolvable(token)
+        if real is not None:
+            for pattern in patterns:
+                if path_matches_globs(real, (pattern,), project_root=project_root):
+                    return pattern
+    return None
+
+
+def _expand_glob_token(
+    token: str, patterns: tuple[str, ...], project_root: str | None
+) -> str | None:
+    """First protected pattern matched by a file ``token`` actually expands to.
+
+    Tried against each plausible base (the project root, then the process
+    cwd — a Bash tool call runs relative to one of these) so a relative glob
+    like ``docs/*.md`` is resolved the way the shell would resolve it. An
+    absolute token is tried as-is, split into its anchor plus the remaining
+    pattern so ``Path.glob`` (which only accepts a RELATIVE pattern) can
+    still expand it. A token that expands to nothing, or only to unrelated
+    files, returns ``None`` — this is the filesystem-truth check the
+    heuristic stem-overlap match in ``find_protected_mention`` does not have.
+    """
+    token_path = Path(token)
+    if token_path.is_absolute():
+        search_specs = [(Path(token_path.anchor), str(token_path.relative_to(token_path.anchor)))]
+    else:
+        bases: list[Path] = []
+        if project_root:
+            bases.append(Path(project_root))
+        cwd = Path.cwd()
+        if cwd not in bases:
+            bases.append(cwd)
+        search_specs = [(base, token) for base in bases]
+
+    seen: set[str] = set()
+    for base, pattern_str in search_specs:
+        key = f"{base}:{pattern_str}"
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            matches = base.glob(pattern_str)
+        except (OSError, ValueError):
+            continue
+        for match in matches:
+            match_str = str(match)
+            for pattern in patterns:
+                if path_matches_globs(match_str, (pattern,), project_root=project_root):
+                    return pattern
+    return None
+
+
 def _realpath_if_resolvable(token: str) -> str | None:
     """Realpath of ``token`` when it names an existing symlink, else None."""
     try:

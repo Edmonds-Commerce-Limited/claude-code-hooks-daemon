@@ -236,6 +236,56 @@ class TestBashRevealingVerbs:
         assert handler.matches(payload) is False
 
 
+class TestBashGlobTokenExpansion:
+    """canary-php-qa-ci-upgrade-26-08-30.md Finding 6: an unexpanded shell
+    glob token (`docs/*.md`) must not be treated as a mention of a protected
+    quarantine artefact unless it actually expands to one on disk."""
+
+    def test_glob_token_with_no_matching_artefact_on_disk_is_allowed(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        (docs / "ordinary.md").write_text("fine")
+        monkeypatch.chdir(tmp_path)
+        payload = _hook_input("Bash", {"command": "grep -c pattern docs/*.md"})
+        assert handler.matches(payload) is False
+
+    def test_glob_token_that_expands_to_a_real_detail_artefact_still_matches(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        (docs / "topic-opus-security-DETAIL.md").write_text("raw")
+        monkeypatch.chdir(tmp_path)
+        payload = _hook_input("Bash", {"command": "grep -c pattern docs/*.md"})
+        assert handler.matches(payload) is True
+
+    def test_glob_token_in_a_directory_with_no_files_at_all_is_allowed(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        payload = _hook_input("Bash", {"command": "grep -c pattern *.md"})
+        assert handler.matches(payload) is False
+
+    def test_literal_detail_artefact_token_still_matches_without_filesystem(
+        self, handler: QuarantineArtefactReadGuardHandler
+    ) -> None:
+        """A LITERAL (non-glob) token keeps today's behaviour: no filesystem
+        check needed, matching purely on the path itself."""
+        payload = _hook_input("Bash", {"command": "cat topic-opus-security-DETAIL.md"})
+        assert handler.matches(payload) is True
+
+
 class TestModeMerging:
     def test_additive_mode_extends_seed_globs(self) -> None:
         instance = QuarantineArtefactReadGuardHandler()

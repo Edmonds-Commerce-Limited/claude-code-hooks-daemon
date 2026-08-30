@@ -203,7 +203,15 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
                 if verb == _AMBIGUOUS_WRITE_VERB and _REDIRECT_MARKER in segment:
                     # `cat > file <<EOF ...` AUTHORS the file; not a reveal.
                     continue
-                mention = sfm.find_protected_mention(segment, patterns)
+                # `find_protected_mention_strict`, not the plain heuristic
+                # variant: an ordinary glob like `docs/*.md` must not deny a
+                # ordinary Bash command just because it COULD glob-expand to
+                # a quarantine artefact name -- only when it actually does,
+                # on disk (canary-php-qa-ci-upgrade-26-08-30.md, Finding 6).
+                # `secret_file_guard` keeps the heuristic-only variant
+                # deliberately, since a false positive there is far cheaper
+                # than the false negative it guards against.
+                mention = sfm.find_protected_mention_strict(segment, patterns)
                 if mention is not None:
                     return mention
         return None
