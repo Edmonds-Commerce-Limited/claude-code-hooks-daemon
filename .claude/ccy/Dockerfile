@@ -61,7 +61,31 @@ RUN wget -qO- https://dl-ssl.google.com/linux/linux_signing_key.pub | \
 ENV PATH="/usr/lib/dart/bin:${PATH}"
 
 # ================================================================
+# Rust toolchain - Plan 00290 (rust socket relay forwarder)
+#
+# Stable + minimal profile + x86_64 musl target: builds the static relay
+# binary (std-only, no crates). gcc provides the host linker rustc needs;
+# musl-tools provides musl-gcc for the fully static musl target. This
+# supersedes the old "Rust skipped, too large" note above, which referred
+# to nightly `-Z parse-only` for the LintOnEdit acceptance test — that
+# test still skips; this toolchain exists to BUILD the relay, not lint.
+# ================================================================
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends gcc musl-tools && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN wget -qO /tmp/rustup-init.sh https://sh.rustup.rs && \
+    sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable \
+        --target x86_64-unknown-linux-musl && \
+    rm /tmp/rustup-init.sh
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# ================================================================
 # Verify installations
 # ================================================================
 RUN go version && ruby --version && php --version && dart --version && tmux -V && \
-    git filter-repo --version
+    git filter-repo --version && \
+    rustc --version && cargo --version && musl-gcc --version
