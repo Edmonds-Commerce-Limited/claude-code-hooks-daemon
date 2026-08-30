@@ -1141,6 +1141,85 @@ def get_socket_path(project_dir: Path | str) -> Path:
     return path
 
 
+# Plan 00290: per-event Unix sockets live in a sibling directory of the
+# legacy daemon socket, one file per wired hook event. See
+# CLAUDE/Plan/00290-rust-socket-relay-forwarder/DESIGN-socket-relay.md §1.1.
+def get_event_socket_dir_from_untracked(untracked_dir: Path) -> Path:
+    """Return the per-event socket directory given an already-resolved untracked dir.
+
+    Internal DRY helper: :func:`get_event_socket_dir` calls this after
+    resolving ``project_dir`` to its untracked directory. The daemon server
+    calls this directly, since it only ever holds the untracked dir (via
+    ``socket_path.parent``), never the project root.
+
+    Returns:
+        ``{untracked_dir}/events{suffix}`` where ``{suffix}`` is the same
+        hostname suffix used by the legacy socket/PID/log files.
+    """
+    suffix = _get_hostname_suffix()
+    return untracked_dir / f"events{suffix}"
+
+
+def get_event_socket_dir(project_dir: Path | str) -> Path:
+    """Return the sibling directory holding per-event Unix sockets (Plan 00290).
+
+    Pattern: ``{untracked}/events{suffix}/`` — a sibling of the legacy
+    ``daemon{suffix}.sock``, one socket file per wired hook event
+    (``constants/events.py::wired_event_metas()``).
+
+    Args:
+        project_dir: Path to project directory.
+
+    Returns:
+        Path to the per-event socket directory (may not exist on disk).
+    """
+    project_path = Path(project_dir).resolve()
+    untracked_dir = _get_untracked_dir(project_path)
+    return get_event_socket_dir_from_untracked(untracked_dir)
+
+
+def get_event_socket_path_in_dir(events_dir: Path, event_file_name: str) -> Path | None:
+    """Return the per-event socket path for ``event_file_name`` inside ``events_dir``.
+
+    Applies the same AF_UNIX path-length fallback as :func:`get_socket_path`:
+    when the natural path exceeds ``_UNIX_SOCKET_PATH_LIMIT``, returns
+    ``None`` — per-event listeners are skipped entirely rather than
+    relocated, so the legacy socket remains the only transport for that event
+    (DESIGN-socket-relay.md §1.1).
+
+    Args:
+        events_dir: The per-event socket directory (see
+            :func:`get_event_socket_dir`).
+        event_file_name: The kebab-case forwarder name (e.g.
+            ``"pre-tool-use"``) — identical to the ``.claude/hooks/`` filename
+            for that event.
+
+    Returns:
+        Path to the per-event socket file, or ``None`` if it would exceed the
+        AF_UNIX socket path length limit.
+    """
+    path = events_dir / f"{event_file_name}.sock"
+    if len(str(path)) > _UNIX_SOCKET_PATH_LIMIT:
+        return None
+    return path
+
+
+def get_event_socket_path(project_dir: Path | str, event_file_name: str) -> Path | None:
+    """Return the per-event socket path for ``event_file_name`` (Plan 00290).
+
+    Args:
+        project_dir: Path to project directory.
+        event_file_name: The kebab-case forwarder name (e.g.
+            ``"pre-tool-use"``).
+
+    Returns:
+        Path to the per-event socket file, or ``None`` if it would exceed the
+        AF_UNIX socket path length limit (see :func:`get_event_socket_path_in_dir`).
+    """
+    events_dir = get_event_socket_dir(project_dir)
+    return get_event_socket_path_in_dir(events_dir, event_file_name)
+
+
 def get_pid_path(project_dir: Path | str) -> Path:
     """
     Generate PID file path for project-specific daemon.

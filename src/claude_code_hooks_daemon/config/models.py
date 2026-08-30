@@ -1085,6 +1085,51 @@ class VerdictLogConfig(BaseModel):
     )
 
 
+class TransportConfig(BaseModel):
+    """Per-event socket + Rust relay transport rungs (Plan 00290).
+
+    Governs the whole transport-choice fallback ladder documented in
+    ``CLAUDE/Plan/00290-rust-socket-relay-forwarder/DESIGN-socket-relay.md``
+    §4-§5: relay binary -> ``nc -U`` -> the permanent bash+python3 rung.
+    Defaults produce behaviour BYTE-IDENTICAL to today — no per-event
+    listeners are bound, no relay is deployed, forwarders are unchanged.
+
+    Attributes:
+        relay_enabled: Rung 1 opt-in — exec the static Rust relay binary.
+        nc_enabled: Rung 2 opt-in — the bash ``nc -U`` path, tried before the
+            python3 transport.
+        timeout_seconds: Relay ``--timeout-ms`` source (converted at deploy
+            time); also the ``nc -w`` budget. Mirrors the python3 transport's
+            30s default (``CLAUDE_HOOKS_SOCKET_TIMEOUT`` keeps overriding it).
+        relay_binary: Absolute-path override for the relay binary. ``None``
+            means ``{untracked}/bin/hooks-relay``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    relay_enabled: bool = Field(
+        default=False,
+        description="Rung 1: exec the static relay binary (opt-in)",
+    )
+    nc_enabled: bool = Field(
+        default=False,
+        description="Rung 2: bash nc -U path (opt-in)",
+    )
+    timeout_seconds: Annotated[int, Field(gt=0)] = Field(
+        default=30,
+        description="Relay --timeout-ms source; also nc -w budget",
+    )
+    relay_binary: str | None = Field(
+        default=None,
+        description="Absolute-path override; null = {untracked}/bin/hooks-relay",
+    )
+
+    @property
+    def per_event_sockets_needed(self) -> bool:
+        """True when any rung requires the daemon's per-event listeners (§1.3)."""
+        return self.relay_enabled or self.nc_enabled
+
+
 class DaemonConfig(BaseModel):
     """Configuration for the daemon server.
 
@@ -1136,6 +1181,10 @@ class DaemonConfig(BaseModel):
     verdict_log: VerdictLogConfig = Field(
         default_factory=VerdictLogConfig,
         description="Verdict log configuration (Plan 00209): per-decision audit trail",
+    )
+    transport: TransportConfig = Field(
+        default_factory=TransportConfig,
+        description="Per-event socket + Rust relay transport rungs (Plan 00290)",
     )
     languages: list[str] | None = Field(
         default=None,

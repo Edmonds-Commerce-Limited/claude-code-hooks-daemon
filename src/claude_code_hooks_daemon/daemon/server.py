@@ -16,6 +16,7 @@ import fcntl
 import json
 import logging
 import os
+import shutil
 import signal
 import sys
 import time
@@ -24,6 +25,7 @@ from pathlib import Path
 from typing import Any, Final, Protocol, runtime_checkable
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.constants.events import wired_event_metas
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.constants.protocol import SocketLimit
 from claude_code_hooks_daemon.core.hook_result import HookResult
@@ -427,6 +429,7 @@ class HooksDaemon:
 
     __slots__ = (
         "_active_requests",
+        "_event_servers",
         "_idle_check_interval",
         "_input_validators",
         "_is_new_controller",
@@ -455,6 +458,7 @@ class HooksDaemon:
         self.config = config
         self.controller = controller
         self.server: asyncio.Server | None = None
+        self._event_servers: dict[str, asyncio.Server] = {}
         self.last_activity: float = time.time()
         self.shutdown_event = asyncio.Event()
         self._active_requests = 0
@@ -659,6 +663,12 @@ class HooksDaemon:
 
         logger.info("Daemon listening on %s", socket_path)
 
+        # Plan 00290: per-event listeners, bound only when the transport
+        # config needs them (§1.3). Only reached once this process has WON
+        # the legacy-socket reuse gate above — a start that loses the race
+        # (DaemonAlreadyRunningError) never touches the events dir.
+        await self._bind_event_sockets(socket_path)
+
         # Setup signal handlers for graceful shutdown
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
@@ -815,6 +825,145 @@ class HooksDaemon:
             )
             raise
 
+    async def _bind_event_sockets(self, legacy_socket_path: Path | None) -> None:
+        """Bind one per-event Unix listener alongside the legacy socket (Plan 00290).
+
+        Gated on ``config.transport.relay_enabled or config.transport.nc_enabled``
+        (DESIGN-socket-relay.md §1.3); with both False (the default) this is a
+        no-op and today's runtime is byte-identical. A pre-existing
+        ``events{suffix}/`` dir is removed wholesale first — per-event sockets
+        carry no reuse semantics (§1.2) — then one listener is bound per
+        ``wired_event_metas()`` entry. Binding is BEST-EFFORT per socket: a
+        failure logs ERROR and that event is still served via the legacy
+        socket (§1.2).
+        """
+        transport = self.config.transport
+        if not (transport.relay_enabled or transport.nc_enabled):
+            return
+        if legacy_socket_path is None:
+            return
+
+        from claude_code_hooks_daemon.daemon.paths import (
+            get_event_socket_dir_from_untracked,
+            get_event_socket_path_in_dir,
+        )
+
+        events_dir = get_event_socket_dir_from_untracked(legacy_socket_path.parent)
+        if events_dir.exists():
+            shutil.rmtree(events_dir, ignore_errors=True)
+        events_dir.mkdir(parents=True, mode=0o750, exist_ok=True)
+
+        bound: dict[str, asyncio.Server] = {}
+        for meta in wired_event_metas():
+            event_socket_path = get_event_socket_path_in_dir(events_dir, meta.bash_key)
+            if event_socket_path is None:
+                logger.warning(
+                    "Skipping per-event socket for %s: path exceeds the AF_UNIX "
+                    "length limit even under the events dir; served only via "
+                    "the legacy socket",
+                    meta.json_key,
+                )
+                continue
+            try:
+                event_server = await asyncio.start_unix_server(
+                    partial(self._handle_event_client, meta.json_key),
+                    path=str(event_socket_path),
+                    limit=SocketLimit.REQUEST_BUFFER_BYTES,
+                )
+            except OSError as e:
+                logger.error(
+                    "Failed to bind per-event socket %s (%s): %s",
+                    event_socket_path,
+                    meta.json_key,
+                    e,
+                )
+                continue
+            event_socket_path.chmod(0o660)
+            bound[meta.json_key] = event_server
+
+        self._event_servers = bound
+        if bound:
+            logger.info("Bound %d per-event socket(s) under %s", len(bound), events_dir)
+
+    @staticmethod
+    async def _read_event_payload(reader: asyncio.StreamReader, limit: int) -> bytes:
+        """Read a per-event connection to EOF, bounded by ``limit`` bytes.
+
+        ``asyncio.StreamReader.read(-1)`` (read-to-EOF) does not honour the
+        stream's ``limit`` the way ``readline``/``readuntil`` do, so an
+        unbounded per-event payload would bypass the same cap the legacy
+        socket enforces via ``SocketLimit.REQUEST_BUFFER_BYTES``. Reading in
+        chunks and checking the running total closes that gap.
+
+        Raises:
+            ValueError: If the payload exceeds ``limit`` bytes.
+        """
+        chunks: list[bytes] = []
+        total = 0
+        chunk_size = 65536
+        while True:
+            chunk = await reader.read(chunk_size)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > limit:
+                raise ValueError(f"event socket payload exceeds {limit} bytes")
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+    async def _handle_event_client(
+        self, event_json_key: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        """Handle a connection on a per-event socket (Plan 00290, EOF framing).
+
+        Reads the raw hook payload to EOF, synthesises the legacy envelope
+        ``{"event": event_json_key, "hook_input": <parsed>}`` and dispatches
+        through the SAME ``_process_request`` path the legacy socket uses
+        (DESIGN-socket-relay.md §2). A malformed or oversized payload fails
+        open with an empty ``{}`` response — Claude Code must always receive
+        valid JSON, and ``{}`` carries no policy (the same passthrough
+        contract every unhandled event already gets).
+        """
+        self._active_requests += 1
+        self.last_activity = time.time()
+        try:
+            try:
+                raw = await self._read_event_payload(reader, SocketLimit.REQUEST_BUFFER_BYTES)
+                hook_input = json.loads(raw.decode())
+            except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                logger.warning(
+                    "Malformed or oversized payload on event socket %s: %s",
+                    event_json_key,
+                    exc,
+                )
+                writer.write(json.dumps({}).encode())
+                await writer.drain()
+                return
+
+            request_data = json.dumps({"event": event_json_key, "hook_input": hook_input})
+            response = await self._process_request(request_data)
+            response_json = json.dumps(response)
+
+            if is_blocking_response(response):
+                log_blocking_response(
+                    response_json, debug_enabled=logger.isEnabledFor(logging.DEBUG)
+                )
+
+            writer.write(response_json.encode())
+            await writer.drain()
+
+        except (BrokenPipeError, ConnectionResetError):
+            self._log_lost_peer(None)
+        except Exception as e:
+            logger.exception("Error handling event-socket client (%s): %s", event_json_key, e)
+            with contextlib.suppress(OSError):
+                writer.write(json.dumps({}).encode())
+                await writer.drain()
+        finally:
+            self._active_requests -= 1
+            writer.close()
+            await writer.wait_closed()
+
     def _signal_handler(self, sig: signal.Signals) -> None:
         """Handle shutdown signals.
 
@@ -898,8 +1047,25 @@ class HooksDaemon:
             self.server.close()
             await self.server.wait_closed()
 
-        # Cleanup socket file
+        # Plan 00290: close every per-event listener and remove the whole
+        # events dir (unlinking each socket individually is redundant once
+        # the directory itself is gone). A no-op when the transport was
+        # never enabled (self._event_servers empty, events_dir absent).
+        for event_server in self._event_servers.values():
+            event_server.close()
+            await event_server.wait_closed()
+        self._event_servers = {}
+
         socket_path = self.config.socket_path_obj
+        if socket_path is not None:
+            from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir_from_untracked
+
+            events_dir = get_event_socket_dir_from_untracked(socket_path.parent)
+            if events_dir.exists():
+                shutil.rmtree(events_dir, ignore_errors=True)
+                logger.debug("Removed per-event socket dir: %s", events_dir)
+
+        # Cleanup socket file
         if socket_path and socket_path.exists():
             socket_path.unlink()
             logger.debug("Removed socket: %s", socket_path)

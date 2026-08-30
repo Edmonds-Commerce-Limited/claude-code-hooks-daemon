@@ -83,10 +83,10 @@ as the mitigations.
 
 ### Phase 2: Daemon per-event listeners
 
-- [ ] ⬜ **Task 2.1**: TDD the multi-socket listener: daemon binds one socket
+- [x] ✅ **Task 2.1**: TDD the multi-socket listener: daemon binds one socket
   per registered hook event alongside the existing socket; event inferred
   from listener identity; existing protocol untouched on the legacy socket.
-- [ ] ⬜ **Task 2.2**: Socket hygiene — stale per-event sockets cleaned like
+- [x] ✅ **Task 2.2**: Socket hygiene — stale per-event sockets cleaned like
   the existing socket; status/health output names the active listeners.
 
 ### Phase 3: Rust relay

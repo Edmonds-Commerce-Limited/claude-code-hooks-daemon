@@ -815,6 +815,25 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Socket: {socket_path} ({'exists' if socket_exists else 'MISSING'})")
     print(f"PID file: {pid_path}")
 
+    # Plan 00290: name active per-event listeners when the transport config
+    # needs them. Silent when the transport is disabled (default) — matches
+    # today's status output byte-for-byte.
+    try:
+        transport_config = Config.find_and_load(project_path).daemon.transport
+    except (FileNotFoundError, PydanticValidationError):
+        transport_config = None
+    if transport_config is not None and (
+        transport_config.relay_enabled or transport_config.nc_enabled
+    ):
+        from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir
+
+        events_dir = get_event_socket_dir(project_path)
+        if events_dir.is_dir():
+            socket_count = len(list(events_dir.glob("*.sock")))
+            print(f"Per-event listeners: {socket_count} active ({events_dir})")
+        else:
+            print("Per-event listeners: transport enabled but events dir not found")
+
     # Project-handler protection signal (Plan 00143). Surfaced for visibility;
     # the exit code stays liveness-based so existing "status == RUNNING" checks
     # keep working — `health` is the command that returns a non-zero on degrade.
