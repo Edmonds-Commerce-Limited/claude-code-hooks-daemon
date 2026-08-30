@@ -9,10 +9,14 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import pytest
+
+from claude_code_hooks_daemon.install.relay_deploy import RELAY_ASSET_NAME
 from claude_code_hooks_daemon.install.transport_probe import (
     TransportProbeResult,
     probe_transport,
     render_env_lines,
+    render_table,
 )
 
 
@@ -132,6 +136,38 @@ def test_event_socket_dir_presence(tmp_path: Path) -> None:
     get_event_socket_dir(project_root).mkdir(parents=True)
     present = probe_transport(project_root=project_root, relay_binary=tmp_path / "x")
     assert present.event_socket_dir_present is True
+
+
+class TestToolchainAndDeployedRoute:
+    def test_toolchain_absent_reported_false(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        monkeypatch.setenv("HOME", str(tmp_path / "no-cargo-here"))
+
+        result = probe_transport(project_root=tmp_path, relay_binary=tmp_path / "x")
+
+        assert result.toolchain_present is False
+
+    def test_deployed_route_absent_when_no_marker(self, tmp_path: Path) -> None:
+        result = probe_transport(project_root=tmp_path, relay_binary=tmp_path / "hooks-relay")
+        assert result.deployed_route is None
+
+    def test_deployed_route_reads_marker(self, tmp_path: Path) -> None:
+        binary = tmp_path / RELAY_ASSET_NAME
+        binary.write_bytes(b"x")
+        binary.chmod(0o755)
+        (tmp_path / f"{RELAY_ASSET_NAME}.route").write_text("download\n")
+
+        result = probe_transport(project_root=tmp_path, relay_binary=binary)
+
+        assert result.deployed_route == "download"
+
+    def test_render_table_includes_new_rows(self, tmp_path: Path) -> None:
+        result = probe_transport(project_root=tmp_path, relay_binary=tmp_path / "x")
+        table = render_table(result)
+        assert "Relay binary deployed via" in table
+        assert "Build toolchain present" in table
 
 
 def test_render_env_lines_both_rungs_off() -> None:

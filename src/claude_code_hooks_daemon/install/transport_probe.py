@@ -30,6 +30,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir
+from claude_code_hooks_daemon.install.relay_deploy import check_musl_toolchain, read_deployed_route
 
 #: Timeout for the cheap `nc -h` capability probe (subprocess, not a socket).
 _NC_HELP_TIMEOUT_SECONDS = 5
@@ -47,8 +48,14 @@ class TransportProbeResult:
     nc_present: bool
     nc_unix_capable: bool
     event_socket_dir_present: bool
+    #: True when a musl-capable rustc toolchain is available (Plan 00290
+    #: Phase 5, Task 5.2) — the build-from-source route's own precondition.
+    toolchain_present: bool = False
+    #: "build"/"download" naming which route deployed the binary currently on
+    #: disk (read from its sidecar marker); None when unknown/undeployed.
+    deployed_route: str | None = None
 
-    def as_dict(self) -> dict[str, bool | None]:
+    def as_dict(self) -> dict[str, bool | str | None]:
         return asdict(self)
 
 
@@ -132,6 +139,9 @@ def probe_transport(
     events_dir = get_event_socket_dir(project_root)
     event_socket_dir_present = events_dir.is_dir()
 
+    toolchain_present = check_musl_toolchain()
+    deployed_route = read_deployed_route(relay_binary)
+
     return TransportProbeResult(
         relay_binary_present=relay_present,
         relay_binary_executable=relay_executable,
@@ -139,6 +149,8 @@ def probe_transport(
         nc_present=nc_present,
         nc_unix_capable=nc_unix_capable,
         event_socket_dir_present=event_socket_dir_present,
+        toolchain_present=toolchain_present,
+        deployed_route=deployed_route,
     )
 
 
@@ -172,6 +184,8 @@ def render_table(result: TransportProbeResult) -> str:
         ("Relay binary present", str(result.relay_binary_present)),
         ("Relay binary executable", str(result.relay_binary_executable)),
         ("Relay binary digest", digest),
+        ("Relay binary deployed via", result.deployed_route or "unknown"),
+        ("Build toolchain present (musl rustc)", str(result.toolchain_present)),
         ("nc on PATH", str(result.nc_present)),
         ("nc Unix-socket capable (-U)", str(result.nc_unix_capable)),
         ("Per-event socket dir present", str(result.event_socket_dir_present)),

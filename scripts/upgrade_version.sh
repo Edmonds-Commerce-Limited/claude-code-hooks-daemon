@@ -334,6 +334,31 @@ FASTPATH_CCY_PY
         print_warning "ccy supervisor deployment had issues (non-fatal)"
     fi
 
+    # Plan 00290 Phase 5: relay binary provisioning on the idempotent fast
+    # path too, so a re-run against the same target version still honours a
+    # newly-set daemon.transport.relay_source. Null (the default) is a no-op.
+    if "$VENV_PYTHON" - "$DAEMON_DIR" "$PROJECT_ROOT" "$TARGET_VERSION" <<'FASTPATH_RELAY_PY'; then
+import sys
+from pathlib import Path
+
+from claude_code_hooks_daemon.install.forwarder_generator import load_transport_config
+from claude_code_hooks_daemon.install.relay_deploy import deploy_relay_if_configured
+
+daemon_dir = Path(sys.argv[1])
+project_root = Path(sys.argv[2])
+version_tag = sys.argv[3]
+
+transport = load_transport_config(project_root)
+result = deploy_relay_if_configured(daemon_dir, project_root, transport, version_tag=version_tag)
+for msg in result.messages:
+    print(f"  -> {msg}")
+sys.exit(0 if (transport.relay_source is None or result.deployed) else 1)
+FASTPATH_RELAY_PY
+        print_success "Relay binary provisioning complete"
+    else
+        print_warning "Relay binary provisioning had issues (non-fatal; relay rung falls back to the legacy transport)"
+    fi
+
     if ! restart_daemon_verified "$VENV_PYTHON"; then
         fail_fast "Daemon failed to start after idempotent upgrade"
     fi
@@ -911,6 +936,41 @@ SLOWPATH_CCY_PY
     print_success "ccy supervisor deployment complete"
 else
     print_warning "ccy supervisor deployment had issues (non-fatal)"
+fi
+
+# ============================================================
+# Step 14c: Deploy relay binary (Plan 00290 Phase 5 — explicit config choice only)
+# ============================================================
+#
+# daemon.transport.relay_source is null by default and never runs implicitly
+# (Phase 5 owner ruling): "build" compiles from source with plain rustc when a
+# musl-capable toolchain is present, "download" fetches the digest-verified
+# release asset matching TARGET_VERSION. Either way this is advisory-only —
+# a failure never aborts the upgrade; the relay rung simply stays unprovisioned
+# and every hook falls back to the permanent bash+python3 transport.
+
+log_step "14c" "Deploying relay binary (if daemon.transport.relay_source is configured)"
+
+if "$VENV_PYTHON" - "$DAEMON_DIR" "$PROJECT_ROOT" "$TARGET_VERSION" <<'SLOWPATH_RELAY_PY'; then
+import sys
+from pathlib import Path
+
+from claude_code_hooks_daemon.install.forwarder_generator import load_transport_config
+from claude_code_hooks_daemon.install.relay_deploy import deploy_relay_if_configured
+
+daemon_dir = Path(sys.argv[1])
+project_root = Path(sys.argv[2])
+version_tag = sys.argv[3]
+
+transport = load_transport_config(project_root)
+result = deploy_relay_if_configured(daemon_dir, project_root, transport, version_tag=version_tag)
+for msg in result.messages:
+    print(f"  -> {msg}")
+sys.exit(0 if (transport.relay_source is None or result.deployed) else 1)
+SLOWPATH_RELAY_PY
+    print_success "Relay binary provisioning complete"
+else
+    print_warning "Relay binary provisioning had issues (non-fatal; relay rung falls back to the legacy transport)"
 fi
 
 # ============================================================

@@ -134,3 +134,43 @@ config_changes:
         corpus and `documentation.enabled` is true, add globs for them here
         instead of `grandfather_allowlist` (which still indexes and partially
         checks the file).
+    - key: daemon.transport
+      recommended: false
+      dormant: true
+      description: >-
+        NEW top-level config block (Plan 00290): `relay_enabled`, `nc_enabled`
+        (both `bool = false`), `timeout_seconds` (`int = 30`), `relay_binary`
+        (`str | null = null`) and `relay_source` (`"build" | "download" | null
+        = null`). Every rung is off by default and `relay_source` runs NEITHER
+        provisioning route by default — this is deliberately EXPERIMENTAL and
+        opt-in for this release, byte-identical to today's behaviour with no
+        config change (pinned by
+        `test_default_config_behaviour_is_byte_identical`). Enabling
+        `relay_enabled`/`nc_enabled` governs the client-side fallback ladder
+        (relay binary -> `nc -U` -> the permanent bash+python3 transport,
+        which is never removed); enabling `relay_source` separately governs
+        HOW the relay binary at `relay_binary` gets onto disk at
+        install/upgrade time. `relay_source: build` compiles from source with
+        plain `rustc` (no cargo, no crates — `relay/hooks_relay.rs` +
+        `relay/build.sh` ship in every install regardless of this setting)
+        and is the FIRST-CLASS route whenever a musl-capable toolchain is
+        present; `relay_source: download` fetches the sha256-digest-verified
+        precompiled asset from the matching GitHub release, falling back to
+        an advisory (never a hard failure) on a fetch error or a digest
+        mismatch. This project's open-source posture means shipping a
+        precompiled binary is a deliberate, documented departure — the
+        digest verification and the always-shipped source are the
+        mitigations. See
+        `docs/guides/HANDLER_REFERENCE.md#transport-daemontransport` and
+        `CLAUDE/Plan/00290-rust-socket-relay-forwarder/DESIGN-socket-relay.md`.
+      migration_note: >-
+        No action needed with the null/false defaults. Enabling the relay hot
+        path is a two-part, fully explicit decision: (1) set
+        `relay_enabled: true` (and optionally `nc_enabled: true` for the
+        middle rung) to opt the client-side fallback ladder in, AND (2) set
+        `relay_source: build` or `relay_source: download` so the installer
+        actually provisions the binary — leaving `relay_source` unset means
+        `relay_enabled: true` has nothing to exec and the ladder simply
+        starts one rung down. Run `bin/hooks-daemon transport-probe` after
+        install/upgrade to confirm which rungs are actually usable and which
+        route deployed the binary.

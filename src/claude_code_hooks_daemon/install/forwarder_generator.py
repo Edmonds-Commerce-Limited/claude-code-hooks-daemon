@@ -168,7 +168,7 @@ def generate_forwarder_content(
     return result
 
 
-def _load_transport_config(project_root: Path) -> TransportConfig:
+def load_transport_config(project_root: Path) -> TransportConfig:
     """Resolve the effective ``daemon.transport`` config for ``project_root``.
 
     Missing/absent config file resolves to the pure defaults (relay
@@ -201,7 +201,7 @@ def regenerate_deployed_hooks(project_root: Path, hooks_dir: Path) -> list[str]:
         Basenames of the files actually rewritten (empty when disabled or
         when every file was already in its generated form).
     """
-    transport = _load_transport_config(project_root)
+    transport = load_transport_config(project_root)
     if not transport.relay_enabled:
         return []
 

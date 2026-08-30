@@ -141,17 +141,24 @@ departure from that posture — so build-from-source is the first-class route
 the convenience option, both are explicit choices recorded in config, and
 neither ever happens implicitly (the relay rung is opt-in to begin with).
 
-- [ ] ⬜ **Task 5.1**: Release pipeline builds the binaries and emits sha256
+- [x] ✅ **Task 5.1**: Release pipeline builds the binaries and emits sha256
   manifests; a client that CHOOSES the download option fetches from the GitHub
   release and the installer verifies the digest before deploying the binary,
-  falling back (with an advisory) on mismatch. No implicit downloads.
-- [ ] ⬜ **Task 5.2**: Build-from-source path — preferred when a Rust
+  falling back (with an advisory) on mismatch. No implicit downloads —
+  `scripts/release/build_relay_release_assets.sh` +
+  `install/relay_deploy.py::deploy_relay_from_download`.
+- [x] ✅ **Task 5.2**: Build-from-source path — preferred when a Rust
   toolchain is present (plain `rustc`, no cargo/crates per the design);
   probe output records which route produced the deployed binary; the source
-  file is shipped in the package either way.
-- [ ] ⬜ **Task 5.3**: UPGRADES config-changes + truth-changes manifest
+  file is shipped in the package either way —
+  `install/relay_deploy.py::deploy_relay_from_build`/`check_musl_toolchain`,
+  `transport_probe.py` `toolchain_present`/`deployed_route`, `hooks-daemon.env`
+  threading via `scripts/install/transport_env.sh` (closes the Phase 4
+  deferral).
+- [x] ✅ **Task 5.3**: UPGRADES config-changes + truth-changes manifest
   entries; HANDLER_REFERENCE/architecture docs updated; opt-in clearly
-  documented as experimental for this release.
+  documented as experimental for this release — validated through the real
+  `ConfigMigrationManifest`/`TruthChangeManifest` loaders.
 
 ### Phase 6: Measurement and QA gate
 

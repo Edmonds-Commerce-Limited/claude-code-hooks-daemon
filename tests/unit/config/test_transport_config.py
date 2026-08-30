@@ -18,6 +18,9 @@ class TestDefaults:
     def test_relay_binary_defaults_to_none(self) -> None:
         assert TransportConfig().relay_binary is None
 
+    def test_relay_source_defaults_to_none(self) -> None:
+        assert TransportConfig().relay_source is None
+
     def test_per_event_sockets_needed_false_by_default(self) -> None:
         assert TransportConfig().per_event_sockets_needed is False
 
@@ -73,3 +76,18 @@ class TestStrictValidation:
     def test_rejects_negative_timeout(self) -> None:
         with pytest.raises(ValidationError):
             TransportConfig.model_validate({"timeout_seconds": -5})
+
+    def test_rejects_unknown_relay_source(self) -> None:
+        with pytest.raises(ValidationError):
+            TransportConfig.model_validate({"relay_source": "curl"})
+
+
+class TestRelaySource:
+    def test_accepts_build(self) -> None:
+        assert TransportConfig(relay_source="build").relay_source == "build"
+
+    def test_accepts_download(self) -> None:
+        assert TransportConfig(relay_source="download").relay_source == "download"
+
+    def test_accepts_null(self) -> None:
+        assert TransportConfig(relay_source=None).relay_source is None

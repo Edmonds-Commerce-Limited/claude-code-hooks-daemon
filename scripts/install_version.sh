@@ -50,6 +50,8 @@ source "$INSTALL_LIB_DIR/slash_commands.sh"
 source "$INSTALL_LIB_DIR/validation.sh"
 # shellcheck source=install/daemon_control.sh
 source "$INSTALL_LIB_DIR/daemon_control.sh"
+# shellcheck source=install/transport_env.sh
+source "$INSTALL_LIB_DIR/transport_env.sh"
 
 # ============================================================
 # Helper functions
@@ -402,6 +404,14 @@ cat > "$ENV_FILE" <<'ENV_EOF'
 HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH/.claude/hooks-daemon"
 ENV_EOF
 
+# Plan 00290 Phase 5: thread transport-probe facts (e.g.
+# HOOKS_DAEMON_NC_UNIX_CAPABLE) into the same file, when a `daemon.transport`
+# config with a rung already enabled is resolvable at this point. A genuine
+# fresh install has no config yet here (Step 7 deploys the default, both
+# rungs off) — a real no-op, appending nothing — so the base content above
+# stays byte-identical to today by default.
+append_transport_probe_env_lines "$PROJECT_ROOT" "$ENV_FILE" "$VENV_PYTHON"
+
 print_success "Deployed hooks-daemon.env"
 
 # ============================================================
@@ -422,6 +432,42 @@ else
         print_warning "No example config found at: $EXAMPLE_CONFIG"
         print_info "You'll need to create a config manually"
     fi
+fi
+
+# ============================================================
+# Step 7b: Deploy relay binary (Plan 00290 Phase 5 — explicit config choice only)
+# ============================================================
+#
+# daemon.transport.relay_source is null by default and never runs implicitly
+# (Phase 5 owner ruling): "build" compiles from source with plain rustc when a
+# musl-capable toolchain is present, "download" fetches the digest-verified
+# release asset matching the installed version. A fresh install always ships
+# the default config (relay_source: null), so this is a genuine no-op unless
+# TARGET_CONFIG was hand-edited between Step 7 and here — advisory-only, a
+# failure never aborts the install.
+
+log_step "7b" "Deploying relay binary (if daemon.transport.relay_source is configured)"
+
+if "$VENV_PYTHON" - "$DAEMON_DIR" "$PROJECT_ROOT" "$INSTALLED_VERSION" <<'DEPLOY_RELAY_PY'; then
+import sys
+from pathlib import Path
+
+from claude_code_hooks_daemon.install.forwarder_generator import load_transport_config
+from claude_code_hooks_daemon.install.relay_deploy import deploy_relay_if_configured
+
+daemon_dir = Path(sys.argv[1])
+project_root = Path(sys.argv[2])
+version_tag = sys.argv[3]
+
+transport = load_transport_config(project_root)
+result = deploy_relay_if_configured(daemon_dir, project_root, transport, version_tag=version_tag)
+for msg in result.messages:
+    print(f"  -> {msg}")
+sys.exit(0 if (transport.relay_source is None or result.deployed) else 1)
+DEPLOY_RELAY_PY
+    print_success "Relay binary provisioning complete"
+else
+    print_warning "Relay binary provisioning had issues (non-fatal; relay rung falls back to the legacy transport)"
 fi
 
 # ============================================================

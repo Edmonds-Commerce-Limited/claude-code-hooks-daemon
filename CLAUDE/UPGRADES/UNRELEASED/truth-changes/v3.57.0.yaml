@@ -75,3 +75,29 @@ truth_changes:
       it again, even across further upgrades or a project's own layout config
       changes (which otherwise refresh a pristine rule's `paths:` glob
       automatically).
+  - was: >
+      Every hook fired a fresh `bash` process that sourced `init.sh` and
+      spawned a `python3 -c` transport for every single event — the only
+      client-side transport that existed, and the daemon's own source tree
+      was the client's entire auditable surface (no compiled artifact of any
+      kind was ever installed into a project).
+    now: >
+      Plan 00290 adds an opt-in, EXPERIMENTAL fast path: a std-only static
+      Rust relay binary (`relay/hooks_relay.rs`, zero crates) that a hook
+      execs directly against a per-event Unix socket, falling back to the
+      unchanged bash+python3 transport on any failure. It ships off by
+      default (`daemon.transport.relay_enabled: false`), so a project that
+      has not opted in sees no behaviour change at all. A project that DOES
+      opt in also makes an explicit, SEPARATE choice for how the binary is
+      provisioned (`daemon.transport.relay_source: build|download`, both
+      null by default): `build` compiles from source with plain `rustc`
+      (no cargo) and is the preferred, first-class route whenever a
+      musl-capable toolchain is present; `download` fetches a
+      sha256-digest-verified precompiled asset from the matching GitHub
+      release as a convenience, never as the only option — the source
+      always ships in the package either way. This is a considered,
+      documented departure from "the source tree is the entire auditable
+      surface" for projects that opt into it; digest verification and the
+      always-shipped source are the stated mitigations. See
+      `docs/guides/HANDLER_REFERENCE.md#transport-daemontransport` and
+      `CLAUDE/Plan/00290-rust-socket-relay-forwarder/DESIGN-socket-relay.md`.

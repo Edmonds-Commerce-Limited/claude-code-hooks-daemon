@@ -109,6 +109,66 @@ same scoping `secret_file_guard` already uses for its own `mode`).
 
 ---
 
+## Transport (`daemon.transport:`)
+
+**EXPERIMENTAL and opt-in for this release** (Plan 00290). A cross-cutting
+`daemon:` sub-block governing the client-side hook transport — the process
+that carries a hook's JSON payload from Claude Code to the daemon and back.
+Every default is off/null, so a project with no `daemon.transport:` block at
+all sees **zero behaviour change**: every hook still runs the existing
+`bash` + `python3` forwarder path.
+
+```yaml
+daemon:
+  transport:
+    relay_enabled: false # rung 1: exec the static Rust relay binary (opt-in)
+    nc_enabled: false # rung 2: bash `nc -U` path, tried before python3 (opt-in)
+    timeout_seconds: 30 # relay --timeout-ms source; also the nc -w budget
+    relay_binary: null # absolute-path override; null = {untracked}/bin/hooks-relay
+    relay_source: null # "build" | "download" | null — see below
+```
+
+**The fallback ladder never loses its floor**: relay binary -> `nc -U` ->
+the permanent bash+python3 transport. The last rung is never removed and
+carries every existing guarantee (`ensure_daemon` auto-start, fail-open JSON
+error emission on any failure) — enabling a faster rung only adds an
+earlier successful exit, it never removes the safety net.
+
+**`relay_enabled`/`nc_enabled` and `relay_source` are two SEPARATE, both
+explicit, decisions** — nothing about this block acts implicitly:
+
+- `relay_enabled`/`nc_enabled` opt a project's forwarders into trying the
+  faster rungs at all.
+- `relay_source: build|download` (both default `null`) separately governs
+  **how the relay binary gets onto disk** at install/upgrade time. Leaving
+  it `null` with `relay_enabled: true` means the ladder simply has nothing
+  to exec at rung 1 and starts one rung down — that combination is valid,
+  not an error.
+
+**Build-from-source is the first-class route.** `relay_source: build` runs
+`relay/build.sh` — a single `rustc --edition 2021 -O -C strip=symbols
+--target x86_64-unknown-linux-musl` invocation, no cargo, no crates, no
+dependency tree — whenever a musl-capable toolchain is present, and is
+preferred over downloading. `relay_source: download` fetches a
+sha256-digest-verified precompiled asset from the GitHub release matching
+the installed version as a convenience; a fetch failure or a digest
+mismatch is always an advisory, never a hard install/upgrade failure. The
+relay's own source (`relay/hooks_relay.rs`) ships in the package
+**regardless of which route is chosen or whether the rung is enabled at
+all** — this project's open-source posture means a compiled artifact is
+never the only form a client can audit or build.
+
+Run `bin/hooks-daemon transport-probe` after install/upgrade to see which
+rungs are actually usable on the machine and which route (`build`/
+`download`/unknown) produced the binary currently deployed.
+
+See
+`CLAUDE/Plan/00290-rust-socket-relay-forwarder/DESIGN-socket-relay.md` for
+the full per-event-socket design, wire framing, and fallback-ladder
+ownership rules.
+
+---
+
 ## PreToolUse Handlers
 
 These handlers run **before** Claude Code executes a tool call. They can block dangerous operations or inject advisory context.

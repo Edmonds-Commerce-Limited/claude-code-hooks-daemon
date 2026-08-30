@@ -1103,6 +1103,13 @@ class TransportConfig(BaseModel):
             30s default (``CLAUDE_HOOKS_SOCKET_TIMEOUT`` keeps overriding it).
         relay_binary: Absolute-path override for the relay binary. ``None``
             means ``{untracked}/bin/hooks-relay``.
+        relay_source: How the relay binary at ``relay_binary`` gets there —
+            ``"build"`` (compile from source with plain ``rustc``, preferred
+            whenever a musl-capable toolchain is present), ``"download"``
+            (fetch the digest-verified precompiled asset from the matching
+            GitHub release), or ``None`` (default — neither route runs; the
+            relay rung stays opt-in on top of an explicit distribution
+            choice, per Plan 00290 Phase 5's owner ruling: nothing implicit).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1122,6 +1129,17 @@ class TransportConfig(BaseModel):
     relay_binary: str | None = Field(
         default=None,
         description="Absolute-path override; null = {untracked}/bin/hooks-relay",
+    )
+    relay_source: Literal["build", "download"] | None = Field(
+        default=None,
+        description=(
+            "How the relay binary is provisioned at install/upgrade time: "
+            "'build' (plain rustc, no cargo, preferred when a musl-capable "
+            "toolchain is present) or 'download' (digest-verified GitHub "
+            "release asset). Default null = neither route runs — an "
+            "explicit, deliberate choice, never an implicit side effect of "
+            "relay_enabled."
+        ),
     )
 
     @property

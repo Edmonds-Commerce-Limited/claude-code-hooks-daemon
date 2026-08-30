@@ -151,30 +151,79 @@ Explicit non-behaviours (this is what keeps the transparency cost low): the
 relay never parses JSON, never reads config, never starts the daemon, never
 retries, never writes files, and contains no event names.
 
-### 3.2 Distribution
+### 3.2 Distribution (implemented Phase 5 — Tasks 5.1/5.2)
 
-- Release assets: `hooks-relay-x86_64-unknown-linux-musl` (aarch64 added when
-  a builder exists) + `SHA256SUMS` covering them, produced by a CI job.
-- In-repo: `relay/hooks_relay.rs` (the auditable source) and
-  `relay/SHA256SUMS.released` (digests of the shipped binaries, updated by
-  the release pipeline).
-- Install/upgrade: the installer deploys the binary to
-  `{untracked}/bin/hooks-relay` ONLY when `relay_enabled: true`, verifying
-  the digest first; on mismatch it refuses the binary, logs an advisory, and
-  the ladder simply runs without rung 1. Where no prebuilt matches the
-  platform and `rustc` is present, build-from-source is offered (same
-  one-line `rustc` invocation); the probe records which route provided the
-  binary.
-- The binary lives under `untracked/` (never committed to a client repo), so
-  a client repo's auditable surface remains 100% source.
-- **CI job (Task 3.3 note; wiring lands in Phase 5, Task 5.1)**: the release
-  pipeline gains a job that installs the musl target
-  (`rustup target add x86_64-unknown-linux-musl`), runs `bash relay/build.sh`
-  (which itself asserts the output has no ELF interpreter, i.e. is fully
-  static), fails the job if the stripped size exceeds the 1 MB ceiling, runs
-  `python3 relay/test_relay.py <binary>` as the gate, and uploads the binary
-  plus its sha256 as the release assets named above. No CI config changes in
-  Phase 3. Local build on this container: 570,056 bytes stripped.
+**Owner ruling restated (binding)**: build-from-source is the FIRST-CLASS
+route, the precompiled download is the convenience option, source ships in
+the package either way, and BOTH routes are explicit config choices —
+`daemon.transport.relay_source: build|download`, default `null`, which runs
+NEITHER route implicitly. This is deliberately decoupled from
+`relay_enabled`/`nc_enabled` (which govern whether the client-side ladder
+*tries* the faster rungs at all): a project can enable the ladder with
+`relay_source` left `null` (the rung simply has nothing to exec and the
+ladder starts one rung down), or set `relay_source` without enabling the
+ladder (the binary gets provisioned but nothing execs it yet).
+
+- **Release assets** (`scripts/release/build_relay_release_assets.sh`, run
+  manually as a `/release` Step 14 sub-step — only when a musl-capable
+  `rustc` is available on the release machine, never a hard release
+  requirement): `hooks-relay-x86_64-unknown-linux-musl` (aarch64 added when
+  a builder exists) + `SHA256SUMS` (one line per asset,
+  `scripts/release/build_bootstrap_checksums.sh`'s format, reused as-is),
+  uploaded to the GitHub release alongside the four skill-script artefacts.
+  No GitHub Actions release-workflow job exists in this repository — release
+  is the human-gated `/release` skill (`CLAUDE/development/RELEASING.md`),
+  not CI — so "produced by a CI job" in the original Task 3.3 note was
+  aspirational; the implemented shape is this script run at release time.
+- **In-repo**: `relay/hooks_relay.rs` (the auditable source, ships
+  regardless of `relay_source`) and `relay/build.sh` (the exact one-line
+  `rustc` invocation both the release script and the install-time build
+  route reuse verbatim — one build recipe, not two).
+- **Install/upgrade** (`install/relay_deploy.py::deploy_relay_if_configured`,
+  wired into `install_version.sh` Step 7b and both `upgrade_version.sh`
+  paths — fast-path and slow-path — as advisory, non-fatal steps): dispatches
+  purely on `relay_source`.
+  - `"build"`: `check_musl_toolchain()` probes `rustc --print target-list`
+    for the musl triple (cheap, no compile attempt); if absent, an advisory
+    names both remedies (install the toolchain, or switch to
+    `relay_source: download`) and nothing is deployed. If present,
+    `deploy_relay_from_build` runs `relay/build.sh` against the DAEMON
+    CLONE's own `relay/` (source ships there regardless of route), copies
+    the stripped output to `resolve_relay_binary_path()` (the
+    `relay_binary` override, or `{untracked}/bin/hooks-relay`), and
+    `chmod 0o755`.
+  - `"download"`: `deploy_relay_from_download` ALWAYS verifies sha256
+    before anything touches disk — fetches `SHA256SUMS` for the release tag
+    matching the version actually being installed (never "latest"), fetches
+    the binary, compares digests, and refuses to deploy on ANY mismatch or
+    fetch failure, reporting an advisory instead of a hard failure either
+    way. The fetch function is dependency-injected (`FetchFn`) so this path
+    is fully unit-testable without real network access; the real
+    implementation is a plain `urllib.request.urlopen`.
+  - `null` (default): a true no-op — `RelayDeployResult(False, None, ())` —
+    regardless of `relay_enabled`/`nc_enabled`.
+  - Either successful route writes a sidecar `<binary>.route` marker
+    (`"build"`/`"download"`) next to the deployed binary, read back by
+    `transport_probe.py::TransportProbeResult.deployed_route` — "which route
+    produced what's on disk" survives a later config change.
+- The binary (and its `.route` marker) live under `untracked/` (never
+  committed to a client repo), so a client repo's auditable surface remains
+  100% source regardless of which route was used or whether the rung is
+  enabled.
+- **`hooks-daemon.env` threading** (closes the Phase 4 deferral):
+  `scripts/install/transport_env.sh::append_transport_probe_env_lines`,
+  called from `install_version.sh` Step 6 right after the base env write.
+  Resolves the project's `daemon.transport` config (via
+  `forwarder_generator.load_transport_config`, the same fail-safe resolver
+  the forwarder-generation step already used — renamed from a private
+  helper to a shared public one for this reuse) and, only when a rung is
+  enabled, runs the probe and appends `HOOKS_DAEMON_NC_UNIX_CAPABLE` lines.
+  On a genuine fresh install this is a real no-op (Step 6 runs before Step 7
+  deploys the config, so nothing is resolvable yet) — the function exists so
+  a repair/idempotent re-run over an already-customised config threads the
+  fact in too, without a second unconditional heredoc rewrite of the file.
+- Local build on this container: 570,056 bytes stripped (unchanged from
+  Phase 3's measurement — `relay/build.sh` itself is untouched by Phase 5).
 
 ## 4. Config schema
 
@@ -285,16 +334,24 @@ that rung 2 must REPLAY, never stream, so rung 3 always has the full payload.
 
 ### 6.3 Probe
 
-`bin/hooks-daemon transport-probe` (new CLI verb, also run by the installer):
+`bin/hooks-daemon transport-probe` (CLI verb; also called internally by the
+Step 6 env-file threading, §3.2):
 
 - relay binary present? executable? digest matches `SHA256SUMS.released`?
 - `nc` on PATH and `-U`-capable (`nc -h` advertises `-U`)?
 - per-event socket dir present (daemon running with listeners)?
+- **(Phase 5)** `toolchain_present`: is a musl-capable `rustc` available
+  right now (`check_musl_toolchain()` — same probe the build route itself
+  runs before attempting a build)?
+- **(Phase 5)** `deployed_route`: `"build"`/`"download"`/`None` — which
+  route produced the binary currently on disk, read from its sidecar
+  `<binary>.route` marker; `None` means undeployed OR predates Phase 5 (a
+  Phase 3/4 dogfood build has no marker — reported as unknown, not a
+  failure).
 
-Output: human-readable table + `--json`; the installer persists the two
-deploy-time facts the bash side needs (`HOOKS_DAEMON_NC_UNIX_CAPABLE`,
-effective rung enablement) into `hooks-daemon.env`, which init.sh already
-sources.
+Output: human-readable table + `--json`; `transport_env.sh` (§3.2) persists
+the one deploy-time fact the bash side reads (`HOOKS_DAEMON_NC_UNIX_CAPABLE`)
+into `hooks-daemon.env`, which init.sh already sources.
 
 ## 7. Non-goals (binding, restated from PLAN.md)
 

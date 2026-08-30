@@ -698,6 +698,37 @@ gh release create vX.Y.Z \
   untracked/release-artifacts/bootstrap-checksums.txt
 ```
 
+### Relay binary (Plan 00290 Phase 5 — the `daemon.transport.relay_source: download` convenience asset)
+
+**Only if a musl-capable `rustc` is available on this machine** (`rustc --print
+target-list | grep x86_64-unknown-linux-musl`). Build-from-source stays the
+FIRST-CLASS route for clients regardless (`relay/hooks_relay.rs` +
+`relay/build.sh` ship in every release, no cargo/crates needed) — this step
+only produces the CONVENIENCE download asset for clients who choose
+`relay_source: download` over `relay_source: build`. Skip this block entirely
+if no toolchain is available here; a release missing the relay asset is still
+valid — the download route just has nothing to fetch until a later release
+adds it, and `install/relay_deploy.py` reports that as an advisory, never a
+hard failure.
+
+```bash
+scripts/release/build_relay_release_assets.sh untracked/release-artifacts
+
+gh release create vX.Y.Z \
+  ... [the four skill-script artifacts above, plus:] \
+  untracked/release-artifacts/hooks-relay-x86_64-unknown-linux-musl \
+  untracked/release-artifacts/SHA256SUMS
+```
+
+**If `gh release create` already ran** (the four skill-script artifacts
+above), upload the relay assets to the same release instead of re-creating it:
+
+```bash
+gh release upload vX.Y.Z \
+  untracked/release-artifacts/hooks-relay-x86_64-unknown-linux-musl \
+  untracked/release-artifacts/SHA256SUMS
+```
+
 **Verification before continuing**:
 
 ```bash
