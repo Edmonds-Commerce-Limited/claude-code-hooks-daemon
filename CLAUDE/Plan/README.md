@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00292: codex cli dual host research](00292-codex-cli-dual-host-research/PLAN.md) - In Progress (research-only: Codex CLI hooks surface vs Claude Code, event mapping, daemon coupling inventory, abstraction options — no code changes, all output in the plan folder)
+
 - [00291: upgrade path hardening and guarded branch install](00291-upgrade-path-hardening-and-guarded-branch-install/PLAN.md) - Not Started (php-qa-ci canary findings: fresh-clone `upgrade_version.sh` hard-fail, UNRELEASED-manifest visibility, silent old-config retention, `v`-prefix handling — plus the owner-ruled guarded, non-obvious, loudly-warned first-party-only branch-install mechanism)
 
 - [00290: rust socket relay forwarder](00290-rust-socket-relay-forwarder/PLAN.md) - Not Started (opt-in, config-driven Rust static relay over per-event Unix sockets with an `nc -U`/bash+python3 fallback ladder — implements Plan 00154's Option C to cut the ~43 ms client-side forwarder spawn cost)
@@ -1281,18 +1283,18 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 291 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 292 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 240 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 38 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 37 + 240 + 7 = **284 folders**, spanning
-  **281 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 38 + 240 + 7 = **285 folders**, spanning
+  **282 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **10** of the
@@ -1301,8 +1303,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   transient probes (00195 during the v3.51.0 acceptance run, 00258 during the
   v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a sub-agent
   that then found Plan 00208 already covered the work). Plans 00288 and 00289
-  are on disk under `Completed/`, counted in the 281 distinct numbers above.
-  281 + 10 = 291. ✅
+  are on disk under `Completed/`, counted in the 282 distinct numbers above.
+  282 + 10 = 292. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
