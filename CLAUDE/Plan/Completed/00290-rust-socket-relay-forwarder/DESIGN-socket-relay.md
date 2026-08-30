@@ -462,8 +462,13 @@ into `hooks-daemon.env`, which init.sh already sources.
 strip-then-reapply transform) -> daemon restart -> real-invocation-context
 verification (socket-stdin probes per `install/transport_verify.py`:
 pre-tool-use JSON object, status-line raw text, stop exit-code-2, per-event
-listener check), with AUTO-REVERT of the previous state on any verification
-failure. `transport status` reports the active rung, listener count, relay
+listener check, and a direct `--no-fallback` relay-binary probe so a silent
+fallback cannot verify green), with AUTO-REVERT of the previous state on any
+verification failure. The guard-state check judges only the catalogue's
+wired forwarder names — client-owned files in `.claude/hooks/` are ignored.
+Enabling with no binary on disk provisions it via `relay_source`
+(`deploy_relay_if_configured`, the installer's own routine) BEFORE anything
+is flipped; a missing `relay_enabled:` key is seeded rather than refused. `transport status` reports the active rung, listener count, relay
 binary facts and the last toggle's persisted verification result. See
 `CLAUDE/Plan/00294-relay-transport-safe-toggle-and-reenable/PLAN.md` and
 `docs/guides/HANDLER_REFERENCE.md#transport-daemontransport`.

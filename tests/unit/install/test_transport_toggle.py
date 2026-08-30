@@ -19,9 +19,11 @@ from claude_code_hooks_daemon.install.forwarder_generator import INIT_SH_ANCHOR
 from claude_code_hooks_daemon.install.transport_toggle import (
     ToggleOutcome,
     TransportToggleError,
+    ensure_relay_binary,
     read_last_toggle_state,
     read_relay_enabled,
     run_toggle,
+    seed_relay_enabled_line,
     set_relay_enabled,
     state_file_path,
     status_snapshot,
@@ -54,13 +56,22 @@ _FORWARDER_BODY = (
 
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
-    """A minimal client-layout project with a commented transport config."""
+    """A minimal client-layout project with a commented transport config.
+
+    A fake relay binary sits at the default resolved path so enabling the
+    relay short-circuits provisioning (binary already present) — the
+    provisioning paths themselves are covered by TestRelayProvisioning.
+    """
     claude_dir = tmp_path / ".claude"
     hooks_dir = claude_dir / "hooks"
     hooks_dir.mkdir(parents=True)
     (claude_dir / "hooks-daemon").mkdir()
     (claude_dir / "hooks-daemon.yaml").write_text(_CONFIG_WITH_COMMENTS)
     (hooks_dir / "pre-tool-use").write_text(_FORWARDER_BODY)
+    relay_binary = claude_dir / "hooks-daemon" / "untracked" / "bin" / "hooks-relay"
+    relay_binary.parent.mkdir(parents=True)
+    relay_binary.write_text("#!/bin/bash\ncat >/dev/null\necho '{}'\n")
+    relay_binary.chmod(0o755)
     return tmp_path
 
 
@@ -291,20 +302,204 @@ class TestRunToggleAutoRevert:
         assert any("pre-tool-use-json" in failure for failure in state["failures"])
 
 
+class TestSeedRelayEnabled:
+    """D3 (canary run 4): a fresh client config has no ``relay_enabled:``
+    line — seed it (comment-preserving) instead of refusing."""
+
+    def test_seed_into_existing_transport_block(self, tmp_path: Path) -> None:
+        config_path = tmp_path / "hooks-daemon.yaml"
+        config_path.write_text(
+            "daemon:\n"
+            "  # a comment that must survive\n"
+            "  transport:\n"
+            "    nc_enabled: false\n"
+            "handlers: {}\n"
+        )
+
+        seeded = seed_relay_enabled_line(config_path)
+
+        assert seeded is True
+        content = config_path.read_text()
+        assert read_relay_enabled(config_path) is False
+        assert "# a comment that must survive" in content
+        assert "nc_enabled: false" in content
+        # The seeded line is indented as a child of transport:.
+        assert "\n    relay_enabled: false\n" in content
+
+    def test_seed_creates_transport_block_under_daemon(self, tmp_path: Path) -> None:
+        config_path = tmp_path / "hooks-daemon.yaml"
+        config_path.write_text("daemon:\n  log_level: INFO\nhandlers: {}\n")
+
+        seeded = seed_relay_enabled_line(config_path)
+
+        assert seeded is True
+        assert read_relay_enabled(config_path) is False
+        assert "  transport:\n    relay_enabled: false\n" in config_path.read_text()
+
+    def test_seed_is_a_no_op_when_the_line_exists(self, tmp_path: Path) -> None:
+        config_path = tmp_path / "hooks-daemon.yaml"
+        config_path.write_text("daemon:\n  transport:\n    relay_enabled: true\n")
+        before = config_path.read_text()
+
+        assert seed_relay_enabled_line(config_path) is False
+        assert config_path.read_text() == before
+
+    def test_seed_without_daemon_section_raises_with_the_yaml_to_add(self, tmp_path: Path) -> None:
+        config_path = tmp_path / "hooks-daemon.yaml"
+        config_path.write_text("handlers: {}\n")
+
+        with pytest.raises(TransportToggleError) as exc_info:
+            seed_relay_enabled_line(config_path)
+
+        assert "relay_enabled" in str(exc_info.value)
+
+    def test_run_toggle_seeds_a_fresh_config_and_enables(self, project: Path) -> None:
+        config_path = _config_path(project)
+        config_path.write_text("daemon:\n  transport:\n    nc_enabled: false\nhandlers: {}\n")
+
+        outcome = run_toggle(project, enable=True, restart_fn=lambda: 0, verify_fn=_passing_probes)
+
+        assert outcome.verified is True
+        assert read_relay_enabled(config_path) is True
+
+    def test_run_toggle_off_on_a_fresh_config_is_a_seeded_no_op(self, project: Path) -> None:
+        config_path = _config_path(project)
+        config_path.write_text("daemon:\n  transport:\n    nc_enabled: false\nhandlers: {}\n")
+
+        outcome = run_toggle(project, enable=False, restart_fn=lambda: 0, verify_fn=_passing_probes)
+
+        assert outcome.changed is False
+        assert read_relay_enabled(config_path) is False
+
+
+class TestRelayProvisioning:
+    """D2 (canary run 4): enabling must ensure the relay binary EXISTS —
+    otherwise the guards silently fall through to legacy while probes pass."""
+
+    def _remove_fixture_binary(self, project: Path) -> Path:
+        binary = project / ".claude" / "hooks-daemon" / "untracked" / "bin" / "hooks-relay"
+        binary.unlink()
+        return binary
+
+    def test_absent_binary_with_null_relay_source_fails_before_any_change(
+        self, project: Path
+    ) -> None:
+        self._remove_fixture_binary(project)
+        restarts: list[int] = []
+
+        def restart() -> int:
+            restarts.append(1)
+            return 0
+
+        outcome = run_toggle(project, enable=True, restart_fn=restart, verify_fn=_passing_probes)
+
+        assert outcome.verified is False
+        assert any("relay-binary" in failure for failure in outcome.failures)
+        assert any("relay_source" in failure for failure in outcome.failures)
+        assert outcome.reverted is False
+        # Nothing was changed: config untouched, no restart, no guard.
+        assert read_relay_enabled(_config_path(project)) is False
+        assert restarts == []
+        assert "relay hot path" not in (_hooks_dir(project) / "pre-tool-use").read_text()
+
+    def test_injected_provision_failure_fails_before_any_change(self, project: Path) -> None:
+        outcome = run_toggle(
+            project,
+            enable=True,
+            restart_fn=lambda: 0,
+            verify_fn=_passing_probes,
+            provision_fn=lambda: "relay-binary: build exited 1: rustc not found",
+        )
+
+        assert outcome.verified is False
+        assert any("build exited 1" in failure for failure in outcome.failures)
+        assert read_relay_enabled(_config_path(project)) is False
+
+    def test_provisioning_is_skipped_when_disabling(self, project: Path) -> None:
+        set_relay_enabled(_config_path(project), True)
+        self._remove_fixture_binary(project)
+
+        outcome = run_toggle(project, enable=False, restart_fn=lambda: 0, verify_fn=_passing_probes)
+
+        assert outcome.verified is True
+
+    def test_ensure_relay_binary_short_circuits_on_present_binary(self, project: Path) -> None:
+        assert ensure_relay_binary(project) is None
+
+    def test_ensure_relay_binary_reports_null_source(self, project: Path) -> None:
+        self._remove_fixture_binary(project)
+        message = ensure_relay_binary(project)
+        assert message is not None
+        assert "relay_source" in message
+
+    def test_ensure_relay_binary_delegates_to_configured_route(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.install.relay_deploy import RelayDeployResult
+
+        binary = self._remove_fixture_binary(project)
+        config_path = _config_path(project)
+        config_path.write_text(
+            config_path.read_text().replace(
+                "timeout_seconds: 30", "timeout_seconds: 30\n    relay_source: build"
+            )
+        )
+        calls: list[str] = []
+
+        def fake_deploy(*_a: object, **_k: object) -> RelayDeployResult:
+            calls.append("deploy")
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            binary.write_text("#!/bin/bash\necho '{}'\n")
+            binary.chmod(0o755)
+            return RelayDeployResult(True, "build", ("built",))
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.install.transport_toggle.deploy_relay_if_configured",
+            fake_deploy,
+        )
+
+        assert ensure_relay_binary(project) is None
+        assert calls == ["deploy"]
+
+    def test_ensure_relay_binary_reports_route_failure(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.install.relay_deploy import RelayDeployResult
+
+        self._remove_fixture_binary(project)
+        config_path = _config_path(project)
+        config_path.write_text(
+            config_path.read_text().replace(
+                "timeout_seconds: 30", "timeout_seconds: 30\n    relay_source: build"
+            )
+        )
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.install.transport_toggle.deploy_relay_if_configured",
+            lambda *_a, **_k: RelayDeployResult(False, "build", ("no musl toolchain",)),
+        )
+
+        message = ensure_relay_binary(project)
+
+        assert message is not None
+        assert "no musl toolchain" in message
+
+
 class TestStatusSnapshot:
     def test_status_reports_disabled_state(self, project: Path) -> None:
         snapshot = status_snapshot(project)
         assert snapshot["relay_enabled"] is False
         assert snapshot["nc_enabled"] is False
+        # The fixture ships a fake binary; the rung is still the fallback
+        # because relay_enabled is false.
         assert snapshot["rung"] == "bash+python3"
         assert snapshot["listener_count"] == 0
-        assert snapshot["relay_binary"]["present"] is False
+        assert snapshot["relay_binary"]["present"] is True
         assert snapshot["last_toggle"] is None
 
     def test_status_reports_enabled_state_and_binary_facts(self, project: Path) -> None:
         set_relay_enabled(_config_path(project), True)
         binary = project / ".claude" / "hooks-daemon" / "untracked" / "bin" / "hooks-relay"
-        binary.parent.mkdir(parents=True)
+        binary.parent.mkdir(parents=True, exist_ok=True)
         binary.write_text("#!/bin/bash\nexit 0\n")
         binary.chmod(0o755)
 
@@ -319,6 +514,7 @@ class TestStatusSnapshot:
 
     def test_status_relay_enabled_without_binary_reports_fallback_rung(self, project: Path) -> None:
         set_relay_enabled(_config_path(project), True)
+        (project / ".claude" / "hooks-daemon" / "untracked" / "bin" / "hooks-relay").unlink()
         snapshot = status_snapshot(project)
         assert snapshot["rung"] == "bash+python3"
 
@@ -339,7 +535,7 @@ class TestStateFile:
 
     def test_corrupt_state_file_reads_as_none(self, project: Path) -> None:
         path = state_file_path(project)
-        path.parent.mkdir(parents=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{not json")
         assert read_last_toggle_state(project) is None
 

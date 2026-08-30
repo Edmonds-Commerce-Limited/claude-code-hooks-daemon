@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.install.transport_verify import (
     probe_listener_count,
     probe_no_event_listeners,
     probe_pre_tool_use,
+    probe_relay_rung_active,
     probe_status_line,
     probe_stop_hard_block,
     run_probes,
@@ -220,6 +221,75 @@ class TestGuardStateProbe:
         result = probe_forwarder_guard_state(tmp_path, expect_relay=False)
         assert result.passed, result.detail
 
+    def test_foreign_client_files_are_ignored(self, tmp_path: Path) -> None:
+        # D1 (canary run 4): clients legitimately ship their own files in
+        # .claude/hooks/ — only the catalogue's wired forwarder names are
+        # this probe's business.
+        guard = build_relay_guard_block("pre-tool-use", TransportConfig(), tmp_path)
+        (tmp_path / "pre-tool-use").write_text("#!/bin/bash\n" + guard + INIT_SH_ANCHOR)
+        for foreign in ("php-qa-ci__custom.py", "CLAUDE.md", "README.md", "test-all-hooks.sh"):
+            (tmp_path / foreign).write_text("# client-owned file, not a forwarder\n")
+
+        result = probe_forwarder_guard_state(tmp_path, expect_relay=True)
+
+        assert result.passed, result.detail
+
+    def test_foreign_files_alone_do_not_satisfy_the_on_state(self, tmp_path: Path) -> None:
+        (tmp_path / "php-qa-ci__custom.py").write_text("# client-owned file\n")
+        result = probe_forwarder_guard_state(tmp_path, expect_relay=True)
+        assert not result.passed
+
+    def test_foreign_file_content_is_not_checked_in_the_off_state(self, tmp_path: Path) -> None:
+        (tmp_path / "pre-tool-use").write_text("#!/bin/bash\n" + INIT_SH_ANCHOR)
+        guard = build_relay_guard_block("pre-tool-use", TransportConfig(), tmp_path)
+        (tmp_path / "RELAY-NOTES.md").write_text("A quoted guard block:\n" + guard)
+
+        result = probe_forwarder_guard_state(tmp_path, expect_relay=False)
+
+        assert result.passed, result.detail
+
+
+class TestRelayRungActiveProbe:
+    """D2 (canary run 4): silent fallback must not masquerade as green — the
+    relay rung must be proven ACTIVE by driving the relay binary itself,
+    with fallback disabled."""
+
+    def _project(self, tmp_path: Path, script_body: str | None) -> Path:
+        binary = tmp_path / "bin" / "hooks-relay"
+        if script_body is not None:
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            binary.write_text("#!/bin/bash\n" + script_body)
+            binary.chmod(0o755)
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir(exist_ok=True)
+        (claude_dir / "hooks-daemon.yaml").write_text(
+            f"daemon:\n  transport:\n    relay_enabled: true\n    relay_binary: {binary}\n"
+        )
+        return tmp_path
+
+    def test_relay_answering_with_json_passes(self, tmp_path: Path) -> None:
+        project = self._project(tmp_path, "cat >/dev/null\necho '{}'\n")
+        result = probe_relay_rung_active(project)
+        assert result.passed, result.detail
+        assert result.name == "relay-rung-active"
+
+    def test_missing_binary_fails_and_names_the_path(self, tmp_path: Path) -> None:
+        project = self._project(tmp_path, None)
+        result = probe_relay_rung_active(project)
+        assert not result.passed
+        assert "hooks-relay" in result.detail
+
+    def test_nonzero_exit_fails(self, tmp_path: Path) -> None:
+        project = self._project(tmp_path, "cat >/dev/null\nexit 1\n")
+        result = probe_relay_rung_active(project)
+        assert not result.passed
+
+    def test_non_json_output_fails(self, tmp_path: Path) -> None:
+        project = self._project(tmp_path, "cat >/dev/null\necho 'garbage'\n")
+        result = probe_relay_rung_active(project)
+        assert not result.passed
+        assert "garbage" in result.detail
+
 
 class TestRunProbesComposition:
     def test_on_state_runs_the_documented_probe_set(
@@ -237,6 +307,7 @@ class TestRunProbesComposition:
         assert names == [
             "forwarder-guard-state",
             "listener-count",
+            "relay-rung-active",
             "pre-tool-use-json",
             "status-line-raw",
             "stop-hard-block",

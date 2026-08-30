@@ -44,8 +44,10 @@ from claude_code_hooks_daemon.daemon.paths import (
 )
 from claude_code_hooks_daemon.install.forwarder_generator import (
     RELAY_EXCLUDED_EVENT_FILE_NAMES,
+    load_transport_config,
     strip_relay_guard_block,
 )
+from claude_code_hooks_daemon.install.relay_deploy import resolve_relay_binary_path
 
 logger = logging.getLogger(__name__)
 
@@ -120,14 +122,22 @@ def run_forwarder_with_socket_stdin(
     stdin) — a pipe-fed invocation cannot see the ``< /dev/stdin`` ENXIO
     class of defect this exists to catch.
     """
+    return _run_argv_with_socket_stdin(["bash", str(forwarder)], payload, cwd=cwd)
+
+
+def _run_argv_with_socket_stdin(
+    argv: list[str],
+    payload: bytes,
+    cwd: Path | None = None,
+) -> tuple[int, bytes, bytes]:
     parent, child = socket.socketpair()
     try:
         parent.sendall(payload)
         parent.shutdown(socket.SHUT_WR)
-        # SECURITY: fixed argv (bash + a repo-owned forwarder path), no
+        # SECURITY: fixed argv (bash/relay binary + repo-owned paths), no
         # shell, no user input, bounded timeout.
         proc = subprocess.Popen(  # nosec B603 B607
-            ["bash", str(forwarder)],
+            argv,
             stdin=child.fileno(),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -340,47 +350,113 @@ def probe_no_event_listeners(project_root: Path) -> ProbeResult:
 
 
 def probe_forwarder_guard_state(hooks_dir: Path, *, expect_relay: bool) -> ProbeResult:
-    """The deployed forwarders' guard blocks match the configured state."""
+    """The deployed forwarders' guard blocks match the configured state.
+
+    Only the catalogue's WIRED forwarder file names are examined (canary run
+    4, defect D1): clients legitimately ship their own files in
+    ``.claude/hooks/`` (helper scripts, docs, their own hook handlers), and
+    judging those as forwarders made verification fail on every real client.
+    The expected file set derives from the event catalogue, never from
+    directory contents.
+    """
     name = "forwarder-guard-state"
     guarded: list[str] = []
     eligible_unguarded: list[str] = []
-    for path in sorted(hooks_dir.iterdir()) if hooks_dir.is_dir() else []:
+    excluded_guarded: list[str] = []
+    for meta in wired_event_metas():
+        path = hooks_dir / meta.bash_key
         if not path.is_file():
             continue
         content = path.read_text()
         has_guard = strip_relay_guard_block(content) != content
         if has_guard:
-            guarded.append(path.name)
-        elif path.name not in RELAY_EXCLUDED_EVENT_FILE_NAMES:
-            eligible_unguarded.append(path.name)
+            guarded.append(meta.bash_key)
+            if meta.bash_key in RELAY_EXCLUDED_EVENT_FILE_NAMES:
+                excluded_guarded.append(meta.bash_key)
+        elif meta.bash_key not in RELAY_EXCLUDED_EVENT_FILE_NAMES:
+            eligible_unguarded.append(meta.bash_key)
     if expect_relay:
         if not guarded:
-            return ProbeResult(name, False, f"no forwarder in {hooks_dir} carries a relay guard")
+            return ProbeResult(
+                name, False, f"no wired forwarder in {hooks_dir} carries a relay guard"
+            )
+        if excluded_guarded:
+            return ProbeResult(
+                name,
+                False,
+                f"relay-INELIGIBLE forwarders carry a guard (raw_stdout/stop "
+                f"correctness regression): {', '.join(excluded_guarded)}",
+            )
         if eligible_unguarded:
             return ProbeResult(
                 name,
                 False,
-                f"relay-eligible forwarders missing their guard: "
-                f"{', '.join(eligible_unguarded)}",
+                f"relay-eligible forwarders missing their guard: {', '.join(eligible_unguarded)}",
             )
-        return ProbeResult(name, True, f"{len(guarded)} forwarder(s) carry the relay guard")
+        return ProbeResult(name, True, f"{len(guarded)} wired forwarder(s) carry the relay guard")
     if guarded:
         return ProbeResult(
-            name, False, f"forwarders still carry a relay guard: {', '.join(guarded)}"
+            name, False, f"wired forwarders still carry a relay guard: {', '.join(guarded)}"
         )
-    return ProbeResult(name, True, "no forwarder carries a relay guard")
+    return ProbeResult(name, True, "no wired forwarder carries a relay guard")
+
+
+def probe_relay_rung_active(project_root: Path) -> ProbeResult:
+    """Relay on: the relay BINARY itself answers, with fallback disabled.
+
+    The forwarder-level probes exercise the whole ladder, so a broken or
+    absent relay that silently falls through to the legacy transport still
+    looks green there (canary run 4, defect D2). This probe drives the
+    resolved relay binary directly against the pre-tool-use per-event socket
+    with ``--no-fallback``, so only the relay rung itself can produce the
+    answer.
+    """
+    name = "relay-rung-active"
+    transport = load_transport_config(project_root)
+    binary = resolve_relay_binary_path(project_root, transport)
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        return ProbeResult(name, False, f"relay binary missing or not executable: {binary}")
+    socket_path = resolve_events_dir(project_root) / "pre-tool-use.sock"
+    timeout_ms = transport.timeout_seconds * 1000
+    try:
+        returncode, out, err = _run_argv_with_socket_stdin(
+            [
+                str(binary),
+                str(socket_path),
+                "--timeout-ms",
+                str(timeout_ms),
+                "--no-fallback",
+            ],
+            _pre_tool_use_payload(),
+        )
+    except subprocess.TimeoutExpired:
+        return ProbeResult(name, False, f"relay timed out after {PROBE_TIMEOUT_SECONDS}s")
+    if returncode != 0:
+        return ProbeResult(
+            name,
+            False,
+            f"relay (no-fallback) exited {returncode}: stderr={_snippet(err)}",
+        )
+    try:
+        parsed = json.loads(out.decode())
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return ProbeResult(name, False, f"relay response is not JSON: {_snippet(out)}")
+    if not isinstance(parsed, dict):
+        return ProbeResult(name, False, f"relay response is not a JSON object: {_snippet(out)}")
+    return ProbeResult(name, True, "relay answered directly (fallback disabled)")
 
 
 def run_probes(project_root: Path, hooks_dir: Path, *, expect_relay: bool) -> list[ProbeResult]:
     """Run the full verification pass for one transport state.
 
-    Cheap state checks first, then the three socket-stdin probes; every
-    probe runs regardless of earlier failures so a toggle's failure report
-    is complete rather than first-fault.
+    Cheap state checks first, then the socket-stdin probes; every probe runs
+    regardless of earlier failures so a toggle's failure report is complete
+    rather than first-fault.
     """
     results = [probe_forwarder_guard_state(hooks_dir, expect_relay=expect_relay)]
     if expect_relay:
         results.append(probe_listener_count(project_root))
+        results.append(probe_relay_rung_active(project_root))
     else:
         results.append(probe_no_event_listeners(project_root))
     results.append(probe_pre_tool_use(hooks_dir))

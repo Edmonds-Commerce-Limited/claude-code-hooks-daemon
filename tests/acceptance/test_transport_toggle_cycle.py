@@ -163,6 +163,18 @@ def client_project() -> Iterator[Path]:
         )
         shutil.copy2(REPO_ROOT / ".claude" / "init.sh", claude_dir / "init.sh")
 
+        # Clients legitimately ship their own files in .claude/hooks/ (canary
+        # run 4, defect D1) — verification must never judge these.
+        for foreign in ("php-qa-ci__custom.py", "CLAUDE.md", "README.md", "test-all-hooks.sh"):
+            (claude_dir / "hooks" / foreign).write_text("# client-owned file, not a forwarder\n")
+
+        # Relay SOURCE ships in every install; the build-provisioning test
+        # (defect D2) compiles it for real from the fixture's own daemon dir.
+        relay_src_dir = claude_dir / "hooks-daemon" / "relay"
+        relay_src_dir.mkdir()
+        shutil.copy2(REPO_ROOT / "relay" / "hooks_relay.rs", relay_src_dir / "hooks_relay.rs")
+        shutil.copy2(REPO_ROOT / "relay" / "build.sh", relay_src_dir / "build.sh")
+
         relay_binary = root / "relay-bin" / "hooks-relay"
         relay_binary.parent.mkdir()
         shutil.copy2(REAL_RELAY_BINARY, relay_binary)
@@ -291,3 +303,73 @@ class TestInducedFailureAutoRevert:
     def test_daemon_still_running_after_the_revert(self, client_project: Path) -> None:
         status = _run_cli(client_project, "status")
         assert "RUNNING" in status.stdout
+
+
+class TestFreshClientConfig:
+    """Defects D3 and D2 (canary run 4) against the real CLI, in order: a
+    fresh config gains a seeded key; an absent binary with no relay_source
+    refuses before changing anything; relay_source: build compiles the relay
+    for real and the enable goes green."""
+
+    def test_transport_off_seeds_a_missing_relay_enabled_key(self, client_project: Path) -> None:
+        config = client_project / ".claude" / "hooks-daemon.yaml"
+        config.write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "  self_install_mode: false\n"
+            "handlers:\n"
+            "  stop:\n"
+            "    auto_continue_stop:\n"
+            "      enabled: true\n"
+            "  status_line:\n"
+            "    model_context:\n"
+            "      enabled: true\n"
+        )
+
+        result = _run_cli(client_project, "transport", "off")
+
+        assert result.returncode == 0, f"stdout={result.stdout} stderr={result.stderr}"
+        assert "already" in result.stdout
+        assert "relay_enabled: false" in config.read_text()
+
+    def test_transport_on_with_absent_binary_and_null_source_refuses_untouched(
+        self, client_project: Path
+    ) -> None:
+        # The seeded config has no relay_binary override and no relay_source;
+        # the default resolved path has no binary.
+        config = client_project / ".claude" / "hooks-daemon.yaml"
+
+        result = _run_cli(client_project, "transport", "on")
+
+        assert result.returncode != 0
+        assert "relay_source" in result.stderr, result.stderr
+        assert "AUTO-REVERTED" not in result.stderr
+        assert "relay_enabled: false" in config.read_text()
+        assert "relay hot path" not in _forwarder_text(client_project, "pre-tool-use")
+
+    def test_transport_on_builds_the_relay_via_relay_source_build(
+        self, client_project: Path
+    ) -> None:
+        built_binary = client_project / "built-bin" / "hooks-relay"
+        config = client_project / ".claude" / "hooks-daemon.yaml"
+        config.write_text(
+            _fixture_config(built_binary).replace(
+                "    timeout_seconds: 30\n",
+                "    timeout_seconds: 30\n    relay_source: build\n",
+            )
+        )
+        assert not built_binary.exists()
+
+        result = _run_cli(client_project, "transport", "on")
+
+        assert result.returncode == 0, f"stdout={result.stdout} stderr={result.stderr}"
+        assert built_binary.is_file(), "transport on must have built and deployed the relay"
+        assert os.access(built_binary, os.X_OK)
+        assert (built_binary.parent / "hooks-relay.route").read_text().strip() == "build"
+        state = _toggle_state(client_project)
+        assert state["verified"] is True
+
+        off = _run_cli(client_project, "transport", "off")
+        assert off.returncode == 0, off.stderr

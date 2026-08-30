@@ -168,7 +168,16 @@ restart and a built-in verification pass that invokes the deployed
 forwarders exactly as Claude Code does (socket stdin, real payload shapes):
 a relay-eligible event must answer with a JSON decision object, the status
 line with raw text, a blockable Stop with exit code 2 + reason on stderr,
-and the daemon's per-event listeners must match the configured state. Any
+the daemon's per-event listeners must match the configured state, and —
+so a silent fallback can never masquerade as green — the relay binary
+itself must answer a probe with fallback disabled. Only the catalogue's
+wired forwarder names are judged, so a client's own files in
+`.claude/hooks/` are never verification's business. When enabling with no
+relay binary on disk, `transport on` provisions it via the configured
+`relay_source` (the same build/download routine the installer uses) and
+refuses cleanly — nothing flipped — when `relay_source` is null or
+provisioning fails. A config with no `relay_enabled:` key at all gets the
+key seeded (comment-preserving) instead of a refusal. Any
 verification failure AUTO-REVERTS the previous state end-to-end (config +
 forwarders + daemon), re-verifies it with the same probes, and exits
 non-zero naming what failed — a toggle can never strand a session on a

@@ -4088,31 +4088,38 @@ def cmd_transport(args: argparse.Namespace) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
+    if outcome.verified is False:
+        # Failure first: a pre-flip refusal (e.g. relay provisioning) also
+        # carries changed=False, and must never read as a clean no-op.
+        print(f"transport {outcome.action}: VERIFICATION FAILED", file=sys.stderr)
+        for failure in outcome.failures:
+            print(f"  - {failure}", file=sys.stderr)
+        if outcome.reverted:
+            if outcome.revert_verified:
+                print(
+                    "AUTO-REVERTED to the previous transport state (revert verified)",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    "AUTO-REVERT attempted but its verification FAILED — inspect the "
+                    "daemon and forwarders before relying on any hook transport",
+                    file=sys.stderr,
+                )
+        elif not outcome.changed:
+            print(
+                "No state was changed — the toggle refused before flipping anything",
+                file=sys.stderr,
+            )
+        return 1
     if not outcome.changed:
         state = "enabled" if enable else "disabled"
         print(f"transport {outcome.action}: relay already {state} — nothing to do")
         return 0
-    if outcome.verified:
-        print(
-            f"transport {outcome.action}: flipped, forwarders regenerated, daemon restarted, verified"
-        )
-        return 0
-
-    print(f"transport {outcome.action}: VERIFICATION FAILED", file=sys.stderr)
-    for failure in outcome.failures:
-        print(f"  - {failure}", file=sys.stderr)
-    if outcome.reverted:
-        if outcome.revert_verified:
-            print(
-                "AUTO-REVERTED to the previous transport state (revert verified)", file=sys.stderr
-            )
-        else:
-            print(
-                "AUTO-REVERT attempted but its verification FAILED — inspect the "
-                "daemon and forwarders before relying on any hook transport",
-                file=sys.stderr,
-            )
-    return 1
+    print(
+        f"transport {outcome.action}: flipped, forwarders regenerated, daemon restarted, verified"
+    )
+    return 0
 
 
 def cmd_reconcile_settings(args: argparse.Namespace) -> int:

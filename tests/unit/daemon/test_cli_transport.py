@@ -130,6 +130,32 @@ class TestTransportToggleWiring:
         assert "pre-tool-use-json" in captured.err
         assert "revert" in captured.err.lower()
 
+    def test_provisioning_failure_exits_nonzero_without_revert_claim(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # D2: a provisioning failure happens BEFORE anything is flipped —
+        # changed=False must not be mistaken for a clean no-op, and no
+        # AUTO-REVERTED claim may be printed since nothing was reverted.
+        outcome = ToggleOutcome(
+            action="on",
+            changed=False,
+            verified=False,
+            failures=["relay-binary: provisioning via relay_source=build failed: no toolchain"],
+        )
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.install.transport_toggle.run_toggle",
+            lambda *_a, **_k: outcome,
+        )
+
+        exit_code = cmd_transport(_args(project, "on"))
+        captured = capsys.readouterr()
+
+        assert exit_code == 1
+        assert "relay-binary" in captured.err
+        assert "AUTO-REVERTED" not in captured.err
+        assert "no state was changed" in captured.err.lower()
+        assert "already" not in captured.out
+
     def test_toggle_error_exits_nonzero(
         self, project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
