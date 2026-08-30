@@ -32,6 +32,13 @@ current release.
 Related but out of scope here: Plan 00176 (settings.json merge preservation)
 proceeds independently; the dedupe scout confirmed no live-plan overlap.
 
+**Canary policy (owner ruling, 2026-08-30)**: the php-qa-ci clone at
+`untracked/repos/php-qa-ci` is a **persistent, test-only canary**. Every run
+starts from a pristine state (delete + re-clone, or an equivalent full reset
+to origin HEAD) and NO run there is ever a real upgrade — nothing is committed
+or pushed from the canary. The REAL php-qa-ci upgrade happens in a separate
+agent thread, as the final confirmation step AFTER a release ships.
+
 ## Goals
 
 - The documented upgrade route works from the fresh-clone client state (no
@@ -103,7 +110,9 @@ proceeds independently; the dedupe scout confirmed no live-plan overlap.
 
 - [ ] ⬜ **Task 4.1**: Re-run the php-qa-ci canary end-to-end through the
   now-fixed documented route using the guarded gate; the run must need zero
-  manual bypasses. Update the canary report with the delta.
+  manual bypasses. Per the canary policy above: start pristine
+  (re-clone/full reset), commit nothing in the canary. Update the canary
+  report with the delta.
 - [ ] ⬜ **Task 4.2**: Full QA green; daemon restart verified; UPGRADES
   manifests updated for any config surface added.
 
