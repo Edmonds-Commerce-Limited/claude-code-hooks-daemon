@@ -113,11 +113,23 @@ as the mitigations.
 
 ### Phase 5: Distribution and release integration
 
+**Owner ruling (2026-08-30)**: client projects get the OPTION of compiling the
+relay themselves or downloading a precompiled binary from the GitHub release —
+and the source ships either way (it is in this package regardless). This
+system being open source is important, and shipping precompiled binaries is a
+departure from that posture — so build-from-source is the first-class route
+(preferred whenever a Rust toolchain is present), the precompiled download is
+the convenience option, both are explicit choices recorded in config, and
+neither ever happens implicitly (the relay rung is opt-in to begin with).
+
 - [ ] ⬜ **Task 5.1**: Release pipeline builds the binaries and emits sha256
-  manifests; installer verifies the digest before deploying the binary and
-  falls back (with an advisory) on mismatch.
-- [ ] ⬜ **Task 5.2**: Build-from-source path when `cargo` is present and no
-  prebuilt matches the platform; recorded as such in the probe output.
+  manifests; a client that CHOOSES the download option fetches from the GitHub
+  release and the installer verifies the digest before deploying the binary,
+  falling back (with an advisory) on mismatch. No implicit downloads.
+- [ ] ⬜ **Task 5.2**: Build-from-source path — preferred when a Rust
+  toolchain is present (plain `rustc`, no cargo/crates per the design);
+  probe output records which route produced the deployed binary; the source
+  file is shipped in the package either way.
 - [ ] ⬜ **Task 5.3**: UPGRADES config-changes + truth-changes manifest
   entries; HANDLER_REFERENCE/architecture docs updated; opt-in clearly
   documented as experimental for this release.
