@@ -596,3 +596,36 @@ is real but you have picked an unenforceable projection of it; find the subset t
 is mechanically visible and guard that instead. Then say in the rule which half it
 covers — a guard that overstates its reach is worse than an absent one, because the
 next reader stops looking.
+
+## Test in the host's invocation context, not your own
+
+The relay dogfood shipped four defects to a live session while unit,
+integration, acceptance AND manual smoke checks were all green — because every
+one of those surfaces invoked the hooks differently from how Claude Code does.
+Three distinct context gaps, one root failure mode:
+
+1. **stdin fd type.** Claude Code hands hook commands a SOCKET as stdin; every
+   test fed a pipe. `< /dev/stdin` re-opens the path — an `open()` on a socket
+   fails ENXIO — so the transport failed on every REAL event and no test could
+   see it. Pipes and sockets both read fine; they differ exactly at re-open.
+   Guard: `tests/integration/test_forwarder_socket_stdin.py` invokes the real
+   deployed forwarders with a socketpair as stdin.
+2. **Payload shape.** Verification payloads were written BY THE VERIFIER, who
+   helpfully included `hook_event_name` — the very field the transport under
+   test is responsible for injecting. The check validated the author's
+   assumptions, not the host's behaviour. Rule: an end-to-end payload must be
+   what the host actually sends, with NOTHING hand-added that any layer under
+   test is supposed to supply.
+3. **Response direction.** The status line needs the daemon's JSON unwrapped
+   to raw text on stdout; a byte-pump transport cannot do that, and nothing
+   asserted the RESPONSE shape Claude Code consumes — only that "a response
+   came back". Assert what the host will do with the answer, not that an
+   answer exists.
+
+The general form: a transport/adapter boundary has THREE contracts — how the
+host calls you (fd types, env, argv), what the host sends (payload as-is), and
+what the host does with your answer (parse mode, exit-code semantics). A test
+suite that pins only the middle one can be fully green while every real
+invocation fails. When a component sits on a host boundary, write at least one
+test per contract IN the host's own manner of invocation — and treat "works
+when I run it by hand" as evidence about your hand, not about the host.
