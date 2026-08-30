@@ -63,6 +63,7 @@ bearing fact for where a policy daemon would sit:
 
 1. **Sandbox mode** — the technical capability boundary (what the process
    is *permitted* to touch), enforced by the OS:
+
    - `read-only` — read + answer questions only; edits/exec/network need
      approval. Default for **non**-version-controlled folders.
    - `workspace-write` — read, edit, and run commands inside the
@@ -75,10 +76,11 @@ bearing fact for where a policy daemon would sit:
    - Enforcement is platform-native: **macOS** via Seatbelt
      (`sandbox-exec`), **Linux** via `bwrap` + `seccomp`, **Windows** via a
      native sandbox or WSL2 inheritance.
-   [Agent approvals & security](https://learn.chatgpt.com/docs/agent-approvals-security)
+     [Agent approvals & security](https://learn.chatgpt.com/docs/agent-approvals-security)
 
 2. **Approval policy** — when Codex must pause and ask a human/reviewer
    before acting:
+
    - `on-request` — default for version-controlled folders; approval
      required to escalate the sandbox boundary, hit the network, or run
      destructive app/MCP tool calls.
@@ -103,7 +105,7 @@ bearing fact for where a policy daemon would sit:
      which evaluates for data exfiltration, credential probing, destructive
      actions. This is the closest analog in Codex's own model to "a policy
      daemon decides instead of a human."
-   [Agent approvals & security](https://learn.chatgpt.com/docs/agent-approvals-security)
+     [Agent approvals & security](https://learn.chatgpt.com/docs/agent-approvals-security)
 
 - **Where the decision is enforced**: "at the point of action
   execution — before shell commands, file modifications outside protected
@@ -183,8 +185,8 @@ would want to sit."
     `requirements.toml`) to make Codex ignore user/project/session hook
     configs entirely and only run managed hooks — this is the enterprise
     lockdown knob.
-  [`docs/config.md`](https://github.com/openai/codex/blob/main/docs/config.md);
-  [Hooks reference](https://learn.chatgpt.com/docs/hooks)
+    [`docs/config.md`](https://github.com/openai/codex/blob/main/docs/config.md);
+    [Hooks reference](https://learn.chatgpt.com/docs/hooks)
 - **Hook events** (name parity with Claude Code is close but not exact):
   `PreToolUse`, `PostToolUse`, `PermissionRequest`, `PreCompact`,
   `PostCompact`, `SessionStart`, `SessionEnd`, `SubagentStart`,
@@ -226,7 +228,7 @@ would want to sit."
     model's context; default budget ~2,500 tokens
     (`additionalContextLimit` to configure); oversized output spills to
     disk and the model gets a preview + file path.
-  [Hooks reference](https://learn.chatgpt.com/docs/hooks)
+    [Hooks reference](https://learn.chatgpt.com/docs/hooks)
 - **Known limitations** (important for anyone building interception
   tooling):
   - **`PreToolUse`/`PostToolUse` currently only fire for Bash/shell,
@@ -250,7 +252,7 @@ would want to sit."
     re-review. Manage via the `/hooks` command. Managed hooks (system/MDM/
     `requirements.toml`) bypass this trust gate.
   - Disable all hooks: `[features] hooks = false` in `config.toml`.
-  [Hooks reference](https://learn.chatgpt.com/docs/hooks)
+    [Hooks reference](https://learn.chatgpt.com/docs/hooks)
 
 **Relevance to a policy daemon**: Codex's hook system is architecturally
 the right seam — `PreToolUse`/`PermissionRequest` sit at the same
@@ -269,7 +271,7 @@ above suggest this is actively being expanded.
 - Session ("rollout") files are JSONL, stored under
   `~/.codex/sessions/YYYY/MM/DD/`, named
   `rollout-<timestamp>-<session-id>.jsonl` (session ids look like UUIDs;
-  illustrative synthetic example: `01234567-abcd-7000-8000-000000000000` —
+  illustrative synthetic example: `00000000-0000-0000-0000-000000000000` —
   the real id seen in sources was a UUIDv7-shaped value). Filenames and the internal
   `session_id` are auto-generated at session start and cannot be set via
   CLI/config. **This path/naming is corroborated by a native macOS viewer
@@ -347,8 +349,7 @@ for `tui` config options before concluding this is truly absent.
 ## 10. Notifications (`notify`) — distinct from hooks
 
 - `notify` in `config.toml` is an external-program hook fired on Codex
-  events (currently `agent-turn-complete`): `notify = ["python3",
-  "/path/to/notify.py"]`. The script receives one JSON CLI argument with
+  events (currently `agent-turn-complete`): `notify = ["python3", "/path/to/notify.py"]`. The script receives one JSON CLI argument with
   fields like `type`, `thread-id`, `input-messages`,
   `last-assistant-message`. Positioned by the docs as good for
   webhooks/desktop notifiers/CI hooks, as distinct from `tui.notifications`
