@@ -13,6 +13,8 @@ daemon (Plan 00259 Task 1.1) via `payload_capture` while calling the real tool:
      "tool_input": {"action": "list", "limit": 3}}
 """
 
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -148,6 +150,139 @@ class TestHandle:
         handler = ArtifactPublishBlockerHandler()
         result = handler.handle(_artifact_input({"action": "list"}))
         assert result.decision == Decision.ALLOW
+
+
+def _handler_with_source_disable(tmp_path: Path, *, enabled: bool = True) -> Any:
+    """Build a handler wired to a temp workspace with the option set."""
+    handler = ArtifactPublishBlockerHandler()
+    handler._source_disable = enabled
+    handler._workspace_root = tmp_path
+    return handler
+
+
+def _non_artifact_event() -> dict[str, Any]:
+    """Any ordinary PreToolUse event — enforcement must not need an Artifact call."""
+    return {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "ls"},
+    }
+
+
+class TestSourceDisable:
+    """The opt-in `source_disable` option (Plan 00293).
+
+    When enabled, the handler ensures `.claude/settings.json` carries
+    `"enableArtifact": false` — the documented settings-level switch that
+    removes the Artifact tool (and its ~6k-token schema) from every future
+    session at source. The call-time deny stays as the in-session backstop,
+    since settings are only read at session start.
+    """
+
+    def test_off_by_default_and_touches_nothing(self, tmp_path: Path) -> None:
+        """Ships disabled: no settings file is created or modified."""
+        handler = _handler_with_source_disable(tmp_path, enabled=False)
+        handler.matches(_non_artifact_event())
+        assert not (tmp_path / ".claude" / "settings.json").exists()
+
+    def test_creates_settings_file_when_absent(self, tmp_path: Path) -> None:
+        """No settings.json yet: one is created holding only the disable key."""
+        handler = _handler_with_source_disable(tmp_path)
+        handler.matches(_non_artifact_event())
+        settings_path = tmp_path / ".claude" / "settings.json"
+        assert json.loads(settings_path.read_text()) == {"enableArtifact": False}
+
+    def test_adds_key_preserving_existing_settings(self, tmp_path: Path) -> None:
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(json.dumps({"plansDirectory": "CLAUDE/Plan", "hooks": {}}))
+        handler = _handler_with_source_disable(tmp_path)
+        handler.matches(_non_artifact_event())
+        settings = json.loads(settings_path.read_text())
+        assert settings["enableArtifact"] is False
+        assert settings["plansDirectory"] == "CLAUDE/Plan"
+        assert settings["hooks"] == {}
+
+    def test_backs_up_an_existing_file_once(self, tmp_path: Path) -> None:
+        """A pre-edit backup is written, and never overwritten if present."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings_path = claude_dir / "settings.json"
+        original = json.dumps({"plansDirectory": "CLAUDE/Plan"})
+        settings_path.write_text(original)
+        handler = _handler_with_source_disable(tmp_path)
+        handler.matches(_non_artifact_event())
+        backup = claude_dir / "settings.json.bak.pre-artifact-source-disable"
+        assert backup.read_text() == original
+
+    def test_noop_when_already_disabled(self, tmp_path: Path) -> None:
+        """Idempotent: `enableArtifact: false` already present means no write."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(json.dumps({"enableArtifact": False}))
+        before = settings_path.stat().st_mtime_ns
+        handler = _handler_with_source_disable(tmp_path)
+        handler.matches(_non_artifact_event())
+        assert settings_path.stat().st_mtime_ns == before
+        assert not (claude_dir / "settings.json.bak.pre-artifact-source-disable").exists()
+
+    def test_overrides_an_explicit_true(self, tmp_path: Path) -> None:
+        """`enableArtifact: true` is still a never-want violation — flipped."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(json.dumps({"enableArtifact": True}))
+        handler = _handler_with_source_disable(tmp_path)
+        handler.matches(_non_artifact_event())
+        assert json.loads(settings_path.read_text())["enableArtifact"] is False
+
+    def test_enforces_only_once_per_handler_instance(self, tmp_path: Path) -> None:
+        """The check runs on the first event only, not on every tool call."""
+        handler = _handler_with_source_disable(tmp_path)
+        handler.matches(_non_artifact_event())
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.unlink()
+        handler.matches(_non_artifact_event())
+        assert not settings_path.exists()
+
+    def test_malformed_settings_survive_untouched(self, tmp_path: Path) -> None:
+        """A broken client file must never crash the chain or be clobbered."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text("{not json")
+        handler = _handler_with_source_disable(tmp_path)
+        handler.matches(_non_artifact_event())
+        assert settings_path.read_text() == "{not json"
+
+    def test_matching_behaviour_is_unchanged(self, tmp_path: Path) -> None:
+        """The option adds enforcement; it must not alter what is denied."""
+        handler = _handler_with_source_disable(tmp_path)
+        assert handler.matches(_artifact_input({"file_path": "/w/r.html"})) is True
+        assert handler.matches(_artifact_input({"action": "list"})) is False
+
+    def test_deny_reason_names_the_source_disable(self, tmp_path: Path) -> None:
+        """With the option on, the deny explains the tool is disabled at source."""
+        handler = _handler_with_source_disable(tmp_path)
+        result = handler.handle(_artifact_input({"file_path": "/w/r.html"}))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "enableArtifact" in result.reason
+
+    def test_default_deny_reason_does_not_claim_source_disable(self, tmp_path: Path) -> None:
+        """Without the option, the reason must not assert a disable that is absent."""
+        handler = _handler_with_source_disable(tmp_path, enabled=False)
+        result = handler.handle(_artifact_input({"file_path": "/w/r.html"}))
+        assert result.reason is not None
+        assert "enableArtifact" not in result.reason
+
+    def test_get_claude_md_documents_the_option(self, tmp_path: Path) -> None:
+        handler = ArtifactPublishBlockerHandler()
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "source_disable" in guidance
 
 
 class TestGuidanceAndAcceptanceTests:

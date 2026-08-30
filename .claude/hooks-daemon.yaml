@@ -129,6 +129,13 @@ handlers:
     artifact_publish_blocker:
       enabled: true
       priority: 14
+      options:
+        # Plan 00293 dogfood: this project never wants the Artifact tool at
+        # all, so the daemon keeps `.claude/settings.json` at
+        # `"enableArtifact": false` — removing the tool (and its ~6k-token
+        # schema) from every new session. The call-time deny above remains
+        # as the in-session backstop.
+        source_disable: true
 
     sensitive_content:
       enabled: true

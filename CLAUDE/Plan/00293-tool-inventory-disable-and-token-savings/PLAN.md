@@ -80,6 +80,25 @@ re-make on every call.
   (artifact_publish_blocker first), with the semantic-vs-binary analysis for
   each (does the project ever want ANY use of the tool?).
 
+### Phase 1b: Owner-directed source-disable enforcement (2026-08-30)
+
+Owner direction after Phase 1 review: extend `artifact_publish_blocker` with
+an optional full-disable feature that updates Claude settings directly, and
+dogfood it on this repo. This supersedes open question 1 of the research doc
+(answer: disable outright) and narrows the Phase 3 advisory scope: for
+Artifact the enforcement lives in the blocker itself, not a separate advisory.
+
+- [x] ✅ **Task 1.3**: TDD an opt-in `source_disable` option on
+  `artifact_publish_blocker` (ships off): ensure `.claude/settings.json`
+  carries `"enableArtifact": false` — additive, idempotent, atomic, one-shot
+  backup, fail-safe on broken client files; deny reason and handler guidance
+  updated; HANDLER_REFERENCE documented.
+- [x] ✅ **Task 1.4**: Dogfood on this repo: option enabled in
+  `.claude/hooks-daemon.yaml`, daemon restarted, verified
+  `.claude/settings.json` gained `"enableArtifact": false` (backup written).
+  Blocker retained as in-session backstop. `/context` schema-removal spot
+  check in a fresh interactive session remains for Task 4.1.
+
 ### Phase 2: Analyser + report
 
 - [ ] ⬜ **Task 2.1**: TDD the transcript tool-usage analyser (per-tool call

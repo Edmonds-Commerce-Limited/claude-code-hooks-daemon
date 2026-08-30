@@ -146,8 +146,7 @@ explicit, decisions** — nothing about this block acts implicitly:
   not an error.
 
 **Build-from-source is the first-class route.** `relay_source: build` runs
-`relay/build.sh` — a single `rustc --edition 2021 -O -C strip=symbols
---target x86_64-unknown-linux-musl` invocation, no cargo, no crates, no
+`relay/build.sh` — a single `rustc --edition 2021 -O -C strip=symbols --target x86_64-unknown-linux-musl` invocation, no cargo, no crates, no
 dependency tree — whenever a musl-capable toolchain is present, and is
 preferred over downloading. `relay_source: download` fetches a
 sha256-digest-verified precompiled asset from the GitHub release matching
@@ -776,7 +775,13 @@ handlers:
 
 **Always allowed:** `action: "list"`. Enumerating existing artefacts discloses nothing new.
 
-**Options:** none beyond `enabled` and `priority`.
+**Options:**
+
+| Option           | Values         | Default | Description                                                                                                              |
+| ---------------- | -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `source_disable` | `true`/`false` | `false` | Plan 00293: also keep `.claude/settings.json` at `"enableArtifact": false`, removing the tool at source for new sessions |
+
+**`source_disable` (opt-in, ships off):** for a project that never wants the Artifact tool at all. On the first PreToolUse event after a daemon start, the handler ensures the project's `.claude/settings.json` carries `"enableArtifact": false` — the documented Claude Code switch (honoured in project settings from Claude Code v2.1.242; once any file sets it false, no file can turn it back on) that removes the tool and its multi-thousand-token schema from every **new** session. The write is additive (other keys preserved), idempotent (no write when already `false`), atomic, and takes a one-shot backup at `settings.json.bak.pre-artifact-source-disable` before the first rewrite; failures are logged, never raised. The call-time deny stays as the in-session backstop, since settings are read only at session start. Note the trade: a new session also loses the allowed `list` action, because the whole tool is gone.
 
 **No escape hatch — by design.** Unlike [`git_stash`](#git_stash) and [`ancestry_preserving_merge`](#ancestry_preserving_merge), this handler accepts no `MUST_..._BECAUSE` declaration. Those hatches cover actions whose consequences stay inside the repository; publishing leaves it. An agent able to type its own justification would have self-authorised disclosure, which is the precise thing this guard exists to prevent — the same reasoning behind `delete-branch --allow-unproven` still requiring an interactive human.
 
@@ -790,6 +795,8 @@ handlers:
     artifact_publish_blocker:
       enabled: true   # default; only a HUMAN should set this to false
       priority: 14
+      options:
+        source_disable: true  # opt-in: also write enableArtifact:false to .claude/settings.json
 ```
 
 ---

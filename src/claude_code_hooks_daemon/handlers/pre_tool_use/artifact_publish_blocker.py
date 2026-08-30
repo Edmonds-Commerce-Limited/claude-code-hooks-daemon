@@ -20,13 +20,19 @@ sensitive" and the two would drift. The risk being managed is not "this page
 contains a secret" but "a URL now exists outside the repository".
 """
 
+import json
+import logging
+import shutil
+from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+
+logger = logging.getLogger(__name__)
 
 # The tool's read-only mode. Enumerating existing artefacts discloses nothing
 # new, so it is the one action deliberately left allowed.
@@ -35,6 +41,17 @@ _LIST_ACTION = "list"
 # Config path a HUMAN edits to lift the block. Named in the deny reason so the
 # person reading over the agent's shoulder knows exactly what to change.
 _CONFIG_KEY_PATH = "handlers.pre_tool_use.artifact_publish_blocker.enabled"
+
+# The documented Claude Code settings switch that removes the Artifact tool at
+# source: no schema in context, no publish surface at all. "No file can turn it
+# back on" once any settings file sets it false (Claude Code >= 2.1.242 honours
+# it in project/local settings too).
+_ENABLE_ARTIFACT_KEY = "enableArtifact"
+
+# One-shot backup + atomic-write staging suffixes, mirroring
+# utils.settings_repair so the two settings rewriters stay equivalent.
+_BACKUP_SUFFIX = ".bak.pre-artifact-source-disable"
+_TMP_SUFFIX = ".tmp.artifact-source-disable"
 
 
 class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
@@ -51,6 +68,74 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.ARTIFACT_PUBLISH_BLOCKER,
             priority=Priority.ARTIFACT_PUBLISH_BLOCKER,
             terminal=True,
+        )
+        # Opt-in `source_disable` option (Plan 00293): when a project turns it
+        # on, the handler ensures `.claude/settings.json` carries
+        # `"enableArtifact": false` so future sessions never load the tool.
+        # The registry overwrites this attribute from handler options.
+        self._source_disable = False
+        self._source_disable_checked = False
+
+    def _ensure_source_disable(self) -> None:
+        """Apply the settings-level Artifact disable, once per daemon process.
+
+        Runs from ``matches`` on the FIRST PreToolUse event of any kind — it
+        must not depend on an Artifact call ever happening, because once the
+        settings disable holds, none ever will. The write is additive and
+        idempotent: other settings keys are preserved, an existing
+        ``enableArtifact: false`` means no write, a one-shot backup is taken
+        before the first rewrite, and any failure is logged rather than
+        raised — a PreToolUse chain must never crash on a broken client file.
+        """
+        if self._source_disable_checked or not getattr(self, "_source_disable", False):
+            return
+        self._source_disable_checked = True
+
+        root = getattr(self, "_workspace_root", None)
+        root_path = Path(root) if root is not None else ProjectContext.project_root()
+        settings_path = root_path / ".claude" / "settings.json"
+
+        settings: dict[str, Any] = {}
+        exists = settings_path.exists()
+        if exists:
+            try:
+                loaded = json.loads(settings_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                logger.warning(
+                    "artifact source-disable skipped — cannot read %s: %s", settings_path, exc
+                )
+                return
+            if not isinstance(loaded, dict):
+                logger.warning(
+                    "artifact source-disable skipped — %s is not a JSON object", settings_path
+                )
+                return
+            settings = loaded
+
+        if settings.get(_ENABLE_ARTIFACT_KEY) is False:
+            return
+
+        settings[_ENABLE_ARTIFACT_KEY] = False
+        tmp_path = settings_path.with_name(settings_path.name + _TMP_SUFFIX)
+        try:
+            if exists:
+                backup_path = settings_path.with_name(settings_path.name + _BACKUP_SUFFIX)
+                if not backup_path.exists():
+                    shutil.copy2(settings_path, backup_path)
+            else:
+                settings_path.parent.mkdir(parents=True, exist_ok=True)
+            # Atomic write: stage then rename, so a crash mid-write can never
+            # leave settings.json truncated. copymode keeps the tracked file's
+            # permissions instead of inheriting the temp file's umask mode.
+            tmp_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+            if exists:
+                shutil.copymode(settings_path, tmp_path)
+            tmp_path.replace(settings_path)
+        except OSError as exc:
+            logger.warning("artifact source-disable aborted for %s: %s", settings_path, exc)
+            return
+        logger.info(
+            "artifact source-disable applied: %s now sets enableArtifact=false", settings_path
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -69,6 +154,8 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
         Returns:
             True if this call would create or update a hosted page.
         """
+        self._ensure_source_disable()
+
         if hook_input.get("tool_name") != ToolName.ARTIFACT:
             return False
 
@@ -121,6 +208,14 @@ hatch, unlike guards whose consequences stay inside the repository.
 STILL ALLOWED: listing existing artefacts (`action: "list"`) — enumerating
 discloses nothing new."""
 
+        if getattr(self, "_source_disable", False):
+            reason += """
+
+NOTE: this project declares the Artifact tool a NEVER-WANT (`source_disable`).
+The daemon has ensured `.claude/settings.json` sets `"enableArtifact": false`,
+which removes the tool entirely from every NEW session — this in-session deny
+is the backstop until the current session ends."""
+
         return GatingResult(
             decision=Decision.DENY,
             reason=reason,
@@ -153,7 +248,16 @@ discloses nothing new."""
             "same reason `delete-branch --allow-unproven` still demands an interactive "
             "human.\n\n"
             f"**To lift it**, a HUMAN sets `{_CONFIG_KEY_PATH}: false`. Ask them; do not "
-            "apply it yourself, and do not hunt for another way to publish."
+            "apply it yourself, and do not hunt for another way to publish.\n\n"
+            "**Optional full disable at source** (Plan 00293): a project that never "
+            "wants the Artifact tool at all can set "
+            "`handlers.pre_tool_use.artifact_publish_blocker.options.source_disable: true`. "
+            "The daemon then ensures `.claude/settings.json` carries "
+            '`"enableArtifact": false` (additive, idempotent, one-shot backup), which '
+            "removes the tool — and its schema's context cost — from every new "
+            "session. The call-time deny above stays as the in-session backstop. "
+            "Ships disabled; enabling it is a deliberate repository-owner act, and "
+            "note it also removes the allowed `list` action once a new session starts."
         )
 
     def get_acceptance_tests(self) -> list[Any]:
