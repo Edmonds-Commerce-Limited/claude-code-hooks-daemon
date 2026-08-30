@@ -60,11 +60,35 @@ Per-event sockets live in a **sibling directory**, one file per event:
 - New `daemon/paths.py` helpers, DRY with the existing ones:
   `get_event_socket_dir(project_dir)` and
   `get_event_socket_path(project_dir, event_file_name)`. Both reuse
-  `_get_untracked_dir` + `_get_hostname_suffix` and apply the same
-  `_UNIX_SOCKET_PATH_LIMIT` fallback as `get_socket_path` (the per-event dir
-  falls back alongside the legacy socket, or per-event listeners are skipped
-  with a WARNING log when even the fallback exceeds the limit — the legacy
-  path is then the only transport, which is always safe).
+  `_get_untracked_dir` + `_get_hostname_suffix`.
+- **Events-dir overflow fallback (Plan 00290 F3 fix, canary run 2)**: the
+  ORIGINAL design (below, superseded) applied `_UNIX_SOCKET_PATH_LIMIT` only
+  per-socket, skipping an individual event with a WARNING when its natural
+  path overflowed. On a standard, deeply-nested client checkout
+  (`<project>/.claude/hooks-daemon/untracked/events-<host>/<event>.sock`)
+  the canary found this left **24 of 31** events silently unbound — the
+  events subdirectory's own overhead (`events-<host>/` plus the longest
+  event name, e.g. `post-tool-use-failure.sock`) routinely overflows the
+  108-byte AF_UNIX limit well before the shorter legacy `daemon.sock` does.
+  `get_event_socket_dir_from_untracked` (and hence `get_event_socket_dir`)
+  now makes ONE fit/fallback decision for the WHOLE events directory
+  (`daemon/paths.py::_event_socket_dir_fits`, using a conservative
+  worst-case filename budget so the decision doesn't need to enumerate every
+  wired event) rather than a per-socket decision: if the natural
+  `events{suffix}` path would push even the longest event name over the
+  limit, EVERY event socket for that project relocates together to a short
+  fallback directory (`daemon/paths.py::_get_event_socket_fallback_dir`),
+  keyed by a short hash of the untracked dir and resolved via the SAME
+  `$XDG_RUNTIME_DIR` -> `/run/user/{uid}` -> `/tmp` precedence
+  `get_socket_path`'s own overflow fallback already uses
+  (`_pick_short_path_root_dir`, factored out as the shared implementation).
+  `event_socket_dir_is_fallback(untracked_dir)` exposes the same decision as
+  a boolean for `install/forwarder_generator.py` (§6.1's three-way
+  agreement). `get_event_socket_path_in_dir`'s own per-socket
+  `_UNIX_SOCKET_PATH_LIMIT` check is retained as a defensive backstop for a
+  directly-supplied `events_dir` — with the directory-level decision above,
+  it should now only ever fire in genuinely pathological cases (e.g. the
+  fallback root itself unusually deep).
 
 ### 1.2 Permissions and lifecycle
 
@@ -356,6 +380,47 @@ source "$SCRIPT_DIR/../init.sh"   # existing body, unchanged
   therefore take effect on `install`/`upgrade`/`deploy` (the same cadence as
   every other client-owned asset refresh), not on daemon restart — the
   restart-only surface is the per-event listeners.
+- **Strip-then-reapply, unconditionally (Plan 00290 F1/F2/F4 fix, canary run
+  2)**: this repository dogfoods the relay, so its own tracked
+  `.claude/hooks/*` — the deploy source for every client
+  (`hooks_deploy.sh::deploy_hook_scripts`) — carries a guard baked with THIS
+  repository's own paths. The canary proved this routed a client's hook
+  traffic to the WRONG project's daemon. `generate_forwarder_content` now
+  ALWAYS strips any existing guard block first
+  (`install/forwarder_generator.py::strip_relay_guard_block`, an exact
+  header/footer marker match — `# --- relay hot path (generated; Plan 00290) ---` / `# --- end relay hot path ---` — so it never needs to parse
+  or trust the block's content) and only THEN re-applies a fresh guard when
+  the CALLER's own config enables it. `regenerate_deployed_hooks` runs this
+  transform unconditionally too (no early return when transport is fully
+  disabled) — a file is only ever rewritten when the generated content
+  actually differs, so the byte-identical-by-default guarantee holds via a
+  no-op comparison rather than a config-gated skip. One bidirectional
+  transform now covers all three findings: a foreign guard copied forward
+  with transport disabled is stripped to the plain canonical shape (F1); a
+  foreign guard with transport newly enabled is rebuilt with the CLIENT's
+  own paths, no longer left un-rewritten by the old "a guard is already
+  present" idempotency check (F2); and disabling transport after it was
+  previously enabled strips the guard back to the plain shape instead of
+  leaving it stale (F4).
+- **Events-dir three-way agreement under the F3 fallback**: when
+  `event_socket_dir_is_fallback(untracked_dir)` is true, `build_relay_guard_block`
+  bakes the Python-RESOLVED fallback events directory as the guard's
+  `_rl_events_dir` literal default (still wrapped in
+  `${HOOKS_DAEMON_EVENTS_DIR:-...}`, so the existing override seam is
+  unaffected) instead of the dynamic `$_rl_dir/events$_rl_sfx` bash
+  concatenation shown above. This is a deliberate, narrow trade-off: the
+  dynamic form keeps a project checkout shared across multiple hosts over
+  NFS correctly host-isolated (bash computes its OWN `$HOSTNAME` at hook-run
+  time) in the common case, but that guarantee is knowingly given up ONLY
+  when the natural path would overflow — the literal is resolved once, on
+  the deploying host, at generation time. A project that is BOTH
+  multi-host-NFS-shared AND deep enough to overflow must set
+  `HOOKS_DAEMON_EVENTS_DIR` per host (the override still works) or accept a
+  fallback path shared across hosts (still correct — keyed by project, not
+  by host — just not host-isolated in that narrow combination). The
+  non-fallback (common) case is untouched: the dynamic bash computation
+  above still applies verbatim, so every existing multi-host guarantee
+  holds exactly as before whenever the natural path fits.
 
 ### 6.2 nc rung placement
 
