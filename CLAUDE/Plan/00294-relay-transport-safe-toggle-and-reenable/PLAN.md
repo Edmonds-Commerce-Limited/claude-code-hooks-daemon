@@ -93,7 +93,7 @@ lineage is one commit old).
   (status line rendering, zero daemon errors over a soak window); journal
   the soak start. Any regression: `transport off` is the first response,
   diagnosis second.
-- [ ] ⬜ **Task 3.2**: Canary: run the toggle cycle in the php-qa-ci canary
+- [x] ✅ **Task 3.2**: Canary: run the toggle cycle in the php-qa-ci canary
   (pristine reset, test-only per the standing canary policy); full QA gate
   - acceptance suite green on the final tree.
 
