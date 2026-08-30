@@ -1,6 +1,6 @@
 # Plan 00290: rust socket relay forwarder
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-30
 **Owner**: joseph
 **Priority**: Medium
