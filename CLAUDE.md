@@ -1503,6 +1503,12 @@ The CLI exits 1 while findings remain (CI-able). Single-file lint:
 `.claude/hooks-daemon.yaml` (modes, per-check overrides, grandfather
 allowlist, generated-docs manifest).
 
+<!-- handler: tool-disable-advisor -->
+
+## tool_disable_advisor — declared never-want tools are checked at session start
+
+Opt-in advisory (ships disabled). When the project declares tools in `tool_policy.never_want`, this handler checks at session start whether each one's source-level disable is actually present in `.claude/settings.json` (`enableArtifact: false` for Artifact; a bare tool name in `permissions.deny` otherwise). A missing disable is reported with the exact settings change; nothing is ever edited automatically. Detection reads PROJECT settings only, so a disable applied at user or managed level is reported as not-found rather than asserted absent. Pairs with `bin/hooks-daemon tool-report`, which recommends candidates from transcript usage.
+
 <!-- handler: idle-housekeeping-advisory -->
 
 ## idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
