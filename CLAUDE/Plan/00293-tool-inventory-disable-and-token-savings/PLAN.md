@@ -115,7 +115,7 @@ Artifact the enforcement lives in the blocker itself, not a separate advisory.
 
 ### Phase 3: Advisory integration
 
-- [ ] ⬜ **Task 3.1**: Session-start advisory (opt-in, ships disabled):
+- [x] ✅ **Task 3.1**: Session-start advisory (opt-in, ships disabled):
   when a declared never-want is NOT disabled at source, advise with the
   exact settings change; when a source-level disable makes a blocker
   handler redundant, name it and the config to demote/disable it.

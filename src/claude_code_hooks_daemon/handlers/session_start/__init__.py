@@ -13,6 +13,7 @@ from .plan_qa_sweep import PlanQaSweepHandler
 from .project_handler_load_checker import ProjectHandlerLoadCheckerHandler
 from .skill_opportunity_detector import SkillOpportunityDetectorHandler
 from .suggest_statusline import SuggestStatusLineHandler
+from .tool_disable_advisor import ToolDisableAdvisorHandler
 from .version_check import VersionCheckHandler
 
 SecretFileHygieneCheckerHandler = (
@@ -33,5 +34,6 @@ __all__ = [
     "SecretFileHygieneCheckerHandler",
     "SkillOpportunityDetectorHandler",
     "SuggestStatusLineHandler",
+    "ToolDisableAdvisorHandler",
     "VersionCheckHandler",
 ]

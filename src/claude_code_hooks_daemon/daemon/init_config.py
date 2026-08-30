@@ -272,6 +272,7 @@ class ConfigTemplate:
             "    secret_file_hygiene_checker: {enabled: true, priority: 62}  # On-disk hygiene (gitignore/tracked/permissions) for protected paths\n"
             "    model_fallback_detector: {enabled: false, priority: 63}  # Opt-in (Plan 00278): loud SessionStart alert on a recorded model fallback. Probably leave OFF — it reports a fallback that already happened and is noisy; the downgrade_indicator status line shows a LIVE downgrade instead. Enable only to capture diagnostic snapshots for tuning delegation config.\n"
             "    docs_qa_sweep: {enabled: true, priority: 64}  # Whole-corpus docs drift report (fires only when documentation.enabled); silent when clean\n"
+            "    tool_disable_advisor: {enabled: false, priority: 65}  # Opt-in (Plan 00293): advise when a tool_policy.never_want tool is not disabled in project settings (never edits)\n"
             "\n"
             "  # SessionEnd - no handlers ship today (cleanup removed in Plan 00237)\n"
             "  session_end: {}\n"

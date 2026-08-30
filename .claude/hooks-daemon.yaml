@@ -662,6 +662,10 @@ handlers:
       enabled: true  # Policy under top-level documentation.qa; also builds/refreshes the corpus index
       priority: 64
 
+    tool_disable_advisor:  # Plan 00293 dogfood: check tool_policy.never_want against project settings
+      enabled: true  # Opt-in (ships disabled); advisory only, never edits settings
+      priority: 65
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     compaction_signal:  # Dogfood: drop <session>.compacting so the supervisor auto-continues

@@ -161,6 +161,22 @@ Run `bin/hooks-daemon transport-probe` after install/upgrade to see which
 rungs are actually usable on the machine and which route (`build`/
 `download`/unknown) produced the binary currently deployed.
 
+**Toggle the relay with `bin/hooks-daemon transport on|off|status`** (Plan
+00294\) — never by hand-editing the three pieces separately. One command
+performs config flip (comment-preserving), forwarder regeneration, daemon
+restart and a built-in verification pass that invokes the deployed
+forwarders exactly as Claude Code does (socket stdin, real payload shapes):
+a relay-eligible event must answer with a JSON decision object, the status
+line with raw text, a blockable Stop with exit code 2 + reason on stderr,
+and the daemon's per-event listeners must match the configured state. Any
+verification failure AUTO-REVERTS the previous state end-to-end (config +
+forwarders + daemon), re-verifies it with the same probes, and exits
+non-zero naming what failed — a toggle can never strand a session on a
+broken transport. Repeating the current state is a clean no-op.
+`transport status` reports the active rung, listener count, relay binary
+path/digest and the last toggle's verification result (persisted in the
+daemon's untracked dir).
+
 See
 `CLAUDE/Plan/00290-rust-socket-relay-forwarder/DESIGN-socket-relay.md` for
 the full per-event-socket design, wire framing, and fallback-ladder
@@ -2928,6 +2944,33 @@ handlers:
     docs_qa_sweep:
       enabled: true
       priority: 64
+```
+
+---
+
+#### tool_disable_advisor
+
+| Property       | Value                  |
+| -------------- | ---------------------- |
+| **Config key** | `tool_disable_advisor` |
+| **Priority**   | 65                     |
+| **Type**       | Advisory               |
+| **Event**      | SessionStart           |
+
+**Description:** Plan 00293. When the project declares tools in `tool_policy.never_want`, this advisory checks at session start whether each one's source-level disable is actually present in the project's `.claude/settings.json` — `"enableArtifact": false` for Artifact, a bare tool name in `permissions.deny` for any other tool — and, when it is not, names the exact settings change. It never edits settings itself. When Artifact's disable IS in place but the [`artifact_publish_blocker`](#artifact_publish_blocker) `source_disable` option is off, it names that option so the enforcement lives in one deliberate place.
+
+**Honest limits:** detection reads PROJECT settings only. A disable applied at user level, via env var, or in managed settings is invisible to this scan, so findings are worded as "no source disable found in project settings", never "not disabled". Pairs with `bin/hooks-daemon tool-report`, which recommends disable candidates from transcript usage.
+
+**Opt-in (ships disabled).**
+
+**Config example:**
+
+```yaml
+handlers:
+  session_start:
+    tool_disable_advisor:
+      enabled: true   # opt-in; requires tool_policy.never_want declarations to do anything
+      priority: 65
 ```
 
 ---

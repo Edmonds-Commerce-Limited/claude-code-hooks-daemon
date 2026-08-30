@@ -875,6 +875,12 @@
       "function": "staged_context",
       "rule": "silent-fallback",
       "reason": "Plan 00284 Task 3.1e: a pathspec'd git-commit path that cannot be read (deleted between git-diff and the read, permission error, race) has no content to check -- OSError maps to None, the same 'nothing to check' outcome the surrounding loop already gives a path with no staged content. The commit itself is not affected; this only decides whether THIS check has something to verify, and the caller (docs_qa_commit_gate) has its own fail-open contract for the whole gate."
+    },
+    {
+      "file": "handlers/pre_tool_use/artifact_publish_blocker.py",
+      "function": "_ensure_source_disable",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00293: the source-disable settings write is deliberately fail-safe — an unreadable/malformed/unwritable client settings.json is logged at WARNING and abandoned, because a PreToolUse chain must never crash or block tool calls over a broken client file. Nothing is concealed (the warning names the path and error), the once-per-process flag prevents retry storms, and the call-time deny remains in force regardless, so the guard the option supplements keeps protecting."
     }
   ]
 }

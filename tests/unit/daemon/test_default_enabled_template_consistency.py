@@ -43,6 +43,7 @@ _EXPECTED_OPT_IN_CONFIG_KEYS = {
     "model_fallback_detector",
     "flaggable_content_channel_guard",
     "quarantine_artefact_read_guard",
+    "tool_disable_advisor",
 }
 
 

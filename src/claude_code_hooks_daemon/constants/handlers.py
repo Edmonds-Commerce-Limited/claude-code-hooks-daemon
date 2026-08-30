@@ -597,6 +597,14 @@ class HandlerID:
         config_key="docs_qa_sweep",
         display_name="docs-qa-sweep",
     )
+    # Tool-disable advisory (Plan 00293): when a project declares a tool in
+    # tool_policy.never_want, advise at session start if its source-level
+    # disable is not actually in place. Opt-in; report-only, never edits.
+    TOOL_DISABLE_ADVISOR = HandlerIDMeta(
+        class_name="ToolDisableAdvisorHandler",
+        config_key="tool_disable_advisor",
+        display_name="tool-disable-advisor",
+    )
 
     # Plan QA edit lint (PreToolUse handler) — Plan 00144: Stage 1 checks on
     # the would-be PLAN.md content at Write/Edit time

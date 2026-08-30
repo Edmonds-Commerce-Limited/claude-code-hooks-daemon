@@ -210,6 +210,7 @@ class Priority:
     # PLAN_QA_SWEEP -- next free SessionStart priority after the existing
     # sequential allocation above.
     DOCS_QA_SWEEP = 64
+    TOOL_DISABLE_ADVISOR = 65
 
     # Advisory handlers (Priority: 55-65)
     CRITICAL_THINKING_ADVISORY = 55
