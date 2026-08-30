@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00292: codex cli dual host research](00292-codex-cli-dual-host-research/PLAN.md) - In Progress (research-only: Codex CLI hooks surface vs Claude Code, event mapping, daemon coupling inventory, abstraction options — no code changes, all output in the plan folder)
-
 - [00291: upgrade path hardening and guarded branch install](00291-upgrade-path-hardening-and-guarded-branch-install/PLAN.md) - Not Started (php-qa-ci canary findings: fresh-clone `upgrade_version.sh` hard-fail, UNRELEASED-manifest visibility, silent old-config retention, `v`-prefix handling — plus the owner-ruled guarded, non-obvious, loudly-warned first-party-only branch-install mechanism)
 
 - [00290: rust socket relay forwarder](00290-rust-socket-relay-forwarder/PLAN.md) - Not Started (opt-in, config-driven Rust static relay over per-event Unix sockets with an `nc -U`/bash+python3 fallback ladder — implements Plan 00154's Option C to cut the ~43 ms client-side forwarder spawn cost)
@@ -167,6 +165,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00292: codex cli dual host research](Completed/00292-codex-cli-dual-host-research/PLAN.md) - Complete (research-only, 9-agent Sonnet workflow: Codex CLI hooks are verdict-based but cover only shell/apply_patch/MCP calls today; 6 of our 31 wired events have any counterpart; recommendation in FINDINGS.md — host-adapter + verdict degradation, deferred until Codex Edit/Write hook coverage lands)
 
 - [00288: project-layout config SSoT](Completed/00288-project-layout-config-ssot/PLAN.md) - Complete at `3aa68a72`…`e8dea14b` + the archiving commit (top-level `layout:` block + `ProjectLayout` facade as the single access API for directory truths; C1–C8 consumption refactors; canonical 11-name vendored/build core; sweep-only `source-tree-markdown` check; 7 shipped `.claude/rules/` directory-role pointers backed by `CLAUDE/DirectoryRoles.md`; manifests staged, dogfooded, dummy-client verified)
 
@@ -1285,15 +1285,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 292 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 240 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 241 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 38 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 38 + 240 + 7 = **285 folders**, spanning
+- **Folder-to-number reconciliation**: 37 + 241 + 7 = **285 folders**, spanning
   **282 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1302,7 +1302,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   00145, 00191, 00195, 00210, 00258 — abandoned drafts, numbers burned by
   transient probes (00195 during the v3.51.0 acceptance run, 00258 during the
   v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a sub-agent
-  that then found Plan 00208 already covered the work). Plans 00288 and 00289
+  that then found Plan 00208 already covered the work). Plans 00288, 00289 and 00292
   are on disk under `Completed/`, counted in the 282 distinct numbers above.
   282 + 10 = 292. ✅
 

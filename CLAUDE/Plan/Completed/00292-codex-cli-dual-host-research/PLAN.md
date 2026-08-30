@@ -1,6 +1,6 @@
 # Plan 00292: codex cli dual host research
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-30
 **Owner**: joseph
 **Priority**: Medium
@@ -56,46 +56,46 @@ for hosting.
 
 ### Phase 1: Parallel research sweep (Sonnet workflow)
 
-- [ ] ⬜ **Task 1.1**: Codex CLI hooks/extension surface — primary sources
+- [x] ✅ **Task 1.1**: Codex CLI hooks/extension surface — primary sources
   (official docs, GitHub source/releases), written to
   `RESEARCH-codex-surface.md` with citations and verbatim schema excerpts.
-- [ ] ⬜ **Task 1.2**: Codex CLI configuration + session lifecycle (config
+- [x] ✅ **Task 1.2**: Codex CLI configuration + session lifecycle (config
   format, exec modes, approval/sandbox model, MCP support) —
   `RESEARCH-codex-lifecycle.md`.
-- [ ] ⬜ **Task 1.3**: Daemon Claude-Code-coupling inventory from THIS repo's
+- [x] ✅ **Task 1.3**: Daemon Claude-Code-coupling inventory from THIS repo's
   code (events, hook-input models, verdict contract, settings.json
   registration, forwarders, transcript/status-line/cron touchpoints) —
   `RESEARCH-daemon-couplings.md`.
-- [ ] ⬜ **Task 1.4**: Prior art — Plan 00169's Codex analysis revisited, plus
+- [x] ✅ **Task 1.4**: Prior art — Plan 00169's Codex analysis revisited, plus
   any ecosystem tools that already bridge multiple agent CLIs —
   `RESEARCH-prior-art.md`.
 
 ### Phase 2: Mapping and options
 
-- [ ] ⬜ **Task 2.1**: Event/semantic mapping table (one-to-one / partial /
+- [x] ✅ **Task 2.1**: Event/semantic mapping table (one-to-one / partial /
   absent, with the blocking-vs-advisory question answered per event) —
   `MAPPING-events.md`.
-- [ ] ⬜ **Task 2.2**: Abstraction options paper with trade-offs and a
+- [x] ✅ **Task 2.2**: Abstraction options paper with trade-offs and a
   recommendation — `OPTIONS-abstraction.md`.
 
 ### Phase 3: Synthesis and gate
 
-- [ ] ⬜ **Task 3.1**: Executive synthesis at the top of a `FINDINGS.md`
+- [x] ✅ **Task 3.1**: Executive synthesis at the top of a `FINDINGS.md`
   (what is possible today, what Codex would need to add, recommended path,
   open questions for the owner), cross-linking the supporting docs.
-- [ ] ⬜ **Task 3.2**: Completeness pass — a critic agent checks for
+- [x] ✅ **Task 3.2**: Completeness pass — a critic agent checks for
   unanswered questions, uncited claims and stale-version risks; findings
   fixed or recorded as open questions. Plan flipped Complete and archived.
 
 ## Success Criteria
 
-- [ ] Every factual claim about Codex CLI carries a citation to a primary
+- [x] Every factual claim about Codex CLI carries a citation to a primary
   source (URL + what it says); uncertainty is stated as uncertainty.
-- [ ] The mapping table covers every hook event the daemon wires today.
-- [ ] The options paper gives the owner enough to decide whether dual-host
+- [x] The mapping table covers every hook event the daemon wires today.
+- [x] The options paper gives the owner enough to decide whether dual-host
   support is worth planning — including the honest "not worth it" case.
-- [ ] Zero code changes on any branch; all output inside this plan folder.
+- [x] Zero code changes on any branch; all output inside this plan folder.
 
 ## Delivery & Milestones
 
-- <!-- milestone or delivery commit hash -->
+- Research corpus delivered by a 9-agent Sonnet workflow (4 parallel researchers, mapping, options, synthesis, completeness critic + repair pass): all 7 documents in this folder; committed with the archive commit.
