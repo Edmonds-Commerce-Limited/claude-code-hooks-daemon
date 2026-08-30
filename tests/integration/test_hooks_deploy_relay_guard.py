@@ -106,7 +106,9 @@ def test_self_install_mode_never_regenerates_even_when_relay_enabled(tmp_path: P
     result = _run_deploy(project_root, project_root, "self-install", venv_python=sys.executable)
 
     assert result.returncode == 0, result.stderr
-    assert (hooks_dir / "pre-tool-use").read_text() == original, (
+    assert (
+        hooks_dir / "pre-tool-use"
+    ).read_text() == original, (
         "self-install mode must never rewrite the repo's own tracked forwarders"
     )
 

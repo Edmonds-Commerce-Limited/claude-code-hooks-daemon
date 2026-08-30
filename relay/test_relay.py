@@ -30,9 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_BINARY = (
-    REPO_ROOT / "untracked" / "relay-build" / "hooks-relay-x86_64-unknown-linux-musl"
-)
+DEFAULT_BINARY = REPO_ROOT / "untracked" / "relay-build" / "hooks-relay-x86_64-unknown-linux-musl"
 
 # Mirrors the relay's diagnostic exit codes (DESIGN-socket-relay.md section 3.1).
 EXIT_CONNECT_FAIL = 10
@@ -108,15 +106,15 @@ def run_relay(
 
 def make_fallback_script(tmp: str) -> tuple[str, str, str]:
     """Write a stand-in bash forwarder that records its argv and stdin."""
-    stdin_file = str(Path(tmp) /"fallback-stdin.bin")
-    args_file = str(Path(tmp) /"fallback-args.txt")
-    script = str(Path(tmp) /"fake-forwarder.sh")
+    stdin_file = str(Path(tmp) / "fallback-stdin.bin")
+    args_file = str(Path(tmp) / "fallback-args.txt")
+    script = str(Path(tmp) / "fake-forwarder.sh")
     with open(script, "w", encoding="utf-8") as fh:
         fh.write(
             "#!/bin/bash\n"
             f"printf '%s' \"$*\" > {args_file}\n"
             f"cat > {stdin_file}\n"
-            "printf '{\"via\":\"fallback\"}'\n"
+            'printf \'{"via":"fallback"}\'\n'
         )
     Path(script).chmod(stat.S_IRWXU)
     return script, stdin_file, args_file
@@ -126,7 +124,7 @@ def make_fallback_script(tmp: str) -> tuple[str, str, str]:
 
 
 def test_happy_path_roundtrip(binary: str, tmp: str) -> None:
-    sock = str(Path(tmp) /"pre-tool-use.sock")
+    sock = str(Path(tmp) / "pre-tool-use.sock")
     payload = b'{"tool_name":"Bash","tool_input":{"command":"true"}}'
     response = b'{"decision":"allow","reason":"stub"}'
     server = StubServer(sock, "echo", response)
@@ -138,7 +136,7 @@ def test_happy_path_roundtrip(binary: str, tmp: str) -> None:
 
 
 def test_daemon_absent_exec_fallback(binary: str, tmp: str) -> None:
-    sock = str(Path(tmp) /"no-daemon.sock")  # never created
+    sock = str(Path(tmp) / "no-daemon.sock")  # never created
     payload = b'{"hook_event_name":"PreToolUse"}'
     script, stdin_file, args_file = make_fallback_script(tmp)
     proc = run_relay(binary, [sock, "--fallback", script], payload)
@@ -151,7 +149,7 @@ def test_daemon_absent_exec_fallback(binary: str, tmp: str) -> None:
 
 
 def test_connect_fail_diagnostic_exit(binary: str, tmp: str) -> None:
-    sock = str(Path(tmp) /"no-daemon-diag.sock")
+    sock = str(Path(tmp) / "no-daemon-diag.sock")
     proc = run_relay(binary, [sock], b"{}")
     assert proc.returncode == EXIT_CONNECT_FAIL, f"exit={proc.returncode}"
     assert proc.stdout == b"", f"stdout={proc.stdout!r}"
@@ -159,7 +157,7 @@ def test_connect_fail_diagnostic_exit(binary: str, tmp: str) -> None:
 
 
 def test_timeout_fail_open(binary: str, tmp: str) -> None:
-    sock = str(Path(tmp) /"silent.sock")
+    sock = str(Path(tmp) / "silent.sock")
     StubServer(sock, "silent")
     start = time.monotonic()
     proc = run_relay(binary, [sock, "--timeout-ms", "500"], b'{"k":1}')
@@ -171,7 +169,7 @@ def test_timeout_fail_open(binary: str, tmp: str) -> None:
 
 
 def test_timeout_diagnostic_exit(binary: str, tmp: str) -> None:
-    sock = str(Path(tmp) /"silent-diag.sock")
+    sock = str(Path(tmp) / "silent-diag.sock")
     StubServer(sock, "silent")
     proc = run_relay(binary, [sock, "--timeout-ms", "500", "--no-fallback"], b'{"k":1}')
     assert proc.returncode == EXIT_TIMEOUT, f"exit={proc.returncode}"
@@ -179,7 +177,7 @@ def test_timeout_diagnostic_exit(binary: str, tmp: str) -> None:
 
 
 def test_mid_exchange_disconnect_fail_open(binary: str, tmp: str) -> None:
-    sock = str(Path(tmp) /"abort.sock")
+    sock = str(Path(tmp) / "abort.sock")
     server = StubServer(sock, "abort")
     # 4 MiB payload: far beyond socket buffers, so the relay is still writing
     # when the server side is already closed and hits EPIPE/ECONNRESET.
@@ -191,7 +189,7 @@ def test_mid_exchange_disconnect_fail_open(binary: str, tmp: str) -> None:
 
 
 def test_mid_exchange_disconnect_diagnostic_exit(binary: str, tmp: str) -> None:
-    sock = str(Path(tmp) /"abort-diag.sock")
+    sock = str(Path(tmp) / "abort-diag.sock")
     server = StubServer(sock, "abort")
     payload = b"x" * (4 * 1024 * 1024)
     proc = run_relay(binary, [sock, "--no-fallback"], payload)
@@ -201,7 +199,7 @@ def test_mid_exchange_disconnect_diagnostic_exit(binary: str, tmp: str) -> None:
 
 
 def test_large_payload_roundtrip(binary: str, tmp: str) -> None:
-    sock = str(Path(tmp) /"large.sock")
+    sock = str(Path(tmp) / "large.sock")
     payload = os.urandom(2 * 1024 * 1024)  # 2 MiB, larger than the 64 KiB pump
     response = os.urandom(2 * 1024 * 1024)  # large response direction too
     server = StubServer(sock, "echo", response)
@@ -213,7 +211,7 @@ def test_large_payload_roundtrip(binary: str, tmp: str) -> None:
 
 
 def test_oversized_response_diagnostic_exit(binary: str, tmp: str) -> None:
-    sock = str(Path(tmp) /"oversize.sock")
+    sock = str(Path(tmp) / "oversize.sock")
     response = b"y" * (RESPONSE_CAP_BYTES + 1)
     server = StubServer(sock, "echo", response)
     proc = run_relay(binary, [sock, "--no-fallback"], b"{}")

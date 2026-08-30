@@ -126,7 +126,9 @@ def test_enabled_transport_without_anchor_returns_unchanged() -> None:
 
 def test_guard_block_reentry_check_is_first() -> None:
     """The `--no-relay` re-entry check gates the whole guard (loop-safety)."""
-    block = build_relay_guard_block("pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"))
+    block = build_relay_guard_block(
+        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u")
+    )
     lines = [line for line in block.splitlines() if line.strip()]
     assert lines[1] == 'if [[ "${1:-}" != "--no-relay" ]]; then'
 
@@ -166,13 +168,17 @@ def test_guard_block_timeout_ms_derived_from_timeout_seconds() -> None:
 
 
 def test_guard_block_execs_with_fallback_and_stdin_intact() -> None:
-    block = build_relay_guard_block("pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"))
+    block = build_relay_guard_block(
+        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u")
+    )
     assert 'exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}"' in block
 
 
 def test_guard_block_is_pure_builtin_no_subshell_spawn() -> None:
     """No `$( )`/backtick/external command inside the guard — bash builtins only."""
-    block = build_relay_guard_block("pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"))
+    block = build_relay_guard_block(
+        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u")
+    )
     assert "$(" not in block
     assert "`" not in block
 
@@ -227,9 +233,7 @@ def test_nc_enabled_preserves_existing_response_mode_arg() -> None:
 
 
 def test_nc_enabled_appends_to_forward_stop_event_call() -> None:
-    source = _SAMPLE_SOURCE.replace(
-        'send_request_stdin "PreToolUse"', 'forward_stop_event "Stop"'
-    )
+    source = _SAMPLE_SOURCE.replace('send_request_stdin "PreToolUse"', 'forward_stop_event "Stop"')
     transport = TransportConfig(nc_enabled=True)
     result = generate_forwarder_content(source, "stop", transport, Path("/proj/untracked"))
     assert 'forward_stop_event "Stop" "stop"' in result
