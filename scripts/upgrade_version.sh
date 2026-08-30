@@ -265,7 +265,7 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ]; then
         rm -rf "$LEGACY_VENV"
     fi
 
-    deploy_all_hooks "$PROJECT_ROOT" "$DAEMON_DIR" "normal"
+    deploy_all_hooks "$PROJECT_ROOT" "$DAEMON_DIR" "normal" "$VENV_PYTHON"
 
     if [ -f "$SETTINGS_JSON_SOURCE" ]; then
         cp "$SETTINGS_JSON_SOURCE" "$PROJECT_ROOT/.claude/settings.json"
@@ -744,7 +744,7 @@ fi
 # ============================================================
 
 log_step "8" "Redeploying hook scripts"
-deploy_all_hooks "$PROJECT_ROOT" "$DAEMON_DIR" "normal"
+deploy_all_hooks "$PROJECT_ROOT" "$DAEMON_DIR" "normal" "$VENV_PYTHON"
 
 # ============================================================
 # Step 9: Redeploy settings.json

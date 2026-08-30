@@ -107,14 +107,28 @@ as the mitigations.
 
 ### Phase 4: Bash forwarder integration
 
-- [ ] ⬜ **Task 4.1**: Rework `.claude/hooks/*` generation: when the config
-  enables the relay and the binary is present, the hook command execs the
-  relay directly (no `init.sh` on the hot path); otherwise the existing
-  script shape, with the `nc -U` rung inserted before the python3 transport
-  when enabled and probed available.
-- [ ] ⬜ **Task 4.2**: Preserve fail-open: every rung's failure lands in the
-  next rung; the last rung keeps `ensure_daemon` + JSON error emission.
-  Acceptance tests for daemon-down, binary-missing, and nc-missing paths.
+- [x] ✅ **Task 4.1**: Reworked `.claude/hooks/*` generation —
+  `install/forwarder_generator.py::generate_forwarder_content` inserts the
+  pure-builtin relay guard block above `source init.sh` when
+  `relay_enabled`, and appends the event's bash_key to the
+  `send_request_stdin`/`forward_stop_event` call when `nc_enabled`; both
+  transforms are independent, idempotent, and no-ops by default (pinned by a
+  byte-identical test against every real deployed hook). Wired into
+  `scripts/install/hooks_deploy.sh::deploy_all_hooks` as a post-`cp`
+  regeneration step (skipped in self-install mode); the `nc -U` rung itself
+  lives in `init.sh::send_request_stdin`, gated on
+  `HOOKS_DAEMON_NC_UNIX_CAPABLE` + the generated socket-name arg, buffering
+  payload/response via temp files (never shell variables) and replaying to
+  the python3 rung on an empty capture.
+- [x] ✅ **Task 4.2**: Fail-open preserved end-to-end — acceptance tests
+  (`tests/integration/test_relay_guard_fail_open.py`) drive REAL generated
+  forwarders against the actual built relay binary for daemon-down
+  (connect-fail → exec fallback with stdin intact → reaches `ensure_daemon`)
+  and binary-missing (guard's own `-x` test skips cleanly to the legacy
+  path), plus nc-missing (broken `nc` degrades to python3, payload
+  genuinely replayed) and `--no-relay` re-entry loop-safety (a forwarder
+  invoked with `--no-relay` never re-attempts the relay even with a working
+  binary and socket present).
 
 ### Phase 5: Distribution and release integration
 

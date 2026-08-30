@@ -436,6 +436,45 @@ git_force_executable() {
 }
 
 #
+# regenerate_forwarders_for_transport() - Insert the opt-in relay guard (Plan 00290)
+#
+# Runs the forwarder_generator module against an already-deployed hooks dir.
+# With the config default (daemon.transport.relay_enabled: false) this is a
+# genuine no-op: the generator reads config, sees the rung disabled, and
+# touches nothing — the plain-cp deploy from deploy_hook_scripts stands
+# byte-identical. Only when a client has opted in does this rewrite the
+# deployed forwarders in place to add the guard block (DESIGN-socket-relay.md
+# §6.1).
+#
+# Args:
+#   $1 - project_root: Path to project root
+#   $2 - hooks_dir: Path to the DEPLOYED .claude/hooks directory
+#   $3 - venv_python: Path to the daemon's venv Python (may be empty/unset —
+#        e.g. an early-stage caller that has not resolved a venv yet)
+#
+# Returns:
+#   Exit code 0 always (advisory only) — a generation failure must never
+#   abort an install/upgrade; the plain-cp forwarders it leaves behind still
+#   work correctly via the permanent bash+python3 rung.
+#
+regenerate_forwarders_for_transport() {
+    local project_root="$1"
+    local hooks_dir="$2"
+    local venv_python="${3:-}"
+
+    if [ -z "$venv_python" ] || [ ! -x "$venv_python" ]; then
+        print_verbose "No venv Python available — skipping relay-guard forwarder generation"
+        return 0
+    fi
+
+    if ! "$venv_python" -m claude_code_hooks_daemon.install.forwarder_generator \
+        --project-root "$project_root" --hooks-dir "$hooks_dir"; then
+        print_warning "Relay-guard forwarder generation failed — forwarders deployed as plain copies (legacy transport still works)"
+    fi
+    return 0
+}
+
+#
 # deploy_all_hooks() - Complete hook deployment workflow
 #
 # Deploys all hooks, init script, and sets permissions.
@@ -445,6 +484,9 @@ git_force_executable() {
 #   $1 - project_root: Path to project root
 #   $2 - daemon_dir: Path to daemon installation directory
 #   $3 - install_mode: "self-install" or "normal"
+#   $4 - venv_python: (optional) Path to the daemon's venv Python, used to
+#        run the Plan 00290 relay-guard forwarder generation step. Omitted or
+#        non-executable: that step is skipped (forwarders stay plain copies).
 #
 # Returns:
 #   Exit code 0 on success, 1 on failure
@@ -453,6 +495,7 @@ deploy_all_hooks() {
     local project_root="$1"
     local daemon_dir="$2"
     local install_mode="$3"
+    local venv_python="${4:-}"
 
     if [ -z "$project_root" ] || [ -z "$daemon_dir" ]; then
         fail_fast "deploy_all_hooks: project_root and daemon_dir required"
@@ -480,6 +523,15 @@ deploy_all_hooks() {
     # Running set_hook_permissions unconditionally is idempotent and cheap.
     if ! set_hook_permissions "$project_root"; then
         print_warning "Failed to set hook permissions — hooks may not fire"
+    fi
+
+    # Plan 00290 Task 4.1: insert the opt-in relay hot-path guard when config
+    # enables it. NEVER in self-install mode — target_hooks IS this
+    # repository's own tracked .claude/hooks/* (deploy_hook_scripts already
+    # skipped copying for the same reason above); rewriting the source of
+    # truth from a generator would defeat the whole byte-identical contract.
+    if [ "$install_mode" != "self-install" ]; then
+        regenerate_forwarders_for_transport "$project_root" "$project_root/.claude/hooks" "$venv_python"
     fi
 
     # Ensure the echd-capture helper (recommended by pipe_blocker) is

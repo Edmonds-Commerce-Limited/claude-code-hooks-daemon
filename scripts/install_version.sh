@@ -357,7 +357,7 @@ fi
 # ============================================================
 
 log_step "4" "Deploying hook scripts"
-deploy_all_hooks "$PROJECT_ROOT" "$DAEMON_DIR" "normal"
+deploy_all_hooks "$PROJECT_ROOT" "$DAEMON_DIR" "normal" "$VENV_PYTHON"
 
 # ============================================================
 # Step 5: Deploy settings.json

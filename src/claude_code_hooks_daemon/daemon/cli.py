@@ -3990,6 +3990,46 @@ def cmd_secret_meta(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_transport_probe(args: argparse.Namespace) -> int:
+    """Report Plan 00290 transport rung availability (read-only, cheap).
+
+    Resolves the effective relay binary path from the project's
+    ``daemon.transport`` config (override or the ``{untracked}/bin/hooks-relay``
+    default) and reports whether it is present/executable/digest-verified,
+    whether ``nc`` on ``PATH`` is Unix-socket-capable, and whether the
+    daemon's per-event socket dir currently exists. See
+    ``CLAUDE/Plan/00290-rust-socket-relay-forwarder/DESIGN-socket-relay.md``
+    §6.3.
+
+    Returns:
+        0 always — this is a report, not a pass/fail gate.
+    """
+    from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir
+    from claude_code_hooks_daemon.daemon.validation import load_config_safe
+    from claude_code_hooks_daemon.install.transport_probe import (
+        probe_transport,
+        render_table,
+    )
+
+    override = getattr(args, "project_root", None)
+    project_root = Path(override) if override else Path(get_project_path(None))
+    config = load_config_safe(project_root) or {}
+    transport_config = (config.get("daemon", {}) or {}).get("transport", {}) or {}
+    override_binary = transport_config.get("relay_binary")
+    relay_binary = (
+        Path(override_binary)
+        if override_binary
+        else get_event_socket_dir(project_root).parent / "bin" / "hooks-relay"
+    )
+
+    result = probe_transport(project_root=project_root, relay_binary=relay_binary)
+    if getattr(args, "json", False):
+        print(json.dumps(result.as_dict()))
+    else:
+        print(render_table(result))
+    return 0
+
+
 def cmd_reconcile_settings(args: argparse.Namespace) -> int:
     """Reconcile a settings.json's hook registrations against the SSoT.
 
@@ -5722,6 +5762,23 @@ def main() -> int:
         help="Project root for config + key resolution (trusted as-is; auto-detected by default)",
     )
     parser_secret_meta.set_defaults(func=cmd_secret_meta)
+
+    # transport-probe (Plan 00290) — relay/nc rung availability, read-only
+    parser_transport_probe = subparsers.add_parser(
+        "transport-probe",
+        help="Report Plan 00290 transport rung availability (relay binary, nc -U, per-event sockets)",
+    )
+    parser_transport_probe.add_argument(
+        "--project-root",
+        type=Path,
+        help="Project root to probe (auto-detected by default)",
+    )
+    parser_transport_probe.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON instead of a human-readable table",
+    )
+    parser_transport_probe.set_defaults(func=cmd_transport_probe)
 
     # reconcile-settings (Plan 00185) — SSoT-derived settings.json hook merge
     parser_reconcile = subparsers.add_parser(
