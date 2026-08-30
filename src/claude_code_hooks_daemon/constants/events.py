@@ -17,7 +17,87 @@ Usage:
 """
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Final, Literal
+
+
+class EventType(StrEnum):
+    """Supported Claude Code hook event types — the WIRE protocol values.
+
+    Lives here (not ``core.event``) so the event-identifier catalogue below
+    can type its wire name against it without an import cycle; ``core.event``
+    re-exports it for its historical import path. These are the exact strings
+    the daemon's ``HookEvent`` model accepts on the socket — note
+    ``STATUS_LINE = "Status"``, which differs from the meta's PascalCase
+    ``json_key`` (``StatusLine``): the wire name is the ONLY safe value to
+    put in a request envelope's ``event`` field.
+    """
+
+    PRE_TOOL_USE = "PreToolUse"
+    POST_TOOL_USE = "PostToolUse"
+    SESSION_START = "SessionStart"
+    SESSION_END = "SessionEnd"
+    PRE_COMPACT = "PreCompact"
+    USER_PROMPT_SUBMIT = "UserPromptSubmit"
+    PERMISSION_REQUEST = "PermissionRequest"
+    NOTIFICATION = "Notification"
+    STOP = "Stop"
+    SUBAGENT_STOP = "SubagentStop"
+    STATUS_LINE = "Status"
+    # Plan 00170: events wired for zero-handler passthrough (no built-in handler
+    # yet — client projects may attach handlers). Kept in lockstep with the
+    # wired EventID catalogue by test_hook_coverage_completeness.
+    SETUP = "Setup"
+    PERMISSION_DENIED = "PermissionDenied"
+    CWD_CHANGED = "CwdChanged"
+    WORKTREE_CREATE = "WorktreeCreate"
+    WORKTREE_REMOVE = "WorktreeRemove"
+    USER_PROMPT_EXPANSION = "UserPromptExpansion"
+    POST_TOOL_USE_FAILURE = "PostToolUseFailure"
+    POST_TOOL_BATCH = "PostToolBatch"
+    SUBAGENT_START = "SubagentStart"
+    TASK_CREATED = "TaskCreated"
+    TASK_COMPLETED = "TaskCompleted"
+    STOP_FAILURE = "StopFailure"
+    TEAMMATE_IDLE = "TeammateIdle"
+    INSTRUCTIONS_LOADED = "InstructionsLoaded"
+    CONFIG_CHANGE = "ConfigChange"
+    FILE_CHANGED = "FileChanged"
+    POST_COMPACT = "PostCompact"
+    ELICITATION = "Elicitation"
+    ELICITATION_RESULT = "ElicitationResult"
+    MESSAGE_DISPLAY = "MessageDisplay"
+
+    @classmethod
+    def from_string(cls, value: str) -> "EventType":
+        """Convert string to EventType, case-insensitive.
+
+        Args:
+            value: Event type string (e.g., "PreToolUse", "pre_tool_use", "status_line")
+
+        Returns:
+            Matching EventType enum member
+
+        Raises:
+            ValueError: If no matching event type found
+        """
+        # Try exact match first
+        for member in cls:
+            if member.value == value:
+                return member
+
+        # Handle special case: "status_line" -> "Status"
+        if value.lower() in ("status_line", "statusline"):
+            return cls.STATUS_LINE
+
+        # Try snake_case conversion
+        normalised = value.lower().replace("_", "")
+        for member in cls:
+            if member.value.lower().replace("_", "") == normalised:
+                return member
+
+        valid_types = ", ".join(m.value for m in cls)
+        raise ValueError(f"Unknown event type: {value}. Valid types: {valid_types}")
 
 
 @dataclass(frozen=True)
@@ -58,6 +138,22 @@ class EventIDMeta:
     category: str = ""
     wired: bool = True
     raw_stdout: bool = False
+
+    @property
+    def wire_key(self) -> EventType:
+        """The typed WIRE protocol event name for this event.
+
+        This is the only value safe to put in a request envelope's ``event``
+        field. It is usually identical to ``json_key``, but NOT always —
+        ``STATUS_LINE`` has ``json_key="StatusLine"`` while the wire value is
+        ``"Status"``, and a consumer that trusts ``json_key`` as the wire
+        name fails ``HookEvent`` validation on every status-line request.
+        Returning the ``EventType`` MEMBER (not a str) makes the invariant
+        type-checked at every consumer: an event whose name cannot resolve
+        raises here, at the source, instead of as a stream of
+        invalid_request warnings at runtime.
+        """
+        return EventType.from_string(self.json_key)
 
 
 class EventID:

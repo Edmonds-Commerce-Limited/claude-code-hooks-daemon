@@ -865,8 +865,11 @@ class HooksDaemon:
                 )
                 continue
             try:
+                # wire_key, NOT json_key: the request envelope's event field
+                # must carry the typed wire value (json_key diverges for
+                # status-line, and HookEvent validation rejects it).
                 event_server = await asyncio.start_unix_server(
-                    partial(self._handle_event_client, meta.json_key),
+                    partial(self._handle_event_client, meta.wire_key.value),
                     path=str(event_socket_path),
                     limit=SocketLimit.REQUEST_BUFFER_BYTES,
                 )
@@ -874,12 +877,12 @@ class HooksDaemon:
                 logger.error(
                     "Failed to bind per-event socket %s (%s): %s",
                     event_socket_path,
-                    meta.json_key,
+                    meta.wire_key.value,
                     e,
                 )
                 continue
             event_socket_path.chmod(0o660)
-            bound[meta.json_key] = event_server
+            bound[meta.wire_key.value] = event_server
 
         self._event_servers = bound
         total_wired = len(wired_event_metas())

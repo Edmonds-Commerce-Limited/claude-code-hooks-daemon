@@ -4,82 +4,17 @@ This module provides Pydantic models for representing hook events
 from Claude Code with full type safety and validation.
 """
 
-from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from claude_code_hooks_daemon.constants import ToolName
+from claude_code_hooks_daemon.constants.events import EventType
 
-
-class EventType(StrEnum):
-    """Supported Claude Code hook event types."""
-
-    PRE_TOOL_USE = "PreToolUse"
-    POST_TOOL_USE = "PostToolUse"
-    SESSION_START = "SessionStart"
-    SESSION_END = "SessionEnd"
-    PRE_COMPACT = "PreCompact"
-    USER_PROMPT_SUBMIT = "UserPromptSubmit"
-    PERMISSION_REQUEST = "PermissionRequest"
-    NOTIFICATION = "Notification"
-    STOP = "Stop"
-    SUBAGENT_STOP = "SubagentStop"
-    STATUS_LINE = "Status"
-    # Plan 00170: events wired for zero-handler passthrough (no built-in handler
-    # yet — client projects may attach handlers). Kept in lockstep with the
-    # wired EventID catalogue by test_hook_coverage_completeness.
-    SETUP = "Setup"
-    PERMISSION_DENIED = "PermissionDenied"
-    CWD_CHANGED = "CwdChanged"
-    WORKTREE_CREATE = "WorktreeCreate"
-    WORKTREE_REMOVE = "WorktreeRemove"
-    USER_PROMPT_EXPANSION = "UserPromptExpansion"
-    POST_TOOL_USE_FAILURE = "PostToolUseFailure"
-    POST_TOOL_BATCH = "PostToolBatch"
-    SUBAGENT_START = "SubagentStart"
-    TASK_CREATED = "TaskCreated"
-    TASK_COMPLETED = "TaskCompleted"
-    STOP_FAILURE = "StopFailure"
-    TEAMMATE_IDLE = "TeammateIdle"
-    INSTRUCTIONS_LOADED = "InstructionsLoaded"
-    CONFIG_CHANGE = "ConfigChange"
-    FILE_CHANGED = "FileChanged"
-    POST_COMPACT = "PostCompact"
-    ELICITATION = "Elicitation"
-    ELICITATION_RESULT = "ElicitationResult"
-    MESSAGE_DISPLAY = "MessageDisplay"
-
-    @classmethod
-    def from_string(cls, value: str) -> "EventType":
-        """Convert string to EventType, case-insensitive.
-
-        Args:
-            value: Event type string (e.g., "PreToolUse", "pre_tool_use", "status_line")
-
-        Returns:
-            Matching EventType enum member
-
-        Raises:
-            ValueError: If no matching event type found
-        """
-        # Try exact match first
-        for member in cls:
-            if member.value == value:
-                return member
-
-        # Handle special case: "status_line" -> "Status"
-        if value.lower() in ("status_line", "statusline"):
-            return cls.STATUS_LINE
-
-        # Try snake_case conversion
-        normalised = value.lower().replace("_", "")
-        for member in cls:
-            if member.value.lower().replace("_", "") == normalised:
-                return member
-
-        valid_types = ", ".join(m.value for m in cls)
-        raise ValueError(f"Unknown event type: {value}. Valid types: {valid_types}")
+# EventType is defined in constants.events (beside the EventID catalogue whose
+# typed ``wire_key`` property depends on it — the import this way round avoids
+# a cycle); re-exported here for its long-standing import path.
+__all__ = ["EventType", "HookEvent", "HookInput", "ToolInput"]
 
 
 class ToolInput(BaseModel):
