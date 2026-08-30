@@ -11,12 +11,16 @@ with ``Path.mkdir`` mocked so path generation never touches the real
 filesystem.
 """
 
+import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from claude_code_hooks_daemon.daemon.paths import (
+    _EVENT_SOCKET_FILENAME_BUDGET,
     _UNIX_SOCKET_PATH_LIMIT,
+    event_socket_dir_is_fallback,
     get_event_socket_dir,
     get_event_socket_dir_from_untracked,
     get_event_socket_path,
@@ -74,13 +78,19 @@ class TestGetEventSocketPath(_EventSocketPathTestBase):
         post = get_event_socket_path(project_dir, "post-tool-use")
         self.assertNotEqual(pre, post)
 
-    def test_returns_none_when_path_exceeds_unix_socket_limit(self) -> None:
-        # A deeply nested project path pushes the computed socket path past
-        # the AF_UNIX length limit — per §1.1, per-event listeners are
-        # skipped entirely (None) rather than relocated to a fallback dir.
+    def test_falls_back_instead_of_none_when_natural_path_exceeds_unix_socket_limit(self) -> None:
+        # Plan 00290 F3 fix (canary run 2): a deeply nested project path
+        # pushes the NATURAL events dir past the AF_UNIX length limit — the
+        # standard client layout, where the bug left most events silently
+        # unbound. Per-event sockets must now relocate to the short
+        # fallback root (mirroring get_socket_path's own overflow fallback)
+        # rather than being skipped entirely.
         deep_project_dir = Path("/" + ("a-fairly-long-directory-name/" * 20))
         path = get_event_socket_path(deep_project_dir, "pre-tool-use")
-        self.assertIsNone(path)
+        self.assertIsNotNone(path)
+        assert path is not None  # narrows for mypy
+        self.assertLessEqual(len(str(path)), _UNIX_SOCKET_PATH_LIMIT)
+        self.assertEqual(path.name, "pre-tool-use.sock")
 
 
 class TestGetEventSocketPathInDir(unittest.TestCase):
@@ -91,6 +101,94 @@ class TestGetEventSocketPathInDir(unittest.TestCase):
     def test_none_when_too_long(self) -> None:
         long_dir = Path("/tmp/" + ("x" * _UNIX_SOCKET_PATH_LIMIT))
         self.assertIsNone(get_event_socket_path_in_dir(long_dir, "stop"))
+
+
+class TestEventSocketDirFallback(_EventSocketPathTestBase):
+    """Plan 00290 F3 fix: mirrors TestSocketPathLengthFallback (test_paths.py)
+    for the per-event socket directory.
+
+    Uses a SYNTHETIC ``untracked_dir`` (not derived from
+    ``get_socket_path(...).parent``) — a sufficiently deep project already
+    pushes the LEGACY socket itself into ITS OWN overflow fallback (a short
+    ``$XDG_RUNTIME_DIR``-rooted path), which would make ``.parent`` short
+    again and defeat these tests. The events-dir fallback is exercised in
+    isolation by constructing an ``untracked_dir`` long enough to overflow
+    the (deeper) events path while staying agnostic of the legacy socket's
+    own, unrelated fallback decision.
+    """
+
+    # events{suffix} for HOSTNAME=test-host is "events-test-host" (18 chars
+    # incl. leading "/"). Budget math: fits iff
+    # len(untracked_dir) + 18 + 30 <= 104, i.e. len(untracked_dir) <= 56.
+    # 90 chars comfortably overflows; 20 chars comfortably fits.
+    _DEEP_UNTRACKED_DIR = Path("/" + "a" * 90)
+    _SHORT_UNTRACKED_DIR = Path("/" + "a" * 20)
+
+    def test_short_untracked_dir_is_not_fallback(self) -> None:
+        self.assertFalse(event_socket_dir_is_fallback(self._SHORT_UNTRACKED_DIR))
+
+    def test_deep_untracked_dir_uses_fallback(self) -> None:
+        self.assertTrue(event_socket_dir_is_fallback(self._DEEP_UNTRACKED_DIR))
+
+    def test_deep_path_over_limit_uses_xdg_runtime_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as xdg_dir:
+            with patch.dict("os.environ", {"XDG_RUNTIME_DIR": xdg_dir}):
+                events_dir = get_event_socket_dir_from_untracked(self._DEEP_UNTRACKED_DIR)
+        self.assertTrue(str(events_dir).startswith(xdg_dir))
+        self.assertIn("-events", events_dir.name)
+
+    def test_deep_path_over_limit_uses_tmp_when_no_xdg_or_run_user(self) -> None:
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("XDG_RUNTIME_DIR", None)
+            with patch.object(Path, "is_dir", return_value=False):
+                events_dir = get_event_socket_dir_from_untracked(self._DEEP_UNTRACKED_DIR)
+        self.assertTrue(str(events_dir).startswith("/tmp/"))  # nosec B108
+        self.assertIn("-events", events_dir.name)
+
+    def test_fallback_dir_is_deterministic_for_same_untracked_dir(self) -> None:
+        first = get_event_socket_dir_from_untracked(self._DEEP_UNTRACKED_DIR)
+        second = get_event_socket_dir_from_untracked(self._DEEP_UNTRACKED_DIR)
+        self.assertEqual(first, second)
+
+    def test_fallback_dir_differs_across_distinct_projects(self) -> None:
+        dir_a = Path("/" + "a" * 90)
+        dir_b = Path("/" + "b" * 90)
+        events_a = get_event_socket_dir_from_untracked(dir_a)
+        events_b = get_event_socket_dir_from_untracked(dir_b)
+        self.assertNotEqual(events_a, events_b)
+
+
+class TestAllWiredEventsBindAtRealisticClientDepth(_EventSocketPathTestBase):
+    """Plan 00290 F3 fix: every wired event must resolve to a bindable
+    (non-None) socket path at a REALISTIC standard client checkout depth —
+    the exact shape the canary found only 7/31 bound at."""
+
+    def test_every_wired_event_resolves_under_realistic_client_depth(self) -> None:
+        from claude_code_hooks_daemon.constants.events import wired_event_metas
+
+        # `<some-org>/<some-deeply-nested-monorepo>/services/billing-api/.claude/hooks-daemon/untracked`
+        realistic_client_project = Path(
+            "/home/runner/work/some-org/some-deeply-nested-monorepo-checkout/"
+            "services/billing-api"
+        )
+        events_dir = get_event_socket_dir(realistic_client_project)
+        for meta in wired_event_metas():
+            path = get_event_socket_path_in_dir(events_dir, meta.bash_key)
+            self.assertIsNotNone(
+                path, f"{meta.bash_key}: socket path unexpectedly exceeds the AF_UNIX limit"
+            )
+            assert path is not None  # narrows for mypy
+            self.assertLessEqual(len(str(path)), _UNIX_SOCKET_PATH_LIMIT)
+
+
+def test_event_socket_filename_budget_covers_every_wired_event() -> None:
+    """The hardcoded worst-case budget (kept literal so paths.py stays
+    stdlib-only importable — see its docstring) must stay >= the real
+    worst case declared in constants/events.py."""
+    from claude_code_hooks_daemon.constants.events import wired_event_metas
+
+    worst_case = max(len(meta.bash_key) + len(".sock") for meta in wired_event_metas())
+    assert worst_case <= _EVENT_SOCKET_FILENAME_BUDGET
 
 
 if __name__ == "__main__":

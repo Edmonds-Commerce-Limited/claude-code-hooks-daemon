@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from claude_code_hooks_daemon.config.models import TransportConfig
-from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir
+from claude_code_hooks_daemon.daemon.paths import get_untracked_dir
 
 #: The one relay target this project builds/ships today (design §3.2).
 RELAY_TARGET: str = "x86_64-unknown-linux-musl"
@@ -87,7 +87,10 @@ def resolve_relay_binary_path(project_root: Path, transport: TransportConfig) ->
     """
     if transport.relay_binary:
         return Path(transport.relay_binary)
-    untracked_dir = get_event_socket_dir(project_root).parent
+    # Plan 00290 F3 fix: NOT get_event_socket_dir(...).parent — that dir can
+    # now resolve to an AF_UNIX-overflow fallback root (e.g. under
+    # /run/user/{uid}), unrelated to where the relay binary actually lives.
+    untracked_dir = get_untracked_dir(project_root)
     return untracked_dir / "bin" / "hooks-relay"
 
 

@@ -882,7 +882,22 @@ class HooksDaemon:
             bound[meta.json_key] = event_server
 
         self._event_servers = bound
-        if bound:
+        total_wired = len(wired_event_metas())
+        if len(bound) < total_wired:
+            # Plan 00290 F3 fix (canary run 2): the canary saw most events
+            # silently unbound with no summary signal — only the per-socket
+            # WARNING/ERROR lines above, easy to miss in a long log. A
+            # shortfall is now ALSO surfaced as one line naming the count, so
+            # `bin/hooks-daemon logs`/status reporting can flag it without
+            # grepping for every individual skip.
+            logger.warning(
+                "Only %d/%d per-event socket(s) bound under %s — the rest are "
+                "served only via the legacy socket (see per-socket warnings above)",
+                len(bound),
+                total_wired,
+                events_dir,
+            )
+        elif bound:
             logger.info("Bound %d per-event socket(s) under %s", len(bound), events_dir)
 
     @staticmethod

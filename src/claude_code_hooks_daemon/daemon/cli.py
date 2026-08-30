@@ -830,12 +830,22 @@ def cmd_status(args: argparse.Namespace) -> int:
     if transport_config is not None and (
         transport_config.relay_enabled or transport_config.nc_enabled
     ):
+        from claude_code_hooks_daemon.constants.events import wired_event_metas
         from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir
 
         events_dir = get_event_socket_dir(project_path)
+        expected_total = len(wired_event_metas())
         if events_dir.is_dir():
             socket_count = len(list(events_dir.glob("*.sock")))
-            print(f"Per-event listeners: {socket_count} active ({events_dir})")
+            print(f"Per-event listeners: {socket_count}/{expected_total} active ({events_dir})")
+            # Plan 00290 F3 fix (canary run 2): a shortfall used to be
+            # invisible in `status` output — the canary saw only 7/31 bound
+            # with nothing here to flag it. Surface it explicitly.
+            if socket_count < expected_total:
+                print(
+                    f"  WARNING: {expected_total - socket_count} event socket(s) "
+                    "failed to bind — see daemon log for details"
+                )
         else:
             print("Per-event listeners: transport enabled but events dir not found")
 
@@ -4009,7 +4019,7 @@ def cmd_transport_probe(args: argparse.Namespace) -> int:
     Returns:
         0 always — this is a report, not a pass/fail gate.
     """
-    from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir
+    from claude_code_hooks_daemon.daemon.paths import get_untracked_dir
     from claude_code_hooks_daemon.daemon.validation import load_config_safe
     from claude_code_hooks_daemon.install.transport_probe import (
         probe_transport,
@@ -4024,7 +4034,11 @@ def cmd_transport_probe(args: argparse.Namespace) -> int:
     relay_binary = (
         Path(override_binary)
         if override_binary
-        else get_event_socket_dir(project_root).parent / "bin" / "hooks-relay"
+        # Plan 00290 F3 fix: NOT get_event_socket_dir(...).parent — that dir
+        # can now resolve to an AF_UNIX-overflow fallback root (e.g. under
+        # /run/user/{uid}), which is unrelated to where the relay binary
+        # actually lives (get_untracked_dir is independent of that decision).
+        else get_untracked_dir(project_root) / "bin" / "hooks-relay"
     )
 
     result = probe_transport(project_root=project_root, relay_binary=relay_binary)

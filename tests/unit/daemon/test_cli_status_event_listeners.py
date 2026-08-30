@@ -80,7 +80,43 @@ class TestCmdStatusPerEventListeners:
 
         out = capsys.readouterr().out
         assert result == 0
-        assert "Per-event listeners: 2 active" in out
+        # Plan 00290 F3 fix: the count now shows against the expected total
+        # (canary run 2 — a shortfall used to be invisible in `status`).
+        from claude_code_hooks_daemon.constants.events import wired_event_metas
+
+        expected_total = len(wired_event_metas())
+        assert f"Per-event listeners: 2/{expected_total} active" in out
+        assert "WARNING" in out  # 2 bound out of many wired events is a shortfall
+
+    def test_no_shortfall_warning_when_every_wired_event_is_bound(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from claude_code_hooks_daemon.constants.events import wired_event_metas
+
+        transport_yaml = "  transport:\n    relay_enabled: true\n"
+        socket_path, untracked_dir = _make_project(tmp_path, transport_yaml=transport_yaml)
+        events_dir = untracked_dir / "events-whatever-suffix"
+        events_dir.mkdir()
+        for meta in wired_event_metas():
+            (events_dir / f"{meta.bash_key}.sock").touch()
+
+        args = argparse.Namespace(project_root=tmp_path)
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path", return_value=socket_path),
+            patch(
+                "claude_code_hooks_daemon.daemon.paths.get_event_socket_dir",
+                return_value=events_dir,
+            ),
+        ):
+            result = cmd_status(args)
+
+        out = capsys.readouterr().out
+        assert result == 0
+        expected_total = len(wired_event_metas())
+        assert f"Per-event listeners: {expected_total}/{expected_total} active" in out
+        assert "WARNING" not in out
 
     def test_reports_missing_events_dir_when_transport_enabled_but_unbound(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

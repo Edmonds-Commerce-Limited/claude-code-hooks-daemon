@@ -1038,6 +1038,31 @@ def get_project_name(project_path: Path | str) -> str:
     return name[:20]
 
 
+def _pick_short_path_root_dir(*, warn_message: str) -> Path:
+    """Return the preferred short-path root for an AF_UNIX overflow fallback.
+
+    Shared by every "project path is too long" fallback in this module (the
+    legacy socket/PID/log fallback and the Plan 00290 per-event socket dir
+    fallback): both need a directory GUARANTEED to be short, tried in the
+    same order of preference.
+
+    Tries, in order:
+    1. ``$XDG_RUNTIME_DIR`` (standard on modern Linux)
+    2. ``/run/user/{uid}`` (common on Linux)
+    3. ``/tmp`` (last resort; logs ``warn_message``)
+    """
+    xdg_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg_dir and Path(xdg_dir).is_dir():
+        return Path(xdg_dir)
+
+    run_user = Path(f"/run/user/{os.getuid()}")
+    if run_user.is_dir():
+        return run_user
+
+    logger.warning(warn_message)
+    return Path("/tmp")  # nosec B108 - /tmp is last resort fallback
+
+
 def _get_fallback_runtime_dir(project_dir: Path, filename: str) -> Path:
     """
     Get fallback path when project path exceeds Unix socket length limit.
@@ -1056,26 +1081,37 @@ def _get_fallback_runtime_dir(project_dir: Path, filename: str) -> Path:
     """
     project_hash = get_project_hash(project_dir)
     base_name = f"hooks-daemon-{project_hash}"
-
-    # Try XDG_RUNTIME_DIR first (standard)
-    xdg_dir = os.environ.get("XDG_RUNTIME_DIR")
-    if xdg_dir and Path(xdg_dir).is_dir():
-        fallback_dir = Path(xdg_dir)
-        logger.info("Socket path too long, using XDG_RUNTIME_DIR: %s", fallback_dir)
-        return fallback_dir / f"{base_name}.{filename}"
-
-    # Try /run/user/{uid} (common on Linux)
-    run_user = Path(f"/run/user/{os.getuid()}")
-    if run_user.is_dir():
-        logger.info("Socket path too long, using /run/user: %s", run_user)
-        return run_user / f"{base_name}.{filename}"
-
-    # Last resort: /tmp (with warning)
-    logger.warning(
-        "Socket path too long and no XDG_RUNTIME_DIR or /run/user available. "
-        "Using /tmp for runtime files. Set CLAUDE_HOOKS_SOCKET_PATH to override."
+    root = _pick_short_path_root_dir(
+        warn_message=(
+            "Socket path too long and no XDG_RUNTIME_DIR or /run/user available. "
+            "Using /tmp for runtime files. Set CLAUDE_HOOKS_SOCKET_PATH to override."
+        )
     )
-    return Path("/tmp") / f"{base_name}.{filename}"  # nosec B108 - /tmp is last resort fallback
+    return root / f"{base_name}.{filename}"
+
+
+def get_untracked_dir(project_dir: Path | str) -> Path:
+    """Return the daemon's untracked directory for ``project_dir`` directly.
+
+    Public entry point for callers that need the untracked dir itself and
+    must NOT derive it from another runtime path's ``.parent`` — that
+    derivation silently breaks whenever the other path is itself using an
+    AF_UNIX-overflow fallback (:func:`get_socket_path`,
+    :func:`get_event_socket_dir_from_untracked` both can resolve outside the
+    project entirely, e.g. under ``$XDG_RUNTIME_DIR`` or ``/tmp``). Plan
+    00290 F3 fix: ``install/forwarder_generator.py`` needs the real
+    untracked dir (for the relay binary's default path and the guard's
+    ``_rl_dir`` literal) independently of where the events socket dir ends
+    up.
+
+    Args:
+        project_dir: Path to project directory.
+
+    Returns:
+        - Self-install mode: ``{project}/untracked``
+        - Normal mode: ``{project}/.claude/hooks-daemon/untracked``
+    """
+    return _get_untracked_dir(Path(project_dir).resolve())
 
 
 def _get_untracked_dir(project_path: Path) -> Path:
@@ -1141,6 +1177,52 @@ def get_socket_path(project_dir: Path | str) -> Path:
     return path
 
 
+# Worst-case length of "<event-file-name>.sock" across every wired event
+# (Plan 00290 F3 fix, canary run 2). Kept as a literal constant here — NOT
+# imported from constants/events.py — because this module must stay
+# importable as a bare stdlib-only script (see the module-level bootstrap
+# comment above ``_DAEMON_METADATA_FILENAME``); pulling in ANY submodule of
+# the ``claude_code_hooks_daemon`` package triggers the package's own
+# ``__init__.py``, which is pydantic-dependent. The invariant that this
+# constant stays >= the real worst case is enforced by
+# ``tests/unit/daemon/test_event_socket_paths.py``.
+_EVENT_SOCKET_FILENAME_BUDGET = 30  # e.g. "post-tool-use-failure.sock" = 27 chars
+
+
+def _event_socket_dir_fits(events_dir: Path) -> bool:
+    """True iff EVERY wired event's socket path under ``events_dir`` fits
+    the AF_UNIX length limit, using the worst-case filename length as a
+    single conservative bound (the events dir is a single directory shared
+    by every forwarder, so the fit/fallback decision is made once, not
+    per-event — see :func:`get_event_socket_dir_from_untracked`)."""
+    worst_case_len = len(str(events_dir)) + len("/") + _EVENT_SOCKET_FILENAME_BUDGET
+    return worst_case_len <= _UNIX_SOCKET_PATH_LIMIT
+
+
+def _get_event_socket_fallback_dir(untracked_dir: Path) -> Path:
+    """Short fallback directory for per-event sockets (Plan 00290 F3 fix).
+
+    Mirrors :func:`_get_fallback_runtime_dir`'s precedence
+    (``$XDG_RUNTIME_DIR`` -> ``/run/user/{uid}`` -> ``/tmp``), keyed by a
+    short hash of ``untracked_dir`` (deterministic and unique per project —
+    the same value ``get_event_socket_dir_from_untracked`` would derive from
+    either the project root or the untracked dir, since the two are related
+    by a pure function). MD5 is used for a short path-identifier only
+    (``usedforsecurity=False``).
+    """
+    dir_hash = hashlib.md5(str(untracked_dir).encode("utf-8"), usedforsecurity=False).hexdigest()[
+        :8
+    ]
+    base_name = f"hooks-daemon-{dir_hash}-events"
+    root = _pick_short_path_root_dir(
+        warn_message=(
+            "Event socket dir too long and no XDG_RUNTIME_DIR or /run/user available. "
+            "Using /tmp for per-event sockets. Set HOOKS_DAEMON_EVENTS_DIR to override."
+        )
+    )
+    return root / base_name
+
+
 # Plan 00290: per-event Unix sockets live in a sibling directory of the
 # legacy daemon socket, one file per wired hook event. See
 # CLAUDE/Plan/00290-rust-socket-relay-forwarder/DESIGN-socket-relay.md §1.1.
@@ -1154,10 +1236,40 @@ def get_event_socket_dir_from_untracked(untracked_dir: Path) -> Path:
 
     Returns:
         ``{untracked_dir}/events{suffix}`` where ``{suffix}`` is the same
-        hostname suffix used by the legacy socket/PID/log files.
+        hostname suffix used by the legacy socket/PID/log files — UNLESS
+        that natural path would push at least one wired event's socket past
+        the AF_UNIX length limit, in which case a short fallback directory
+        is returned instead (Plan 00290 F3 fix: on a standard, deeply-nested
+        client layout the natural path routinely overflows well before the
+        legacy socket does, silently leaving most events unbound with no
+        fallback — the canary-observed bug this closes). See
+        :func:`event_socket_dir_is_fallback` for the same decision exposed
+        as a boolean, and DESIGN-socket-relay.md §1.1 for the caveat this
+        fallback carries for a project shared across multiple hosts.
     """
     suffix = _get_hostname_suffix()
-    return untracked_dir / f"events{suffix}"
+    natural = untracked_dir / f"events{suffix}"
+    if _event_socket_dir_fits(natural):
+        return natural
+    return _get_event_socket_fallback_dir(untracked_dir)
+
+
+def event_socket_dir_is_fallback(untracked_dir: Path) -> bool:
+    """True iff :func:`get_event_socket_dir_from_untracked` resolves to the
+    short fallback root rather than the natural ``events{suffix}`` sibling
+    of the legacy socket (Plan 00290 F3 fix).
+
+    Used by :mod:`install.forwarder_generator` to decide whether the
+    generated relay guard can compute its events directory dynamically in
+    bash (the natural-path case — correct on every host sharing an NFS-mounted
+    project) or must bake the Python-resolved fallback literal instead (see
+    that module's ``build_relay_guard_block`` for the three-way-agreement
+    contract this maintains between this module, the generated bash guard,
+    and the daemon's own bind decision).
+    """
+    suffix = _get_hostname_suffix()
+    natural = untracked_dir / f"events{suffix}"
+    return not _event_socket_dir_fits(natural)
 
 
 def get_event_socket_dir(project_dir: Path | str) -> Path:
