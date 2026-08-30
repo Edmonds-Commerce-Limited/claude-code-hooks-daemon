@@ -161,6 +161,10 @@ def _default_restart_fn(project_root: Path) -> Callable[[], int]:
     def restart() -> int:
         # SECURITY: fixed argv — this interpreter, this package's CLI, a
         # resolved project root. No shell, no user input.
+        # Output goes to DEVNULL, never a pipe: the daemonised child inherits
+        # this process's stdio, so a captured pipe would make run() wait for
+        # the DAEMON's exit, not the CLI's (the daemon-smoke suite's own
+        # hard-learned note). Only the exit code is consumed.
         result = subprocess.run(  # nosec B603
             [
                 sys.executable,
@@ -171,7 +175,8 @@ def _default_restart_fn(project_root: Path) -> Callable[[], int]:
                 "restart",
             ],
             cwd=project_root,
-            capture_output=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             timeout=_RESTART_TIMEOUT_SECONDS,
         )
         return result.returncode

@@ -77,11 +77,14 @@ lineage is one commit old).
 
 ### Phase 2: Integration and safety proofs
 
-- [ ] ⬜ **Task 2.1**: Acceptance tests: toggle on→verify→off→verify cycles
-  against a real daemon, including an induced-failure case proving
-  auto-revert (e.g. a deliberately broken relay binary).
-- [ ] ⬜ **Task 2.2**: Docs (HANDLER_REFERENCE transport section + design
-  doc update) and UPGRADES manifest entries for the new CLI.
+- [x] ✅ **Task 2.1**: Acceptance tests
+  (`tests/acceptance/test_transport_toggle_cycle.py`): on→verify→off→verify
+  cycle + idempotent no-ops + induced-failure auto-revert (broken relay
+  binary) against a real daemon in an isolated client-layout fixture at a
+  short /tmp path — this repo's live daemon/forwarders are never touched.
+- [x] ✅ **Task 2.2**: Docs (HANDLER_REFERENCE transport section, Plan 00290
+  DESIGN-socket-relay.md §6.4) and an UNRELEASED truth-changes manifest
+  entry for the new CLI.
 
 ### Phase 3: Re-enable and soak
 

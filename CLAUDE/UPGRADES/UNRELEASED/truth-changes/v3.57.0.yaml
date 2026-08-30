@@ -101,3 +101,50 @@ truth_changes:
       always-shipped source are the stated mitigations. See
       `docs/guides/HANDLER_REFERENCE.md#transport-daemontransport` and
       `CLAUDE/Plan/00290-rust-socket-relay-forwarder/DESIGN-socket-relay.md`.
+  - was: >
+      Toggling the relay transport was a three-step MANUAL dance — edit
+      `daemon.transport.relay_enabled` by hand, regenerate the deployed
+      forwarders, restart the daemon — with no built-in verification.
+      Every mis-sequenced step during the Plan 00290 dogfood smeared a
+      broken window across live sessions, and nothing checked the result
+      in the invocation context Claude Code actually uses.
+    now: >
+      Plan 00294 adds `bin/hooks-daemon transport on|off|status`: ONE
+      command performing config flip (comment-preserving targeted line
+      edit) -> forwarder regeneration -> daemon restart -> verification
+      that invokes the deployed forwarders exactly as Claude Code does
+      (socket stdin, real payload shapes: JSON decision object for a
+      relay-eligible event, raw text for the status line, exit-code-2 for
+      a blockable Stop, plus a per-event listener check). Any verification
+      failure AUTO-REVERTS the previous state end-to-end and re-verifies
+      it with the same probes, exiting non-zero with the failure named.
+      Repeating the current state is a clean no-op; `transport status`
+      reports the active rung, listener count, relay binary facts and the
+      last toggle's persisted verification result. Hand-toggling still
+      works but is no longer the supported route. See
+      `docs/guides/HANDLER_REFERENCE.md#transport-daemontransport` and
+      DESIGN-socket-relay.md §6.4.
+  - was: >
+      A tool the project never wanted (Artifact being the poster child) could
+      only be fought at CALL time: artifact_publish_blocker denied each
+      publish attempt, but the tool's schema — measured at ~6,000 tokens for
+      Artifact — still loaded into EVERY session's context window, and no
+      daemon surface could tell a project which tools its sessions never
+      actually use.
+    now: >
+      Plan 00293 adds the disable-at-source story end to end. Research
+      (RESEARCH-tool-disable.md) established that settings-level disables
+      (`"enableArtifact": false`, bare tool names in `permissions.deny`,
+      `--tools`) remove the schema from context while specifier/parameter
+      deny rules are call-time refusal only. artifact_publish_blocker gained
+      an opt-in `source_disable` option that keeps the project's
+      `.claude/settings.json` at `"enableArtifact": false` (additive,
+      idempotent, one-shot backup); `bin/hooks-daemon tool-report` scans the
+      project's session transcripts (tool names and counts only — never
+      content) and ranks tools by measured schema cost vs observed usage
+      into never-want / never-used / low-use / keep tiers; a new opt-in
+      `tool_disable_advisor` SessionStart handler checks declared
+      `tool_policy.never_want` tools against project settings and names the
+      exact missing change. Everything RECOMMENDS — nothing is ever disabled
+      automatically, except where a project deliberately enables the
+      blocker's own source_disable enforcement.

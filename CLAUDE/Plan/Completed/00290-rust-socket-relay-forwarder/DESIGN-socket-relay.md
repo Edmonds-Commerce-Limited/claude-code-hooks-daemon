@@ -454,6 +454,20 @@ Output: human-readable table + `--json`; `transport_env.sh` (§3.2) persists
 the one deploy-time fact the bash side reads (`HOOKS_DAEMON_NC_UNIX_CAPABLE`)
 into `hooks-daemon.env`, which init.sh already sources.
 
+### 6.4 Operational toggle (Plan 00294)
+
+`bin/hooks-daemon transport on|off|status` is the supported way to flip
+`relay_enabled` after deploy: ONE command performing config flip
+(comment-preserving targeted line edit) -> forwarder regeneration (§6.1's
+strip-then-reapply transform) -> daemon restart -> real-invocation-context
+verification (socket-stdin probes per `install/transport_verify.py`:
+pre-tool-use JSON object, status-line raw text, stop exit-code-2, per-event
+listener check), with AUTO-REVERT of the previous state on any verification
+failure. `transport status` reports the active rung, listener count, relay
+binary facts and the last toggle's persisted verification result. See
+`CLAUDE/Plan/00294-relay-transport-safe-toggle-and-reenable/PLAN.md` and
+`docs/guides/HANDLER_REFERENCE.md#transport-daemontransport`.
+
 ## 7. Non-goals (binding, restated from PLAN.md)
 
 - No policy in the binary — every allow/deny decision stays in Python.
