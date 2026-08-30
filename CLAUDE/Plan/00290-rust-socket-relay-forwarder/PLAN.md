@@ -72,15 +72,14 @@ as the mitigations.
 
 ### Phase 1: Design
 
-- [ ] ⬜ **Task 1.1**: Write `DESIGN-socket-relay.md` in this folder: per-event
-  socket naming/location (daemon untracked dir, perms), lifecycle (created at
-  daemon start, removed on stop), event↔socket mapping, framing (raw hook
-  JSON in, verdict JSON out), timeout and exit-code contract, and the full
-  fallback ladder with the failure modes each rung must handle.
-- [ ] ⬜ **Task 1.2**: Specify the config schema (single `transport`/forwarder
-  options block: relay enabled flag default false, nc rung enabled flag,
-  timeouts, binary path override) and the installer probe that records rung
-  availability. Config validated through the real loader (`extra="forbid"`).
+- [x] ✅ **Task 1.1**: Write `DESIGN-socket-relay.md` in this folder: per-event
+  socket naming/location, lifecycle, event↔socket mapping, framing, timeout
+  and exit-code contract, and the full fallback ladder — delivered as
+  [DESIGN-socket-relay.md](DESIGN-socket-relay.md) §1–§3, §5.
+- [x] ✅ **Task 1.2**: Specify the config schema (`daemon.transport`: relay
+  enabled default false, nc rung flag, timeout, binary path override) and the
+  installer probe recording rung availability —
+  [DESIGN-socket-relay.md](DESIGN-socket-relay.md) §4, §6.
 
 ### Phase 2: Daemon per-event listeners
 
