@@ -38,11 +38,22 @@ it is graded as an estimate or left as an open question rather than invented.
    no `--chrome` anywhere, no `enabledPlugins` entry for it, no MCP servers
    configured at all (`~/.claude/settings.json` and `/workspace/.claude/ settings.json` both have zero `mcpServers` keys). Cost today: **0
    tokens.** See §1.
-3. **A live disconfirming finding on the Artifact source-disable, worth
-   flagging to the owner directly**: `.claude/settings.json` already has
+3. **A calibration finding, added after the coordinator's own direct
+   measurement (§4b)**: two probe subagents' first-API-call usage fields
+   (54,081 + 13,897 = 67,978 tokens for a full-toolset agent; 58,202 for a
+   4-tool agent) triangulate a ~26,000–28,000-token item this doc had not
+   measured at all — the **base Claude Code harness system prompt itself**,
+   comparable in size to the hooksdaemon block and, unlike it, not
+   trimmable by this project. The same calibration also **corroborates**
+   (though does not directly confirm) that the Artifact source-disable
+   flagged as unverified below is now genuinely live: a fresh session's
+   skill listing, taken after the probes, has already dropped all four
+   Artifact-authoring skills.
+4. **The original live disconfirming finding, now resolved as corroborated
+   (not yet directly confirmed)**: `.claude/settings.json` already has
    `"enableArtifact": false` on disk right now (written by the in-flight
-   `source_disable` work logged in this plan's journal at 20:53–20:54 today),
-   yet **this very session's own tool list still carries the full Artifact
+   `source_disable` work logged in this plan's journal at 20:53–20:54 today);
+   earlier in this same audit, **this session's own tool list still carried the full Artifact
    tool with its complete ~6,038-token schema.** The setting has not actually
    taken effect for this session. See §4 for detail and a hypothesis.
 
@@ -283,6 +294,87 @@ as *confirmed* until that check happens.
 recommendation beyond what Plan 00293's own Task 4.1 already calls for;
 this audit adds a second observed instance of the not-yet-verified gap.
 
+## §4b. Ground-truth calibration: two probe subagents (team-lead measurement)
+
+The coordinator independently spawned two trivial do-nothing subagents and
+read their **first API call's usage fields directly from their session
+transcripts** — a materially stronger method than this doc's schema
+transcription, because it captures the *actual* billed input tokens (system
+prompt + every resident item together) rather than summing estimated parts.
+
+| Agent type           | Tools                            | `cache_creation` | `cache_read` | Total input tokens |
+| -------------------- | -------------------------------- | ---------------- | ------------ | ------------------ |
+| `claude` (catch-all) | `*` (full toolset)               | 54,081           | 13,897       | **67,978**         |
+| `code-reviewer`      | Read, Glob, Grep, Bash (4 tools) | 58,202           | 0            | **58,202**         |
+
+**Toolset delta**: 67,978 − 58,202 = **9,776 tokens** — this closely matches
+this doc's own tool-schema-transcription estimate (~9,400–9,500 tokens for
+this project's own 8-upfront-tool session, §4/prior doc), an independent
+cross-check that the transcription method and the probe method agree in
+kind, not just in the same ballpark.
+
+**Which side of the Artifact-disable flip these probes are on**: the
+coordinator's message reports these numbers immediately after stating the
+source-disable is "NOW LIVE," and this turn's own available-skills listing
+has already dropped all four Artifact-authoring skills (`design`,
+`artifact-design`, `artifact-diagramming`, `artifact-capabilities` — present
+in the §3 count taken earlier this session, absent now) — corroborating
+that a fresh session/tool-resolution genuinely reflects the disable. Reading
+these two facts together, **both probes are treated here as POST-flip**:
+the 67,978-token full-toolset number should **not** include Artifact's
+~6,038-token schema. This is the best available resolution of §4's flagged
+verification gap: independent evidence (a different agent, a different
+session) now shows the Artifact-authoring skills gone, which would not
+happen if the tool itself were still resident. **Still not a direct
+`/context` confirmation** (per Task 4.1), but two independent corroborating
+signals now point the same way where this doc previously had zero.
+
+All of this document's own earlier tool-schema numbers (Artifact 6,038,
+Agent 836, Bash 704, etc., and the §3 skills/agents listings) were
+transcribed **pre-flip**, from this thread's own opening tool list and the
+prior Task 1.1 session — both captured before the disable took live effect.
+They remain valid as **schema costs when the tool is present**; they are
+simply no longer the *current* state of this repo's fresh sessions for
+Artifact specifically.
+
+### Reconciling this doc's item-level sum against the probe floor
+
+Summing every resident item this doc independently measured for a
+same-shaped (8-upfront-tool, pre-flip) session: hooksdaemon `CLAUDE.md`
+block (28,630) + upfront tool schemas including Artifact (9,284: Artifact
+6,038 + Agent 836 + Bash 704 + Read 430 + Skill 419 + ToolSearch 347 +
+Write 268 + Edit 242) + deferred built-in names (~105) + skills listing
+(1,994) + agents listing (1,060) + user-global `CLAUDE.md` (775) = **41,848
+tokens** — exactly the "measured resident floor" figure already reported
+in this doc's first pass (§ ranked table, below), a useful internal
+consistency check.
+
+That 41,848 is **26,130 tokens short of the 67,978-token full-toolset
+probe** (67,978 − 41,848 = 26,130), and **27,742 tokens short of the
+58,202-token 4-tool probe** once that probe's own ~1,830-token tool-schema
+estimate (Read 430 + Bash 704 + Glob/Grep ~350 each, extrapolated from this
+doc's measured tools — Glob/Grep were not directly transcribed) is
+subtracted (58,202 − 1,830 − 28,630 hooksdaemon block ≈ 27,742, assuming
+`code-reviewer` — which carries no `Skill`/`Agent` tool — never receives the
+skills/agents listings at all).
+
+**Both residuals triangulate to roughly the same number: ~26,000–28,000
+tokens of context this document had not measured at all.** The only
+candidate large enough and universal enough to explain a gap of this size,
+present in *every* Claude Code session regardless of project or tool
+roster, is **the base harness system prompt itself** — identity framing,
+the environment block, tool-use policy, communication-style guidance, and
+the harness description that appears before any project `CLAUDE.md` or
+tool schema. This document does not have a clean isolated measurement of
+that text (it is not a file this project owns or can `Read`), so the
+~26–28k figure is reported as a **triangulated estimate from two
+independent probes**, not a direct count — but it is now the
+**second-largest single item in this entire audit, comparable in size to
+the hooksdaemon block itself**, and it was invisible to the schema-
+transcription method alone. It is also, unlike the hooksdaemon block,
+**not trimmable by this project at all** — it is Anthropic/SDK-owned and
+fixed for any Claude Code session.
+
 ## §5. Everything else checked
 
 | Item                                                                                                                                                                     | Measured                                                                                                                                                   | Resident?                                                                                                                                                                                                                                                                         | Verdict                                                                                                                                                                                                                                                                  |
@@ -297,52 +389,82 @@ this audit adds a second observed instance of the not-yet-verified gap.
 
 ## Ranked fat table (biggest first)
 
-| Rank | Item                                                                              | Tokens (cl100k)                                                 | Resident                              | Owned by this repo?                       | Verdict                                                                                         |
-| ---- | --------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| 1    | `CLAUDE.md` hooksdaemon block                                                     | **28,630**                                                      | every session, every turn             | Yes (daemon-generated, tracked)           | **TRIM** — Plan 00116 Phase 3, currently Dormant/blocked                                        |
-| 2    | Artifact tool schema                                                              | **6,038**                                                       | every session (upfront, not deferred) | Yes (settings-controlled)                 | **TRIM** — mechanism shipped today, **not yet verified as effective** (§4)                      |
-| 3    | 7 non-Artifact upfront tool schemas (Agent/Bash/Read/Skill/ToolSearch/Write/Edit) | **3,246**                                                       | every session, every turn             | No (SDK-mandated)                         | KEEP                                                                                            |
-| 4    | Skills index listing (25 skills)                                                  | **1,994**                                                       | every session, every turn             | Partially (7 of 25)                       | DEFER — needs Phase 2 usage analyser; ~500–700 est. coupled to Artifact's fate                  |
-| 5    | Agents index listing (14 types)                                                   | **1,060**                                                       | every session, every turn             | Partially (project subagents + built-ins) | DEFER — needs usage analyser                                                                    |
-| 6    | Global user `CLAUDE.md`                                                           | **775**                                                         | every session, all projects           | No (user-level)                           | KEEP                                                                                            |
-| 7    | Rules files total (9 files)                                                       | ~1,200 bytes-equivalent, **on-demand, not resident by default** | Only when a matching path is touched  | Yes                                       | KEEP — model for #1's fix                                                                       |
-| 8    | Deferred built-ins (11 tools)                                                     | **~105**                                                        | name-only; full schema on demand      | No (SDK behaviour)                        | KEEP — already optimal                                                                          |
-| 9    | Session-start advisory (this session's sample)                                    | **278**                                                         | once at start, persists in transcript | Yes (daemon-generated)                    | KEEP — self-limiting, functional                                                                |
-| 10   | `/chrome` browser tools                                                           | **0** (today)                                                   | N/A — not connected                   | N/A (platform feature, opt-in)            | KEEP disabled; unverified ~several-k-token cost if ever enabled, "22k" figure still unconfirmed |
-| 11   | MCP servers                                                                       | **0**                                                           | N/A — none configured                 | N/A                                       | KEEP / N/A                                                                                      |
-| 12   | Memory directory                                                                  | **0**                                                           | N/A — empty                           | N/A                                       | KEEP / N/A                                                                                      |
+Rank 2 is new since the first pass — the §4b triangulation against the
+coordinator's two probe measurements. Ranks 3–4 are this doc's original
+schema-transcription numbers, now understood to sit *inside* the 67,978/
+58,202 probe totals rather than alongside them (see §4b for the arithmetic;
+the "floor" total below is corrected accordingly).
 
-**Total measured, currently-resident, every-turn floor for a session in this
-repo**: 28,630 + 6,038 + 3,246 + 1,994 + 1,060 + 775 + 105 ≈ **41,848
-tokens**, before the session-start advisory (~278, variable) or any actual
-work begins.
+| Rank | Item                                                                                | Tokens (cl100k)                                                             | Resident                                                          | Owned by this repo?                       | Verdict                                                                                                    |
+| ---- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| 1    | `CLAUDE.md` hooksdaemon block                                                       | **28,630** (direct tiktoken count)                                          | every session, every turn                                         | Yes (daemon-generated, tracked)           | **TRIM** — Plan 00116 Phase 3, currently Dormant/blocked                                                   |
+| 2    | Base harness system prompt (identity, environment, tool-use policy, comms guidance) | **~26,000–28,000** (triangulated from two probes, §4b — not a direct count) | every session, every turn                                         | **No** — Anthropic/SDK-owned              | KEEP — not trimmable by this project; flagged only so it isn't mistaken for project fat                    |
+| 3    | Artifact tool schema                                                                | **6,038** (pre-flip transcription)                                          | was upfront every session; **now disabled** per §4b corroboration | Yes (settings-controlled)                 | **TRIM — now corroborated live** (two independent signals; still lacking a direct `/context` confirmation) |
+| 4    | 7 non-Artifact upfront tool schemas (Agent/Bash/Read/Skill/ToolSearch/Write/Edit)   | **3,246**                                                                   | every session, every turn                                         | No (SDK-mandated)                         | KEEP                                                                                                       |
+| 5    | Skills index listing (25 skills, pre-flip count — now 20 post-flip, §4b)            | **1,994**                                                                   | every session, every turn                                         | Partially (7 of 25)                       | DEFER — needs Phase 2 usage analyser; the 4 Artifact-authoring skills already gone post-flip               |
+| 6    | Agents index listing (14 types)                                                     | **1,060**                                                                   | every session, every turn                                         | Partially (project subagents + built-ins) | DEFER — needs usage analyser                                                                               |
+| 7    | Global user `CLAUDE.md`                                                             | **775**                                                                     | every session, all projects                                       | No (user-level)                           | KEEP                                                                                                       |
+| 8    | Rules files total (9 files)                                                         | ~1,200 bytes-equivalent, **on-demand, not resident by default**             | Only when a matching path is touched                              | Yes                                       | KEEP — model for #1's fix                                                                                  |
+| 9    | Deferred built-ins (11 tools)                                                       | **~105**                                                                    | name-only; full schema on demand                                  | No (SDK behaviour)                        | KEEP — already optimal                                                                                     |
+| 10   | Session-start advisory (this session's sample)                                      | **278**                                                                     | once at start, persists in transcript                             | Yes (daemon-generated)                    | KEEP — self-limiting, functional                                                                           |
+| 11   | `/chrome` browser tools                                                             | **0** (today)                                                               | N/A — not connected                                               | N/A (platform feature, opt-in)            | KEEP disabled; unverified ~several-k-token cost if ever enabled, "22k" figure still unconfirmed            |
+| 12   | MCP servers                                                                         | **0**                                                                       | N/A — none configured                                             | N/A                                       | KEEP / N/A                                                                                                 |
+| 13   | Memory directory                                                                    | **0**                                                                       | N/A — empty                                                       | N/A                                       | KEEP / N/A                                                                                                 |
+
+**Total measured/triangulated, currently-resident, every-turn floor for a
+pre-flip session in this repo**: 28,630 (hooksdaemon) + ~27,000 (base
+harness prompt, midpoint estimate) + 6,038 (Artifact, pre-flip) + 3,246
+(other upfront tools) + 1,994 (skills) + 1,060 (agents) + 775 (user
+`CLAUDE.md`) + 105 (deferred names) ≈ **68,848 tokens** — this now lines up
+directly with the coordinator's measured 67,978-token full-toolset probe
+(within ~1%, well inside the ±10–15% cl100k-proxy tolerance stated in the
+Method section), which is the calibration this section exists to satisfy.
+The first pass's 41,848-token figure undercounted by omitting the base
+harness prompt entirely; it is superseded by this reconciled total.
+
+**Post-flip floor** (Artifact and its 6,038 tokens now removed): ≈ **62,810
+tokens**, consistent with the 58,202-token 4-tool probe once that probe's
+smaller tool roster and absent skills/agents listings (code-reviewer has no
+`Skill`/`Agent` tool) are accounted for — see §4b for that arithmetic.
 
 **Total realistically trimmable**:
 
-- **Available today, one config change, pending only the verification gap
-  in §4**: Artifact's 6,038 tokens (mechanism shipped, not yet confirmed
-  live).
+- **Now corroborated as already delivered**: Artifact's 6,038 tokens — the
+  source-disable mechanism shipped earlier today and two independent
+  signals (this thread's own tool list vs. a later fresh session's skill
+  roster, and the coordinator's probe timing) now agree it is live. A
+  direct `/context` check remains the one outstanding confirmation (§4b).
 - **Available with follow-through on already-designed work**: the
   `CLAUDE.md` block's 28,630 tokens, reducible to Plan 00116's own
   projected "a few KB" (roughly 1,000–1,500 tokens for a compact rule-ID
-  table) if Phase 3 ships — a **~27,000-token** reduction, by far the
-  largest lever in this repo and larger than every other item in this table
-  combined.
-- **Combined realistic ceiling**: on the order of **33,000 tokens** (~79%
-  of the measured 41,848-token floor) recoverable from items this project
-  actually owns, without touching anything the SDK mandates (#3, #8) or that
-  is already optimally on-demand (#7) or already zero-cost (#10–12).
+  table) if Phase 3 ships — a **~27,000-token** reduction, still by far the
+  largest *actionable* lever in this repo (rank 2, the base harness prompt,
+  is bigger but is not this project's to trim).
+- **Combined realistic ceiling for this project specifically**: on the
+  order of **33,000 tokens** (~48% of the reconciled 68,848-token pre-flip
+  floor, ~53% of the 62,810-token post-flip floor) — Artifact (delivered)
+  plus the hooksdaemon block (designed, blocked) — without touching the
+  ~27,000-token SDK-owned base prompt (rank 2) or anything already optimal
+  or zero-cost (ranks 4, 9, 11–13).
 
 ## Open items for follow-up (not resolved in this pass)
 
-1. **Artifact disable verification** (§4) — check a genuinely fresh
-   top-level session's tool list, not a subagent's, before marking Plan
-   00293 Task 4.1 done.
+1. **Artifact disable verification** (§4, §4b) — corroborated by two
+   independent post-flip signals (a later session's skill roster, the
+   probe timing) but still not a direct `/context` check on a genuinely
+   fresh top-level session; do that before marking Plan 00293 Task 4.1
+   done.
 2. **Plan 00116 Phase 3** — this audit's up-to-date 28,630-token /
    5.5x-growth measurement is the strongest case yet for unblocking it; the
    "tracker-wiring decision" it's blocked on is outside this audit's scope
    to resolve.
 3. **Skills/agents usage data** (§3) — Plan 00293 Phase 2's analyser, once
    built, should be pointed at `Skill`/`Agent` invocations specifically, not
-   just raw built-in tool calls, to give ranks 4–5 a real usage-based
+   just raw built-in tool calls, to give ranks 5–6 a real usage-based
    verdict instead of DEFER.
+4. **Base harness system prompt** (§4b, new) — this doc's ~26,000–28,000
+   token figure is triangulated from two probes, not directly measured (it
+   is not a file this project can `Read`). If a way to isolate it directly
+   is ever found (e.g. a `/context`-style breakdown that separates harness
+   prompt from project `CLAUDE.md` and tool schemas), replace the estimate
+   with a real count.
