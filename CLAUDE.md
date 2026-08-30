@@ -140,9 +140,9 @@ The `Artifact` tool renders a local file to a page hosted on claude.ai and retur
 
 **There is NO escape hatch.** Unlike `git_stash` or `ancestry_preserving_merge`, this handler accepts no `MUST_..._BECAUSE` declaration. Those hatches let an agent declare intent for an action whose consequences stay inside the repository; publishing leaves it. An agent that can type its own justification has self-authorised disclosure, which is the precise thing this guard exists to prevent — the same reason `delete-branch --allow-unproven` still demands an interactive human.
 
-**To lift it**, a HUMAN sets `handlers.pre_tool_use.artifact_publish_blocker.enabled: false`. Ask them; do not apply it yourself, and do not hunt for another way to publish.
+**To lift it**, a HUMAN changes `handlers.pre_tool_use.artifact_publish_blocker.enabled` to `false`. Ask them; do not apply it yourself, and do not hunt for another way to publish.
 
-**Optional full disable at source** (Plan 00293): a project that never wants the Artifact tool at all can set `handlers.pre_tool_use.artifact_publish_blocker.options.source_disable: true`. The daemon then ensures `.claude/settings.json` carries `"enableArtifact": false` (additive, idempotent, one-shot backup), which removes the tool — and its schema's context cost — from every new session. The call-time deny above stays as the in-session backstop. Ships disabled; enabling it is a deliberate repository-owner act, and note it also removes the allowed `list` action once a new session starts.
+**Optional full disable at source** (Plan 00293): a project that never wants the Artifact tool at all can opt in via `handlers.pre_tool_use.artifact_publish_blocker.options.source_disable: true`. The daemon then ensures `.claude/settings.json` carries `"enableArtifact": false` (additive, idempotent, one-shot backup), which removes the tool — and its schema's context cost — from every new session. The call-time deny above stays as the in-session backstop. Ships disabled; enabling it is a deliberate repository-owner act, and note it also removes the allowed `list` action once a new session starts.
 
 <!-- handler: block-secret-file-read -->
 
