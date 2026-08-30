@@ -1,6 +1,6 @@
 # Plan 00290: rust socket relay forwarder
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-30
 **Owner**: joseph
 **Priority**: Medium
@@ -172,19 +172,18 @@ neither ever happens implicitly (the relay rung is opt-in to begin with).
   `forwarder_generator.py::regenerate_deployed_hooks` gating bug); both
   fixed upstream same day (commit `4a8c2e50`) and re-measured: p50
   22.426 ms / p95 23.439 ms — functional, ~5x slower than relay.
-- [ ] ⬜ **Task 6.2**: Full QA gate run against the dogfood flip (relay
-  enabled, all 31 forwarders regenerated) surfaced two genuine bugs the
-  flip itself causes — see journal for detail: (1) the relay guard `exec`s
-  past `forward_stop_event`, silently defeating the Stop/SubagentStop
-  exit-code-2 hard-block contract; (2) the guard's baked-in socket path
-  breaks this repo's own daemon-isolation test fixtures (42 test failures,
-  confirmed not pre-existing). **Dogfood flip reverted** —
-  `.claude/hooks-daemon.yaml` and all 31 forwarders back to byte-identical
-  HEAD content, daemon confirmed RUNNING with default (no relay) behaviour.
-  Fix assigned to the Phase 4 author (exclude Stop/SubagentStop from the
-  guard; make the socket path overridable via
-  `${HOOKS_DAEMON_EVENTS_DIR:-<literal>}`); re-flip + final QA gate pending
-  that landing.
+- [x] ✅ **Task 6.2**: Dogfood soak live and QA gate green. The first flip
+  surfaced two genuine bugs (relay guard `exec`ing past
+  `forward_stop_event`'s exit-code-2 hard-block translation; baked socket
+  path breaking daemon-isolation fixtures — journal has the full story),
+  fixed at `c9a0f674` (Stop/SubagentStop excluded from the guard;
+  `${HOOKS_DAEMON_EVENTS_DIR:-…}` overrides). Re-flip committed at
+  `54422e79`: relay enabled in this repo, 29 forwarders carry the guard,
+  stop/subagent-stop excluded. Verified against that exact state: stop
+  hard-block acceptance 3/3 (manual `exit=2` check included), live relay
+  round-trip, fail-open with daemon stopped, daemon RUNNING with 31
+  per-event listeners. Full `llm_qa` gate green (tests 15835/15835; the
+  four regression categories cleared at `aa6d2a5b`).
 
 ## Success Criteria
 
@@ -193,12 +192,23 @@ neither ever happens implicitly (the relay rung is opt-in to begin with).
   and daemon-down fail-open were proved live in this repo before the
   dogfood flip was reverted (see Task 6.2) — both fallback mechanisms work
   correctly on their own terms, independent of the Stop-hook gap found.
-- [ ] Default config behaviour is byte-identical to today (opt-in OFF ⇒ no
-  behaviour change for existing installs).
-- [ ] Binary is std-only, static, digest-verified at install, and carries no
-  policy; bash path remains complete and readable.
-- [ ] Full QA passes; docs, config manifests and release notes updated.
+- [x] ✅ Default config behaviour is byte-identical to today (opt-in OFF ⇒ no
+  behaviour change for existing installs) — proven by generation tests and
+  by this repo's forwarders staying diff-free until the deliberate flip.
+- [x] ✅ Binary is std-only, static, digest-verified at install, and carries no
+  policy; bash path remains complete and readable (570,056 bytes stripped,
+  readelf-verified no ELF interpreter, sha256-gated deploy).
+- [x] ✅ Full QA passes (final gate green against the live dogfood state);
+  docs, config manifests updated. Release notes are the release's job
+  (human-gated `/release`).
 
 ## Delivery & Milestones
 
-- <!-- milestone or delivery commit hash -->
+- Design + per-event listeners + relay + forwarder integration:
+  `47e80b0e` → `228e766b` → `4f988048` → `8cabdb04`.
+- Distribution/release integration: `3cbbf87a`; measurement: `759d2521`,
+  `9b33a568` (relay p50 4.344 ms; nc p50 22.426 ms; python3 baseline
+  p50 34.111 ms).
+- Dogfood-exposed bug fixes: `4a8c2e50` (nc -N + gating), `c9a0f674`
+  (stop exclusion + env overrides); QA regression clear: `aa6d2a5b`.
+- Dogfood soak live in this repo: `54422e79`.
