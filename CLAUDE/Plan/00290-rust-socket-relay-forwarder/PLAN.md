@@ -167,27 +167,32 @@ neither ever happens implicitly (the relay rung is opt-in to begin with).
   PreToolUse event on all three rungs in
   [MEASUREMENT-relay.md](MEASUREMENT-relay.md). Relay p50 4.344 ms / p95
   5.056 ms — under the ≤6 ms criterion on both statistics. Fresh python3
-  baseline on this container: 34.111 ms p50. The nc rung was found broken
-  (hangs ~30 s per call — missing `-N` on the `nc -U -w` invocation in
-  `init.sh::send_request_stdin`; a second bug in
-  `forwarder_generator.py::regenerate_deployed_hooks` also means the
-  nc-only transform never runs through the production CLI/install path at
-  all) — diagnosed and reported, not patched (out of this task's scope);
-  `nc_enabled` stays off.
-- [x] ✅ **Task 6.2**: Full QA green (`llm_qa.py all`, `plan-qa --sweep`,
-  `docs-qa --sweep`); daemon restart verified; relay dogfooded in this repo
-  (`relay_enabled: true`, `relay_source: build`, `nc_enabled: false`) —
-  forwarders regenerated via `forwarder_generator`, live relay path and
-  daemon-down fail-open both proved against the real deployed forwarder.
-  Soak period starts at this commit; see journal.
+  baseline on this container: 34.111 ms p50. The nc rung was initially found
+  broken (hangs ~30 s per call — missing `-N` on `nc -U -w`, plus a
+  `forwarder_generator.py::regenerate_deployed_hooks` gating bug); both
+  fixed upstream same day (commit `4a8c2e50`) and re-measured: p50
+  22.426 ms / p95 23.439 ms — functional, ~5x slower than relay.
+- [ ] ⬜ **Task 6.2**: Full QA gate run against the dogfood flip (relay
+  enabled, all 31 forwarders regenerated) surfaced two genuine bugs the
+  flip itself causes — see journal for detail: (1) the relay guard `exec`s
+  past `forward_stop_event`, silently defeating the Stop/SubagentStop
+  exit-code-2 hard-block contract; (2) the guard's baked-in socket path
+  breaks this repo's own daemon-isolation test fixtures (42 test failures,
+  confirmed not pre-existing). **Dogfood flip reverted** —
+  `.claude/hooks-daemon.yaml` and all 31 forwarders back to byte-identical
+  HEAD content, daemon confirmed RUNNING with default (no relay) behaviour.
+  Fix assigned to the Phase 4 author (exclude Stop/SubagentStop from the
+  guard; make the socket path overridable via
+  `${HOOKS_DAEMON_EVENTS_DIR:-<literal>}`); re-flip + final QA gate pending
+  that landing.
 
 ## Success Criteria
 
 - [x] ✅ Relay path measured ≤6 ms p50 end-to-end for a typical PreToolUse
-  event (4.344 ms p50, 5.056 ms p95); fallback rungs each verified working —
-  relay's connect-fail fallback and daemon-down fail-open proved live in
-  this repo; the nc rung's acceptance tests (Task 4.2) still pass in
-  isolation, but the rung is unsafe as wired end-to-end (see Task 6.1).
+  event (4.344 ms p50, 5.056 ms p95); the relay's own connect-fail fallback
+  and daemon-down fail-open were proved live in this repo before the
+  dogfood flip was reverted (see Task 6.2) — both fallback mechanisms work
+  correctly on their own terms, independent of the Stop-hook gap found.
 - [ ] Default config behaviour is byte-identical to today (opt-in OFF ⇒ no
   behaviour change for existing installs).
 - [ ] Binary is std-only, static, digest-verified at install, and carries no
