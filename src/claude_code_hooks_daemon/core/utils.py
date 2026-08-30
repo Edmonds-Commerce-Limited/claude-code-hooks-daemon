@@ -581,6 +581,19 @@ def get_workspace_root() -> Path:
     Requires BOTH markers to ensure we find the actual project root, not a subdirectory
     that happens to have one marker.
 
+    **WARNING -- this is anchored to THIS MODULE's ``__file__``, not to any
+    caller's project.** The upward search starts from where
+    ``claude_code_hooks_daemon`` is installed on disk, so it always resolves
+    to the source tree the daemon package physically lives in (the real repo
+    in self-install mode; the vendored ``.claude/hooks-daemon/`` copy in a
+    normal client install) -- regardless of which project a particular
+    caller, test, or daemon instance is actually operating on. A daemon
+    constructed for a DIFFERENT project root (e.g. a test daemon rooted at a
+    tmp directory) still gets the source tree's root here, silently. Callers
+    that know their own project root (most already do, via
+    :class:`ProjectContext` or an explicit constructor argument) should pass
+    it through rather than rely on this function to infer it.
+
     Returns:
         Path to project root directory
     """

@@ -9,6 +9,7 @@ import json
 import sys
 import traceback
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.core.event import EventType
@@ -42,16 +43,26 @@ class FrontController:
     Supports both terminal (stop on match) and non-terminal (fall-through) handlers.
     """
 
-    __slots__ = ("event_name", "handlers")
+    __slots__ = ("event_name", "handlers", "project_root")
 
-    def __init__(self, event_name: str) -> None:
+    def __init__(self, event_name: str, project_root: Path | None = None) -> None:
         """Initialise front controller.
 
         Args:
             event_name: Hook event type (PreToolUse, PostToolUse, etc.)
+            project_root: Project root to write hook-errors.log under, on a
+                handler crash. Pass this explicitly for any controller built
+                for a project root other than the real one the daemon source
+                lives in (e.g. a test daemon rooted at a tmp directory) --
+                otherwise a crash logs into the SOURCE TREE's own
+                untracked/hook-errors.log via get_workspace_root()'s
+                __file__-anchored fallback, regardless of this controller's
+                intended project. Omit it to preserve that historical
+                fallback for callers that never opted in.
         """
         self.event_name = event_name
         self.handlers: list[Handler] = []
+        self.project_root = project_root
 
     def register(self, handler: Handler) -> None:
         """Register a handler instance.
@@ -135,7 +146,9 @@ class FrontController:
         except Exception as e:
             # Handler crashed - log to file and return error details
             handler_name = current_handler.name if current_handler else "unknown"
-            log_error_to_file(self.event_name, e, hook_input, handler_name)
+            log_error_to_file(
+                self.event_name, e, hook_input, handler_name, project_root=self.project_root
+            )
 
             error_msg = f"Hook handler error in {handler_name}: {type(e).__name__}: {e}"
 
@@ -182,7 +195,7 @@ class FrontController:
             result = self.dispatch(hook_input)
         except Exception as e:
             # Handler crashed - log to file and return error details
-            log_error_to_file(self.event_name, e, hook_input)
+            log_error_to_file(self.event_name, e, hook_input, project_root=self.project_root)
 
             error_msg = f"Hook handler error: {type(e).__name__}: {e}"
             stack_trace = traceback.format_exc()
@@ -218,6 +231,7 @@ def log_error_to_file(
     exception: Exception,
     hook_input: dict[str, Any],
     handler_name: str | None = None,
+    project_root: Path | None = None,
 ) -> None:
     """Log hook errors to persistent file for debugging.
 
@@ -229,9 +243,16 @@ def log_error_to_file(
         exception: The exception that was raised
         hook_input: The hook input dict that caused the error
         handler_name: Optional name of handler that crashed
+        project_root: Project root to log under. When None, falls back to
+            get_workspace_root() -- which is __file__-anchored to the daemon's
+            OWN source tree, not to any particular caller's project. Pass this
+            explicitly whenever the log must land under a project root other
+            than the source tree itself (e.g. a test daemon rooted at a tmp
+            directory), or it silently writes into the source tree's log
+            instead.
     """
     try:
-        workspace_root = get_workspace_root()
+        workspace_root = project_root if project_root is not None else get_workspace_root()
         log_dir = workspace_root / "untracked"
         log_file = log_dir / "hook-errors.log"
 

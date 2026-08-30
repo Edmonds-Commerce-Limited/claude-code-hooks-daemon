@@ -756,7 +756,7 @@ class TestHooksDaemon:
 
     @pytest.mark.anyio
     async def test_daemon_handles_exception_in_request_processing(
-        self, daemon_config: DaemonConfig
+        self, daemon_config: DaemonConfig, tmp_path: Path
     ) -> None:
         """Test that daemon handles exceptions during request processing."""
 
@@ -792,7 +792,12 @@ class TestHooksDaemon:
                     )
                 ]
 
-        controller = FrontController(event_name="PreToolUse")
+        # Plan: hook-errors.log test-pollution fix -- this handler DELIBERATELY
+        # crashes, so FrontController must be told to log under this test's
+        # OWN tmp_path rather than get_workspace_root()'s __file__-anchored
+        # fallback, which would otherwise write into the real source tree's
+        # untracked/hook-errors.log.
+        controller = FrontController(event_name="PreToolUse", project_root=tmp_path)
         controller.register(FailingHandler())
 
         daemon = HooksDaemon(config=daemon_config, controller=controller)

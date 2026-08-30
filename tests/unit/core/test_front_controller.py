@@ -898,3 +898,95 @@ class TestHookErrorLogBackupRetention:
         assert len(backups) == 5
         # The live log was recreated with the new error entry.
         assert (untracked / "hook-errors.log").exists()
+
+
+class TestLogErrorToFileProjectRootIsolation:
+    """A daemon/controller built for a tmp project root must never pollute
+    the real source tree's untracked/hook-errors.log (test-pollution bug,
+    verified: get_workspace_root() is __file__-anchored, not tied to any
+    particular daemon's configured project root)."""
+
+    def test_log_error_to_file_writes_under_explicit_project_root(self, tmp_path):
+        """Passing project_root explicitly must bypass get_workspace_root()
+        entirely -- the log must land under tmp_path, not the real repo."""
+        with patch(
+            "claude_code_hooks_daemon.core.front_controller.get_workspace_root"
+        ) as mock_get_root:
+            log_error_to_file(
+                "PreToolUse",
+                ValueError("boom"),
+                {"tool_name": "Bash"},
+                project_root=tmp_path,
+            )
+
+        # get_workspace_root() must never even be consulted when a root is given.
+        mock_get_root.assert_not_called()
+        log_file = tmp_path / "untracked" / "hook-errors.log"
+        assert log_file.exists()
+        assert "boom" in log_file.read_text()
+
+    def test_front_controller_dispatch_error_uses_its_own_project_root(self, tmp_path):
+        """A FrontController constructed with project_root=tmp_path must log
+        a handler crash there, never into the real workspace's untracked/."""
+
+        class CrashingHandler(Handler):
+            def __init__(self) -> None:
+                super().__init__(name="crashing-handler", priority=10, terminal=True)
+
+            def matches(self, hook_input: dict) -> bool:
+                return True
+
+            def handle(self, hook_input: dict) -> HookResult:
+                raise RuntimeError("Simulated handler failure")
+
+            def get_claude_md(self) -> str | None:
+                return None
+
+            def get_acceptance_tests(self) -> list:
+                return []
+
+        controller = FrontController("PreToolUse", project_root=tmp_path)
+        controller.register(CrashingHandler())
+
+        with patch(
+            "claude_code_hooks_daemon.core.front_controller.get_workspace_root"
+        ) as mock_get_root:
+            result = controller.dispatch({"tool_name": "Bash"})
+
+        mock_get_root.assert_not_called()
+        assert result.decision == Decision.ALLOW
+        log_file = tmp_path / "untracked" / "hook-errors.log"
+        assert log_file.exists()
+        assert "Simulated handler failure" in log_file.read_text()
+
+    def test_front_controller_without_project_root_falls_back(self, tmp_path):
+        """Back-compat: omitting project_root preserves the historical
+        get_workspace_root() lookup for callers that never opted in."""
+
+        class CrashingHandler(Handler):
+            def __init__(self) -> None:
+                super().__init__(name="crashing-handler", priority=10, terminal=True)
+
+            def matches(self, hook_input: dict) -> bool:
+                return True
+
+            def handle(self, hook_input: dict) -> HookResult:
+                raise RuntimeError("boom")
+
+            def get_claude_md(self) -> str | None:
+                return None
+
+            def get_acceptance_tests(self) -> list:
+                return []
+
+        controller = FrontController("PreToolUse")
+        controller.register(CrashingHandler())
+
+        with patch(
+            "claude_code_hooks_daemon.core.front_controller.get_workspace_root",
+            return_value=tmp_path,
+        ) as mock_get_root:
+            controller.dispatch({"tool_name": "Bash"})
+
+        mock_get_root.assert_called_once()
+        assert (tmp_path / "untracked" / "hook-errors.log").exists()
