@@ -911,7 +911,15 @@ send_request_stdin() {
             _nc_stderr="$(mktemp)"
             cat > "$_nc_payload"
             _nc_rc=0
-            nc -U -w "${CLAUDE_HOOKS_SOCKET_TIMEOUT:-30}" "$_nc_sock" \
+            # -N: shut down the socket's write half once stdin hits EOF.
+            # Without it, OpenBSD nc keeps the connection open after the
+            # payload is fully sent, the daemon's EOF-framed per-event
+            # socket (DESIGN-socket-relay.md §2) never sees the half-close,
+            # never responds, and nc sits until -w's timeout elapses —
+            # observed as a ~30s hang on every nc-rung call (Plan 00290
+            # Phase 6 measurement). With -N, -w's "final net reads" role
+            # becomes the correct overall response-wait budget.
+            nc -U -N -w "${CLAUDE_HOOKS_SOCKET_TIMEOUT:-30}" "$_nc_sock" \
                 < "$_nc_payload" > "$_nc_response" 2> "$_nc_stderr" || _nc_rc=$?
             if [[ "$_nc_rc" -eq 0 && -s "$_nc_response" ]]; then
                 cat "$_nc_response"

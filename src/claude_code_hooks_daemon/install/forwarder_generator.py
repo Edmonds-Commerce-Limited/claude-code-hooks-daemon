@@ -187,11 +187,14 @@ def load_transport_config(project_root: Path) -> TransportConfig:
 def regenerate_deployed_hooks(project_root: Path, hooks_dir: Path) -> list[str]:
     """Rewrite every deployed forwarder in ``hooks_dir`` in place (Task 4.1).
 
-    No-op (touches nothing) when the resolved transport config has
-    ``relay_enabled: False`` — the deployed tree is left exactly as
-    ``deploy_hook_scripts`` (a plain ``cp``) already produced it, which is
-    how the byte-identical-by-default guarantee holds without this function
-    even needing to inspect file contents in the common case.
+    No-op (touches nothing) when the resolved transport config has BOTH
+    ``relay_enabled: False`` AND ``nc_enabled: False`` (the default) — the
+    deployed tree is left exactly as ``deploy_hook_scripts`` (a plain
+    ``cp``) already produced it, which is how the byte-identical-by-default
+    guarantee holds without this function even needing to inspect file
+    contents in the common case. The two rungs are independent by design
+    (``TransportConfig``/DESIGN-socket-relay.md §4-§5): either flag alone
+    must still trigger regeneration.
 
     Args:
         project_root: The target project's root directory.
@@ -202,7 +205,7 @@ def regenerate_deployed_hooks(project_root: Path, hooks_dir: Path) -> list[str]:
         when every file was already in its generated form).
     """
     transport = load_transport_config(project_root)
-    if not transport.relay_enabled:
+    if not (transport.relay_enabled or transport.nc_enabled):
         return []
 
     untracked_dir = get_event_socket_dir(project_root).parent

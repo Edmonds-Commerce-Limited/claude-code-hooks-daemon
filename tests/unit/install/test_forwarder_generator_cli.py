@@ -77,6 +77,31 @@ def test_relay_enabled_config_rewrites_every_forwarder(tmp_path: Path) -> None:
     assert '_rl_sock="$_rl_dir/events$_rl_sfx/post-tool-use.sock"' in post_content
 
 
+def test_nc_only_enabled_config_rewrites_every_forwarder(tmp_path: Path) -> None:
+    """Regression: nc_enabled must apply independently of relay_enabled.
+
+    `regenerate_deployed_hooks` previously early-returned `[]` whenever
+    `relay_enabled` was False, even when `nc_enabled` was True — silently
+    skipping the nc-only rung's forwarder-side transform through the
+    production CLI/install path entirely (found during Plan 00290 Phase 6
+    measurement).
+    """
+    project_root = _make_project(
+        tmp_path,
+        config_yaml="daemon:\n  transport:\n    nc_enabled: true\n",
+    )
+    hooks_dir = project_root / ".claude" / "hooks"
+
+    rewritten = regenerate_deployed_hooks(project_root, hooks_dir)
+
+    assert sorted(rewritten) == ["post-tool-use", "pre-tool-use"]
+    content = (hooks_dir / "pre-tool-use").read_text()
+    assert "relay hot path" not in content
+    assert 'send_request_stdin "PreToolUse" "" "pre-tool-use"' in content
+    post_content = (hooks_dir / "post-tool-use").read_text()
+    assert 'send_request_stdin "PostToolUse" "" "post-tool-use"' in post_content
+
+
 def test_regenerate_is_idempotent(tmp_path: Path) -> None:
     project_root = _make_project(
         tmp_path,

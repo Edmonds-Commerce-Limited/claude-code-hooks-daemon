@@ -30,9 +30,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
+import tempfile
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -42,7 +45,6 @@ from claude_code_hooks_daemon.config.models import TransportConfig
 from claude_code_hooks_daemon.install.forwarder_generator import generate_forwarder_content
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_HOOKS_DIR = _REPO_ROOT / ".claude" / "hooks"
 _INIT_SH = _REPO_ROOT / ".claude" / "init.sh"
 _RELAY_BINARY = _REPO_ROOT / "untracked" / "relay-build" / "hooks-relay-x86_64-unknown-linux-musl"
 
@@ -87,6 +89,28 @@ class _RecordingSocketServer:
         self._srv.close()
 
 
+#: Self-contained forwarder shape — deliberately NOT read from this
+#: repository's own `.claude/hooks/*`, which is daemon-owned and can be
+#: mid-regeneration by a concurrent transport-config change (Plan 00290
+#: Phase 6 found exactly this: a concurrent dogfood flip had already
+#: guard-injected the live files, silently contaminating every test here
+#: that read them). A fixed template keeps this suite's outcomes a function
+#: of the code under test, never of this repo's current deploy state.
+_FORWARDER_TEMPLATE = """#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+source "$SCRIPT_DIR/../init.sh"
+
+if ! ensure_daemon; then
+    emit_hook_error "{event_pascal}" "daemon_startup_failed" "daemon failed to start"
+    exit 0
+fi
+
+send_request_stdin "{event_pascal}"
+"""
+
+
 def _write_generated_forwarder(
     tmp_path: Path,
     event_file_name: str,
@@ -94,7 +118,7 @@ def _write_generated_forwarder(
     transport: TransportConfig,
     untracked_dir: Path,
 ) -> Path:
-    source = (_HOOKS_DIR / event_file_name).read_text()
+    source = _FORWARDER_TEMPLATE.format(event_pascal=event_pascal)
     content = generate_forwarder_content(source, event_file_name, transport, untracked_dir)
     hooks_dir = tmp_path / ".claude" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -108,8 +132,20 @@ def _write_generated_forwarder(
 
 
 def _base_env(sock_path: Path, pid_path: Path) -> dict[str, str]:
+    """Base env for a forwarder subprocess, isolated from this repo's OWN
+    (possibly concurrently-modified — e.g. a dogfood transport flip)
+    `untracked/` state.
+
+    `HOOKS_DAEMON_ROOT_DIR` governs where `init.sh` resolves `_untracked_dir`
+    — and therefore where the nc rung's per-event socket lookup lands — so it
+    must point at THIS test's own isolated root (`sock_path`'s parent, which
+    every caller already derives from `tmp_path` or an equivalent short-lived
+    dir) rather than the real repo checkout. Nothing these tests exercise
+    needs the real repo's venv/CLI: `ensure_daemon` always short-circuits on
+    `live_pid_file` before reaching anything that would.
+    """
     env = os.environ.copy()
-    env["HOOKS_DAEMON_ROOT_DIR"] = str(_REPO_ROOT)
+    env["HOOKS_DAEMON_ROOT_DIR"] = str(sock_path.parent)
     env["CLAUDE_HOOKS_SOCKET_PATH"] = str(sock_path)
     env["CLAUDE_HOOKS_PID_PATH"] = str(pid_path)
     return env
@@ -175,7 +211,7 @@ def test_relay_connect_fail_execs_fallback_with_stdin_intact(tmp_path: Path) -> 
     failure execs `/bin/bash <fallback> --no-relay` and stdin survives the
     exec unmodified — the exact contract the guard block depends on."""
     fallback = tmp_path / "fallback.sh"
-    fallback.write_text("#!/bin/bash\necho \"ARGS:$*\"\ncat\n")
+    fallback.write_text('#!/bin/bash\necho "ARGS:$*"\ncat\n')
     fallback.chmod(0o755)
 
     result = subprocess.run(
@@ -242,7 +278,7 @@ def _make_broken_nc_dir(base: Path) -> str:
     shim_dir = base / "broken-nc-bin"
     shim_dir.mkdir(exist_ok=True)
     shim = shim_dir / "nc"
-    shim.write_text('#!/bin/sh\nexit 127\n')
+    shim.write_text("#!/bin/sh\nexit 127\n")
     shim.chmod(0o755)
     return str(shim_dir)
 
@@ -323,6 +359,78 @@ def test_nc_capability_flag_unset_skips_nc_rung(
     assert request["hook_input"]["tool_input"]["command"] == "true"
 
 
+def test_nc_rung_round_trip_completes_promptly(live_pid_file: Path) -> None:
+    """Regression (Plan 00290 Phase 6 measurement): the nc rung's `nc -U -w`
+    invocation, missing `-N` (shutdown-on-stdin-EOF), never sent EOF to the
+    daemon's EOF-framed per-event socket — the daemon never saw the
+    half-close, never responded, and every nc-rung call hung for the full
+    `-w` budget (~30s) before falling through to python3. This drives a
+    REAL EOF-framed server (the daemon's actual per-event protocol —
+    `_RecordingSocketServer` reads to EOF, then replies, exactly as
+    DESIGN-socket-relay.md §2 specifies) bound at the literal per-event
+    socket path the guard computes, and asserts the nc rung itself serves
+    the request well within a few seconds — not the legacy socket, which is
+    deliberately left unreachable here so a silent fall-through to python3
+    would surface as a daemon-down error response instead of the nc
+    server's canned reply."""
+    # AF_UNIX paths are capped ~108 bytes, and pytest's own `tmp_path` fixture
+    # nests too deep for the socket paths this test needs — a short-lived
+    # directory directly under /tmp is required instead.
+    short_root = Path(tempfile.mkdtemp(prefix="ncrt-"))
+    try:
+        untracked_dir = short_root / "untracked"
+        transport = TransportConfig(nc_enabled=True)
+        forwarder = _write_generated_forwarder(
+            short_root, "pre-tool-use", "PreToolUse", transport, untracked_dir
+        )
+
+        # send_request_stdin resolves its nc socket at RUNTIME from
+        # $HOOKS_DAEMON_ROOT_DIR/untracked + init.sh's own
+        # `_get_hostname_suffix` (unlike the relay guard's `_rl_dir`, which
+        # is baked in as a literal at generation time) — so the server must
+        # bind where THAT computation actually lands, and
+        # HOOKS_DAEMON_ROOT_DIR must point at our short_root tree rather
+        # than the real repo checkout.
+        hostname_suffix = "-" + os.environ.get("HOSTNAME", "localhost").lower().replace(" ", "-")
+        events_dir = untracked_dir / f"events{hostname_suffix}"
+        events_dir.mkdir(parents=True)
+        event_sock = events_dir / "pre-tool-use.sock"
+        canned = (
+            b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"via-nc"}}'
+        )
+        server = _RecordingSocketServer(event_sock, canned)
+        server.start()
+
+        payload = json.dumps(
+            {"tool_name": "Bash", "tool_input": {"command": "nc-roundtrip"}}
+        ).encode()
+        env = _base_env(short_root / "no-such-legacy-daemon.sock", live_pid_file)
+        env["HOOKS_DAEMON_NC_UNIX_CAPABLE"] = "1"
+
+        start = time.monotonic()
+        result = subprocess.run(
+            ["bash", str(forwarder)],
+            input=payload,
+            capture_output=True,
+            env=env,
+            timeout=_TIMEOUT_SECONDS,
+        )
+        elapsed = time.monotonic() - start
+        server.join()
+
+        assert result.returncode == 0, result.stderr.decode()
+        assert elapsed < 5.0, f"nc rung took {elapsed:.1f}s — the -N EOF-shutdown fix regressed"
+        assert server.received is not None, "the nc rung's own EOF-framed socket was never reached"
+        # The per-event socket protocol is unwrapped (DESIGN-socket-relay.md
+        # §2): the daemon receives exactly the raw stdin payload, not the
+        # legacy socket's {"event", "hook_input"} envelope.
+        request = json.loads(server.received)
+        assert request["tool_input"]["command"] == "nc-roundtrip"
+        assert result.stdout.decode().strip() == canned.decode()
+    finally:
+        shutil.rmtree(short_root, ignore_errors=True)
+
+
 # ---------------------------------------------------------------------------
 # 4. --no-relay re-entry: loop-safety
 # ---------------------------------------------------------------------------
@@ -363,9 +471,7 @@ def test_no_relay_reentry_skips_own_guard(
         )
         forwarder.write_text(content)
 
-        canned = (
-            b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"ok"}}\n'
-        )
+        canned = b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"ok"}}\n'
         server = _RecordingSocketServer(sock_path, canned)
         server.start()
         payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "reentry"}}).encode()
@@ -381,9 +487,9 @@ def test_no_relay_reentry_skips_own_guard(
         server.join()
 
         assert result.returncode == 0, result.stderr.decode()
-        assert b"SHOULD_NEVER_RUN" not in result.stderr, (
-            "the fake relay ran despite --no-relay re-entry — loop-safety broken"
-        )
+        assert (
+            b"SHOULD_NEVER_RUN" not in result.stderr
+        ), "the fake relay ran despite --no-relay re-entry — loop-safety broken"
         assert server.received is not None, "legacy transport was never reached"
         request = json.loads(server.received)
         assert request["hook_input"]["tool_input"]["command"] == "reentry"
