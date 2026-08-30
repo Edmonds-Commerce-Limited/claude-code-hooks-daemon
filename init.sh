@@ -941,6 +941,19 @@ send_request_stdin() {
         fi
     fi
 
+    # stdin for the python3 transport: the nc replay file when rung 2 buffered
+    # the payload and failed, else THIS process's own stdin duplicated by fd
+    # (dup2 semantics — valid for ANY fd type). NEVER a /dev/stdin re-open:
+    # Claude Code hands hooks a SOCKET as stdin, and open() on a socket fails
+    # with ENXIO ("No such device or address") — while every pipe-fed test
+    # invocation works, which is exactly how this shipped. Field-observed as a
+    # non-blocking error on every real hook event.
+    if [[ -n "$_nc_replay_payload" ]]; then
+        exec 3<"$_nc_replay_payload"
+    else
+        exec 3<&0
+    fi
+
     python3 -c "
 import json
 import os
@@ -1187,8 +1200,9 @@ except ConnectionRefusedError:
 
 except Exception as e:
     fail(type(e).__name__, f'{type(e).__name__}: {e}')
-" "$event_name" "$response_mode" < "${_nc_replay_payload:-/dev/stdin}"
+" "$event_name" "$response_mode" <&3
     local _rv=$?
+    exec 3<&-
     if [[ -n "$_nc_replay_payload" ]]; then
         rm -f "$_nc_replay_payload"
     fi
