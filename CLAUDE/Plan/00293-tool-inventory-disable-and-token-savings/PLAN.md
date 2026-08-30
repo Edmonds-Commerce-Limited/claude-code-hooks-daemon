@@ -122,27 +122,40 @@ Artifact the enforcement lives in the blocker itself, not a separate advisory.
 
 ### Phase 4: Dogfood and gate
 
-- [ ] ⬜ **Task 4.1**: Run the report on this repo's own transcripts; commit
+- [ ] 🔄 **Task 4.1**: Run the report on this repo's own transcripts; commit
   the findings summary (not raw transcripts) to this plan folder; review
   recommendations with the owner; apply at least one accepted
-  recommendation end-to-end (candidate: Artifact never-want declared,
-  source disable verified, blocker handler disposition decided).
-- [ ] ⬜ **Task 4.2**: Full QA green; UPGRADES manifests + HANDLER_REFERENCE
-  docs for the new config/CLI; daemon restart verified.
+  recommendation end-to-end. DONE: report run (355 transcripts / 12
+  sessions, findings in JOURNAL 26-08-30), Artifact never-want declared,
+  settings disable applied via `source_disable`, blocker retained as
+  backstop. OPEN (human-gated): a `/context` spot check in a fresh
+  top-level interactive session to directly confirm the Artifact schema is
+  absent — the fat-audit corroboration is journaled but is not direct
+  verification.
+- [x] ✅ **Task 4.2**: Full QA + UPGRADES manifests (truth-changes +
+  config-changes for `source_disable`, `tool_policy`,
+  `tool_disable_advisor`) + HANDLER_REFERENCE docs; daemon restart
+  verified. QA 24/25 — the sole failing check (`magic_values`, one
+  finding) is in Plan 00294's in-flight file, assigned there.
 
 ## Success Criteria
 
-- [ ] Research doc answers, with citations/measurements, whether a
+- [x] Research doc answers, with citations/measurements, whether a
   settings-level disable removes the schema from context — the fact the
-  whole token-savings case rests on.
-- [ ] Report runs on this repo and produces a defensible tools-vs-tokens
+  whole token-savings case rests on (direct `/context` confirmation still
+  awaiting a fresh human-side session; see Task 4.1).
+- [x] Report runs on this repo and produces a defensible tools-vs-tokens
   table; the never-used tier matches reality (spot-checked against known
   usage).
-- [ ] Nothing is ever disabled automatically; the advisory names exact
+- [x] Nothing is ever disabled automatically; the advisory names exact
   changes and stays opt-in.
-- [ ] Dogfood applied at least one accepted recommendation with the
+- [x] Dogfood applied at least one accepted recommendation with the
   redundant-handler analysis recorded.
 
 ## Delivery & Milestones
 
-- <!-- milestone or delivery commit hash -->
+- Phase 1 research: c5794698 (RESEARCH-tool-disable.md)
+- Phase 1b source_disable + dogfood: 64a46659
+- Phase 2 analyser/report/CLI/config: c3f7455f
+- Phase 3 tool_disable_advisor: c50b0d66
+- Phase 4 manifests + QA gate: <!-- this commit -->

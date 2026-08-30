@@ -119,6 +119,13 @@ class TestAdvice:
         _handler(root).handle(_SESSION_START)
         assert json.loads((root / ".claude" / "settings.json").read_text()) == {}
 
+    def test_invalid_daemon_config_degrades_to_silent(self, tmp_path: Path) -> None:
+        """An unloadable hooks-daemon.yaml (already reported elsewhere) must
+        make this advisory silent, not raise out of the SessionStart chain."""
+        root = _project(tmp_path, config_yaml="version: 1.0\n")
+        handler = _handler(root)
+        assert handler.matches(_SESSION_START) is False
+
     def test_broken_settings_file_does_not_crash(self, tmp_path: Path) -> None:
         root = _project(tmp_path, config_yaml=_NEVER_WANT_YAML)
         (root / ".claude" / "settings.json").write_text("{broken")

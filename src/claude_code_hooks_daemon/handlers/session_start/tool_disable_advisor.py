@@ -24,6 +24,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from claude_code_hooks_daemon.config.models import Config, ToolPolicyConfig
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
@@ -56,8 +58,18 @@ class ToolDisableAdvisorHandler(SessionStartHandlerBase):
         return Path(root) if root is not None else ProjectContext.project_root()
 
     def _tool_policy(self) -> ToolPolicyConfig:
+        """The project's tool policy; empty (never fires) on an unloadable config.
+
+        ``matches()`` runs on every SessionStart, so a client config the daemon
+        itself already reports as invalid must degrade this advisory to silent
+        rather than raise out of the chain.
+        """
         config_path = self._project_root() / ".claude" / "hooks-daemon.yaml"
-        return Config.load_or_default(config_path).tool_policy
+        try:
+            return Config.load_or_default(config_path).tool_policy
+        except (ValidationError, OSError, ValueError) as exc:
+            logger.debug("tool_disable_advisor: cannot load %s: %s", config_path, exc)
+            return ToolPolicyConfig()
 
     def _load_settings(self) -> dict[str, Any]:
         """The project's settings.json as a dict; empty on any problem."""

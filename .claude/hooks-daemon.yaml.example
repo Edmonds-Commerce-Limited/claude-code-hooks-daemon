@@ -481,6 +481,10 @@ handlers:
       enabled: false  # Enable via top-level documentation.enabled: true; also builds/refreshes the corpus index
       priority: 64
 
+    tool_disable_advisor:  # Check tool_policy.never_want tools against project settings (Plan 00293)
+      enabled: false  # Opt-in; advisory only, never edits settings; inert without tool_policy.never_want entries
+      priority: 65
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     compaction_signal:  # Drops <session>.compacting for the PTY supervisor (opt-in)

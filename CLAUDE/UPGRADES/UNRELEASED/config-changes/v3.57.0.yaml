@@ -174,3 +174,56 @@ config_changes:
         starts one rung down. Run `bin/hooks-daemon transport-probe` after
         install/upgrade to confirm which rungs are actually usable and which
         route deployed the binary.
+    - key: handlers.pre_tool_use.artifact_publish_blocker.options.source_disable
+      recommended: false
+      dormant: true
+      description: >-
+        NEW opt-in enforcement option (Plan 00293), default FALSE. When a
+        project turns it on, the blocker ensures the project's
+        `.claude/settings.json` carries `"enableArtifact": false` — the
+        documented Claude Code switch that removes the Artifact tool and its
+        multi-thousand-token schema from every NEW session (honoured in
+        project settings from Claude Code v2.1.242; once any file sets it
+        false, no file can turn it back on). The write runs on the first
+        PreToolUse event after a daemon start, is additive (other settings
+        keys preserved), idempotent (no write when already false), atomic,
+        takes a one-shot backup at
+        `settings.json.bak.pre-artifact-source-disable`, and fails safe
+        (logged, never raised) on a broken client file. The call-time deny
+        stays as the in-session backstop.
+      migration_note: >-
+        Leave OFF unless the project genuinely never wants the Artifact tool:
+        enabling it also removes the previously-allowed `action: "list"` once
+        a new session starts, because the whole tool is gone. Live sessions
+        keep the tool until they end; verify with /context in a fresh session.
+    - key: tool_policy
+      recommended: false
+      dormant: true
+      description: >-
+        NEW top-level config block (Plan 00293), ships empty. `never_want` is
+        a list of `{tool, reason}` declarations for tools the project has
+        decided it never wants; `low_use_max_calls` (default 2) is the
+        highest total observed call count `bin/hooks-daemon tool-report`
+        still classes as low-use. Declaring a never-want only changes what
+        the report (and the opt-in tool_disable_advisor) RECOMMEND — nothing
+        is ever disabled automatically from this block.
+      migration_note: >-
+        No action needed with the empty default. Run `bin/hooks-daemon
+        tool-report` first: it scans the project's session transcripts (tool
+        names and counts only, never content) and recommends candidates;
+        declare the ones the project agrees with.
+    - key: handlers.session_start.tool_disable_advisor
+      recommended: false
+      dormant: true
+      description: >-
+        NEW opt-in SessionStart advisory (Plan 00293), default FALSE. For
+        each `tool_policy.never_want` declaration it checks the PROJECT's
+        `.claude/settings.json` for the documented source disable
+        (`enableArtifact: false` for Artifact; a bare tool name in
+        `permissions.deny` otherwise) and advises the exact settings change
+        when absent. It never edits settings, and findings are worded as
+        "not found in project settings" because user/env/managed-level
+        disables are invisible to a project-file scan.
+      migration_note: >-
+        Enable only after declaring `tool_policy.never_want` entries — with
+        none declared the handler never fires.

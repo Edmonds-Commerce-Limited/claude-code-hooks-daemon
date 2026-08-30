@@ -177,6 +177,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "GitUpstreamCheckerHandler": "T3 the rewritten-upstream case must never be 'fixed' by pulling",
     "HookRegistrationCheckerHandler": "T3 self-repair changes settings.json under the agent",
     "DocsQaSweepHandler": "T3 drift findings are worked through across the session",
+    "ToolDisableAdvisorHandler": "T3 the named settings change awaits a user decision later",
     "PlanQaSweepHandler": "T3 drift findings are worked through across the session",
     "PlanWorkflowAssetCheckerHandler": "T3 names a provisioning command to run later",
     "ProjectHandlerLoadCheckerHandler": "T3 'your guardrails are OFF' must persist",
