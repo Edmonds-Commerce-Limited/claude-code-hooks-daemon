@@ -26,6 +26,7 @@ configured transport state, and the daemon's per-event listeners are bound
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 
@@ -45,6 +46,8 @@ from claude_code_hooks_daemon.install.forwarder_generator import (
     RELAY_EXCLUDED_EVENT_FILE_NAMES,
     strip_relay_guard_block,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Per-probe subprocess budget, seconds — matches the socket-stdin
 #: integration suite's own bound, and keeps the whole verification pass
@@ -196,14 +199,22 @@ def probe_status_line(hooks_dir: Path) -> ProbeResult:
         return ProbeResult(name, False, "status line produced no output")
     if text.startswith(b"{"):
         try:
-            if isinstance(json.loads(text.decode()), dict):
-                return ProbeResult(
-                    name,
-                    False,
-                    f"raw_stdout event answered with a JSON envelope: {_snippet(out)}",
-                )
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            pass  # A brace-leading non-JSON line is still raw text.
+            envelope: object = json.loads(text.decode())
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            # The PASSING outcome, made explicit: brace-leading bytes that do
+            # not decode as JSON are still raw text, which is exactly what
+            # the raw_stdout contract wants on stdout.
+            logger.debug(
+                "status-line output starts with '{' but is not JSON (%s) — raw text, as required",
+                exc,
+            )
+            envelope = None
+        if isinstance(envelope, dict):
+            return ProbeResult(
+                name,
+                False,
+                f"raw_stdout event answered with a JSON envelope: {_snippet(out)}",
+            )
     return ProbeResult(name, True, "raw text received")
 
 
@@ -306,12 +317,21 @@ def probe_no_event_listeners(project_root: Path) -> ProbeResult:
         probe_sock.settimeout(1.0)
         try:
             probe_sock.connect(str(socket_path))
-        except OSError:
-            continue
+        except OSError as exc:
+            # The PASSING outcome, made explicit: a socket file nothing
+            # accepts on is a stale leftover, not a live relay listener.
+            logger.debug(
+                "no listener accepting on %s (%s) — expected for the off state",
+                socket_path,
+                exc,
+            )
+            connected = False
         else:
-            live.append(meta.bash_key)
+            connected = True
         finally:
             probe_sock.close()
+        if connected:
+            live.append(meta.bash_key)
     if live:
         return ProbeResult(
             name, False, f"live per-event listeners still accepting: {', '.join(sorted(live))}"

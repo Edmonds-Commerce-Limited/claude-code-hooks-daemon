@@ -22,6 +22,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import logging
 import os
 import re
 
@@ -41,6 +42,8 @@ from claude_code_hooks_daemon.install.transport_verify import (
     resolve_events_dir,
     run_probes,
 )
+
+logger = logging.getLogger(__name__)
 
 #: The last toggle's verification result, persisted alongside the daemon's
 #: other state in its untracked dir so ``transport status`` can report it.
@@ -143,9 +146,16 @@ def read_last_toggle_state(project_root: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     try:
-        loaded = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
+        loaded: object = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        # A corrupt/unreadable state file must not break `transport status`;
+        # surface it and report the honest answer: no trustworthy record.
+        logger.warning(
+            "transport toggle state file %s is unreadable (%s); reporting no last toggle",
+            path,
+            exc,
+        )
+        loaded = None
     return loaded if isinstance(loaded, dict) else None
 
 
@@ -275,7 +285,10 @@ def _relay_binary_facts(project_root: Path, relay_binary_override: str | None) -
     if present:
         try:
             sha256 = hashlib.sha256(binary.read_bytes()).hexdigest()
-        except OSError:
+        except OSError as exc:
+            # Status must still render when the binary is unreadable; say so
+            # rather than silently reporting "no digest".
+            logger.warning("could not hash relay binary %s: %s", binary, exc)
             sha256 = ""
     return {
         "path": str(binary),
