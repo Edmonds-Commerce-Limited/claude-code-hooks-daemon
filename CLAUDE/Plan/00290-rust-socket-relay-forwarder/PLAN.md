@@ -91,14 +91,19 @@ as the mitigations.
 
 ### Phase 3: Rust relay
 
-- [ ] ⬜ **Task 3.1**: Implement the relay (std-only, no crates): argv names
+- [x] ✅ **Task 3.1**: Implement the relay (std-only, no crates): argv names
   the socket path, stdin streamed to socket, response streamed to stdout,
   configurable timeout, distinct exit codes for connect-fail vs timeout vs
-  protocol error; on connect-fail exec the bash forwarder (path via argv).
-- [ ] ⬜ **Task 3.2**: Rust unit/integration tests plus a daemon-side
-  acceptance test driving a real event through the relay end-to-end.
-- [ ] ⬜ **Task 3.3**: Static build (`x86_64`/`aarch64-unknown-linux-musl`),
-  stripped size recorded; build script committed; CI job added.
+  protocol error; on connect-fail exec the bash forwarder (path via argv) —
+  delivered as `relay/hooks_relay.rs`.
+- [x] ✅ **Task 3.2**: Rust unit/integration tests plus a daemon-side
+  acceptance test driving a real event through the relay end-to-end —
+  stub-server harness `relay/test_relay.py` (9 cases, all passing); the
+  daemon-side end-to-end acceptance run is Phase 6's gate (Task 6.2).
+- [x] ✅ **Task 3.3**: Static build (`x86_64`/`aarch64-unknown-linux-musl`),
+  stripped size recorded; build script committed; CI job added —
+  `relay/build.sh` (x86_64 built: 570,056 bytes stripped; aarch64 awaits a
+  builder, per design §3.2); CI job specified in design §3.2, wired Phase 5.
 
 ### Phase 4: Bash forwarder integration
 

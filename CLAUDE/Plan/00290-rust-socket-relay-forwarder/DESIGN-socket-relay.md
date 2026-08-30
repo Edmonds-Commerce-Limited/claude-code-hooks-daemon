@@ -167,6 +167,14 @@ retries, never writes files, and contains no event names.
   binary.
 - The binary lives under `untracked/` (never committed to a client repo), so
   a client repo's auditable surface remains 100% source.
+- **CI job (Task 3.3 note; wiring lands in Phase 5, Task 5.1)**: the release
+  pipeline gains a job that installs the musl target
+  (`rustup target add x86_64-unknown-linux-musl`), runs `bash relay/build.sh`
+  (which itself asserts the output has no ELF interpreter, i.e. is fully
+  static), fails the job if the stripped size exceeds the 1 MB ceiling, runs
+  `python3 relay/test_relay.py <binary>` as the gate, and uploads the binary
+  plus its sha256 as the release assets named above. No CI config changes in
+  Phase 3. Local build on this container: 570,056 bytes stripped.
 
 ## 4. Config schema
 
