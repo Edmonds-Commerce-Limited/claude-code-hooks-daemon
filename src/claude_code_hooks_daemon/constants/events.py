@@ -128,6 +128,12 @@ class EventIDMeta:
             handler — it can never be a bare fail-open passthrough. Decision /
             context / observe events (the vast majority) are False: ``{}`` is
             their correct "no opinion" response.
+        requires_client_translation: True when the legacy bash forwarder
+            performs a CLIENT-SIDE translation of the daemon's JSON response
+            that a byte-pump relay has no way to reproduce — today this is
+            exactly ``forward_stop_event``'s ``decision=block`` ->
+            exit-code-2 hard re-entry translation for Stop/SubagentStop
+            (Plan 00101 Phase 9). False for every other event.
     """
 
     enum_value: str
@@ -138,6 +144,24 @@ class EventIDMeta:
     category: str = ""
     wired: bool = True
     raw_stdout: bool = False
+    requires_client_translation: bool = False
+
+    @property
+    def relay_eligible(self) -> bool:
+        """True when a pure byte-pump relay can safely serve this event.
+
+        Plan 00290 (relay dogfood, commit 9d353fd3 EMERGENCY suspension): the
+        relay execs ``stdin -> socket -> stdout`` with zero JSON handling, so
+        it structurally cannot perform either of the two client-side
+        translations the bash forwarder still owns — unwrapping a
+        ``raw_stdout`` event's JSON into the raw value Claude Code expects
+        on stdout, or ``forward_stop_event``'s exit-code translation for
+        ``requires_client_translation`` events. Typed at the source so a
+        consumer (``forwarder_generator``, the completeness test) can never
+        hold a stale, hand-maintained exclusion list that drifts from the
+        catalogue.
+        """
+        return not self.raw_stdout and not self.requires_client_translation
 
     @property
     def wire_key(self) -> EventType:
@@ -211,6 +235,9 @@ class EventID:
         json_key="Stop",
         can_block=True,
         category="stop",
+        # forward_stop_event translates decision=block -> exit-code-2 hard
+        # re-entry client-side; the relay has no equivalent (Plan 00290).
+        requires_client_translation=True,
     )
 
     SUBAGENT_STOP = EventIDMeta(
@@ -220,6 +247,8 @@ class EventID:
         json_key="SubagentStop",
         can_block=True,
         category="subagent",
+        # Same exit-code translation contract as STOP above.
+        requires_client_translation=True,
     )
 
     USER_PROMPT_SUBMIT = EventIDMeta(
@@ -506,6 +535,18 @@ def wired_event_metas() -> tuple[EventIDMeta, ...]:
     for a hook that deliberately does not exist yet.
     """
     return tuple(m for m in all_event_metas() if m.wired)
+
+
+def relay_ineligible_bash_keys() -> frozenset[str]:
+    """``bash_key`` of every WIRED event a pure byte-pump relay cannot serve.
+
+    Single typed source for :mod:`install.forwarder_generator`'s guard-block
+    exclusion (Plan 00290 dogfood field report) — derived from
+    :attr:`EventIDMeta.relay_eligible` rather than a hand-maintained file-name
+    set, so a future catalogue edit (a new ``raw_stdout`` event, a new
+    ``requires_client_translation`` event) can never silently drift from it.
+    """
+    return frozenset(m.bash_key for m in wired_event_metas() if not m.relay_eligible)
 
 
 # Type-safe event key literal (for mypy/type checking).

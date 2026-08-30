@@ -26,6 +26,7 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config, TransportConfig
+from claude_code_hooks_daemon.constants.events import relay_ineligible_bash_keys
 from claude_code_hooks_daemon.daemon.paths import (
     event_socket_dir_is_fallback,
     get_event_socket_dir_from_untracked,
@@ -40,16 +41,19 @@ INIT_SH_ANCHOR: str = 'source "$SCRIPT_DIR/../init.sh"\n'
 _GUARD_HEADER = "# --- relay hot path (generated; Plan 00290) ---\n"
 _GUARD_FOOTER = "# --- end relay hot path ---\n"
 
-#: Stop/SubagentStop NEVER get the relay guard, at any config (Plan 00290
-#: Phase 6 dogfood finding). The relay `exec`s the process directly and is a
-#: protocol-ignorant byte pump with no equivalent of `forward_stop_event`'s
-#: daemon `decision=block` JSON -> exit-code-2 translation — the contract
-#: Claude Code v2.1.114 requires for hard re-entry (Plan 00101 Phase 9).
-#: Bypassing that translation would be a real safety regression, so these
-#: two forwarders always keep the bash path; per-turn events don't need the
-#: hot path anyway. See DESIGN-socket-relay.md §1.1 for the rationale this
-#: mirrors in the daemon's own per-event socket naming.
-RELAY_EXCLUDED_EVENT_FILE_NAMES: frozenset[str] = frozenset({"stop", "subagent-stop"})
+#: Events whose ``bash_key`` the relay guard must NEVER be applied to, at any
+#: config — derived from :func:`constants.events.relay_ineligible_bash_keys`,
+#: the single typed source (:attr:`EventIDMeta.relay_eligible`). Today this
+#: is ``raw_stdout`` events (StatusLine, WorktreeCreate — the relay's pure
+#: byte pump cannot perform the client-side JSON-unwrap ``response_mode``
+#: needs) and Stop/SubagentStop (``forward_stop_event``'s client-side
+#: ``decision=block`` -> exit-code-2 translation the relay has no equivalent
+#: for — Plan 00101 Phase 9). Bypassing either would be a real safety/
+#: correctness regression (Plan 00290 dogfood field report, commit 9d353fd3
+#: EMERGENCY suspension), so this set is computed from the catalogue rather
+#: than hand-maintained here — a future catalogue edit can never drift from
+#: it silently. See DESIGN-socket-relay.md §1.1.
+RELAY_EXCLUDED_EVENT_FILE_NAMES: frozenset[str] = relay_ineligible_bash_keys()
 
 
 def _default_relay_binary_path(untracked_dir: Path) -> str:
@@ -230,8 +234,9 @@ def generate_forwarder_content(
        project entirely (see that function's docstring for why this must
        never be conditional on the current config).
     2. Only then, iff ``transport.relay_enabled`` and ``event_file_name`` is
-       not in :data:`RELAY_EXCLUDED_EVENT_FILE_NAMES` (``stop``,
-       ``subagent-stop`` — see that constant's docstring) and the
+       not in :data:`RELAY_EXCLUDED_EVENT_FILE_NAMES` (``status-line``,
+       ``worktree-create``, ``stop``, ``subagent-stop`` — see that
+       constant's docstring) and the
        ``source init.sh`` anchor is present, a FRESH guard block
        (:func:`build_relay_guard_block`) is inserted directly above it,
        reflecting the caller's own ``untracked_dir``/config. If the anchor

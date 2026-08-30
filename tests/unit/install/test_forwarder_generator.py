@@ -232,6 +232,58 @@ def test_real_stop_hooks_never_get_relay_guard_when_enabled(hook_file: str) -> N
     assert result == source
 
 
+# ---------------------------------------------------------------------------
+# Defect 1 fix (Plan 00290 dogfood field report, commit 9d353fd3 EMERGENCY
+# suspension): raw_stdout events (StatusLine, WorktreeCreate) are relay
+# structurally, not just Stop/SubagentStop — the relay is a pure byte pump
+# and cannot perform the client-side JSON-unwrap those two response_modes
+# need. Eligibility is derived from EventIDMeta.relay_eligible, not a
+# hand-maintained file-name set.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("event_file_name", ["status-line", "worktree-create"])
+def test_relay_guard_excludes_raw_stdout_events(event_file_name: str) -> None:
+    transport = TransportConfig(relay_enabled=True)
+    source = _SAMPLE_SOURCE.replace(
+        'send_request_stdin "PreToolUse"', 'send_request_stdin "Status" "status"'
+    )
+
+    result = generate_forwarder_content(source, event_file_name, transport, Path("/proj/untracked"))
+
+    assert "relay hot path" not in result
+    assert result == source
+
+
+@pytest.mark.parametrize("hook_file", ["status-line", "worktree-create"])
+def test_real_raw_stdout_hooks_never_get_relay_guard_when_enabled(hook_file: str) -> None:
+    source = (_HOOKS_DIR / hook_file).read_text()
+    transport = TransportConfig(relay_enabled=True)
+
+    result = generate_forwarder_content(source, hook_file, transport, Path("/proj/untracked"))
+
+    assert "relay hot path" not in result
+    assert result == source
+
+
+def test_relay_excluded_set_matches_typed_catalogue_source() -> None:
+    """The generator's exclusion set must be exactly the catalogue's
+    relay-ineligible bash_keys — no drift between the two is possible since
+    one is now derived from the other, but this pins the derivation itself."""
+    from claude_code_hooks_daemon.constants.events import relay_ineligible_bash_keys
+    from claude_code_hooks_daemon.install.forwarder_generator import (
+        RELAY_EXCLUDED_EVENT_FILE_NAMES,
+    )
+
+    assert RELAY_EXCLUDED_EVENT_FILE_NAMES == relay_ineligible_bash_keys()
+    assert RELAY_EXCLUDED_EVENT_FILE_NAMES == {
+        "status-line",
+        "worktree-create",
+        "stop",
+        "subagent-stop",
+    }
+
+
 def test_enabled_transport_without_anchor_returns_unchanged() -> None:
     """Defensive: no anchor line means no safe insertion point, so skip."""
     transport = TransportConfig(relay_enabled=True)
