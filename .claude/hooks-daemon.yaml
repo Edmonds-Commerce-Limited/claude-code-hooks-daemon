@@ -36,14 +36,15 @@ daemon:
   # dogfooded here (Task 6.2), post commit c9a0f674 (Stop/SubagentStop
   # excluded from the relay guard; guard socket/binary paths overridable).
   transport:
-    # DOGFOOD SUSPENDED (owner escalation): the relay rung broke live twice on
-    # the status-line surface - first the wire event name (fixed, 873b18c3),
-    # then strict-mode input validation, because the relay does not perform
-    # the hook_event_name payload enrichment the legacy bash transport does.
-    # Relay stays OFF here until an end-to-end test drives REAL Claude Code
-    # payload shapes (no hand-added fields) through EVERY per-event socket
-    # and passes. Re-enabling is a deliberate act after that lands.
-    relay_enabled: false
+    # DOGFOOD LIVE (Plan 00294 Phase 3): re-enabled via `bin/hooks-daemon
+    # transport on` after the post-00290 fixes landed — typed relay
+    # eligibility from the event catalogue, daemon-side hook_event_name
+    # enrichment, and the real-payload e2e suite driving REAL Claude Code
+    # payload shapes through every per-event socket
+    # (tests/integration/test_relay_event_socket_real_payloads.py). The
+    # toggle verified the live state (31 listeners, socket-stdin probes).
+    # Any regression: `bin/hooks-daemon transport off` FIRST, diagnose second.
+    relay_enabled: true
     nc_enabled: false
     timeout_seconds: 30
     relay_binary: null         # null = <untracked>/bin/hooks-relay

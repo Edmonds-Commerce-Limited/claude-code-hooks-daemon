@@ -88,7 +88,7 @@ lineage is one commit old).
 
 ### Phase 3: Re-enable and soak
 
-- [ ] ⬜ **Task 3.1**: With the post-00290 fixes merged and the full gate
+- [ ] 🔄 **Task 3.1**: With the post-00290 fixes merged and the full gate
   green, run `transport on` in THIS repo; verify live session health
   (status line rendering, zero daemon errors over a soak window); journal
   the soak start. Any regression: `transport off` is the first response,
