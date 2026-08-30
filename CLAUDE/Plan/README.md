@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00294: relay transport safe toggle and reenable](00294-relay-transport-safe-toggle-and-reenable/PLAN.md) - Not Started (finish Plan 00290: one-command verified auto-reverting transport on/off toggle, then re-enable the dogfood and canary-prove client parity)
-
 - [00293: tool inventory disable and token savings](00293-tool-inventory-disable-and-token-savings/PLAN.md) - Not Started (disable-at-source for never-wanted tools instead of fighting them with hooks, transcript-scanning analyser for never-used tools, tools-vs-tokens report with the decision left to projects; dogfood here)
 
 - [00291: upgrade path hardening and guarded branch install](00291-upgrade-path-hardening-and-guarded-branch-install/PLAN.md) - Not Started (php-qa-ci canary findings: fresh-clone `upgrade_version.sh` hard-fail, UNRELEASED-manifest visibility, silent old-config retention, `v`-prefix handling — plus the owner-ruled guarded, non-obvious, loudly-warned first-party-only branch-install mechanism)
@@ -167,6 +165,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00294: relay transport safe toggle and reenable](Completed/00294-relay-transport-safe-toggle-and-reenable/PLAN.md) - Complete at `17f9446e` + the archiving commit (one-command verified auto-reverting `transport on|off|status`; relay dogfood re-enabled here via the toggle; canary run 5 proved client parity incl. client-side relay build)
 
 - [00290: rust socket relay forwarder](Completed/00290-rust-socket-relay-forwarder/PLAN.md) - Complete at `54422e79` + the archiving commit (opt-in `daemon.transport` relay: per-event Unix sockets + std-only static Rust relay, measured 4.344 ms p50 vs 34.1 ms baseline; stop/subagent-stop excluded to keep the exit-2 contract; dogfooded live in this repo)
 
@@ -1289,15 +1289,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 294 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 242 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 243 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 38 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 38 + 242 + 7 = **287 folders**, spanning
+- **Folder-to-number reconciliation**: 37 + 243 + 7 = **287 folders**, spanning
   **284 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1306,7 +1306,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   00145, 00191, 00195, 00210, 00258 — abandoned drafts, numbers burned by
   transient probes (00195 during the v3.51.0 acceptance run, 00258 during the
   v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a sub-agent
-  that then found Plan 00208 already covered the work). Plans 00288, 00289, 00290 and 00292
+  that then found Plan 00208 already covered the work). Plans 00288, 00289, 00290, 00292 and 00294
   are on disk under `Completed/`, counted in the 284 distinct numbers above.
   284 + 10 = 294. ✅
 

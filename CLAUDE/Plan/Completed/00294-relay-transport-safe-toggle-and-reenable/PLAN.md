@@ -1,6 +1,6 @@
 # Plan 00294: relay transport safe toggle and reenable
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-08-30
 **Owner**: joseph
 **Priority**: High
@@ -88,24 +88,34 @@ lineage is one commit old).
 
 ### Phase 3: Re-enable and soak
 
-- [ ] 🔄 **Task 3.1**: With the post-00290 fixes merged and the full gate
+- [x] ✅ **Task 3.1**: With the post-00290 fixes merged and the full gate
   green, run `transport on` in THIS repo; verify live session health
   (status line rendering, zero daemon errors over a soak window); journal
   the soak start. Any regression: `transport off` is the first response,
-  diagnosis second.
+  diagnosis second. (Soak 21:16→22:0x: relay rung active, 31/31 listeners,
+  status line healthy, zero hook errors across the window.)
 - [x] ✅ **Task 3.2**: Canary: run the toggle cycle in the php-qa-ci canary
   (pristine reset, test-only per the standing canary policy); full QA gate
   - acceptance suite green on the final tree.
 
 ## Success Criteria
 
-- [ ] Toggling either way is ONE command, verified, and auto-reverting —
+- [x] Toggling either way is ONE command, verified, and auto-reverting —
   demonstrated by the induced-failure acceptance test.
-- [ ] The relay dogfood is live again in this repo via the toggle, with the
+- [x] The relay dogfood is live again in this repo via the toggle, with the
   status line healthy and zero daemon errors across the soak window.
-- [ ] Canary proves the same toggle behaviour in a client install.
-- [ ] Full QA + acceptance suites green.
+- [x] Canary proves the same toggle behaviour in a client install (run 5:
+  client-side relay build, verified green on-state, full off/strip cycle).
+- [x] Full QA + acceptance suites green (25/25 QA, 16,124+ tests, coverage
+  95.2%, acceptance 71 passed — re-run on the final tree).
 
 ## Delivery & Milestones
 
-- <!-- milestone or delivery commit hash -->
+- `09c55123` Phase 1 — transport on|off|status toggle with verified auto-revert
+- `396fa48e` Phase 2 — acceptance proofs, docs, upgrade manifest
+- `fe729dea` error-hiding findings fixed in transport modules
+- `16fdac8e` Phase 3 — relay dogfood re-enabled via `transport on`; soak start
+- `c841ff74` canary run 4 — safety contract held, D1–D3 found
+- `4f8941da` D1–D3 client-side toggle fixes (catalogue-derived guard probe,
+  pre-flip relay provisioning + relay-rung-active probe, config seeding)
+- `17f9446e` canary run 5 green — Task 3.2 complete
