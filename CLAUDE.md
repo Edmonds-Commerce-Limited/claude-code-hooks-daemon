@@ -1089,29 +1089,6 @@ When you background a long-lived process:
 
 Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
 
-<!-- handler: markdown-table-formatter -->
-
-## markdown_table_formatter — markdown tables are auto-aligned
-
-After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-formatted via `mdformat + mdformat-gfm` so that table pipes are aligned and column widths are consistent. The handler is non-terminal and advisory — it never blocks, it just rewrites the file on disk.
-
-**What changes:**
-
-- Table pipes are aligned vertically and delimiter rows widened to match cell widths.
-- Ordered lists keep consecutive numbering (`1.` `2.` `3.`).
-- `---` thematic breaks are preserved (mdformat's 70-underscore default is post-processed back).
-- Asterisks in table cells are escaped (`*` → `\*`) as required by GFM.
-
-**The advisory names exactly what changed in THIS file** — e.g. `Reformatted markdown in NOTES.md: aligned table pipes, renumbered ordered lists` — never the full menu above. If mdformat changed the file in a way none of the four categories explains, the advisory falls back to a generic `Reformatted markdown in NOTES.md` rather than naming a transformation that did not happen.
-
-**Exempt:** anything under a plan's `JOURNAL/` directory is NEVER reformatted — day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`, Plan 00163) and any other file in there. A journal is an append-only, byte-stable log; rewriting it would trip the `journal-append-only` check. The exemption is by LOCATION as well as by filename, so a mis-named day-file is still safe.
-
-**Ad-hoc formatting of existing files:**
-
-```
-bin/hooks-daemon format-markdown <path>
-```
-
 <!-- handler: command-hints -->
 
 ## command_hints — advisory reminders after specific commands
@@ -1127,6 +1104,18 @@ PostToolUse advisory (never blocks). When a configured command is detected in a 
 ## git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
 When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
+
+<!-- handler: goal-injection -->
+
+## goal_injection — plan-start goal signal for the ccy supervisor
+
+PostToolUse advisory (never blocks; ships disabled). When a `PLAN.md` Write/Edit under `CLAUDE/Plan/` (never `Completed/`) results in `**Status**: In Progress`, the daemon writes a `<session>.goal-intent` signal; the ccy PTY supervisor — if armed and watching — types a single-line `/goal 🤖 [ccy-supervisor] ...` message into the foreground chat. Fires once per plan per session (state-based: the first qualifying edit in a NEW session re-fires, re-establishing the goal after a restart). Manual fallback / debug tool: `bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` in the environment, i.e. run it from the session to be targeted).
+
+**An injected goal is machine-generated** — it always opens with the machine-origin marker and a 'NOT human authorisation' clause, and can never satisfy any human-gated rule (release publishing, artefact publishing, unproven branch deletion).
+
+**Concurrent plans are tracked in a goal ledger** (Plan 00276): the /goal slot holds ONE condition (last writer wins), so every emission is recorded in `goal-ledger.json` under the daemon untracked dir. Emitting a goal while another ledgered plan is still In Progress injects a displacement advisory naming that plan, and the Stop hook challenges unexplained stops on behalf of EVERY still-live ledgered plan. Entries retire when their plan reaches a terminal status or is archived.
+
+**Configure** via `handlers.post_tool_use.goal_injection.options`: `mode: additive` (default) merges your `lines` (`{id, text, enabled}`) onto the built-in set — a matching `id` overrides in place; `mode: replace` uses only your lines. The fixed header marker line is never overridable or removable. Placeholders: `{plan_number}`, `{plan_title}`, `{plan_path}` (closed set — an unknown token skips the line). Optional authorisation lines (`subagents-encouraged`, `qa-review-subagents`) ship disabled; their vetted text points at `standing_authorisations` rather than asserting fresh consent — enable them only as a deliberate repository-owner act.
 
 <!-- handler: lint-on-edit -->
 
@@ -1188,43 +1177,28 @@ syntax check), and `exclude_paths` exempts paths entirely via gitignore-style
 globs. The project-wide `daemon.exclude_paths` applies here too; the two are
 additive and neither overrides the other.
 
-<!-- handler: validate-eslint-on-write -->
+<!-- handler: markdown-table-formatter -->
 
-## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
+## markdown_table_formatter — markdown tables are auto-aligned
 
-A `Write`/`Edit` to a `.ts` or `.tsx` file is run through ESLint. Reported
-errors DENY the tool call.
+After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-formatted via `mdformat + mdformat-gfm` so that table pipes are aligned and column widths are consistent. The handler is non-terminal and advisory — it never blocks, it just rewrites the file on disk.
 
-**A Bash-authored `.ts`/`.tsx` file is checked too** — one written with `>`,
-`>>`, `tee` or a `cat <<EOF` heredoc. A file the command merely RELOCATES
-(`cp`, `mv`, `install`, `dd`) is not: those bytes were already on disk. Opt out
-with `handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes: false`, which leaves `Write`/`Edit` checking untouched.
+**What changes:**
 
-**The write has ALREADY landed on disk.** The denial is a failure report, not
-a rollback — the file exists with your content in it. Fix the reported problems
-with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
-sibling tool calls that were cancelled alongside the denied one.
+- Table pipes are aligned vertically and delimiter rows widened to match cell widths.
+- Ordered lists keep consecutive numbering (`1.` `2.` `3.`).
+- `---` thematic breaks are preserved (mdformat's 70-underscore default is post-processed back).
+- Asterisks in table cells are escaped (`*` → `\*`) as required by GFM.
 
-**This is STRICTER than `lint_on_edit`, which covers the other languages.**
-That handler ALLOWs when its linter is missing or when the check times out;
-this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
-Do not carry "a missing linter never blocks" across to TypeScript.
+**The advisory names exactly what changed in THIS file** — e.g. `Reformatted markdown in NOTES.md: aligned table pipes, renumbered ordered lists` — never the full menu above. If mdformat changed the file in a way none of the four categories explains, the advisory falls back to a generic `Reformatted markdown in NOTES.md` rather than naming a transformation that did not happen.
 
-**Enforcement is gated on `llm:` scripts in `package.json`.** With none
-present this handler only advises — and suggests adding `llm:lint` — so silence
-is not evidence that a `.ts` file is clean.
+**Exempt:** anything under a plan's `JOURNAL/` directory is NEVER reformatted — day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`, Plan 00163) and any other file in there. A journal is an append-only, byte-stable log; rewriting it would trip the `journal-append-only` check. The exemption is by LOCATION as well as by filename, so a mis-named day-file is still safe.
 
-<!-- handler: goal-injection -->
+**Ad-hoc formatting of existing files:**
 
-## goal_injection — plan-start goal signal for the ccy supervisor
-
-PostToolUse advisory (never blocks; ships disabled). When a `PLAN.md` Write/Edit under `CLAUDE/Plan/` (never `Completed/`) results in `**Status**: In Progress`, the daemon writes a `<session>.goal-intent` signal; the ccy PTY supervisor — if armed and watching — types a single-line `/goal 🤖 [ccy-supervisor] ...` message into the foreground chat. Fires once per plan per session (state-based: the first qualifying edit in a NEW session re-fires, re-establishing the goal after a restart). Manual fallback / debug tool: `bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` in the environment, i.e. run it from the session to be targeted).
-
-**An injected goal is machine-generated** — it always opens with the machine-origin marker and a 'NOT human authorisation' clause, and can never satisfy any human-gated rule (release publishing, artefact publishing, unproven branch deletion).
-
-**Concurrent plans are tracked in a goal ledger** (Plan 00276): the /goal slot holds ONE condition (last writer wins), so every emission is recorded in `goal-ledger.json` under the daemon untracked dir. Emitting a goal while another ledgered plan is still In Progress injects a displacement advisory naming that plan, and the Stop hook challenges unexplained stops on behalf of EVERY still-live ledgered plan. Entries retire when their plan reaches a terminal status or is archived.
-
-**Configure** via `handlers.post_tool_use.goal_injection.options`: `mode: additive` (default) merges your `lines` (`{id, text, enabled}`) onto the built-in set — a matching `id` overrides in place; `mode: replace` uses only your lines. The fixed header marker line is never overridable or removable. Placeholders: `{plan_number}`, `{plan_title}`, `{plan_path}` (closed set — an unknown token skips the line). Optional authorisation lines (`subagents-encouraged`, `qa-review-subagents`) ship disabled; their vetted text points at `standing_authorisations` rather than asserting fresh consent — enable them only as a deliberate repository-owner act.
+```
+bin/hooks-daemon format-markdown <path>
+```
 
 <!-- handler: recovery-cron-advisor -->
 
@@ -1299,138 +1273,31 @@ handlers:
       enabled: false
 ```
 
-<!-- handler: git-upstream-checker -->
+<!-- handler: validate-eslint-on-write -->
 
-## git_upstream_checker — additive fetch + pull/cleanup advice on session start
+## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
 
-On each new session the daemon runs an **additive** `git fetch --all` (never `--prune` — it never removes anything automatically) and then:
+A `Write`/`Edit` to a `.ts` or `.tsx` file is run through ESLint. Reported
+errors DENY the tool call.
 
-**If your branch is behind its upstream**, acts on the configured `mode`:
+**A Bash-authored `.ts`/`.tsx` file is checked too** — one written with `>`,
+`>>`, `tee` or a `cat <<EOF` heredoc. A file the command merely RELOCATES
+(`cp`, `mv`, `install`, `dd`) is not: those bytes were already on disk. Opt out
+with `handlers.post_tool_use.validate_eslint_on_write.options.check_bash_writes: false`, which leaves `Write`/`Edit` checking untouched.
 
-- `warn` (default): strongly advises you to run `git pull`.
-- `agent-pull`: instructs you to run `git pull` as your first action.
-- `auto-pull`: the daemon runs `git pull --ff-only` for you on a clean, non-diverged tree; if it cannot fast-forward (dirty tree or diverged history) it degrades to a warning and you pull manually.
+**The write has ALREADY landed on disk.** The denial is a failure report, not
+a rollback — the file exists with your content in it. Fix the reported problems
+with `Edit` (`npx eslint <file> --fix` clears most of them), and re-issue any
+sibling tool calls that were cancelled alongside the denied one.
 
-**If the upstream was REWRITTEN**, every mode above is overridden and NO pull is advised in any wording. The signal is a divergence whose two sides share no commit shas yet resolve to the SAME tree: identical content, so there is nothing to merge and each local commit is a pre-rewrite duplicate. Pulling would merge the entire pre-rewrite history back in and republish whatever the rewrite (a `filter-repo` secret-strip, say) was run to remove. The advisory instead asks a human to realign the branch onto its upstream and to re-fetch tags with `--force`, since a rewrite moves every tag to a new sha. Do NOT work around this by pulling — if you believe the divergence is genuine, check the trees yourself before merging.
+**This is STRICTER than `lint_on_edit`, which covers the other languages.**
+That handler ALLOWs when its linter is missing or when the check times out;
+this one DENIES on an ESLint timeout and on any failure to run ESLint at all.
+Do not carry "a missing linter never blocks" across to TypeScript.
 
-**If local branches track a remote branch that was deleted**, it lists them (marked merged = safe vs not-merged = has unique commits) and asks you to clean up AFTER checking: `git branch -d <name>` for merged branches, ask the human for the rest, and optionally `git fetch --prune` the stale remote-tracking refs. The daemon never prunes or deletes a branch itself; never use `git branch -D`.
-
-It is silent when up to date with no gone branches, not in a git repo, on a detached HEAD, or without an upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
-
-<!-- handler: plan-qa-sweep -->
-
-## plan_qa_sweep — plan-tree drift report at session start
-
-At the start of each new session the plan directory is swept with the
-plan QA check catalogue. That covers the cross-file invariants
-(index/folder bijection, number collisions, statistics recount,
-archive structure, status-vs-location coherence, staleness) AND the
-document-level rules applied to every PLAN.md already on disk —
-status line present, status token in the enum, header/body coherence,
-task grammar, path existence, journal day-file naming. Findings are
-injected once as advisory context — the sweep never blocks.
-
-**A rule that only fires at write time cannot see what predates it.**
-The document-level checks run on BOTH surfaces for that reason, so a
-violation introduced before the rule existed — or by a `git mv`, a
-merge, or any path other than a Write/Edit tool call — is still
-reported. The rules that are deliberately edit-only are the ones
-about the ACT of writing (editing an archived plan, rewriting a
-journal, growing an oversized document); each records its reason in
-`plan_qa/checks/common.py`.
-
-**When a drift report appears**: fix the listed findings (each names
-its exact remediation) as part of your plan housekeeping, then
-re-check with:
-
-```
-bin/hooks-daemon plan-qa --sweep
-```
-
-The CLI exits 1 while findings remain (CI-able). Single-file lint:
-`plan-qa --lint <PLAN.md>`; staged-commit check: `plan-qa --check-staged`.
-Policy lives under `plan_workflow.qa` in `.claude/hooks-daemon.yaml`
-(archive dir names, staleness window, legacy/collision allowlists).
-
-<!-- handler: plan-workflow-asset-checker -->
-
-## plan_workflow_asset_checker — plan tooling provisioning alert
-
-At session start, when the plan workflow is enabled but the daemon-owned `mkplan.bash` is missing from the plan directory, this advisory fires (it never blocks). A missing `mkplan.bash` means `CLAUDE.md` and `plan_number_helper` reference a scaffolder that does not exist and journalling is inert.
-
-**Fix**: (re)deploy the assets on demand —
-
-```
-bin/hooks-daemon deploy-plan-workflow
-```
-
-The deploy is idempotent (fills gaps only, never overwrites client-owned files). Silent when `mkplan.bash` is present or the workflow is disabled.
-
-<!-- handler: project-handler-load-checker -->
-
-## project_handler_load_checker — project protection degraded alert
-
-At session start this handler reports any **project handlers** (`.claude/project-handlers/`) that FAILED to load in the running daemon. A skipped handler is a silently-disabled protection — the alert exists so you never assume a guardrail is active when it is not.
-
-### When you see `🚨 PROJECT PROTECTION DEGRADED 🚨`
-
-1. **Do not assume normal guardrails are in force.** The listed handlers are OFF for this session.
-2. **Diagnose** each failure: `bin/hooks-daemon validate-project-handlers` names the file, the missing method, and the daemon version that introduced it.
-3. **Fix** the handler(s) — usually adding a required method stub (e.g. `get_claude_md`) that a daemon upgrade made mandatory.
-4. **Restart the daemon** (`bin/hooks-daemon restart`). The alert reflects the *running* daemon, so it clears only after a restart reloads the fixed handlers — fixing the file alone is not enough.
-
-The handler is silent when every project handler loads, so seeing this alert always means real action is required.
-
-<!-- handler: hook-registration-checker -->
-
-## hook_registration_checker — hooks configuration policy
-
-On every new session this handler audits hook configuration across `.claude/settings.json` and `.claude/settings.local.json`. When it reports issues, fix them — do not ignore the warning.
-
-### Policy
-
-1. **All hooks live in `settings.json`.** That file is tracked in version control, visible to teammates, and is the single source of truth for the daemon.
-2. **`settings.local.json` must contain ZERO `hooks` entries.** It exists for per-developer `permissions` and IDE state only. A `hooks` block there is either (a) invisible to the rest of the team, or (b) duplicated with `settings.json` — in which case the hook fires twice per event.
-3. **Hook commands must invoke the daemon wrapper.** Every registered `type: command` hook must end with `/.claude/hooks/{event}`. Anything else (inline Python, custom shell scripts, bespoke paths) is a legacy setup that bypasses the daemon entirely. This rule is about COMMAND hooks only: Claude Code's native `type: prompt` and `type: agent` hooks carry no command at all and are permitted, provided they sit ALONGSIDE the wrapper and never replace it — registration repair is additive per EVENT, so a wrapper that is removed is never restored and every handler on that event goes dark.
-
-### Remediation
-
-- **Hooks in `settings.local.json`**: move each `hooks` entry to `settings.json`, then delete the `hooks` key from `settings.local.json`. Confirm no duplicates remain.
-- **Legacy-style commands**: replace them with a project-level handler. Run `bin/hooks-daemon init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
-- **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
-- **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry and remove the duplicate in `settings.local.json`.
-
-<!-- handler: secret-file-hygiene-checker -->
-
-## secret_file_hygiene_checker -- on-disk hygiene for protected paths
-
-At SessionStart, for every configured protected path (the effective `secret_file_guard` globs) that EXISTS on disk, this advisory reports (never blocks) when it is:
-
-- **not gitignored** -- add it to `.gitignore`
-- **git-tracked** -- `git rm --cached <path>` to untrack it
-- **group/world-readable** -- `chmod 600 <path>`
-
-**Metadata only.** Files are enumerated via `git ls-files` (tracked, untracked-visible and untracked-ignored -- three cheap index reads, no filesystem walk) and checked with `stat()` -- the file's CONTENTS are never opened, so this advisory cannot leak what it protects. This is the SessionStart half of the permissions/ownership hygiene the `secret-meta` CLI already reports on demand for a single path.
-
-**Outside a git repository** (or when `git` is unavailable), gitignore/tracked status is meaningless, so only permissions are checked via a bounded fallback walk -- and if that walk hits its file-count bound, the advisory says so explicitly rather than reporting a truncated scan as a clean one.
-
-<!-- handler: model-fallback-detector -->
-
-## model_fallback_detector — silent model substitution is surfaced
-
-At session start the transcript is scanned for the platform's own `model_refusal_fallback` record, AND for every subsequent assistant message's model — so the advisory can tell an ACTIVE fallback from one that has already RECOVERED.
-
-**`🚨 MODEL FALLBACK DETECTED 🚨` (ACTIVE — no later assistant turn returned to the original model)**:
-
-1. **Tell the human immediately** — the substitution is otherwise silent, and a session has run degraded for hours unnoticed.
-2. **A session restart is the only cure** — while active, the fallback is session-sticky; keep working only on the human's say-so.
-3. **Read the diagnostic snapshot** (path named in the advisory, default `untracked/reports/`): it holds the fallback record plus the preceding transcript window, secret-redacted, so the project can tune its `flaggable_work_advisor` delegation config to stop the recurrence.
-
-**A soft, non-alarming notice (no 🚨, no restart instruction) means RECOVERED** — a later assistant turn was already back on the original model before this advisory ever fired. No action is needed; the diagnostic snapshot is still written for tuning purposes.
-
-Dedupe state is PERSISTED to disk and survives a daemon restart: an ACTIVE record re-advises once per (session, identity); a RECOVERED record is noted at most once EVER, across every session; each distinct record's diagnostic snapshot is written at most once EVER.
-
-Options under `handlers.session_start.model_fallback_detector.options`: `snapshot_enabled` (default true), `snapshot_dir` (default `untracked/reports`), `snapshot_window_records` (default 20). Snapshots are never auto-committed.
+**Enforcement is gated on `llm:` scripts in `package.json`.** With none
+present this handler only advises — and suggests adding `llm:lint` — so silence
+is not evidence that a `.ts` file is clean.
 
 <!-- handler: ccy-supervisor-integrity -->
 
@@ -1500,6 +1367,139 @@ The CLI exits 1 while findings remain (CI-able). Single-file lint:
 `docs-qa --lint <file>`. Policy lives under `documentation.qa` in
 `.claude/hooks-daemon.yaml` (modes, per-check overrides, grandfather
 allowlist, generated-docs manifest).
+
+<!-- handler: git-upstream-checker -->
+
+## git_upstream_checker — additive fetch + pull/cleanup advice on session start
+
+On each new session the daemon runs an **additive** `git fetch --all` (never `--prune` — it never removes anything automatically) and then:
+
+**If your branch is behind its upstream**, acts on the configured `mode`:
+
+- `warn` (default): strongly advises you to run `git pull`.
+- `agent-pull`: instructs you to run `git pull` as your first action.
+- `auto-pull`: the daemon runs `git pull --ff-only` for you on a clean, non-diverged tree; if it cannot fast-forward (dirty tree or diverged history) it degrades to a warning and you pull manually.
+
+**If the upstream was REWRITTEN**, every mode above is overridden and NO pull is advised in any wording. The signal is a divergence whose two sides share no commit shas yet resolve to the SAME tree: identical content, so there is nothing to merge and each local commit is a pre-rewrite duplicate. Pulling would merge the entire pre-rewrite history back in and republish whatever the rewrite (a `filter-repo` secret-strip, say) was run to remove. The advisory instead asks a human to realign the branch onto its upstream and to re-fetch tags with `--force`, since a rewrite moves every tag to a new sha. Do NOT work around this by pulling — if you believe the divergence is genuine, check the trees yourself before merging.
+
+**If local branches track a remote branch that was deleted**, it lists them (marked merged = safe vs not-merged = has unique commits) and asks you to clean up AFTER checking: `git branch -d <name>` for merged branches, ask the human for the rest, and optionally `git fetch --prune` the stale remote-tracking refs. The daemon never prunes or deletes a branch itself; never use `git branch -D`.
+
+It is silent when up to date with no gone branches, not in a git repo, on a detached HEAD, or without an upstream. Configure via `handlers.session_start.git_upstream_checker.options.mode`.
+
+<!-- handler: hook-registration-checker -->
+
+## hook_registration_checker — hooks configuration policy
+
+On every new session this handler audits hook configuration across `.claude/settings.json` and `.claude/settings.local.json`. When it reports issues, fix them — do not ignore the warning.
+
+### Policy
+
+1. **All hooks live in `settings.json`.** That file is tracked in version control, visible to teammates, and is the single source of truth for the daemon.
+2. **`settings.local.json` must contain ZERO `hooks` entries.** It exists for per-developer `permissions` and IDE state only. A `hooks` block there is either (a) invisible to the rest of the team, or (b) duplicated with `settings.json` — in which case the hook fires twice per event.
+3. **Hook commands must invoke the daemon wrapper.** Every registered `type: command` hook must end with `/.claude/hooks/{event}`. Anything else (inline Python, custom shell scripts, bespoke paths) is a legacy setup that bypasses the daemon entirely. This rule is about COMMAND hooks only: Claude Code's native `type: prompt` and `type: agent` hooks carry no command at all and are permitted, provided they sit ALONGSIDE the wrapper and never replace it — registration repair is additive per EVENT, so a wrapper that is removed is never restored and every handler on that event goes dark.
+
+### Remediation
+
+- **Hooks in `settings.local.json`**: move each `hooks` entry to `settings.json`, then delete the `hooks` key from `settings.local.json`. Confirm no duplicates remain.
+- **Legacy-style commands**: replace them with a project-level handler. Run `bin/hooks-daemon init-project-handlers` to scaffold `.claude/project-handlers/`, port the logic into a handler class, then restore the daemon wrapper in `settings.json`. The daemon will auto-discover the new handler on restart.
+- **Missing hooks**: by default this handler SELF-HEALS — it merges the full wired registration set into `settings.json` on session start (additive; preserves `permissions`/`env`/`statusLine` and any custom hooks; one-shot backup to `settings.json.bak.pre-registration-repair`), so the flood stops without a reinstall. Opt out with `handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false`, then re-run the installer or add the missing `{event_name}` entry manually.
+- **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry and remove the duplicate in `settings.local.json`.
+
+<!-- handler: model-fallback-detector -->
+
+## model_fallback_detector — silent model substitution is surfaced
+
+At session start the transcript is scanned for the platform's own `model_refusal_fallback` record, AND for every subsequent assistant message's model — so the advisory can tell an ACTIVE fallback from one that has already RECOVERED.
+
+**`🚨 MODEL FALLBACK DETECTED 🚨` (ACTIVE — no later assistant turn returned to the original model)**:
+
+1. **Tell the human immediately** — the substitution is otherwise silent, and a session has run degraded for hours unnoticed.
+2. **A session restart is the only cure** — while active, the fallback is session-sticky; keep working only on the human's say-so.
+3. **Read the diagnostic snapshot** (path named in the advisory, default `untracked/reports/`): it holds the fallback record plus the preceding transcript window, secret-redacted, so the project can tune its `flaggable_work_advisor` delegation config to stop the recurrence.
+
+**A soft, non-alarming notice (no 🚨, no restart instruction) means RECOVERED** — a later assistant turn was already back on the original model before this advisory ever fired. No action is needed; the diagnostic snapshot is still written for tuning purposes.
+
+Dedupe state is PERSISTED to disk and survives a daemon restart: an ACTIVE record re-advises once per (session, identity); a RECOVERED record is noted at most once EVER, across every session; each distinct record's diagnostic snapshot is written at most once EVER.
+
+Options under `handlers.session_start.model_fallback_detector.options`: `snapshot_enabled` (default true), `snapshot_dir` (default `untracked/reports`), `snapshot_window_records` (default 20). Snapshots are never auto-committed.
+
+<!-- handler: plan-qa-sweep -->
+
+## plan_qa_sweep — plan-tree drift report at session start
+
+At the start of each new session the plan directory is swept with the
+plan QA check catalogue. That covers the cross-file invariants
+(index/folder bijection, number collisions, statistics recount,
+archive structure, status-vs-location coherence, staleness) AND the
+document-level rules applied to every PLAN.md already on disk —
+status line present, status token in the enum, header/body coherence,
+task grammar, path existence, journal day-file naming. Findings are
+injected once as advisory context — the sweep never blocks.
+
+**A rule that only fires at write time cannot see what predates it.**
+The document-level checks run on BOTH surfaces for that reason, so a
+violation introduced before the rule existed — or by a `git mv`, a
+merge, or any path other than a Write/Edit tool call — is still
+reported. The rules that are deliberately edit-only are the ones
+about the ACT of writing (editing an archived plan, rewriting a
+journal, growing an oversized document); each records its reason in
+`plan_qa/checks/common.py`.
+
+**When a drift report appears**: fix the listed findings (each names
+its exact remediation) as part of your plan housekeeping, then
+re-check with:
+
+```
+bin/hooks-daemon plan-qa --sweep
+```
+
+The CLI exits 1 while findings remain (CI-able). Single-file lint:
+`plan-qa --lint <PLAN.md>`; staged-commit check: `plan-qa --check-staged`.
+Policy lives under `plan_workflow.qa` in `.claude/hooks-daemon.yaml`
+(archive dir names, staleness window, legacy/collision allowlists).
+
+<!-- handler: plan-workflow-asset-checker -->
+
+## plan_workflow_asset_checker — plan tooling provisioning alert
+
+At session start, when the plan workflow is enabled but the daemon-owned `mkplan.bash` is missing from the plan directory, this advisory fires (it never blocks). A missing `mkplan.bash` means `CLAUDE.md` and `plan_number_helper` reference a scaffolder that does not exist and journalling is inert.
+
+**Fix**: (re)deploy the assets on demand —
+
+```
+bin/hooks-daemon deploy-plan-workflow
+```
+
+The deploy is idempotent (fills gaps only, never overwrites client-owned files). Silent when `mkplan.bash` is present or the workflow is disabled.
+
+<!-- handler: project-handler-load-checker -->
+
+## project_handler_load_checker — project protection degraded alert
+
+At session start this handler reports any **project handlers** (`.claude/project-handlers/`) that FAILED to load in the running daemon. A skipped handler is a silently-disabled protection — the alert exists so you never assume a guardrail is active when it is not.
+
+### When you see `🚨 PROJECT PROTECTION DEGRADED 🚨`
+
+1. **Do not assume normal guardrails are in force.** The listed handlers are OFF for this session.
+2. **Diagnose** each failure: `bin/hooks-daemon validate-project-handlers` names the file, the missing method, and the daemon version that introduced it.
+3. **Fix** the handler(s) — usually adding a required method stub (e.g. `get_claude_md`) that a daemon upgrade made mandatory.
+4. **Restart the daemon** (`bin/hooks-daemon restart`). The alert reflects the *running* daemon, so it clears only after a restart reloads the fixed handlers — fixing the file alone is not enough.
+
+The handler is silent when every project handler loads, so seeing this alert always means real action is required.
+
+<!-- handler: secret-file-hygiene-checker -->
+
+## secret_file_hygiene_checker -- on-disk hygiene for protected paths
+
+At SessionStart, for every configured protected path (the effective `secret_file_guard` globs) that EXISTS on disk, this advisory reports (never blocks) when it is:
+
+- **not gitignored** -- add it to `.gitignore`
+- **git-tracked** -- `git rm --cached <path>` to untrack it
+- **group/world-readable** -- `chmod 600 <path>`
+
+**Metadata only.** Files are enumerated via `git ls-files` (tracked, untracked-visible and untracked-ignored -- three cheap index reads, no filesystem walk) and checked with `stat()` -- the file's CONTENTS are never opened, so this advisory cannot leak what it protects. This is the SessionStart half of the permissions/ownership hygiene the `secret-meta` CLI already reports on demand for a single path.
+
+**Outside a git repository** (or when `git` is unavailable), gitignore/tracked status is meaningless, so only permissions are checked via a bounded fallback walk -- and if that walk hits its file-count bound, the advisory says so explicitly rather than reporting a truncated scan as a clean one.
 
 <!-- handler: idle-housekeeping-advisory -->
 
