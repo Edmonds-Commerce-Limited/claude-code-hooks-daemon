@@ -1,6 +1,6 @@
 # Plan 00293: tool inventory disable and token savings
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-30
 **Owner**: joseph
 **Priority**: Medium
@@ -69,13 +69,13 @@ re-make on every call.
 
 ### Phase 1: Research (primary sources, written to RESEARCH-tool-disable.md)
 
-- [ ] ⬜ **Task 1.1**: Establish the disable mechanisms: Claude Code settings
+- [x] ✅ **Task 1.1**: Establish the disable mechanisms: Claude Code settings
   (`permissions.deny`, tool allow/deny lists, env/config switches), what each
   actually removes from context (schema vs mere refusal), interaction with
   deferred tools/ToolSearch, and per-tool schema token cost (measured where
   possible — token-count the schemas — cited where documented). Verify or
   refute the supplied Reddit thread's claims against these sources.
-- [ ] ⬜ **Task 1.2**: Inventory this repo's fight-with-hooks candidates:
+- [x] ✅ **Task 1.2**: Inventory this repo's fight-with-hooks candidates:
   every blocker handler whose target could instead be disabled at source
   (artifact_publish_blocker first), with the semantic-vs-binary analysis for
   each (does the project ever want ANY use of the tool?).
