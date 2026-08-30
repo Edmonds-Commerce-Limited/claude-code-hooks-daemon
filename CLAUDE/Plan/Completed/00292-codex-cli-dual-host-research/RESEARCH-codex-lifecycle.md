@@ -268,8 +268,9 @@ above suggest this is actively being expanded.
 
 - Session ("rollout") files are JSONL, stored under
   `~/.codex/sessions/YYYY/MM/DD/`, named
-  `rollout-<timestamp>-<session-id>.jsonl` (session ids look like UUIDs,
-  e.g. `019edfd4-fbf0-7100-a982-2ab5bdf125fb`). Filenames and the internal
+  `rollout-<timestamp>-<session-id>.jsonl` (session ids look like UUIDs;
+  illustrative synthetic example: `01234567-abcd-7000-8000-000000000000` —
+  the real id seen in sources was a UUIDv7-shaped value). Filenames and the internal
   `session_id` are auto-generated at session start and cannot be set via
   CLI/config. **This path/naming is corroborated by a native macOS viewer
   project and an official-repo discussion thread, not by a doc page I
