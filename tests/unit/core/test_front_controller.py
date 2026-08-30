@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core.front_controller import (
     FrontController,
     get_workspace_root,
@@ -931,7 +932,11 @@ class TestLogErrorToFileProjectRootIsolation:
 
         class CrashingHandler(Handler):
             def __init__(self) -> None:
-                super().__init__(name="crashing-handler", priority=10, terminal=True)
+                super().__init__(
+                    handler_id=HandlerID.TEST_SERVER,
+                    priority=Priority.TEST_HANDLER,
+                    terminal=True,
+                )
 
             def matches(self, hook_input: dict) -> bool:
                 return True
@@ -965,7 +970,11 @@ class TestLogErrorToFileProjectRootIsolation:
 
         class CrashingHandler(Handler):
             def __init__(self) -> None:
-                super().__init__(name="crashing-handler", priority=10, terminal=True)
+                super().__init__(
+                    handler_id=HandlerID.TEST_SERVER,
+                    priority=Priority.TEST_HANDLER,
+                    terminal=True,
+                )
 
             def matches(self, hook_input: dict) -> bool:
                 return True
