@@ -112,6 +112,50 @@ def test_enabled_transport_is_idempotent_against_already_generated_content() -> 
     assert once.count("relay hot path (generated") == 1
 
 
+@pytest.mark.parametrize("event_file_name", ["stop", "subagent-stop"])
+def test_relay_guard_excludes_stop_events(event_file_name: str) -> None:
+    """Stop/SubagentStop must NEVER get the relay guard.
+
+    The relay `exec`s directly and is a protocol-ignorant byte pump — it has
+    no equivalent of `forward_stop_event`'s daemon `decision=block` JSON ->
+    exit-code-2 translation (Claude Code's hard re-entry contract). Ruling
+    (Plan 00290 Phase 6 dogfood finding): those two forwarders always keep
+    the bash path; the relay hot path never applies to them, at any config.
+    """
+    transport = TransportConfig(relay_enabled=True)
+    source = _SAMPLE_SOURCE.replace('send_request_stdin "PreToolUse"', 'forward_stop_event "Stop"')
+
+    result = generate_forwarder_content(source, event_file_name, transport, Path("/proj/untracked"))
+
+    assert "relay hot path" not in result
+    assert result == source
+
+
+def test_relay_guard_excluded_but_nc_still_applies_to_stop() -> None:
+    """The exclusion is relay-specific — nc is safe for Stop/SubagentStop:
+    it only changes the TRANSPORT beneath send_request_stdin, and
+    forward_stop_event's own decision=block parsing still runs afterward
+    regardless of which rung served the request."""
+    transport = TransportConfig(relay_enabled=True, nc_enabled=True)
+    source = _SAMPLE_SOURCE.replace('send_request_stdin "PreToolUse"', 'forward_stop_event "Stop"')
+
+    result = generate_forwarder_content(source, "stop", transport, Path("/proj/untracked"))
+
+    assert "relay hot path" not in result
+    assert 'forward_stop_event "Stop" "stop"' in result
+
+
+@pytest.mark.parametrize("hook_file", ["stop", "subagent-stop"])
+def test_real_stop_hooks_never_get_relay_guard_when_enabled(hook_file: str) -> None:
+    source = (_HOOKS_DIR / hook_file).read_text()
+    transport = TransportConfig(relay_enabled=True)
+
+    result = generate_forwarder_content(source, hook_file, transport, Path("/proj/untracked"))
+
+    assert "relay hot path" not in result
+    assert result == source
+
+
 def test_enabled_transport_without_anchor_returns_unchanged() -> None:
     """Defensive: no anchor line means no safe insertion point, so skip."""
     transport = TransportConfig(relay_enabled=True)
@@ -137,7 +181,7 @@ def test_guard_block_names_the_correct_event_socket() -> None:
     block = build_relay_guard_block(
         "user-prompt-submit", TransportConfig(relay_enabled=True), Path("/proj/untracked")
     )
-    assert '_rl_sock="$_rl_dir/events$_rl_sfx/user-prompt-submit.sock"' in block
+    assert '_rl_sock="$_rl_events_dir/user-prompt-submit.sock"' in block
 
 
 def test_guard_block_uses_literal_untracked_dir() -> None:
@@ -151,14 +195,42 @@ def test_guard_block_default_relay_binary_path() -> None:
     block = build_relay_guard_block(
         "pre-tool-use", TransportConfig(relay_enabled=True), Path("/proj/untracked")
     )
-    assert '_rl_bin="/proj/untracked/bin/hooks-relay"' in block
+    assert '_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/proj/untracked/bin/hooks-relay}"' in block
 
 
 def test_guard_block_honours_relay_binary_override() -> None:
     transport = TransportConfig(relay_enabled=True, relay_binary="/opt/custom/hooks-relay")
     block = build_relay_guard_block("pre-tool-use", transport, Path("/proj/untracked"))
-    assert '_rl_bin="/opt/custom/hooks-relay"' in block
+    assert '_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/opt/custom/hooks-relay}"' in block
     assert "/proj/untracked/bin/hooks-relay" not in block
+
+
+def test_guard_block_events_dir_is_env_overridable() -> None:
+    """Test-isolation fix: the events dir a fixture needs to redirect must be
+    a single env-overridable variable, not just the untracked-dir literal it
+    is computed from — mirrors CLAUDE_HOOKS_SOCKET_PATH's override pattern
+    for the legacy socket."""
+    block = build_relay_guard_block(
+        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/proj/untracked")
+    )
+    assert '_rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"' in block
+    assert '_rl_sock="$_rl_events_dir/pre-tool-use.sock"' in block
+
+
+def test_guard_block_relay_binary_is_env_overridable() -> None:
+    block = build_relay_guard_block(
+        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/proj/untracked")
+    )
+    assert '_rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/proj/untracked/bin/hooks-relay}"' in block
+
+
+def test_guard_block_env_overrides_are_pure_parameter_expansion() -> None:
+    """Still zero subshells/spawns — `${VAR:-default}` is a bash builtin."""
+    block = build_relay_guard_block(
+        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u")
+    )
+    assert "$(" not in block
+    assert "`" not in block
 
 
 def test_guard_block_timeout_ms_derived_from_timeout_seconds() -> None:

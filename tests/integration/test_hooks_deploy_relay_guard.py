@@ -85,7 +85,7 @@ def test_relay_enabled_config_inserts_guard(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     deployed = (project_root / ".claude" / "hooks" / "pre-tool-use").read_text()
     assert "relay hot path" in deployed
-    assert '_rl_sock="$_rl_dir/events$_rl_sfx/pre-tool-use.sock"' in deployed
+    assert '_rl_sock="$_rl_events_dir/pre-tool-use.sock"' in deployed
     # The rest of the forwarder body is untouched.
     assert 'send_request_stdin "PreToolUse"' in deployed
 

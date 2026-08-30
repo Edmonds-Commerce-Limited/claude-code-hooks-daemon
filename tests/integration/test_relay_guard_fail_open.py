@@ -110,6 +110,24 @@ fi
 send_request_stdin "{event_pascal}"
 """
 
+#: Mirrors the real `.claude/hooks/stop`/`subagent-stop` shape: `set -uo
+#: pipefail` (not `-e` — `forward_stop_event` returning 2 on block is
+#: desired) and `exit $?` propagating the translated exit code.
+_STOP_FORWARDER_TEMPLATE = """#!/bin/bash
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+source "$SCRIPT_DIR/../init.sh"
+
+if ! ensure_daemon; then
+    emit_hook_error "{event_pascal}" "daemon_startup_failed" "daemon failed to start"
+    exit 0
+fi
+
+forward_stop_event "{event_pascal}"
+exit $?
+"""
+
 
 def _write_generated_forwarder(
     tmp_path: Path,
@@ -117,8 +135,10 @@ def _write_generated_forwarder(
     event_pascal: str,
     transport: TransportConfig,
     untracked_dir: Path,
+    *,
+    template: str = _FORWARDER_TEMPLATE,
 ) -> Path:
-    source = _FORWARDER_TEMPLATE.format(event_pascal=event_pascal)
+    source = template.format(event_pascal=event_pascal)
     content = generate_forwarder_content(source, event_file_name, transport, untracked_dir)
     hooks_dir = tmp_path / ".claude" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -461,15 +481,6 @@ def test_no_relay_reentry_skips_own_guard(
         forwarder = _write_generated_forwarder(
             tmp_path, "pre-tool-use", "PreToolUse", transport, untracked_dir
         )
-        # Rewrite the guard's socket suffix computation target to match our
-        # unsuffixed test layout: patch _rl_sock's directory to the literal
-        # events dir we created (no hostname suffix complexity needed here).
-        content = forwarder.read_text()
-        content = content.replace(
-            '_rl_sock="$_rl_dir/events$_rl_sfx/pre-tool-use.sock"',
-            f'_rl_sock="{events_dir}/pre-tool-use.sock"',
-        )
-        forwarder.write_text(content)
 
         canned = b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"ok"}}\n'
         server = _RecordingSocketServer(sock_path, canned)
@@ -477,6 +488,10 @@ def test_no_relay_reentry_skips_own_guard(
         payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "reentry"}}).encode()
 
         env = _base_env(sock_path, live_pid_file)
+        # Test-isolation fix (Plan 00290 Phase 6 dogfood finding): redirect
+        # the guard's events dir via env instead of patching the generated
+        # content's baked path.
+        env["HOOKS_DAEMON_EVENTS_DIR"] = str(events_dir)
         result = subprocess.run(
             ["bash", str(forwarder), "--no-relay"],
             input=payload,
@@ -495,3 +510,168 @@ def test_no_relay_reentry_skips_own_guard(
         assert request["hook_input"]["tool_input"]["command"] == "reentry"
     finally:
         loop_sock.close()
+
+
+# ---------------------------------------------------------------------------
+# 5. Stop/SubagentStop exclusion: the exit-code-2 hard-block contract
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "event_pascal,event_file_name", [("Stop", "stop"), ("SubagentStop", "subagent-stop")]
+)
+def test_stop_events_keep_exit_code_2_contract_even_with_relay_enabled(
+    event_pascal: str,
+    event_file_name: str,
+    tmp_path: Path,
+    sock_path: Path,
+    live_pid_file: Path,
+) -> None:
+    """Regression (Plan 00290 Phase 6 dogfood finding): a relay-enabled Stop/
+    SubagentStop forwarder must still translate the daemon's
+    `decision=block` JSON into exit code 2 (Claude Code's hard re-entry
+    contract, Plan 00101 Phase 9) — never exec the relay directly, which has
+    no equivalent of that translation.
+
+    Proven adversarially: a relay binary and a listening per-event socket
+    ARE present and WOULD be selected by the guard if the exclusion were
+    ever broken — this fails loudly (wrong exit code / relay's own exit 99
+    leaking through) rather than passing vacuously because nothing was
+    reachable.
+    """
+    untracked_dir = tmp_path / "untracked"
+    fake_relay = tmp_path / "would-bypass-relay.sh"
+    fake_relay.write_text("#!/bin/bash\necho SHOULD_NEVER_RUN >&2\nexit 99\n")
+    fake_relay.chmod(0o755)
+    events_dir = untracked_dir / "events"
+    events_dir.mkdir(parents=True)
+    loop_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    loop_sock.bind(str(events_dir / f"{event_file_name}.sock"))
+    loop_sock.listen(1)
+    try:
+        transport = TransportConfig(relay_enabled=True, relay_binary=str(fake_relay))
+        forwarder = _write_generated_forwarder(
+            tmp_path,
+            event_file_name,
+            event_pascal,
+            transport,
+            untracked_dir,
+            template=_STOP_FORWARDER_TEMPLATE,
+        )
+        assert "relay hot path" not in forwarder.read_text()
+
+        reason = "STOPPING BECAUSE: acceptance probe"
+        server = _RecordingSocketServer(
+            sock_path, json.dumps({"decision": "block", "reason": reason}).encode() + b"\n"
+        )
+        server.start()
+        payload = json.dumps({"stop_hook_active": False}).encode()
+
+        env = _base_env(sock_path, live_pid_file)
+        env["HOOKS_DAEMON_EVENTS_DIR"] = str(events_dir)
+        result = subprocess.run(
+            ["bash", str(forwarder)],
+            input=payload,
+            capture_output=True,
+            env=env,
+            timeout=_TIMEOUT_SECONDS,
+        )
+        server.join()
+
+        assert b"SHOULD_NEVER_RUN" not in result.stderr, "the relay ran for a Stop event"
+        assert (
+            result.returncode == 2
+        ), f"expected hard re-entry exit 2, got {result.returncode}: {result.stderr.decode()}"
+        assert reason in result.stderr.decode()
+    finally:
+        loop_sock.close()
+
+
+# ---------------------------------------------------------------------------
+# 6. Env-override test isolation: HOOKS_DAEMON_EVENTS_DIR / _RELAY_BINARY
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _RELAY_BINARY.exists(), reason="no built relay binary on this machine")
+def test_env_override_redirects_relay_away_from_baked_default(
+    tmp_path: Path, sock_path: Path, live_pid_file: Path
+) -> None:
+    """The guard's baked `_rl_dir`/default relay binary point at a location
+    with NO working relay+socket; `HOOKS_DAEMON_EVENTS_DIR` +
+    `HOOKS_DAEMON_RELAY_BINARY` redirect it to a fixture-controlled one, and
+    the relay is genuinely used from there — proving the override actually
+    takes effect at runtime, not just in the generated string."""
+    baked_untracked_dir = tmp_path / "baked-nonexistent" / "untracked"
+    transport = TransportConfig(relay_enabled=True, relay_binary=str(_RELAY_BINARY))
+    forwarder = _write_generated_forwarder(
+        tmp_path, "pre-tool-use", "PreToolUse", transport, baked_untracked_dir
+    )
+    assert str(baked_untracked_dir) in forwarder.read_text()
+
+    override_events_dir = tmp_path / "override-events"
+    override_events_dir.mkdir(parents=True)
+    canned = (
+        b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"via-override"}}'
+    )
+    server = _RecordingSocketServer(override_events_dir / "pre-tool-use.sock", canned)
+    server.start()
+
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "override-me"}}).encode()
+    env = _base_env(sock_path, live_pid_file)  # legacy socket deliberately unreachable
+    env["HOOKS_DAEMON_EVENTS_DIR"] = str(override_events_dir)
+
+    result = subprocess.run(
+        ["bash", str(forwarder)],
+        input=payload,
+        capture_output=True,
+        env=env,
+        timeout=_TIMEOUT_SECONDS,
+    )
+    server.join()
+
+    assert result.returncode == 0, result.stderr.decode()
+    assert server.received is not None, "the override events dir's socket was never reached"
+    request = json.loads(server.received)
+    assert request["tool_input"]["command"] == "override-me"
+
+
+def test_env_override_absent_falls_through_to_legacy(
+    tmp_path: Path, sock_path: Path, live_pid_file: Path
+) -> None:
+    """`HOOKS_DAEMON_EVENTS_DIR` pointed at an empty directory (no socket for
+    this event): the guard's `-S` test is false regardless of what the baked
+    default would have resolved to, and the legacy path is reached — the
+    override decouples the test from whatever the baked default happens to
+    be, in either direction."""
+    untracked_dir = tmp_path / "untracked"
+    transport = TransportConfig(relay_enabled=True, relay_binary=str(_RELAY_BINARY))
+    forwarder = _write_generated_forwarder(
+        tmp_path, "pre-tool-use", "PreToolUse", transport, untracked_dir
+    )
+
+    empty_override_dir = tmp_path / "empty-override-events"
+    empty_override_dir.mkdir(parents=True)
+
+    canned = b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"ok"}}\n'
+    server = _RecordingSocketServer(sock_path, canned)
+    server.start()
+    payload = json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": "no-override-sock"}}
+    ).encode()
+
+    env = _base_env(sock_path, live_pid_file)
+    env["HOOKS_DAEMON_EVENTS_DIR"] = str(empty_override_dir)
+
+    result = subprocess.run(
+        ["bash", str(forwarder)],
+        input=payload,
+        capture_output=True,
+        env=env,
+        timeout=_TIMEOUT_SECONDS,
+    )
+    server.join()
+
+    assert result.returncode == 0, result.stderr.decode()
+    assert server.received is not None, "legacy transport was never reached"
+    request = json.loads(server.received)
+    assert request["hook_input"]["tool_input"]["command"] == "no-override-sock"

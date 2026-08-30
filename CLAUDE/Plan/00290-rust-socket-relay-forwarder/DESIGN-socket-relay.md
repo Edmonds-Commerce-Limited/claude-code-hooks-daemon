@@ -38,6 +38,25 @@ Per-event sockets live in a **sibling directory**, one file per event:
 - The set of sockets is exactly `constants/events.py::wired_event_metas()` —
   catalogued-but-unwired events (Plan 00170 burn-down) get no socket, the same
   rule that gates forwarders and settings entries today.
+- **`Stop`/`SubagentStop` are bound like every other wired event, but their
+  forwarders never connect to them** (Plan 00290 Phase 6 dogfood finding,
+  fixed in §6.1). `.claude/hooks/stop`/`subagent-stop` call
+  `forward_stop_event`, which translates the daemon's JSON `decision=block`
+  response into the exit-code-2 hard-re-entry contract Claude Code v2.1.114
+  requires (Plan 00101 Phase 9) — a translation that happens in BASH, after
+  the transport call returns. The relay `exec`s the forwarder process
+  directly and is a protocol-ignorant byte pump with no equivalent
+  translation, so exec'ing it for these two events would silently drop the
+  hard-block contract. The forwarder-side fix
+  (`forwarder_generator.RELAY_EXCLUDED_EVENT_FILE_NAMES`) is therefore the
+  only place this needs to be enforced — leaving the daemon's own bind
+  behaviour unchanged (still binds these two sockets unconditionally,
+  alongside every other wired event) is deliberate and harmless: an unused
+  listener costs nothing, and special-casing the BIND side would only add a
+  second place this invariant could drift from the generator. The nc rung
+  is unaffected by this exclusion — it only replaces the transport beneath
+  `send_request_stdin`/`forward_stop_event`, so the exit-code translation
+  still runs afterward regardless of which rung served the request.
 - New `daemon/paths.py` helpers, DRY with the existing ones:
   `get_event_socket_dir(project_dir)` and
   `get_event_socket_path(project_dir, event_file_name)`. Both reuse
@@ -293,8 +312,9 @@ inserting a **generated relay guard** ABOVE the `source init.sh` line:
 if [[ "${1:-}" != "--no-relay" ]]; then
     _rl_dir="<generated: untracked dir>"          # literal, install-mode aware
     _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx,,}"; _rl_sfx="${_rl_sfx// /-}"
-    _rl_bin="<generated: relay binary path>"
-    _rl_sock="$_rl_dir/events$_rl_sfx/pre-tool-use.sock"
+    _rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"
+    _rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-<generated: relay binary path>}"
+    _rl_sock="$_rl_events_dir/pre-tool-use.sock"
     if [[ -x "$_rl_bin" && -S "$_rl_sock" ]]; then
         exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \
             --timeout-ms "<generated: timeout_seconds*1000>"
@@ -314,6 +334,22 @@ source "$SCRIPT_DIR/../init.sh"   # existing body, unchanged
   agree.
 - `--no-relay` is how the relay's fallback exec re-enters the same script
   without recursing into rung 1.
+- **`HOOKS_DAEMON_EVENTS_DIR`/`HOOKS_DAEMON_RELAY_BINARY` env overrides**
+  (Plan 00290 Phase 6 dogfood finding): the events-dir and relay-binary
+  values are wrapped in `${VAR:-default}` — still pure parameter expansion,
+  no spawns, no behaviour change when unset — so a test fixture can redirect
+  the relay's target the same way `CLAUDE_HOOKS_SOCKET_PATH` already
+  redirects the legacy socket. Before this, the guard's `_rl_dir` was a bare
+  literal baked in at generation time with no override seam, so a fixture
+  that only knew how to redirect the legacy path (via
+  `CLAUDE_HOOKS_SOCKET_PATH`/`HOOKS_DAEMON_ROOT_DIR`) could not stop a
+  relay-enabled generated forwarder from reaching whatever real relay/socket
+  happened to exist at the baked default — a genuine test-isolation gap that
+  bit exactly this way when a dogfooded repo's own real per-event sockets
+  silently answered a test's synthetic payload instead of its fake server.
+- **Excluded events**: `Stop`/`SubagentStop` forwarders never receive this
+  guard block at all, at any config — see §1.1's exclusion note. Every other
+  wired event gets it when `relay_enabled: true`.
 - The guard block is **generated at deploy time** by the installer from the
   loaded config: when `relay_enabled: false` the guard is omitted entirely
   and the deployed file is byte-identical to today's. Config changes

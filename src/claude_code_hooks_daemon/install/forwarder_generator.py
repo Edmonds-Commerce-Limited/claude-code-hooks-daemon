@@ -36,6 +36,17 @@ INIT_SH_ANCHOR: str = 'source "$SCRIPT_DIR/../init.sh"\n'
 _GUARD_HEADER = "# --- relay hot path (generated; Plan 00290) ---\n"
 _GUARD_FOOTER = "# --- end relay hot path ---\n"
 
+#: Stop/SubagentStop NEVER get the relay guard, at any config (Plan 00290
+#: Phase 6 dogfood finding). The relay `exec`s the process directly and is a
+#: protocol-ignorant byte pump with no equivalent of `forward_stop_event`'s
+#: daemon `decision=block` JSON -> exit-code-2 translation — the contract
+#: Claude Code v2.1.114 requires for hard re-entry (Plan 00101 Phase 9).
+#: Bypassing that translation would be a real safety regression, so these
+#: two forwarders always keep the bash path; per-turn events don't need the
+#: hot path anyway. See DESIGN-socket-relay.md §1.1 for the rationale this
+#: mirrors in the daemon's own per-event socket naming.
+RELAY_EXCLUDED_EVENT_FILE_NAMES: frozenset[str] = frozenset({"stop", "subagent-stop"})
+
 
 def _default_relay_binary_path(untracked_dir: Path) -> str:
     """``{untracked}/bin/hooks-relay`` — the default when unoverridden (design §4)."""
@@ -76,8 +87,16 @@ def build_relay_guard_block(
         + f'    _rl_dir="{untracked_dir}"\n'
         + '    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx,,}"; '
         + '_rl_sfx="${_rl_sfx// /-}"\n'
-        + f'    _rl_bin="{relay_binary}"\n'
-        + f'    _rl_sock="$_rl_dir/events$_rl_sfx/{event_file_name}.sock"\n'
+        # Test-isolation fix (Plan 00290 Phase 6 dogfood finding): both the
+        # events dir and the relay binary path are wrapped in
+        # `${VAR:-default}` — pure parameter expansion, still zero spawns —
+        # so a test fixture can redirect the relay's target the same way
+        # CLAUDE_HOOKS_SOCKET_PATH already redirects the legacy socket,
+        # instead of being stuck with whatever this deployment's baked
+        # literal happens to be.
+        + '    _rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"\n'
+        + f'    _rl_bin="${{HOOKS_DAEMON_RELAY_BINARY:-{relay_binary}}}"\n'
+        + f'    _rl_sock="$_rl_events_dir/{event_file_name}.sock"\n'
         + '    if [[ -x "$_rl_bin" && -S "$_rl_sock" ]]; then\n'
         + '        exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \\\n'
         + f'            --timeout-ms "{timeout_ms}"\n'
@@ -151,16 +170,27 @@ def generate_forwarder_content(
       (:func:`build_relay_guard_block`) is inserted directly above the
       ``source init.sh`` line. If that anchor is absent (a non-standard
       forwarder shape), this transform is skipped rather than guessing an
-      insertion point.
+      insertion point. ``event_file_name`` in :data:`RELAY_EXCLUDED_EVENT_FILE_NAMES`
+      (``stop``, ``subagent-stop``) NEVER gets this transform, at any
+      config — see that constant's docstring.
     - ``transport.nc_enabled``: the event's bash_key is appended as a
       trailing literal arg to the file's ``send_request_stdin``/
-      ``forward_stop_event`` call (:func:`append_nc_socket_arg`).
+      ``forward_stop_event`` call (:func:`append_nc_socket_arg`). Applies to
+      every event, including the two excluded from the relay guard — nc only
+      changes the transport beneath ``send_request_stdin``, so
+      ``forward_stop_event``'s own decision=block parsing still runs
+      afterward regardless of which rung served the request.
 
     With both flags False (the default) this returns ``source_content``
     completely unchanged.
     """
     result = source_content
-    if transport.relay_enabled and INIT_SH_ANCHOR in result and _GUARD_HEADER not in result:
+    if (
+        transport.relay_enabled
+        and event_file_name not in RELAY_EXCLUDED_EVENT_FILE_NAMES
+        and INIT_SH_ANCHOR in result
+        and _GUARD_HEADER not in result
+    ):
         guard = build_relay_guard_block(event_file_name, transport, untracked_dir)
         result = result.replace(INIT_SH_ANCHOR, guard + INIT_SH_ANCHOR, 1)
     if transport.nc_enabled:

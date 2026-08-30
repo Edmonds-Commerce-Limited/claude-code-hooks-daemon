@@ -72,9 +72,9 @@ def test_relay_enabled_config_rewrites_every_forwarder(tmp_path: Path) -> None:
     assert sorted(rewritten) == ["post-tool-use", "pre-tool-use"]
     content = (hooks_dir / "pre-tool-use").read_text()
     assert "relay hot path" in content
-    assert '_rl_sock="$_rl_dir/events$_rl_sfx/pre-tool-use.sock"' in content
+    assert '_rl_sock="$_rl_events_dir/pre-tool-use.sock"' in content
     post_content = (hooks_dir / "post-tool-use").read_text()
-    assert '_rl_sock="$_rl_dir/events$_rl_sfx/post-tool-use.sock"' in post_content
+    assert '_rl_sock="$_rl_events_dir/post-tool-use.sock"' in post_content
 
 
 def test_nc_only_enabled_config_rewrites_every_forwarder(tmp_path: Path) -> None:
