@@ -174,7 +174,11 @@ class TestEofFraming:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "ls"}}
         response = await _connect_and_send_eof(socket_path, hook_input)
 
-        assert echo_handler.last_hook_input == hook_input
+        # hook_event_name enrichment (Plan 00290 defect 2 fix): the daemon
+        # injects it from the socket identity when the payload omits it —
+        # see test_event_socket_hook_event_name_enrichment.py for the
+        # dedicated coverage of that behaviour.
+        assert echo_handler.last_hook_input == {**hook_input, "hook_event_name": "PreToolUse"}
         assert "hookSpecificOutput" in response
 
         await daemon.shutdown()

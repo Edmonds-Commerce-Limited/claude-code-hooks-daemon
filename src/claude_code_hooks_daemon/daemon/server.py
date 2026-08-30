@@ -941,6 +941,19 @@ class HooksDaemon:
         open with an empty ``{}`` response — Claude Code must always receive
         valid JSON, and ``{}`` carries no policy (the same passthrough
         contract every unhandled event already gets).
+
+        **hook_event_name enrichment (Plan 00290 dogfood field report, commit
+        9d353fd3 EMERGENCY suspension, defect 2)**: the legacy bash transport
+        injects ``hook_input['hook_event_name'] = event_name`` itself before
+        dispatch (``.claude/init.sh``'s ``send_request_stdin`` — the
+        Status-line special case, since Claude Code's real status-line
+        payload never carries it). A byte-pump relay client can never
+        perform that injection (it never parses JSON), so it is mirrored
+        here instead — the daemon already knows the wire event name from
+        which per-event socket the connection arrived on, so this is a pure
+        server-side backstop with no policy: an ALREADY-present
+        ``hook_event_name`` (the common case — Claude Code sends it natively
+        for most events) is never overwritten.
         """
         self._active_requests += 1
         self.last_activity = time.time()
@@ -957,6 +970,9 @@ class HooksDaemon:
                 writer.write(json.dumps({}).encode())
                 await writer.drain()
                 return
+
+            if isinstance(hook_input, dict) and not hook_input.get("hook_event_name"):
+                hook_input["hook_event_name"] = event_json_key
 
             request_data = json.dumps({"event": event_json_key, "hook_input": hook_input})
             response = await self._process_request(request_data)
