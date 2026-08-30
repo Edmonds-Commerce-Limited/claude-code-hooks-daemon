@@ -15,6 +15,19 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# --- relay hot path (generated; Plan 00290) ---
+if [[ "${1:-}" != "--no-relay" ]]; then
+    _rl_dir="/workspace/untracked"
+    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx,,}"; _rl_sfx="${_rl_sfx// /-}"
+    _rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"
+    _rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/workspace/untracked/bin/hooks-relay}"
+    _rl_sock="$_rl_events_dir/worktree-create.sock"
+    if [[ -x "$_rl_bin" && -S "$_rl_sock" ]]; then
+        exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \
+            --timeout-ms "30000"
+    fi
+fi
+# --- end relay hot path ---
 source "$SCRIPT_DIR/../init.sh"
 
 # Try to start daemon - if it fails, output proper JSON error to stdout

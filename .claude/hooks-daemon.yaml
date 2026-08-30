@@ -30,6 +30,19 @@ daemon:
     events:                    # empty list = all events; scope e.g. to [Status]
       - Status
 
+  # Transport (Plan 00290) - opt-in relay/nc hot-path rungs. Both false is
+  # today's behaviour, byte-identical. Relay measured at p50 4.3ms / p95
+  # 5.1ms end-to-end (see CLAUDE/Plan/00290-.../MEASUREMENT-relay.md) and is
+  # dogfooded here (Task 6.2), post commit c9a0f674 (Stop/SubagentStop
+  # excluded from the relay guard; guard socket/binary paths overridable).
+  transport:
+    relay_enabled: true        # rung 1: exec the static relay binary (dogfooded here)
+    nc_enabled: false          # rung 2: bash `nc -U` path - measured working (22.4ms p50)
+                                # but relay is ~5x faster; see MEASUREMENT-relay.md
+    timeout_seconds: 30
+    relay_binary: null         # null = <untracked>/bin/hooks-relay
+    relay_source: build        # build from relay/hooks_relay.rs via relay/build.sh
+
 # Built-in handler configuration
 # Handlers run in priority order (lower number = earlier execution)
 # Priority ranges: 5=test, 10-20=safety, 25-45=workflow, 50-60=tool usage
