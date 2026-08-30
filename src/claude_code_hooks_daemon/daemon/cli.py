@@ -4049,6 +4049,72 @@ def cmd_transport_probe(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_transport(args: argparse.Namespace) -> int:
+    """``transport on|off|status`` — the safe relay toggle (Plan 00294).
+
+    ``on``/``off`` perform config flip -> forwarder regeneration -> daemon
+    restart -> real-context verification as ONE operation, auto-reverting the
+    previous state end-to-end when verification fails. ``status`` reports the
+    current rung, listener count, relay binary facts and the last toggle's
+    verification result.
+
+    Returns:
+        0 on a verified toggle, a clean no-op, or a status report; 1 when
+        verification failed (even though the auto-revert restored the prior
+        state) or a toggle precondition was not met.
+    """
+    from claude_code_hooks_daemon.install.transport_toggle import (
+        TransportToggleError,
+        render_status,
+        run_toggle,
+        status_snapshot,
+    )
+
+    override = getattr(args, "project_root", None)
+    project_root = Path(override).resolve() if override else Path(get_project_path(None))
+
+    if args.action == "status":
+        snapshot = status_snapshot(project_root)
+        if getattr(args, "json", False):
+            print(json.dumps(snapshot, indent=2))
+        else:
+            print(render_status(snapshot))
+        return 0
+
+    enable = args.action == "on"
+    try:
+        outcome = run_toggle(project_root, enable=enable)
+    except TransportToggleError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    if not outcome.changed:
+        state = "enabled" if enable else "disabled"
+        print(f"transport {outcome.action}: relay already {state} — nothing to do")
+        return 0
+    if outcome.verified:
+        print(
+            f"transport {outcome.action}: flipped, forwarders regenerated, daemon restarted, verified"
+        )
+        return 0
+
+    print(f"transport {outcome.action}: VERIFICATION FAILED", file=sys.stderr)
+    for failure in outcome.failures:
+        print(f"  - {failure}", file=sys.stderr)
+    if outcome.reverted:
+        if outcome.revert_verified:
+            print(
+                "AUTO-REVERTED to the previous transport state (revert verified)", file=sys.stderr
+            )
+        else:
+            print(
+                "AUTO-REVERT attempted but its verification FAILED — inspect the "
+                "daemon and forwarders before relying on any hook transport",
+                file=sys.stderr,
+            )
+    return 1
+
+
 def cmd_reconcile_settings(args: argparse.Namespace) -> int:
     """Reconcile a settings.json's hook registrations against the SSoT.
 
@@ -5900,6 +5966,25 @@ def main() -> int:
         help="Emit JSON instead of a human-readable table",
     )
     parser_transport_probe.set_defaults(func=cmd_transport_probe)
+
+    # transport (Plan 00294) — safe, verified, auto-reverting relay toggle
+    parser_transport = subparsers.add_parser(
+        "transport",
+        help="Toggle the relay transport safely (on/off with built-in "
+        "verification and auto-revert) or report its status",
+    )
+    parser_transport.add_argument(
+        "action",
+        choices=["on", "off", "status"],
+        help="on/off: verified toggle with auto-revert; status: current rung, "
+        "listeners, binary and last toggle result",
+    )
+    parser_transport.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit status as JSON (status action only)",
+    )
+    parser_transport.set_defaults(func=cmd_transport)
 
     # reconcile-settings (Plan 00185) — SSoT-derived settings.json hook merge
     parser_reconcile = subparsers.add_parser(

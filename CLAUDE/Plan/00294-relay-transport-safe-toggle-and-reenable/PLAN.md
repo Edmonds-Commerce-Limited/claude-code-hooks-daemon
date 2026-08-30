@@ -1,6 +1,6 @@
 # Plan 00294: relay transport safe toggle and reenable
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-30
 **Owner**: joseph
 **Priority**: High
@@ -61,15 +61,17 @@ lineage is one commit old).
 
 ### Phase 1: Toggle command
 
-- [ ] ⬜ **Task 1.1**: TDD `transport on|off|status` CLI: config flip via the
-  real loader (comment-preserving edit or documented equivalent), forwarder
-  regeneration through `forwarder_generator`, daemon restart, state
-  reporting. Idempotent (on-when-on / off-when-off are clean no-ops).
-- [ ] ⬜ **Task 1.2**: TDD the built-in verification pass: socket-stdin
-  probes (real invocation manner, unmodified payload shapes) for one
-  eligible event + status-line + stop hard-block, listener-count check,
-  bounded time budget.
-- [ ] ⬜ **Task 1.3**: TDD auto-revert: any verification failure restores the
+- [x] ✅ **Task 1.1**: TDD `transport on|off|status` CLI: config flip via a
+  targeted comment-preserving line edit of `relay_enabled:` (explicitly
+  round-trip tested), forwarder regeneration through `forwarder_generator`,
+  daemon restart, state reporting
+  (`install/transport_toggle.py`, `cmd_transport`). Idempotent (on-when-on /
+  off-when-off are clean no-ops).
+- [x] ✅ **Task 1.2**: TDD the built-in verification pass: socket-stdin
+  probes (real invocation manner, unmodified payload shapes) for
+  pre-tool-use + status-line + stop hard-block, listener-count check,
+  bounded per-probe budget (`install/transport_verify.py`).
+- [x] ✅ **Task 1.3**: TDD auto-revert: any verification failure restores the
   prior state end-to-end and exits non-zero with the failure named;
   the revert itself is verified by the same probes.
 
