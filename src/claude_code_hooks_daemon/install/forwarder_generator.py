@@ -26,7 +26,11 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config, TransportConfig
-from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir
+from claude_code_hooks_daemon.daemon.paths import (
+    event_socket_dir_is_fallback,
+    get_event_socket_dir_from_untracked,
+    get_untracked_dir,
+)
 
 #: The line every current forwarder sources init.sh through. The guard block
 #: is inserted directly above this line (DESIGN §6.1) — it is the anchor that
@@ -78,32 +82,87 @@ def build_relay_guard_block(
     Returns:
         The guard block text, newline-terminated, ready to be inserted
         directly above :data:`INIT_SH_ANCHOR`.
+
+    **Events-dir three-way agreement (Plan 00290 F3 fix)**: the events
+    directory is normally computed DYNAMICALLY in bash
+    (``$_rl_dir/events$_rl_sfx``, using bash's own ``$HOSTNAME`` at hook-run
+    time) so a project checkout shared across multiple hosts over NFS gets a
+    correctly host-isolated path on every host without redeployment. But on
+    a deeply-nested standard client layout that dynamic path can itself
+    exceed the AF_UNIX length limit for most event names — silently inert
+    (canary-observed). When ``paths.event_socket_dir_is_fallback`` says the
+    daemon's own bind decision (``paths.get_event_socket_dir_from_untracked``)
+    would use its short fallback root instead, this function BAKES that
+    same resolved path as the guard's literal default — computed once, at
+    generation time, on the deploying host. This is the one case where the
+    dynamic-per-host guarantee is knowingly given up: a project that is
+    BOTH multi-host-NFS-shared AND deep enough to overflow must either set
+    ``HOOKS_DAEMON_EVENTS_DIR`` per host or accept a shared fallback path
+    (still correct — the fallback root is keyed by project, not by host —
+    just not host-isolated in that narrow combination).
     """
     relay_binary = transport.relay_binary or _default_relay_binary_path(untracked_dir)
     timeout_ms = transport.timeout_seconds * 1000
-    return (
-        _GUARD_HEADER
-        + 'if [[ "${1:-}" != "--no-relay" ]]; then\n'
-        + f'    _rl_dir="{untracked_dir}"\n'
-        + '    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx,,}"; '
-        + '_rl_sfx="${_rl_sfx// /-}"\n'
-        # Test-isolation fix (Plan 00290 Phase 6 dogfood finding): both the
-        # events dir and the relay binary path are wrapped in
-        # `${VAR:-default}` — pure parameter expansion, still zero spawns —
-        # so a test fixture can redirect the relay's target the same way
-        # CLAUDE_HOOKS_SOCKET_PATH already redirects the legacy socket,
-        # instead of being stuck with whatever this deployment's baked
-        # literal happens to be.
-        + '    _rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"\n'
-        + f'    _rl_bin="${{HOOKS_DAEMON_RELAY_BINARY:-{relay_binary}}}"\n'
-        + f'    _rl_sock="$_rl_events_dir/{event_file_name}.sock"\n'
-        + '    if [[ -x "$_rl_bin" && -S "$_rl_sock" ]]; then\n'
-        + '        exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \\\n'
-        + f'            --timeout-ms "{timeout_ms}"\n'
-        + "    fi\n"
-        + "fi\n"
-        + _GUARD_FOOTER
-    )
+    lines = [
+        _GUARD_HEADER,
+        'if [[ "${1:-}" != "--no-relay" ]]; then\n',
+        f'    _rl_dir="{untracked_dir}"\n',
+    ]
+    if event_socket_dir_is_fallback(untracked_dir):
+        resolved_events_dir = get_event_socket_dir_from_untracked(untracked_dir)
+        # Test-isolation fix (Plan 00290 Phase 6 dogfood finding), preserved
+        # in the fallback case too: still `${VAR:-default}` parameter
+        # expansion, zero spawns, so a test fixture can still redirect this.
+        lines.append(f'    _rl_events_dir="${{HOOKS_DAEMON_EVENTS_DIR:-{resolved_events_dir}}}"\n')
+    else:
+        lines.append(
+            '    _rl_sfx="-${HOSTNAME:-localhost}"; _rl_sfx="${_rl_sfx,,}"; '
+            '_rl_sfx="${_rl_sfx// /-}"\n'
+        )
+        lines.append('    _rl_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-$_rl_dir/events$_rl_sfx}"\n')
+    lines.append(f'    _rl_bin="${{HOOKS_DAEMON_RELAY_BINARY:-{relay_binary}}}"\n')
+    lines.append(f'    _rl_sock="$_rl_events_dir/{event_file_name}.sock"\n')
+    lines.append('    if [[ -x "$_rl_bin" && -S "$_rl_sock" ]]; then\n')
+    lines.append('        exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \\\n')
+    lines.append(f'            --timeout-ms "{timeout_ms}"\n')
+    lines.append("    fi\n")
+    lines.append("fi\n")
+    lines.append(_GUARD_FOOTER)
+    return "".join(lines)
+
+
+#: Matches a complete relay guard block, header through footer inclusive
+#: (DOTALL so the block body's newlines are matched). The header/footer are
+#: fixed literal marker comments emitted verbatim by
+#: :func:`build_relay_guard_block`, so this match is exact regardless of
+#: what the block's body contains (a foreign project's untracked-dir
+#: literal, a stale timeout, a different events-dir — Plan 00290 F1/F2/F4
+#: fix: stripping never needs to parse or understand the guard's content).
+_GUARD_BLOCK_PATTERN = re.compile(
+    re.escape(_GUARD_HEADER) + r".*?" + re.escape(_GUARD_FOOTER), re.DOTALL
+)
+
+
+def strip_relay_guard_block(source_content: str) -> str:
+    """Remove any existing relay guard block from ``source_content``.
+
+    Idempotent: content with no guard block is returned unchanged. This is
+    the fix for Plan 00290 findings F1/F2/F4 (canary run 2) — the deployed
+    forwarder a client receives is a copy of THIS repository's own
+    ``.claude/hooks/*``, which (since this repo dogfoods the relay) already
+    carries a guard block pointing at THIS repository's own paths. Without
+    an unconditional strip first, that foreign guard survived every
+    downstream config state: a disabled client config left it in place
+    (F1 — proven to answer a client's hook request from the wrong project's
+    daemon), an enabled client config left it un-rewritten because the
+    idempotency check saw "a guard is already present" (F2), and disabling
+    transport again never removed it (F4). Stripping FIRST, unconditionally,
+    then re-applying per the CALLER's own config (see
+    :func:`generate_forwarder_content`) makes the transform a single
+    bidirectional operation that fixes all three: the result always reflects
+    only the current config and the current project's own paths.
+    """
+    return _GUARD_BLOCK_PATTERN.sub("", source_content)
 
 
 #: Matches the single `send_request_stdin "Event" [mode]` or
@@ -163,33 +222,39 @@ def generate_forwarder_content(
         untracked_dir: The target project's resolved daemon untracked
             directory (install-mode aware).
 
-    Two independent, order-safe transforms — each gated on its own config
-    flag, so an unopted-in rung leaves ``source_content`` byte-identical:
+    The relay guard is handled as a single STRIP-then-REAPPLY transform
+    (Plan 00290 F1/F2/F4 fix), unconditionally:
 
-    - ``transport.relay_enabled``: the relay guard block
-      (:func:`build_relay_guard_block`) is inserted directly above the
-      ``source init.sh`` line. If that anchor is absent (a non-standard
-      forwarder shape), this transform is skipped rather than guessing an
-      insertion point. ``event_file_name`` in :data:`RELAY_EXCLUDED_EVENT_FILE_NAMES`
-      (``stop``, ``subagent-stop``) NEVER gets this transform, at any
-      config — see that constant's docstring.
-    - ``transport.nc_enabled``: the event's bash_key is appended as a
-      trailing literal arg to the file's ``send_request_stdin``/
-      ``forward_stop_event`` call (:func:`append_nc_socket_arg`). Applies to
-      every event, including the two excluded from the relay guard — nc only
-      changes the transport beneath ``send_request_stdin``, so
-      ``forward_stop_event``'s own decision=block parsing still runs
-      afterward regardless of which rung served the request.
+    1. :func:`strip_relay_guard_block` removes any EXISTING guard block
+       first, regardless of config — including one baked for a different
+       project entirely (see that function's docstring for why this must
+       never be conditional on the current config).
+    2. Only then, iff ``transport.relay_enabled`` and ``event_file_name`` is
+       not in :data:`RELAY_EXCLUDED_EVENT_FILE_NAMES` (``stop``,
+       ``subagent-stop`` — see that constant's docstring) and the
+       ``source init.sh`` anchor is present, a FRESH guard block
+       (:func:`build_relay_guard_block`) is inserted directly above it,
+       reflecting the caller's own ``untracked_dir``/config. If the anchor
+       is absent (a non-standard forwarder shape), this half is skipped
+       rather than guessing an insertion point.
 
-    With both flags False (the default) this returns ``source_content``
-    completely unchanged.
+    A source with no guard and a disabled config round-trips unchanged
+    (strip is a no-op, nothing is re-added) — the default byte-identical
+    guarantee still holds.
+
+    Independently, ``transport.nc_enabled`` appends the event's bash_key as
+    a trailing literal arg to the file's ``send_request_stdin``/
+    ``forward_stop_event`` call (:func:`append_nc_socket_arg`). Applies to
+    every event, including the two excluded from the relay guard — nc only
+    changes the transport beneath ``send_request_stdin``, so
+    ``forward_stop_event``'s own decision=block parsing still runs
+    afterward regardless of which rung served the request.
     """
-    result = source_content
+    result = strip_relay_guard_block(source_content)
     if (
         transport.relay_enabled
         and event_file_name not in RELAY_EXCLUDED_EVENT_FILE_NAMES
         and INIT_SH_ANCHOR in result
-        and _GUARD_HEADER not in result
     ):
         guard = build_relay_guard_block(event_file_name, transport, untracked_dir)
         result = result.replace(INIT_SH_ANCHOR, guard + INIT_SH_ANCHOR, 1)
@@ -217,28 +282,27 @@ def load_transport_config(project_root: Path) -> TransportConfig:
 def regenerate_deployed_hooks(project_root: Path, hooks_dir: Path) -> list[str]:
     """Rewrite every deployed forwarder in ``hooks_dir`` in place (Task 4.1).
 
-    No-op (touches nothing) when the resolved transport config has BOTH
-    ``relay_enabled: False`` AND ``nc_enabled: False`` (the default) — the
-    deployed tree is left exactly as ``deploy_hook_scripts`` (a plain
-    ``cp``) already produced it, which is how the byte-identical-by-default
-    guarantee holds without this function even needing to inspect file
-    contents in the common case. The two rungs are independent by design
-    (``TransportConfig``/DESIGN-socket-relay.md §4-§5): either flag alone
-    must still trigger regeneration.
+    ALWAYS scans every file (Plan 00290 F1/F2/F4 fix) — it must, even with
+    the resolved transport config at BOTH ``relay_enabled: False`` AND
+    ``nc_enabled: False`` (the default), because a deployed forwarder can
+    carry a STALE or FOREIGN guard block from an earlier config state or
+    from a contaminated deploy source (see :func:`strip_relay_guard_block`).
+    A file is only ever WRITTEN when :func:`generate_forwarder_content`'s
+    output actually differs from what's on disk, so the common case (no
+    guard present, config disabled) still touches nothing — the
+    byte-identical-by-default guarantee holds via a no-op comparison rather
+    than an early return.
 
     Args:
         project_root: The target project's root directory.
         hooks_dir: The deployed ``.claude/hooks`` directory to rewrite.
 
     Returns:
-        Basenames of the files actually rewritten (empty when disabled or
-        when every file was already in its generated form).
+        Basenames of the files actually rewritten (empty when every file was
+        already in its generated form).
     """
     transport = load_transport_config(project_root)
-    if not (transport.relay_enabled or transport.nc_enabled):
-        return []
-
-    untracked_dir = get_event_socket_dir(project_root).parent
+    untracked_dir = get_untracked_dir(project_root)
     rewritten: list[str] = []
     for path in sorted(hooks_dir.iterdir()):
         if not path.is_file():

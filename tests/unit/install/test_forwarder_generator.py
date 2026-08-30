@@ -17,8 +17,10 @@ import pytest
 from claude_code_hooks_daemon.config.models import TransportConfig
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.install.forwarder_generator import (
+    INIT_SH_ANCHOR,
     build_relay_guard_block,
     generate_forwarder_content,
+    strip_relay_guard_block,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -59,13 +61,21 @@ def test_disabled_transport_returns_source_unchanged() -> None:
     sorted(p.name for p in _HOOKS_DIR.iterdir() if p.is_file() and p.name != "README.md"),
 )
 def test_every_real_deployed_hook_is_byte_identical_when_disabled(hook_file: str) -> None:
-    """Pin default behaviour against every hook script actually shipped today."""
+    """Pin default behaviour against every hook script actually shipped today.
+
+    This repo dogfoods the relay (Plan 00290 F1 canary finding), so its own
+    tracked ``.claude/hooks/*`` may already carry a guard block pointing at
+    THIS repo's own paths. A disabled client config must always strip that
+    away and produce the guard-free canonical shape — never copy it forward
+    verbatim (that was F1: a client silently inheriting this repo's guard).
+    """
     source = (_HOOKS_DIR / hook_file).read_text()
     transport = TransportConfig()
 
     result = generate_forwarder_content(source, hook_file, transport, Path("/proj/untracked"))
 
-    assert result == source
+    assert result == strip_relay_guard_block(source)
+    assert "relay hot path" not in result
 
 
 def test_disabled_transport_returns_source_unchanged_even_without_anchor() -> None:
@@ -111,6 +121,71 @@ def test_enabled_transport_is_idempotent_against_already_generated_content() -> 
 
     assert twice == once
     assert once.count("relay hot path (generated") == 1
+
+
+# ---------------------------------------------------------------------------
+# Canary run 2 findings F1/F2/F4: strip-then-reapply against a FOREIGN or
+# STALE guard already present on disk (this repo dogfoods the relay, so a
+# client's deployed forwarder is a copy of a source that may already carry
+# a guard block pointing at THIS repo's own paths — proven live to route a
+# client's hook traffic to the wrong project's daemon).
+# ---------------------------------------------------------------------------
+
+
+def _foreign_guard_source(untracked_dir: str = "/workspace/untracked") -> str:
+    """A forwarder that already carries a guard baked for a DIFFERENT project."""
+    guard = build_relay_guard_block(
+        "pre-tool-use", TransportConfig(relay_enabled=True), Path(untracked_dir)
+    )
+    return _SAMPLE_SOURCE.replace(INIT_SH_ANCHOR, guard + INIT_SH_ANCHOR)
+
+
+def test_f1_disabled_config_strips_a_foreign_guard_entirely() -> None:
+    """F1 repro: a client's default (disabled) config must never inherit
+    another project's guard block — it must be stripped, not copied forward."""
+    contaminated = _foreign_guard_source()
+    transport = TransportConfig()  # disabled — the client's real default
+
+    result = generate_forwarder_content(
+        contaminated, "pre-tool-use", transport, Path("/proj/untracked")
+    )
+
+    assert "relay hot path" not in result
+    assert "/workspace/untracked" not in result
+    assert result == _SAMPLE_SOURCE
+
+
+def test_f2_enabled_config_replaces_foreign_guard_with_clients_own_paths() -> None:
+    """F2 repro: enabling transport over an already-contaminated deploy must
+    rewrite the guard to the CLIENT's own paths, not leave the foreign one
+    (the old idempotency check saw "a guard is already present" and skipped)."""
+    contaminated = _foreign_guard_source()
+    transport = TransportConfig(relay_enabled=True)
+
+    result = generate_forwarder_content(
+        contaminated, "pre-tool-use", transport, Path("/client/untracked")
+    )
+
+    assert "/workspace/untracked" not in result
+    assert '_rl_dir="/client/untracked"' in result
+    assert result.count("relay hot path (generated") == 1
+
+
+def test_f4_disabling_transport_strips_a_previously_generated_guard() -> None:
+    """F4 repro: flipping transport OFF must restore the byte-identical plain
+    shape, not leave a stale guard from when it was last enabled."""
+    own_transport = TransportConfig(relay_enabled=True)
+    previously_generated = generate_forwarder_content(
+        _SAMPLE_SOURCE, "pre-tool-use", own_transport, Path("/proj/untracked")
+    )
+    assert "relay hot path" in previously_generated  # sanity: guard really is there
+
+    disabled_transport = TransportConfig()
+    result = generate_forwarder_content(
+        previously_generated, "pre-tool-use", disabled_transport, Path("/proj/untracked")
+    )
+
+    assert result == _SAMPLE_SOURCE
 
 
 @pytest.mark.parametrize("event_file_name", ["stop", "subagent-stop"])
