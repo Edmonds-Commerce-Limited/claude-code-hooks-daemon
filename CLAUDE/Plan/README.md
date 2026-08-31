@@ -88,10 +88,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - User-directed design: enforce by **blocking at the daemon layer**, not by disabling Claude's own (unreliable) memory engine
   - Deferred follow-ups: a scaffolding skill (inventory docs, `@`-import audit, auto-build rules/skills) and dogfooding the policy in this repo (migrate `MEMORY.md` into tracked docs)
 
-- [00116: CLAUDE.md Token Compression via Stateful Progressive Disclosure](Completed/00116-claude-md-token-compression/PLAN.md) - Complete at `ba8860ed` + the archiving commit (two-tier injected block live at 63.6% shrink; 46 handlers on Rule/DisclosureTracker; block-report data-driven promotion; explain-rule CLI+skill)
-
-  - Compresses the always-resident CLAUDE.md via stateful progressive disclosure so handler guidance loads on demand rather than inflating every session's base context; Phases 1–2 merged, Phase 3 awaits a tracker-wiring decision
-
 ### Tooling / Dependencies
 
 - [00129: Wire llm-friendly-qa-wrappers in as a Major Dependency](00129-llm-qa-wrappers-integration/PLAN.md) - Not Started
@@ -165,6 +161,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00266: AI-assisted handler decisions](00266-ai-assisted-handler-decisions/PLAN.md) - Dormant (native `prompt`/`agent` hooks measured live: they work, fail CLOSED, cost ~1.2s vs the daemon's ~51ms, and cannot override a daemon deny; dynamic prompting via `tool_use_id` is the leading architecture; parked as reference until a revival condition fires)
 
 ## Completed Plans
+
+- [00116: CLAUDE.md Token Compression via Stateful Progressive Disclosure](Completed/00116-claude-md-token-compression/PLAN.md) - Complete at `ba8860ed` + the archiving commit (two-tier injected block live at 63.6% shrink; 46 handlers on Rule/DisclosureTracker; block-report data-driven promotion; explain-rule CLI+skill)
 
 - [00294: relay transport safe toggle and reenable](Completed/00294-relay-transport-safe-toggle-and-reenable/PLAN.md) - Complete at `17f9446e` + the archiving commit (one-command verified auto-reverting `transport on|off|status`; relay dogfood re-enabled here via the toggle; canary run 5 proved client parity incl. client-side relay build)
 
