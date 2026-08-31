@@ -140,7 +140,9 @@ class GhIssueCommentsHandler(PreToolUseHandlerBase):
         # The suggested command is invocation-specific and always shown,
         # regardless of disclosure state -- it is the concrete fix, not
         # teaching content.
-        message += f"\n\nREQUIRED ACTION:\n  Add --comments to your command:\n\n  {suggested_command}\n"
+        message += (
+            f"\n\nREQUIRED ACTION:\n  Add --comments to your command:\n\n  {suggested_command}\n"
+        )
 
         return GatingResult(decision=Decision.DENY, reason=message)
 

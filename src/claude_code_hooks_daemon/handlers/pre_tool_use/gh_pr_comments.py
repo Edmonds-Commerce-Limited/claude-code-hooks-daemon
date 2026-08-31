@@ -48,8 +48,7 @@ class GhPrCommentsHandler(PreToolUseHandlerBase):
         self._rule = Rule(
             rule_id=RuleID.GH_PR_VIEW_NO_COMMENTS,
             blocked="`gh pr view` without `--comments`",
-            why="PR comments contain review feedback and discussion context "
-            "not in the PR body",
+            why="PR comments contain review feedback and discussion context " "not in the PR body",
             fix="Add --comments, or include comments in --json fields",
             verbose=(
                 "WHY REQUIRED:\n"
@@ -158,7 +157,9 @@ class GhPrCommentsHandler(PreToolUseHandlerBase):
         # The suggested command is invocation-specific and always shown,
         # regardless of disclosure state -- it is the concrete fix, not
         # teaching content.
-        message += f"\n\nREQUIRED ACTION:\n  Add --comments to your command:\n\n  {suggested_command}\n"
+        message += (
+            f"\n\nREQUIRED ACTION:\n  Add --comments to your command:\n\n  {suggested_command}\n"
+        )
 
         return GatingResult(decision=Decision.DENY, reason=message)
 
