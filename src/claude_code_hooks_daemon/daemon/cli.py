@@ -4880,6 +4880,122 @@ def cmd_block_report(args: argparse.Namespace) -> int:
     return 0
 
 
+_EXPLAIN_UNKNOWN_RULE_HINT = "Run 'hooks-daemon explain-rule --list' to see every known rule ID."
+_EXPLAIN_UNKNOWN_HANDLER_HINT = (
+    "Run 'hooks-daemon explain-rule --list' to see every known handler and rule ID."
+)
+
+
+def cmd_explain_rule(args: argparse.Namespace) -> int:
+    """Print the full verbatim detail for a rule, or list every known rule ID.
+
+    Plan 00116 Task 6.1, Decision F. Enumeration is fully dynamic — it walks
+    the handlers package directly (no daemon required), so a rule declared
+    by any handler's ``get_rules()`` is found automatically, including
+    handlers migrated after this command was written.
+
+    Args:
+        args: Parsed CLI arguments with ``rule_id`` (optional positional)
+            and ``list_rules`` (``--list`` flag).
+
+    Returns:
+        0 on success (detail printed, or the full list printed); 1 if the
+        rule ID is unknown or missing with no ``--list``.
+    """
+    from claude_code_hooks_daemon.core.rule import RuleFormatter
+    from claude_code_hooks_daemon.rule_explain.lookup import (
+        discover_handler_rules,
+        find_rule,
+        near_rule_matches,
+    )
+
+    handlers = discover_handler_rules()
+
+    if getattr(args, "list_rules", False):
+        for handler in handlers:
+            for rule in handler.rules:
+                print(f"{rule.rule_id}\t{handler.config_key}\t{rule.blocked}")
+        return 0
+
+    rule_id = getattr(args, "rule_id", None)
+    if not rule_id:
+        print(
+            "ERROR: explain-rule requires a rule ID, or --list to see every known rule.",
+            file=sys.stderr,
+        )
+        return 1
+
+    found = find_rule(handlers, rule_id)
+    if found is None:
+        suggestions = near_rule_matches(handlers, rule_id)
+        print(f"ERROR: unknown rule ID: {rule_id}", file=sys.stderr)
+        if suggestions:
+            print(f"Did you mean: {', '.join(suggestions)}?", file=sys.stderr)
+        print(_EXPLAIN_UNKNOWN_RULE_HINT, file=sys.stderr)
+        return 1
+
+    handler, rule = found
+    formatter = RuleFormatter()
+    print(f"Rule: {rule.rule_id}")
+    print(f"Handler: {handler.config_key} ({handler.class_name})")
+    print()
+    print(formatter.verbose(rule))
+    return 0
+
+
+def cmd_explain_handler(args: argparse.Namespace) -> int:
+    """Print a handler's rules (IDs + terse) plus its get_claude_md() text.
+
+    Plan 00116 Task 6.1, Decision F.
+
+    Args:
+        args: Parsed CLI arguments with ``name`` — a config key (e.g.
+            ``destructive_git``) or a class name, case-insensitive.
+
+    Returns:
+        0 on success; 1 if the handler name is unknown.
+    """
+    from claude_code_hooks_daemon.core.rule import RuleFormatter
+    from claude_code_hooks_daemon.rule_explain.lookup import (
+        discover_handler_rules,
+        find_handler,
+        near_handler_matches,
+    )
+
+    handlers = discover_handler_rules()
+    name = getattr(args, "name", None) or ""
+
+    handler = find_handler(handlers, name)
+    if handler is None:
+        suggestions = near_handler_matches(handlers, name)
+        print(f"ERROR: unknown handler: {name}", file=sys.stderr)
+        if suggestions:
+            print(f"Did you mean: {', '.join(suggestions)}?", file=sys.stderr)
+        print(_EXPLAIN_UNKNOWN_HANDLER_HINT, file=sys.stderr)
+        return 1
+
+    print(f"Handler: {handler.config_key} ({handler.class_name})")
+    print()
+
+    if handler.rules:
+        formatter = RuleFormatter()
+        print("Rules:")
+        for rule in handler.rules:
+            print(f"  {formatter.terse(rule)}")
+        print()
+    else:
+        print("Rules: (none declared)")
+        print()
+
+    if handler.claude_md:
+        print("CLAUDE.md guidance:")
+        print(handler.claude_md)
+    else:
+        print("CLAUDE.md guidance: (none)")
+
+    return 0
+
+
 _BUG_REPORT_LOG_LINES = 100
 _BUG_REPORT_DIR_NAME = "bug-reports"
 _BUG_REPORT_ENV_VARS = (
@@ -5715,6 +5831,35 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_block_report.set_defaults(func=cmd_block_report)
+
+    # explain-rule / explain-handler commands (Plan 00116 Task 6.1, Decision F)
+    parser_explain_rule = subparsers.add_parser(
+        "explain-rule",
+        help="Print the full detail for a rule ID, or --list every known rule",
+    )
+    parser_explain_rule.add_argument(
+        "rule_id",
+        nargs="?",
+        default=None,
+        help="Rule ID to explain, e.g. R-GIT-RESET-HARD (case-insensitive, R- optional)",
+    )
+    parser_explain_rule.add_argument(
+        "--list",
+        dest="list_rules",
+        action="store_true",
+        help="List every known rule ID with its owning handler",
+    )
+    parser_explain_rule.set_defaults(func=cmd_explain_rule)
+
+    parser_explain_handler = subparsers.add_parser(
+        "explain-handler",
+        help="Print a handler's rules (IDs + terse) plus its CLAUDE.md guidance",
+    )
+    parser_explain_handler.add_argument(
+        "name",
+        help="Handler config key or class name, e.g. destructive_git (case-insensitive)",
+    )
+    parser_explain_handler.set_defaults(func=cmd_explain_handler)
 
     # docs-qa command (Plan 00284) — sweep / single-file lint (staged: not
     # implemented in this slice)
