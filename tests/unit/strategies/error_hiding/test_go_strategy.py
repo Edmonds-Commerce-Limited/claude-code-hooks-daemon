@@ -80,6 +80,28 @@ class TestGoStrategyPatternMatching:
         pattern = next(p for p in strategy.patterns if p.name == "empty error check")
         assert not re.search(pattern.regex, "if err != nil { return err }")
 
+    def test_blank_first_position_with_checked_err_does_not_match(
+        self, strategy: GoErrorHidingStrategy
+    ) -> None:
+        # `_, err := f()` discards the VALUE, not the error — the error is
+        # captured. This is THE idiomatic Go form when only the error matters
+        # (v3.57.0 acceptance run caught the old second regex alternative
+        # denying it; the strategy's own ALLOW acceptance test uses it).
+        pattern = next(p for p in strategy.patterns if p.name == "blank identifier discards error")
+        assert not re.search(pattern.regex, 'if _, err := os.Open("f"); err != nil {')
+        assert not re.search(pattern.regex, "_, err := riskyCall()")
+
+    def test_blank_middle_position_with_err_last_does_not_match(
+        self, strategy: GoErrorHidingStrategy
+    ) -> None:
+        pattern = next(p for p in strategy.patterns if p.name == "blank identifier discards error")
+        assert not re.search(pattern.regex, "x, _, err := f()")
+
+    def test_double_blank_assignment_still_matches(self, strategy: GoErrorHidingStrategy) -> None:
+        # `_, _ := f()` discards everything including the error.
+        pattern = next(p for p in strategy.patterns if p.name == "blank identifier discards error")
+        assert re.search(pattern.regex, "_, _ := riskyCall()")
+
     def test_blank_identifier_on_non_error_does_not_match(
         self, strategy: GoErrorHidingStrategy
     ) -> None:

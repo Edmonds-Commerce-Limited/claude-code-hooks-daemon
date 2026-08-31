@@ -16,7 +16,10 @@ _PATTERNS: tuple[ErrorHidingPattern, ...] = (
     ),
     ErrorHidingPattern(
         name="blank identifier discards error",
-        regex=r"\w+\s*,\s*_\s*:?=\s*\w|\b_\s*,\s*\w+\s*:?=\s*\w",
+        # Only a blank in the LAST tuple position hides an error: Go returns
+        # the error last, so `result, _ :=` throws it away, while the
+        # idiomatic `_, err :=` captures it for the caller to check.
+        regex=r"\w+\s*,\s*_\s*:?=\s*\w",
         example="result, _ := riskyCall()",
         suggestion="Capture and check the error return value",
     ),
