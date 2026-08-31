@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.ancestry_preserving_merge import (
     AncestryPreservingMergeHandler,
 )
@@ -21,6 +24,14 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.ancestry_preserving_merge im
 
 def _bash(command: str) -> dict:
     return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test (Plan 00116)."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 class TestInitialisation:
@@ -321,6 +332,98 @@ class TestGetClaudeMd:
         handler = AncestryPreservingMergeHandler()
         content = handler.get_claude_md() or ""
         assert "MUST_SQUASH_BECAUSE" in content
+
+
+class TestGetRules:
+    """get_rules() declares the 3 Rule objects (Decision B)."""
+
+    @pytest.fixture
+    def handler(self) -> AncestryPreservingMergeHandler:
+        return AncestryPreservingMergeHandler()
+
+    def test_returns_three_rules(self, handler: AncestryPreservingMergeHandler) -> None:
+        rules = handler.get_rules()
+        assert len(rules) == 3
+        assert all(isinstance(rule, Rule) for rule in rules)
+
+    def test_rule_ids_match_constants(self, handler: AncestryPreservingMergeHandler) -> None:
+        expected = {
+            RuleID.GIT_MERGE_SQUASH,
+            RuleID.GH_PR_MERGE_SQUASH,
+            RuleID.GH_PR_MERGE_REBASE,
+        }
+        actual = {rule.rule_id for rule in handler.get_rules()}
+        assert actual == expected
+
+    def test_every_rule_has_non_empty_verbose(
+        self, handler: AncestryPreservingMergeHandler
+    ) -> None:
+        for rule in handler.get_rules():
+            assert rule.verbose
+
+
+class TestDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Plan 00116)."""
+
+    @pytest.fixture
+    def handler(self) -> AncestryPreservingMergeHandler:
+        return AncestryPreservingMergeHandler()
+
+    def _hook_input(self, command: str, transcript_path: str) -> dict:
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "transcript_path": transcript_path,
+        }
+
+    def test_deny_leads_with_rule_id(self, handler: AncestryPreservingMergeHandler) -> None:
+        result = handler.handle(
+            self._hook_input("git merge --squash feature", "/tmp/agent-a/transcript.jsonl")
+        )
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_MERGE_SQUASH}]")
+
+    def test_first_fire_is_verbose(self, handler: AncestryPreservingMergeHandler) -> None:
+        result = handler.handle(
+            self._hook_input("git merge --squash feature", "/tmp/agent-a/transcript.jsonl")
+        )
+        assert "WHY THIS MATTERS" in result.reason
+
+    def test_second_fire_same_rule_same_agent_is_terse(
+        self, handler: AncestryPreservingMergeHandler
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("git merge --squash feature", transcript_path))
+        result = handler.handle(self._hook_input("git merge --squash other", transcript_path))
+        assert "WHY THIS MATTERS" not in result.reason
+        assert "Fix:" in result.reason
+
+    def test_different_rule_same_agent_is_independently_verbose(
+        self, handler: AncestryPreservingMergeHandler
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("git merge --squash feature", transcript_path))
+        result = handler.handle(self._hook_input("gh pr merge --squash 123", transcript_path))
+        assert "WHY THIS MATTERS" in result.reason
+
+    def test_different_agent_is_independently_verbose(
+        self, handler: AncestryPreservingMergeHandler
+    ) -> None:
+        handler.handle(
+            self._hook_input("git merge --squash feature", "/tmp/agent-a/transcript.jsonl")
+        )
+        result = handler.handle(
+            self._hook_input("git merge --squash feature", "/tmp/agent-b/transcript.jsonl")
+        )
+        assert "WHY THIS MATTERS" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(
+        self, handler: AncestryPreservingMergeHandler
+    ) -> None:
+        hook_input = _bash("git merge --squash feature")
+        first = handler.handle(hook_input)
+        second = handler.handle(hook_input)
+        assert "WHY THIS MATTERS" in first.reason
+        assert "WHY THIS MATTERS" in second.reason
 
 
 class TestGetAcceptanceTests:

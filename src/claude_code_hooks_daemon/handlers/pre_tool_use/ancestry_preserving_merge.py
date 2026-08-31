@@ -18,9 +18,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
@@ -77,7 +79,62 @@ _ANCESTRY_SEVERING_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (_GH_PR_MERGE_REBASE_PATTERN, "gh pr merge --rebase"),
 )
 
+# Parallel, index-aligned RuleID for each entry in _ANCESTRY_SEVERING_PATTERNS
+# (Plan 00116, Decision B: one rule per severing spelling -- each is its own
+# concrete command, not a shared conceptual violation like destructive_git's
+# checkout variants).
+_PATTERN_RULE_IDS: tuple[str, ...] = (
+    RuleID.GIT_MERGE_SQUASH,
+    RuleID.GH_PR_MERGE_SQUASH,
+    RuleID.GH_PR_MERGE_REBASE,
+)
+
 _WARN_GUIDANCE_HEADER = "WARNING: ancestry-severing merge detected"
+
+# Shared teaching content template for the first-fire verbose block. `{label}`
+# is substituted per rule at __init__ time (a Rule.verbose is static per rule,
+# not per invocation -- Plan 00116 migration pattern).
+_RULE_VERBOSE_TEMPLATE = (
+    "WHY THIS MATTERS:\n"
+    "A squash merge collapses every commit into one new commit on the "
+    "target, and a rebase merge replays them as new commits with new "
+    "shas. Either way, this branch's commits never become ancestors of "
+    "the target -- so git branch -d (the safe, battle-tested delete) "
+    "will refuse this branch FOREVER, even though its content is fully "
+    "upstream. Only a --no-ff merge commit preserves ancestry.\n\n"
+    "USE INSTEAD:\n"
+    "  git merge --no-ff <branch>      (merge commit, preserves ancestry)\n"
+    "  gh pr merge --merge <number>    (GitHub equivalent of --no-ff)\n\n"
+    "A LOCAL git rebase (e.g. `git rebase main` on your feature branch "
+    "before merging) is fine and stays allowed -- it is the REBASE MERGE "
+    "integration button that severs ancestry, not local rebasing.\n\n"
+    "ESCAPE HATCH (if your platform mandates squash-only or rebase-only "
+    "merging):\n"
+    '  MUST_SQUASH_BECAUSE="explain why"; git merge --squash <branch>'
+)
+
+# SINGLE SOURCE OF TRUTH for get_rules(): (rule_id, blocked, why, fix). One
+# entry per unique RuleID in _PATTERN_RULE_IDS (3 rules, Decision B).
+_RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
+    (
+        RuleID.GIT_MERGE_SQUASH,
+        "`git merge --squash`",
+        "Severs ancestry -- git branch -d refuses the branch forever",
+        "Use git merge --no-ff instead",
+    ),
+    (
+        RuleID.GH_PR_MERGE_SQUASH,
+        "`gh pr merge --squash`",
+        "Severs ancestry -- git branch -d refuses the branch forever",
+        "Use gh pr merge --merge instead",
+    ),
+    (
+        RuleID.GH_PR_MERGE_REBASE,
+        "`gh pr merge --rebase`",
+        "Severs ancestry -- git branch -d refuses the branch forever",
+        "Use gh pr merge --merge instead",
+    ),
+)
 
 
 class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
@@ -110,12 +167,44 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
             ],
         )
         self._mode = _MODE_BLOCK
+        # Index-aligned rule_id per pattern (Decision B), compiled once.
+        self._pattern_rule_ids: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+            (pattern, rule_id)
+            for (pattern, _label), rule_id in zip(
+                _ANCESTRY_SEVERING_PATTERNS, _PATTERN_RULE_IDS, strict=True
+            )
+        )
+        # One Rule per unique rule_id (Decision B: 3 rules), built once from
+        # the single source-of-truth _RULE_DEFINITIONS mapping.
+        self._rules: tuple[Rule, ...] = tuple(
+            Rule(
+                rule_id=rule_id,
+                blocked=blocked,
+                why=why,
+                fix=fix,
+                verbose=_RULE_VERBOSE_TEMPLATE,
+            )
+            for rule_id, blocked, why, fix in _RULE_DEFINITIONS
+        )
+        self._rules_by_id: dict[str, Rule] = {rule.rule_id: rule for rule in self._rules}
+        self._formatter = RuleFormatter()
 
     def _match_label(self, command: str) -> str | None:
         """Return the label of the first matching ancestry-severing pattern."""
         for pattern, label in _ANCESTRY_SEVERING_PATTERNS:
             if pattern.search(command):
                 return label
+        return None
+
+    def _match_rule_id(self, command: str) -> str | None:
+        """Return the RuleID of the first matching ancestry-severing pattern.
+
+        Mirrors ``_match_label`` exactly (same ordered pattern list), so the
+        two can never disagree about which pattern matched first.
+        """
+        for pattern, rule_id in self._pattern_rule_ids:
+            if pattern.search(command):
+                return rule_id
         return None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -133,27 +222,6 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
 
         return True
 
-    def _block_reason(self, label: str) -> str:
-        return (
-            f"BLOCKED: {label} severs ancestry\n\n"
-            "WHY THIS MATTERS:\n"
-            "A squash merge collapses every commit into one new commit on the "
-            "target, and a rebase merge replays them as new commits with new "
-            "shas. Either way, this branch's commits never become ancestors of "
-            "the target -- so git branch -d (the safe, battle-tested delete) "
-            "will refuse this branch FOREVER, even though its content is fully "
-            "upstream. Only a --no-ff merge commit preserves ancestry.\n\n"
-            "USE INSTEAD:\n"
-            "  git merge --no-ff <branch>      (merge commit, preserves ancestry)\n"
-            "  gh pr merge --merge <number>    (GitHub equivalent of --no-ff)\n\n"
-            "A LOCAL git rebase (e.g. `git rebase main` on your feature branch "
-            "before merging) is fine and stays allowed -- it is the REBASE MERGE "
-            "integration button that severs ancestry, not local rebasing.\n\n"
-            "ESCAPE HATCH (if your platform mandates squash-only or rebase-only "
-            "merging):\n"
-            '  MUST_SQUASH_BECAUSE="explain why"; git merge --squash <branch>'
-        )
-
     def _warn_guidance(self, label: str) -> str:
         return (
             f"{_WARN_GUIDANCE_HEADER}\n\n"
@@ -165,8 +233,19 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
             "  gh pr merge --merge <number>"
         )
 
+    def get_rules(self) -> list[Rule]:
+        """Return the 3 Rule objects backing this handler's blocking behaviour."""
+        return list(self._rules)
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block or warn about the ancestry-severing merge, based on mode."""
+        """Block or warn about the ancestry-severing merge, based on mode.
+
+        In block mode, verbosity is decided per (transcript_path, rule_id)
+        via the shared DisclosureTracker (Plan 00116, Decision G): the first
+        fire of a rule for a given agent is verbose; subsequent fires of the
+        SAME rule for the SAME agent are terse. A missing transcript_path
+        fails toward verbose every time (no key to track against).
+        """
         command = get_bash_command(hook_input)
         if not command:
             return GatingResult(decision=Decision.ALLOW)
@@ -185,7 +264,27 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
                 guidance=self._warn_guidance(label),
             )
 
-        return GatingResult(decision=Decision.DENY, reason=self._block_reason(label))
+        rule_id = self._match_rule_id(command)
+        if rule_id is None:
+            # Defensive only: handle() is normally invoked exclusively after
+            # matches() returned True.
+            return GatingResult(
+                decision=Decision.DENY,
+                reason="BLOCKED: ancestry-severing merge detected",
+            )
+        rule = self._rules_by_id[rule_id]
+
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, rule_id):
+            message = self._formatter.terse(rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, rule_id)
+            message = self._formatter.verbose(rule)
+
+        return GatingResult(decision=Decision.DENY, reason=message)
 
     def get_claude_md(self) -> str | None:
         return (
