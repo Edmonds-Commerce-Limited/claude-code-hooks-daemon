@@ -214,6 +214,8 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "UpgradeNotifierHandler": "status-line renderer, no agent-facing action",
     "WorkingDirectoryHandler": "status-line renderer, no agent-facing action",
     "CompactionSignalHandler": "writes a signal file for the supervisor, not the agent",
+    "DisclosureResetPreCompactHandler": "resets internal disclosure state, no agent-facing action",
+    "DisclosureResetSessionStartHandler": "resets internal disclosure state, no agent-facing action",
     "WorktreeRemoveHandler": "prunes stale registrations; nothing to do differently",
     # -- Test 4: the fire-time message already says all of it ------------
     "BritishEnglishHandler": "T4 names the exact spelling and its replacement",
