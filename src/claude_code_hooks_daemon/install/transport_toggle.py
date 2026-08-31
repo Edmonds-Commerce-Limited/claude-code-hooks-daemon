@@ -244,20 +244,32 @@ def _default_restart_fn(project_root: Path) -> Callable[[], int]:
         # this process's stdio, so a captured pipe would make run() wait for
         # the DAEMON's exit, not the CLI's (the daemon-smoke suite's own
         # hard-learned note). Only the exit code is consumed.
-        result = subprocess.run(  # nosec B603
-            [
-                sys.executable,
-                "-m",
-                "claude_code_hooks_daemon.daemon.cli",
-                "--project-root",
-                str(project_root),
-                "restart",
-            ],
-            cwd=project_root,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=_RESTART_TIMEOUT_SECONDS,
-        )
+        try:
+            result = subprocess.run(  # nosec B603
+                [
+                    sys.executable,
+                    "-m",
+                    "claude_code_hooks_daemon.daemon.cli",
+                    "--project-root",
+                    str(project_root),
+                    "restart",
+                ],
+                cwd=project_root,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=_RESTART_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            # A hung restart raises rather than returning a code — surface it
+            # as a synthetic non-zero exit so the caller's return-value-driven
+            # revert path still fires (a raised exception here must never
+            # bypass the revert).
+            logger.warning(
+                "daemon restart timed out after %s seconds for %s",
+                _RESTART_TIMEOUT_SECONDS,
+                project_root,
+            )
+            return -1
         return result.returncode
 
     return restart
@@ -369,13 +381,21 @@ def run_toggle(
             return outcome
 
     failures: list[str] = []
-    set_relay_enabled(config_path, enable)
-    regenerate_deployed_hooks(project_root, hooks_dir)
-    restart_rc = restart()
-    if restart_rc != 0:
-        failures.append(f"daemon-restart: exit code {restart_rc}")
-    else:
-        failures.extend(_failure_lines(verify(enable)))
+    try:
+        set_relay_enabled(config_path, enable)
+        regenerate_deployed_hooks(project_root, hooks_dir)
+        restart_rc = restart()
+        if restart_rc != 0:
+            failures.append(f"daemon-restart: exit code {restart_rc}")
+        else:
+            failures.extend(_failure_lines(verify(enable)))
+    except Exception as exc:
+        # An exception here (a hung restart's subprocess.TimeoutExpired, an
+        # unreadable-file OSError from regenerate, ...) must fall through to
+        # the SAME revert path as a return-value failure — never propagate
+        # and skip the revert. Reported explicitly, never swallowed.
+        logger.warning("transport %s raised before verification completed: %s", action, exc)
+        failures.append(f"{type(exc).__name__}: {exc}")
 
     if not failures:
         outcome = ToggleOutcome(action=action, changed=True, verified=True)
@@ -384,17 +404,23 @@ def run_toggle(
 
     # AUTO-REVERT: restore the previous state end-to-end and re-verify it
     # with the same probes — a toggle must never strand a session on a
-    # broken transport.
-    set_relay_enabled(config_path, current)
-    regenerate_deployed_hooks(project_root, hooks_dir)
-    revert_restart_rc = restart()
-    if revert_restart_rc != 0:
+    # broken transport. Also exception-safe, for the same reason as above.
+    revert_verified: bool | None
+    try:
+        set_relay_enabled(config_path, current)
+        regenerate_deployed_hooks(project_root, hooks_dir)
+        revert_restart_rc = restart()
+        if revert_restart_rc != 0:
+            revert_verified = False
+            failures.append(f"revert daemon-restart: exit code {revert_restart_rc}")
+        else:
+            revert_failures = _failure_lines(verify(current))
+            revert_verified = not revert_failures
+            failures.extend(f"revert {line}" for line in revert_failures)
+    except Exception as exc:
+        logger.warning("transport %s revert raised an exception: %s", action, exc)
         revert_verified = False
-        failures.append(f"revert daemon-restart: exit code {revert_restart_rc}")
-    else:
-        revert_failures = _failure_lines(verify(current))
-        revert_verified = not revert_failures
-        failures.extend(f"revert {line}" for line in revert_failures)
+        failures.append(f"revert {type(exc).__name__}: {exc}")
 
     outcome = ToggleOutcome(
         action=action,

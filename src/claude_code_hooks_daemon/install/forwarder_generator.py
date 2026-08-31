@@ -20,6 +20,7 @@ to today's, which is the whole point of shipping this rung opt-in.
 from __future__ import annotations
 
 import argparse
+import logging
 import re
 import sys
 from pathlib import Path
@@ -54,6 +55,8 @@ _GUARD_FOOTER = "# --- end relay hot path ---\n"
 #: than hand-maintained here — a future catalogue edit can never drift from
 #: it silently. See DESIGN-socket-relay.md §1.1.
 RELAY_EXCLUDED_EVENT_FILE_NAMES: frozenset[str] = relay_ineligible_bash_keys()
+
+logger = logging.getLogger(__name__)
 
 
 def _default_relay_binary_path(untracked_dir: Path) -> str:
@@ -273,15 +276,29 @@ def load_transport_config(project_root: Path) -> TransportConfig:
 
     Missing/absent config file resolves to the pure defaults (relay
     disabled) — the same fail-safe behaviour every other config-driven
-    installer step uses.
+    installer step uses. A config file that EXISTS but fails to parse
+    (malformed YAML) or fails pydantic validation resolves the same way,
+    with the failure logged rather than aborting the caller — a client's
+    broken config must not take down forwarder regeneration entirely.
     """
     try:
         config_path = ConfigLoader.find_config(str(project_root))
         raw = ConfigLoader.load(config_path)
         merged = ConfigLoader.merge_with_defaults(raw)
+        return Config.model_validate(merged).daemon.transport
     except FileNotFoundError:
         return TransportConfig()
-    return Config.model_validate(merged).daemon.transport
+    except Exception as exc:
+        # ValueError (malformed YAML/JSON, from ConfigLoader.load) and
+        # pydantic.ValidationError (from Config.model_validate) both land
+        # here — neither is a case worth distinguishing from "no usable
+        # config", so both fall back to defaults with an explicit advisory.
+        logger.warning(
+            "daemon.transport config at %s is unusable (%s); falling back to defaults",
+            project_root / ".claude" / "hooks-daemon.yaml",
+            exc,
+        )
+        return TransportConfig()
 
 
 def regenerate_deployed_hooks(project_root: Path, hooks_dir: Path) -> list[str]:
@@ -312,7 +329,14 @@ def regenerate_deployed_hooks(project_root: Path, hooks_dir: Path) -> list[str]:
     for path in sorted(hooks_dir.iterdir()):
         if not path.is_file():
             continue
-        source = path.read_text()
+        try:
+            source = path.read_text()
+        except (OSError, UnicodeDecodeError) as exc:
+            # A single unreadable/non-UTF-8 file must not abort the pass for
+            # every sibling — skip it, report it, and keep going. The
+            # unconditional F1 guard-strip still runs on every OTHER file.
+            logger.warning("skipping unreadable forwarder %s: %s", path, exc)
+            continue
         generated = generate_forwarder_content(source, path.name, transport, untracked_dir)
         if generated != source:
             path.write_text(generated)
