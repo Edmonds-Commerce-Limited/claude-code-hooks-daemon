@@ -2,9 +2,20 @@
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.worktree_file_copy import (
     WorktreeFileCopyHandler,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test (Plan 00116)."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 class TestWorktreeFileCopyHandler:
@@ -377,3 +388,75 @@ class TestWorktreeFileCopyHandler:
             },
         }
         assert handler.matches(hook_input) is True
+
+
+class TestGetRules:
+    @pytest.fixture
+    def handler(self) -> WorktreeFileCopyHandler:
+        return WorktreeFileCopyHandler()
+
+    def test_returns_one_rule(self, handler: WorktreeFileCopyHandler) -> None:
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+        assert rules[0].rule_id == RuleID.WORKTREE_FILE_COPY
+        assert rules[0].verbose
+
+
+class TestDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Plan 00116).
+
+    The blocked command is invocation-specific evidence and is always shown.
+    """
+
+    @pytest.fixture
+    def handler(self) -> WorktreeFileCopyHandler:
+        return WorktreeFileCopyHandler()
+
+    def _hook_input(self, command: str, transcript_path: str) -> dict:
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "transcript_path": transcript_path,
+        }
+
+    def test_deny_leads_with_rule_id(self, handler: WorktreeFileCopyHandler) -> None:
+        result = handler.handle(
+            self._hook_input(
+                "cp untracked/worktrees/branch/src/file.py src/", "/tmp/agent-a/transcript.jsonl"
+            )
+        )
+        assert result.reason.startswith(f"BLOCKED [{RuleID.WORKTREE_FILE_COPY}]")
+
+    def test_first_fire_is_verbose(self, handler: WorktreeFileCopyHandler) -> None:
+        result = handler.handle(
+            self._hook_input(
+                "cp untracked/worktrees/branch/src/file.py src/", "/tmp/agent-a/transcript.jsonl"
+            )
+        )
+        assert "CATASTROPHIC" in result.reason
+
+    def test_second_fire_same_agent_is_terse_but_still_names_command(
+        self, handler: WorktreeFileCopyHandler
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(
+            self._hook_input("cp untracked/worktrees/branch/src/a.py src/", transcript_path)
+        )
+        result = handler.handle(
+            self._hook_input("mv untracked/worktrees/branch/tests/b.py tests/", transcript_path)
+        )
+        assert "CATASTROPHIC" not in result.reason
+        assert "mv untracked/worktrees/branch/tests/b.py tests/" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(
+        self, handler: WorktreeFileCopyHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cp untracked/worktrees/branch/src/file.py src/"},
+        }
+        first = handler.handle(hook_input)
+        second = handler.handle(hook_input)
+        assert "CATASTROPHIC" in first.reason
+        assert "CATASTROPHIC" in second.reason
