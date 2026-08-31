@@ -15,11 +15,34 @@ resolves correctly on its own.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from claude_code_hooks_daemon.block_report.fingerprints import (
     FINGERPRINT_TABLE,
     UNRESOLVED_HANDLER_PAIRS,
     attribute_deny,
 )
+from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.rule import RuleFormatter
+from claude_code_hooks_daemon.rule_explain.lookup import discover_handler_rules
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+@pytest.fixture(autouse=True)
+def _project_context() -> None:
+    """Initialise ProjectContext so every handler can be CONSTRUCTED.
+
+    Mirrors the pattern in ``tests/unit/test_rule_parity.py`` — a handler
+    that raises on construction (e.g. one reading ``ProjectContext`` in
+    ``__init__``) would silently drop out of ``discover_handler_rules()``.
+    """
+    if not ProjectContext.is_initialized():
+        ProjectContext.initialize(_project_root() / ".claude" / "hooks-daemon.yaml")
 
 
 class TestFingerprintTable:
@@ -79,6 +102,37 @@ class TestAttributeDeny:
             'echo "=== TRACKED FILE COUNT ===" && git ls-files | wc -l'
         )
         assert attribute_deny(real_text) == "pipe_blocker"
+
+
+class TestAttributeDenyFromRuleFormattedText:
+    """Real coverage: attribution against RuleFormatter output (Plan 00283 follow-up).
+
+    The wrapped-fragment test above proves the table is internally
+    consistent; it says nothing about whether the table's fragments still
+    appear in what handlers actually emit today. Handlers have migrated
+    onto ``Rule``/``RuleFormatter``, which renders ``BLOCKED [R-ID]: ...`` —
+    a header the pre-migration ``FINGERPRINT_TABLE`` fragments do not
+    contain. This exercises the real render path for every rule-declaring
+    handler and asserts attribution still resolves to that handler.
+    """
+
+    def test_every_rule_verbose_and_terse_render_attributes_to_its_handler(self) -> None:
+        formatter = RuleFormatter()
+        handlers = discover_handler_rules()
+        exercised_any_rule = False
+        for handler in handlers:
+            for rule in handler.rules:
+                exercised_any_rule = True
+                verbose_text = formatter.verbose(rule)
+                terse_text = formatter.terse(rule)
+                assert attribute_deny(verbose_text) == handler.config_key, (
+                    f"verbose render of {rule.rule_id} did not attribute to "
+                    f"{handler.config_key}"
+                )
+                assert (
+                    attribute_deny(terse_text) == handler.config_key
+                ), f"terse render of {rule.rule_id} did not attribute to {handler.config_key}"
+        assert exercised_any_rule, "no handler declared any Rule via get_rules()"
 
 
 class TestUnresolvedHandlerPairs:
