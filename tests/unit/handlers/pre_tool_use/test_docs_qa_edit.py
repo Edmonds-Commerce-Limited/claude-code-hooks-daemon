@@ -10,13 +10,26 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.docs_qa.policy import (
     DocumentationPolicy,
     DocumentationQaPolicy,
     GeneratedDocEntry,
 )
 from claude_code_hooks_daemon.handlers.pre_tool_use.docs_qa_edit import DocsQaEditHandler
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 def _handler(policy: DocumentationPolicy | None = None) -> DocsQaEditHandler:
@@ -154,6 +167,7 @@ class TestHandleBlocking:
         with _patched_root(tmp_path):
             result = handler.handle(_write_input(target, content))
         assert result.decision == Decision.DENY
+        assert result.reason.startswith(f"BLOCKED [{RuleID.DOCS_QA_EDIT}]")
         assert "rules-file-shape" in (result.reason or "")
 
     def test_new_rules_file_with_fence_advises_in_warn_mode(self, tmp_path: Path) -> None:
@@ -304,3 +318,59 @@ class TestClaudeMdAndAcceptanceTests:
     def test_get_acceptance_tests_returns_list(self) -> None:
         tests = DocsQaEditHandler().get_acceptance_tests()
         assert len(tests) >= 1
+
+
+class TestGetRules:
+    def test_returns_one_rule(self) -> None:
+        rules = DocsQaEditHandler().get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+
+    def test_rule_id_matches_constant(self) -> None:
+        assert DocsQaEditHandler().get_rules()[0].rule_id == RuleID.DOCS_QA_EDIT
+
+    def test_rule_has_non_empty_verbose(self) -> None:
+        assert DocsQaEditHandler().get_rules()[0].verbose
+
+
+class TestBlockModeDisclosureLadder:
+    """Verbose-first/terse-after teaching prose; findings stay fully present always."""
+
+    _CONTENT = "---\npaths: ['*']\ndescription: x\n---\n# T\n\n```bash\necho hi\n```\n"
+
+    def _deny(self, tmp_path: Path, name: str, transcript_path: str) -> Any:
+        (tmp_path / ".claude" / "rules").mkdir(parents=True, exist_ok=True)
+        target = tmp_path / ".claude" / "rules" / name
+        policy = DocumentationPolicy(enabled=True, qa=DocumentationQaPolicy(edit_mode="block"))
+        handler = _handler(policy)
+        hook_input = _write_input(target, self._CONTENT)
+        hook_input["transcript_path"] = transcript_path
+        with _patched_root(tmp_path):
+            return handler.handle(hook_input)
+
+    def test_first_fire_for_agent_is_verbose(self, tmp_path: Path) -> None:
+        result = self._deny(tmp_path, "one.md", "/tmp/agent-a/transcript.jsonl")
+        assert "EDIT-stage catalogue" in result.reason
+
+    def test_second_fire_is_terse_but_findings_stay_full(self, tmp_path: Path) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        self._deny(tmp_path, "one.md", transcript_path)
+        result = self._deny(tmp_path, "two.md", transcript_path)
+
+        assert "EDIT-stage catalogue" not in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.DOCS_QA_EDIT}]")
+        assert "Fix:" in result.reason
+        assert "rules-file-shape" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(self, tmp_path: Path) -> None:
+        (tmp_path / ".claude" / "rules").mkdir(parents=True)
+        target = tmp_path / ".claude" / "rules" / "one.md"
+        policy = DocumentationPolicy(enabled=True, qa=DocumentationQaPolicy(edit_mode="block"))
+        handler = _handler(policy)
+        hook_input = _write_input(target, self._CONTENT)
+        with _patched_root(tmp_path):
+            first = handler.handle(hook_input)
+            second = handler.handle(hook_input)
+
+        assert "EDIT-stage catalogue" in first.reason
+        assert "EDIT-stage catalogue" in second.reason
