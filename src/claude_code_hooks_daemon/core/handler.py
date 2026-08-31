@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.hook_result import HookResult
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.core.rule import Rule
+    from claude_code_hooks_daemon.core.workspace import ProjectRegistry
 
 
 class Handler(ABC):
@@ -49,6 +50,7 @@ class Handler(ABC):
         "_project_exclude_paths",
         "_project_languages",
         "_project_layout",
+        "_project_registry",
         "config_key",
         "depends_on",
         "handler_id",
@@ -62,6 +64,7 @@ class Handler(ABC):
     _project_languages: list[str] | None
     _project_exclude_paths: list[str] | None
     _project_layout: ProjectLayout | None
+    _project_registry: ProjectRegistry | None
 
     def __init__(
         self,
@@ -124,6 +127,7 @@ class Handler(ABC):
         self._project_languages = None
         self._project_exclude_paths = None
         self._project_layout = None
+        self._project_registry = None
 
     def __repr__(self) -> str:
         """Return string representation."""

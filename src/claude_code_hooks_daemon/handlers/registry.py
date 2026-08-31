@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import DocumentationConfig, PlanWorkflowConfig
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.core.router import EventRouter
+    from claude_code_hooks_daemon.core.workspace import ProjectRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +224,7 @@ class HandlerRegistry:
         plan_workflow: "PlanWorkflowConfig | None" = None,
         documentation: "DocumentationConfig | None" = None,
         project_layout: "ProjectLayout | None" = None,
+        project_registry: "ProjectRegistry | None" = None,
     ) -> int:
         """Register all discovered handlers with the router.
 
@@ -239,6 +241,8 @@ class HandlerRegistry:
             documentation: Optional DocumentationConfig for documentation-related handlers
             project_layout: Optional ProjectLayout facade (Plan 00288) injected
                 onto every handler instance, mirroring project_exclude_paths
+            project_registry: Optional ProjectRegistry facade (Plan 00296)
+                injected onto every handler instance, mirroring project_layout
 
         Returns:
             Number of handlers registered
@@ -393,6 +397,11 @@ class HandlerRegistry:
                             # read directory-role truths from one API instead of
                             # hardcoding or re-declaring them.
                             instance._project_layout = project_layout
+
+                            # Inject the ProjectRegistry facade (Plan 00296) so handlers can
+                            # resolve a file's workspace from declared projects instead of
+                            # assuming a single project root.
+                            instance._project_registry = project_registry
 
                             # Inject plan_workflow config for planning-tagged handlers
                             # This overrides any handler-level options (top-level is source of truth)

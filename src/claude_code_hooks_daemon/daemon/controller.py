@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     )
     from claude_code_hooks_daemon.core.handler import Handler
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+    from claude_code_hooks_daemon.core.workspace import ProjectRegistry
     from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerDiscovery
 
 logger = logging.getLogger(__name__)
@@ -176,6 +177,7 @@ class DaemonController:
         documentation: "DocumentationConfig | None" = None,
         verdict_log: "VerdictLogConfig | None" = None,
         project_layout: "ProjectLayout | None" = None,
+        project_registry: "ProjectRegistry | None" = None,
         claude_md: "ClaudeMdConfig | None" = None,
     ) -> None:
         """Initialise the controller with handlers.
@@ -198,6 +200,8 @@ class DaemonController:
                 defaults (enabled).
             project_layout: Optional ProjectLayout facade (Plan 00288) injected
                 onto every handler instance
+            project_registry: Optional ProjectRegistry facade (Plan 00296)
+                injected onto every handler instance, mirroring project_layout
             claude_md: Optional ClaudeMdConfig (Plan 00116 Decision I) carrying
                 ``promotion.promoted_handlers`` for the injected block's
                 two-tier layout. ``None`` behaves like an empty promoted list
@@ -245,6 +249,7 @@ class DaemonController:
             plan_workflow=plan_workflow,
             documentation=documentation,
             project_layout=project_layout,
+            project_registry=project_registry,
         )
 
         logger.info("Registered %d built-in handlers", count)

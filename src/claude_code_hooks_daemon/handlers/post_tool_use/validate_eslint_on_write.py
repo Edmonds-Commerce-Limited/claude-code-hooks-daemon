@@ -30,7 +30,7 @@ from claude_code_hooks_daemon.core import (
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
-from claude_code_hooks_daemon.core.workspace import Workspace
+from claude_code_hooks_daemon.core.workspace import resolve_workspace
 from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
@@ -154,7 +154,7 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
 
         resolved = resolve_project_root()
         project_root = Path(resolved) if resolved else Path(file_path).parent
-        workspace = Workspace.for_path(Path(file_path), project_root)
+        workspace = resolve_workspace(self._project_registry, Path(file_path), project_root)
         bin_dirs = workspace.bin_dirs or (workspace.root.joinpath(*_NODE_BIN_SUBPATH),)
         return workspace.root, bin_dirs
 

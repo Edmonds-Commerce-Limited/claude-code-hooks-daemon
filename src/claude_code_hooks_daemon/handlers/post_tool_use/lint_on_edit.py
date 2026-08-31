@@ -23,7 +23,7 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision, get_data_lay
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
-from claude_code_hooks_daemon.core.workspace import Workspace
+from claude_code_hooks_daemon.core.workspace import Workspace, resolve_workspace
 from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
 from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
@@ -268,17 +268,17 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         "Ansible": "ansible.cfg",
     }
 
-    @staticmethod
-    def _workspace_for(file_path: str) -> Workspace:
-        """The workspace containing ``file_path``.
+    def _workspace_for(self, file_path: str) -> Workspace:
+        """The declared project containing ``file_path``.
 
-        Bounded at the project root when one is resolvable; otherwise at the
-        file's own directory, so a unit test with no initialised
-        ``ProjectContext`` neither raises nor walks the whole filesystem.
+        Falls back to the file's own directory as the notional root when no
+        ``ProjectContext`` is initialised, so a unit test exercising this
+        handler directly neither raises nor resolves against an unrelated
+        repository.
         """
         resolved = resolve_project_root()
         project_root = Path(resolved) if resolved else Path(file_path).parent
-        return Workspace.for_path(Path(file_path), project_root)
+        return resolve_workspace(self._project_registry, Path(file_path), project_root)
 
     def _resolve_executable(
         self, executable: str, workspace_bin_dirs: tuple[Path, ...] = ()

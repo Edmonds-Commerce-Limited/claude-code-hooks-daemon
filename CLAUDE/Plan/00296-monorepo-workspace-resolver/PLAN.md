@@ -121,16 +121,19 @@ the affected handlers through it.
 Ordered after Phase 2 because `Workspace` is already the type every handler
 consumes: this changes where a `Workspace` COMES FROM, not what consumes it.
 
-- [ ] ⬜ **Task 3.1**: Top-level `projects:` schema + models
+- [x] ✅ **Task 3.1**: Top-level `projects:` schema + models
   (`name`, `root`, optional `kind`, optional `bin_dirs`), validated and
-  defaulting to a single project at the repo root when omitted. Declaring a
-  project must NOT require it to have a manifest (the report's `infra/`).
-- [ ] ⬜ **Task 3.2**: `Workspace.for_path()` resolves from declared
-  projects, else the repo root — the manifest walk leaves the resolution
-  path entirely. Nearest declared root wins when two nest.
-- [ ] ⬜ **Task 3.3**: Re-point the Phase 2 handler tests at
-  `projects:`-declared fixtures. The handlers themselves are unaffected;
-  only the source of the `Workspace` changes.
+  defaulting to a single project at the repo root when omitted. A declared
+  project needs no manifest (the report's `infra/`). Owner ruling enforced:
+  **zero absolute paths** — `root` AND every `bin_dirs` entry must be
+  repo-relative, non-escaping; duplicates of name or root rejected.
+- [x] ✅ **Task 3.2**: `ProjectRegistry` resolves from declared projects,
+  else the repo root — the manifest walk left the resolution path entirely
+  and survives only as convention inside a declared root. Nearest declared
+  root wins when projects nest, independent of config order.
+- [x] ✅ **Task 3.3**: Handlers resolve via the injected `_project_registry`
+  (wiring mirrors `ProjectLayout`); Phase 2 handler tests re-pointed at
+  `projects:`-declared fixtures, each with an anti-inference pin.
 - [ ] ⬜ **Task 3.4**: Monorepo DETECTOR + advisory: manifests below the root
   with none at it means "this looks like a monorepo" — name the workspaces
   found and print the `projects:` block to paste. Advises, never decides.

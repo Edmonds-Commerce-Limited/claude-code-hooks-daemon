@@ -41,6 +41,8 @@ from pathlib import Path
 from typing import Final
 from unittest.mock import MagicMock, patch
 
+from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.core.workspace import ProjectRegistry
 from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import (
     LintOnEditHandler,
 )
@@ -180,9 +182,17 @@ class TestWorkspaceBinDirResolution:
 
 
 class TestWorkingDirectoryIsTheFilesWorkspace:
-    """The linter runs from the edited file's workspace, not the daemon's cwd."""
+    """The linter runs from the edited file's DECLARED project, not the daemon cwd."""
 
-    def test_runs_from_the_files_own_workspace(self, tmp_path: Path) -> None:
+    @staticmethod
+    def _declare(handler: LintOnEditHandler, root: Path, *roots: str) -> None:
+        """Inject declared projects, as the daemon does at config load."""
+        config = Config.model_validate(
+            {"projects": [{"name": path, "root": path} for path in roots]}
+        )
+        handler._project_registry = ProjectRegistry.from_config(config, root)
+
+    def test_runs_from_the_files_own_declared_project(self, tmp_path: Path) -> None:
         svc = tmp_path / "services" / "billing"
         svc.mkdir(parents=True)
         (svc / "pyproject.toml").write_text("[project]\nname = 'billing'\n", encoding="utf-8")
@@ -190,6 +200,7 @@ class TestWorkingDirectoryIsTheFilesWorkspace:
         edited.write_text("x = 1\n", encoding="utf-8")
 
         handler = LintOnEditHandler()
+        self._declare(handler, tmp_path, "services/billing")
         with (
             patch(f"{_MODULE}.resolve_project_root", return_value=str(tmp_path)),
             patch("subprocess.run") as mock_run,
@@ -200,6 +211,32 @@ class TestWorkingDirectoryIsTheFilesWorkspace:
             )
 
         assert mock_run.call_args[1]["cwd"] == str(svc)
+
+    def test_undeclared_subproject_runs_from_the_repository_root(self, tmp_path: Path) -> None:
+        """Anti-inference pin: a pyproject.toml is not a declaration.
+
+        `services/billing` has its own pyproject.toml and looks exactly like a
+        project. Undeclared, the linter must still run from the repository
+        root — running it from a guessed root would apply the wrong config.
+        """
+        svc = tmp_path / "services" / "billing"
+        svc.mkdir(parents=True)
+        (svc / "pyproject.toml").write_text("[project]\nname = 'billing'\n", encoding="utf-8")
+        edited = svc / "app.py"
+        edited.write_text("x = 1\n", encoding="utf-8")
+
+        handler = LintOnEditHandler()
+        self._declare(handler, tmp_path)
+        with (
+            patch(f"{_MODULE}.resolve_project_root", return_value=str(tmp_path)),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            handler._run_lint_command(
+                {}, f"{sys.executable} -m py_compile {{file}}", str(edited), "Python"
+            )
+
+        assert mock_run.call_args[1]["cwd"] == str(tmp_path)
 
     def test_ansible_cfg_marker_still_selects_the_working_dir(self, tmp_path: Path) -> None:
         """NON-REGRESSION PIN for the resolver rollout.

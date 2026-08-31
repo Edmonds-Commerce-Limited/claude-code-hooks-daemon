@@ -14,7 +14,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.core.workspace import Workspace
+from claude_code_hooks_daemon.core.workspace import resolve_workspace
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
@@ -135,8 +135,7 @@ class NpmCommandHandler(PreToolUseHandlerBase):
         self.has_llm_commands: bool = has_llm_commands_in_package_json()
         self._formatter = RuleFormatter()
 
-    @staticmethod
-    def _workspace_root_for(hook_input: dict[str, Any], command: str) -> Path:
+    def _workspace_root_for(self, hook_input: dict[str, Any], command: str) -> Path:
         """Resolve the workspace the npm command actually runs in.
 
         A monorepo holds several sibling Node workspaces, each with its own
@@ -145,10 +144,11 @@ class NpmCommandHandler(PreToolUseHandlerBase):
         the trouble of defining ``llm:`` wrappers -- enforcement downgrades to
         advisory and nothing says why.
 
-        Two signals locate the command, in order of specificity: a leading
-        ``cd <dir> &&``, then the hook's ``cwd``. A repository with no manifest
-        anywhere resolves to the project root, which is what the single-root
-        path always returned -- so this is a no-op there.
+        Two signals locate WHERE the command runs, in order of specificity: a
+        leading ``cd <dir> &&``, then the hook's ``cwd``. That location is then
+        resolved to a DECLARED project. A repository that declares nothing
+        resolves to the project root, which is what the single-project path
+        always returned -- so this is a no-op there.
         """
         resolved = resolve_project_root()
         project_root = Path(resolved) if resolved else None
@@ -167,10 +167,10 @@ class NpmCommandHandler(PreToolUseHandlerBase):
             base = target if target.is_absolute() else base / target
 
         # No initialised ProjectContext (unit tests, per resolve_project_root's
-        # contract): bound the walk at the base itself. There is no repository
-        # root to stop at, and raising here would make an unrelated formatting
-        # test depend on daemon bootstrap.
-        return Workspace.for_path(base, project_root if project_root is not None else base).root
+        # contract): treat the command's own location as the notional root, so
+        # an unrelated formatting test does not depend on daemon bootstrap.
+        fallback_root = project_root if project_root is not None else base
+        return resolve_workspace(self._project_registry, base, fallback_root).root
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is an npm run or npx command that needs validation."""

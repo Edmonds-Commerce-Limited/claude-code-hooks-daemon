@@ -74,6 +74,13 @@ projects:
 `root` is the only required field beside `name`. The nearest declared root
 containing the file wins when two nest.
 
+**Every configured path is repository-root-relative — zero absolute paths.**
+`root` and every `bin_dirs` entry are validated: absolute paths, `~`, and
+`..` escapes are all rejected. A repository is mounted at different places on
+different machines — a container bind mount, a desktop checkout, CI — so an
+absolute path in committed config is correct on exactly one of them and
+silently wrong everywhere else.
+
 **A declared project need not contain a manifest.** That is the case
 declaration exists for: a config-driven toolchain directory, or a docs site
 with its own `docs/` and `CLAUDE/` and no `package.json`, is a real project

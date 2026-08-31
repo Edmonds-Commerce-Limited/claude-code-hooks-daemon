@@ -12,7 +12,9 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.workspace import ProjectRegistry
 from claude_code_hooks_daemon.handlers.pre_tool_use.npm_command import NpmCommandHandler
 
 
@@ -893,12 +895,16 @@ class TestNpmCommandDisclosureLadder:
 
 
 class TestNpmCommandMonorepoWorkspace:
-    """Mode is decided per invocation from the command's own workspace.
+    """Mode is decided per invocation, against the command's DECLARED project.
 
-    Plan 00296 Task 2.1. Deciding once at construction, against the git root,
-    makes the handler permanently inert in a monorepo that has gone to the
-    trouble of defining llm: wrappers -- enforcement silently downgrades to
-    advisory and nothing says why.
+    Plan 00296. Deciding once at construction against the git root makes the
+    handler permanently inert in a monorepo that has gone to the trouble of
+    defining llm: wrappers -- enforcement silently downgrades to advisory and
+    nothing says why.
+
+    Projects are declared, never inferred: every test here that expects
+    per-project behaviour declares the projects, and
+    `test_undeclared_monorepo_is_not_split_up` pins the negative.
     """
 
     @staticmethod
@@ -923,7 +929,7 @@ class TestNpmCommandMonorepoWorkspace:
         """Point BOTH root lookups at the fixture repo.
 
         `ProjectContext.project_root` is what the mode probe reads;
-        `resolve_project_root` is what bounds the workspace walk.
+        `resolve_project_root` is what supplies the fallback root.
         """
         with (
             patch(
@@ -938,14 +944,27 @@ class TestNpmCommandMonorepoWorkspace:
             yield
 
     @classmethod
-    def _handler(cls, root: Path) -> NpmCommandHandler:
+    def _handler(cls, root: Path, declare: bool = True) -> NpmCommandHandler:
         """Construct at the ROOT, where no manifest exists.
 
         Construction-time detection therefore yields False; any DENY below
         proves the decision was re-made per invocation.
+
+        ``declare=False`` leaves the registry empty, which is how an
+        unconfigured repository behaves.
         """
         with cls._rooted_at(root):
-            return NpmCommandHandler()
+            handler = NpmCommandHandler()
+
+        projects = (
+            [{"name": "web", "root": "apps/web"}, {"name": "api", "root": "apps/api"}]
+            if declare
+            else []
+        )
+        handler._project_registry = ProjectRegistry.from_config(
+            Config.model_validate({"projects": projects}), root
+        )
+        return handler
 
     @staticmethod
     def _input(command: str, cwd: Path | None = None) -> dict[str, Any]:
@@ -1024,6 +1043,25 @@ class TestNpmCommandMonorepoWorkspace:
             result = handler.handle(self._input("npm run build"))
 
         assert result.decision == Decision.DENY
+
+    def test_undeclared_monorepo_is_not_split_up(self, tmp_path: Path) -> None:
+        """THE anti-inference pin, at handler level.
+
+        `apps/web` has a package.json with llm: scripts and looks exactly like
+        a workspace. With NOTHING declared the handler must resolve to the
+        repository root -- which has no manifest, so advisory -- rather than
+        quietly deciding `apps/web` is a project. A guessed boundary that
+        happened to be wrong would enforce against the wrong tree while
+        looking perfectly healthy.
+        """
+        root = self._monorepo(tmp_path)
+        handler = self._handler(root, declare=False)
+
+        with self._rooted_at(root):
+            result = handler.handle(self._input("npm run build", cwd=root / "apps" / "web"))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context is not None
 
     def test_piped_command_denies_before_workspace_resolution(self, tmp_path: Path) -> None:
         """The piped branch denies regardless of mode -- unchanged by this task.

@@ -6,7 +6,7 @@ validation, serialisation, and sensible defaults.
 
 import logging
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Final, Literal, Self
 
 import yaml
@@ -955,6 +955,114 @@ class LayoutConfig(BaseModel):
     )
 
 
+def _repo_relative_path(value: str, label: str) -> str:
+    """Validate and normalise a repository-relative config path (Plan 00296).
+
+    **Config carries ZERO absolute paths.** A repository is mounted at
+    different places on different machines -- a container bind mount, a
+    developer's home directory, a CI checkout -- so an absolute path in
+    committed config is correct on exactly one of them and silently wrong
+    everywhere else. Relative-to-the-repo-root is the only form that
+    survives being checked out somewhere new.
+
+    Escapes (``..``) are rejected for the same reason: a path that leaves the
+    repository is by definition describing something the repository does not
+    carry, so it cannot be portable either.
+
+    Normalisation makes ``web/``, ``./web`` and ``web`` one declaration.
+    Without that, an equality check (the duplicate-root guard) and a
+    path-containment check can disagree about the same directory.
+
+    Args:
+        value: The raw configured path.
+        label: What is being validated, for the error message.
+
+    Returns:
+        The normalised relative path; ``.`` for the repository root itself.
+
+    Raises:
+        ValueError: If the path is absolute or escapes the repository.
+    """
+    if value.startswith("/") or PurePosixPath(value).is_absolute():
+        raise ValueError(
+            f"{label} must be repository-relative, got absolute {value!r}. "
+            f"Absolute paths break when the repository is mounted elsewhere."
+        )
+    if value.startswith("~"):
+        raise ValueError(
+            f"{label} must be repository-relative, got home-relative {value!r}. "
+            f"Absolute paths break when the repository is mounted elsewhere."
+        )
+
+    # PurePosixPath normalises "./web", "web/" and "a//b" without touching
+    # ".." components, which are then rejected rather than resolved.
+    normalised = PurePosixPath(value).as_posix()
+    if ".." in PurePosixPath(normalised).parts:
+        raise ValueError(f"{label} must not escape the repository, got {value!r}")
+
+    return normalised
+
+
+class ProjectConfig(BaseModel):
+    """One declared project within the repository (Plan 00296).
+
+    A project is CONFIGURED, never inferred. The daemon will report that a
+    repository looks like a monorepo, but it will not act on that: a wrongly
+    guessed boundary leaves enforcement looking healthy while pointing at the
+    wrong tree, which is the same silent failure this whole mechanism exists
+    to remove.
+
+    ``kind`` and ``bin_dirs`` are optional because they can be filled in by
+    convention once the boundary is known -- a declared root containing a
+    ``package.json`` is ``node`` with ``node_modules/.bin``. That is
+    convention INSIDE a line the user drew, not a guess about where the line
+    is. State either explicitly to override.
+
+    Attributes:
+        name: Identifier for this project, unique within the block. Used in
+            advisory and diagnostic output.
+        root: Repository-relative directory, e.g. ``apps/web``. ``.`` declares
+            the repository root itself as a project. A declared project need
+            NOT contain a manifest -- a config-driven toolchain directory is
+            exactly the case declaration exists for.
+        kind: Ecosystem name. Unset means infer from the manifest at ``root``.
+        bin_dirs: Root-relative tool binary directories. Unset means infer
+            from ``kind``; an explicitly EMPTY list declares that this project
+            has none, which is a different statement from staying silent.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, description="Unique identifier for this project")
+    root: str = Field(min_length=1, description="Repository-relative project root directory")
+    kind: str | None = Field(
+        default=None, description="Ecosystem name; unset infers from the manifest at root"
+    )
+    bin_dirs: list[str] | None = Field(
+        default=None, description="Root-relative tool bin dirs; unset infers from kind"
+    )
+
+    @field_validator("root")
+    @classmethod
+    def validate_root_is_repo_relative(cls, value: str) -> str:
+        """Roots are repository-relative, normalised, and may not escape."""
+        return _repo_relative_path(value, "project root")
+
+    @field_validator("bin_dirs")
+    @classmethod
+    def validate_bin_dirs_are_repo_relative(cls, value: list[str] | None) -> list[str] | None:
+        """Bin dirs are relative to the PROJECT root, under the same rule.
+
+        An absolute ``bin_dirs`` entry would pin a machine-specific toolchain
+        path into shared config -- the same portability failure as an absolute
+        project root, and easier to miss because it looks like a plausible
+        thing to write.
+        """
+        if value is None:
+            return None
+        return [_repo_relative_path(entry, "project bin_dirs entry") for entry in value]
+
+
 class AgentAssetGateConfig(BaseModel):
     """Gating config for one daemon-shipped agent asset (Plan 00279).
 
@@ -1436,6 +1544,10 @@ class Config(BaseModel):
     plan_workflow: PlanWorkflowConfig = Field(default_factory=PlanWorkflowConfig)
     documentation: DocumentationConfig = Field(default_factory=DocumentationConfig)
     layout: LayoutConfig = Field(default_factory=LayoutConfig)
+    projects: list[ProjectConfig] = Field(
+        default_factory=list,
+        description="Declared projects; empty means one project at the repository root",
+    )
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     ccy: CcyConfig = Field(default_factory=CcyConfig)
     tool_policy: ToolPolicyConfig = Field(default_factory=ToolPolicyConfig)
@@ -1447,6 +1559,30 @@ class Config(BaseModel):
 
     # Legacy field mapping
     settings: dict[str, Any] | None = Field(default=None, exclude=True)
+
+    @model_validator(mode="after")
+    def validate_projects_are_distinct(self) -> Self:
+        """Reject duplicate project names and duplicate roots (Plan 00296).
+
+        A duplicate NAME makes advisory and diagnostic output ambiguous -- two
+        different trees reported under one label. A duplicate ROOT is worse:
+        resolution picks the nearest declared root containing a file, and two
+        entries at the same root have no defensible winner, so the answer
+        would depend on config ordering.
+
+        Nesting is NOT a duplicate and stays legal: a package inside a
+        workspace is a real shape, and nearest-wins resolves it unambiguously.
+        """
+        seen_names: set[str] = set()
+        seen_roots: set[str] = set()
+        for project in self.projects:
+            if project.name in seen_names:
+                raise ValueError(f"duplicate project name {project.name!r} in 'projects'")
+            if project.root in seen_roots:
+                raise ValueError(f"duplicate project root {project.root!r} in 'projects'")
+            seen_names.add(project.name)
+            seen_roots.add(project.root)
+        return self
 
     @model_validator(mode="after")
     def migrate_legacy_settings(self) -> Self:

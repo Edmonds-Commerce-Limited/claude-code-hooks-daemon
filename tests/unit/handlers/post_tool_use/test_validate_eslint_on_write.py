@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.core.workspace import ProjectRegistry
 from claude_code_hooks_daemon.utils.npm import (
     has_llm_commands_in_package_json as real_has_llm_commands,
 )
@@ -948,6 +950,18 @@ class TestPerFileWorkspace:
     def _hook_input(file_path: Path) -> dict[str, Any]:
         return {"tool_name": "Write", "tool_input": {"file_path": str(file_path)}}
 
+    @staticmethod
+    def _declare(handler: ValidateEslintOnWriteHandler, root: Path, declare: bool = True) -> None:
+        """Inject the declared projects, as the daemon does at config load."""
+        projects = (
+            [{"name": "web", "root": "apps/web"}, {"name": "api", "root": "apps/api"}]
+            if declare
+            else []
+        )
+        handler._project_registry = ProjectRegistry.from_config(
+            Config.model_validate({"projects": projects}), root
+        )
+
     def test_runs_eslint_in_the_files_own_workspace(self, tmp_path: Path) -> None:
         root = self._monorepo(tmp_path)
         edited = root / "apps" / "web" / "src" / "page.ts"
@@ -955,11 +969,32 @@ class TestPerFileWorkspace:
 
         with self._real_detection(root):
             handler = ValidateEslintOnWriteHandler()
+            self._declare(handler, root)
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
                 handler.handle(self._hook_input(edited))
 
         assert mock_run.call_args[1]["cwd"] == str(root / "apps" / "web")
+
+    def test_undeclared_monorepo_is_not_split_up(self, tmp_path: Path) -> None:
+        """Anti-inference pin: nothing declared means the repository root.
+
+        `apps/web` has a package.json with llm: scripts. Undeclared, the
+        handler must resolve to the root — which has no manifest, so advisory
+        — rather than deciding for itself that `apps/web` is a project.
+        """
+        root = self._monorepo(tmp_path)
+        edited = root / "apps" / "web" / "src" / "page.ts"
+        edited.write_text("const x = 1;")
+
+        with self._real_detection(root):
+            handler = ValidateEslintOnWriteHandler()
+            self._declare(handler, root, declare=False)
+            with patch("subprocess.run") as mock_run:
+                result = handler.handle(self._hook_input(edited))
+
+        assert result.decision == Decision.ALLOW
+        assert mock_run.call_count == 0
 
     def test_sibling_workspace_without_llm_scripts_is_advisory(self, tmp_path: Path) -> None:
         """The api workspace must NOT inherit web's enforcement mode."""
@@ -969,6 +1004,7 @@ class TestPerFileWorkspace:
 
         with self._real_detection(root):
             handler = ValidateEslintOnWriteHandler()
+            self._declare(handler, root)
             with patch("subprocess.run") as mock_run:
                 result = handler.handle(self._hook_input(edited))
 
@@ -984,6 +1020,7 @@ class TestPerFileWorkspace:
 
         with self._real_detection(root):
             handler = ValidateEslintOnWriteHandler()
+            self._declare(handler, root)
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
                 handler.handle(self._hook_input(edited))
@@ -1004,6 +1041,10 @@ class TestPerFileWorkspace:
 
         with self._real_detection(root):
             handler = ValidateEslintOnWriteHandler(workspace_root=root / "apps" / "web")
+            # Declarations are present AND disagree with the pin (the edited
+            # file is in `api`): the pin must still win, which is what makes
+            # it a usable test seam.
+            self._declare(handler, root)
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
                 handler.handle(self._hook_input(edited))
