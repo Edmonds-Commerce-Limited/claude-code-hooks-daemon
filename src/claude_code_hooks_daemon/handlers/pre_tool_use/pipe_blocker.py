@@ -16,13 +16,15 @@ import re
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import (
     Decision,
     GatingResult,
     get_data_layer,
 )
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.strategies.pipe_blocker.common import UNIVERSAL_WHITELIST_PATTERNS
 from claude_code_hooks_daemon.strategies.pipe_blocker.registry import PipeBlockerStrategyRegistry
@@ -243,6 +245,47 @@ _MESSAGE_TAKING_COMMANDS: tuple[str, ...] = ("git", "hg", "svn", "jj")
 _PATH_SEPARATOR = "/"
 
 
+# Single generic teaching paragraph shared by both rules below (Plan 00116):
+# get_rules()'s Rule.verbose is a STATIC per-rule fallback used for the
+# always-on CLAUDE.md table; the actual deny messages this handler emits stay
+# fully dynamic (source name, resolved echd-capture path, truncated command)
+# and are built by the existing _blacklisted_reason/_unknown_reason/
+# _prose_reason methods, which a static Rule.verbose cannot represent
+# (Migration Pattern: "Rule.verbose has no access to the invocation's actual
+# command text"). Declaring rules is still required for the disclosure ladder
+# and the parity contract that every deny reason leads with a rule_id.
+def _pipe_verbose_content(consumer: str) -> str:
+    return (
+        f"Piping a command to {consumer} truncates its output. If the data you "
+        f"need is not in those truncated lines, the ENTIRE command must be "
+        f"re-run — wasting time and resources.\n\n"
+        f"Cheap filtering/output commands (grep, rg, awk, sed, jq, ls, cat, "
+        f"git log/tag/branch, etc.) may still be piped to {consumer} — they "
+        f"already produce bounded output. Anything else should capture full "
+        f"output first (the `echd-capture` helper, or a temp-file redirect) "
+        f"and read a bounded slice from that capture, never from a truncating "
+        f"pipe."
+    )
+
+
+_RULE_DEFINITIONS: tuple[tuple[str, str, str, str, str], ...] = (
+    (
+        RuleID.PIPE_TO_TAIL,
+        "`| tail`",
+        "Truncates output and causes information loss",
+        "Capture full output with echd-capture (or a temp-file redirect), then read a bounded slice",
+        _pipe_verbose_content("tail"),
+    ),
+    (
+        RuleID.PIPE_TO_HEAD,
+        "`| head`",
+        "Truncates output and causes information loss",
+        "Capture full output with echd-capture (or a temp-file redirect), then read a bounded slice",
+        _pipe_verbose_content("head"),
+    ),
+)
+
+
 def _segment_binary(command: str, index: int) -> str:
     """Basename of the command word that owns the flag at ``index``.
 
@@ -320,6 +363,14 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         self._pipe_pattern: re.Pattern[str] = re.compile(r"\|&?\s*(tail|head)\b", re.IGNORECASE)
         self._tail_follow_pattern: re.Pattern[str] = re.compile(r"\btail\s+-[a-z]*f", re.IGNORECASE)
         self._head_bytes_pattern: re.Pattern[str] = re.compile(r"\bhead\s+-[a-z]*c", re.IGNORECASE)
+
+        # One Rule per consumer (Plan 00116, Decision B): tail vs head is the
+        # granularity the pre-declared RuleID constants already commit to.
+        self._rules: tuple[Rule, ...] = tuple(
+            Rule(rule_id=rule_id, blocked=blocked, why=why, fix=fix, verbose=verbose)
+            for rule_id, blocked, why, fix, verbose in _RULE_DEFINITIONS
+        )
+        self._rules_by_id: dict[str, Rule] = {rule.rule_id: rule for rule in self._rules}
 
     def _apply_language_filter(self) -> None:
         """Apply language filter to registry on first use (lazy)."""
@@ -425,6 +476,20 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         An empty producer (extraction failed) is deliberately NOT whitelisted,
         preserving the pre-existing "unknown ⇒ block" tier.
         """
+        match = self._find_offending_match(command)
+        if match is None:
+            return None
+        return self._extract_producer(command, match.start())
+
+    def _find_offending_match(self, command: str) -> re.Match[str] | None:
+        """The regex Match for the first offending pipe, or None if all are exempt.
+
+        Factored out of :meth:`_find_offending_producer` (Plan 00116) so the
+        winning pipe's CONSUMER (``tail`` vs ``head``, captured group 1) is
+        available too, for resolving which Rule fired — without changing
+        which pipe is judged first or how (NG2: zero matching-behaviour
+        change). ``_find_offending_producer`` now delegates here.
+        """
         for match in self._pipe_pattern.finditer(command):
             consumer_segment = self._extract_consumer_segment(command, match.start())
 
@@ -438,8 +503,15 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             producer = self._extract_producer(command, match.start())
             if self._matches_whitelist(producer):
                 continue
-            return producer
+            return match
         return None
+
+    def _match_rule_id(self, command: str) -> str | None:
+        """RuleID for the first offending pipe's CONSUMER, or None if none offend."""
+        match = self._find_offending_match(command)
+        if match is None:
+            return None
+        return RuleID.PIPE_TO_HEAD if match.group(1).lower() == "head" else RuleID.PIPE_TO_TAIL
 
     @staticmethod
     def _extract_consumer_segment(command: str, pipe_start: int) -> str:
@@ -730,13 +802,6 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             f"{source} 2>&1 | {helper} {_ECHD_CAPTURE_DEFAULT_LINES}\n"
         )
 
-    def _get_block_count(self) -> int:
-        """Get number of previous blocks by this handler."""
-        try:
-            return get_data_layer().history.count_blocks_by_handler(self.name)
-        except Exception:
-            return 0
-
     @staticmethod
     def _truncate_command(command: str) -> str:
         """Cap the echoed COMMAND text (Task 1.3): the full text is rarely
@@ -799,7 +864,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         )
         return function_words / len(words) >= _PROSE_FUNCTION_WORD_RATIO
 
-    def _prose_reason(self) -> str:
+    def _prose_reason(self, rule_id: str) -> str:
         """Short, accurate block reason for matched text that looks like
         prose, not a shell command (Task 1.1/1.2). Deliberately carries NO
         remediation template and does NOT echo the matched text back — the
@@ -808,7 +873,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         wrapped in fabricated shell scaffolding.
         """
         return (
-            "🚫 BLOCKED: pipe-like pattern (`| tail` / `| head`) detected, but the "
+            f"BLOCKED [{rule_id}]: pipe-like pattern (`| tail` / `| head`) detected, but the "
             "matched text does not look like a real shell command\n\n"
             "WHY BLOCKED:\n"
             "  • This handler errs on the side of caution and cannot reliably tell "
@@ -824,11 +889,11 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
-    def _blacklisted_reason(self, source_segment: str, command: str) -> str:
+    def _blacklisted_reason(self, rule_id: str, source_segment: str, command: str) -> str:
         """Return verbose block message for known-expensive commands (blacklisted)."""
         source_name = source_segment.split()[0] if source_segment else "command"
         return (
-            f"🚫 BLOCKED: Pipe to tail/head detected\n\n"
+            f"BLOCKED [{rule_id}]: Pipe to tail/head detected\n\n"
             f"COMMAND: {self._truncate_command(command)}\n\n"
             f"WHY BLOCKED:\n"
             f"  • Piping {source_name} to tail/head causes information loss\n"
@@ -839,21 +904,21 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
-    def _blacklisted_terse_reason(self, source_segment: str, command: str) -> str:
+    def _blacklisted_terse_reason(self, rule_id: str, source_segment: str, command: str) -> str:
         """Return terse block message for known-expensive commands (subsequent blocks)."""
         source_name = source_segment.split()[0] if source_segment else "command"
         return (
-            f"BLOCKED: Pipe to tail/head — {source_name} is expensive\n\n"
+            f"BLOCKED [{rule_id}]: Pipe to tail/head — {source_name} is expensive\n\n"
             f"COMMAND: {self._truncate_command(command)}\n\n"
             f"{self._echd_capture_terse(source_segment)}\n"
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
-    def _unknown_reason(self, source_segment: str, command: str) -> str:
+    def _unknown_reason(self, rule_id: str, source_segment: str, command: str) -> str:
         """Return verbose block message for unrecognized commands (not in whitelist or blacklist)."""
         source_name = source_segment.split()[0] if source_segment else "command"
         return (
-            f"🚫 BLOCKED: Pipe to tail/head detected\n\n"
+            f"BLOCKED [{rule_id}]: Pipe to tail/head detected\n\n"
             f"COMMAND: {self._truncate_command(command)}\n\n"
             f"WHY BLOCKED:\n"
             f"  • This command is unrecognized by the pipe blocker\n"
@@ -870,11 +935,11 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
-    def _unknown_terse_reason(self, source_segment: str, command: str) -> str:
+    def _unknown_terse_reason(self, rule_id: str, source_segment: str, command: str) -> str:
         """Return terse block message for unrecognized commands (subsequent blocks)."""
         source_name = source_segment.split()[0] if source_segment else "command"
         return (
-            f"BLOCKED: Pipe to tail/head — {source_name} unrecognized\n\n"
+            f"BLOCKED [{rule_id}]: Pipe to tail/head — {source_name} unrecognized\n\n"
             f"COMMAND: {self._truncate_command(command)}\n\n"
             f"Add to whitelist in .claude/hooks-daemon.yaml:\n"
             f"  {_CONFIG_YAML_KEY}:\n"
@@ -885,7 +950,18 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         )
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block with blacklisted or unknown message based on pattern match and block count."""
+        """Block with a verbose-first/terse-after blacklisted/unknown/prose message.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G) rather than a running
+        block count: the first fire of a rule for a given agent is verbose;
+        subsequent fires of the SAME rule for the SAME agent are terse. An
+        event with no transcript_path fails toward verbose every time
+        (unknown disclosure state -> more info) since there is no key to
+        track against. Which rule fires (tail vs head consumer) is resolved
+        from the SAME offending-pipe match matches()/handle() both use, so
+        the two can never disagree about which pipe triggered the block.
+        """
         command = get_bash_command(hook_input) or "unknown command"
         # Extract the segment from a message-blanked copy so a fake pipe
         # inside a -m/-F value earlier in the string can never be mistaken
@@ -904,29 +980,45 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             else self._extract_source_segment(scan_target)
         )
 
+        rule_id = self._match_rule_id(scan_target)
+        if rule_id is None:
+            # Defensive only: handle() is normally invoked exclusively after
+            # matches() returned True, so this path is unreachable via the
+            # daemon's dispatch. Kept for callers that invoke handle()
+            # directly with a scan_target none of the pipe patterns matches.
+            rule_id = RuleID.PIPE_TO_TAIL
+
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        first_fire = not (transcript_path and tracker.was_disclosed(transcript_path, rule_id))
+        if transcript_path and first_fire:
+            tracker.mark_disclosed(transcript_path, rule_id)
+
         # Task 1.2: sanity-check BEFORE templating. Matched text that looks
         # like prose, not a shell command, gets a short accurate reason and
         # skips the extra_whitelist/echd-capture template entirely — that
         # template is what turned a defensible block into an embarrassing
         # one (Plan 00209 §1).
         if self._looks_like_prose(source_segment):
-            return GatingResult(decision=Decision.DENY, reason=self._prose_reason())
-
-        block_count = self._get_block_count()
+            return GatingResult(decision=Decision.DENY, reason=self._prose_reason(rule_id))
 
         # Differentiate: known expensive vs unrecognized, verbose vs terse
         if self._matches_blacklist(source_segment):
-            if block_count == 0:
-                reason = self._blacklisted_reason(source_segment, command)
+            if first_fire:
+                reason = self._blacklisted_reason(rule_id, source_segment, command)
             else:
-                reason = self._blacklisted_terse_reason(source_segment, command)
+                reason = self._blacklisted_terse_reason(rule_id, source_segment, command)
         else:
-            if block_count == 0:
-                reason = self._unknown_reason(source_segment, command)
+            if first_fire:
+                reason = self._unknown_reason(rule_id, source_segment, command)
             else:
-                reason = self._unknown_terse_reason(source_segment, command)
+                reason = self._unknown_terse_reason(rule_id, source_segment, command)
 
         return GatingResult(decision=Decision.DENY, reason=reason)
+
+    def get_rules(self) -> list[Rule]:
+        """Return the 2 Rule objects backing this handler's blocking behaviour."""
+        return list(self._rules)
 
     def get_claude_md(self) -> str | None:
         """Return CLAUDE.md guidance about the pipe blocker."""

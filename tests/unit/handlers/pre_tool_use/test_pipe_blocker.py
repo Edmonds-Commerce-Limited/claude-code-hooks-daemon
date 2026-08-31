@@ -1,14 +1,30 @@
-"""Tests for PipeBlockerHandler progressive verbosity."""
+"""Tests for PipeBlockerHandler verbose-first/terse-after disclosure ladder."""
 
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
 
 _PROJECT_CONTEXT_PATH = "claude_code_hooks_daemon.core.project_context.ProjectContext"
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """get_data_layer() is a process-wide singleton (Plan 00116, Decision G).
+
+    Without this, one test's ``mark_disclosed`` for a rule_id + transcript_path
+    leaks into a later test that reuses the same pair, turning a genuine
+    "first fire" into a stale "already disclosed".
+    """
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 @pytest.fixture
@@ -35,6 +51,10 @@ def unknown_input() -> dict:
     }
 
 
+def _with_transcript(hook_input: dict, transcript_path: str) -> dict:
+    return {**hook_input, "transcript_path": transcript_path}
+
+
 # ── echd-capture recommendation (Plan 00164 Phase 6) ─────────────────────────
 
 
@@ -58,27 +78,22 @@ class TestEchdCaptureRecommendation:
         self,
         handler: PipeBlockerHandler,
         hook_input: dict,
-        count: int,
+        transcript_path: str,
         daemon_dir: Path | None = None,
     ) -> str:
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = count
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            if daemon_dir is not None:
-                with patch(f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir") as mock_dut:
-                    mock_dut.return_value = daemon_dir / "untracked"
-                    reason = handler.handle(hook_input).reason
-            else:
-                # No ProjectContext deployment mocked — simulates the helper
-                # being unresolvable (not initialised / not found anywhere).
-                with patch(
-                    f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir",
-                    side_effect=RuntimeError("not initialised"),
-                ):
-                    reason = handler.handle(hook_input).reason
+        hook_input = _with_transcript(hook_input, transcript_path)
+        if daemon_dir is not None:
+            with patch(f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir") as mock_dut:
+                mock_dut.return_value = daemon_dir / "untracked"
+                reason = handler.handle(hook_input).reason
+        else:
+            # No ProjectContext deployment mocked — simulates the helper
+            # being unresolvable (not initialised / not found anywhere).
+            with patch(
+                f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir",
+                side_effect=RuntimeError("not initialised"),
+            ):
+                reason = handler.handle(hook_input).reason
         assert reason is not None
         return reason
 
@@ -86,7 +101,9 @@ class TestEchdCaptureRecommendation:
         self, handler: PipeBlockerHandler, blacklisted_input: dict, tmp_path: Path
     ) -> None:
         _deploy_fake_helper(tmp_path)
-        reason = self._handle(handler, blacklisted_input, 0, daemon_dir=tmp_path)
+        reason = self._handle(
+            handler, blacklisted_input, "/tmp/agent-a/transcript.jsonl", daemon_dir=tmp_path
+        )
         assert "echd-capture" in reason
         assert str(tmp_path / "scripts" / "echd-capture") in reason
         assert "pipefail" in reason
@@ -95,13 +112,18 @@ class TestEchdCaptureRecommendation:
         self, handler: PipeBlockerHandler, blacklisted_input: dict, tmp_path: Path
     ) -> None:
         _deploy_fake_helper(tmp_path)
-        assert "echd-capture" in self._handle(handler, blacklisted_input, 3, daemon_dir=tmp_path)
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        self._handle(handler, blacklisted_input, transcript_path, daemon_dir=tmp_path)
+        reason = self._handle(handler, blacklisted_input, transcript_path, daemon_dir=tmp_path)
+        assert "echd-capture" in reason
 
     def test_verbose_unknown_recommends_echd_capture(
         self, handler: PipeBlockerHandler, unknown_input: dict, tmp_path: Path
     ) -> None:
         _deploy_fake_helper(tmp_path)
-        reason = self._handle(handler, unknown_input, 0, daemon_dir=tmp_path)
+        reason = self._handle(
+            handler, unknown_input, "/tmp/agent-a/transcript.jsonl", daemon_dir=tmp_path
+        )
         assert "echd-capture" in reason
         assert "pipefail" in reason
 
@@ -109,7 +131,10 @@ class TestEchdCaptureRecommendation:
         self, handler: PipeBlockerHandler, unknown_input: dict, tmp_path: Path
     ) -> None:
         _deploy_fake_helper(tmp_path)
-        assert "echd-capture" in self._handle(handler, unknown_input, 3, daemon_dir=tmp_path)
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        self._handle(handler, unknown_input, transcript_path, daemon_dir=tmp_path)
+        reason = self._handle(handler, unknown_input, transcript_path, daemon_dir=tmp_path)
+        assert "echd-capture" in reason
 
     def test_claude_md_documents_echd_capture(self, handler: PipeBlockerHandler) -> None:
         guidance = handler.get_claude_md()
@@ -175,19 +200,13 @@ class TestEchdCaptureResolution:
         """When the helper cannot be resolved anywhere, the block message must
         fall back to the temp-file redirect and must NOT present a bare
         `echd-capture` as a runnable command."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with (
-            patch(
-                "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-                return_value=mock_dl,
-            ),
-            patch(
-                f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir",
-                side_effect=RuntimeError("not initialised"),
-            ),
+        with patch(
+            f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir",
+            side_effect=RuntimeError("not initialised"),
         ):
-            reason = handler.handle(blacklisted_input).reason
+            reason = handler.handle(
+                _with_transcript(blacklisted_input, "/tmp/agent-a/transcript.jsonl")
+            ).reason
 
         assert reason is not None
         assert "echd-capture" not in reason
@@ -195,171 +214,100 @@ class TestEchdCaptureResolution:
         assert "RECOMMENDED ALTERNATIVE" in reason
 
 
-# ── _get_block_count() ────────────────────────────────────────────────────────
-
-
-class TestGetBlockCount:
-    """Tests for _get_block_count() method."""
-
-    def test_returns_zero_when_no_previous_blocks(self, handler: PipeBlockerHandler) -> None:
-        """Returns 0 when data layer reports no previous blocks."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            assert handler._get_block_count() == 0
-
-    def test_returns_count_from_data_layer(self, handler: PipeBlockerHandler) -> None:
-        """Returns the count provided by data layer."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 5
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            assert handler._get_block_count() == 5
-
-    def test_returns_zero_on_data_layer_exception(self, handler: PipeBlockerHandler) -> None:
-        """Falls back to 0 when data layer raises an exception."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.side_effect = Exception("Data layer error")
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            assert handler._get_block_count() == 0
-
-    def test_queries_handler_name(self, handler: PipeBlockerHandler) -> None:
-        """Passes handler name to count_blocks_by_handler."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            handler._get_block_count()
-        mock_dl.history.count_blocks_by_handler.assert_called_once_with(handler.name)
-
-
-# ── Blacklisted path: verbose (first block) ──────────────────────────────────
+# ── Blacklisted path: verbose (first fire) ────────────────────────────────────
 
 
 class TestBlacklistedVerboseMessage:
-    """First block (count=0) for blacklisted commands produces verbose message."""
+    """First fire for a given agent produces a verbose message for blacklisted commands."""
 
-    def test_first_block_blacklisted_contains_pipe_blocked(
+    def test_first_fire_blacklisted_contains_pipe_blocked(
         self, handler: PipeBlockerHandler, blacklisted_input: dict
     ) -> None:
         """Verbose blacklisted message contains 'Pipe to tail/head detected'."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(blacklisted_input)
+        result = handler.handle(
+            _with_transcript(blacklisted_input, "/tmp/agent-a/transcript.jsonl")
+        )
         assert "Pipe to tail/head detected" in result.reason
 
-    def test_first_block_blacklisted_contains_why_blocked(
+    def test_first_fire_blacklisted_contains_why_blocked(
         self, handler: PipeBlockerHandler, blacklisted_input: dict
     ) -> None:
         """Verbose blacklisted message contains 'WHY BLOCKED' section."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(blacklisted_input)
+        result = handler.handle(
+            _with_transcript(blacklisted_input, "/tmp/agent-a/transcript.jsonl")
+        )
         assert "WHY BLOCKED" in result.reason
 
-    def test_first_block_blacklisted_contains_expensive(
+    def test_first_fire_blacklisted_contains_expensive(
         self, handler: PipeBlockerHandler, blacklisted_input: dict
     ) -> None:
         """Verbose blacklisted message mentions 'expensive'."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(blacklisted_input)
+        result = handler.handle(
+            _with_transcript(blacklisted_input, "/tmp/agent-a/transcript.jsonl")
+        )
         assert "expensive" in result.reason
 
-    def test_first_block_blacklisted_contains_recommended_alternative(
+    def test_first_fire_blacklisted_contains_recommended_alternative(
         self, handler: PipeBlockerHandler, blacklisted_input: dict
     ) -> None:
         """Verbose blacklisted message contains 'RECOMMENDED ALTERNATIVE' section."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(blacklisted_input)
+        result = handler.handle(
+            _with_transcript(blacklisted_input, "/tmp/agent-a/transcript.jsonl")
+        )
         assert "RECOMMENDED ALTERNATIVE" in result.reason
 
+    def test_first_fire_blacklisted_leads_with_rule_id(
+        self, handler: PipeBlockerHandler, blacklisted_input: dict
+    ) -> None:
+        """The deny reason leads with a rule_id (Plan 00116 parity contract)."""
+        result = handler.handle(
+            _with_transcript(blacklisted_input, "/tmp/agent-a/transcript.jsonl")
+        )
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PIPE_TO_TAIL}]")
 
-# ── Blacklisted path: terse (subsequent blocks) ───────────────────────────────
+
+# ── Blacklisted path: terse (repeat fires) ────────────────────────────────────
 
 
 class TestBlacklistedTerseMessage:
-    """Subsequent blocks (count>=1) for blacklisted commands produce terse message."""
+    """A repeat fire of the SAME rule for the SAME agent is terse."""
 
-    def test_second_block_blacklisted_terse(
+    def _second_fire(self, handler: PipeBlockerHandler, blacklisted_input: dict) -> str:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(_with_transcript(blacklisted_input, transcript_path))
+        result = handler.handle(_with_transcript(blacklisted_input, transcript_path))
+        assert result.reason is not None
+        return result.reason
+
+    def test_second_fire_blacklisted_terse(
         self, handler: PipeBlockerHandler, blacklisted_input: dict
     ) -> None:
-        """count=1 produces terse message for blacklisted command."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(blacklisted_input)
-        assert "BLOCKED" in result.reason
-        assert "expensive" in result.reason
-        assert "TEMP_FILE" in result.reason
+        """A repeat fire produces a terse message for a blacklisted command."""
+        reason = self._second_fire(handler, blacklisted_input)
+        assert "BLOCKED" in reason
+        assert "expensive" in reason
+        assert "TEMP_FILE" in reason
 
-    def test_second_block_blacklisted_no_why_blocked_section(
+    def test_second_fire_blacklisted_no_why_blocked_section(
         self, handler: PipeBlockerHandler, blacklisted_input: dict
     ) -> None:
         """Terse blacklisted message omits 'WHY BLOCKED' section."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(blacklisted_input)
-        assert "WHY BLOCKED" not in result.reason
+        assert "WHY BLOCKED" not in self._second_fire(handler, blacklisted_input)
 
-    def test_second_block_blacklisted_no_recommended_alternative_section(
+    def test_second_fire_blacklisted_no_recommended_alternative_section(
         self, handler: PipeBlockerHandler, blacklisted_input: dict
     ) -> None:
         """Terse blacklisted message omits 'RECOMMENDED ALTERNATIVE' section."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(blacklisted_input)
-        assert "RECOMMENDED ALTERNATIVE" not in result.reason
+        assert "RECOMMENDED ALTERNATIVE" not in self._second_fire(handler, blacklisted_input)
 
-    def test_many_blocks_blacklisted_still_terse(
+    def test_many_fires_blacklisted_still_terse(
         self, handler: PipeBlockerHandler, blacklisted_input: dict
     ) -> None:
-        """count=10 still produces terse message for blacklisted command."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 10
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(blacklisted_input)
+        """A long run of repeat fires for the same agent stays terse."""
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        for _ in range(10):
+            result = handler.handle(_with_transcript(blacklisted_input, transcript_path))
+        assert result.reason is not None
         assert "BLOCKED" in result.reason
         assert "expensive" in result.reason
         assert "WHY BLOCKED" not in result.reason
@@ -368,146 +316,107 @@ class TestBlacklistedTerseMessage:
         self, handler: PipeBlockerHandler, blacklisted_input: dict
     ) -> None:
         """Terse blacklisted message includes the blocked command."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(blacklisted_input)
-        assert "COMMAND:" in result.reason
+        assert "COMMAND:" in self._second_fire(handler, blacklisted_input)
 
     def test_terse_blacklisted_contains_disable_hint(
         self, handler: PipeBlockerHandler, blacklisted_input: dict
     ) -> None:
         """Terse blacklisted message includes disable hint."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(blacklisted_input)
-        assert "pipe_blocker" in result.reason
+        assert "pipe_blocker" in self._second_fire(handler, blacklisted_input)
+
+    def test_terse_blacklisted_leads_with_rule_id(
+        self, handler: PipeBlockerHandler, blacklisted_input: dict
+    ) -> None:
+        """The terse reminder still leads with the rule_id."""
+        assert self._second_fire(handler, blacklisted_input).startswith(
+            f"BLOCKED [{RuleID.PIPE_TO_TAIL}]"
+        )
 
 
-# ── Unknown path: verbose (first block) ──────────────────────────────────────
+# ── Unknown path: verbose (first fire) ────────────────────────────────────────
 
 
 class TestUnknownVerboseMessage:
-    """First block (count=0) for unknown commands produces verbose message."""
+    """First fire for a given agent produces a verbose message for unknown commands."""
 
-    def test_first_block_unknown_contains_pipe_blocked(
+    def test_first_fire_unknown_contains_pipe_blocked(
         self, handler: PipeBlockerHandler, unknown_input: dict
     ) -> None:
         """Verbose unknown message contains 'Pipe to tail/head detected'."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(unknown_input)
+        result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
         assert "Pipe to tail/head detected" in result.reason
 
-    def test_first_block_unknown_contains_extra_whitelist(
+    def test_first_fire_unknown_contains_extra_whitelist(
         self, handler: PipeBlockerHandler, unknown_input: dict
     ) -> None:
         """Verbose unknown message mentions extra_whitelist."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(unknown_input)
+        result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
         assert "extra_whitelist" in result.reason
 
-    def test_first_block_unknown_contains_why_blocked(
+    def test_first_fire_unknown_contains_why_blocked(
         self, handler: PipeBlockerHandler, unknown_input: dict
     ) -> None:
         """Verbose unknown message contains 'WHY BLOCKED' section."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(unknown_input)
+        result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
         assert "WHY BLOCKED" in result.reason
 
-    def test_first_block_unknown_contains_whitelisted_info(
+    def test_first_fire_unknown_contains_whitelisted_info(
         self, handler: PipeBlockerHandler, unknown_input: dict
     ) -> None:
         """Verbose unknown message contains WHITELISTED COMMANDS section."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(unknown_input)
+        result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
         assert "WHITELISTED" in result.reason
 
+    def test_first_fire_unknown_leads_with_rule_id(
+        self, handler: PipeBlockerHandler, unknown_input: dict
+    ) -> None:
+        """The deny reason leads with a rule_id (Plan 00116 parity contract)."""
+        result = handler.handle(_with_transcript(unknown_input, "/tmp/agent-a/transcript.jsonl"))
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PIPE_TO_TAIL}]")
 
-# ── Unknown path: terse (subsequent blocks) ───────────────────────────────────
+
+# ── Unknown path: terse (repeat fires) ─────────────────────────────────────────
 
 
 class TestUnknownTerseMessage:
-    """Subsequent blocks (count>=1) for unknown commands produce terse message."""
+    """A repeat fire of the SAME rule for the SAME agent is terse."""
 
-    def test_second_block_unknown_terse(
+    def _second_fire(self, handler: PipeBlockerHandler, unknown_input: dict) -> str:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(_with_transcript(unknown_input, transcript_path))
+        result = handler.handle(_with_transcript(unknown_input, transcript_path))
+        assert result.reason is not None
+        return result.reason
+
+    def test_second_fire_unknown_terse(
         self, handler: PipeBlockerHandler, unknown_input: dict
     ) -> None:
-        """count=1 produces terse message for unknown command."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(unknown_input)
-        assert "BLOCKED" in result.reason
-        assert "unrecognized" in result.reason
-        assert "extra_whitelist" in result.reason
+        """A repeat fire produces a terse message for an unknown command."""
+        reason = self._second_fire(handler, unknown_input)
+        assert "BLOCKED" in reason
+        assert "unrecognized" in reason
+        assert "extra_whitelist" in reason
 
-    def test_second_block_unknown_no_why_blocked_section(
+    def test_second_fire_unknown_no_why_blocked_section(
         self, handler: PipeBlockerHandler, unknown_input: dict
     ) -> None:
         """Terse unknown message omits 'WHY BLOCKED' section."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(unknown_input)
-        assert "WHY BLOCKED" not in result.reason
+        assert "WHY BLOCKED" not in self._second_fire(handler, unknown_input)
 
-    def test_second_block_unknown_no_whitelisted_section(
+    def test_second_fire_unknown_no_whitelisted_section(
         self, handler: PipeBlockerHandler, unknown_input: dict
     ) -> None:
         """Terse unknown message omits WHITELISTED COMMANDS section."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(unknown_input)
-        assert "WHITELISTED COMMANDS" not in result.reason
+        assert "WHITELISTED COMMANDS" not in self._second_fire(handler, unknown_input)
 
-    def test_many_blocks_unknown_still_terse(
+    def test_many_fires_unknown_still_terse(
         self, handler: PipeBlockerHandler, unknown_input: dict
     ) -> None:
-        """count=10 still produces terse message for unknown command."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 10
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(unknown_input)
+        """A long run of repeat fires for the same agent stays terse."""
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        for _ in range(10):
+            result = handler.handle(_with_transcript(unknown_input, transcript_path))
+        assert result.reason is not None
         assert "BLOCKED" in result.reason
         assert "unrecognized" in result.reason
         assert "WHY BLOCKED" not in result.reason
@@ -516,72 +425,86 @@ class TestUnknownTerseMessage:
         self, handler: PipeBlockerHandler, unknown_input: dict
     ) -> None:
         """Terse unknown message includes the blocked command."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(unknown_input)
-        assert "COMMAND:" in result.reason
+        assert "COMMAND:" in self._second_fire(handler, unknown_input)
 
     def test_terse_unknown_contains_temp_file_alternative(
         self, handler: PipeBlockerHandler, unknown_input: dict
     ) -> None:
         """Terse unknown message includes temp file alternative."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(unknown_input)
-        assert "TEMP_FILE" in result.reason
+        assert "TEMP_FILE" in self._second_fire(handler, unknown_input)
 
     def test_terse_unknown_contains_disable_hint(
         self, handler: PipeBlockerHandler, unknown_input: dict
     ) -> None:
         """Terse unknown message includes disable hint."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(unknown_input)
-        assert "pipe_blocker" in result.reason
+        assert "pipe_blocker" in self._second_fire(handler, unknown_input)
 
 
-# ── Data layer error fallback ─────────────────────────────────────────────────
+# ── Disclosure ladder isolation ────────────────────────────────────────────────
 
 
-class TestDataLayerErrorFallback:
-    """When data layer errors, falls back to verbose (count=0) message."""
+class TestPipeBlockerDisclosureLadderIsolation:
+    """Multi-agent / multi-rule isolation (Plan 00116, Decision G)."""
 
-    def test_data_layer_error_blacklisted_falls_back_to_verbose(
+    def test_different_rule_same_agent_is_independently_verbose(
+        self, handler: PipeBlockerHandler, blacklisted_input: dict, unknown_input: dict
+    ) -> None:
+        """A different consumer (head vs tail) for the same agent gets its own first fire."""
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(_with_transcript(blacklisted_input, transcript_path))
+        head_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "pytest tests/ | head -20"},
+            "transcript_path": transcript_path,
+        }
+        result = handler.handle(head_input)
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PIPE_TO_HEAD}]")
+        assert "WHY BLOCKED" in result.reason
+
+    def test_same_rule_different_agent_is_independently_verbose(
         self, handler: PipeBlockerHandler, blacklisted_input: dict
     ) -> None:
-        """Data layer error for blacklisted path falls back to verbose message."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.side_effect = Exception("Data layer error")
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(blacklisted_input)
+        """A sub-agent (different transcript_path) never inherits another agent's disclosure."""
+        handler.handle(_with_transcript(blacklisted_input, "/tmp/agent-a/transcript.jsonl"))
+        result = handler.handle(
+            _with_transcript(blacklisted_input, "/tmp/agent-b/transcript.jsonl")
+        )
+        assert result.reason is not None
         assert "WHY BLOCKED" in result.reason
-        assert "expensive" in result.reason
 
-    def test_data_layer_error_unknown_falls_back_to_verbose(
-        self, handler: PipeBlockerHandler, unknown_input: dict
+    def test_missing_transcript_path_fails_toward_verbose_every_time(
+        self, handler: PipeBlockerHandler, blacklisted_input: dict
     ) -> None:
-        """Data layer error for unknown path falls back to verbose message."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.side_effect = Exception("Data layer error")
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(unknown_input)
-        assert "WHY BLOCKED" in result.reason
-        assert "extra_whitelist" in result.reason
+        """No transcript_path in the payload -> always verbose (unknown state -> more info)."""
+        first = handler.handle(blacklisted_input)
+        second = handler.handle(blacklisted_input)
+        assert first.reason is not None
+        assert second.reason is not None
+        assert "WHY BLOCKED" in first.reason
+        assert "WHY BLOCKED" in second.reason
+
+
+class TestPipeBlockerGetRules:
+    """get_rules() declares the 2 Rule objects backing this handler (Plan 00116)."""
+
+    @pytest.fixture
+    def handler(self) -> PipeBlockerHandler:
+        return PipeBlockerHandler()
+
+    def test_returns_two_rules(self, handler: PipeBlockerHandler) -> None:
+        rules = handler.get_rules()
+        assert len(rules) == 2
+        assert all(isinstance(rule, Rule) for rule in rules)
+
+    def test_rule_ids_match_constants(self, handler: PipeBlockerHandler) -> None:
+        actual = {rule.rule_id for rule in handler.get_rules()}
+        assert actual == {RuleID.PIPE_TO_TAIL, RuleID.PIPE_TO_HEAD}
+
+    def test_no_duplicate_rule_ids(self, handler: PipeBlockerHandler) -> None:
+        rule_ids = [rule.rule_id for rule in handler.get_rules()]
+        assert len(rule_ids) == len(set(rule_ids))
+
+    def test_every_rule_has_non_empty_verbose(self, handler: PipeBlockerHandler) -> None:
+        for rule in handler.get_rules():
+            assert rule.verbose, f"{rule.rule_id} has empty verbose content"

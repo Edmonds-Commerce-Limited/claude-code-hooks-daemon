@@ -10,9 +10,32 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_content, get_file_path
+
+# Shared teaching content for the SINGLE deny concept this handler enforces
+# (Plan 00116: sed_blocker collapses to one Rule -- every matched shape is the
+# same "sed can modify files" violation, just reached via Bash or Write).
+# Preserves the pre-migration count-driven ladder's richest ("verbose") prose
+# verbatim, minus the invocation-specific `Command:`/`Script:` interpolation a
+# static Rule.verbose cannot carry (Plan 00116 Migration Pattern).
+_SED_VERBOSE_CONTENT = (
+    "sed is FORBIDDEN - causes large-scale file corruption.\n\n"
+    "WHY BANNED:\n"
+    "  \u2022 Claude gets sed syntax wrong regularly\n"
+    "  \u2022 Single error destroys hundreds of files\n"
+    "  \u2022 In-place editing is irreversible\n\n"
+    "\u2705 USE PARALLEL HAIKU AGENTS:\n"
+    "  1. List files to update\n"
+    "  2. Dispatch haiku agents (one per file)\n"
+    "  3. Use Edit tool (safe, atomic, git-trackable)\n\n"
+    "EXAMPLE:\n"
+    "  Bad:  find . -name \"*.ts\" -exec sed -i 's/foo/bar/g' {} \\;\n"
+    "  Good: Dispatch 10 haiku agents with Edit tool"
+)
 
 
 class SedBlockingMode:
@@ -101,6 +124,17 @@ class SedBlockerHandler(PreToolUseHandlerBase):
         )
         # Word boundary pattern: \bsed\b matches "sed" as whole word
         self._sed_pattern = re.compile(r"\bsed\b", re.IGNORECASE)
+        # Single deny concept (Plan 00116, Decision B): every matched shape --
+        # Bash execution or a Write-tool shell script -- is the same violation.
+        self._rule = Rule(
+            rule_id=RuleID.SED_FILE_MODIFICATION,
+            blocked="`sed`",
+            why="Claude gets sed syntax wrong regularly and a single error can destroy "
+            "hundreds of files",
+            fix="Use the Edit tool (or parallel Haiku agents with Edit for bulk changes)",
+            verbose=_SED_VERBOSE_CONTENT,
+        )
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if sed appears anywhere in bash commands or shell scripts."""
@@ -285,86 +319,33 @@ class SedBlockerHandler(PreToolUseHandlerBase):
 
         return False
 
-    def _get_block_count(self) -> int:
-        """Get number of previous blocks by this handler.
-
-        Falls back to 0 only when the data layer / history is not available
-        (AttributeError). Any other error propagates (FAIL FAST) rather than being
-        silently swallowed.
-        """
-        try:
-            return get_data_layer().history.count_blocks_by_handler(self.name)
-        except AttributeError:
-            return 0
-
-    def _terse_reason(self, context_type: str, blocked_content: str | None) -> str:
-        """Return terse message for first block."""
-        return (
-            f"BLOCKED: sed is forbidden. Use Edit tool (or parallel Haiku agents for bulk).\n\n"
-            f"BLOCKED {context_type}: {blocked_content}"
-        )
-
-    def _standard_reason(self, context_type: str, blocked_content: str | None) -> str:
-        """Return standard message for blocks 2-3."""
-        return (
-            f"🚫 BLOCKED: sed command detected\n\n"
-            f"sed is FORBIDDEN - causes large-scale file corruption.\n\n"
-            f"BLOCKED {context_type}: {blocked_content}\n\n"
-            f"WHY BANNED:\n"
-            f"  • Claude gets sed syntax wrong regularly\n"
-            f"  • Single error destroys hundreds of files\n"
-            f"  • In-place editing is irreversible\n\n"
-            f"✅ USE PARALLEL HAIKU AGENTS:\n"
-            f"  1. List files to update\n"
-            f"  2. Dispatch haiku agents (one per file)\n"
-            f"  3. Use Edit tool (safe, atomic, git-trackable)"
-        )
-
-    def _verbose_reason(self, context_type: str, blocked_content: str | None) -> str:
-        """Return verbose message with example for blocks 4+."""
-        return (
-            f"🚫 BLOCKED: sed command detected\n\n"
-            f"sed is FORBIDDEN - causes large-scale file corruption.\n\n"
-            f"BLOCKED {context_type}: {blocked_content}\n\n"
-            f"WHY BANNED:\n"
-            f"  • Claude gets sed syntax wrong regularly\n"
-            f"  • Single error destroys hundreds of files\n"
-            f"  • In-place editing is irreversible\n\n"
-            f"✅ USE PARALLEL HAIKU AGENTS:\n"
-            f"  1. List files to update\n"
-            f"  2. Dispatch haiku agents (one per file)\n"
-            f"  3. Use Edit tool (safe, atomic, git-trackable)\n\n"
-            f"EXAMPLE:\n"
-            f"  Bad:  find . -name \"*.ts\" -exec sed -i 's/foo/bar/g' {{}} \\;\n"
-            f"  Good: Dispatch 10 haiku agents with Edit tool"
-        )
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [self._rule]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block the operation with clear explanation."""
-        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        """Block the operation with a verbose-first/terse-after explanation.
 
-        # Extract the problematic command/content
-        if tool_name == ToolName.BASH:
-            blocked_content = get_bash_command(hook_input)
-            context_type = "command"
-        else:  # Write tool
-            blocked_content = get_file_path(hook_input)
-            context_type = "script"
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G): the first fire for a given
+        agent is verbose (full teaching content); subsequent fires for the
+        SAME agent are terse. An event with no transcript_path fails toward
+        verbose every time (unknown disclosure state -> more info) since
+        there is no key to track against.
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
 
-        # Get block count and determine verbosity level
-        block_count = self._get_block_count()
-
-        # Progressive verbosity: terse -> standard -> verbose
-        if block_count == 0:
-            reason = self._terse_reason(context_type, blocked_content)
-        elif block_count <= 2:
-            reason = self._standard_reason(context_type, blocked_content)
+        if transcript_path and tracker.was_disclosed(transcript_path, RuleID.SED_FILE_MODIFICATION):
+            message = self._formatter.terse(self._rule)
         else:
-            reason = self._verbose_reason(context_type, blocked_content)
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.SED_FILE_MODIFICATION)
+            message = self._formatter.verbose(self._rule)
 
         return GatingResult(
             decision=Decision.DENY,
-            reason=reason,
+            reason=message,
         )
 
     def get_claude_md(self) -> str | None:

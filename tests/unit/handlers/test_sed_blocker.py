@@ -1,10 +1,24 @@
 """Comprehensive tests for SedBlockerHandler."""
 
-from unittest.mock import MagicMock, patch
-
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker import SedBlockerHandler
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """get_data_layer() is a process-wide singleton (Plan 00116, Decision G).
+
+    Without this, one test's ``mark_disclosed`` for a rule_id + transcript_path
+    leaks into a later test that reuses the same pair, turning a genuine
+    "first fire" into a stale "already disclosed".
+    """
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 class TestSedBlockerHandler:
@@ -578,65 +592,24 @@ EOF
         }
         assert handler.matches(hook_input) is True
 
-    # handle() Tests - Message content
+    # handle() Tests - message content
     def test_handle_returns_deny_decision(self, handler):
         """handle() should return deny decision."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "sed -i 's/foo/bar/g' file.txt"},
         }
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         assert result.decision == "deny"
 
-    def test_handle_bash_reason_contains_blocked_indicator(self, handler):
-        """handle() reason should indicate operation is blocked."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
+    def test_handle_bash_reason_leads_with_rule_id(self, handler):
+        """handle() reason should lead with the rule's ID (Plan 00116 parity contract)."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "sed 's/foo/bar/' file.txt"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        assert "BLOCKED" in result.reason
+        result = handler.handle(hook_input)
+        assert result.reason.startswith(f"BLOCKED [{RuleID.SED_FILE_MODIFICATION}]")
 
-    def test_handle_bash_reason_contains_command(self, handler):
-        """handle() reason should include the blocked command."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "sed -i 's/foo/bar/g' file.txt"},
-        }
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        assert "sed -i 's/foo/bar/g' file.txt" in result.reason
-
-    def test_handle_bash_shows_command_context_type(self, handler):
-        """handle() should show 'command' as context type for Bash."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "sed 's/foo/bar/' file.txt"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        assert "command" in result.reason.lower()
-
-    def test_handle_write_reason_contains_file_path(self, handler):
-        """handle() reason should include file path for Write tool."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
+    def test_handle_write_reason_leads_with_rule_id(self, handler):
+        """handle() reason for the Write branch also leads with the rule's ID."""
         hook_input = {
             "tool_name": "Write",
             "tool_input": {
@@ -644,118 +617,58 @@ EOF
                 "content": "sed -i 's/foo/bar/g' file.txt",
             },
         }
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        assert "/workspace/script.sh" in result.reason
-
-    def test_handle_write_shows_script_context_type(self, handler):
-        """handle() should show 'script' as context type for Write."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        hook_input = {
-            "tool_name": "Write",
-            "tool_input": {
-                "file_path": "/workspace/script.sh",
-                "content": "sed 's/foo/bar/' file.txt",
-            },
-        }
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        assert "script" in result.reason.lower()
+        result = handler.handle(hook_input)
+        assert result.reason.startswith(f"BLOCKED [{RuleID.SED_FILE_MODIFICATION}]")
 
     def test_handle_reason_explains_why_banned(self, handler):
-        """handle() reason should explain why sed is banned."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
+        """handle() reason should explain why sed is banned (first fire, verbose)."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "sed -i 's/foo/bar/g' file.txt"},
         }
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         assert "WHY BANNED" in result.reason
         assert "Claude gets sed syntax wrong" in result.reason
 
     def test_handle_reason_mentions_file_corruption(self, handler):
-        """handle() reason should mention file corruption risk."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
+        """handle() reason should mention file corruption risk (first fire, verbose)."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "sed 's/foo/bar/' file.txt"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         assert "corruption" in result.reason.lower()
 
     def test_handle_reason_suggests_haiku_agents(self, handler):
-        """handle() reason should suggest using parallel haiku agents."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
+        """handle() reason should suggest using parallel haiku agents (first fire, verbose)."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "sed -i 's/foo/bar/g' file.txt"},
         }
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         assert "haiku" in result.reason.lower()
         assert "Edit tool" in result.reason
 
     def test_handle_reason_provides_example(self, handler):
-        """handle() reason should provide good vs bad example."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 3
+        """handle() reason should provide good vs bad example (first fire, verbose)."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "sed 's/foo/bar/' file.txt"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         assert "EXAMPLE" in result.reason
         assert "Bad:" in result.reason
         assert "Good:" in result.reason
 
     def test_handle_context_is_none(self, handler):
-        """handle() context should be None."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
+        """handle() context should be an empty list."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "sed 's/foo/bar/' file.txt"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         assert result.context == []
 
     def test_handle_guidance_is_none(self, handler):
         """handle() guidance should be None."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "sed 's/foo/bar/' file.txt"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         assert result.guidance is None
 
     # Integration Tests
     def test_full_workflow_blocks_dangerous_sed(self, handler):
         """Complete workflow: Block dangerous sed command."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "find . -name '*.txt' -exec sed -i 's/foo/bar/g' {} \\;"},
@@ -765,11 +678,7 @@ EOF
         assert handler.matches(hook_input) is True
 
         # Should deny
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         assert result.decision == "deny"
         assert "sed" in result.reason.lower()
 
@@ -792,8 +701,6 @@ EOF
 
     def test_full_workflow_blocks_shell_script_with_sed(self, handler):
         """Complete workflow: Block shell script creation with sed."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
         hook_input = {
             "tool_name": "Write",
             "tool_input": {
@@ -806,13 +713,9 @@ EOF
         assert handler.matches(hook_input) is True
 
         # Should deny
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         assert result.decision == "deny"
-        assert "/workspace/update.sh" in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.SED_FILE_MODIFICATION}]")
 
     def test_full_workflow_allows_markdown_documentation(self, handler):
         """Complete workflow: Allow markdown mentioning sed."""
@@ -947,148 +850,127 @@ EOF
         assert handler.matches(hook_input) is True
 
 
-class TestSedBlockerProgressiveVerbosity:
-    """Test suite for SedBlockerHandler progressive verbosity feature."""
+class TestSedBlockerDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Plan 00116).
+
+    Replaces the old block-count-driven ladder: verbosity is now keyed by
+    (transcript_path, rule_id) via DisclosureTracker, not by a running total
+    of previous blocks from HandlerHistory.
+    """
 
     @pytest.fixture
     def handler(self):
         """Create handler instance."""
         return SedBlockerHandler()
 
-    def test_terse_reason_on_first_block(self, handler):
-        """First block (count=0) should return terse message."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "sed -i 's/foo/bar/g' file.txt"},
-        }
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def _hook_input(self, command: str, transcript_path: str | None = None) -> dict:
+        hook_input: dict = {"tool_name": "Bash", "tool_input": {"command": command}}
+        if transcript_path is not None:
+            hook_input["transcript_path"] = transcript_path
+        return hook_input
 
-        # Terse message should be short
-        assert len(result.reason) < 200
-        assert "BLOCKED" in result.reason
-        assert "Edit tool" in result.reason
-        # Should NOT have verbose sections
-        assert "WHY BANNED" not in result.reason
-        assert "EXAMPLE" not in result.reason
+    def test_first_fire_for_agent_is_verbose(self, handler):
+        """The first time the rule fires for a given agent, the block is verbose."""
+        hook_input = self._hook_input(
+            "sed -i 's/foo/bar/g' file.txt", "/tmp/agent-a/transcript.jsonl"
+        )
+        result = handler.handle(hook_input)
 
-    def test_standard_reason_on_second_block(self, handler):
-        """Second block (count=1) should return standard message without EXAMPLE."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "sed -i 's/foo/bar/g' file.txt"},
-        }
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-
-        # Standard message should have WHY BANNED but not EXAMPLE
+        assert result.decision == "deny"
         assert "WHY BANNED" in result.reason
-        assert "Claude gets sed syntax wrong" in result.reason
         assert "PARALLEL HAIKU AGENTS" in result.reason
+        assert "EXAMPLE" in result.reason
+        assert "Bad:" in result.reason
+        assert "Good:" in result.reason
+
+    def test_second_fire_for_same_agent_is_terse(self, handler):
+        """A repeat fire of the rule for the SAME agent is terse."""
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("sed -i 's/foo/bar/g' file.txt", transcript_path))
+        result = handler.handle(self._hook_input("sed 's/a/b/' other.txt", transcript_path))
+
+        assert result.decision == "deny"
+        assert "WHY BANNED" not in result.reason
         assert "EXAMPLE" not in result.reason
         assert "Bad:" not in result.reason
         assert "Good:" not in result.reason
 
-    def test_standard_reason_on_third_block(self, handler):
-        """Third block (count=2) should return standard message without EXAMPLE."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 2
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "sed -i 's/foo/bar/g' file.txt"},
-        }
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_terse_message_still_leads_with_rule_id_and_names_fix(self, handler):
+        """The terse reminder still leads with the rule ID and names the fix."""
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("sed -i 's/foo/bar/g' file.txt", transcript_path))
+        result = handler.handle(self._hook_input("sed 's/a/b/' other.txt", transcript_path))
 
-        # Standard message should have WHY BANNED but not EXAMPLE
+        assert result.reason.startswith(f"BLOCKED [{RuleID.SED_FILE_MODIFICATION}]")
+        assert "Fix:" in result.reason
+
+    def test_same_rule_different_agent_is_independently_verbose(self, handler):
+        """A sub-agent (different transcript_path) never inherits another agent's disclosure."""
+        handler.handle(
+            self._hook_input("sed -i 's/foo/bar/g' file.txt", "/tmp/agent-a/transcript.jsonl")
+        )
+        result = handler.handle(
+            self._hook_input("sed -i 's/x/y/g' file.txt", "/tmp/agent-b/transcript.jsonl")
+        )
+
         assert "WHY BANNED" in result.reason
-        assert "Claude gets sed syntax wrong" in result.reason
-        assert "PARALLEL HAIKU AGENTS" in result.reason
-        assert "EXAMPLE" not in result.reason
 
-    def test_verbose_reason_on_fourth_block(self, handler):
-        """Fourth block (count=3) should return verbose message with EXAMPLE."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 3
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "sed -i 's/foo/bar/g' file.txt"},
+    def test_write_branch_fire_shares_the_same_rule_and_disclosure_state(self, handler):
+        """The Write-tool branch fires the same rule, and shares disclosure state with Bash."""
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("sed -i 's/foo/bar/g' file.txt", transcript_path))
+        write_hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/script.sh",
+                "content": "sed -i 's/foo/bar/g' file.txt",
+            },
+            "transcript_path": transcript_path,
         }
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        result = handler.handle(write_hook_input)
 
-        # Verbose message should have everything including EXAMPLE
-        assert "WHY BANNED" in result.reason
-        assert "PARALLEL HAIKU AGENTS" in result.reason
-        assert "EXAMPLE" in result.reason
-        assert "Bad:" in result.reason
-        assert "Good:" in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.SED_FILE_MODIFICATION}]")
+        assert "WHY BANNED" not in result.reason
 
-    def test_verbose_reason_on_many_blocks(self, handler):
-        """Many blocks (count=10) should still return verbose message."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 10
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "sed -i 's/foo/bar/g' file.txt"},
-        }
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_missing_transcript_path_fails_toward_verbose_every_time(self, handler):
+        """No transcript_path in the payload -> always verbose (unknown state -> more info)."""
+        hook_input = self._hook_input("sed -i 's/foo/bar/g' file.txt")
 
-        # Verbose message should have everything including EXAMPLE
-        assert "WHY BANNED" in result.reason
-        assert "EXAMPLE" in result.reason
-        assert "Bad:" in result.reason
-        assert "Good:" in result.reason
+        first = handler.handle(hook_input)
+        second = handler.handle(hook_input)
 
-    def test_data_layer_unavailable_falls_back_to_terse(self, handler):
-        """If data layer/history is unavailable (AttributeError), fall back to terse."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.side_effect = AttributeError("no history")
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "sed -i 's/foo/bar/g' file.txt"},
-        }
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        assert "WHY BANNED" in first.reason
+        assert "WHY BANNED" in second.reason
 
-        # Should fall back to terse message (count=0)
-        assert len(result.reason) < 200
-        assert "BLOCKED" in result.reason
-        assert "Edit tool" in result.reason
 
-    def test_block_count_does_not_swallow_unexpected_errors(self, handler):
-        """Unexpected errors from the data layer must propagate (FAIL FAST)."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.side_effect = RuntimeError("unexpected")
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            with pytest.raises(RuntimeError):
-                handler._get_block_count()
+class TestSedBlockerGetRules:
+    """get_rules() declares the single Rule backing this handler (Plan 00116)."""
+
+    @pytest.fixture
+    def handler(self):
+        """Create handler instance."""
+        return SedBlockerHandler()
+
+    def test_returns_one_rule(self, handler):
+        """get_rules() returns exactly one Rule (a single deny concept)."""
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert all(isinstance(rule, Rule) for rule in rules)
+
+    def test_rule_id_matches_constant(self, handler):
+        """The declared rule_id is the SED_FILE_MODIFICATION constant."""
+        rules = handler.get_rules()
+        assert rules[0].rule_id == RuleID.SED_FILE_MODIFICATION
+
+    def test_rule_has_non_empty_verbose(self, handler):
+        """The rule's verbose teaching content is non-empty."""
+        rules = handler.get_rules()
+        assert rules[0].verbose
+
+    def test_rule_blocked_literal_mentions_sed(self, handler):
+        """The rule's blocked literal names the offending command verbatim."""
+        rules = handler.get_rules()
+        assert "sed" in rules[0].blocked.lower()
 
 
 class TestSedBlockerHandlerBlockingMode:
