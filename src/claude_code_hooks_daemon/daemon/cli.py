@@ -4938,11 +4938,15 @@ def _init_project_context_for_explain(args: argparse.Namespace) -> None:
         return
     try:
         ProjectContext.initialize(config_file)
-    except (ValueError, RuntimeError):
+    except (ValueError, RuntimeError) as exc:
         logger.debug(
             "Could not initialise ProjectContext for rule lookup from %s",
             config_file,
             exc_info=True,
+        )
+        print(
+            f"WARNING: could not initialise project context from {config_file}: {exc}",
+            file=sys.stderr,
         )
 
 

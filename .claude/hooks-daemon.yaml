@@ -614,6 +614,10 @@ handlers:
 
   # SessionStart handlers (run when session starts)
   session_start:
+    disclosure_reset_session_start:  # Reset per-agent rule-disclosure state on every SessionStart (Plan 00116 Phase 4)
+      enabled: true
+      priority: 15
+
     project_handler_load_checker:  # Loud alert when project handlers failed to load (Plan 00143)
       enabled: true
       priority: 50
@@ -695,6 +699,10 @@ handlers:
 
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
+    disclosure_reset_pre_compact:  # Reset per-agent rule-disclosure state before compaction (Plan 00116 Phase 4)
+      enabled: true
+      priority: 15
+
     compaction_signal:  # Dogfood: drop <session>.compacting so the supervisor auto-continues
       enabled: true
       priority: 20

@@ -1055,9 +1055,7 @@ class TestDisclosureLadder:
         (plan_dir / "mkplan.bash").write_text("#!/usr/bin/env bash\n")
         transcript_path = "/tmp/agent-a/transcript.jsonl"
 
-        handler.handle(
-            self._hook_input("mkdir -p CLAUDE/Plan/00250-some-feature", transcript_path)
-        )
+        handler.handle(self._hook_input("mkdir -p CLAUDE/Plan/00250-some-feature", transcript_path))
         result = handler.handle(
             self._hook_input("mkdir -p CLAUDE/Plan/00251-another-feature", transcript_path)
         )

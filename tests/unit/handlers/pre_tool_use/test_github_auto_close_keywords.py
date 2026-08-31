@@ -341,9 +341,7 @@ class TestDisclosureLadder:
         handler = GithubAutoCloseKeywordsHandler()
         transcript_path = "/tmp/agent-a/transcript.jsonl"
         handler.handle(self._hook_input("git commit -m 'Fixes #123'", transcript_path))
-        result = handler.handle(
-            self._hook_input("git commit -m 'closes #456'", transcript_path)
-        )
+        result = handler.handle(self._hook_input("git commit -m 'closes #456'", transcript_path))
         assert "NO ESCAPE HATCH" not in result.reason
         assert "Fix:" in result.reason
         assert 'MATCHED: "closes #456"' in result.reason

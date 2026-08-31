@@ -103,8 +103,7 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
     ),
     (
         RuleID.SEC_XSS,
-        "`innerHTML`, `dangerouslySetInnerHTML`, `document.write`, "
-        "`template.HTML`/`JS`/`URL`",
+        "`innerHTML`, `dangerouslySetInnerHTML`, `document.write`, " "`template.HTML`/`JS`/`URL`",
         "Injects unescaped content into the DOM/output, enabling XSS",
         "Use the framework's safe templating/escaping APIs",
     ),

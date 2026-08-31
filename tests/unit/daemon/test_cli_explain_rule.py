@@ -130,3 +130,23 @@ class TestProjectContextInitialisation:
             _rule_args(rule_id="R-GIT-RESET-HARD", project_root="/nonexistent-root-xyz")
         )
         assert exit_code == 0
+
+    def test_initialize_failure_warns_on_stderr_but_still_degrades_gracefully(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A config file that resolves but fails to initialise (e.g. a bad
+        project layout) must not be silently swallowed at debug level only —
+        the CLI user gets a stderr warning, and the command still degrades
+        gracefully rather than crashing."""
+        ProjectContext.reset()
+
+        def _raise(config_path: Path | str) -> None:
+            raise ValueError("synthetic failure for test")
+
+        monkeypatch.setattr(ProjectContext, "initialize", _raise)
+        exit_code = cmd_explain_rule(_rule_args(list_rules=True, project_root=str(_REPO_ROOT)))
+        assert exit_code == 0
+        err = capsys.readouterr().err
+        assert "could not initialise project context" in err.lower()
+        assert "synthetic failure for test" in err
+        assert not ProjectContext.is_initialized()

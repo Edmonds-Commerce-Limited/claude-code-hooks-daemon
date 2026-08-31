@@ -875,7 +875,7 @@ class TestValidateEslintOnWriteDisclosureLadder:
         test_file.write_text("const x = 1;")
         with patch(
             "subprocess.run",
-            side_effect=subprocess_module.TimeoutExpired(cmd="tsx", timeout=30),
+            side_effect=subprocess_module.TimeoutExpired(cmd="tsx", timeout=Timeout.ESLINT_CHECK),
         ):
             result = handler.handle(self._hook_input(test_file, None))
         assert result.reason.startswith(f"BLOCKED [{RuleID.ESLINT_TIMEOUT}]")
