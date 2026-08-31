@@ -190,41 +190,22 @@ class TestStatePathResolutionNeverUsesProcessCwd:
             assert handler.matches({}) is False
 
 
-class TestPublishAuthorisationGate:
-    """Blocking the stop must not trap the session where it is REQUIRED to ask.
+class TestUnfinishedReleaseAlwaysBlocks:
+    """The human's `/release` invocation is the ONLY authorisation there is.
 
-    RELEASING.md gates Steps 14-15 (tag, publish) on an explicit human "yes,
-    publish", and requires the agent to ask "every time, even inside an
-    authorised ``/release`` run". A guard that denies the Stop while prep is
-    finished and authorisation is absent forbids the only correct next action.
+    Owner ruling (v3.57.0 release): there is no secondary human publish gate.
+    The pipeline's blocking gates decide whether the release passes or fails,
+    and once prep is complete the correct next action is to PROCEED to tag and
+    publish — never to stop and ask. So an unfinished release blocks the Stop
+    at EVERY recorded step until Step 15 verification deletes the state file.
+
+    A legacy `publish_authorised` field in an old state file is ignored — its
+    value, its type, and its absence all mean the same thing: keep going.
     """
 
-    def test_awaiting_publish_authorisation_allows_the_stop(self, tmp_path: Path) -> None:
-        """Prep complete, no publish authorisation ⇒ stopping to ask is correct."""
-        _write_state(
-            tmp_path,
-            last_completed_step=ReleaseBlockerHandler.PREP_COMPLETE_STEP,
-            publish_authorised=False,
-        )
-
-        handler = ReleaseBlockerHandler()
-
-        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
-            assert handler.matches({}) is False
-
-    def test_publish_authorised_still_blocks_until_the_file_is_deleted(
-        self, tmp_path: Path
-    ) -> None:
-        """With authorisation granted the remaining steps must be finished.
-
-        Abandoning a release here leaves the version bumped and nothing tagged,
-        which RELEASING.md calls its own broken state.
-        """
-        _write_state(
-            tmp_path,
-            last_completed_step=ReleaseBlockerHandler.PREP_COMPLETE_STEP,
-            publish_authorised=True,
-        )
+    def test_prep_complete_step_blocks_the_stop(self, tmp_path: Path) -> None:
+        """After Step 13 the remaining work is tag + publish — proceed, not ask."""
+        _write_state(tmp_path, last_completed_step=13, publish_authorised=False)
 
         handler = ReleaseBlockerHandler()
 
@@ -233,42 +214,28 @@ class TestPublishAuthorisationGate:
 
     def test_a_prep_step_blocks_the_stop(self, tmp_path: Path) -> None:
         """Prep steps proceed on the state file's authority alone, so keep guarding."""
-        _write_state(
-            tmp_path,
-            last_completed_step=ReleaseBlockerHandler.PREP_COMPLETE_STEP - 1,
-            publish_authorised=False,
-        )
+        _write_state(tmp_path, last_completed_step=12, publish_authorised=False)
 
         handler = ReleaseBlockerHandler()
 
         with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
             assert handler.matches({}) is True
 
-    def test_a_non_boolean_authorisation_is_not_authorisation(self, tmp_path: Path) -> None:
-        """A malformed field must never read as consent, and must never trap.
+    def test_a_legacy_authorisation_field_is_ignored(self, tmp_path: Path) -> None:
+        """Whatever an old state file says, the release still has to be finished."""
+        for legacy_value in (True, False, "false"):
+            _write_state(tmp_path, last_completed_step=13, publish_authorised=legacy_value)
 
-        ``bool("false")`` is True, so a STRING in this field would be taken as
-        authorisation granted. The handler would then keep denying the Stop —
-        denying the very stop the agent needs in order to ask a human, with prep
-        already complete. Only a real boolean counts as consent; anything else
-        is absence of consent, which stands the handler down.
-        """
-        _write_state(
-            tmp_path,
-            last_completed_step=ReleaseBlockerHandler.PREP_COMPLETE_STEP,
-            publish_authorised="false",
-        )
+            handler = ReleaseBlockerHandler()
 
-        handler = ReleaseBlockerHandler()
+            with patch.object(
+                ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)
+            ):
+                assert handler.matches({}) is True, f"blocked regardless of {legacy_value!r}"
 
-        with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
-            assert handler.matches({}) is False
-
-    def test_a_missing_authorisation_field_is_not_authorisation(self, tmp_path: Path) -> None:
-        """Absent means "not granted", which is the documented default."""
-        state_path = _write_state(
-            tmp_path, last_completed_step=ReleaseBlockerHandler.PREP_COMPLETE_STEP
-        )
+    def test_a_missing_authorisation_field_changes_nothing(self, tmp_path: Path) -> None:
+        """The field is legacy; its absence is the normal, current shape."""
+        state_path = _write_state(tmp_path, last_completed_step=13)
         state = json.loads(state_path.read_text(encoding="utf-8"))
         del state["publish_authorised"]
         state_path.write_text(json.dumps(state), encoding="utf-8")
@@ -276,7 +243,7 @@ class TestPublishAuthorisationGate:
         handler = ReleaseBlockerHandler()
 
         with patch.object(ReleaseBlockerHandler, "_project_root", return_value=str(tmp_path)):
-            assert handler.matches({}) is False
+            assert handler.matches({}) is True
 
     def test_a_missing_step_counter_is_treated_as_prep(self, tmp_path: Path) -> None:
         """Unknown progress means the release is unfinished, so guard it.

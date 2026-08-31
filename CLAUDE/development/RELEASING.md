@@ -22,15 +22,20 @@ release *would be sound*, never that it is *wanted now*.
 
 ### The rule
 
-| Situation                                                                  | Allowed to tag/publish?       |
-| -------------------------------------------------------------------------- | ----------------------------- |
-| Human invoked `/release` in this session and confirmed the publish step    | YES                           |
-| Release state file records an explicit publish authorisation (see below)   | YES — resume and finish       |
-| Release state file exists but records no publish authorisation             | Finish the prep, then **ASK** |
-| A cron tick, failsafe-recovery wake-up, or `/loop` iteration fires         | **NO**                        |
-| All blocking gates just went green and no state file authorises publishing | **NO — stop and ask**         |
-| The working tree looks "ready" and a version bump is already committed     | **NO**                        |
-| A plan or TODO says "finish the release"                                   | **NO**                        |
+**`/release` is the one and only authorisation.** There is no secondary
+human confirmation before tagging or publishing (owner ruling, v3.57.0
+release — an earlier revision of this document invented one and it was
+wrong). The release process is gated ONLY by the factors that confirm the
+release is ready: the pipeline's blocking gates (Steps 6, 8–12). It
+ultimately passes — and publishes — or it fails and is aborted.
+
+| Situation                                                              | Allowed to tag/publish?             |
+| ---------------------------------------------------------------------- | ----------------------------------- |
+| Human invoked `/release` and every blocking gate has passed            | YES — proceed, do not ask           |
+| Release state file exists (a `/release` run in flight, see below)      | YES — resume and finish             |
+| A cron tick, failsafe-recovery wake-up, or `/loop` iteration fires     | **NO** — no state file ⇒ no release |
+| The working tree looks "ready" and a version bump is already committed | **NO**                              |
+| A plan or TODO says "finish the release"                               | **NO**                              |
 
 ### A release MAY span a compaction — and then it MUST be finished
 
@@ -59,7 +64,6 @@ update it as each numbered step completes:
 {
   "version": "3.52.0",
   "authorised_by_human_at": "<ISO timestamp of the /release invocation>",
-  "publish_authorised": false,
   "last_completed_step": 8,
   "notes": "human confirmed scope: plans 00197-00202 + 00206"
 }
@@ -71,12 +75,10 @@ Rules for reading it:
   version, or a plan saying "finish the release" is NOT a substitute. Ask.
 - **State file present ⇒ a release IS authorised.** Resume from
   `last_completed_step`; do not restart it and do not re-litigate whether it
-  should happen.
-- **`publish_authorised` gates Steps 14–15 only.** Prep steps are reversible and
-  may proceed on the file's authority alone. Tag and publish are outward-facing
-  and effectively irreversible — once pushed, other installations upgrade onto
-  them. Set this flag only from an explicit human "yes, publish", never from
-  the fact that the gates passed.
+  should happen. That authorisation covers the WHOLE pipeline, tagging and
+  publishing included — once the blocking gates pass, proceed to Steps 14–15
+  without asking again. (A `publish_authorised` field in an old state file is
+  legacy; ignore it.)
 - **Delete the file** once Step 15 verification succeeds, so a later session
   cannot mistake a finished release for an in-flight one.
 
@@ -84,14 +86,13 @@ The scope question — "is the bundle complete?" — is the one thing an agent
 cannot answer from the repository, which is why `notes` records the human's
 answer rather than the agent's inference.
 
-**Steps 14 and 15 (tag, GitHub release) are the hard gate.** Preparing a release
-— version bump, changelog, release notes, running QA — is reversible and may
-proceed under `/release`. Tagging and publishing are outward-facing and
-effectively irreversible: once pushed, other installations upgrade onto them.
-Ask before those steps, every time, even inside an authorised `/release` run.
-
-**If in doubt, stop and ask.** An unwanted release costs a forced follow-up
-version and a broken bundle. A delayed release costs minutes.
+**The blocking gates are the only gates.** Tagging and publishing are
+outward-facing and effectively irreversible — which is exactly why the
+pipeline's blocking gates exist. Once they pass inside an authorised
+`/release` run, tag and publish without a further confirmation; there is no
+"ask before those steps" rule. The doubt case is about STARTING a release
+(no `/release`, no state file ⇒ ask), never about finishing one whose gates
+are green.
 
 ### Recovering from an unauthorised release
 
@@ -700,8 +701,7 @@ gh release create vX.Y.Z \
 
 ### Relay binary (Plan 00290 Phase 5 — the `daemon.transport.relay_source: download` convenience asset)
 
-**Only if a musl-capable `rustc` is available on this machine** (`rustc --print
-target-list | grep x86_64-unknown-linux-musl`). Build-from-source stays the
+**Only if a musl-capable `rustc` is available on this machine** (`rustc --print target-list | grep x86_64-unknown-linux-musl`). Build-from-source stays the
 FIRST-CLASS route for clients regardless (`relay/hooks_relay.rs` +
 `relay/build.sh` ship in every release, no cargo/crates needed) — this step
 only produces the CONVENIENCE download asset for clients who choose

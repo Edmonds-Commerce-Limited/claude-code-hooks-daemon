@@ -9,9 +9,10 @@ argument-hint: "[major|minor|patch|X.Y.Z]"
 ## 🚨 HUMAN-GATED — this skill is the ONLY valid entry point
 
 **A release may only begin when a human invokes `/release` in the CURRENT
-session. An agent must never start, resume, or complete a release on its own
-initiative — and tagging/publishing needs explicit confirmation even inside an
-authorised run.**
+session. An agent must never start a release on its own initiative. The
+`/release` invocation is the ONLY authorisation there is: once the pipeline's
+blocking gates pass, the release proceeds through tag and publish with no
+secondary human confirmation — it passes, or a failed gate aborts it.**
 
 A release is a decision about **scope**, and scope is not visible from inside
 the repository: only the human knows which work belongs in the bundle. A clean
@@ -26,12 +27,12 @@ to live where a compaction cannot reach them.
 
 - **No state file ⇒ no release in progress.** A dirty tree or a plan saying
   "finish the release" is not a substitute — ask.
-- **State file present ⇒ resume** from `last_completed_step`.
-- **`publish_authorised` gates Steps 14–15 only**, set solely by an explicit
-  human "yes, publish" — never by the gates passing.
+- **State file present ⇒ resume** from `last_completed_step` and carry the
+  release through to Step 15 — the recorded `/release` authorisation covers
+  tagging and publishing.
 
-Do not tag or publish because a cron tick fired, because a plan says "finish the
-release", or because the tree looks ready. Stop and ask.
+Do not START a release because a cron tick fired, because a plan says "finish
+the release", or because the tree looks ready — no state file means no release.
 
 See **[RELEASING.md](../../../CLAUDE/development/RELEASING.md)** — "A RELEASE IS
 HUMAN-GATED" — for the full rule, the state-file schema, and how to recover from
@@ -310,8 +311,9 @@ Main Claude executes acceptance tests - scope depends on bump type:
 ### Stage 8: Finalization (RELEASING.md Steps 13-15)
 
 Main Claude commits, tags, and publishes - see RELEASING.md Steps 13-15.
-Steps 14-15 (tag, GitHub release) are gated on `publish_authorised` in the
-release state file - an explicit human "yes, publish", every time.
+Steps 14-15 (tag, GitHub release) proceed as soon as every blocking gate has
+passed — the original `/release` invocation is the authorisation; there is no
+secondary confirmation step.
 
 ## Documentation
 

@@ -36,9 +36,13 @@ has committed and pushed, the tree is clean while tagging and publishing remain
 there. The state file survives until Step 15 verification succeeds, so the
 guard covers the whole window.
 
-The one place the guard must stand down is where RELEASING.md requires the
-agent to stop: with prep complete and `publish_authorised` still false, the
-only correct next action is to ask a human. Denying that Stop would forbid it.
+There is NO secondary publish gate (owner ruling, v3.57.0 release): the human
+`/release` invocation is the only authorisation, and the pipeline's blocking
+gates are the only gates. Once prep is complete the correct next action is to
+PROCEED to tag and publish, so the guard holds at every recorded step until
+Step 15 verification deletes the state file. An earlier revision stood down
+after Step 13 to let the agent ask a human "yes, publish" — that gate was
+erroneous and has been removed.
 
 WHAT THIS TRADES AWAY. RELEASING.md also documents a "Manual Release (Bypass
 Skill)" sequence that writes no state file, and on that path this handler is
@@ -101,14 +105,7 @@ class ReleaseBlockerHandler(Handler):
     #: untracked dir, which differs between self-install and client installs.
     RELEASE_STATE_PARTS: ClassVar[tuple[str, ...]] = ("untracked", "release-state.json")
 
-    #: The step after which the remaining work is tagging and publishing.
-    #: RELEASING.md gates those on an explicit human "yes, publish", so once
-    #: this step is complete and authorisation is absent, stopping to ask is
-    #: the REQUIRED action and must not be denied.
-    PREP_COMPLETE_STEP: ClassVar[int] = 13
-
     _FIELD_VERSION: ClassVar[str] = "version"
-    _FIELD_PUBLISH_AUTHORISED: ClassVar[str] = "publish_authorised"
     _FIELD_LAST_COMPLETED_STEP: ClassVar[str] = "last_completed_step"
 
     _UNKNOWN: ClassVar[str] = "unknown"
@@ -201,34 +198,6 @@ class ReleaseBlockerHandler(Handler):
 
         return state
 
-    def _is_awaiting_publish_authorisation(self, state: dict[str, Any]) -> bool:
-        """True when the correct next action is to stop and ask a human.
-
-        RELEASING.md gates tagging and publishing on an explicit human "yes,
-        publish" and requires the agent to ask "every time, even inside an
-        authorised `/release` run". Once prep is complete without that
-        authorisation, denying the Stop would forbid the only permitted move.
-
-        An absent or non-integer step counter is treated as prep still running:
-        the guard stays active, and that cannot trap the session because prep
-        can be carried forward.
-
-        Only a real boolean counts as consent. ``bool()`` would not do here:
-        ``bool("false")`` is True, so a STRING in that field would be read as
-        authorisation granted, and the handler would go on denying the very Stop
-        the agent needs in order to ask a human. Anything that is not a boolean
-        is absence of consent — which is also the documented default.
-        """
-        step = state.get(self._FIELD_LAST_COMPLETED_STEP)
-        if not isinstance(step, int):
-            return False
-
-        authorised = state.get(self._FIELD_PUBLISH_AUTHORISED)
-        if not isinstance(authorised, bool):
-            authorised = False
-
-        return step >= self.PREP_COMPLETE_STEP and not authorised
-
     @staticmethod
     def _stopped_on_a_tool_error(hook_input: dict) -> bool:
         """True when the session stopped straight after a failed tool call.
@@ -265,8 +234,7 @@ class ReleaseBlockerHandler(Handler):
 
         Returns:
             True if a release is in flight and the session must not end.
-            False if no release state file exists, it cannot be read, the
-            release is waiting on a human publish decision, or the
+            False if no release state file exists, it cannot be read, or the
             stop_hook_active flag is set.
         """
         # Prevent infinite loops - check both snake_case and camelCase variants
@@ -279,13 +247,6 @@ class ReleaseBlockerHandler(Handler):
 
         state = self._read_release_state(hook_input)
         if state is None:
-            return False
-
-        if self._is_awaiting_publish_authorisation(state):
-            logger.info(
-                "release-blocker: release %s awaits human publish authorisation, allowing stop",
-                state.get(self._FIELD_VERSION, self._UNKNOWN),
-            )
             return False
 
         return True
@@ -320,9 +281,11 @@ class ReleaseBlockerHandler(Handler):
             "Abandoning a part-done release is its own broken state: version "
             "bumped, UNRELEASED/ directories moved, nothing tagged. Finish it, or "
             "revert it deliberately.\n\n"
-            "The exception: if prep is complete and publish_authorised is still "
-            "false, stopping to ask a human IS the required action and this "
-            "handler stands down by itself.\n\n"
+            "There is NO secondary human publish gate: the /release invocation "
+            "was the authorisation, and the pipeline's blocking gates are the "
+            "only gates. Once prep (Step 13) is complete, PROCEED to tag and "
+            "publish (Steps 14-15) and delete the state file after "
+            "verification.\n\n"
             "ABORTING a failed gate: RELEASING.md mandates ABORT on any failed "
             "BLOCKING gate, and those gates are Steps 8-12 — below the step at "
             "which this guard stands down, so it will keep denying the Stop you "
