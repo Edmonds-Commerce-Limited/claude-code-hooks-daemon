@@ -3,11 +3,26 @@
 import re
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
+
+# Shared teaching content for the (only) deny path — preserves the deny-mode
+# block message verbatim (Plan 00116, Task 3.2).
+_RULE_VERBOSE = (
+    "Stashes get forgotten, lost, and block git pull. "
+    "Use git commit instead — WIP commits are fine.\n\n"
+    "DO THIS INSTEAD:\n"
+    "  git commit -m 'WIP: description'\n"
+    "  git pull --rebase\n\n"
+    "ESCAPE HATCH (if you truly must stash):\n"
+    '  MUST_STASH_BECAUSE="explain why commit won\'t work"; '
+    "git stash"
+)
 
 # Git accepts GLOBAL OPTIONS before the subcommand, so `git -C /path stash`
 # bypassed this handler entirely until every pattern below was widened.
@@ -51,6 +66,14 @@ class GitStashHandler(PreToolUseHandlerBase):
             tags=[HandlerTag.SAFETY, HandlerTag.GIT, HandlerTag.BLOCKING],
         )
         self._mode = "deny"
+        self._rule = Rule(
+            rule_id=RuleID.GIT_STASH_PUSH,
+            blocked="`git stash` / `git stash push` / `git stash save`",
+            why="Stashes get forgotten, lost, and block git pull",
+            fix="Use git commit instead — WIP commits are fine",
+            verbose=_RULE_VERBOSE,
+        )
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a git stash creation command without escape hatch."""
@@ -86,25 +109,26 @@ class GitStashHandler(PreToolUseHandlerBase):
 
         return True
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's deny path."""
+        return [self._rule]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Block or warn about git stash based on mode configuration."""
         mode = getattr(self, "_mode", "deny")
 
         if mode == "deny":
-            return GatingResult(
-                decision=Decision.DENY,
-                reason=(
-                    "BLOCKED: git stash\n\n"
-                    "Stashes get forgotten, lost, and block git pull. "
-                    "Use git commit instead — WIP commits are fine.\n\n"
-                    "DO THIS INSTEAD:\n"
-                    "  git commit -m 'WIP: description'\n"
-                    "  git pull --rebase\n\n"
-                    "ESCAPE HATCH (if you truly must stash):\n"
-                    '  MUST_STASH_BECAUSE="explain why commit won\'t work"; '
-                    "git stash"
-                ),
-            )
+            transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+            tracker = get_data_layer().disclosure
+
+            if transcript_path and tracker.was_disclosed(transcript_path, self._rule.rule_id):
+                message = self._formatter.terse(self._rule)
+            else:
+                if transcript_path:
+                    tracker.mark_disclosed(transcript_path, self._rule.rule_id)
+                message = self._formatter.verbose(self._rule)
+
+            return GatingResult(decision=Decision.DENY, reason=message)
         else:
             return GatingResult(
                 decision=Decision.ALLOW,

@@ -2,8 +2,24 @@
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.git_stash import GitStashHandler
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test (Plan 00116).
+
+    get_data_layer() is a process-wide singleton; without resetting, one
+    test's mark_disclosed leaks into a later test reusing the same
+    (transcript_path, rule_id) pair.
+    """
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 class TestGitStashHandler:
@@ -389,6 +405,70 @@ class TestGitStashHandler:
 
         # Both should match the same patterns
         assert deny_handler.matches(hook_input) == warn_handler.matches(hook_input)
+
+
+class TestGitStashGetRules:
+    """get_rules() declares the single Rule backing the deny path."""
+
+    @pytest.fixture
+    def handler(self):
+        return GitStashHandler()
+
+    def test_returns_one_rule(self, handler):
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+        assert rules[0].rule_id == RuleID.GIT_STASH_PUSH
+
+    def test_rule_has_non_empty_verbose(self, handler):
+        assert handler.get_rules()[0].verbose
+
+
+class TestGitStashDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Plan 00116)."""
+
+    @pytest.fixture
+    def handler(self):
+        return GitStashHandler()
+
+    def _hook_input(self, command: str, transcript_path: str):
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "transcript_path": transcript_path,
+        }
+
+    def test_deny_reason_leads_with_rule_id(self, handler):
+        result = handler.handle(self._hook_input("git stash", "/tmp/agent-a/transcript.jsonl"))
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_STASH_PUSH}]")
+
+    def test_first_fire_is_verbose(self, handler):
+        result = handler.handle(self._hook_input("git stash", "/tmp/agent-a/transcript.jsonl"))
+        assert "MUST_STASH_BECAUSE" in result.reason
+
+    def test_second_fire_same_agent_is_terse(self, handler):
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("git stash", transcript_path))
+        result = handler.handle(self._hook_input("git stash push", transcript_path))
+        assert "DO THIS INSTEAD" not in result.reason
+        assert "Fix:" in result.reason
+
+    def test_different_agent_is_independently_verbose(self, handler):
+        handler.handle(self._hook_input("git stash", "/tmp/agent-a/transcript.jsonl"))
+        result = handler.handle(self._hook_input("git stash", "/tmp/agent-b/transcript.jsonl"))
+        assert "MUST_STASH_BECAUSE" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(self, handler):
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
+        first = handler.handle(hook_input)
+        second = handler.handle(hook_input)
+        assert "MUST_STASH_BECAUSE" in first.reason
+        assert "MUST_STASH_BECAUSE" in second.reason
+
+    def test_warn_mode_is_unaffected_by_disclosure_ladder(self, handler):
+        handler._mode = "warn"
+        result = handler.handle(self._hook_input("git stash", "/tmp/agent-a/transcript.jsonl"))
+        assert result.decision == "allow"
 
 
 class TestGitStashAcceptanceTests:
