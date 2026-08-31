@@ -26,11 +26,14 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext
+from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,34 @@ _ENABLE_ARTIFACT_KEY = "enableArtifact"
 # utils.settings_repair so the two settings rewriters stay equivalent.
 _BACKUP_SUFFIX = ".bak.pre-artifact-source-disable"
 _TMP_SUFFIX = ".tmp.artifact-source-disable"
+
+_RULE = Rule(
+    rule_id=RuleID.ARTIFACT_PUBLISH,
+    blocked="publishing an artefact via the `Artifact` tool",
+    why="The page lives OUTSIDE the project and the repository cannot audit or retract it",
+    fix="Write the file locally and tell the user its path, or ask a human to publish",
+    verbose=(
+        "WHY BLOCKED:\n"
+        "Publishing renders this content to a page hosted on claude.ai and returns a\n"
+        "URL. The page starts private, but it lives OUTSIDE this project:\n"
+        "  - The repository cannot audit what left it\n"
+        "  - Deleting the artefact later does NOT un-share a link already opened\n"
+        "  - Whether that content should leave is the USER's decision, not yours\n\n"
+        "DO INSTEAD:\n"
+        "  - Write the file locally and tell the user its path — they lose nothing,\n"
+        "    since publishing is one step they can take themselves whenever they want\n"
+        "  - Report your findings directly in your reply\n\n"
+        f"IF PUBLISHING IS GENUINELY WANTED:\n"
+        f"Ask the user. Only a human may lift this block, by setting:\n\n"
+        f"    {_CONFIG_KEY_PATH}: false\n\n"
+        "Do NOT edit that setting yourself and do NOT look for another route to publish.\n"
+        "An agent that authorises its own disclosure has defeated the entire point of\n"
+        "this guard — which is exactly why this handler has no MUST_..._BECAUSE escape\n"
+        "hatch, unlike guards whose consequences stay inside the repository.\n\n"
+        'STILL ALLOWED: listing existing artefacts (`action: "list"`) — enumerating\n'
+        "discloses nothing new."
+    ),
+)
 
 
 class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
@@ -169,8 +200,18 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
 
         return True
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [_RULE]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny the publish and explain who can lift the block.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The `source_disable`
+        note is appended on every fire when the option is active — it is
+        per-project configuration, not per-invocation, but it still changes
+        which settings key is relevant to name.
 
         Args:
             hook_input: Hook input for the artefact call.
@@ -181,32 +222,16 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
         if not self.matches(hook_input):
             return GatingResult(decision=Decision.ALLOW)
 
-        reason = f"""🚫 BLOCKED: publishing an artefact
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        formatter = RuleFormatter()
 
-WHY BLOCKED:
-Publishing renders this content to a page hosted on claude.ai and returns a
-URL. The page starts private, but it lives OUTSIDE this project:
-  • The repository cannot audit what left it
-  • Deleting the artefact later does NOT un-share a link already opened
-  • Whether that content should leave is the USER's decision, not yours
-
-DO INSTEAD:
-  • Write the file locally and tell the user its path — they lose nothing,
-    since publishing is one step they can take themselves whenever they want
-  • Report your findings directly in your reply
-
-IF PUBLISHING IS GENUINELY WANTED:
-Ask the user. Only a human may lift this block, by setting:
-
-    {_CONFIG_KEY_PATH}: false
-
-Do NOT edit that setting yourself and do NOT look for another route to publish.
-An agent that authorises its own disclosure has defeated the entire point of
-this guard — which is exactly why this handler has no MUST_..._BECAUSE escape
-hatch, unlike guards whose consequences stay inside the repository.
-
-STILL ALLOWED: listing existing artefacts (`action: "list"`) — enumerating
-discloses nothing new."""
+        if transcript_path and tracker.was_disclosed(transcript_path, RuleID.ARTIFACT_PUBLISH):
+            reason = formatter.terse(_RULE)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.ARTIFACT_PUBLISH)
+            reason = formatter.verbose(_RULE)
 
         if getattr(self, "_source_disable", False):
             reason += """

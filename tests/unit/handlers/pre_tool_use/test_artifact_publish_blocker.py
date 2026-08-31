@@ -21,10 +21,21 @@ import pytest
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.artifact_publish_blocker import (
     ArtifactPublishBlockerHandler,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 def _artifact_input(tool_input: dict[str, Any]) -> dict[str, Any]:
@@ -302,3 +313,65 @@ class TestGuidanceAndAcceptanceTests:
         decisions = {test.expected_decision for test in tests}
         assert Decision.DENY in decisions
         assert Decision.ALLOW in decisions
+
+
+class TestArtifactPublishBlockerGetRules:
+    """get_rules() declares the single Rule backing this handler (Plan 00116)."""
+
+    def test_returns_one_rule(self) -> None:
+        handler = ArtifactPublishBlockerHandler()
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+
+    def test_rule_id_matches_constant(self) -> None:
+        handler = ArtifactPublishBlockerHandler()
+        assert handler.get_rules()[0].rule_id == RuleID.ARTIFACT_PUBLISH
+
+    def test_rule_has_non_empty_verbose(self) -> None:
+        handler = ArtifactPublishBlockerHandler()
+        assert handler.get_rules()[0].verbose
+
+
+class TestArtifactPublishBlockerDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Decision G)."""
+
+    def _hook_input(self, transcript_path: str) -> dict[str, Any]:
+        hook_input = _artifact_input({"file_path": "/workspace/r.html"})
+        hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    def test_first_fire_for_agent_is_verbose(self) -> None:
+        handler = ArtifactPublishBlockerHandler()
+        result = handler.handle(self._hook_input("/tmp/agent-a/transcript.jsonl"))
+
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "DO INSTEAD" in result.reason
+
+    def test_second_fire_for_same_agent_is_terse(self) -> None:
+        handler = ArtifactPublishBlockerHandler()
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input(transcript_path))
+        result = handler.handle(self._hook_input(transcript_path))
+
+        assert result.reason is not None
+        assert "DO INSTEAD" not in result.reason
+
+    def test_terse_message_leads_with_rule_id(self) -> None:
+        handler = ArtifactPublishBlockerHandler()
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input(transcript_path))
+        result = handler.handle(self._hook_input(transcript_path))
+
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{RuleID.ARTIFACT_PUBLISH}]")
+
+    def test_missing_transcript_path_is_always_verbose(self) -> None:
+        handler = ArtifactPublishBlockerHandler()
+        hook_input = _artifact_input({"file_path": "/workspace/r.html"})
+        handler.handle(hook_input)
+        result = handler.handle(hook_input)
+
+        assert result.reason is not None
+        assert "DO INSTEAD" in result.reason
