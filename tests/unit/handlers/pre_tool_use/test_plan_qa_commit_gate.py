@@ -15,13 +15,24 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.config.models import PlanWorkflowQaConfig
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_qa_commit_gate import (
     PlanQaCommitGateHandler,
 )
 
 _PLAN_DIR_REL = "CLAUDE/Plan"
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -217,6 +228,7 @@ class TestHandleBlockMode:
             result = _handler("block").handle(_bash_input('git commit -m "Plan 00001: done"'))
 
         assert result.decision == Decision.DENY
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_QA_COMMIT}]")
         assert "terminal-state-atomic" in (result.reason or "")
         assert "git mv" in (result.reason or "")
 
@@ -272,3 +284,57 @@ class TestGuidance:
 
     def test_default_enabled(self) -> None:
         assert PlanQaCommitGateHandler().get_default_enabled() is True
+
+
+class TestGetRules:
+    def test_returns_one_rule(self) -> None:
+        rules = PlanQaCommitGateHandler().get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+
+    def test_rule_id_matches_constant(self) -> None:
+        assert PlanQaCommitGateHandler().get_rules()[0].rule_id == RuleID.PLAN_QA_COMMIT
+
+    def test_rule_has_non_empty_verbose(self) -> None:
+        assert PlanQaCommitGateHandler().get_rules()[0].verbose
+
+
+class TestBlockModeDisclosureLadder:
+    """Verbose-first/terse-after teaching prose; findings stay fully present always."""
+
+    def _flip_terminal(self, repo: Path, transcript_path: str) -> Any:
+        plan_md = repo / _PLAN_DIR_REL / "00001-first/PLAN.md"
+        plan_md.write_text("# Plan 00001: first\n\n**Status**: Complete\n")
+        _git(repo, "add", "-A")
+
+        hook_input = _bash_input('git commit -m "Plan 00001: done"')
+        hook_input["transcript_path"] = transcript_path
+        with _patched_root(repo):
+            return _handler("block").handle(hook_input)
+
+    def test_first_fire_for_agent_is_verbose(self, repo: Path) -> None:
+        result = self._flip_terminal(repo, "/tmp/agent-a/transcript.jsonl")
+        assert "cross-file plan" in result.reason
+
+    def test_second_fire_is_terse_but_findings_stay_full(self, repo: Path) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        self._flip_terminal(repo, transcript_path)
+        result = self._flip_terminal(repo, transcript_path)
+
+        assert "cross-file plan" not in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_QA_COMMIT}]")
+        assert "Fix:" in result.reason
+        assert "terminal-state-atomic" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(self, repo: Path) -> None:
+        plan_md = repo / _PLAN_DIR_REL / "00001-first/PLAN.md"
+        plan_md.write_text("# Plan 00001: first\n\n**Status**: Complete\n")
+        _git(repo, "add", "-A")
+
+        hook_input = _bash_input('git commit -m "Plan 00001: done"')
+        with _patched_root(repo):
+            first = _handler("block").handle(hook_input)
+            second = _handler("block").handle(hook_input)
+
+        assert "cross-file plan" in first.reason
+        assert "cross-file plan" in second.reason
