@@ -8,12 +8,35 @@ a common vector for malware and system compromise.
 import re
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, OPTIONAL_SUDO
+
+# Full first-fire teaching content (Plan 00116): reuses the pre-migration
+# handler's rich prose verbatim, minus the invocation-specific `COMMAND:`
+# interpolation a static Rule.verbose cannot carry (Migration Pattern).
+_CURL_PIPE_SHELL_VERBOSE_CONTENT = (
+    "Piping content from curl/wget directly to bash/sh is a massive security risk:\n"
+    "  • Executes untrusted remote code without inspection\n"
+    "  • No opportunity to verify what will be executed\n"
+    "  • Can compromise your entire system\n"
+    "  • Common vector for malware and exploits\n\n"
+    "SAFE alternative:\n"
+    "  1. Download the script first:\n"
+    "     curl -O https://example.com/install.sh\n\n"
+    "  2. Inspect the downloaded file:\n"
+    "     cat install.sh\n"
+    "     # Read and understand what it does\n\n"
+    "  3. Then execute if safe:\n"
+    "     bash install.sh\n\n"
+    "NEVER pipe network content directly to a shell."
+)
 
 # Interpreters that execute piped content as code. Piping network content to any of
 # these is a remote-code-execution risk and must be blocked.
@@ -65,6 +88,14 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
             priority=Priority.CURL_PIPE_SHELL,
             terminal=True,
         )
+        self._rule = Rule(
+            rule_id=RuleID.CURL_PIPE_SHELL,
+            blocked="`curl|wget ... | bash|sh|...`",
+            why="Executes untrusted remote code without any inspection",
+            fix="Download first, inspect, then execute if safe",
+            verbose=_CURL_PIPE_SHELL_VERBOSE_CONTENT,
+        )
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if command pipes curl/wget to a shell or scripting interpreter.
@@ -95,8 +126,19 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
 
         return bool(re.search(_CURL_PIPE_SHELL_PATTERN, command, re.IGNORECASE))
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [self._rule]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block command and explain why piping to shell is dangerous.
+        """Block command with a verbose-first/terse-after explanation.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G): the first fire for a
+        given agent is verbose (full teaching content); subsequent fires for
+        the SAME agent are terse. An event with no transcript_path fails
+        toward verbose every time (unknown disclosure state -> more info)
+        since there is no key to track against.
 
         Args:
             hook_input: Hook input containing the dangerous command
@@ -108,35 +150,19 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
         if not self.matches(hook_input):
             return GatingResult(decision=Decision.ALLOW)
 
-        command = hook_input.get("tool_input", {}).get("command", "")
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
 
-        reason = f"""🚫 BLOCKED: Piping network content to shell
-
-COMMAND: {command}
-
-WHY BLOCKED:
-Piping content from curl/wget directly to bash/sh is a massive security risk:
-  • Executes untrusted remote code without inspection
-  • No opportunity to verify what will be executed
-  • Can compromise your entire system
-  • Common vector for malware and exploits
-
-SAFE alternative:
-  1. Download the script first:
-     curl -O https://example.com/install.sh
-
-  2. Inspect the downloaded file:
-     cat install.sh
-     # Read and understand what it does
-
-  3. Then execute if safe:
-     bash install.sh
-
-NEVER pipe network content directly to a shell."""
+        if transcript_path and tracker.was_disclosed(transcript_path, RuleID.CURL_PIPE_SHELL):
+            message = self._formatter.terse(self._rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.CURL_PIPE_SHELL)
+            message = self._formatter.verbose(self._rule)
 
         return GatingResult(
             decision=Decision.DENY,
-            reason=reason,
+            reason=message,
             context=[],
             guidance=None,
         )

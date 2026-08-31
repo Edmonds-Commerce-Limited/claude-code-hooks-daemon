@@ -7,11 +7,37 @@ security vulnerabilities by allowing anyone to read, write, and execute files.
 import re
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+
+# Full first-fire teaching content (Plan 00116): reuses the pre-migration
+# handler's rich prose verbatim, minus the invocation-specific `COMMAND:`
+# interpolation a static Rule.verbose cannot carry (Migration Pattern).
+_DANGEROUS_PERMISSIONS_VERBOSE_CONTENT = (
+    "Setting 777 (or a+rwx) permissions creates security vulnerabilities:\n"
+    "  • Allows anyone to read, write, and execute the file\n"
+    "  • Bypasses all file permission security\n"
+    "  • Can expose sensitive data\n"
+    "  • Violates principle of least privilege\n"
+    "  • Often indicates a misunderstanding of permissions\n\n"
+    "CORRECT permissions:\n"
+    "  • Directories: 755 (owner: rwx, others: r-x)\n"
+    "    chmod 755 mydir/\n\n"
+    "  • Executable files: 755 (owner: rwx, others: r-x)\n"
+    "    chmod 755 script.sh\n\n"
+    "  • Regular files: 644 (owner: rw, others: r)\n"
+    "    chmod 644 config.json\n\n"
+    "  • Private files: 600 (owner: rw, others: none)\n"
+    "    chmod 600 secret.key\n\n"
+    "If you need broader access, ask the human user for the specific use case.\n"
+    "The correct solution is almost never 777."
+)
 
 # World-writable OCTAL modes: any mode whose "other" (last) digit has the write bit
 # (octal 2) set — digits 2, 3, 6, 7. Covers 666, 777, 757, 002, etc. An optional
@@ -56,6 +82,15 @@ class DangerousPermissionsHandler(PreToolUseHandlerBase):
             priority=Priority.DANGEROUS_PERMISSIONS,
             terminal=True,
         )
+        self._rule = Rule(
+            rule_id=RuleID.CHMOD_WORLD_WRITABLE,
+            blocked="`chmod 777`/`chmod a+w`/`chmod o+w`",
+            why="Allows anyone to read, write, and execute, bypassing all file "
+            "permission security",
+            fix="Use least-privilege permissions instead (755/644/600)",
+            verbose=_DANGEROUS_PERMISSIONS_VERBOSE_CONTENT,
+        )
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if command sets world-writable (dangerous) permissions.
@@ -86,8 +121,19 @@ class DangerousPermissionsHandler(PreToolUseHandlerBase):
 
         return bool(re.search(_DANGEROUS_PERMISSIONS_PATTERN, command))
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [self._rule]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block command and explain why 777 permissions are dangerous.
+        """Block command with a verbose-first/terse-after explanation.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G): the first fire for a
+        given agent is verbose (full teaching content); subsequent fires for
+        the SAME agent are terse. An event with no transcript_path fails
+        toward verbose every time (unknown disclosure state -> more info)
+        since there is no key to track against.
 
         Args:
             hook_input: Hook input containing the dangerous command
@@ -99,39 +145,19 @@ class DangerousPermissionsHandler(PreToolUseHandlerBase):
         if not self.matches(hook_input):
             return GatingResult(decision=Decision.ALLOW)
 
-        command = hook_input.get("tool_input", {}).get("command", "")
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
 
-        reason = f"""🚫 BLOCKED: chmod 777 - dangerous permissions
-
-COMMAND: {command}
-
-WHY BLOCKED:
-Setting 777 (or a+rwx) permissions creates security vulnerabilities:
-  • Allows anyone to read, write, and execute the file
-  • Bypasses all file permission security
-  • Can expose sensitive data
-  • Violates principle of least privilege
-  • Often indicates a misunderstanding of permissions
-
-CORRECT permissions:
-  • Directories: 755 (owner: rwx, others: r-x)
-    chmod 755 mydir/
-
-  • Executable files: 755 (owner: rwx, others: r-x)
-    chmod 755 script.sh
-
-  • Regular files: 644 (owner: rw, others: r)
-    chmod 644 config.json
-
-  • Private files: 600 (owner: rw, others: none)
-    chmod 600 secret.key
-
-If you need broader access, ask the human user for the specific use case.
-The correct solution is almost never 777."""
+        if transcript_path and tracker.was_disclosed(transcript_path, RuleID.CHMOD_WORLD_WRITABLE):
+            message = self._formatter.terse(self._rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.CHMOD_WORLD_WRITABLE)
+            message = self._formatter.verbose(self._rule)
 
         return GatingResult(
             decision=Decision.DENY,
-            reason=reason,
+            reason=message,
             context=[],
             guidance=None,
         )

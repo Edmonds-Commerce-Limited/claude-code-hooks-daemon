@@ -97,6 +97,24 @@ class RuleID:
     GIT_STASH_PUSH: str = "R-GIT-STASH-PUSH"
 
     # ------------------------------------------------------------------
+    # root_recursion_guard handler
+    # ------------------------------------------------------------------
+
+    #: A recursive scanner (grep -r, find, rg, ...) rooted at /, /proc, /sys,
+    #: /home, /root, ~ or $HOME — walks the entire filesystem.
+    ROOT_RECURSION_CATASTROPHIC: str = "R-ROOT-RECURSION-CATASTROPHIC"
+
+    # ------------------------------------------------------------------
+    # dangerous_permissions handler (sudo_pip/pip_break_system are separate)
+    # ------------------------------------------------------------------
+
+    #: sudo pip install — installing as root corrupts the OS-managed Python.
+    SUDO_PIP_INSTALL: str = "R-SUDO-PIP-INSTALL"
+
+    #: pip install --break-system-packages — bypasses PEP 668 protection.
+    PIP_BREAK_SYSTEM_PACKAGES: str = "R-PIP-BREAK-SYSTEM-PACKAGES"
+
+    # ------------------------------------------------------------------
     # plan_time_estimates handler
     # ------------------------------------------------------------------
 
@@ -152,6 +170,12 @@ class RuleID:
 
     #: Stop attempted while a goal-ledger entry is still live/unexplained.
     STOP_GOAL_LEDGER: str = "R-STOP-GOAL-LEDGER"
+
+    #: Stop attempted right after a QA tool's own output indicated failure.
+    STOP_QA_FAILURE: str = "R-STOP-QA-FAILURE"
+
+    #: Stop attempted after asking a non-rhetorical confirmation question.
+    STOP_CONFIRMATION_QUESTION: str = "R-STOP-CONFIRMATION-QUESTION"
 
     # ------------------------------------------------------------------
     # ancestry_preserving_merge handler — 3 rules (one per severing spelling)

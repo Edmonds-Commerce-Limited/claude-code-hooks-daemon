@@ -8,12 +8,37 @@ and break system tools.
 import re
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, SUDO_INVOCATION
+
+# Full first-fire teaching content (Plan 00116): reuses the pre-migration
+# handler's rich prose verbatim, minus the invocation-specific `COMMAND:`
+# interpolation a static Rule.verbose cannot carry (Migration Pattern).
+_SUDO_PIP_VERBOSE_CONTENT = (
+    "System-wide pip installs using sudo can cause serious problems:\n"
+    "  • Conflicts with your OS package manager (apt, dnf, pacman, etc.)\n"
+    "  • Breaks OS tools that depend on specific Python package versions\n"
+    "  • Creates permission and ownership issues\n"
+    "  • Bypasses PEP 668 externally-managed environment protections\n\n"
+    "SAFE alternatives:\n"
+    "  1. Use a virtual environment (RECOMMENDED):\n"
+    "     python -m venv myenv\n"
+    "     source myenv/bin/activate\n"
+    "     pip install <package>\n\n"
+    "  2. Use --user flag for user-local install:\n"
+    "     pip install --user <package>\n\n"
+    "  3. Use your OS package manager:\n"
+    "     sudo apt install python3-<package>  # Debian/Ubuntu\n"
+    "     sudo dnf install python3-<package>  # Fedora/RHEL\n\n"
+    "NEVER use sudo pip install as default behavior."
+)
 
 # `sudo` + any form of pip install.
 #
@@ -47,6 +72,14 @@ class SudoPipHandler(PreToolUseHandlerBase):
             priority=Priority.SUDO_PIP,
             terminal=True,
         )
+        self._rule = Rule(
+            rule_id=RuleID.SUDO_PIP_INSTALL,
+            blocked="`sudo pip install`",
+            why="Conflicts with the OS package manager and can corrupt system Python",
+            fix="Use a virtual environment or `pip install --user` instead",
+            verbose=_SUDO_PIP_VERBOSE_CONTENT,
+        )
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if command contains sudo pip install.
@@ -75,8 +108,19 @@ class SudoPipHandler(PreToolUseHandlerBase):
 
         return bool(re.search(_SUDO_PIP_PATTERN, command, re.IGNORECASE))
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [self._rule]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block command and explain why sudo pip install is dangerous.
+        """Block command with a verbose-first/terse-after explanation.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G): the first fire for a
+        given agent is verbose (full teaching content); subsequent fires for
+        the SAME agent are terse. An event with no transcript_path fails
+        toward verbose every time (unknown disclosure state -> more info)
+        since there is no key to track against.
 
         Args:
             hook_input: Hook input containing the dangerous command
@@ -88,37 +132,19 @@ class SudoPipHandler(PreToolUseHandlerBase):
         if not self.matches(hook_input):
             return GatingResult(decision=Decision.ALLOW)
 
-        command = hook_input.get("tool_input", {}).get("command", "")
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
 
-        reason = f"""🚫 BLOCKED: sudo pip install
-
-COMMAND: {command}
-
-WHY BLOCKED:
-System-wide pip installs using sudo can cause serious problems:
-  • Conflicts with your OS package manager (apt, dnf, pacman, etc.)
-  • Breaks OS tools that depend on specific Python package versions
-  • Creates permission and ownership issues
-  • Bypasses PEP 668 externally-managed environment protections
-
-SAFE alternatives:
-  1. Use a virtual environment (RECOMMENDED):
-     python -m venv myenv
-     source myenv/bin/activate
-     pip install <package>
-
-  2. Use --user flag for user-local install:
-     pip install --user <package>
-
-  3. Use your OS package manager:
-     sudo apt install python3-<package>  # Debian/Ubuntu
-     sudo dnf install python3-<package>  # Fedora/RHEL
-
-NEVER use sudo pip install as default behavior."""
+        if transcript_path and tracker.was_disclosed(transcript_path, RuleID.SUDO_PIP_INSTALL):
+            message = self._formatter.terse(self._rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.SUDO_PIP_INSTALL)
+            message = self._formatter.verbose(self._rule)
 
         return GatingResult(
             decision=Decision.DENY,
-            reason=reason,
+            reason=message,
             context=[],
             guidance=None,
         )

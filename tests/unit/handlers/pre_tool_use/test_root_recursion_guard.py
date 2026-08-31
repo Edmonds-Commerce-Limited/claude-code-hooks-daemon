@@ -12,12 +12,28 @@ Escape hatch: ``MUST_SCAN_ROOT_BECAUSE="reason"`` (mirrors git_stash's
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.root_recursion_guard import (
     RootRecursionGuardHandler,
 )
 
 _BLOCKING_LIKE_DECISIONS = (Decision.DENY, Decision.ASK)
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """get_data_layer() is a process-wide singleton (Plan 00116, Decision G).
+
+    Without this, one test's ``mark_disclosed`` for a rule_id + transcript_path
+    leaks into a later test that reuses the same pair, turning a genuine
+    "first fire" into a stale "already disclosed".
+    """
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 def _bash(command: str) -> dict:
@@ -138,6 +154,70 @@ class TestRootRecursionGuardHandle:
     def test_handle_reason_mentions_escape_hatch(self, handler):
         result = handler.handle(_bash("find / -name x"))
         assert "MUST_SCAN_ROOT_BECAUSE" in result.reason
+
+    def test_handle_reason_leads_with_rule_id(self, handler):
+        result = handler.handle(_bash('grep -rl "x" /'))
+        assert result.reason.startswith(f"BLOCKED [{RuleID.ROOT_RECURSION_CATASTROPHIC}]")
+
+
+class TestRootRecursionGuardDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Plan 00116)."""
+
+    @pytest.fixture
+    def handler(self):
+        return RootRecursionGuardHandler()
+
+    def _hook_input(self, command: str, transcript_path: str | None = None) -> dict:
+        hook_input: dict = {"tool_name": "Bash", "tool_input": {"command": command}}
+        if transcript_path is not None:
+            hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    def test_first_fire_for_agent_is_verbose(self, handler):
+        result = handler.handle(self._hook_input('grep -rl "x" /', "/tmp/agent-a/transcript.jsonl"))
+        assert result.decision == Decision.DENY
+        assert "115 minutes" in result.reason
+
+    def test_second_fire_for_same_agent_is_terse(self, handler):
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input('grep -rl "x" /', transcript_path))
+        result = handler.handle(self._hook_input("find / -name x", transcript_path))
+        assert "115 minutes" not in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.ROOT_RECURSION_CATASTROPHIC}]")
+        assert "Fix:" in result.reason
+
+    def test_same_rule_different_agent_is_independently_verbose(self, handler):
+        handler.handle(self._hook_input('grep -rl "x" /', "/tmp/agent-a/transcript.jsonl"))
+        result = handler.handle(self._hook_input('grep -rl "x" /', "/tmp/agent-b/transcript.jsonl"))
+        assert "115 minutes" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(self, handler):
+        hook_input = self._hook_input('grep -rl "x" /')
+        first = handler.handle(hook_input)
+        second = handler.handle(hook_input)
+        assert "115 minutes" in first.reason
+        assert "115 minutes" in second.reason
+
+
+class TestRootRecursionGuardGetRules:
+    """get_rules() declares the single Rule backing this handler (Plan 00116)."""
+
+    @pytest.fixture
+    def handler(self):
+        return RootRecursionGuardHandler()
+
+    def test_returns_one_rule(self, handler):
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert all(isinstance(rule, Rule) for rule in rules)
+
+    def test_rule_id_matches_constant(self, handler):
+        rules = handler.get_rules()
+        assert rules[0].rule_id == RuleID.ROOT_RECURSION_CATASTROPHIC
+
+    def test_rule_has_non_empty_verbose(self, handler):
+        rules = handler.get_rules()
+        assert rules[0].verbose
 
 
 class TestRootRecursionGuardMetadata:

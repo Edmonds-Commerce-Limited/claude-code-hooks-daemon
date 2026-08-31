@@ -2,9 +2,25 @@
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.dangerous_permissions import (
     DangerousPermissionsHandler,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """get_data_layer() is a process-wide singleton (Plan 00116, Decision G).
+
+    Without this, one test's ``mark_disclosed`` for a rule_id + transcript_path
+    leaks into a later test that reuses the same pair, turning a genuine
+    "first fire" into a stale "already disclosed".
+    """
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 class TestDangerousPermissionsHandler:
@@ -226,14 +242,14 @@ class TestDangerousPermissionsHandler:
         result = handler.handle(hook_input)
         assert "BLOCKED" in result.reason
 
-    def test_handle_reason_contains_command(self, handler):
-        """handle() reason should include the blocked command."""
+    def test_handle_reason_leads_with_rule_id(self, handler):
+        """handle() reason should lead with the rule's ID (Plan 00116 parity contract)."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "chmod -R 777 /var/www/"},
         }
         result = handler.handle(hook_input)
-        assert "chmod -R 777 /var/www/" in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.CHMOD_WORLD_WRITABLE}]")
 
     def test_handle_reason_explains_danger(self, handler):
         """handle() reason should explain why 777 is dangerous."""
@@ -291,3 +307,66 @@ class TestDangerousPermissionsHandler:
         for cmd in safe_commands:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}}
             assert handler.matches(hook_input) is False, f"Should allow: {cmd}"
+
+
+class TestDangerousPermissionsDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Plan 00116)."""
+
+    @pytest.fixture
+    def handler(self):
+        return DangerousPermissionsHandler()
+
+    def _hook_input(self, command: str, transcript_path: str | None = None) -> dict:
+        hook_input: dict = {"tool_name": "Bash", "tool_input": {"command": command}}
+        if transcript_path is not None:
+            hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    def test_first_fire_for_agent_is_verbose(self, handler):
+        hook_input = self._hook_input("chmod 777 file.txt", "/tmp/agent-a/transcript.jsonl")
+        result = handler.handle(hook_input)
+        assert result.decision == "deny"
+        assert "CORRECT permissions" in result.reason
+
+    def test_second_fire_for_same_agent_is_terse(self, handler):
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("chmod 777 file.txt", transcript_path))
+        result = handler.handle(self._hook_input("chmod a+w other.txt", transcript_path))
+        assert "CORRECT permissions" not in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.CHMOD_WORLD_WRITABLE}]")
+        assert "Fix:" in result.reason
+
+    def test_same_rule_different_agent_is_independently_verbose(self, handler):
+        handler.handle(self._hook_input("chmod 777 file.txt", "/tmp/agent-a/transcript.jsonl"))
+        result = handler.handle(
+            self._hook_input("chmod 777 file.txt", "/tmp/agent-b/transcript.jsonl")
+        )
+        assert "CORRECT permissions" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(self, handler):
+        hook_input = self._hook_input("chmod 777 file.txt")
+        first = handler.handle(hook_input)
+        second = handler.handle(hook_input)
+        assert "CORRECT permissions" in first.reason
+        assert "CORRECT permissions" in second.reason
+
+
+class TestDangerousPermissionsGetRules:
+    """get_rules() declares the single Rule backing this handler (Plan 00116)."""
+
+    @pytest.fixture
+    def handler(self):
+        return DangerousPermissionsHandler()
+
+    def test_returns_one_rule(self, handler):
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert all(isinstance(rule, Rule) for rule in rules)
+
+    def test_rule_id_matches_constant(self, handler):
+        rules = handler.get_rules()
+        assert rules[0].rule_id == RuleID.CHMOD_WORLD_WRITABLE
+
+    def test_rule_has_non_empty_verbose(self, handler):
+        rules = handler.get_rules()
+        assert rules[0].verbose

@@ -25,10 +25,31 @@ import re
 import shlex
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+
+# Full first-fire teaching content (Plan 00116), preserving the pre-migration
+# handler's rich prose verbatim.
+_ROOT_RECURSION_VERBOSE_CONTENT = (
+    "A recursive scanner (grep -r/-rl, ugrep, find, fd, rg) was pointed "
+    "at /, /proc, /sys, /home, /root, ~ or $HOME. This walks the ENTIRE "
+    "filesystem (including /proc, network mounts, container overlays) and, "
+    "where grep is aliased to multi-threaded ugrep, saturates every core. "
+    "An incident like this ran for ~115 minutes at >1000% CPU.\n\n"
+    "`... | head` does NOT bound the work: head closes the pipe, but a -l/-rl "
+    "scan that matches nothing never writes, so it never gets SIGPIPE and runs "
+    "to completion across the whole disk.\n\n"
+    "DO THIS INSTEAD — scope the search to the project:\n"
+    '  rg -l "pattern" .\n'
+    '  grep -rl "pattern" "$CLAUDE_PROJECT_DIR"\n'
+    "Prefer rg (respects .gitignore, far cheaper) over grep -r.\n\n"
+    "ESCAPE HATCH (if you truly must scan from a root):\n"
+    '  MUST_SCAN_ROOT_BECAUSE="explain why"; grep -rl x /'
+)
 
 # Escape hatch: MUST_SCAN_ROOT_BECAUSE="non-empty reason" bypasses the block.
 _ESCAPE_HATCH_PATTERN: Final[re.Pattern[str]] = re.compile(
@@ -134,6 +155,14 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
             priority=Priority.ROOT_RECURSION_GUARD,
             tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
+        self._rule = Rule(
+            rule_id=RuleID.ROOT_RECURSION_CATASTROPHIC,
+            blocked="`grep -r`/`find`/`rg`/... rooted at `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`",
+            why="Walks the entire filesystem and can pin every CPU core for hours",
+            fix='Scope the search to the project (e.g. `rg -l "pattern" .`)',
+            verbose=_ROOT_RECURSION_VERBOSE_CONTENT,
+        )
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         command = get_bash_command(hook_input)
@@ -144,27 +173,33 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
             return False
         return any(_segment_is_dangerous(seg) for seg in _SEGMENT_SPLIT_RE.split(command))
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [self._rule]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        return GatingResult(
-            decision=Decision.DENY,
-            reason=(
-                "BLOCKED: recursive scan rooted at a catastrophic location\n\n"
-                "A recursive scanner (grep -r/-rl, ugrep, find, fd, rg) was pointed "
-                "at /, /proc, /sys, /home, /root, ~ or $HOME. This walks the ENTIRE "
-                "filesystem (including /proc, network mounts, container overlays) and, "
-                "where grep is aliased to multi-threaded ugrep, saturates every core. "
-                "An incident like this ran for ~115 minutes at >1000% CPU.\n\n"
-                "`... | head` does NOT bound the work: head closes the pipe, but a -l/-rl "
-                "scan that matches nothing never writes, so it never gets SIGPIPE and runs "
-                "to completion across the whole disk.\n\n"
-                "DO THIS INSTEAD — scope the search to the project:\n"
-                '  rg -l "pattern" .\n'
-                '  grep -rl "pattern" "$CLAUDE_PROJECT_DIR"\n'
-                "Prefer rg (respects .gitignore, far cheaper) over grep -r.\n\n"
-                "ESCAPE HATCH (if you truly must scan from a root):\n"
-                '  MUST_SCAN_ROOT_BECAUSE="explain why"; grep -rl x /'
-            ),
-        )
+        """Block with a verbose-first/terse-after explanation.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G): the first fire for a
+        given agent is verbose (full teaching content); subsequent fires for
+        the SAME agent are terse. An event with no transcript_path fails
+        toward verbose every time (unknown disclosure state -> more info)
+        since there is no key to track against.
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(
+            transcript_path, RuleID.ROOT_RECURSION_CATASTROPHIC
+        ):
+            message = self._formatter.terse(self._rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.ROOT_RECURSION_CATASTROPHIC)
+            message = self._formatter.verbose(self._rule)
+
+        return GatingResult(decision=Decision.DENY, reason=message)
 
     def get_claude_md(self) -> str | None:
         return (
