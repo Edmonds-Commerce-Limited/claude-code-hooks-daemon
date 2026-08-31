@@ -589,7 +589,11 @@ class ClaudeMdInjector:
             if config_key in self._promoted_handlers or handler.name in self._promoted_handlers:
                 if content is not None:
                     promoted.append((handler.name, content))
-                continue
+                    continue
+                # Named in promoted_handlers but has no get_claude_md() prose
+                # (only rules, or nothing at all) — fall through to the
+                # normal progressive/fallback tiering below instead of
+                # silently dropping this handler's guidance.
 
             if rules:
                 progressive.append((handler.name, list(rules)))
@@ -631,10 +635,20 @@ class ClaudeMdInjector:
 
         if progressive:
             parts.append(_PROGRESSIVE_TIER_HEADING)
+            # Provenance markers are HTML comments, which are BLOCK-LEVEL in
+            # GFM — one interleaved between row groups would terminate the
+            # table (header+delimiter render as a zero-row table and every
+            # row group after the first becomes literal paragraph text).
+            # Emit every marker together, BEFORE the header, so the table
+            # body (header, delimiter, all rows) stays one contiguous block.
+            # handler_names_in_guidance() scans the whole <hooksdaemon>
+            # block for markers regardless of position, so this keeps
+            # provenance lookup working.
+            for name, _rules in progressive:
+                parts.append(f"{_HANDLER_MARKER_PREFIX}{name}{_HANDLER_MARKER_SUFFIX}")
             parts.append(_RULE_TABLE_HEADER)
             formatter = RuleFormatter()
-            for name, rules in progressive:
-                parts.append(f"{_HANDLER_MARKER_PREFIX}{name}{_HANDLER_MARKER_SUFFIX}")
+            for _name, rules in progressive:
                 for rule in rules:
                     parts.append(formatter.table_row(rule))
             parts.append("")

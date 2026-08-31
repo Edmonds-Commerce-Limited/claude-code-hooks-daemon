@@ -1,5 +1,6 @@
 """TDD tests for ClaudeMdInjector."""
 
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -1371,6 +1372,77 @@ class TestTwoTierPromotedBlock:
         assert "R-SED-EXEC" in content
         assert "some_advisory — a reminder" in content, "advisory heading one-liner present"
         assert "Advisory body prose." not in content, "advisory body must not be resident"
+
+    def test_progressive_table_with_two_handlers_has_contiguous_rows(self, tmp_path: Path) -> None:
+        """A ``<!-- handler: NAME -->`` comment between row groups is BLOCK-LEVEL
+        in GFM and terminates the table -- the header+delimiter become a
+        zero-row table and every subsequent row group renders as literal
+        paragraph text. Only one handler was ever exercised by the older
+        tier tests, which is why this escaped: the bug needs a SECOND
+        handler's rows to appear after a marker to manifest."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n")
+
+        handler_a = _StubHandler("handler_a", "## handler_a\n\nProse.", rules=[self._rule("R-A")])
+        handler_b = _StubHandler("handler_b", "## handler_b\n\nProse.", rules=[self._rule("R-B")])
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path,
+            handlers=[handler_a, handler_b],
+            promoted_handlers=[],
+        )
+        injector.inject()
+
+        content = claude_md.read_text()
+        lines = content.splitlines()
+        # mdformat realigns column widths, so match the delimiter row
+        # structurally (leading "|" then only "-"/" "/"|" cells) rather
+        # than by exact original spacing.
+        delimiter_pattern = re.compile(r"^\|[\s\-|]+\|$")
+        delimiter_idx = next(
+            i for i, line in enumerate(lines) if delimiter_pattern.match(line.strip())
+        )
+
+        row_lines = []
+        i = delimiter_idx + 1
+        while i < len(lines) and lines[i].strip().startswith("|"):
+            row_lines.append(lines[i])
+            i += 1
+
+        assert len(row_lines) == 2, (
+            "table rows are not contiguous under the single header+delimiter -- "
+            f"only found {row_lines!r} directly beneath it; full table region: "
+            f"{lines[delimiter_idx:delimiter_idx + 8]!r}"
+        )
+        assert "R-A" in "\n".join(row_lines)
+        assert "R-B" in "\n".join(row_lines)
+
+    def test_promoted_handler_with_no_prose_falls_through_to_progressive_tier(
+        self, tmp_path: Path
+    ) -> None:
+        """A handler named in ``promoted_handlers`` whose ``get_claude_md()``
+        returns ``None`` (only rules, or nothing at all) must not be silently
+        dropped -- it should still land in the progressive rule table if it
+        declares rules."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n")
+
+        handler = _StubHandler("no_prose_handler", None, rules=[self._rule("R-NO-PROSE")])
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path,
+            handlers=[handler],
+            promoted_handlers=["no_prose_handler"],
+        )
+        injector.inject()
+
+        content = claude_md.read_text()
+        assert "R-NO-PROSE" in content, (
+            "a promoted handler with no get_claude_md() prose but declared rules "
+            "must still contribute its rules to the progressive tier"
+        )
 
     def test_promoted_handlers_defaults_to_empty(self, tmp_path: Path) -> None:
         """Omitting promoted_handlers entirely behaves like an empty list."""
