@@ -45,9 +45,11 @@ import re
 from pathlib import Path
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
 
@@ -137,6 +139,25 @@ _WARN_GUIDANCE_HEADER: Final[str] = (
     "⚠️ GitHub auto-closing keyword reference detected in a git message"
 )
 
+# Shared teaching content for the (only) deny path (Plan 00116, Task 3.2).
+# The matched span itself is invocation-specific and is appended separately
+# by handle() -- a Rule.verbose is static per rule, not per invocation.
+_RULE_VERBOSE: Final[str] = (
+    "WHAT WOULD HAPPEN:\n"
+    "  • When this commit reaches the default branch (or the PR "
+    "merges), GitHub AUTO-CLOSES the referenced issue/PR\n"
+    "  • This cannot be disabled repository-side, and closures "
+    "triggered this way are easy to miss\n\n"
+    "USE A NON-CLOSING REFERENCE INSTEAD:\n"
+    f"  {_REWRITE_EXAMPLES}\n"
+    "  e.g. git commit -m 'Addresses #123: harden the retry path'\n\n"
+    "THERE IS NO ESCAPE HATCH. If this project genuinely wants "
+    "auto-close commits to work (closing keywords are part of its "
+    "workflow), this handler should be disabled — suggest that to "
+    "the user; do not try to work around the block.\n"
+    "To disable: handlers.pre_tool_use.github_auto_close_keywords"
+)
+
 
 class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
     """Deny git messages carrying GitHub auto-closing keyword references.
@@ -176,6 +197,19 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
         # read-twice TOCTOU between the two calls).
         self._cached_command: str | None = None
         self._cached_span: str | None = None
+        self._rule = Rule(
+            rule_id=RuleID.GH_AUTO_CLOSE_KEYWORD,
+            blocked="a GitHub closing keyword + issue reference in a git/gh message",
+            why="Auto-closes the referenced issue/PR the moment the commit "
+            "reaches the default branch, and cannot be disabled repository-side",
+            fix="Use a non-closing reference instead, e.g. Addresses #123",
+            verbose=_RULE_VERBOSE,
+        )
+        self._formatter = RuleFormatter()
+
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's deny path."""
+        return [self._rule]
 
     def _message_segments(self, command: str) -> list[str]:
         """The message-bearing slices of ``command``.
@@ -267,27 +301,23 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
                 ],
             )
 
-        return GatingResult(
-            decision=Decision.DENY,
-            reason=(
-                "🚫 BLOCKED: GitHub auto-closing keyword reference in a git "
-                "message\n\n"
-                f'MATCHED: "{matched}"\n\n'
-                "WHAT WOULD HAPPEN:\n"
-                "  • When this commit reaches the default branch (or the PR "
-                "merges), GitHub AUTO-CLOSES the referenced issue/PR\n"
-                "  • This cannot be disabled repository-side, and closures "
-                "triggered this way are easy to miss\n\n"
-                "USE A NON-CLOSING REFERENCE INSTEAD:\n"
-                f"  {_REWRITE_EXAMPLES}\n"
-                "  e.g. git commit -m 'Addresses #123: harden the retry path'\n\n"
-                "THERE IS NO ESCAPE HATCH. If this project genuinely wants "
-                "auto-close commits to work (closing keywords are part of its "
-                "workflow), this handler should be disabled — suggest that to "
-                "the user; do not try to work around the block.\n"
-                "To disable: handlers.pre_tool_use.github_auto_close_keywords"
-            ),
-        )
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        rule_id = self._rule.rule_id
+
+        if transcript_path and tracker.was_disclosed(transcript_path, rule_id):
+            message = self._formatter.terse(self._rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, rule_id)
+            message = self._formatter.verbose(self._rule)
+
+        # The matched span is invocation-specific and always shown, regardless
+        # of disclosure state -- it is the concrete evidence, not teaching
+        # content, so it is not gated by the verbose-first/terse-after ladder.
+        message += f'\n\nMATCHED: "{matched}"'
+
+        return GatingResult(decision=Decision.DENY, reason=message)
 
     def get_claude_md(self) -> str:
         """Resident guidance for the project's CLAUDE.md."""

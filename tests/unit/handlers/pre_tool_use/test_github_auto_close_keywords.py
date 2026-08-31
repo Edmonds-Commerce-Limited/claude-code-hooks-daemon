@@ -20,7 +20,10 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.github_auto_close_keywords import (
     GithubAutoCloseKeywordsHandler,
 )
@@ -28,6 +31,14 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.github_auto_close_keywords i
 
 def _bash(command: str) -> dict[str, object]:
     return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test (Plan 00116)."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 class TestInitialisation:
@@ -289,6 +300,79 @@ class TestDenyMessage:
         assert "Refs" in result.reason
         assert "NO ESCAPE HATCH" in result.reason
         assert "MUST_AUTO_CLOSE_BECAUSE" not in result.reason
+
+
+class TestGetRules:
+    def test_returns_one_rule(self) -> None:
+        rules = GithubAutoCloseKeywordsHandler().get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+        assert rules[0].rule_id == RuleID.GH_AUTO_CLOSE_KEYWORD
+        assert rules[0].verbose
+
+
+class TestDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Plan 00116).
+
+    The matched span is invocation-specific evidence, not teaching content,
+    so it is appended on EVERY fire regardless of disclosure state.
+    """
+
+    def _hook_input(self, command: str, transcript_path: str) -> dict[str, object]:
+        hook_input = _bash(command)
+        hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    def test_deny_leads_with_rule_id(self) -> None:
+        handler = GithubAutoCloseKeywordsHandler()
+        result = handler.handle(
+            self._hook_input("git commit -m 'Fixes #123'", "/tmp/agent-a/transcript.jsonl")
+        )
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GH_AUTO_CLOSE_KEYWORD}]")
+
+    def test_first_fire_is_verbose(self) -> None:
+        handler = GithubAutoCloseKeywordsHandler()
+        result = handler.handle(
+            self._hook_input("git commit -m 'Fixes #123'", "/tmp/agent-a/transcript.jsonl")
+        )
+        assert "NO ESCAPE HATCH" in result.reason
+
+    def test_second_fire_same_agent_is_terse_but_still_names_match(self) -> None:
+        handler = GithubAutoCloseKeywordsHandler()
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("git commit -m 'Fixes #123'", transcript_path))
+        result = handler.handle(
+            self._hook_input("git commit -m 'closes #456'", transcript_path)
+        )
+        assert "NO ESCAPE HATCH" not in result.reason
+        assert "Fix:" in result.reason
+        assert 'MATCHED: "closes #456"' in result.reason
+
+    def test_different_agent_is_independently_verbose(self) -> None:
+        handler = GithubAutoCloseKeywordsHandler()
+        handler.handle(
+            self._hook_input("git commit -m 'Fixes #123'", "/tmp/agent-a/transcript.jsonl")
+        )
+        result = handler.handle(
+            self._hook_input("git commit -m 'Fixes #123'", "/tmp/agent-b/transcript.jsonl")
+        )
+        assert "NO ESCAPE HATCH" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(self) -> None:
+        handler = GithubAutoCloseKeywordsHandler()
+        hook_input = _bash("git commit -m 'Fixes #123'")
+        first = handler.handle(hook_input)
+        second = handler.handle(hook_input)
+        assert "NO ESCAPE HATCH" in first.reason
+        assert "NO ESCAPE HATCH" in second.reason
+
+    def test_warn_mode_is_unaffected_by_disclosure_ladder(self) -> None:
+        handler = GithubAutoCloseKeywordsHandler()
+        handler._mode = "warn"
+        result = handler.handle(
+            self._hook_input("git commit -m 'Fixes #123'", "/tmp/agent-a/transcript.jsonl")
+        )
+        assert result.decision == Decision.ALLOW
 
 
 class TestGuidanceAndAcceptance:
