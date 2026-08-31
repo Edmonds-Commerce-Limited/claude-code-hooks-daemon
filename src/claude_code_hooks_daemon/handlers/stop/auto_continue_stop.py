@@ -35,9 +35,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, ToolName
-from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import BlockingResult, Decision, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.transcript_reader import (
     ContentBlock,
     TranscriptMessage,
@@ -121,15 +123,63 @@ _TOOL_ERROR_RECOVERY_REASON = (
 # Prefix an assistant message uses to signal an intentional, explained stop.
 _STOP_EXPLANATION_PREFIX = "STOPPING BECAUSE:"
 
+# SINGLE SOURCE OF TRUTH for get_rules() / the disclosure ladder (Plan 00116,
+# Phase 3): one Rule per DENY-branch CONCEPT, not per historical reason
+# constant naming quirk. Each rule's ``verbose`` is the corresponding
+# original ``_..._REASON`` constant VERBATIM -- this handler's feedback text
+# is behaviour-critical, so the first fire of every branch is byte-identical
+# to the pre-migration always-on message. Only a REPEAT fire of the SAME
+# rule for the SAME agent goes terse; the terse ``fix`` field is written so
+# the agent still knows the operative next action (continue, or prefix
+# STOPPING BECAUSE:) without the full teaching prose.
+_RULE_DEFINITIONS: tuple[tuple[str, str, str, str, str], ...] = (
+    (
+        RuleID.STOP_QA_FAILURE,
+        "Stopping while the last QA tool run's own output indicated failure",
+        "QA failures detected in the last QA tool run",
+        "Fix the failures, re-run the QA tool, and continue without stopping",
+        _QA_FAIL_REASON,
+    ),
+    (
+        RuleID.STOP_TAUTOLOGICAL_QUESTION,
+        "Stopping behind a rhetorical continue/confirmation question",
+        "The answer is obvious -- yes, continue the already-planned work now",
+        "Resume the next unit of work immediately; STOPPING BECAUSE: does not exempt this",
+        _RHETORICAL_CONTINUE_BLOCK_REASON,
+    ),
+    (
+        RuleID.STOP_AFTER_TOOL_ERROR,
+        "Stopping right after an unresolved tool_use_error",
+        "The correct action is to address the cause and retry, not stop",
+        "Address the tool_use_error's cause (e.g. Read before Edit/Write) and retry",
+        _TOOL_ERROR_RECOVERY_REASON,
+    ),
+    (
+        RuleID.STOP_CONFIRMATION_QUESTION,
+        "Stopping to ask an obvious confirmation question",
+        "The daemon auto-continues through confirmation-style questions",
+        "Proceed with the remaining work; stop with STOPPING BECAUSE: only if truly stuck",
+        _CONFIRMATION_CONTINUE_REASON,
+    ),
+    (
+        RuleID.STOP_NO_REASON,
+        "Stopping without a STOPPING BECAUSE: explanation",
+        "The stop hook enforces intentional stops",
+        "Prefix your stop message with STOPPING BECAUSE: <reason>, or keep working",
+        _EXPLAIN_OR_CONTINUE_REASON,
+    ),
+)
+
 # Plan 00276: goal-ledger Stop defence. Claude Code's /goal slot holds ONE
 # condition (last writer wins); the daemon-side goal ledger remembers every
 # emitted goal, so an unexplained stop is challenged on behalf of EVERY
 # ledgered plan still In Progress — not only the newest.
 _GOAL_LEDGER_CHALLENGE_TEMPLATE = (
-    "GOAL LEDGER (daemon-side): the following ledgered plan(s) are still "
-    "In Progress and their goals remain owed, even if the /goal condition "
-    "now shows only the newest one: Plan(s) {plans}. Continue that work, or "
-    "stop with STOPPING BECAUSE: naming why each listed plan cannot proceed."
+    f"[{RuleID.STOP_GOAL_LEDGER}] GOAL LEDGER (daemon-side): the following "
+    "ledgered plan(s) are still In Progress and their goals remain owed, "
+    "even if the /goal condition now shows only the newest one: Plan(s) "
+    "{plans}. Continue that work, or stop with STOPPING BECAUSE: naming why "
+    "each listed plan cannot proceed."
 )
 
 # Verb group shared by the rhetorical-continue confirmation patterns. These are
@@ -340,6 +390,14 @@ class AutoContinueStopHandler(StopHandlerBase):
         # Injected by the registry for planning-tagged handlers
         # (plan_workflow.directory); None falls back to the config default.
         self._track_plans_in_project: str | None = None
+        # One Rule per DENY-branch concept (Plan 00116), built once from the
+        # single source-of-truth _RULE_DEFINITIONS mapping.
+        self._rules: tuple[Rule, ...] = tuple(
+            Rule(rule_id=rule_id, blocked=blocked, why=why, fix=fix, verbose=verbose)
+            for rule_id, blocked, why, fix, verbose in _RULE_DEFINITIONS
+        )
+        self._rules_by_id: dict[str, Rule] = {rule.rule_id: rule for rule in self._rules}
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Return True for all Stop events unless re-entry or AskUserQuestion.
@@ -410,8 +468,9 @@ class AutoContinueStopHandler(StopHandlerBase):
         # Branch 1: QA failure
         if reader and self._is_qa_failure(reader):
             logger.info("QA failure detected - instructing Claude to fix and continue")
-            result = BlockingResult(decision=Decision.DENY, reason=_QA_FAIL_REASON)
-            self._log_stop_event(hook_input, Decision.DENY, _QA_FAIL_REASON)
+            reason = self._render_branch_message(RuleID.STOP_QA_FAILURE, hook_input)
+            result = BlockingResult(decision=Decision.DENY, reason=reason)
+            self._log_stop_event(hook_input, Decision.DENY, reason)
             return result
 
         # Branch 2: Explicit stop explanation.
@@ -429,12 +488,11 @@ class AutoContinueStopHandler(StopHandlerBase):
                         "Rhetorical continue question inside STOPPING BECAUSE: stop"
                         " - hard-blocking"
                     )
-                    result = BlockingResult(
-                        decision=Decision.DENY, reason=_RHETORICAL_CONTINUE_BLOCK_REASON
+                    reason = self._render_branch_message(
+                        RuleID.STOP_TAUTOLOGICAL_QUESTION, hook_input
                     )
-                    self._log_stop_event(
-                        hook_input, Decision.DENY, _RHETORICAL_CONTINUE_BLOCK_REASON
-                    )
+                    result = BlockingResult(decision=Decision.DENY, reason=reason)
+                    self._log_stop_event(hook_input, Decision.DENY, reason)
                     return result
                 logger.info("STOPPING BECAUSE: prefix detected - allowing stop")
                 result = BlockingResult(decision=Decision.ALLOW)
@@ -449,8 +507,9 @@ class AutoContinueStopHandler(StopHandlerBase):
         # stop after a tool error.
         if reader and reader.last_tool_result_was_error():
             logger.info("tool_use_error detected with no recovery - emitting recovery reason")
-            result = BlockingResult(decision=Decision.DENY, reason=_TOOL_ERROR_RECOVERY_REASON)
-            self._log_stop_event(hook_input, Decision.DENY, _TOOL_ERROR_RECOVERY_REASON)
+            reason = self._render_branch_message(RuleID.STOP_AFTER_TOOL_ERROR, hook_input)
+            result = BlockingResult(decision=Decision.DENY, reason=reason)
+            self._log_stop_event(hook_input, Decision.DENY, reason)
             return result
 
         # Branch 3: Confirmation question (backwards compat)
@@ -472,17 +531,22 @@ class AutoContinueStopHandler(StopHandlerBase):
 
                 if is_confirmation and "?" in last_message:
                     logger.info("Confirmation question detected - will auto-continue")
-                    result = BlockingResult(
-                        decision=Decision.DENY, reason=_CONFIRMATION_CONTINUE_REASON
+                    reason = self._render_branch_message(
+                        RuleID.STOP_CONFIRMATION_QUESTION, hook_input
                     )
-                    self._log_stop_event(hook_input, Decision.DENY, _CONFIRMATION_CONTINUE_REASON)
+                    result = BlockingResult(decision=Decision.DENY, reason=reason)
+                    self._log_stop_event(hook_input, Decision.DENY, reason)
                     return result
 
         # Branch 4: Default - require explanation or force continue
         force_explanation = self._force_explanation
         if force_explanation:
             logger.info("No stop explanation provided - requiring STOPPING BECAUSE: or continue")
-            reason = _EXPLAIN_OR_CONTINUE_REASON
+            reason = self._render_branch_message(RuleID.STOP_NO_REASON, hook_input)
+            # The goal-ledger challenge names specific live plan numbers, so it
+            # is dynamic per-invocation content (like a QA-gate finding) and
+            # stays FULLY present every fire -- never governed by the
+            # disclosure ladder that terses the surrounding teaching prose.
             challenge = self._goal_ledger_challenge()
             if challenge is not None:
                 reason = f"{reason}\n\n{challenge}"
@@ -495,6 +559,25 @@ class AutoContinueStopHandler(StopHandlerBase):
         result = BlockingResult(decision=Decision.ALLOW)
         self._log_stop_event(hook_input, Decision.ALLOW, "")
         return result
+
+    def _render_branch_message(self, rule_id: str, hook_input: dict[str, Any]) -> str:
+        """Verbose-first/terse-after DENY message for one of the five branch rules.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G): the first fire of a rule
+        for a given agent is verbose (the original reason text, verbatim);
+        subsequent fires of the SAME rule for the SAME agent are terse. An
+        event with no transcript_path fails toward verbose every time.
+        """
+        rule = self._rules_by_id[rule_id]
+        transcript_path = hook_input.get("transcript_path")
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, rule_id):
+            return self._formatter.terse(rule)
+        if transcript_path:
+            tracker.mark_disclosed(transcript_path, rule_id)
+        return self._formatter.verbose(rule)
 
     def _goal_ledger_challenge(self) -> str | None:
         """Return a challenge naming every still-live ledgered goal, or None.
@@ -824,6 +907,10 @@ class AutoContinueStopHandler(StopHandlerBase):
             re.search(pattern, text_lower, re.IGNORECASE)
             for pattern in self.ERROR_QUESTION_PATTERNS
         )
+
+    def get_rules(self) -> list[Rule]:
+        """Return the 5 Rule objects backing this handler's DENY branches."""
+        return list(self._rules)
 
     def get_claude_md(self) -> str | None:
         """Return CLAUDE.md guidance about the stop explanation requirement."""

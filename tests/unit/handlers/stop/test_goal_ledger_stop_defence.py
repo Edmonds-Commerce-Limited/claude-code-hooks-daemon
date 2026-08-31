@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     AutoContinueStopHandler,
@@ -89,13 +90,22 @@ class TestGoalLedgerStopDefence:
     def test_empty_ledger_leaves_default_reason_unchanged(
         self, handler: AutoContinueStopHandler
     ) -> None:
+        """No live ledger entries -> no goal-ledger challenge appended.
+
+        The message still leads with the R-STOP-NO-REASON rule (Plan 00116)
+        and carries the full teaching text verbatim on first fire; what stays
+        UNCHANGED here is the absence of the goal-ledger addendum.
+        """
         from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
             _EXPLAIN_OR_CONTINUE_REASON,
         )
 
         result = handler.handle({})
         assert result.decision == Decision.DENY
-        assert result.reason == _EXPLAIN_OR_CONTINUE_REASON
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{RuleID.STOP_NO_REASON}]")
+        assert _EXPLAIN_OR_CONTINUE_REASON in result.reason
+        assert "GOAL LEDGER" not in result.reason
 
     def test_uninitialised_project_context_fails_open(
         self, handler: AutoContinueStopHandler, monkeypatch: pytest.MonkeyPatch

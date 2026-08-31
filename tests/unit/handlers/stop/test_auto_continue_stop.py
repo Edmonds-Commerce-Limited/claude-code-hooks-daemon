@@ -11,11 +11,26 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, HookResult
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.handlers.stop import auto_continue_stop
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     AutoContinueStopHandler,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module.
+
+    get_data_layer() is a process-wide singleton (Plan 00116, Decision G).
+    Without this, one test's mark_disclosed leaks into a later test that
+    reuses the same (transcript_path, rule_id) pair.
+    """
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 class TestStopEventsLogRetention:
@@ -1750,8 +1765,9 @@ class TestBranch3StaleReaderRace:
         assert result.decision == Decision.DENY
         reason = result.reason or ""
         assert reason.startswith(
-            "AUTO-CONTINUE: Yes, proceed"
+            f"BLOCKED [{RuleID.STOP_CONFIRMATION_QUESTION}]"
         ), f"Expected Branch 3 auto-continue but got: {reason[:80]}"
+        assert "AUTO-CONTINUE: Yes, proceed" in reason
 
     def test_confirmation_in_fresh_transcript_after_user_as_last_message(
         self, handler: AutoContinueStopHandler, tmp_path: Path
@@ -1824,8 +1840,9 @@ class TestBranch3StaleReaderRace:
         assert result.decision == Decision.DENY
         reason = result.reason or ""
         assert reason.startswith(
-            "AUTO-CONTINUE: Yes, proceed"
+            f"BLOCKED [{RuleID.STOP_CONFIRMATION_QUESTION}]"
         ), f"Expected Branch 3 auto-continue but got: {reason[:80]}"
+        assert "AUTO-CONTINUE: Yes, proceed" in reason
 
 
 class TestHasStopExplanationStaleTranscriptRace:
@@ -2939,3 +2956,90 @@ class TestRhetoricalContinueHardBlock:
         result = self._handle(handler, path)
         assert result.decision == Decision.DENY
         assert result.reason is not None
+
+
+class TestAutoContinueStopGetRules:
+    """get_rules() declares the 5 Rule objects backing this handler (Plan 00116)."""
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        return AutoContinueStopHandler()
+
+    def test_returns_five_rules(self, handler: AutoContinueStopHandler) -> None:
+        from claude_code_hooks_daemon.core.rule import Rule
+
+        rules = handler.get_rules()
+        assert len(rules) == 5
+        assert all(isinstance(rule, Rule) for rule in rules)
+
+    def test_rule_ids_match_constants(self, handler: AutoContinueStopHandler) -> None:
+        expected = {
+            RuleID.STOP_QA_FAILURE,
+            RuleID.STOP_TAUTOLOGICAL_QUESTION,
+            RuleID.STOP_AFTER_TOOL_ERROR,
+            RuleID.STOP_CONFIRMATION_QUESTION,
+            RuleID.STOP_NO_REASON,
+        }
+        actual = {rule.rule_id for rule in handler.get_rules()}
+        assert actual == expected
+
+    def test_every_rule_has_non_empty_verbose(self, handler: AutoContinueStopHandler) -> None:
+        for rule in handler.get_rules():
+            assert rule.verbose, f"{rule.rule_id} has empty verbose content"
+
+
+class TestAutoContinueStopDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Plan 00116, Decision G).
+
+    First fire of a DENY-branch rule for a given agent is byte-identical to
+    the original always-on reason text (verbatim in Rule.verbose); a repeat
+    fire of the SAME rule for the SAME agent goes terse, but the terse
+    reminder still names the operative next action.
+    """
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        return AutoContinueStopHandler()
+
+    def _hook_input(self, transcript_path: str) -> dict[str, Any]:
+        return {"transcript_path": transcript_path, "stop_hook_active": False}
+
+    def test_no_reason_first_fire_is_verbose(self, handler: AutoContinueStopHandler) -> None:
+        """Branch 4 (no reader/no explanation) first fire carries the full teaching text."""
+        result = handler.handle(self._hook_input("/tmp/agent-a/transcript.jsonl"))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{RuleID.STOP_NO_REASON}]")
+        assert "DO NOT STOP because the context window" in result.reason
+
+    def test_no_reason_second_fire_is_terse_but_actionable(
+        self, handler: AutoContinueStopHandler
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input(transcript_path))
+        result = handler.handle(self._hook_input(transcript_path))
+
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "DO NOT STOP because the context window" not in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.STOP_NO_REASON}]")
+        assert "STOPPING BECAUSE:" in result.reason
+        assert "Fix:" in result.reason
+
+    def test_different_agent_is_independently_verbose(
+        self, handler: AutoContinueStopHandler
+    ) -> None:
+        handler.handle(self._hook_input("/tmp/agent-a/transcript.jsonl"))
+        result = handler.handle(self._hook_input("/tmp/agent-b/transcript.jsonl"))
+        assert result.reason is not None
+        assert "DO NOT STOP because the context window" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(
+        self, handler: AutoContinueStopHandler
+    ) -> None:
+        hook_input: dict[str, Any] = {"stop_hook_active": False}
+        first = handler.handle(hook_input)
+        second = handler.handle(hook_input)
+        assert first.reason is not None and second.reason is not None
+        assert "DO NOT STOP because the context window" in first.reason
+        assert "DO NOT STOP because the context window" in second.reason
