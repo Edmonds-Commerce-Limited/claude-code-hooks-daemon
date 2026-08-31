@@ -91,7 +91,11 @@ _SECTION_INTRO = (
 # Tier headings (Plan 00116 Decision I — DESIGN-HYBRID-PROMOTION.md layout).
 _PROMOTED_TIER_HEADING = "## Frequently-triggered handler guidance\n"
 _PROGRESSIVE_TIER_HEADING = "## All other enforced rules\n"
-_FALLBACK_TIER_HEADING = "## Other active handler guidance (rules not yet migrated)\n"
+_FALLBACK_TIER_HEADING = (
+    "## Advisories and other active handlers\n\n"
+    "One line each; these fire with their own guidance when relevant. "
+    "Full text: `bin/hooks-daemon explain-handler <name>`.\n"
+)
 
 _RULE_TABLE_HEADER = "| ID | Blocked | Why | Fix |\n" "| --- | --- | --- | --- |"
 
@@ -122,6 +126,22 @@ _COMMIT_MESSAGE_WITH_USER_EDITS = (
     "have prompted."
 )
 _GIT_HEAD_REF = "HEAD"
+
+
+def _summary_line(content: str) -> str:
+    """One-line summary of a handler's guidance: its first heading line.
+
+    Decision C renders no-rules (advisory) handlers as a single bullet — the
+    first markdown heading's text (sans ``#`` markers), or the first
+    non-empty line when the prose carries no heading.
+    """
+    for line in content.strip().splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        return stripped.lstrip("#").strip()
+    return ""
+
 
 _HANDLER_MARKER_PREFIX = "<!-- handler: "
 _HANDLER_MARKER_SUFFIX = " -->"
@@ -623,9 +643,8 @@ class ClaudeMdInjector:
             parts.append(_FALLBACK_TIER_HEADING)
             for name, content in fallback:
                 parts.append(f"{_HANDLER_MARKER_PREFIX}{name}{_HANDLER_MARKER_SUFFIX}")
-                parts.append("")
-                parts.append(content.strip())
-                parts.append("")
+                parts.append(f"- {_summary_line(content)}")
+            parts.append("")
 
         parts.append(_CLOSE_TAG)
         return "\n".join(parts)

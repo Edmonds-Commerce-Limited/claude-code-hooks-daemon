@@ -202,7 +202,9 @@ class TestClaudeMdInjectorCreateSection:
         claude_md.write_text(old_content)
 
         handler = _StubHandler("stop_handler", "## Stop\n\nNew guidance.")
-        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path, handlers=[handler], promoted_handlers=["stop_handler"]
+        )
         injector.inject()
 
         content = claude_md.read_text()
@@ -215,7 +217,9 @@ class TestClaudeMdInjectorCreateSection:
         from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 
         handler = _StubHandler("my_handler", "## My Handler\n\nGuidance here.")
-        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path, handlers=[handler], promoted_handlers=["my_handler"]
+        )
         injector.inject()
 
         claude_md = tmp_path / "CLAUDE.md"
@@ -235,7 +239,9 @@ class TestClaudeMdInjectorCreateSection:
             _StubHandler("included", "## Included\n\nContent."),
             _StubHandler("excluded", None),
         ]
-        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=handlers)
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path, handlers=handlers, promoted_handlers=["included"]
+        )
         injector.inject()
 
         content = claude_md.read_text()
@@ -284,7 +290,11 @@ class TestClaudeMdInjectorCreateSection:
             _StubHandler("pipe_blocker", "## Pipe Blocker\n\nAvoid pipes."),
             _StubHandler("stop_handler", "## Stop Handler\n\nUse STOPPING BECAUSE:."),
         ]
-        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=handlers)
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path,
+            handlers=handlers,
+            promoted_handlers=["pipe_blocker", "stop_handler"],
+        )
         injector.inject()
 
         content = claude_md.read_text()
@@ -435,7 +445,9 @@ class TestClaudeMdInjectorContentLossProtection:
         claude_md.write_text(user_content + hooksdaemon_block)
 
         handler = _StubHandler("h", "## H\n\nNew content.")
-        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path, handlers=[handler], promoted_handlers=["h"]
+        )
         injector.inject()
 
         result = claude_md.read_text()
@@ -595,10 +607,14 @@ class TestClaudeMdInjectorAutoCommit:
 
         _init_git_repo(tmp_path)
         ClaudeMdInjector(
-            workspace_root=tmp_path, handlers=[_StubHandler("h", "## H\n\nOne.")]
+            workspace_root=tmp_path,
+            handlers=[_StubHandler("h", "## H\n\nOne.")],
+            promoted_handlers=["h"],
         ).inject()
         ClaudeMdInjector(
-            workspace_root=tmp_path, handlers=[_StubHandler("h", "## H\n\nTwo.")]
+            workspace_root=tmp_path,
+            handlers=[_StubHandler("h", "## H\n\nTwo.")],
+            promoted_handlers=["h"],
         ).inject()
 
         message = subprocess.run(
@@ -1028,7 +1044,9 @@ class TestClaudeMdInjectorFormatting:
             "tbl",
             "## Table\n\n| A | Bee |\n|---|---|\n| 1 | 2 |\n| longvalue | 3 |\n",
         )
-        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path, handlers=[handler], promoted_handlers=["tbl"]
+        )
         injector.inject()
 
         on_disk = claude_md.read_text()
@@ -1270,28 +1288,34 @@ class TestTwoTierPromotedBlock:
         assert "destroys uncommitted changes permanently" in content
         assert "ask the user / git stash first" in content
 
-    def test_no_rules_blocking_handler_keeps_its_full_prose_as_fallback(
-        self, tmp_path: Path
-    ) -> None:
-        """Transition safety: a handler with no get_rules() yet must not lose guidance."""
+    def test_no_rules_handler_collapses_to_one_line_pointer(self, tmp_path: Path) -> None:
+        """Decision C: a no-rules (advisory) handler gets a ONE-LINE entry.
+
+        With the Phase 3 fan-out complete and the rule-parity suite enforcing
+        deny-implies-rules, the only handlers without rules are advisory —
+        their guidance arrives at fire time, and the full text is one
+        ``explain-handler`` call away, so the resident block carries only the
+        heading line."""
         from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 
         claude_md = tmp_path / "CLAUDE.md"
         claude_md.write_text("# Project\n")
 
-        not_yet_migrated = _StubHandler(
-            "markdown_organization",
-            "## markdown_organization\n\nFull legacy prose retained until migrated.",
+        advisory = _StubHandler(
+            "some_advisory",
+            "## some_advisory — reminds you of things\n\nLong teaching body prose.",
         )
         injector = ClaudeMdInjector(
             workspace_root=tmp_path,
-            handlers=[not_yet_migrated],
+            handlers=[advisory],
             promoted_handlers=[],
         )
         injector.inject()
 
         content = claude_md.read_text()
-        assert "Full legacy prose retained until migrated." in content
+        assert "some_advisory — reminds you of things" in content, "heading line must survive"
+        assert "Long teaching body prose." not in content, "body prose must NOT be resident"
+        assert "explain-handler" in content, "the on-demand pointer must be present"
 
     def test_meta_rule_and_explain_pointer_appear_exactly_once(self, tmp_path: Path) -> None:
         from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
@@ -1331,7 +1355,7 @@ class TestTwoTierPromotedBlock:
             rules=[self._rule("R-SED-EXEC")],
         )
         fallback = _StubHandler(
-            "some_advisory", "## some_advisory\n\nAdvisory prose stays as fallback."
+            "some_advisory", "## some_advisory — a reminder\n\nAdvisory body prose."
         )
         injector = ClaudeMdInjector(
             workspace_root=tmp_path,
@@ -1345,7 +1369,8 @@ class TestTwoTierPromotedBlock:
             "This prose must not be resident when nothing is promoted." not in content
         ), "empty promoted_handlers must still reduce rules-bearing handlers to table rows"
         assert "R-SED-EXEC" in content
-        assert "Advisory prose stays as fallback." in content
+        assert "some_advisory — a reminder" in content, "advisory heading one-liner present"
+        assert "Advisory body prose." not in content, "advisory body must not be resident"
 
     def test_promoted_handlers_defaults_to_empty(self, tmp_path: Path) -> None:
         """Omitting promoted_handlers entirely behaves like an empty list."""
