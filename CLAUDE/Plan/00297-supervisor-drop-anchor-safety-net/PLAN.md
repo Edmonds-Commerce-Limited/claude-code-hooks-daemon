@@ -155,4 +155,7 @@ all work rather than letting the session keep burning.
 
 ## Delivery & Milestones
 
-- <!-- milestone or delivery commit hash -->
+- `4be5bbef` — DROP ANCHOR implementation delivered (anchor invariant,
+  read-back-only clearing, retry/escalation, floor clamp, 25 tests); live
+  worker verified reloaded (fresh worker pid post-edit). Open: ESC interrupt
+  on escalation (deliberate deviation, owner decision pending).
