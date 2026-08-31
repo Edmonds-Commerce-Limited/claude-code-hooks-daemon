@@ -776,3 +776,108 @@ class TestNpmCommandHandler:
         guidance = handler.get_claude_md()
         assert guidance is not None
         assert "llm:" in guidance
+
+
+class TestNpmCommandGetRules:
+    """get_rules() (Plan 00116): 2 rules for the 2 distinct deny shapes."""
+
+    def test_get_rules_returns_two_rules(self) -> None:
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=True,
+        ):
+            handler = NpmCommandHandler()
+        assert len(handler.get_rules()) == 2
+
+    def test_get_rules_ids_are_constants(self) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=True,
+        ):
+            handler = NpmCommandHandler()
+        rule_ids = {rule.rule_id for rule in handler.get_rules()}
+        assert rule_ids == {RuleID.NPM_PIPED_COMMAND, RuleID.NPM_NON_LLM_COMMAND}
+
+    def test_get_rules_every_verbose_is_non_empty(self) -> None:
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=True,
+        ):
+            handler = NpmCommandHandler()
+        for rule in handler.get_rules():
+            assert rule.verbose
+
+
+class TestNpmCommandDisclosureLadder:
+    """Verbose-first/terse-after per (transcript_path, rule_id) (Plan 00116)."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_disclosure_tracker(self):
+        from claude_code_hooks_daemon.core import reset_data_layer
+
+        reset_data_layer()
+        yield
+        reset_data_layer()
+
+    @pytest.fixture
+    def handler(self) -> NpmCommandHandler:
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=True,
+        ):
+            return NpmCommandHandler()
+
+    @staticmethod
+    def _non_llm_input(transcript_path: str | None) -> dict[str, Any]:
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run build"},
+        }
+        if transcript_path is not None:
+            hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    def test_deny_reason_starts_with_rule_id_prefix(self, handler: NpmCommandHandler) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        result = handler.handle(self._non_llm_input("/tmp/transcript-npm-a.jsonl"))
+        assert result.reason.startswith(f"BLOCKED [{RuleID.NPM_NON_LLM_COMMAND}]")
+
+    def test_first_fire_is_verbose(self, handler: NpmCommandHandler) -> None:
+        result = handler.handle(self._non_llm_input("/tmp/transcript-npm-b.jsonl"))
+        assert "PHILOSOPHY" in result.reason
+
+    def test_second_fire_same_agent_is_terse(self, handler: NpmCommandHandler) -> None:
+        transcript = "/tmp/transcript-npm-c.jsonl"
+        handler.handle(self._non_llm_input(transcript))
+        second = handler.handle(self._non_llm_input(transcript))
+        assert "PHILOSOPHY" not in second.reason
+        assert "BLOCKED COMMAND:" in second.reason
+
+    def test_different_agent_is_independently_verbose(self, handler: NpmCommandHandler) -> None:
+        handler.handle(self._non_llm_input("/tmp/transcript-npm-d.jsonl"))
+        other = handler.handle(self._non_llm_input("/tmp/transcript-npm-e.jsonl"))
+        assert "PHILOSOPHY" in other.reason
+
+    def test_missing_transcript_path_always_verbose(self, handler: NpmCommandHandler) -> None:
+        first = handler.handle(self._non_llm_input(None))
+        second = handler.handle(self._non_llm_input(None))
+        assert "PHILOSOPHY" in first.reason
+        assert "PHILOSOPHY" in second.reason
+
+    def test_piped_and_non_llm_rules_disclose_independently(
+        self, handler: NpmCommandHandler
+    ) -> None:
+        """Two DIFFERENT rules for the SAME agent both disclose verbose."""
+        transcript = "/tmp/transcript-npm-f.jsonl"
+        piped_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run test | grep failed"},
+            "transcript_path": transcript,
+        }
+        non_llm_result = handler.handle(self._non_llm_input(transcript))
+        piped_result = handler.handle(piped_input)
+        assert "PHILOSOPHY" in non_llm_result.reason
+        assert "Piping npm/npx commands is pointless" in piped_result.reason

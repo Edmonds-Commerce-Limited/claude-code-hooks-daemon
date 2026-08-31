@@ -7,9 +7,11 @@ When llm: commands do NOT exist, allows with advisory about creating them.
 import re
 from typing import Any, ClassVar
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
@@ -37,6 +39,40 @@ def _truncate_command(command: str) -> str:
     if len(command) <= _MAX_ECHOED_COMMAND_CHARS:
         return command
     return command[:_MAX_ECHOED_COMMAND_CHARS] + _TRUNCATION_SUFFIX
+
+
+# 2 rules (Plan 00116): a piped npm/npx command and a raw non-llm: command are
+# distinct deny shapes with distinct remedies, not the same concept.
+_NPM_PIPED_RULE = Rule(
+    rule_id=RuleID.NPM_PIPED_COMMAND,
+    blocked="a piped `npm run`/`npx` command",
+    why="Piping npm/npx commands is pointless — llm: cache files hold the full data",
+    fix="Run the plain command, then query the cache file with jq",
+    verbose=(
+        "Piping npm/npx commands is pointless.\n\n"
+        "PHILOSOPHY: llm: commands write to cache files in ./var/qa/\n"
+        "Piping output to grep/awk/sed is ineffective because:\n"
+        "  • Minimal stdout (summary only, not full data)\n"
+        "  • Full data in JSON cache files\n"
+        "  • Use jq to query cache files directly\n\n"
+        "Cache files contain full machine-readable JSON - use jq!"
+    ),
+)
+_NPM_NON_LLM_RULE = Rule(
+    rule_id=RuleID.NPM_NON_LLM_COMMAND,
+    blocked="a raw `npm run`/`npx` command when llm: wrappers exist",
+    why="llm: commands provide LLM-friendly, machine-readable output",
+    fix="Use the project's `npm run llm:*` equivalent instead",
+    verbose=(
+        "PHILOSOPHY: Claude should use llm: prefixed commands which provide:\n"
+        "  • Minimal stdout (summary only)\n"
+        "  • Verbose JSON logging to ./var/qa/ files\n"
+        "  • Machine-readable output\n"
+        "  • Caching system for performance\n\n"
+        "The llm: commands create cache files you can read directly.\n"
+        "No need for grep/awk/sed post-processing!"
+    ),
+)
 
 
 class NpmCommandHandler(PreToolUseHandlerBase):
@@ -80,6 +116,7 @@ class NpmCommandHandler(PreToolUseHandlerBase):
             ],
         )
         self.has_llm_commands: bool = has_llm_commands_in_package_json()
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is an npm run or npx command that needs validation."""
@@ -121,23 +158,18 @@ class NpmCommandHandler(PreToolUseHandlerBase):
         if pipe_match:
             pipe_match.group(1)
             cmd_name = pipe_match.group(2)
+            dynamic_detail = (
+                f"BLOCKED COMMAND:\n"
+                f"  {_truncate_command(command)}\n\n"
+                f"INSTEAD:\n"
+                f"  1. Run: npm run llm:{cmd_name.replace('llm:', '')}\n"
+                f"  2. Query cache with jq: jq '.results[] | select(.success == false)' "
+                f"./var/qa/{{type}}-cache.json\n"
+                f"  3. Use jq for filtering, counting, extracting data"
+            )
             return GatingResult(
                 decision=Decision.DENY,
-                reason=(
-                    f"🚫 BLOCKED: Piping npm/npx commands is pointless\n\n"
-                    f"PHILOSOPHY: llm: commands write to cache files in ./var/qa/\n"
-                    f"Piping output to grep/awk/sed is ineffective because:\n"
-                    f"  • Minimal stdout (summary only, not full data)\n"
-                    f"  • Full data in JSON cache files\n"
-                    f"  • Use jq to query cache files directly\n\n"
-                    f"BLOCKED COMMAND:\n"
-                    f"  {_truncate_command(command)}\n\n"
-                    f"INSTEAD:\n"
-                    f"  1. Run: npm run llm:{cmd_name.replace('llm:', '')}\n"
-                    f"  2. Query cache with jq: jq '.results[] | select(.success == false)' ./var/qa/{{type}}-cache.json\n"
-                    f"  3. Use jq for filtering, counting, extracting data\n\n"
-                    f"Cache files contain full machine-readable JSON - use jq!"
-                ),
+                reason=self._deny_reason(hook_input, _NPM_PIPED_RULE, dynamic_detail),
             )
 
         # Check if it's npm run command
@@ -180,22 +212,41 @@ class NpmCommandHandler(PreToolUseHandlerBase):
             )
 
         # Enforcement mode: llm: commands exist in package.json
-        reason = (
-            f"🚫 BLOCKED: Must use llm: prefixed command instead of '{blocked_cmd}'\n\n"
-            f"PHILOSOPHY: Claude should use llm: prefixed commands which provide:\n"
-            f"  • Minimal stdout (summary only)\n"
-            f"  • Verbose JSON logging to ./var/qa/ files\n"
-            f"  • Machine-readable output\n"
-            f"  • Caching system for performance\n\n"
+        dynamic_detail = (
             f"BLOCKED COMMAND:\n"
             f"  {blocked_cmd}\n\n"
             f"USE THIS INSTEAD:\n"
-            f"  npm run {suggested}\n\n"
-            f"The llm: commands create cache files you can read directly.\n"
-            f"No need for grep/awk/sed post-processing!"
+            f"  npm run {suggested}"
         )
 
-        return GatingResult(decision=Decision.DENY, reason=reason)
+        return GatingResult(
+            decision=Decision.DENY,
+            reason=self._deny_reason(hook_input, _NPM_NON_LLM_RULE, dynamic_detail),
+        )
+
+    def get_rules(self) -> list[Rule]:
+        """Return the 2 Rule objects backing this handler's blocking behaviour."""
+        return [_NPM_PIPED_RULE, _NPM_NON_LLM_RULE]
+
+    def _deny_reason(self, hook_input: dict[str, Any], rule: Rule, dynamic_detail: str) -> str:
+        """Build a DENY reason, verbose-first/terse-after per (transcript_path, rule_id).
+
+        Plan 00116, Decision G. The per-invocation diagnostic (the blocked
+        command, the suggested replacement) is dynamic and always fully
+        present -- only the surrounding "why llm: commands exist" teaching
+        prose goes terse on repeat fires.
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
+            message = self._formatter.terse(rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, rule.rule_id)
+            message = self._formatter.verbose(rule)
+
+        return f"{message}\n\n{dynamic_detail}"
 
     def get_claude_md(self) -> str | None:
         return (
