@@ -26,10 +26,12 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import record_new_plan_document
 from claude_code_hooks_daemon.plan_qa.context import edit_context
 from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME, README_FILENAME
@@ -38,6 +40,23 @@ from claude_code_hooks_daemon.plan_qa.report import format_advisory, format_bloc
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
 from claude_code_hooks_daemon.plan_qa.types import Finding, Level, Stage
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
+
+# Single source of truth for the one rule this handler's DENY path enforces
+# (Plan 00116, gate-level granularity: one Rule per GATE, not one per plan QA
+# check module). The per-check findings from format_block_reason() are
+# dynamic content and stay FULLY present in both verbose and terse forms;
+# only the surrounding teaching prose about the gate itself goes
+# terse-after-first-fire.
+_RULE_WHY = "Plan QA linting catches issues you can fix immediately, before they reach commit"
+_RULE_FIX = "Fix the content per each finding's remediation below and retry"
+_RULE_VERBOSE = (
+    "Every Write/Edit of a PLAN.md, the plan-index README.md, or a journal "
+    "day-file under the plan directory is checked against the plan QA "
+    "edit-stage rules on the content the file WOULD have. Each finding below "
+    "names its own remediation -- fix the content accordingly and retry. "
+    "Grandfathered plans in `plan_workflow.qa.legacy_plan_allowlist` only "
+    "ever advise."
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +97,14 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
         # Injected by the registry for PLANNING-tagged handlers.
         self._track_plans_in_project: str | None = None
         self._plan_qa: Any = None
+        self._rule = Rule(
+            rule_id=RuleID.PLAN_QA_EDIT,
+            blocked="a PLAN.md/README.md Write/Edit violates a block-level plan QA check",
+            why=_RULE_WHY,
+            fix=_RULE_FIX,
+            verbose=_RULE_VERBOSE,
+        )
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         if hook_input.get(HookInputField.TOOL_NAME) not in (ToolName.WRITE, ToolName.EDIT):
@@ -163,8 +190,33 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
 
         blockers = [finding for finding in findings if finding.level == Level.BLOCK]
         if blockers and self._plan_qa.edit_mode == _EDIT_MODE_BLOCK:
-            return GatingResult(decision=Decision.DENY, reason=format_block_reason(blockers))
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=self._blocking_message(blockers, hook_input),
+            )
         return self._advisory_result(findings)
+
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's block-mode denial."""
+        return [self._rule]
+
+    def _blocking_message(self, blockers: list[Finding], hook_input: dict[str, Any]) -> str:
+        """Build the block-mode deny message: verbose-first/terse-after teaching
+        prose (Plan 00116, Decision G), with the per-check findings from
+        ``format_block_reason`` ALWAYS fully present -- they are dynamic
+        content, not the static teaching text the disclosure ladder governs.
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, RuleID.PLAN_QA_EDIT):
+            prose = self._formatter.terse(self._rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.PLAN_QA_EDIT)
+            prose = self._formatter.verbose(self._rule)
+
+        return f"{prose}\n\n{format_block_reason(blockers)}"
 
     def _record_allocation(self, file_path: Path) -> None:
         """Advance the per-repo plan counter for a newly-created plan document.

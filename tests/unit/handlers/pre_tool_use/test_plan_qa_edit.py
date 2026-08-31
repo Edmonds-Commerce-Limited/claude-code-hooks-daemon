@@ -11,8 +11,13 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
 from claude_code_hooks_daemon.config.models import PlanWorkflowQaConfig
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_qa_edit import PlanQaEditHandler
 
 _PLAN_DIR_REL = "CLAUDE/Plan"
@@ -26,6 +31,14 @@ _VALID_PLAN = (
     "- [ ] ⬜ **Task 1.1**: x\n"
 )
 _NO_STATUS_PLAN = "# Plan 00042: Widget\n\n## Progress\n\nno header here\n"
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 def _handler(
@@ -245,6 +258,7 @@ class TestHandleWrite:
         with _patched_root(tmp_path):
             result = _handler().handle(_write_input(target, _NO_STATUS_PLAN))
         assert result.decision == Decision.DENY
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_QA_EDIT}]")
         assert "status-line-present" in (result.reason or "")
         assert "**Status**:" in (result.reason or "")
 
@@ -456,3 +470,57 @@ class TestCounterAllocationOnNewPlan:
             _handler().handle(_write_input(target, "## 10:00 · note\n"))
 
         recorder.assert_called_once_with(target, _PLAN_DIR_REL, tmp_path)
+
+
+class TestGetRules:
+    def test_returns_one_rule(self) -> None:
+        rules = PlanQaEditHandler().get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+
+    def test_rule_id_matches_constant(self) -> None:
+        assert PlanQaEditHandler().get_rules()[0].rule_id == RuleID.PLAN_QA_EDIT
+
+    def test_rule_has_non_empty_verbose(self) -> None:
+        assert PlanQaEditHandler().get_rules()[0].verbose
+
+
+class TestBlockModeDisclosureLadder:
+    """Verbose-first/terse-after teaching prose; findings stay fully present always."""
+
+    def test_first_fire_for_agent_is_verbose(self, tmp_path: Path) -> None:
+        target = tmp_path / _PLAN_DIR_REL / "00042-widget" / "PLAN.md"
+        hook_input = _write_input(target, _NO_STATUS_PLAN)
+        hook_input["transcript_path"] = "/tmp/agent-a/transcript.jsonl"
+        with _patched_root(tmp_path):
+            result = _handler().handle(hook_input)
+        assert "edit-stage rules" in result.reason
+
+    def test_second_fire_is_terse_but_findings_stay_full(self, tmp_path: Path) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        target1 = tmp_path / _PLAN_DIR_REL / "00042-widget" / "PLAN.md"
+        hook_input1 = _write_input(target1, _NO_STATUS_PLAN)
+        hook_input1["transcript_path"] = transcript_path
+        with _patched_root(tmp_path):
+            _handler().handle(hook_input1)
+
+        target2 = tmp_path / _PLAN_DIR_REL / "00043-widget" / "PLAN.md"
+        hook_input2 = _write_input(target2, _NO_STATUS_PLAN)
+        hook_input2["transcript_path"] = transcript_path
+        with _patched_root(tmp_path):
+            result = _handler().handle(hook_input2)
+
+        assert "edit-stage rules" not in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_QA_EDIT}]")
+        assert "Fix:" in result.reason
+        # Findings are dynamic content: always fully present, terse or not.
+        assert "status-line-present" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(self, tmp_path: Path) -> None:
+        target = tmp_path / _PLAN_DIR_REL / "00042-widget" / "PLAN.md"
+        hook_input = _write_input(target, _NO_STATUS_PLAN)
+        with _patched_root(tmp_path):
+            first = _handler().handle(hook_input)
+            second = _handler().handle(hook_input)
+        assert "edit-stage rules" in first.reason
+        assert "edit-stage rules" in second.reason
