@@ -357,13 +357,13 @@ fingerprint-attribution scheme and amended targets:
 
 ### Phase 8: De-`@` the heavy imports (TDD where testable)
 
-- [ ] ⬜ **Task 8.1**: Convert CLAUDE.md `@`-imports (PlanWorkflow, RELEASING,
-  Features, Bugs, General, HOOKS-DAEMON) to plain references + a one-line trigger
-  pointer each. Edit only the user-content region; verify the injector's
-  content-preservation check + `validate_instruction_content` still pass.
-  (Doc/lint test: referenced but not `@`-expanded; pointer present.)
-- [ ] ⬜ **Task 8.2**: Installer / CLAUDE.md template for fresh installs emits the
-  de-`@`'d form + rule-table block (search `src/claude_code_hooks_daemon/install/`).
+- [x] ✅ **Task 8.1**: DELIVERED EXTERNALLY (Plan 00289's `@`-import conversion +
+  the docs-QA `at-import-census` check): verified 2026-08-31 — zero `@`-imports
+  remain in the root CLAUDE.md user-content region.
+- [x] ✅ **Task 8.2**: DELIVERED EXTERNALLY: verified 2026-08-31 — the installer
+  templates under `src/claude_code_hooks_daemon/install/` emit no `@`-imports.
+  Rule-table block emission for fresh installs is covered by Phase 5 (the
+  injector regenerates on install/restart, so no separate template change).
 
 ### Phase 9: Verification, QA, dogfood (executor runs in MAIN repo)
 
