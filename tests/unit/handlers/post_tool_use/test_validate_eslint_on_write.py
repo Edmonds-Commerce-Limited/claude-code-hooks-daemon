@@ -760,3 +760,133 @@ class TestNodeModulesBinPath:
 
         call_kwargs = mock_run.call_args[1]
         assert "env" in call_kwargs
+
+
+class TestValidateEslintOnWriteGetRules:
+    """get_rules() (Plan 00116): 3 rules for the 3 distinct failure shapes."""
+
+    def test_get_rules_returns_three_rules(self, tmp_path: Path) -> None:
+        handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+        assert len(handler.get_rules()) == 3
+
+    def test_get_rules_ids_are_constants(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+        rule_ids = {rule.rule_id for rule in handler.get_rules()}
+        assert rule_ids == {
+            RuleID.ESLINT_ERRORS,
+            RuleID.ESLINT_TIMEOUT,
+            RuleID.ESLINT_RUN_FAILURE,
+        }
+
+    def test_get_rules_every_verbose_is_non_empty(self, tmp_path: Path) -> None:
+        handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+        for rule in handler.get_rules():
+            assert rule.verbose
+
+
+class TestValidateEslintOnWriteDisclosureLadder:
+    """Verbose-first/terse-after per (transcript_path, rule_id) (Plan 00116).
+
+    The dynamic diagnostic (ESLint output, timeout seconds, exception text)
+    is a POST-hoc failure report and must stay fully present in BOTH verbose
+    and terse forms -- only the surrounding teaching prose goes terse.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_disclosure_tracker(self):
+        from claude_code_hooks_daemon.core import reset_data_layer
+
+        reset_data_layer()
+        yield
+        reset_data_layer()
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> ValidateEslintOnWriteHandler:
+        return ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+
+    @staticmethod
+    def _hook_input(test_file: Path, transcript_path: str | None) -> dict:
+        hook_input: dict = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        if transcript_path is not None:
+            hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    @patch("subprocess.run")
+    def test_deny_reason_starts_with_rule_id_prefix(
+        self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+        mock_run.return_value = MagicMock(returncode=1, stdout="ESLint error output", stderr="")
+        result = handler.handle(self._hook_input(test_file, "/tmp/transcript-esl-a.jsonl"))
+        assert result.reason.startswith(f"BLOCKED [{RuleID.ESLINT_ERRORS}]")
+
+    @patch("subprocess.run")
+    def test_first_fire_is_verbose(
+        self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+        mock_run.return_value = MagicMock(returncode=1, stdout="ESLint error output", stderr="")
+        result = handler.handle(self._hook_input(test_file, "/tmp/transcript-esl-b.jsonl"))
+        assert "ALREADY landed on disk" in result.reason
+        assert "ESLint error output" in result.reason
+
+    @patch("subprocess.run")
+    def test_second_fire_same_agent_is_terse_but_keeps_diagnostic(
+        self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+        mock_run.return_value = MagicMock(returncode=1, stdout="ESLint error output", stderr="")
+        transcript = "/tmp/transcript-esl-c.jsonl"
+        handler.handle(self._hook_input(test_file, transcript))
+        second = handler.handle(self._hook_input(test_file, transcript))
+        assert "ALREADY landed on disk" not in second.reason
+        assert "ESLint error output" in second.reason
+
+    @patch("subprocess.run")
+    def test_missing_transcript_path_always_verbose(
+        self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+        mock_run.return_value = MagicMock(returncode=1, stdout="ESLint error output", stderr="")
+        first = handler.handle(self._hook_input(test_file, None))
+        second = handler.handle(self._hook_input(test_file, None))
+        assert "ALREADY landed on disk" in first.reason
+        assert "ALREADY landed on disk" in second.reason
+
+    def test_timeout_uses_the_timeout_rule(
+        self, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        import subprocess as subprocess_module
+
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+        with patch(
+            "subprocess.run",
+            side_effect=subprocess_module.TimeoutExpired(cmd="tsx", timeout=30),
+        ):
+            result = handler.handle(self._hook_input(test_file, None))
+        assert result.reason.startswith(f"BLOCKED [{RuleID.ESLINT_TIMEOUT}]")
+
+    def test_run_failure_uses_the_run_failure_rule(
+        self, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+        with patch("subprocess.run", side_effect=RuntimeError("boom")):
+            result = handler.handle(self._hook_input(test_file, None))
+        assert result.reason.startswith(f"BLOCKED [{RuleID.ESLINT_RUN_FAILURE}]")

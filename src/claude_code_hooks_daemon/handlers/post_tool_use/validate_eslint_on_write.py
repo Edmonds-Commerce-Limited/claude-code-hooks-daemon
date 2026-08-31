@@ -20,14 +20,61 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.paths import ProjectPath
-from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import (
+    BlockingResult,
+    Decision,
+    ProjectContext,
+    get_data_layer,
+)
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 
 logger = logging.getLogger(__name__)
+
+# 3 rules (Plan 00116): distinct failure shapes with distinct diagnostics --
+# reported errors, a timeout, and a failure to run ESLint at all.
+_ESLINT_ERRORS_RULE = Rule(
+    rule_id=RuleID.ESLINT_ERRORS,
+    blocked="a written/authored TS/TSX file with reported ESLint errors",
+    why="The write has already landed on disk; this is a failure report, not a rollback",
+    fix="Fix the reported problems with Edit (`npx eslint <file> --fix` clears most)",
+    verbose=(
+        "The write has ALREADY landed on disk. The denial is a failure report, "
+        "not a rollback — the file exists with your content in it. Fix the "
+        "reported problems with Edit (`npx eslint <file> --fix` clears most of "
+        "them), and re-issue any sibling tool calls that were cancelled "
+        "alongside the denied one."
+    ),
+)
+_ESLINT_TIMEOUT_RULE = Rule(
+    rule_id=RuleID.ESLINT_TIMEOUT,
+    blocked="an ESLint run that did not finish within the configured timeout",
+    why="This handler DENIES on a timeout — unlike lint_on_edit, which allows",
+    fix="Investigate why ESLint is slow (config, project size); retry the edit",
+    verbose=(
+        "This is STRICTER than `lint_on_edit`, which covers the other "
+        "languages: that handler ALLOWs when its linter is missing or when "
+        "the check times out. This one DENIES on an ESLint timeout — do not "
+        "carry 'a missing linter never blocks' across to TypeScript."
+    ),
+)
+_ESLINT_RUN_FAILURE_RULE = Rule(
+    rule_id=RuleID.ESLINT_RUN_FAILURE,
+    blocked="an ESLint invocation that failed to run at all",
+    why="ESLint could not be launched (exception raised invoking it)",
+    fix="Check the ESLint wrapper/tsx setup, then retry the edit",
+    verbose=(
+        "This is STRICTER than `lint_on_edit`, which covers the other "
+        "languages: that handler ALLOWs when its linter is missing. This one "
+        "DENIES on any failure to run ESLint at all — do not carry 'a missing "
+        "linter never blocks' across to TypeScript."
+    ),
+)
 
 
 class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
@@ -74,6 +121,31 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
         # (Plan 00260 Task 3.5). Relocation (`cp`/`mv`/`dd`) is never checked --
         # see `get_written_file_paths` for why a DENYING guard must not.
         self._check_bash_writes: bool = True
+        self._formatter = RuleFormatter()
+
+    def get_rules(self) -> list[Rule]:
+        """Return the 3 Rule objects backing this handler's blocking behaviour."""
+        return [_ESLINT_ERRORS_RULE, _ESLINT_TIMEOUT_RULE, _ESLINT_RUN_FAILURE_RULE]
+
+    def _deny_reason(self, hook_input: dict[str, Any], rule: Rule, dynamic_detail: str) -> str:
+        """Build a DENY reason, verbose-first/terse-after per (transcript_path, rule_id).
+
+        Plan 00116, Decision G. This is a POST-hoc failure report -- the
+        dynamic diagnostic (ESLint output, the failing command) must stay
+        fully present in BOTH verbose and terse forms; only the surrounding
+        teaching prose goes terse on repeat fires.
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
+            message = self._formatter.terse(rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, rule.rule_id)
+            message = self._formatter.verbose(rule)
+
+        return f"{message}\n\n{dynamic_detail}"
 
     def _checkable_paths(self, hook_input: dict[str, Any]) -> list[str]:
         """TypeScript files this event authored, via any write route."""
@@ -200,7 +272,10 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
                     "   Or:  npm run lint -- --fix\n"
                 )
 
-                return BlockingResult(decision=Decision.DENY, reason=error_message)
+                return BlockingResult(
+                    decision=Decision.DENY,
+                    reason=self._deny_reason(hook_input, _ESLINT_ERRORS_RULE, error_message),
+                )
 
             logger.info("ESLint validation passed for %s", file_path_obj.name)
             return BlockingResult(decision=Decision.ALLOW)
@@ -208,10 +283,19 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
         except subprocess.TimeoutExpired:
             return BlockingResult(
                 decision=Decision.DENY,
-                reason=f"ESLint timed out after {Timeout.ESLINT_CHECK} seconds",
+                reason=self._deny_reason(
+                    hook_input,
+                    _ESLINT_TIMEOUT_RULE,
+                    f"ESLint timed out after {Timeout.ESLINT_CHECK} seconds",
+                ),
             )
         except Exception as e:
-            return BlockingResult(decision=Decision.DENY, reason=f"Failed to run ESLint: {e!s}")
+            return BlockingResult(
+                decision=Decision.DENY,
+                reason=self._deny_reason(
+                    hook_input, _ESLINT_RUN_FAILURE_RULE, f"Failed to run ESLint: {e!s}"
+                ),
+            )
 
     def get_claude_md(self) -> str | None:
         return """## validate_eslint_on_write — TypeScript writes are ESLint-checked, and a failure DENIES
