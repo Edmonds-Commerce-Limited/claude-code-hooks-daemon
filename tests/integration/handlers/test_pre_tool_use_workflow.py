@@ -31,11 +31,14 @@ class TestNpmCommandHandler:
             NpmCommandHandler,
         )
 
+        # The patch spans the whole test, not just construction: since Plan
+        # 00296 the mode is decided per invocation from the command's own
+        # workspace, so `handle()` calls the detector too.
         with patch(
             "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
             return_value=True,
         ):
-            return NpmCommandHandler()
+            yield NpmCommandHandler()
 
     @pytest.mark.parametrize(
         "command",

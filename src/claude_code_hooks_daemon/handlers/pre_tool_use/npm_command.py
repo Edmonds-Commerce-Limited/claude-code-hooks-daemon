@@ -5,6 +5,7 @@ When llm: commands do NOT exist, allows with advisory about creating them.
 """
 
 import re
+from pathlib import Path
 from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -13,8 +14,19 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.core.workspace import Workspace
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
+from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+
+# A monorepo npm command is normally shaped `cd <workspace> && npm run <x>`:
+# the hook's own `cwd` stays at the repo root, so honouring `cwd` alone would
+# resolve no manifest and leave enforcement off for exactly the invocations
+# that need it. Only a LEADING cd counts -- a cd later in a chain does not
+# describe where the npm command ran.
+_LEADING_CD_PATTERN = re.compile(
+    r"""^\s*cd\s+(?:'(?P<sq>[^']+)'|"(?P<dq>[^"]+)"|(?P<bare>[^\s;&|]+))\s*(?:&&|;)"""
+)
 
 # Capture the FULL npm-run script token. Script names legitimately contain
 # letters (any case), digits, colons, underscores and hyphens (e.g.
@@ -115,8 +127,50 @@ class NpmCommandHandler(PreToolUseHandlerBase):
                 HandlerTag.NON_TERMINAL,
             ],
         )
+        # The mode at the PROJECT ROOT, probed once. `handle()` never reads
+        # this -- it re-decides per invocation from the command's own
+        # workspace (Plan 00296). It survives only for `get_acceptance_tests()`,
+        # which generates expectations with no hook input and so has no
+        # command, no cwd, and no workspace to resolve.
         self.has_llm_commands: bool = has_llm_commands_in_package_json()
         self._formatter = RuleFormatter()
+
+    @staticmethod
+    def _workspace_root_for(hook_input: dict[str, Any], command: str) -> Path:
+        """Resolve the workspace the npm command actually runs in.
+
+        A monorepo holds several sibling Node workspaces, each with its own
+        ``package.json``. Deciding the mode once against the git root makes
+        this handler permanently inert on exactly the repository that went to
+        the trouble of defining ``llm:`` wrappers -- enforcement downgrades to
+        advisory and nothing says why.
+
+        Two signals locate the command, in order of specificity: a leading
+        ``cd <dir> &&``, then the hook's ``cwd``. A repository with no manifest
+        anywhere resolves to the project root, which is what the single-root
+        path always returned -- so this is a no-op there.
+        """
+        resolved = resolve_project_root()
+        project_root = Path(resolved) if resolved else None
+
+        raw_cwd = hook_input.get(HookInputField.CWD)
+        if raw_cwd:
+            base = Path(raw_cwd)
+        elif project_root is not None:
+            base = project_root
+        else:
+            base = Path.cwd()
+
+        cd_match = _LEADING_CD_PATTERN.match(command)
+        if cd_match:
+            target = Path(cd_match.group("sq") or cd_match.group("dq") or cd_match.group("bare"))
+            base = target if target.is_absolute() else base / target
+
+        # No initialised ProjectContext (unit tests, per resolve_project_root's
+        # contract): bound the walk at the base itself. There is no repository
+        # root to stop at, and raising here would make an unrelated formatting
+        # test depend on daemon bootstrap.
+        return Workspace.for_path(base, project_root if project_root is not None else base).root
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is an npm run or npx command that needs validation."""
@@ -191,8 +245,11 @@ class NpmCommandHandler(PreToolUseHandlerBase):
                     decision=Decision.ALLOW, reason="Could not parse npm/npx command"
                 )
 
-        # Advisory mode: no llm: commands in package.json
-        if not self.has_llm_commands:
+        # Advisory mode: no llm: commands in this command's own workspace.
+        # Decided per invocation, not once at construction: two sibling
+        # workspaces in one repository can legitimately be in different modes.
+        workspace_root = self._workspace_root_for(hook_input, command)
+        if not has_llm_commands_in_package_json(workspace_root):
             guide_path = get_llm_command_guide_path()
             return GatingResult(
                 decision=Decision.ALLOW,
@@ -213,10 +270,7 @@ class NpmCommandHandler(PreToolUseHandlerBase):
 
         # Enforcement mode: llm: commands exist in package.json
         dynamic_detail = (
-            f"BLOCKED COMMAND:\n"
-            f"  {blocked_cmd}\n\n"
-            f"USE THIS INSTEAD:\n"
-            f"  npm run {suggested}"
+            f"BLOCKED COMMAND:\n  {blocked_cmd}\n\nUSE THIS INSTEAD:\n  npm run {suggested}"
         )
 
         return GatingResult(

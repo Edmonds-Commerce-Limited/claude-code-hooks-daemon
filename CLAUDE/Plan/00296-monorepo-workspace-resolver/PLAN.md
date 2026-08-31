@@ -28,11 +28,23 @@ the affected handlers through it.
 
 ## Goals
 
-- A shared `Workspace.for_path(file_path)` resolver: walk up from the file to
-  the nearest recognised manifest (`package.json`, `composer.json`,
-  `pyproject.toml`, `go.mod`, `Cargo.toml`, ...), stopping at the git root;
-  returns root, kind, manifest and tool bin dirs; falls back to the git root
-  so single-root repositories see no behaviour change and need no config.
+- A top-level `projects:` config block that models a project as a
+  first-class concept: omitted means one project at the repo root (today's
+  behaviour), and a monorepo is expressed by changing config structure rather
+  than by inference alone. This is what covers a workspace with **no
+  manifest** — the report's own `infra/` (config-driven, no manifest), which
+  a manifest walk-up structurally cannot resolve.
+- A shared `Workspace.for_path(file_path)` resolver as the zero-config
+  derivation layer: walk up from the file to the nearest recognised manifest
+  (`package.json`, `composer.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`,
+  ...), stopping at the git root; returns root, kind, manifest and tool bin
+  dirs; falls back to the git root so single-root repositories see no
+  behaviour change and need no config.
+- Resolution precedence is **declared → derived → project root**. Declaration
+  is a precedence layer, never a requirement: mandatory declaration would
+  charge every single-project repo for a monorepo feature, and a stale list
+  would silently disable enforcement for an undeclared workspace — the same
+  silent-degradation class as the original defect.
 - `npm_command` / `has_llm_commands_in_package_json()`: mode decided per
   workspace, evaluated per invocation rather than once at handler
   construction.
@@ -52,10 +64,15 @@ the affected handlers through it.
 
 ## Non-Goals
 
-- Requiring (or recommending) a root-level manifest in client monorepos —
+- Requiring (or recommending) a root-level manifest **in the repository** —
   the report is explicit that a manifest existing purely to satisfy tooling
-  is a bodge, and resolution must derive the workspace from the edited
-  file's own path.
+  is a bodge (it would declare dependencies the repo does not have and create
+  a lockfile nobody installs). Declaring projects in
+  `.claude/hooks-daemon.yaml` is NOT this: it tells the daemon where the
+  projects are without putting a fake manifest in the repo.
+- Making `projects:` mandatory. Zero-config single-project behaviour must
+  stay byte-identical, and derivation must keep working for undeclared
+  workspaces that do have a manifest.
 - Changing `lint_on_edit`'s return-None-rather-than-guess fallback: a
   missing tool must never block anyone. The defect is the search path, not
   the fallback behaviour.
@@ -72,29 +89,55 @@ the affected handlers through it.
 
 - [x] ✅ **Task 1.1**: TDD `Workspace.for_path()` in core (manifest walk-up,
   git-root stop, git-root fallback, kind + bin_dirs per ecosystem).
-- [x] ✅ **Task 1.2**: Config surface review — decide whether any override
-  knob is needed at all given automatic resolution, and document the
-  resolver in the agent tree. Decision: **no new override knob**;
-  `_MANIFEST_KINDS` is the sole extension point. Canonical doc:
+- [x] ✅ **Task 1.2**: Config surface review and resolver documentation in
+  the agent tree. Canonical doc:
   [../../Code/WorkspaceResolution.md](../../Code/WorkspaceResolution.md).
+  Its "no new override knob" conclusion is **SUPERSEDED by Phase 3** (owner
+  ruling): derivation alone cannot resolve a manifest-less workspace.
 
 ### Phase 2: Route handlers through it
 
-- [ ] ⬜ **Task 2.1**: `has_llm_commands_in_package_json()` takes the
-  workspace root; `npm_command` evaluates per invocation.
-- [ ] ⬜ **Task 2.2**: `lint_on_edit` working dir + executable resolution
-  via workspace bin dirs. Must not regress Ansible: `ansible.cfg` is a
-  `_MODULE_ROOT_MARKERS` entry but not a manifest, so it needs either a
-  `_MANIFEST_KINDS` row or a supplementary lookup.
-- [ ] ⬜ **Task 2.3**: `validate_eslint_on_write` per-file workspace.
+- [x] ✅ **Task 2.1**: `has_llm_commands_in_package_json()` takes the
+  workspace root; `npm_command` evaluates per invocation. Resolves from a
+  leading `cd <dir> &&` first, then the hook's `cwd` — cwd alone leaves the
+  reported symptom in place, since a monorepo npm command runs from the repo
+  root and cds into the workspace.
+- [x] ✅ **Task 2.2**: `lint_on_edit` working dir + executable resolution
+  via workspace bin dirs. Ansible kept its `ansible.cfg` working directory:
+  `_MODULE_ROOT_MARKERS` is consulted FIRST and the workspace root is the
+  fallback, since `ansible.cfg` is not a manifest. Return-None-not-guess is
+  unchanged; the "not found" advisory now names the bin dirs it searched.
+- [x] ✅ **Task 2.3**: `validate_eslint_on_write` per-file workspace — cwd,
+  PATH and the mode probe all derive from the authored file's workspace; an
+  explicit `workspace_root` still pins every file (test seam preserved).
 - [ ] ⬜ **Task 2.4**: `tdd_enforcement` workspace-relative `test_path_map`
   and removal of the hardcoded `/workspace` fallback.
 - [ ] ⬜ **Task 2.5**: `markdown_organization` automatic resolution with
   `monorepo_subproject_patterns` as override.
 
-### Phase 3: Degradation visibility
+### Phase 3: `projects:` as a first-class config concept
 
-- [ ] ⬜ **Task 3.1**: Surface downgraded enforcement modes and unresolved
+The declaration layer. Ordered after Phase 2 because `Workspace` is already
+the type every handler consumes, so this adds a source ahead of the manifest
+walk rather than changing any consumer.
+
+- [ ] ⬜ **Task 3.1**: Top-level `projects:` schema + models
+  (`name`, `root`, optional `kind`, optional `bin_dirs`), validated and
+  defaulting to a single project at the repo root when omitted.
+- [ ] ⬜ **Task 3.2**: `Workspace.for_path()` consults declared projects
+  FIRST, then the manifest walk, then the project root. Nearest declared
+  root wins when two nest. A declared project needs no manifest — that is
+  the whole point (the report's `infra/`).
+- [ ] ⬜ **Task 3.3**: `markdown_organization`'s `monorepo_subproject_patterns`
+  re-expressed as `projects:` entries, keeping the option working as a
+  deprecated alias rather than a parallel mechanism.
+- [ ] ⬜ **Task 3.4**: Document `projects:` in the config reference and in
+  [../../Code/WorkspaceResolution.md](../../Code/WorkspaceResolution.md),
+  replacing its "no override knob" section with the precedence ladder.
+
+### Phase 4: Degradation visibility
+
+- [ ] ⬜ **Task 4.1**: Surface downgraded enforcement modes and unresolved
   tools in `handlers` and `check` output.
 
 ## Success Criteria
@@ -103,8 +146,11 @@ the affected handlers through it.
   manifest), `npm_command` enforces `llm:` wrappers, `lint_on_edit`
   finds workspace-installed linters, and `tdd_enforcement` honours a
   workspace-relative test dir.
+- [ ] A third workspace with **no manifest at all** (the report's `infra/`)
+  resolves correctly once declared in `projects:`, and resolves to the repo
+  root when not declared — the derivation-only limit, made explicit.
 - [ ] Single-root repositories show byte-identical handler behaviour with
-  no added configuration.
+  no added configuration, `projects:` absent.
 - [ ] A silently-downgraded handler mode is visible in `check` output.
 
 ## Delivery & Milestones

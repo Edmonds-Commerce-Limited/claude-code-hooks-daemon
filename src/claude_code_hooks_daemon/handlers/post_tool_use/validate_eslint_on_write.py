@@ -30,9 +30,16 @@ from claude_code_hooks_daemon.core import (
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
+from claude_code_hooks_daemon.core.workspace import Workspace
 from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
+from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+
+# Where a Node workspace keeps its tool binaries. Used as a FALLBACK when the
+# resolver yields no bin dirs (no manifest found), so a pinned workspace_root
+# without a package.json still gets `tsx` on PATH exactly as it always did.
+_NODE_BIN_SUBPATH = ("node_modules", ".bin")
 
 logger = logging.getLogger(__name__)
 
@@ -113,15 +120,43 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
                 HandlerTag.NON_TERMINAL,
             ],
         )
-        self.workspace_root = (
-            Path(workspace_root) if workspace_root else ProjectContext.project_root()
-        )
+        # An EXPLICIT root pins every file to one workspace -- that is what
+        # makes this a usable test seam. Left unset, each authored file
+        # resolves its own workspace (Plan 00296 Task 2.3), because one scalar
+        # cannot express "TS under web/, and a second TS workspace elsewhere".
+        self._pinned_workspace_root: Path | None = Path(workspace_root) if workspace_root else None
+        self.workspace_root = self._pinned_workspace_root or ProjectContext.project_root()
+        # The mode at the PROJECT ROOT. `handle()` re-decides per authored file
+        # against that file's own workspace; this survives for callers that
+        # inspect the handler's default mode without a hook event.
         self.has_llm_commands: bool = has_llm_commands_in_package_json()
         # Check files a Bash command AUTHORED as well as Write/Edit ones
         # (Plan 00260 Task 3.5). Relocation (`cp`/`mv`/`dd`) is never checked --
         # see `get_written_file_paths` for why a DENYING guard must not.
         self._check_bash_writes: bool = True
         self._formatter = RuleFormatter()
+
+    def _workspace_for(self, file_path: str) -> tuple[Path, tuple[Path, ...]]:
+        """Resolve (root, bin_dirs) for one authored file.
+
+        ESLint's config, plugins and binaries are workspace-scoped, so running
+        from the git root in a monorepo resolves the wrong config -- or no
+        config -- for a file that has a perfectly good one next to it.
+
+        Returns the pinned root when one was given (test seam), otherwise the
+        file's own workspace. ``node_modules/.bin`` is always included, even
+        when the resolver found no manifest, so a root without a
+        ``package.json`` still resolves ``tsx`` exactly as before.
+        """
+        if self._pinned_workspace_root is not None:
+            root = self._pinned_workspace_root
+            return root, (root.joinpath(*_NODE_BIN_SUBPATH),)
+
+        resolved = resolve_project_root()
+        project_root = Path(resolved) if resolved else Path(file_path).parent
+        workspace = Workspace.for_path(Path(file_path), project_root)
+        bin_dirs = workspace.bin_dirs or (workspace.root.joinpath(*_NODE_BIN_SUBPATH),)
+        return workspace.root, bin_dirs
 
     def get_rules(self) -> list[Rule]:
         """Return the 3 Rule objects backing this handler's blocking behaviour."""
@@ -187,9 +222,12 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
         # matching how `handle` has always returned a single verdict.
         file_path = paths[0]
         file_path_obj = Path(file_path)
+        workspace_root, workspace_bin_dirs = self._workspace_for(file_path)
 
-        # Advisory mode: no llm: commands in package.json - skip validation
-        if not self.has_llm_commands:
+        # Advisory mode: no llm: commands in THIS FILE's workspace. Decided
+        # per event, not once at construction: two TS workspaces in one
+        # repository can legitimately be in different modes.
+        if not has_llm_commands_in_package_json(workspace_root):
             guide_path = get_llm_command_guide_path()
             return BlockingResult(
                 decision=Decision.ALLOW,
@@ -229,14 +267,16 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
                 "0",
                 "--human",
             ]
-            cwd = str(self.workspace_root)
+            cwd = str(workspace_root)
 
-            # Prepend node_modules/.bin so tsx is resolvable even when the daemon
-            # runs with a restricted system PATH (no node_modules/.bin included).
+            # Prepend the workspace's own bin dirs so tsx is resolvable even
+            # when the daemon runs with a restricted system PATH. In a monorepo
+            # these are the SIBLING workspace's binaries, not the repo root's.
             env = os.environ.copy()
-            bin_path = self.workspace_root / "node_modules" / ".bin"
-            if bin_path.exists():
-                env["PATH"] = str(bin_path) + os.pathsep + env.get("PATH", "")
+            existing = [bin_dir for bin_dir in workspace_bin_dirs if bin_dir.exists()]
+            if existing:
+                prefix = os.pathsep.join(str(bin_dir) for bin_dir in existing)
+                env["PATH"] = prefix + os.pathsep + env.get("PATH", "")
 
             if is_worktree:
                 logger.info("Detected worktree file - using ESLint wrapper for consistent config")

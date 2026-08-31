@@ -1,10 +1,18 @@
 """Tests for ValidateEslintOnWriteHandler."""
 
+import json
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from claude_code_hooks_daemon.utils.npm import (
+    has_llm_commands_in_package_json as real_has_llm_commands,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -491,12 +499,6 @@ class TestValidateEslintOnWriteHandler:
         self, mock_run: MagicMock, tmp_path: Path
     ) -> None:
         """Advisory mode skips ESLint validation and returns ALLOW with advisory."""
-        with patch(
-            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
-            return_value=False,
-        ):
-            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
-
         test_file = tmp_path / "test.ts"
         test_file.write_text("const x = 1;")
 
@@ -505,7 +507,14 @@ class TestValidateEslintOnWriteHandler:
             "tool_input": {"file_path": str(test_file)},
         }
 
-        result = handler.handle(hook_input)
+        # The patch spans handle() too: since Plan 00296 the mode is decided
+        # per event against the authored file's own workspace.
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
+            return_value=False,
+        ):
+            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+            result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
         # Regression test: an ALLOW decision's `reason` is silently dropped by
@@ -519,12 +528,6 @@ class TestValidateEslintOnWriteHandler:
         self, mock_run: MagicMock, tmp_path: Path
     ) -> None:
         """The advisory message must actually reach the user via to_json()."""
-        with patch(
-            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
-            return_value=False,
-        ):
-            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
-
         test_file = tmp_path / "test.ts"
         test_file.write_text("const x = 1;")
 
@@ -533,7 +536,13 @@ class TestValidateEslintOnWriteHandler:
             "tool_input": {"file_path": str(test_file)},
         }
 
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
+            return_value=False,
+        ):
+            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+            result = handler.handle(hook_input)
+
         response = result.to_json("PostToolUse")
         additional_context = response["hookSpecificOutput"]["additionalContext"]
         assert "ADVISORY" in additional_context
@@ -542,12 +551,6 @@ class TestValidateEslintOnWriteHandler:
     @patch("subprocess.run")
     def test_advisory_mode_suggests_llm_lint(self, mock_run: MagicMock, tmp_path: Path) -> None:
         """Advisory mode suggests creating llm:lint script."""
-        with patch(
-            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
-            return_value=False,
-        ):
-            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
-
         test_file = tmp_path / "component.tsx"
         test_file.write_text("export const App = () => <div />;")
 
@@ -556,7 +559,12 @@ class TestValidateEslintOnWriteHandler:
             "tool_input": {"file_path": str(test_file)},
         }
 
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
+            return_value=False,
+        ):
+            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+            result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
         advisory = "\n".join(result.context)
@@ -567,12 +575,6 @@ class TestValidateEslintOnWriteHandler:
     @patch("subprocess.run")
     def test_advisory_mode_includes_guide_path(self, mock_run: MagicMock, tmp_path: Path) -> None:
         """Advisory mode includes path to LLM command wrapper guide."""
-        with patch(
-            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
-            return_value=False,
-        ):
-            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
-
         test_file = tmp_path / "test.ts"
         test_file.write_text("const x = 1;")
 
@@ -581,7 +583,12 @@ class TestValidateEslintOnWriteHandler:
             "tool_input": {"file_path": str(test_file)},
         }
 
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
+            return_value=False,
+        ):
+            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+            result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
         advisory = "\n".join(result.context)
@@ -890,3 +897,115 @@ class TestValidateEslintOnWriteDisclosureLadder:
         with patch("subprocess.run", side_effect=RuntimeError("boom")):
             result = handler.handle(self._hook_input(test_file, None))
         assert result.reason.startswith(f"BLOCKED [{RuleID.ESLINT_RUN_FAILURE}]")
+
+
+class TestPerFileWorkspace:
+    """ESLint runs in the EDITED FILE's own workspace (Plan 00296 Task 2.3).
+
+    `workspace_root` is a single scalar, so it cannot express "TS files under
+    web/, and a second TS workspace elsewhere" -- and the mode probe ignored
+    it entirely and read the repo root.
+    """
+
+    @staticmethod
+    def _monorepo(tmp_path: Path) -> Path:
+        """Two TS workspaces, NO root manifest. Only one defines llm: scripts."""
+        web = tmp_path / "apps" / "web"
+        (web / "src").mkdir(parents=True)
+        (web / "package.json").write_text(
+            json.dumps({"scripts": {"llm:lint": "eslint ."}}), encoding="utf-8"
+        )
+        api = tmp_path / "apps" / "api"
+        (api / "src").mkdir(parents=True)
+        (api / "package.json").write_text(
+            json.dumps({"scripts": {"lint": "eslint ."}}), encoding="utf-8"
+        )
+        return tmp_path
+
+    @staticmethod
+    @contextmanager
+    def _real_detection(root: Path) -> Iterator[None]:
+        """Undo the module's autouse mocks.
+
+        This class needs the REAL detector, because the whole point is that
+        two workspaces get DIFFERENT answers from it.
+        """
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write."
+                "has_llm_commands_in_package_json",
+                real_has_llm_commands,
+            ),
+            patch(
+                "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write."
+                "resolve_project_root",
+                return_value=str(root),
+            ),
+        ):
+            yield
+
+    @staticmethod
+    def _hook_input(file_path: Path) -> dict[str, Any]:
+        return {"tool_name": "Write", "tool_input": {"file_path": str(file_path)}}
+
+    def test_runs_eslint_in_the_files_own_workspace(self, tmp_path: Path) -> None:
+        root = self._monorepo(tmp_path)
+        edited = root / "apps" / "web" / "src" / "page.ts"
+        edited.write_text("const x = 1;")
+
+        with self._real_detection(root):
+            handler = ValidateEslintOnWriteHandler()
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+                handler.handle(self._hook_input(edited))
+
+        assert mock_run.call_args[1]["cwd"] == str(root / "apps" / "web")
+
+    def test_sibling_workspace_without_llm_scripts_is_advisory(self, tmp_path: Path) -> None:
+        """The api workspace must NOT inherit web's enforcement mode."""
+        root = self._monorepo(tmp_path)
+        edited = root / "apps" / "api" / "src" / "server.ts"
+        edited.write_text("const x = 1;")
+
+        with self._real_detection(root):
+            handler = ValidateEslintOnWriteHandler()
+            with patch("subprocess.run") as mock_run:
+                result = handler.handle(self._hook_input(edited))
+
+        assert result.decision == Decision.ALLOW
+        assert mock_run.call_count == 0, "advisory mode must not run ESLint"
+
+    def test_prepends_the_workspaces_own_node_modules_bin(self, tmp_path: Path) -> None:
+        root = self._monorepo(tmp_path)
+        bin_dir = root / "apps" / "web" / "node_modules" / ".bin"
+        bin_dir.mkdir(parents=True)
+        edited = root / "apps" / "web" / "src" / "page.ts"
+        edited.write_text("const x = 1;")
+
+        with self._real_detection(root):
+            handler = ValidateEslintOnWriteHandler()
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+                handler.handle(self._hook_input(edited))
+
+        assert mock_run.call_args[1]["env"]["PATH"].startswith(str(bin_dir))
+
+    def test_explicit_workspace_root_still_pins_every_file(self, tmp_path: Path) -> None:
+        """The documented test seam survives: an explicit root wins outright.
+
+        The edited file lives in `api`, but the pin names `web` -- so both the
+        cwd AND the mode come from `web`, overriding per-file resolution
+        entirely. (Pinning to `api` would be indistinguishable from resolving
+        it, which is why the file and the pin deliberately disagree here.)
+        """
+        root = self._monorepo(tmp_path)
+        edited = root / "apps" / "api" / "src" / "server.ts"
+        edited.write_text("const x = 1;")
+
+        with self._real_detection(root):
+            handler = ValidateEslintOnWriteHandler(workspace_root=root / "apps" / "web")
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+                handler.handle(self._hook_input(edited))
+
+        assert mock_run.call_args[1]["cwd"] == str(root / "apps" / "web")

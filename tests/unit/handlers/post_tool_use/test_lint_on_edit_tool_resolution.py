@@ -35,14 +35,18 @@ distinct: found -> run it; genuinely absent -> advise, never block.
 
 from __future__ import annotations
 
+import stat
 import sys
 from pathlib import Path
 from typing import Final
+from unittest.mock import MagicMock, patch
 
 from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import (
     LintOnEditHandler,
 )
 from claude_code_hooks_daemon.strategies.lint.python_strategy import PythonLintStrategy
+
+_MODULE = "claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit"
 
 # The interpreter running the daemon lives in the project venv's bin/ directory,
 # which is where that venv's console scripts (ruff, black, mypy) also live.
@@ -123,3 +127,128 @@ class TestMissingToolIsAdvisoryNotBlocking:
             "tool is not installed is the failure mode this guard exists to "
             "prevent — see the module docstring on `python -m ruff`."
         )
+
+
+def _make_executable(path: Path) -> Path:
+    """Create a runnable stub at ``path`` (parents included)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return path
+
+
+class TestWorkspaceBinDirResolution:
+    """A workspace's own tool binaries are searched first (Plan 00296 Task 2.2).
+
+    ``vendor/bin`` (Composer) and ``node_modules/.bin`` (npm) are where a
+    workspace actually keeps its linters. Searching only the daemon venv and
+    PATH means the handler reports "install it to enable lint checking" about
+    a tool that is already installed a few directories away.
+    """
+
+    def test_finds_a_linter_in_the_workspace_vendor_bin(self, tmp_path: Path) -> None:
+        phpstan = _make_executable(tmp_path / "vendor" / "bin" / "phpstan")
+        handler = LintOnEditHandler()
+
+        resolved = handler._resolve_executable("phpstan", (tmp_path / "vendor" / "bin",))
+
+        assert resolved == str(phpstan)
+
+    def test_workspace_bin_wins_over_path(self, tmp_path: Path) -> None:
+        """A workspace-pinned tool version must beat a global one."""
+        local_tool = _make_executable(tmp_path / "node_modules" / ".bin" / "sh")
+        handler = LintOnEditHandler()
+
+        resolved = handler._resolve_executable("sh", (tmp_path / "node_modules" / ".bin",))
+
+        assert resolved == str(local_tool), "the workspace copy must win over /bin/sh on PATH"
+
+    def test_nonexistent_bin_dir_is_skipped_not_fatal(self, tmp_path: Path) -> None:
+        """bin_dirs are constructed, not probed, so most will not exist."""
+        handler = LintOnEditHandler()
+
+        resolved = handler._resolve_executable("ruff", (tmp_path / "nope" / "bin",))
+
+        assert resolved is not None, "must fall through to the daemon venv"
+        assert Path(resolved).is_file()
+
+    def test_missing_everywhere_still_returns_none(self, tmp_path: Path) -> None:
+        """The return-None-rather-than-guess fallback is explicitly preserved."""
+        handler = LintOnEditHandler()
+
+        assert handler._resolve_executable("no-such-linter-xyzzy", (tmp_path,)) is None
+
+
+class TestWorkingDirectoryIsTheFilesWorkspace:
+    """The linter runs from the edited file's workspace, not the daemon's cwd."""
+
+    def test_runs_from_the_files_own_workspace(self, tmp_path: Path) -> None:
+        svc = tmp_path / "services" / "billing"
+        svc.mkdir(parents=True)
+        (svc / "pyproject.toml").write_text("[project]\nname = 'billing'\n", encoding="utf-8")
+        edited = svc / "app.py"
+        edited.write_text("x = 1\n", encoding="utf-8")
+
+        handler = LintOnEditHandler()
+        with (
+            patch(f"{_MODULE}.resolve_project_root", return_value=str(tmp_path)),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            handler._run_lint_command(
+                {}, f"{sys.executable} -m py_compile {{file}}", str(edited), "Python"
+            )
+
+        assert mock_run.call_args[1]["cwd"] == str(svc)
+
+    def test_ansible_cfg_marker_still_selects_the_working_dir(self, tmp_path: Path) -> None:
+        """NON-REGRESSION PIN for the resolver rollout.
+
+        ``ansible.cfg`` is a ``_MODULE_ROOT_MARKERS`` entry but NOT a manifest
+        in ``_MANIFEST_KINDS``, so the shared workspace resolver cannot find
+        it. Routing this handler naively through the resolver would silently
+        drop Ansible's working directory -- and per the comment on
+        ``_MODULE_ROOT_MARKERS`` that makes the linter fail for the WRONG
+        reason, a denial the author cannot act on.
+        """
+        infra = tmp_path / "infra"
+        infra.mkdir(parents=True)
+        (infra / "ansible.cfg").write_text("[defaults]\n", encoding="utf-8")
+        edited = infra / "roles" / "web" / "tasks" / "main.yml"
+        edited.parent.mkdir(parents=True)
+        edited.write_text("- name: noop\n", encoding="utf-8")
+
+        handler = LintOnEditHandler()
+        with (
+            patch(f"{_MODULE}.resolve_project_root", return_value=str(tmp_path)),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            handler._run_lint_command(
+                {}, f"{sys.executable} -m py_compile {{file}}", str(edited), "Ansible"
+            )
+
+        assert mock_run.call_args[1]["cwd"] == str(infra), (
+            "Ansible lost its ansible.cfg working directory -- the marker lookup "
+            "must take precedence over the manifest-only workspace resolver."
+        )
+
+    def test_go_mod_marker_is_unaffected(self, tmp_path: Path) -> None:
+        """go.mod IS a manifest, so both mechanisms agree -- pinned regardless."""
+        module = tmp_path / "cmd" / "server"
+        module.mkdir(parents=True)
+        (module / "go.mod").write_text("module example.com/server\n", encoding="utf-8")
+        edited = module / "main.go"
+        edited.write_text("package main\n", encoding="utf-8")
+
+        handler = LintOnEditHandler()
+        with (
+            patch(f"{_MODULE}.resolve_project_root", return_value=str(tmp_path)),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            handler._run_lint_command(
+                {}, f"{sys.executable} -m py_compile {{file}}", str(edited), "Go"
+            )
+
+        assert mock_run.call_args[1]["cwd"] == str(module)

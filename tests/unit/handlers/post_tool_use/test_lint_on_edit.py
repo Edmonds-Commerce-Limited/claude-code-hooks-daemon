@@ -401,7 +401,7 @@ class TestCommandOverrides:
             "tool_name": "Write",
             "tool_input": {"file_path": str(test_file)},
         }
-        with patch.object(handler, "_resolve_executable", side_effect=lambda name: name):
+        with patch.object(handler, "_resolve_executable", side_effect=lambda name, *_: name):
             result = handler.handle(hook_input)
         assert result.decision.value == "allow"
 
@@ -436,7 +436,7 @@ class TestCommandOverrides:
             "tool_name": "Write",
             "tool_input": {"file_path": str(test_file)},
         }
-        with patch.object(handler, "_resolve_executable", side_effect=lambda name: name):
+        with patch.object(handler, "_resolve_executable", side_effect=lambda name, *_: name):
             result = handler.handle(hook_input)
         assert result.decision.value == "allow"
 
@@ -628,10 +628,18 @@ class TestModuleRoot:
         assert str(go_file) not in command_str
 
     @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
-    def test_non_go_lint_does_not_set_cwd(
+    def test_non_marker_lint_runs_from_the_files_workspace(
         self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
     ) -> None:
-        """Non-Go lint commands don't set cwd."""
+        """A language with no module-root marker runs from its own workspace.
+
+        This previously asserted ``cwd is None`` -- i.e. the daemon's own
+        working directory. That is wrong for every tool that discovers config
+        relative to cwd: a Python file's ruff settings live in ITS workspace's
+        pyproject.toml, not wherever the daemon happens to be running (Plan
+        00296 Task 2.2). With no manifest above it, the workspace resolves to
+        the fallback root, which is what is asserted here.
+        """
         test_file = tmp_path / "app.py"
         test_file.write_text("x = 1")
 
@@ -648,7 +656,7 @@ class TestModuleRoot:
         handler.handle(hook_input)
 
         call_kwargs = mock_subprocess.run.call_args[1]
-        assert call_kwargs.get("cwd") is None
+        assert call_kwargs.get("cwd") == str(tmp_path)
 
 
 class TestAcceptanceTests:

@@ -23,11 +23,15 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision, get_data_lay
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
+from claude_code_hooks_daemon.core.workspace import Workspace
 from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
 from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
-from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
+from claude_code_hooks_daemon.utils.path_exclusion import (
+    handler_excludes_path,
+    resolve_project_root,
+)
 
 # Placeholder for file path in lint commands
 _FILE_PLACEHOLDER = "{file}"
@@ -264,7 +268,21 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         "Ansible": "ansible.cfg",
     }
 
-    def _resolve_executable(self, executable: str) -> str | None:
+    @staticmethod
+    def _workspace_for(file_path: str) -> Workspace:
+        """The workspace containing ``file_path``.
+
+        Bounded at the project root when one is resolvable; otherwise at the
+        file's own directory, so a unit test with no initialised
+        ``ProjectContext`` neither raises nor walks the whole filesystem.
+        """
+        resolved = resolve_project_root()
+        project_root = Path(resolved) if resolved else Path(file_path).parent
+        return Workspace.for_path(Path(file_path), project_root)
+
+    def _resolve_executable(
+        self, executable: str, workspace_bin_dirs: tuple[Path, ...] = ()
+    ) -> str | None:
         """Resolve a lint tool name to a runnable path, or None if absent.
 
         ``subprocess.run`` without a shell resolves a bare name against ``PATH``
@@ -275,9 +293,15 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         checking": the guard silently inert, and the advice wrong, because ruff
         was already installed.
 
-        Looks in the interpreter's own ``bin`` directory first (that IS the
-        project venv), then falls back to ``PATH`` for tools installed system
-        wide (``golangci-lint``, ``shellcheck``, ``phpstan``).
+        Search order: the edited file's OWN workspace bin dirs
+        (``vendor/bin``, ``node_modules/.bin``), then the interpreter's own
+        ``bin`` directory (that IS the project venv), then ``PATH`` for tools
+        installed system wide (``golangci-lint``, ``shellcheck``).
+
+        The workspace comes first deliberately (Plan 00296): a project pins a
+        linter VERSION in its own manifest, so a global copy that happens to
+        be on PATH is the wrong tool, and in a monorepo it may not exist at
+        all while the workspace's copy does.
 
         Returning None rather than guessing is deliberate: the caller turns it
         into an advisory ALLOW. Invoking a missing tool some other way — e.g.
@@ -289,6 +313,11 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         # is already resolved; do not second-guess it.
         if Path(executable).is_absolute():
             return executable
+
+        for bin_dir in workspace_bin_dirs:
+            workspace_candidate = bin_dir / executable
+            if workspace_candidate.is_file():
+                return str(workspace_candidate)
 
         candidate = _INTERPRETER_BIN_DIR / executable
         if candidate.is_file():
@@ -309,11 +338,19 @@ class LintOnEditHandler(PostToolUseHandlerBase):
             BlockingResult with DENY if lint fails, None if lint passes.
             BlockingResult with ALLOW if linter not found or times out (graceful degradation).
         """
-        # Find module/project root for languages that require it (e.g., Go needs go.mod)
+        # The language's own marker wins where it declares one. `ansible.cfg`
+        # is NOT a manifest, so the workspace resolver cannot find it -- going
+        # resolver-only here would silently drop Ansible's working directory
+        # and make the linter fail for the WRONG reason (see the comment on
+        # _MODULE_ROOT_MARKERS). Every other language falls through to the
+        # file's own workspace, which is where its config actually lives.
+        workspace = self._workspace_for(file_path)
         working_dir: str | None = None
         marker = self._MODULE_ROOT_MARKERS.get(language_name)
         if marker:
             working_dir = self._find_module_root(file_path, marker)
+        if working_dir is None:
+            working_dir = str(workspace.root)
 
         # For Go, vet the package directory (not single file) since Go packages span
         # multiple files and single-file vetting can't resolve cross-file references
@@ -334,13 +371,15 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         # is this handler's job to find that name in the project venv or on
         # PATH. Without this the guard is inert wherever tooling lives in a
         # venv, which is the normal case for a Python project.
-        resolved = self._resolve_executable(command_parts[0])
+        resolved = self._resolve_executable(command_parts[0], workspace.bin_dirs)
         if resolved is None:
+            searched = ", ".join(str(bin_dir) for bin_dir in workspace.bin_dirs)
+            where = f"{searched}, " if searched else ""
             return BlockingResult(
                 decision=Decision.ALLOW,
                 context=[
                     f"⚠️ {language_name} lint tool not found ({command_parts[0]}) "
-                    f"- looked in {_INTERPRETER_BIN_DIR} and on PATH. "
+                    f"- looked in {where}{_INTERPRETER_BIN_DIR} and on PATH. "
                     f"Install it to enable lint checking."
                 ],
             )

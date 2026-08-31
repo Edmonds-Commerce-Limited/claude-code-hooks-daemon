@@ -123,9 +123,7 @@ class TestWorkspaceForPath:
 
         workspace = Workspace.for_path(src_file, project_root)
 
-        assert workspace == Workspace(
-            root=project_root, kind="unknown", manifest=None, bin_dirs=()
-        )
+        assert workspace == Workspace(root=project_root, kind="unknown", manifest=None, bin_dirs=())
 
     def test_walk_stops_at_project_root_manifest_above_ignored(self, tmp_path: Path) -> None:
         """A manifest that lives ABOVE project_root is never considered."""
@@ -139,9 +137,7 @@ class TestWorkspaceForPath:
 
         workspace = Workspace.for_path(src_file, project_root)
 
-        assert workspace == Workspace(
-            root=project_root, kind="unknown", manifest=None, bin_dirs=()
-        )
+        assert workspace == Workspace(root=project_root, kind="unknown", manifest=None, bin_dirs=())
 
     def test_multiple_manifests_in_one_dir_use_precedence_order(self, tmp_path: Path) -> None:
         """When a directory holds several manifests, node > php > python > go > rust wins."""

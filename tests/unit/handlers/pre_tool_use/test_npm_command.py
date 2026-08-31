@@ -3,6 +3,10 @@
 Comprehensive test coverage for npm/npx command enforcement.
 """
 
+import json
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -16,22 +20,27 @@ class TestNpmCommandHandler:
     """Test suite for NpmCommandHandler."""
 
     @pytest.fixture
-    def handler(self) -> NpmCommandHandler:
-        """Create handler instance with llm commands detected (enforcement mode)."""
+    def handler(self) -> Iterator[NpmCommandHandler]:
+        """Handler in enforcement mode (llm: commands present).
+
+        The patch spans the whole test, not just construction: since Plan
+        00296 the mode is decided per invocation from the command's own
+        workspace, so `handle()` calls the detector too.
+        """
         with patch(
             "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
             return_value=True,
         ):
-            return NpmCommandHandler()
+            yield NpmCommandHandler()
 
     @pytest.fixture
-    def advisory_handler(self) -> NpmCommandHandler:
-        """Create handler instance without llm commands (advisory mode)."""
+    def advisory_handler(self) -> Iterator[NpmCommandHandler]:
+        """Handler in advisory mode (no llm: commands anywhere)."""
         with patch(
             "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
             return_value=False,
         ):
-            return NpmCommandHandler()
+            yield NpmCommandHandler()
 
     # Tests for matches() method - npm run commands
 
@@ -822,12 +831,12 @@ class TestNpmCommandDisclosureLadder:
         reset_data_layer()
 
     @pytest.fixture
-    def handler(self) -> NpmCommandHandler:
+    def handler(self) -> Iterator[NpmCommandHandler]:
         with patch(
             "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
             return_value=True,
         ):
-            return NpmCommandHandler()
+            yield NpmCommandHandler()
 
     @staticmethod
     def _non_llm_input(transcript_path: str | None) -> dict[str, Any]:
@@ -881,3 +890,155 @@ class TestNpmCommandDisclosureLadder:
         piped_result = handler.handle(piped_input)
         assert "PHILOSOPHY" in non_llm_result.reason
         assert "Piping npm/npx commands is pointless" in piped_result.reason
+
+
+class TestNpmCommandMonorepoWorkspace:
+    """Mode is decided per invocation from the command's own workspace.
+
+    Plan 00296 Task 2.1. Deciding once at construction, against the git root,
+    makes the handler permanently inert in a monorepo that has gone to the
+    trouble of defining llm: wrappers -- enforcement silently downgrades to
+    advisory and nothing says why.
+    """
+
+    @staticmethod
+    def _monorepo(tmp_path: Path) -> Path:
+        """Two sibling Node workspaces, NO root manifest (the reported shape)."""
+        enforced = tmp_path / "apps" / "web"
+        enforced.mkdir(parents=True)
+        (enforced / "package.json").write_text(
+            json.dumps({"scripts": {"llm:build": "vite build", "build": "vite build"}}),
+            encoding="utf-8",
+        )
+        advisory = tmp_path / "apps" / "api"
+        advisory.mkdir(parents=True)
+        (advisory / "package.json").write_text(
+            json.dumps({"scripts": {"build": "tsc"}}), encoding="utf-8"
+        )
+        return tmp_path
+
+    @staticmethod
+    @contextmanager
+    def _rooted_at(root: Path) -> Iterator[None]:
+        """Point BOTH root lookups at the fixture repo.
+
+        `ProjectContext.project_root` is what the mode probe reads;
+        `resolve_project_root` is what bounds the workspace walk.
+        """
+        with (
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+                return_value=root,
+            ),
+            patch(
+                "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.resolve_project_root",
+                return_value=str(root),
+            ),
+        ):
+            yield
+
+    @classmethod
+    def _handler(cls, root: Path) -> NpmCommandHandler:
+        """Construct at the ROOT, where no manifest exists.
+
+        Construction-time detection therefore yields False; any DENY below
+        proves the decision was re-made per invocation.
+        """
+        with cls._rooted_at(root):
+            return NpmCommandHandler()
+
+    @staticmethod
+    def _input(command: str, cwd: Path | None = None) -> dict[str, Any]:
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+        }
+        if cwd is not None:
+            hook_input["cwd"] = str(cwd)
+        return hook_input
+
+    def test_enforces_in_workspace_with_llm_scripts_via_cwd(self, tmp_path: Path) -> None:
+        root = self._monorepo(tmp_path)
+        handler = self._handler(root)
+        assert handler.has_llm_commands is False, "root has no manifest: precondition"
+
+        with self._rooted_at(root):
+            result = handler.handle(self._input("npm run build", cwd=root / "apps" / "web"))
+
+        assert result.decision == Decision.DENY
+        assert "llm:build" in result.reason
+
+    def test_advises_in_sibling_workspace_without_llm_scripts(self, tmp_path: Path) -> None:
+        """The sibling must NOT inherit the other workspace's mode."""
+        root = self._monorepo(tmp_path)
+        handler = self._handler(root)
+
+        with self._rooted_at(root):
+            result = handler.handle(self._input("npm run build", cwd=root / "apps" / "api"))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context is not None
+
+    def test_leading_cd_selects_the_workspace(self, tmp_path: Path) -> None:
+        """`cd apps/web && npm run build` is how a monorepo command is actually shaped.
+
+        The hook's cwd stays at the repo root, so honouring cwd alone would
+        resolve nothing and leave enforcement off for the real invocation.
+        """
+        root = self._monorepo(tmp_path)
+        handler = self._handler(root)
+
+        with self._rooted_at(root):
+            result = handler.handle(self._input("cd apps/web && npm run build", cwd=root))
+
+        assert result.decision == Decision.DENY
+
+    def test_leading_cd_into_workspace_without_llm_scripts_advises(self, tmp_path: Path) -> None:
+        root = self._monorepo(tmp_path)
+        handler = self._handler(root)
+
+        with self._rooted_at(root):
+            result = handler.handle(self._input("cd apps/api && npm run build", cwd=root))
+
+        assert result.decision == Decision.ALLOW
+
+    def test_no_manifest_anywhere_falls_back_to_advisory(self, tmp_path: Path) -> None:
+        """Single-root repo with no Node in it behaves exactly as before."""
+        root = self._monorepo(tmp_path)
+        handler = self._handler(root)
+
+        with self._rooted_at(root):
+            result = handler.handle(self._input("npm run build", cwd=root))
+
+        assert result.decision == Decision.ALLOW
+
+    def test_missing_cwd_falls_back_to_project_root(self, tmp_path: Path) -> None:
+        """A hook payload without cwd must not raise; it degrades to the root."""
+        root = self._monorepo(tmp_path)
+        (root / "package.json").write_text(
+            json.dumps({"scripts": {"llm:qa": "qa"}}), encoding="utf-8"
+        )
+        handler = self._handler(root)
+
+        with self._rooted_at(root):
+            result = handler.handle(self._input("npm run build"))
+
+        assert result.decision == Decision.DENY
+
+    def test_piped_command_denies_before_workspace_resolution(self, tmp_path: Path) -> None:
+        """The piped branch denies regardless of mode -- unchanged by this task.
+
+        Documented in the field report as a secondary observation: 'advisory'
+        mode still hard-denies pipes. Pinned here so the workspace work does
+        not silently alter it.
+        """
+        root = self._monorepo(tmp_path)
+        handler = self._handler(root)
+
+        with self._rooted_at(root):
+            result = handler.handle(
+                self._input("npm run build | grep x", cwd=root / "apps" / "api")
+            )
+
+        assert result.decision == Decision.DENY
+        assert "Piping npm/npx commands is pointless" in result.reason

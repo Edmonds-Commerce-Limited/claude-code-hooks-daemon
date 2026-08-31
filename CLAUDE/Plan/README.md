@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00296: monorepo workspace resolver](00296-monorepo-workspace-resolver/PLAN.md) - In Progress (client field report: handlers assume a single-root repository, so multi-workspace monorepos get silent enforcement degradation; one shared `Workspace.for_path()` resolver routed through npm_command, lint_on_edit, validate_eslint_on_write, tdd_enforcement and markdown_organization, plus surfacing downgraded modes in `check`)
+- [00296: monorepo workspace resolver](00296-monorepo-workspace-resolver/PLAN.md) - In Progress (one shared `Workspace.for_path()` resolver, so a multi-workspace monorepo stops silently degrading enforcement)
 
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
 
@@ -174,7 +174,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00292: codex cli dual host research](Completed/00292-codex-cli-dual-host-research/PLAN.md) - Complete (research-only, 9-agent Sonnet workflow: Codex CLI hooks are verdict-based but cover only shell/apply_patch/MCP calls today; 6 of our 31 wired events have any counterpart; recommendation in FINDINGS.md — host-adapter + verdict degradation, deferred until Codex Edit/Write hook coverage lands)
 
-- [00288: project-layout config SSoT](Completed/00288-project-layout-config-ssot/PLAN.md) - Complete at `3aa68a72`…`e8dea14b` + the archiving commit (top-level `layout:` block + `ProjectLayout` facade as the single access API for directory truths; C1–C8 consumption refactors; canonical 11-name vendored/build core; sweep-only `source-tree-markdown` check; 7 shipped `.claude/rules/` directory-role pointers backed by `CLAUDE/DirectoryRoles.md`; manifests staged, dogfooded, dummy-client verified)
+- [00288: project-layout config SSoT](Completed/00288-project-layout-config-ssot/PLAN.md) - Complete at `3aa68a72`…`e8dea14b` + the archiving commit (top-level `layout:` block and `ProjectLayout` facade as the single access API for directory truths)
 
 - [00289: docs gold standard zero findings](Completed/00289-docs-gold-standard-zero-findings/PLAN.md) - Complete at `671b6eb7` + `01312f29` + the archiving commit (whole-repo `docs-qa --sweep` driven from 34 advisories to zero: two checker bug fixes, a new `scope_exclude_globs` corpus exclusion, a live-template link fix, root `CLAUDE.md` `@`-import conversion, module-doc thinning/promotion, and the `release-agent.md` duplicate)
 
@@ -216,7 +216,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00270: bash safe mode forcer](Completed/00270-bash-safe-mode-forcer/PLAN.md) - Complete at merge `0f96b7ea` + the commit that archives it (opt-in `bash_safe_mode` handler enforcing `set -e`/`-o pipefail` preludes on multi-statement Bash invocations; shared `utils/bash_flags.py` scanner with an end-of-options guard, `verification_result_gate` refactored onto it; code-reviewed, dogfooded warn-mode scoped to mutator sequences)
 
-- [00267: Worktree seeding and config suggestions](Completed/00267-worktree-seeding-and-config-suggestions/PLAN.md) - Complete at `79cd6fc6` + the commit that archives it (a fresh worktree now carries the project's git-ignored local files, symlink or copy chosen per entry; `check-worktree-seed` reports drift and runs at install/upgrade; dogfooding it found this repo seeding neither its daemon env nor its secret word list, the latter leaving `sensitive_content` silently inert in every worktree)
+- [00267: Worktree seeding and config suggestions](Completed/00267-worktree-seeding-and-config-suggestions/PLAN.md) - Complete at `79cd6fc6` + the commit that archives it (a fresh worktree now carries the project's git-ignored local files, with `check-worktree-seed` reporting drift)
 
 - [00265: static type safe handler results](Completed/00265-static-type-safe-handler-results/PLAN.md) - Complete at `6fc2db3a` + the commit that archives it (an undeliverable decision is now unwritable, not merely detectable: per-event bases narrow `handle()` once and all 84 handlers inherit it; a shipped example whose `SessionStart` refusal had never blocked anything was found and fixed en route)
 

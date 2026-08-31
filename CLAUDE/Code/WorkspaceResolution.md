@@ -69,20 +69,35 @@ the filesystem the walk still never ascends past that file's own filesystem
 root, and a manifest found on the way up is honoured; failing that, the
 project-root fallback applies.
 
-## Configuration: there is deliberately no workspace override knob
+## Configuration: declared, then derived, then root
 
-Resolution is derived entirely from the edited file's own path. This is a
-requirement, not an omission — a client field report on this behaviour is
-explicit that adding a root-level manifest purely to satisfy tooling is a
-bodge, and a config knob naming each workspace is the same bodge spelled
-differently. Both make the repository serve the daemon rather than the reverse.
+Resolution has three layers, tried in order:
 
-Adding a knob would also be dead surface: the automatic answer is correct for
-every layout that has a manifest, and a layout without one is not made
-resolvable by declaring where it is — the toolchain still is not there.
+1. **Declared** — a `projects:` entry in `.claude/hooks-daemon.yaml`.
+2. **Derived** — the manifest walk-up described above.
+3. **Project root** — the fallback, so a single-project repo needs nothing.
 
-**To support a new ecosystem, add a row to `_MANIFEST_KINDS`.** That is the
-supported extension path, and it benefits every consumer at once.
+Declaration exists because **derivation cannot see a workspace that has no
+manifest**. A config-driven toolchain directory — an Ansible tree, a docs site
+with its own `docs/` and `CLAUDE/` — has no `package.json` to walk up to, so
+the walk falls through to the repo root and enforcement silently degrades:
+exactly the failure this whole mechanism exists to remove.
+
+Declaring projects to the daemon is NOT the same as adding a manifest to the
+repository. The latter is a bodge — it would declare dependencies the
+repository does not have and create a lockfile nobody installs. A `projects:`
+block puts that knowledge in the daemon's own config, where it costs the
+repository nothing.
+
+**Declaration is a precedence layer, never a requirement.** Omit `projects:`
+and behaviour is exactly the derived-then-root ladder. Making it mandatory
+would charge every single-project repo for a monorepo feature, and a stale
+list would silently disable enforcement for a workspace nobody remembered to
+add — the same silent-degradation class as the original defect.
+
+**To support a new ecosystem's automatic detection, add a row to
+`_MANIFEST_KINDS`.** That benefits every consumer at once, and is the right
+fix whenever the ecosystem does have a manifest worth recognising.
 
 ### The knobs that remain, and what they now mean
 
@@ -91,7 +106,8 @@ These are *not* workspace overrides and are not replaced by the resolver:
 - **`markdown_organization.monorepo_subproject_patterns`** — a *documentation
   layout* sub-project, which need not coincide with a manifest (a docs site
   with its own `docs/` and `CLAUDE/` and no `package.json` is a real case).
-  Automatic resolution cannot subsume it, so it stays as a manual override.
+  This is the same need `projects:` serves, so it becomes a deprecated alias
+  for a `projects:` entry rather than a second mechanism.
 - **`tdd_enforcement.test_path_map`** — declares where tests for a source glob
   live. Orthogonal to *which* workspace; the resolver only changes what a
   relative `test_dir` is resolved against.
@@ -105,9 +121,11 @@ These are *not* workspace overrides and are not replaced by the resolver:
 - **Marker files that are not manifests.** `lint_on_edit` resolves a working
   directory for Go and Ansible via its own `_MODULE_ROOT_MARKERS`. `go.mod` is
   a manifest and resolves normally; `ansible.cfg` is not, so an Ansible tree
-  with no other manifest resolves to the fallback. A consumer needing such a
-  marker either contributes it to `_MANIFEST_KINDS` or keeps a supplementary
-  lookup — it must not silently lose the working directory it had.
+  with no other manifest would resolve to the fallback. That handler therefore
+  consults its marker FIRST and uses the workspace root only as a fallback —
+  the pattern to copy. A consumer needing such a marker either contributes it
+  to `_MANIFEST_KINDS` or keeps a supplementary lookup ordered ahead of the
+  resolver; it must not silently lose the working directory it had.
 - **Nested git repositories are a different concern.** A *different git root*
   (what the commit gates' `_is_foreign_repo()` detects) is not a workspace.
   The resolver never crosses into that question.
