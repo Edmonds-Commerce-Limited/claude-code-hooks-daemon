@@ -470,10 +470,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - background_process_tracker — backgrounded processes are tracked
 
-<!-- handler: markdown-table-formatter -->
-
-- markdown_table_formatter — markdown tables are auto-aligned
-
 <!-- handler: command-hints -->
 
 - command_hints — advisory reminders after specific commands
@@ -486,13 +482,33 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - goal_injection — plan-start goal signal for the ccy supervisor
 
+<!-- handler: markdown-table-formatter -->
+
+- markdown_table_formatter — markdown tables are auto-aligned
+
 <!-- handler: recovery-cron-advisor -->
 
 - recovery_cron_advisor — failsafe recovery cron lifecycle advisory
 
+<!-- handler: ccy-supervisor-integrity -->
+
+- ccy_supervisor_integrity — keep the ccy supervisor properly set up
+
+<!-- handler: docs-qa-sweep -->
+
+- docs_qa_sweep — documentation drift report at session start
+
 <!-- handler: git-upstream-checker -->
 
 - git_upstream_checker — additive fetch + pull/cleanup advice on session start
+
+<!-- handler: hook-registration-checker -->
+
+- hook_registration_checker — hooks configuration policy
+
+<!-- handler: model-fallback-detector -->
+
+- model_fallback_detector — silent model substitution is surfaced
 
 <!-- handler: plan-qa-sweep -->
 
@@ -506,25 +522,9 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - project_handler_load_checker — project protection degraded alert
 
-<!-- handler: hook-registration-checker -->
-
-- hook_registration_checker — hooks configuration policy
-
 <!-- handler: secret-file-hygiene-checker -->
 
 - secret_file_hygiene_checker -- on-disk hygiene for protected paths
-
-<!-- handler: model-fallback-detector -->
-
-- model_fallback_detector — silent model substitution is surfaced
-
-<!-- handler: ccy-supervisor-integrity -->
-
-- ccy_supervisor_integrity — keep the ccy supervisor properly set up
-
-<!-- handler: docs-qa-sweep -->
-
-- docs_qa_sweep — documentation drift report at session start
 
 <!-- handler: tool-disable-advisor -->
 
