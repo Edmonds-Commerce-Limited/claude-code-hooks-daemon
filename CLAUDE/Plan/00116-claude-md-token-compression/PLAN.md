@@ -291,19 +291,20 @@ fingerprint-attribution scheme and amended targets:
 
 ### Phase 2b: Real-block measurement & promotion config (Decision I, TDD)
 
-- [ ] ⬜ **Task 2b.1**: `bin/hooks-daemon block-report` — transcript-scanning
+- [x] ✅ **Task 2b.1**: `bin/hooks-daemon block-report` — transcript-scanning
   block-frequency analyser (streaming pattern from `tool_report/analyser.py`;
   privacy: handler names + counts only, never content). Handler attribution by
   deny-message fingerprint table derived from handler message constants, with a
   parity test that every blocking handler's own deny output matches its own
   fingerprint. Ranked report + recommended PROMOTED set per configured
   thresholds. See [DESIGN-HYBRID-PROMOTION.md](DESIGN-HYBRID-PROMOTION.md).
-- [ ] ⬜ **Task 2b.2**: Config surface `claude_md.promotion`
+- [x] ✅ **Task 2b.2**: Config surface `claude_md.promotion`
   (`promoted_handlers`, `min_blocks`, `min_sessions`) — empty list ⇒ pure
   progressive disclosure (safe fresh-install default).
-- [ ] ⬜ **Task 2b.3**: Run `block-report` over THIS repo's real transcripts;
-  commit the evidence summary (counts only) as a journal entry and set this
-  repo's initial `promoted_handlers` from it.
+- [x] ✅ **Task 2b.3**: DONE 2026-08-31 — 359 transcripts / 12 sessions scanned;
+  thresholds tuned to 20/3 (defaults promoted 29/34 — no compression); 10
+  data-hot handlers + judgement-added `auto_continue_stop` committed in
+  `.claude/hooks-daemon.yaml`; evidence journalled.
 
 ### Phase 3: Stateful disclosure in handlers (TDD, parallelisable)
 
