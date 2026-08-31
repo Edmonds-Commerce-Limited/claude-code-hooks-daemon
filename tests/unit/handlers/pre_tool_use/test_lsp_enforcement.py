@@ -922,3 +922,59 @@ class TestLspEnforcementAcceptanceTests:
             assert test.title
             assert test.command
             assert test.description
+
+
+class TestLspEnforcementGetRules:
+    """get_rules() (Plan 00116): one rule; mode is a cadence knob, not a category."""
+
+    def test_get_rules_returns_one_rule(self) -> None:
+        from claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement import (
+            LspEnforcementHandler,
+        )
+
+        assert len(LspEnforcementHandler().get_rules()) == 1
+
+    def test_get_rules_rule_id_is_constant(self) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+        from claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement import (
+            LspEnforcementHandler,
+        )
+
+        rule = LspEnforcementHandler().get_rules()[0]
+        assert rule.rule_id == RuleID.LSP_SYMBOL_LOOKUP
+
+    def test_deny_reason_starts_with_rule_id_prefix(self) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+        from claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement import (
+            LspEnforcementHandler,
+        )
+
+        handler = LspEnforcementHandler()
+        hook_input = {
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "class FrontController"},
+        }
+        result = handler.handle(hook_input)
+        assert result.reason.startswith(f"BLOCKED [{RuleID.LSP_SYMBOL_LOOKUP}]")
+
+    def test_block_once_second_call_still_carries_lsp_guidance_in_context(self) -> None:
+        """block_once's own cadence (not the disclosure tracker) still applies."""
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement import (
+            LspEnforcementHandler,
+        )
+
+        handler = LspEnforcementHandler()
+        hook_input = {
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "class FrontController"},
+        }
+        with patch.object(handler, "_get_block_count", return_value=0):
+            first = handler.handle(hook_input)
+        with patch.object(handler, "_get_block_count", return_value=1):
+            second = handler.handle(hook_input)
+        assert first.decision == "deny"
+        assert second.decision == "allow"
+        assert second.context
+        assert "LSP" in "\n".join(second.context)

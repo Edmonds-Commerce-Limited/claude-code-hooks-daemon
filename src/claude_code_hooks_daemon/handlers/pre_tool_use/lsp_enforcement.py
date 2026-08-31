@@ -30,8 +30,10 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
 logger = logging.getLogger(__name__)
@@ -144,6 +146,24 @@ _LSP_OP_DEFINITION = "goToDefinition"
 _LSP_OP_REFERENCES = "findReferences"
 _LSP_OP_WORKSPACE_SYMBOL = "workspaceSymbol"
 
+# Single rule: block_once/advisory/strict is a VERBOSITY/CADENCE knob on the
+# same concept, "use LSP instead of grep for a symbol lookup" -- not a
+# different violation per mode.
+_LSP_RULE = Rule(
+    rule_id=RuleID.LSP_SYMBOL_LOOKUP,
+    blocked="a symbol-like Grep/Bash grep lookup",
+    why="LSP tools give semantic ~50ms code intelligence; grep is slow and imprecise",
+    fix="Use goToDefinition/findReferences/workspaceSymbol/hover/documentSymbol instead",
+    verbose=(
+        "Available LSP operations:\n"
+        "  - goToDefinition: Find where a symbol is defined\n"
+        "  - findReferences: Find all references to a symbol\n"
+        "  - workspaceSymbol: Search for symbols across the workspace\n"
+        "  - hover: Get type info and documentation for a symbol\n"
+        "  - documentSymbol: Get all symbols in a file"
+    ),
+)
+
 
 class LspEnforcementHandler(PreToolUseHandlerBase):
     """Enforce LSP tool usage instead of Grep/Bash grep for symbol lookups.
@@ -158,6 +178,7 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             priority=Priority.LSP_ENFORCEMENT,
             tags=[HandlerTag.WORKFLOW, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
+        self._formatter = RuleFormatter()
 
     def get_default_enabled(self) -> bool:
         """Opt-in handler — off by default (Plan 00133).
@@ -362,8 +383,20 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
         # Plain identifiers -> workspaceSymbol (broad search) or findReferences
         return _LSP_OP_WORKSPACE_SYMBOL
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [_LSP_RULE]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Handle a symbol-like grep, steering toward LSP tools."""
+        """Handle a symbol-like grep, steering toward LSP tools.
+
+        block_once/advisory/strict is a cadence knob on ONE concept, so the
+        rule ID is fixed regardless of mode -- unlike destructive_git's
+        DisclosureTracker ladder, this handler already self-limits its own
+        way (block_once's session-scoped block count), which this migration
+        preserves unchanged; only the surrounding message now leads with
+        the rule ID via RuleFormatter.
+        """
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         pattern = self._extract_search_pattern(hook_input, tool_name) or ""
         lsp_available = self._is_lsp_available()
@@ -375,14 +408,16 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             mode = LspEnforcementMode.ADVISORY
 
         suggested_op = self._suggest_lsp_operation(pattern)
-        reason = self._build_reason(pattern, suggested_op, lsp_available)
+        dynamic_detail = self._build_dynamic_detail(pattern, suggested_op, lsp_available)
 
         # Determine decision based on mode
         if mode == LspEnforcementMode.ADVISORY:
-            return GatingResult(decision=Decision.ALLOW, context=[reason])
+            return GatingResult(decision=Decision.ALLOW, context=[dynamic_detail])
+
+        deny_reason = f"{self._formatter.verbose(_LSP_RULE)}\n\n{dynamic_detail}"
 
         if mode == LspEnforcementMode.STRICT:
-            return GatingResult(decision=Decision.DENY, reason=reason)
+            return GatingResult(decision=Decision.DENY, reason=deny_reason)
 
         # block_once: deny first time IN THIS SESSION, allow subsequent.
         # The daemon is shared across sessions (Plan 00127), so the count
@@ -390,22 +425,15 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
         # other session's one-time deny (Plan 00277 Task 2.1).
         block_count = self._get_block_count(hook_input.get(HookInputField.SESSION_ID))
         if block_count == 0:
-            return GatingResult(decision=Decision.DENY, reason=reason)
-        return GatingResult(decision=Decision.ALLOW, context=[reason])
+            return GatingResult(decision=Decision.DENY, reason=deny_reason)
+        return GatingResult(decision=Decision.ALLOW, context=[dynamic_detail])
 
-    def _build_reason(self, pattern: str, suggested_op: str, lsp_available: bool) -> str:
-        """Build the guidance message for the LLM."""
+    def _build_dynamic_detail(self, pattern: str, suggested_op: str, lsp_available: bool) -> str:
+        """Build the per-invocation guidance (pattern, suggestion, availability)."""
         lines = [
             f"LSP tool available for this lookup: pattern '{pattern}' looks like a symbol search.",
             "",
             f"Suggested LSP operation: {suggested_op}",
-            "",
-            "Available LSP operations:",
-            "  - goToDefinition: Find where a symbol is defined",
-            "  - findReferences: Find all references to a symbol",
-            "  - workspaceSymbol: Search for symbols across the workspace",
-            "  - hover: Get type info and documentation for a symbol",
-            "  - documentSymbol: Get all symbols in a file",
         ]
 
         if not lsp_available:
