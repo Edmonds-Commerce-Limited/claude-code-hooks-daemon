@@ -19,6 +19,16 @@ def mock_project_context():
         yield mock
 
 
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test (Plan 00116)."""
+    from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+
+    reset_data_layer()
+    yield
+    reset_data_layer()
+
+
 import pytest
 
 from claude_code_hooks_daemon.core.hook_result import Decision
@@ -930,3 +940,127 @@ class TestHandRolledPlanFolderCreation:
 
         for command in variants:
             assert handler.matches(_bash(command)), f"Should still match: {command}"
+
+
+class TestGetRules:
+    """get_rules() declares the 2 Rule objects (Decision B)."""
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> PlanNumberHelperHandler:
+        handler = PlanNumberHelperHandler()
+        handler._workspace_root = tmp_path
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        return handler
+
+    def test_returns_two_rules(self, handler: PlanNumberHelperHandler) -> None:
+        from claude_code_hooks_daemon.core.rule import Rule
+
+        rules = handler.get_rules()
+        assert len(rules) == 2
+        assert all(isinstance(rule, Rule) for rule in rules)
+
+    def test_rule_ids_match_constants(self, handler: PlanNumberHelperHandler) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        expected = {RuleID.PLAN_NUMBER_DISCOVERY, RuleID.PLAN_FOLDER_MKDIR}
+        actual = {rule.rule_id for rule in handler.get_rules()}
+        assert actual == expected
+
+    def test_every_rule_has_non_empty_verbose(self, handler: PlanNumberHelperHandler) -> None:
+        for rule in handler.get_rules():
+            assert rule.verbose
+
+
+class TestDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Plan 00116).
+
+    The dynamic answer (next plan number, or the scaffolder invocation) is
+    invocation-specific and is always shown, regardless of disclosure state.
+    """
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> PlanNumberHelperHandler:
+        handler = PlanNumberHelperHandler()
+        handler._workspace_root = tmp_path
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        return handler
+
+    def _hook_input(self, command: str, transcript_path: str) -> dict[str, Any]:
+        hook_input = _bash(command)
+        hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
+    )
+    def test_discovery_deny_leads_with_rule_id(
+        self, mock_get_next: Any, handler: PlanNumberHelperHandler
+    ) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        mock_get_next.return_value = "00042"
+        result = handler.handle(
+            self._hook_input(
+                "ls -d CLAUDE/Plan/0* | sort -V | tail -1", "/tmp/agent-a/transcript.jsonl"
+            )
+        )
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_NUMBER_DISCOVERY}]")
+
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
+    )
+    def test_discovery_first_fire_is_verbose(
+        self, mock_get_next: Any, handler: PlanNumberHelperHandler
+    ) -> None:
+        mock_get_next.return_value = "00042"
+        result = handler.handle(
+            self._hook_input("ls -d CLAUDE/Plan/0* | tail -1", "/tmp/agent-a/transcript.jsonl")
+        )
+        assert "different branches" in result.reason
+
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
+    )
+    def test_discovery_second_fire_is_terse_but_still_names_number(
+        self, mock_get_next: Any, handler: PlanNumberHelperHandler
+    ) -> None:
+        mock_get_next.return_value = "00042"
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("ls -d CLAUDE/Plan/0* | tail -1", transcript_path))
+        mock_get_next.return_value = "00043"
+        result = handler.handle(self._hook_input("ls -d CLAUDE/Plan/0* | tail -1", transcript_path))
+        assert "different branches" not in result.reason
+        assert "Fix:" in result.reason
+        assert "00043" in result.reason
+
+    def test_mkdir_deny_leads_with_rule_id(self, handler: PlanNumberHelperHandler) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        plan_dir = handler._workspace_root / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / "mkplan.bash").write_text("#!/usr/bin/env bash\n")
+
+        result = handler.handle(
+            self._hook_input(
+                "mkdir -p CLAUDE/Plan/00250-some-feature", "/tmp/agent-a/transcript.jsonl"
+            )
+        )
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_FOLDER_MKDIR}]")
+
+    def test_mkdir_second_fire_is_terse_but_still_names_scaffolder(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        plan_dir = handler._workspace_root / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / "mkplan.bash").write_text("#!/usr/bin/env bash\n")
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+
+        handler.handle(
+            self._hook_input("mkdir -p CLAUDE/Plan/00250-some-feature", transcript_path)
+        )
+        result = handler.handle(
+            self._hook_input("mkdir -p CLAUDE/Plan/00251-another-feature", transcript_path)
+        )
+        assert "Fix:" in result.reason
+        assert "mkplan.bash" in result.reason
+        assert "another-feature" in result.reason

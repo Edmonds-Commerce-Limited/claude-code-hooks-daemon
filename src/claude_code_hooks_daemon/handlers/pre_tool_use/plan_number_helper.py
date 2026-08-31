@@ -31,9 +31,11 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import GatingResult
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     PLAN_NUMBER_WIDTH,
     next_plan_number_for_target,
@@ -89,6 +91,61 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         self._workspace_root: Path = ProjectContext.project_root()
         self._track_plans_in_project: str | None = None  # Path to plan folder or None
         self._plan_workflow_docs: str | None = None  # Path to workflow doc or None
+
+        self._rule_discovery = Rule(
+            rule_id=RuleID.PLAN_NUMBER_DISCOVERY,
+            blocked="a bash discovery scan (ls/find/sort+tail) for the next plan number",
+            why="Misses subdirectories like Completed/ and disagrees across branches",
+            fix="Use the printed next plan number, or the git counter directly",
+            verbose=(
+                "Folder scans miss plans archived in Completed/ (and other "
+                "subdirectories), and different branches can disagree about "
+                "which plans exist -- so a scan-derived number is not "
+                "trustworthy. The daemon tracks the next plan number in a "
+                "per-repo git config counter (hooksdaemon.latestPlanNumber) "
+                "instead, which stays correct across branches."
+            ),
+        )
+        self._rule_mkdir = Rule(
+            rule_id=RuleID.PLAN_FOLDER_MKDIR,
+            blocked="`mkdir <plan-dir>/NNNNN-name` (hand-creating a plan folder)",
+            why="Claims a plan number the moment the folder appears, but "
+            "nothing records the claim until PLAN.md is written",
+            fix="Use the mkplan.bash scaffolder instead",
+            verbose=(
+                "The number is claimed the moment the folder appears, but "
+                "nothing records the claim until PLAN.md is written. A "
+                "concurrent agent reading the git counter in between is "
+                "handed the SAME number, and nothing catches the collision "
+                "until the commit gate -- by which point both folders exist.\n\n"
+                "The scaffolder takes a lock, allocates atomically from "
+                "hooksdaemon.latestPlanNumber, creates the folder, scaffolds "
+                "PLAN.md and advances the counter -- so concurrent runs can "
+                "never collide on a number."
+            ),
+        )
+        self._formatter = RuleFormatter()
+
+    def get_rules(self) -> list[Rule]:
+        """Return the 2 Rule objects backing this handler's deny paths."""
+        return [self._rule_discovery, self._rule_mkdir]
+
+    def _render(self, rule: Rule, hook_input: dict[str, Any]) -> str:
+        """Render `rule` via the verbose-first/terse-after disclosure ladder.
+
+        Keyed on (transcript_path, rule_id) via the shared DisclosureTracker
+        (Plan 00116, Decision G). A missing transcript_path fails toward
+        verbose every time (no key to track against).
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
+            return self._formatter.terse(rule)
+
+        if transcript_path:
+            tracker.mark_disclosed(transcript_path, rule.rule_id)
+        return self._formatter.verbose(rule)
 
     def _new_plan_folder_in_mkdir(self, command: str) -> str | None:
         """The plan folder a ``mkdir`` in ``command`` would CREATE, else ``None``.
@@ -148,28 +205,24 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
 
         return candidate
 
-    def _deny_hand_rolled_creation(self, plan_folder: str) -> GatingResult:
+    def _deny_hand_rolled_creation(
+        self, plan_folder: str, hook_input: dict[str, Any]
+    ) -> GatingResult:
         """Redirect a hand-rolled plan-folder creation to the scaffolder."""
         folder_name = plan_folder.rsplit("/", 1)[-1]
         name_match = re.match(rf"\d{{1,{PLAN_NUMBER_WIDTH}}}-(.+)$", folder_name)
         kebab_name = name_match.group(1) if name_match else folder_name
 
-        return GatingResult.deny(
-            reason=(
-                f"🚫 BLOCKED: `{_MKDIR_COMMAND} {plan_folder}` hand-creates a plan folder.\n\n"
-                "The number is claimed the moment the folder appears, but nothing "
-                "records the claim until PLAN.md is written. A concurrent agent "
-                "reading the git counter in between is handed the SAME number, and "
-                "nothing catches the collision until the commit gate -- by which "
-                "point both folders exist.\n\n"
-                "💡 Use the scaffolder instead. It takes a lock, allocates atomically "
-                "from `hooksdaemon.latestPlanNumber`, creates the folder, scaffolds "
-                "PLAN.md and advances the counter:\n\n"
-                f'    {self._track_plans_in_project}/{MKPLAN_SCRIPT_NAME} "{kebab_name}"\n\n'
-                "It prints the new folder path on stdout. You still add the README "
-                "index row yourself."
-            )
+        message = self._render(self._rule_mkdir, hook_input)
+        # The exact command and scaffolder invocation are invocation-specific
+        # and always shown, regardless of disclosure state.
+        message += (
+            f"\n\nCommand: `{_MKDIR_COMMAND} {plan_folder}`\n\n"
+            f'    {self._track_plans_in_project}/{MKPLAN_SCRIPT_NAME} "{kebab_name}"\n\n'
+            "It prints the new folder path on stdout. You still add the README "
+            "index row yourself."
         )
+        return GatingResult.deny(reason=message)
 
     @staticmethod
     def _extracts_latest(command: str) -> bool:
@@ -425,41 +478,38 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         command = hook_input.get(HookInputField.TOOL_INPUT, {}).get("command", "")
         hand_rolled_folder = self._new_plan_folder_in_mkdir(command)
         if hand_rolled_folder is not None:
-            return self._deny_hand_rolled_creation(hand_rolled_folder)
+            return self._deny_hand_rolled_creation(hand_rolled_folder, hook_input)
 
         # Get next plan number (git-anchored: per-repo counter, trusted when
         # present, bootstrapped from a filesystem scan when absent).
+        message = self._render(self._rule_discovery, hook_input)
+
         try:
             plan_base = self._workspace_root / self._track_plans_in_project
             next_number = next_plan_number_for_target(
                 plan_base, self._track_plans_in_project, self._workspace_root
             )
 
-            reason_message = (
-                f"🚫 BLOCKED: This command won't find all plans (misses subdirectories like Completed/).\n\n"
-                f"💡 Next plan number is {next_number}. "
-                f"Use this instead of bash commands to discover plan numbers."
-            )
+            # The next plan number is invocation-specific and is always shown,
+            # regardless of disclosure state -- it is the concrete answer, not
+            # teaching content.
+            message += f"\n\nNext plan number is {next_number}. Use this instead of bash commands to discover plan numbers."
 
             # Add workflow docs reference if configured
             if self._plan_workflow_docs:
                 workflow_path = self._workspace_root / self._plan_workflow_docs
                 if workflow_path.exists():
-                    reason_message += (
+                    message += (
                         f"\n📖 See `{self._plan_workflow_docs}` for plan structure and conventions."
                     )
 
-            return GatingResult.deny(reason=reason_message)
+            return GatingResult.deny(reason=message)
 
         except Exception as e:
             # Gracefully handle errors - still block the broken command
-            reason_message = (
-                f"🚫 BLOCKED: This command won't find all plans.\n\n"
-                f"⚠️ Could not determine next plan number ({e}). "
-                f"Starting from 00001 if this is a new project."
-            )
+            message += f"\n\n⚠️ Could not determine next plan number ({e}). Starting from 00001 if this is a new project."
 
-            return GatingResult.deny(reason=reason_message)
+            return GatingResult.deny(reason=message)
 
     def get_claude_md(self) -> str | None:
         return (
