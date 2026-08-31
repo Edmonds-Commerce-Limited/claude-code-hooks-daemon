@@ -19,6 +19,26 @@ nothing at the git root, concludes the project "doesn't have" that toolchain,
 and quietly stops enforcing — the guard is inert and nobody is told. That is
 strictly worse than a loud failure, because the repository looks protected.
 
+## Projects are declared, never inferred
+
+The fix is **not** to make the daemon work the boundaries out for itself.
+Inferring them would reintroduce the very failure being fixed, one level up: a
+wrongly-inferred boundary leaves enforcement looking healthy while pointing at
+the wrong tree, and nothing says so. The original defect was never "enforcement
+was off" — it was "enforcement was off and the only way to find out was to read
+the handler source".
+
+So resolution has exactly two layers:
+
+1. **Declared** — a `projects:` entry in `.claude/hooks-daemon.yaml`.
+2. **Project root** — when nothing is declared. This is a single-project
+   repository's behaviour, unchanged.
+
+A repository that looks like a monorepo but declares nothing keeps today's
+behaviour and gets a **loud advisory** naming the workspaces found and the
+config block to paste. It does not get a guess. See
+[Detection advises, never decides](#detection-advises-never-decides).
+
 ## The contract
 
 ```python
@@ -27,61 +47,37 @@ from claude_code_hooks_daemon.core.workspace import Workspace
 workspace = Workspace.for_path(edited_file, ProjectContext.project_root())
 ```
 
-Walk up from the file's own directory to the **nearest** recognised manifest,
-stopping at and including the project root. The returned `Workspace` is frozen
-and carries four facts:
+The returned `Workspace` is frozen and carries four facts:
 
 | Field      | Meaning                                                                        |
 | ---------- | ------------------------------------------------------------------------------ |
-| `root`     | Directory holding the resolved manifest, or the project root when none found   |
-| `kind`     | `node`, `php`, `python`, `go`, `rust`, or `unknown` for the fallback           |
-| `manifest` | Absolute path to the manifest that resolved it, or `None` for the fallback     |
+| `root`     | The declared project's root, or the project root when nothing is declared      |
+| `kind`     | `node`, `php`, `python`, `go`, `rust`, or `unknown`                            |
+| `manifest` | Absolute path to the manifest found at `root`, or `None` when there is none    |
 | `bin_dirs` | Absolute tool-binary directories, ecosystem order; existence is not guaranteed |
 
-### Manifest precedence
+## Declaring projects
 
-`_MANIFEST_KINDS` is the extension point — one entry per ecosystem, in
-precedence order, used only to break ties **within a single directory**:
+```yaml
+# Omitted entirely == one project at the repo root == today's behaviour.
+projects:
+  - name: web
+    root: web
+  - name: service
+    root: service
+  - name: infra
+    root: infra
+    kind: ansible # no manifest here at all — declaration is the ONLY way
+    bin_dirs: [.venv/bin]
+```
 
-| Manifest         | Kind     | Bin dirs                |
-| ---------------- | -------- | ----------------------- |
-| `package.json`   | `node`   | `node_modules/.bin`     |
-| `composer.json`  | `php`    | `vendor/bin`            |
-| `pyproject.toml` | `python` | `.venv/bin`, `venv/bin` |
-| `go.mod`         | `go`     | —                       |
-| `Cargo.toml`     | `rust`   | —                       |
+`root` is the only required field beside `name`. The nearest declared root
+containing the file wins when two nest.
 
-Depth beats precedence: a `package.json` two directories up loses to a
-`composer.json` in the file's own directory. Nearest always wins.
-
-### Why the fallback is the git root
-
-When no manifest is found the resolver returns the project root with kind
-`unknown`. This is what makes adoption safe: **a single-root repository
-resolves exactly what `ProjectContext.project_root()` used to return**, so
-routing a handler through the resolver is a no-op there and needs no
-configuration. Monorepo support is therefore not a mode to switch on.
-
-### Files outside the project root
-
-The project-root stop only applies to files under it. For a file elsewhere on
-the filesystem the walk still never ascends past that file's own filesystem
-root, and a manifest found on the way up is honoured; failing that, the
-project-root fallback applies.
-
-## Configuration: declared, then derived, then root
-
-Resolution has three layers, tried in order:
-
-1. **Declared** — a `projects:` entry in `.claude/hooks-daemon.yaml`.
-2. **Derived** — the manifest walk-up described above.
-3. **Project root** — the fallback, so a single-project repo needs nothing.
-
-Declaration exists because **derivation cannot see a workspace that has no
-manifest**. A config-driven toolchain directory — an Ansible tree, a docs site
-with its own `docs/` and `CLAUDE/` — has no `package.json` to walk up to, so
-the walk falls through to the repo root and enforcement silently degrades:
-exactly the failure this whole mechanism exists to remove.
+**A declared project need not contain a manifest.** That is the case
+declaration exists for: a config-driven toolchain directory, or a docs site
+with its own `docs/` and `CLAUDE/` and no `package.json`, is a real project
+with nothing to detect.
 
 Declaring projects to the daemon is NOT the same as adding a manifest to the
 repository. The latter is a bodge — it would declare dependencies the
@@ -89,54 +85,66 @@ repository does not have and create a lockfile nobody installs. A `projects:`
 block puts that knowledge in the daemon's own config, where it costs the
 repository nothing.
 
-**Declaration is a precedence layer, never a requirement.** Omit `projects:`
-and behaviour is exactly the derived-then-root ladder. Making it mandatory
-would charge every single-project repo for a monorepo feature, and a stale
-list would silently disable enforcement for a workspace nobody remembered to
-add — the same silent-degradation class as the original defect.
+### Convention inside a declared boundary
 
-**To support a new ecosystem's automatic detection, add a row to
-`_MANIFEST_KINDS`.** That benefits every consumer at once, and is the right
-fix whenever the ecosystem does have a manifest worth recognising.
+`kind` and `bin_dirs` are optional because they can be filled in by convention
+once the boundary is known: a declared root containing a `package.json` is
+`node` with `node_modules/.bin`. This is not inference about *where a project
+is* — the user drew that line — only about what an ecosystem conventionally
+looks like inside it. Both fields can be stated explicitly to override.
 
-### The knobs that remain, and what they now mean
+| Manifest at root | Kind     | Bin dirs                |
+| ---------------- | -------- | ----------------------- |
+| `package.json`   | `node`   | `node_modules/.bin`     |
+| `composer.json`  | `php`    | `vendor/bin`            |
+| `pyproject.toml` | `python` | `.venv/bin`, `venv/bin` |
+| `go.mod`         | `go`     | —                       |
+| `Cargo.toml`     | `rust`   | —                       |
 
-These are *not* workspace overrides and are not replaced by the resolver:
+## Detection advises, never decides
+
+The same manifest walk that could resolve a workspace is used instead to
+**detect** one: manifests below the repo root with none at it is the signature
+of an unconfigured monorepo. When that shape is seen, the daemon reports the
+workspaces it found and prints the `projects:` block to paste.
+
+That report changes no enforcement decision. Detection informs a human; config
+decides behaviour. Keeping the two apart is the whole point — a detector that
+quietly became a resolver would put the daemon back to guessing.
+
+### The other config surfaces, and what they now mean
 
 - **`markdown_organization.monorepo_subproject_patterns`** — a *documentation
-  layout* sub-project, which need not coincide with a manifest (a docs site
-  with its own `docs/` and `CLAUDE/` and no `package.json` is a real case).
-  This is the same need `projects:` serves, so it becomes a deprecated alias
-  for a `projects:` entry rather than a second mechanism.
+  layout* sub-project. This is the same need `projects:` serves, so it becomes
+  a deprecated alias for a `projects:` entry rather than a second mechanism.
 - **`tdd_enforcement.test_path_map`** — declares where tests for a source glob
-  live. Orthogonal to *which* workspace; the resolver only changes what a
-  relative `test_dir` is resolved against.
+  live. Orthogonal to *which* project; resolution only changes what a relative
+  `test_dir` is anchored against.
 - **`validate_eslint_on_write`'s `workspace_root` constructor argument** — a
   test seam, not user configuration. It is not read from YAML.
-- **`layout.source_dirs` and friends** — roles *within* a workspace, a
-  different axis entirely.
+- **`layout.source_dirs` and friends** — roles *within* a project, a different
+  axis entirely.
 
 ## Known limits
 
 - **Marker files that are not manifests.** `lint_on_edit` resolves a working
-  directory for Go and Ansible via its own `_MODULE_ROOT_MARKERS`. `go.mod` is
-  a manifest and resolves normally; `ansible.cfg` is not, so an Ansible tree
-  with no other manifest would resolve to the fallback. That handler therefore
-  consults its marker FIRST and uses the workspace root only as a fallback —
-  the pattern to copy. A consumer needing such a marker either contributes it
-  to `_MANIFEST_KINDS` or keeps a supplementary lookup ordered ahead of the
-  resolver; it must not silently lose the working directory it had.
+  directory for Go and Ansible via its own `_MODULE_ROOT_MARKERS`, consulted
+  BEFORE the project root. That ordering is the pattern to copy: a consumer
+  with a language-specific marker must not lose the working directory it had.
 - **Nested git repositories are a different concern.** A *different git root*
-  (what the commit gates' `_is_foreign_repo()` detects) is not a workspace.
-  The resolver never crosses into that question.
+  (what the commit gates' `_is_foreign_repo()` detects) is not a project.
+  Resolution never crosses into that question.
 - **`bin_dirs` are paths, not promises.** They are constructed, not probed;
-  callers check existence. This keeps resolution free of filesystem cost
-  beyond the walk itself.
+  callers check existence, keeping resolution free of filesystem cost.
+- **A project nobody declared is invisible.** By design — the daemon reports
+  the shape and waits rather than acting on a guess. The cost is that an
+  unconfigured monorepo stays degraded until someone reads the advisory, which
+  is the trade accepted in exchange for never enforcing against the wrong tree.
 
 ## Adoption
 
-Which handlers currently resolve through this rather than through
+Which handlers currently resolve through `Workspace` rather than through
 `ProjectContext.project_root()` is tracked in
 [Plan 00296](../Plan/00296-monorepo-workspace-resolver/PLAN.md), along with the
 field report that motivated it. A handler that needs a project — not a git
-root — should use this resolver.
+root — should use `Workspace.for_path()`.
