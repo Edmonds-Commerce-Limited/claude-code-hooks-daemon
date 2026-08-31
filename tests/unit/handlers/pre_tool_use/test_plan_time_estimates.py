@@ -7,10 +7,26 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_time_estimates import (
     PlanTimeEstimatesHandler,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module.
+
+    get_data_layer() is a process-wide singleton (Plan 00116, Decision G).
+    Without this, one test's ``mark_disclosed`` leaks into a later test that
+    reuses the same (transcript_path, rule_id) pair.
+    """
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 class TestPlanTimeEstimatesHandler:
@@ -247,27 +263,30 @@ class TestPlanTimeEstimatesHandler:
     # Tests for handle() method
 
     def test_handle_denies_time_estimates(self, handler: PlanTimeEstimatesHandler) -> None:
-        """Handler denies time estimates with appropriate message."""
+        """Handler denies time estimates with appropriate message, leading with the rule ID."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {
                 "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
                 "content": "**Estimated Effort**: 2 hours",
             },
+            "transcript_path": "/tmp/agent-1/transcript.jsonl",
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_TIME_ESTIMATE}]")
         assert "Time estimates not allowed" in result.reason
         assert "/workspace/CLAUDE/Plan/001-test/PLAN.md" in result.reason
 
     def test_handle_explains_why_blocked(self, handler: PlanTimeEstimatesHandler) -> None:
-        """Handler explanation includes reasoning."""
+        """Handler explanation includes reasoning on first fire (verbose)."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {
                 "file_path": "/workspace/CLAUDE/Plan/002-test/PLAN.md",
                 "content": "Target Completion: 2026-02-01",
             },
+            "transcript_path": "/tmp/agent-2/transcript.jsonl",
         }
         result = handler.handle(hook_input)
         assert "WHY:" in result.reason
@@ -275,13 +294,14 @@ class TestPlanTimeEstimatesHandler:
         assert "CORRECT APPROACH:" in result.reason
 
     def test_handle_provides_alternatives(self, handler: PlanTimeEstimatesHandler) -> None:
-        """Handler provides alternative approach guidance."""
+        """Handler provides alternative approach guidance on first fire (verbose)."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {
                 "file_path": "/workspace/CLAUDE/Plan/003-test/PLAN.md",
                 "content": "ETA: 3 weeks",
             },
+            "transcript_path": "/tmp/agent-3/transcript.jsonl",
         }
         result = handler.handle(hook_input)
         assert "Break work into concrete tasks" in result.reason
@@ -550,6 +570,97 @@ class TestPlanTimeEstimatesHandler:
         assert "Plan/" in guidance or "plan document" in lowered
         # Mentions the forbidden estimate kinds
         assert "hour" in lowered or "estimate" in lowered
+
+
+class TestPlanTimeEstimatesGetRules:
+    """get_rules() declares the single Rule backing this handler (Plan 00116)."""
+
+    @pytest.fixture
+    def handler(self) -> PlanTimeEstimatesHandler:
+        """Create handler instance."""
+        return PlanTimeEstimatesHandler()
+
+    def test_returns_one_rule(self, handler: PlanTimeEstimatesHandler) -> None:
+        """get_rules() returns exactly one Rule object."""
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+
+    def test_rule_id_matches_constant(self, handler: PlanTimeEstimatesHandler) -> None:
+        """The declared rule_id is the PLAN_TIME_ESTIMATE constant."""
+        assert handler.get_rules()[0].rule_id == RuleID.PLAN_TIME_ESTIMATE
+
+    def test_rule_has_non_empty_verbose(self, handler: PlanTimeEstimatesHandler) -> None:
+        """The rule's verbose teaching content is non-empty."""
+        assert handler.get_rules()[0].verbose
+
+
+class TestPlanTimeEstimatesDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Plan 00116, Decision G)."""
+
+    @pytest.fixture
+    def handler(self) -> PlanTimeEstimatesHandler:
+        """Create handler instance."""
+        return PlanTimeEstimatesHandler()
+
+    def _hook_input(self, content: str, transcript_path: str) -> dict[str, Any]:
+        return {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
+                "content": content,
+            },
+            "transcript_path": transcript_path,
+        }
+
+    def test_first_fire_for_agent_is_verbose(self, handler: PlanTimeEstimatesHandler) -> None:
+        """The first time the rule fires for a given agent, the block is verbose."""
+        result = handler.handle(
+            self._hook_input("**Estimated Effort**: 2 hours", "/tmp/agent-a/transcript.jsonl")
+        )
+        assert result.decision == Decision.DENY
+        assert "CORRECT APPROACH:" in result.reason
+
+    def test_second_fire_for_same_agent_is_terse(self, handler: PlanTimeEstimatesHandler) -> None:
+        """A repeat fire of the same rule for the same agent is terse."""
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("**Estimated Effort**: 2 hours", transcript_path))
+        result = handler.handle(self._hook_input("ETA: 3 weeks", transcript_path))
+
+        assert result.decision == Decision.DENY
+        assert "CORRECT APPROACH:" not in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PLAN_TIME_ESTIMATE}]")
+        assert "Fix:" in result.reason
+        # File path still appears on every fire, terse or verbose.
+        assert "PLAN.md" in result.reason
+
+    def test_different_agent_is_independently_verbose(
+        self, handler: PlanTimeEstimatesHandler
+    ) -> None:
+        """A sub-agent (different transcript_path) never inherits another agent's disclosure."""
+        handler.handle(
+            self._hook_input("**Estimated Effort**: 2 hours", "/tmp/agent-a/transcript.jsonl")
+        )
+        result = handler.handle(
+            self._hook_input("**Estimated Effort**: 2 hours", "/tmp/agent-b/transcript.jsonl")
+        )
+        assert "CORRECT APPROACH:" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(
+        self, handler: PlanTimeEstimatesHandler
+    ) -> None:
+        """No transcript_path in the payload -> always verbose."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
+                "content": "**Estimated Effort**: 2 hours",
+            },
+        }
+        first = handler.handle(hook_input)
+        second = handler.handle(hook_input)
+        assert "CORRECT APPROACH:" in first.reason
+        assert "CORRECT APPROACH:" in second.reason
 
 
 class TestJournalDayFilesAreExempt:

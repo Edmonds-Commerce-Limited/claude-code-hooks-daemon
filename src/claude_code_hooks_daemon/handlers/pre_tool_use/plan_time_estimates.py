@@ -11,10 +11,28 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
+
+# Single source of truth for the one rule this handler enforces (Plan 00116,
+# Decision B: a handler with one conceptual violation gets one Rule).
+_RULE_WHY = "Time estimates in plans create false expectations and pressure"
+_RULE_FIX = (
+    "Break work into concrete tasks and implementation steps; let the user decide scheduling"
+)
+_RULE_VERBOSE = (
+    "Plans should focus on WHAT needs to be done, not WHEN.\n\n"
+    f"WHY: {_RULE_WHY}.\n\n"
+    "✅ CORRECT APPROACH:\n"
+    "  - Break work into concrete tasks\n"
+    "  - Describe implementation steps\n"
+    "  - Let user decide scheduling\n"
+    "  - Focus on actionable work, not timelines"
+)
 
 
 class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
@@ -76,6 +94,14 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
                 HandlerTag.NON_TERMINAL,
             ],
         )
+        self._rule = Rule(
+            rule_id=RuleID.PLAN_TIME_ESTIMATE,
+            blocked="Time estimates not allowed in plan documents",
+            why=_RULE_WHY,
+            fix=_RULE_FIX,
+            verbose=_RULE_VERBOSE,
+        )
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing time estimates to plan files."""
@@ -136,23 +162,33 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
         """Return True if the line contains a technical-term exemption."""
         return any(re.search(pattern, line, re.IGNORECASE) for pattern in self.TECHNICAL_PATTERNS)
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [self._rule]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block time estimates."""
+        """Block time estimates with a verbose-first/terse-after explanation.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). An event with no
+        transcript_path fails toward verbose every time, since there is no
+        key to track disclosure state against.
+        """
         file_path = get_file_path(hook_input)
+
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, RuleID.PLAN_TIME_ESTIMATE):
+            message = self._formatter.terse(self._rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.PLAN_TIME_ESTIMATE)
+            message = self._formatter.verbose(self._rule)
 
         return GatingResult(
             decision=Decision.DENY,
-            reason=(
-                "🚫 BLOCKED: Time estimates not allowed in plan documents\n\n"
-                f"File: {file_path}\n\n"
-                "Plans should focus on WHAT needs to be done, not WHEN.\n\n"
-                "WHY: Time estimates in plans create false expectations and pressure.\n\n"
-                "✅ CORRECT APPROACH:\n"
-                "  - Break work into concrete tasks\n"
-                "  - Describe implementation steps\n"
-                "  - Let user decide scheduling\n"
-                "  - Focus on actionable work, not timelines"
-            ),
+            reason=f"{message}\n\nFile: {file_path}",
         )
 
     def get_claude_md(self) -> str | None:

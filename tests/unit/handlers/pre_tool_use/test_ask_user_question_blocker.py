@@ -8,9 +8,20 @@ with guidance to state the assumed-correct answer and proceed.
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, HookResult
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 
 REQUIRED_PREFIX = "ASKING BECAUSE:"
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 class TestAskUserQuestionBlockerHandler:
@@ -315,3 +326,92 @@ class TestAskUserQuestionBlockerHandler:
         guidance = handler.get_claude_md()
         assert guidance is not None
         assert "assum" in guidance.lower()
+
+    # ------------------------------------------------------------------
+    # handle() — deny message leads with the rule ID (Plan 00116)
+    # ------------------------------------------------------------------
+    def test_handle_deny_leads_with_rule_id(self, handler):
+        result = handler.handle(
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": "Should I continue?"}]},
+                "transcript_path": "/tmp/agent-1/transcript.jsonl",
+            }
+        )
+        assert result.decision == Decision.DENY
+        assert result.reason.startswith(f"BLOCKED [{RuleID.ASK_USER_QUESTION_UNJUSTIFIED}]")
+
+
+class TestAskUserQuestionBlockerGetRules:
+    """get_rules() declares the single Rule backing strict-mode blocking."""
+
+    @pytest.fixture
+    def handler(self):
+        from claude_code_hooks_daemon.handlers.pre_tool_use.ask_user_question_blocker import (
+            AskUserQuestionBlockerHandler,
+        )
+
+        return AskUserQuestionBlockerHandler()
+
+    def test_returns_one_rule(self, handler):
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+
+    def test_rule_id_matches_constant(self, handler):
+        assert handler.get_rules()[0].rule_id == RuleID.ASK_USER_QUESTION_UNJUSTIFIED
+
+    def test_rule_has_non_empty_verbose(self, handler):
+        assert handler.get_rules()[0].verbose
+
+
+class TestAskUserQuestionBlockerDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Plan 00116, Decision G)."""
+
+    @pytest.fixture
+    def handler(self):
+        from claude_code_hooks_daemon.handlers.pre_tool_use.ask_user_question_blocker import (
+            AskUserQuestionBlockerHandler,
+        )
+
+        return AskUserQuestionBlockerHandler()
+
+    def _hook_input(self, question: str, transcript_path: str):
+        return {
+            "tool_name": "AskUserQuestion",
+            "tool_input": {"questions": [{"question": question}]},
+            "transcript_path": transcript_path,
+        }
+
+    def test_first_fire_for_agent_is_verbose(self, handler):
+        result = handler.handle(
+            self._hook_input("Should I continue?", "/tmp/agent-a/transcript.jsonl")
+        )
+        assert "TAUTOLOGICAL QUESTIONS" in result.reason
+
+    def test_second_fire_for_same_agent_is_terse(self, handler):
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("Should I continue?", transcript_path))
+        result = handler.handle(self._hook_input("Should I bodge it?", transcript_path))
+
+        assert result.decision == Decision.DENY
+        assert "TAUTOLOGICAL QUESTIONS" not in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.ASK_USER_QUESTION_UNJUSTIFIED}]")
+        assert "Fix:" in result.reason
+
+    def test_different_agent_is_independently_verbose(self, handler):
+        handler.handle(self._hook_input("Should I continue?", "/tmp/agent-a/transcript.jsonl"))
+        result = handler.handle(
+            self._hook_input("Should I continue?", "/tmp/agent-b/transcript.jsonl")
+        )
+        assert "TAUTOLOGICAL QUESTIONS" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(self, handler):
+        hook_input = {
+            "tool_name": "AskUserQuestion",
+            "tool_input": {"questions": [{"question": "Should I continue?"}]},
+        }
+        first = handler.handle(hook_input)
+        second = handler.handle(hook_input)
+        assert "TAUTOLOGICAL QUESTIONS" in first.reason
+        assert "TAUTOLOGICAL QUESTIONS" in second.reason

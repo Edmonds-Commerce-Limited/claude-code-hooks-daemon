@@ -29,17 +29,23 @@ from __future__ import annotations
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 
 # Defaults / option keys — no magic strings
 DEFAULT_REQUIRED_PREFIX = "ASKING BECAUSE:"
 MODE_STRICT = "strict"
 MODE_ADVISORY = "advisory"
 
-_DENY_REASON_TEMPLATE = (
-    "BLOCKED: AskUserQuestion without `{prefix}` prefix.\n\n"
+# Full first-fire teaching content (Plan 00116). The prefix is a runtime
+# option (overridable per-handler-instance, even after construction — see
+# test_custom_required_prefix_override), so the Rule this handler denies
+# with is built fresh from the CURRENT prefix on every call rather than
+# fixed once in __init__.
+_RULE_VERBOSE_TEMPLATE = (
     "This handler enforces a prefix-positive policy mirroring the Stop "
     "handler's `STOPPING BECAUSE:` convention. Asking the user pauses the "
     "session; the daemon will only let a question through when you have "
@@ -91,10 +97,35 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
             priority=Priority.ASK_USER_QUESTION_BLOCKER,
             tags=[HandlerTag.WORKFLOW, HandlerTag.TERMINAL],
         )
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Return True only for AskUserQuestion tool calls."""
         return hook_input.get(HookInputField.TOOL_NAME) == ToolName.ASK_USER_QUESTION
+
+    @staticmethod
+    def _build_rule(prefix: str) -> Rule:
+        """Build the Rule for the given prefix.
+
+        The prefix is a runtime option that can change even after
+        construction (``handler._required_prefix = "..."``), so the Rule is
+        built fresh from the CURRENT prefix on every call rather than fixed
+        once in ``__init__``.
+        """
+        return Rule(
+            rule_id=RuleID.ASK_USER_QUESTION_UNJUSTIFIED,
+            blocked=f"AskUserQuestion without `{prefix}` prefix",
+            why="Asking pauses the session for a question the daemon cannot verify was necessary",
+            fix=(
+                f"State the assumed answer in output text and proceed, or retry every "
+                f"question prefixed `{prefix} <reason>`"
+            ),
+            verbose=_RULE_VERBOSE_TEMPLATE.format(prefix=prefix),
+        )
+
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's strict-mode blocking."""
+        return [self._build_rule(DEFAULT_REQUIRED_PREFIX)]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Allow if every question carries the required prefix; otherwise act per mode."""
@@ -118,9 +149,22 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
                 guidance=advisory_text,
             )
 
+        rule = self._build_rule(prefix)
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(
+            transcript_path, RuleID.ASK_USER_QUESTION_UNJUSTIFIED
+        ):
+            message = self._formatter.terse(rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.ASK_USER_QUESTION_UNJUSTIFIED)
+            message = self._formatter.verbose(rule)
+
         return GatingResult(
             decision=Decision.DENY,
-            reason=_DENY_REASON_TEMPLATE.format(prefix=prefix),
+            reason=message,
         )
 
     @staticmethod
