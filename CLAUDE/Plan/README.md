@@ -88,7 +88,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - User-directed design: enforce by **blocking at the daemon layer**, not by disabling Claude's own (unreliable) memory engine
   - Deferred follow-ups: a scaffolding skill (inventory docs, `@`-import audit, auto-build rules/skills) and dogfooding the policy in this repo (migrate `MEMORY.md` into tracked docs)
 
-- [00116: CLAUDE.md Token Compression via Stateful Progressive Disclosure](00116-claude-md-token-compression/PLAN.md) - In Progress (Phases 1–2 complete and merged; Phase 3 pending tracker-wiring decision)
+- [00116: CLAUDE.md Token Compression via Stateful Progressive Disclosure](Completed/00116-claude-md-token-compression/PLAN.md) - Complete at `ba8860ed` + the archiving commit (two-tier injected block live at 63.6% shrink; 46 handlers on Rule/DisclosureTracker; block-report data-driven promotion; explain-rule CLI+skill)
 
   - Compresses the always-resident CLAUDE.md via stateful progressive disclosure so handler guidance loads on demand rather than inflating every session's base context; Phases 1–2 merged, Phase 3 awaits a tracker-wiring decision
 
@@ -1289,15 +1289,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 294 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 243 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 244 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 36 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
 - **Cancelled/Abandoned**: 7 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213)
 
-- **Folder-to-number reconciliation**: 37 + 243 + 7 = **287 folders**, spanning
+- **Folder-to-number reconciliation**: 36 + 244 + 7 = **287 folders**, spanning
   **284 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
@@ -1306,7 +1306,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   00145, 00191, 00195, 00210, 00258 — abandoned drafts, numbers burned by
   transient probes (00195 during the v3.51.0 acceptance run, 00258 during the
   v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a sub-agent
-  that then found Plan 00208 already covered the work). Plans 00288, 00289, 00290, 00292 and 00294
+  that then found Plan 00208 already covered the work). Plans 00116, 00288, 00289, 00290, 00292 and 00294
   are on disk under `Completed/`, counted in the 284 distinct numbers above.
   284 + 10 = 294. ✅
 
