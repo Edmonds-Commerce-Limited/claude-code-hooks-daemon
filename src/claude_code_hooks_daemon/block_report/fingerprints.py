@@ -2,32 +2,53 @@
 
 A transcript records a hook denial as the DENIED tool call's ``reason``
 text, not the handler that produced it — the daemon does not stamp a
-handler id onto the record. To attribute a denial to a handler, this module
-matches the recorded text against a table of distinctive literal
-substrings, one entry per blocking handler, copied VERBATIM from that
-handler's own deny-reason source (never paraphrased, so a substring here
-is provably present in the handler's real output).
+handler id onto the record. :func:`attribute_deny` resolves a recorded
+deny text back to a handler's config key in two stages:
+
+1. **Primary — rule-ID extraction.** Every handler migrated onto
+   ``Handler.get_rules() -> list[Rule]`` renders its deny text through
+   ``RuleFormatter``, which always leads with ``"BLOCKED [R-<ID>]: ..."``
+   (see ``core/rule.py``). This stage extracts that bracketed rule ID and
+   looks it up in an index built from ``rule_explain.lookup.discover_handler_rules``
+   — the same rule/handler enumeration ``explain-rule`` uses — mapping the
+   ID to its owning handler's config key. This covers every migrated
+   handler automatically; no per-handler literal needs maintaining here.
+2. **Fallback — literal fragment table.** :data:`FINGERPRINT_TABLE` below
+   matches a table of distinctive literal substrings captured from
+   handlers' PRE-migration deny-reason text. This is load-bearing for
+   attributing OLDER transcripts recorded before a handler migrated onto
+   ``get_rules()`` — those denials never contained a ``BLOCKED [R-...]``
+   header, so stage 1 cannot resolve them, and re-scanning session history
+   is the entire point of this module.
 
 Coverage: every ``handlers/pre_tool_use/*.py`` module with a
-``Decision.DENY`` path was read to source its fingerprint(s). Two pairs of
-handlers were found to share their entire deny-message HEADER with no
-other stable literal distinguishing them without also inspecting the
-paired tool_use's tool name (out of scope for a content-only, privacy-safe
-scan): ``plan_qa_edit`` / ``plan_qa_commit_gate`` both lead with
-``"Plan QA violation(s) — fix before retrying:"`` (``plan_qa/report.py``),
-and ``docs_qa_edit`` / ``docs_qa_commit_gate`` both lead with
-``"Docs QA violation(s) — fix before retrying:"`` (``docs_qa/report.py``).
-Those four handlers are deliberately NOT in :data:`FINGERPRINT_TABLE`; see
-:data:`UNRESOLVED_HANDLER_PAIRS`.
+``Decision.DENY`` path was read to source its fallback fingerprint(s). Two
+pairs of handlers were found to share their entire deny-message HEADER
+with no other stable literal distinguishing them without also inspecting
+the paired tool_use's tool name (out of scope for a content-only,
+privacy-safe scan): ``plan_qa_edit`` / ``plan_qa_commit_gate`` both lead
+with ``"Plan QA violation(s) — fix before retrying:"``
+(``plan_qa/report.py``), and ``docs_qa_edit`` / ``docs_qa_commit_gate``
+both lead with ``"Docs QA violation(s) — fix before retrying:"``
+(``docs_qa/report.py``). Those four handlers are deliberately NOT in
+:data:`FINGERPRINT_TABLE`; see :data:`UNRESOLVED_HANDLER_PAIRS`.
 
-Fingerprint fragments are checked as case-sensitive substrings — the
-denial text is the handler's own generated reason, so exact literal
+Fallback fingerprint fragments are checked as case-sensitive substrings —
+the denial text is the handler's own generated reason, so exact literal
 matching is deliberately strict rather than fuzzy.
 """
 
 from __future__ import annotations
 
+import re
+from functools import lru_cache
+
 from claude_code_hooks_daemon.constants.handlers import HandlerID
+from claude_code_hooks_daemon.rule_explain.lookup import discover_handler_rules
+
+# Matches the leading header every RuleFormatter-rendered deny text carries
+# (both ``.terse()`` and ``.verbose()`` start with this — see core/rule.py).
+_RULE_ID_HEADER_PATTERN = re.compile(r"BLOCKED \[(R-[A-Z0-9-]+)\]")
 
 # One entry per blocking handler that could be attributed from a stable
 # literal fragment of its own deny-reason text. Every fragment below is
@@ -133,18 +154,47 @@ UNRESOLVED_HANDLER_PAIRS: dict[str, str] = {
 }
 
 
+@lru_cache(maxsize=1)
+def _rule_id_to_config_key() -> dict[str, str]:
+    """Build a ``rule_id -> handler config_key`` index from every discovered rule.
+
+    Reuses ``rule_explain.lookup.discover_handler_rules`` (the same
+    enumeration ``explain-rule`` uses) rather than duplicating handler
+    discovery here. Cached because handler discovery walks the package on
+    every call and the result is immutable for the life of the process.
+
+    Returns:
+        Mapping of upper-cased rule ID to its owning handler's config key.
+    """
+    return {
+        rule.rule_id.upper(): handler.config_key
+        for handler in discover_handler_rules()
+        for rule in handler.rules
+    }
+
+
 def attribute_deny(text: str) -> str | None:
     """Attribute one deny-reason text to a handler's config key.
+
+    Tries rule-ID extraction first (covers every handler migrated onto
+    ``get_rules()``), then falls back to :data:`FINGERPRINT_TABLE` literal
+    matching for pre-migration historical transcript text.
 
     Args:
         text: The deny-reason text recorded in a transcript's tool_result.
 
     Returns:
-        The matching handler's ``config_key``, or ``None`` when no
-        fingerprint matches, or when more than one handler's fingerprints
-        match the same text (an ambiguous match is reported as unattributed
-        rather than guessed).
+        The matching handler's ``config_key``, or ``None`` when neither
+        stage resolves the text, or when the fallback stage's fragments
+        match more than one handler (an ambiguous match is reported as
+        unattributed rather than guessed).
     """
+    header_match = _RULE_ID_HEADER_PATTERN.search(text)
+    if header_match is not None:
+        config_key = _rule_id_to_config_key().get(header_match.group(1).upper())
+        if config_key is not None:
+            return config_key
+
     matches = [
         handler
         for handler, fragments in FINGERPRINT_TABLE.items()
