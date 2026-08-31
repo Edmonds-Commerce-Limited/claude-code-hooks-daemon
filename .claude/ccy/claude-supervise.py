@@ -997,6 +997,35 @@ _MODEL_RESTORE_BACKOFF_SECONDS = 3600.0
 _MAX_MODEL_RESTORES = 2
 _DRY_RUN_MODEL_BODY_PREFIX = "would inject /model (dry-run — no real /model sent):"
 
+# ── DROP ANCHOR: fable-above-low invariant (Plan 00297) ─────────────────────
+# On 2026-08-31 the effort floor injected `/effort xhigh` on Opus; a model
+# flip to Fable carried the xhigh over; the follow-up `/effort low`
+# injection was SWALLOWED by a busy session while the audit recorded it
+# done -- Fable ran at XHIGH for roughly an hour. The floor/coupled-effort
+# machinery above cannot by construction catch this: the floor family only
+# ever RAISES effort (see its INVARIANT docstring), and the one-shot
+# post-/model-switch correction is marked done on a successful PTY WRITE,
+# never on a verified read-back of the session's actual state. DROP ANCHOR
+# is a SEPARATE, continuously re-evaluated invariant -- `model == fable`
+# implies `effort == low` -- checked on every fresh, non-stale sidecar
+# reading, with its own retry cooldown and escalation bound, independent of
+# the floor mechanism's cap/cooldown so an unverified violation always keeps
+# retrying.
+_ANCHOR_TARGET_EFFORT = "low"
+# Own, tighter cooldown than `_EFFORT_REINJECT_COOLDOWN_SECONDS` -- an
+# active anchor must retry aggressively, but still not spam every tick.
+_ANCHOR_RETRY_COOLDOWN_SECONDS = 25.0
+# After this many injection attempts with no verified read-back, OR after
+# this much wall-clock since the violation was first observed (whichever
+# comes first), the anchor is considered ESCALATED: the host posts a loud
+# owner-facing alert (see `supervise()`) while continuing to retry.
+_ANCHOR_MAX_ATTEMPTS = 3
+_ANCHOR_ESCALATION_BOUND_SECONDS = 300.0
+_ANCHOR_ALERT_TEXT = (
+    "🚨 DROP ANCHOR: fable stuck above low effort after repeated /effort low "
+    "attempts — owner attention needed (see decision.log)"
+)
+
 
 def _parse_model_restore_delay(raw: str) -> float:
     """Parse the restore-delay override.
@@ -1321,6 +1350,13 @@ class TickOutcome:
     # lifecycle and must not eat into the flag-compaction budget. False for
     # every other decision and for legacy replies without the field.
     is_flag_compact: bool = False
+    # Plan 00297: True only for the DROP ANCHOR emergency `/effort low`
+    # correction, so the HOST records the attempt against the anchor's own
+    # bookkeeping (`mark_anchor_injection`) rather than the floor/coupled
+    # mechanisms' -- the anchor is verified by read-back only, never by a
+    # successful PTY write. False for every other decision and for legacy
+    # replies without the field.
+    is_anchor_injection: bool = False
 
 
 def _coerce_float(value: object) -> float:
@@ -2347,6 +2383,16 @@ class CompactStateMachine:
         # (/model, /effort) since the last flush. Flushed as ONE visible
         # bot-prefixed message on the next injectable tick; bounded FIFO.
         self._audit_pending: list[str] = []
+        # Plan 00297: DROP ANCHOR invariant state -- whether it is currently
+        # active (a fresh, non-stale reading last showed fable above low
+        # effort), when it was first observed, the last injection attempt
+        # timestamp (its own retry cooldown, separate from the floor
+        # mechanism's), and how many attempts have been made without a
+        # verified read-back correcting it.
+        self._anchor_active: bool = False
+        self._anchor_started_ts: float | None = None
+        self._anchor_last_injected_ts: float | None = None
+        self._anchor_attempts: int = 0
 
     @property
     def effort_pending(self) -> str | None:
@@ -2463,11 +2509,24 @@ class CompactStateMachine:
         This BYPASSES the raise-only invariant that governs the floor-based
         ``_effort_pending`` family: lowering fable to its floor is the
         entire point.
+
+        DROP ANCHOR clamp (Plan 00297): the top-ranked family's configured
+        floor is clamped to ``_ANCHOR_TARGET_EFFORT`` when it would resolve
+        ABOVE that ceiling -- e.g. a ``CCY_MIN_EFFORT_LEVELS`` misconfigured
+        with an Opus-era ``fable=xhigh`` override. Fable-above-low is banned
+        unconditionally by the anchor invariant, not merely by the default
+        floor value, so this path must never hand out anything higher.
         """
         if _family_rank(family) == _TOP_FAMILY_RANK:
-            return self._policy.min_effort_levels.get(
+            configured = self._policy.min_effort_levels.get(
                 family, _DEFAULT_MIN_EFFORT_LEVELS.get(family, _DOWNGRADE_TARGET_EFFORT)
             )
+            if (
+                configured not in _EFFORT_RANKS
+                or _EFFORT_RANKS[configured] > _EFFORT_RANKS[_ANCHOR_TARGET_EFFORT]
+            ):
+                return _ANCHOR_TARGET_EFFORT
+            return configured
         return _DOWNGRADE_TARGET_EFFORT
 
     @property
@@ -2532,6 +2591,99 @@ class CompactStateMachine:
         """
         self._audit_pending = []
 
+    # ── DROP ANCHOR (Plan 00297) ─────────────────────────────────────────
+
+    @property
+    def anchor_active(self) -> bool:
+        """True while the DROP ANCHOR invariant is observed violated.
+
+        Cleared ONLY by a later fresh reading showing verified read-back
+        (fable at low effort, or the family moving off fable entirely) --
+        never by an injection attempt succeeding on the wire, which is
+        exactly the inject-and-assume defect this closes.
+        """
+        return self._anchor_active
+
+    @property
+    def anchor_attempts(self) -> int:
+        """How many `/effort low` attempts the anchor has fired this episode."""
+        return self._anchor_attempts
+
+    @property
+    def anchor_started_ts(self) -> float | None:
+        """Wall-clock time the current anchor episode was first observed."""
+        return self._anchor_started_ts
+
+    def _evaluate_anchor(self, *, family: str, effort: str | None, now_wall: float) -> None:
+        """Continuously re-check `model == fable implies effort == low`.
+
+        An UNKNOWN effort reading (older sidecar, or a race before the
+        first render) never counts as evidence either way -- it neither
+        engages nor clears an anchor, because a guess must never stand in
+        for a verified read-back in either direction.
+        """
+        if effort is None or effort not in _EFFORT_RANKS:
+            return
+        violated = (
+            family == "fable" and _EFFORT_RANKS[effort] > _EFFORT_RANKS[_ANCHOR_TARGET_EFFORT]
+        )
+        if violated:
+            if not self._anchor_active:
+                self._anchor_active = True
+                self._anchor_started_ts = now_wall
+                self._anchor_attempts = 0
+            return
+        if self._anchor_active:
+            # Invariant holds again -- either fable is verified at low, or
+            # the model has moved off fable entirely (the invariant no
+            # longer applies to it).
+            self._anchor_active = False
+            self._anchor_started_ts = None
+            self._anchor_last_injected_ts = None
+            self._anchor_attempts = 0
+
+    def anchor_injection_due(self, now_wall: float) -> bool:
+        """True when the anchor should (re)inject `/effort low` this tick.
+
+        Its OWN cooldown (`_ANCHOR_RETRY_COOLDOWN_SECONDS`) -- deliberately
+        NOT the floor mechanism's `_EFFORT_REINJECT_COOLDOWN_SECONDS` or
+        `_MAX_EFFORT_INJECTIONS` cap, both of which an unverified anchor
+        violation must bypass so it keeps retrying rather than going quiet
+        because an unrelated budget was spent.
+        """
+        if not self._anchor_active:
+            return False
+        if self._anchor_last_injected_ts is None:
+            return True
+        return now_wall - self._anchor_last_injected_ts >= _ANCHOR_RETRY_COOLDOWN_SECONDS
+
+    def mark_anchor_injection(self, now_wall: float) -> None:
+        """Record an anchor `/effort low` attempt (HOST, successful PTY write only).
+
+        Deliberately does NOT clear `anchor_active` -- a PTY write
+        succeeding proves nothing about whether the session actually
+        applied it (the live incident: swallowed by a busy session). Only
+        `_evaluate_anchor` observing a later verified read-back clears it.
+        """
+        self._anchor_last_injected_ts = now_wall
+        self._anchor_attempts += 1
+
+    def anchor_escalated_at(self, now_wall: float) -> bool:
+        """True once the anchor has exceeded its attempt or time bound.
+
+        Escalation does not change injection behaviour (the anchor keeps
+        retrying either way) -- it is purely the signal the HOST uses to
+        post a loud, rate-limited owner-facing alert (Plan 00297 Task 2.2).
+        """
+        if not self._anchor_active:
+            return False
+        if self._anchor_attempts >= _ANCHOR_MAX_ATTEMPTS:
+            return True
+        return (
+            self._anchor_started_ts is not None
+            and now_wall - self._anchor_started_ts >= _ANCHOR_ESCALATION_BOUND_SECONDS
+        )
+
     @property
     def last_model_session(self) -> str | None:
         """The most recently observed foreground session id, or None (Plan 00278)."""
@@ -2569,6 +2721,12 @@ class CompactStateMachine:
         session = reading.session_id
         if not session or family is None:
             return
+        # Plan 00297: DROP ANCHOR is evaluated on every fresh, non-stale
+        # reading, INDEPENDENT of the raise-only floor/downgrade logic below
+        # -- that logic cannot detect "fable already running above its
+        # floor" by construction. Runs before the floor bookkeeping so an
+        # anchor engagement/clear is never skipped by an early return below.
+        self._evaluate_anchor(family=family, effort=reading.effort, now_wall=now_wall)
         prev_session = self._last_model_session
         prev_family = self._last_model_family
         self._last_model_session = session
@@ -2680,6 +2838,10 @@ class CompactStateMachine:
             "flag_compactions": self._flag_compactions,
             "coupled_effort_pending": self._coupled_effort_pending,
             "audit_pending": list(self._audit_pending),
+            "anchor_active": self._anchor_active,
+            "anchor_started_ts": self._anchor_started_ts,
+            "anchor_last_injected_ts": self._anchor_last_injected_ts,
+            "anchor_attempts": self._anchor_attempts,
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -2746,6 +2908,16 @@ class CompactStateMachine:
             raw_items = state["audit_pending"]
             if isinstance(raw_items, list):
                 self._audit_pending = [str(item) for item in raw_items[:_MAX_AUDIT_ITEMS]]
+        if "anchor_active" in state:
+            self._anchor_active = bool(state["anchor_active"])
+        if "anchor_started_ts" in state:
+            raw = state["anchor_started_ts"]
+            self._anchor_started_ts = None if raw is None else _coerce_float(raw)
+        if "anchor_last_injected_ts" in state:
+            raw = state["anchor_last_injected_ts"]
+            self._anchor_last_injected_ts = None if raw is None else _coerce_float(raw)
+        if "anchor_attempts" in state:
+            self._anchor_attempts = _coerce_int(state["anchor_attempts"])
 
     def evaluate(
         self,
@@ -3432,6 +3604,75 @@ def decide_once(
     # Plan 00281: set True by the flip-flop flag-compact branch below, so the
     # HOST counts the successful injection against the flag-compaction budget.
     is_flag_compact = False
+    # Plan 00297: set True only by the DROP ANCHOR branch immediately below,
+    # so the HOST records the attempt against the anchor's OWN bookkeeping.
+    is_anchor_injection = False
+    # ── DROP ANCHOR: fable-above-low invariant (Plan 00297) ─────────────────
+    # HIGHEST subordinate priority -- checked even ahead of the coupled-effort
+    # correction below -- because fable observed running above low effort is
+    # the most expensive misconfiguration the product allows (owner ruling,
+    # incident 2026-08-31), treated as an emergency rather than a preference.
+    # Uniquely allowed to preempt a WOULD_CONTINUE nudge -- never
+    # WOULD_COMPACT/WOULD_ESCAPE, which manage an in-flight compaction rather
+    # than invite more work -- so a "stop everything" episode never resumes
+    # the session onto another turn at the wrong effort. Gated on an empty
+    # input box ONLY (never the full idle floor), matching the coupled-effort
+    # and manual-model-switch precedent: an emergency correction cannot wait
+    # for the session to go idle, and is NOT permanently deferred by a busy
+    # box -- the anchor stays active and retries on the next unobstructed
+    # tick. Uses its OWN cooldown (`anchor_injection_due`), bypassing the
+    # floor mechanism's `_EFFORT_REINJECT_COOLDOWN_SECONDS`/
+    # `_MAX_EFFORT_INJECTIONS` entirely. A successful PTY write here does NOT
+    # verify anything -- only a later sidecar reading showing effort == low
+    # (`_evaluate_anchor`, run from `note_model_reading` above) clears
+    # `anchor_active`, so a swallowed injection (the live incident) keeps
+    # retrying instead of masquerading as fixed.
+    if machine.state is SupervisorState.MONITOR and machine.anchor_active:
+        anchor_preempts_continue = evaluation.decision is Decision.WOULD_CONTINUE
+        if payload is None or anchor_preempts_continue:
+            if anchor_preempts_continue:
+                payload = None
+                consume_signal_path = None
+            observed = (
+                f"model={reading.model_id!r} effort={reading.effort!r}"
+                if reading is not None
+                else "model=? effort=?"
+            )
+            if not facts.input_line_empty:
+                deferred_log = f"{_DEFERRED_LOG_PREFIX} (DROP ANCHOR: fable above low effort)"
+                noop_reason_log = None
+            elif machine.anchor_injection_due(facts.now_wall):
+                decision_value = Decision.WOULD_EFFORT.value
+                confirm_enters = effort_confirm_enters
+                effort_command = f"{_EFFORT_COMMAND} {_ANCHOR_TARGET_EFFORT}"
+                escalated = " [ESCALATED]" if machine.anchor_escalated_at(facts.now_wall) else ""
+                reason = (
+                    f"DROP ANCHOR: fable observed above low effort ({observed}) -> "
+                    f"would inject {effort_command} "
+                    f"(attempt {machine.anchor_attempts + 1}){escalated}"
+                )
+                if dry_run:
+                    payload = (
+                        f"{_format_bot_prefix(facts.now_wall)} "
+                        f"{_DRY_RUN_EFFORT_BODY_PREFIX} {effort_command} [DROP ANCHOR]"
+                    )
+                else:
+                    payload = effort_command
+                    machine.arm_audit(f"{effort_command} (DROP ANCHOR emergency correction)")
+                submit = True
+                is_anchor_injection = True
+                deferred_log = None
+                noop_reason_log = None
+            else:
+                escalated = " [ESCALATED]" if machine.anchor_escalated_at(facts.now_wall) else ""
+                noop_reason_log = (
+                    f"{_NOOP_LOG_PREFIX}: DROP ANCHOR active, retry cooldown "
+                    f"({observed}, attempt {machine.anchor_attempts}){escalated}"
+                )
+                deferred_log = None
+                if anchor_preempts_continue:
+                    decision_value = Decision.NOOP.value
+                    reason = "DROP ANCHOR active -> continue nudge suppressed"
     # ── Coupled effort: "/model switch MUST be followed by /effort" ─────────
     # HIGH PRIORITY: checked BEFORE every other subordinate family (manual
     # model switch, goal, floor-based effort, auto-model-restore) so a
@@ -3800,6 +4041,7 @@ def decide_once(
         model_switch_session=model_switch_session,
         model_switch_is_auto_restore=model_switch_is_auto_restore,
         is_flag_compact=is_flag_compact,
+        is_anchor_injection=is_anchor_injection,
     )
 
 
@@ -3860,7 +4102,11 @@ def _apply_decision(
 
 
 def _apply_post_injection_bookkeeping(
-    machine: CompactStateMachine, outcome: TickOutcome, *, injected: bool
+    machine: CompactStateMachine,
+    outcome: TickOutcome,
+    *,
+    injected: bool,
+    now_wall: float | None = None,
 ) -> None:
     """Update per-family cap/pending bookkeeping after ``_apply_decision`` runs.
 
@@ -3869,7 +4115,11 @@ def _apply_post_injection_bookkeeping(
     rules for every injectable family live in exactly one place. Every
     mark_*/arm_* call below fires ONLY on a successful injection
     (``injected``) -- a failed PTY write keeps every pending episode/signal
-    intact so the next tick retries.
+    intact so the next tick retries. ``now_wall`` feeds
+    ``mark_anchor_injection`` (Plan 00297), whose own retry cooldown is
+    timestamp-based; it is only ever consulted for an anchor injection, so
+    the default (resolved lazily via ``time.time()``) never affects any
+    other family or any existing caller that omits it.
     """
     if not injected:
         return
@@ -3883,10 +4133,14 @@ def _apply_post_injection_bookkeeping(
     elif outcome.decision_value == Decision.WOULD_STANDING_AUTH.value:
         machine.mark_standing_auth_injection()
     elif outcome.decision_value == Decision.WOULD_EFFORT.value:
-        # The coupled branch is checked FIRST in decide_once, so if it was
-        # armed, this tick's WOULD_EFFORT can only have come from it (Plan
-        # 00278 continuation).
-        if machine.coupled_effort_pending is not None:
+        # The DROP ANCHOR branch is checked FIRST of all, then the coupled
+        # branch, in decide_once -- so `is_anchor_injection` (Plan 00297)
+        # disambiguates from the coupled correction (Plan 00278
+        # continuation), which in turn disambiguates from the plain floor
+        # restore.
+        if outcome.is_anchor_injection:
+            machine.mark_anchor_injection(now_wall if now_wall is not None else time.time())
+        elif machine.coupled_effort_pending is not None:
             machine.mark_coupled_effort_injection()
         else:
             machine.mark_effort_injection()
@@ -3962,7 +4216,7 @@ def _poll_once(
         effort_confirm_enters=effort_confirm_enters,
     )
     injected = _apply_decision(outcome, master_writer=master_writer, log=log)
-    _apply_post_injection_bookkeeping(machine, outcome, injected=injected)
+    _apply_post_injection_bookkeeping(machine, outcome, injected=injected, now_wall=now_wall)
     return Evaluation(decision=Decision(outcome.decision_value), reason=outcome.reason)
 
 
@@ -4022,6 +4276,7 @@ def _outcome_to_json(outcome: TickOutcome) -> str:
             "model_switch_session": outcome.model_switch_session,
             "model_switch_is_auto_restore": outcome.model_switch_is_auto_restore,
             "is_flag_compact": outcome.is_flag_compact,
+            "is_anchor_injection": outcome.is_anchor_injection,
         }
     )
 
@@ -4043,6 +4298,7 @@ def _outcome_from_json(line: str) -> TickOutcome:
         model_switch_session=data.get("model_switch_session"),
         model_switch_is_auto_restore=bool(data.get("model_switch_is_auto_restore", False)),
         is_flag_compact=bool(data.get("is_flag_compact", False)),
+        is_anchor_injection=bool(data.get("is_anchor_injection", False)),
     )
 
 
@@ -4571,7 +4827,9 @@ def supervise(
             # ever overwritten. A PTY write failure raises above, so no cap
             # is burned and no pending episode/signal is lost (Plan 00269
             # review fix; Plan 00278 continuation).
-            _apply_post_injection_bookkeeping(machine, outcome, injected=injected)
+            _apply_post_injection_bookkeeping(
+                machine, outcome, injected=injected, now_wall=now_wall
+            )
         else:
             _poll_once(
                 machine,
@@ -4591,6 +4849,11 @@ def supervise(
                 own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
                 goal_signal_ttl_seconds=policy.goal_signal_ttl_seconds,
             )
+        # Plan 00297: loud, rate-limited owner-facing alert once the anchor
+        # has exceeded its attempt/time bound -- purely a notification, the
+        # anchor keeps retrying either way (see `anchor_escalated_at`).
+        if machine.anchor_active and machine.anchor_escalated_at(now_wall):
+            status_message_poster.post(_ANCHOR_ALERT_TEXT, level=_STATUS_LEVEL_WARNING)
 
     previous_handler = signal.signal(signal.SIGWINCH, _on_winch)
 

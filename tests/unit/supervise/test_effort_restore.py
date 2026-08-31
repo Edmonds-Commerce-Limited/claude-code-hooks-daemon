@@ -481,7 +481,14 @@ def test_effort_resets_to_floor_after_successful_flip_back(tmp_path: Path) -> No
 
 
 def test_no_effort_reset_without_our_restore(tmp_path: Path) -> None:
-    # A recovery we did not cause (human flipped back) is left alone.
+    # A recovery we did not cause (human flipped back) is left alone BY THIS
+    # (raise-only) floor family specifically -- fable observed at xhigh is
+    # not "below its floor" so this mechanism has nothing to say about it.
+    # Plan 00297: the separate DROP ANCHOR invariant DOES still correct it
+    # (fable-above-low is banned unconditionally, regardless of who caused
+    # it or which mechanism would otherwise apply) -- that is the whole
+    # point of a read-back-verified safety net that does not depend on this
+    # family's raise-only assumptions.
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
     _downgrade(sidecar_dir, machine)
@@ -490,7 +497,8 @@ def test_no_effort_reset_without_our_restore(tmp_path: Path) -> None:
     after = _NOW + 60.0
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=after - 1.0)
     outcome = _decide(sidecar_dir, machine, facts=_facts(after))
-    assert outcome.payload is None
+    assert outcome.decision_value == "would-effort"
+    assert outcome.payload == "/effort low"
 
 
 def test_parse_model_restore_delay() -> None:
@@ -577,13 +585,18 @@ def test_coupled_target_for_non_top_family_is_downgrade_xhigh() -> None:
     assert machine.coupled_effort_pending == f"{_SESSION}:opus:xhigh"
 
 
-def test_coupled_target_respects_custom_fable_floor_override() -> None:
+def test_coupled_target_clamps_a_custom_fable_floor_override_above_low() -> None:
+    # Plan 00297 (owner ruling, incident 2026-08-31): fable-above-low is
+    # banned UNCONDITIONALLY, not merely by default -- a CCY_MIN_EFFORT_LEVELS
+    # override that configures fable's floor above low is clamped to low
+    # rather than honoured, so the coupled correction can never itself hand
+    # out a value the DROP ANCHOR invariant would immediately have to undo.
     policy = _mod.CompactPolicy(
         min_effort_levels={"fable": "medium", "opus": "high", "sonnet": "high", "haiku": "low"}
     )
     machine = _mod.CompactStateMachine(policy)
     machine.arm_coupled_effort(session=_SESSION, family="fable")
-    assert machine.coupled_effort_pending == f"{_SESSION}:fable:medium"
+    assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
 
 
 def test_coupled_effort_fires_on_the_tick_after_arming(tmp_path: Path) -> None:
