@@ -1203,6 +1203,46 @@ class TestTwoTierPromotedBlock:
         content = claude_md.read_text()
         assert "Verbatim prose that must stay resident." in content
 
+    def test_promotion_matches_config_key_not_display_name(self, tmp_path: Path) -> None:
+        """The promoted_handlers config lists CONFIG KEYS (module basenames,
+        e.g. ``lsp_enforcement``), but a handler's ``.name`` is its display
+        name (e.g. ``enforce-lsp-usage``) — the two never coincide for real
+        handlers. Promotion must match on the config key, or the live daemon
+        silently promotes nothing (found in the Phase 9 dogfood flip)."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+        from claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement import (
+            LspEnforcementHandler,
+        )
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n")
+
+        handler = LspEnforcementHandler()
+        assert handler.name != "lsp_enforcement", "precondition: display name != config key"
+        prose = handler.get_claude_md()
+        assert prose, "precondition: the real handler has resident prose"
+
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path,
+            handlers=[handler],
+            promoted_handlers=["lsp_enforcement"],
+        )
+        injector.inject()
+
+        # The injector mdformat-normalises the written block, so assert on
+        # distinctive prose substrings rather than byte-identity.
+        content = claude_md.read_text()
+        for marker in (
+            "use LSP tools for code symbol lookups",
+            "block_once",
+            "subsequent retries are allowed",
+        ):
+            assert marker in content, (
+                f"promoted prose marker {marker!r} missing — a handler promoted "
+                "under its CONFIG KEY must keep its full prose resident even "
+                "though its display name differs"
+            )
+
     def test_non_promoted_rules_declaring_handler_is_reduced_to_table_rows(
         self, tmp_path: Path
     ) -> None:

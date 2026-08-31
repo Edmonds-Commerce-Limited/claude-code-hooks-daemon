@@ -560,7 +560,13 @@ class ClaudeMdInjector:
             content = handler.get_claude_md()
             rules = handler.get_rules() if hasattr(handler, "get_rules") else []
 
-            if handler.name in self._promoted_handlers:
+            # The promoted_handlers config lists CONFIG KEYS — the handler's
+            # module basename (e.g. ``lsp_enforcement``). A handler's display
+            # ``.name`` (e.g. ``enforce-lsp-usage``) never coincides with the
+            # key for real handlers, so match the key; the display name is
+            # accepted too for fixture handlers and forwards compatibility.
+            config_key = type(handler).__module__.rsplit(".", maxsplit=1)[-1]
+            if config_key in self._promoted_handlers or handler.name in self._promoted_handlers:
                 if content is not None:
                     promoted.append((handler.name, content))
                 continue
