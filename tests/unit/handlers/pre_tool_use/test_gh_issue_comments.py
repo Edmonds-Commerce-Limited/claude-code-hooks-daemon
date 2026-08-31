@@ -4,10 +4,21 @@ from __future__ import annotations
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.gh_issue_comments import (
     GhIssueCommentsHandler,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test (Plan 00116)."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 class TestGhIssueCommentsHandler:
@@ -337,3 +348,64 @@ class TestGhIssueCommentsHandler:
         guidance = handler.get_claude_md()
         assert guidance is not None
         assert "--json" in guidance
+
+
+class TestGetRules:
+    @pytest.fixture
+    def handler(self) -> GhIssueCommentsHandler:
+        return GhIssueCommentsHandler()
+
+    def test_returns_one_rule(self, handler: GhIssueCommentsHandler) -> None:
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+        assert rules[0].rule_id == RuleID.GH_ISSUE_VIEW_NO_COMMENTS
+        assert rules[0].verbose
+
+
+class TestDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Plan 00116).
+
+    The suggested command is invocation-specific and is always shown.
+    """
+
+    @pytest.fixture
+    def handler(self) -> GhIssueCommentsHandler:
+        return GhIssueCommentsHandler()
+
+    def _hook_input(self, command: str, transcript_path: str) -> dict:
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "transcript_path": transcript_path,
+        }
+
+    def test_deny_leads_with_rule_id(self, handler: GhIssueCommentsHandler) -> None:
+        result = handler.handle(
+            self._hook_input("gh issue view 123", "/tmp/agent-a/transcript.jsonl")
+        )
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GH_ISSUE_VIEW_NO_COMMENTS}]")
+
+    def test_first_fire_is_verbose(self, handler: GhIssueCommentsHandler) -> None:
+        result = handler.handle(
+            self._hook_input("gh issue view 123", "/tmp/agent-a/transcript.jsonl")
+        )
+        assert "WHY REQUIRED" in result.reason
+
+    def test_second_fire_same_agent_is_terse_but_still_names_fix(
+        self, handler: GhIssueCommentsHandler
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("gh issue view 123", transcript_path))
+        result = handler.handle(self._hook_input("gh issue view 456", transcript_path))
+        assert "WHY REQUIRED" not in result.reason
+        assert "gh issue view 456 --comments" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(
+        self, handler: GhIssueCommentsHandler
+    ) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "gh issue view 123"}}
+        first = handler.handle(hook_input)
+        second = handler.handle(hook_input)
+        assert "WHY REQUIRED" in first.reason
+        assert "WHY REQUIRED" in second.reason

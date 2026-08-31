@@ -5,10 +5,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import GatingResult
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
 
@@ -31,6 +33,24 @@ class GhIssueCommentsHandler(PreToolUseHandlerBase):
             r"\bgh\s+issue\s+view\b",
             re.IGNORECASE,
         )
+        self._rule = Rule(
+            rule_id=RuleID.GH_ISSUE_VIEW_NO_COMMENTS,
+            blocked="`gh issue view` without `--comments`",
+            why="Issue comments contain critical context, clarifications and "
+            "updates not in the issue body",
+            fix="Add --comments, or include comments in --json fields",
+            verbose=(
+                "WHY REQUIRED:\n"
+                "  • Issue comments contain critical context and clarifications\n"
+                "  • Updates and decisions are often discussed in comments\n"
+                "  • Without comments, you miss half the conversation"
+            ),
+        )
+        self._formatter = RuleFormatter()
+
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's deny path."""
+        return [self._rule]
 
     def _gh_issue_view_segment(self, command: str) -> str | None:
         """Return the 'gh issue view ...' sub-command segment, or None if absent.
@@ -106,18 +126,23 @@ class GhIssueCommentsHandler(PreToolUseHandlerBase):
 
         suggested_command = self._compute_suggested_command(command)
 
-        reason = (
-            "BLOCKED: gh issue view requires --comments flag\n\n"
-            "WHY REQUIRED:\n"
-            "  • Issue comments contain critical context and clarifications\n"
-            "  • Updates and decisions are often discussed in comments\n"
-            "  • Without comments, you miss half the conversation\n\n"
-            "REQUIRED ACTION:\n"
-            f"  Add --comments to your command:\n\n"
-            f"  {suggested_command}\n"
-        )
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        rule_id = self._rule.rule_id
 
-        return GatingResult(decision=Decision.DENY, reason=reason)
+        if transcript_path and tracker.was_disclosed(transcript_path, rule_id):
+            message = self._formatter.terse(self._rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, rule_id)
+            message = self._formatter.verbose(self._rule)
+
+        # The suggested command is invocation-specific and always shown,
+        # regardless of disclosure state -- it is the concrete fix, not
+        # teaching content.
+        message += f"\n\nREQUIRED ACTION:\n  Add --comments to your command:\n\n  {suggested_command}\n"
+
+        return GatingResult(decision=Decision.DENY, reason=message)
 
     def get_claude_md(self) -> str | None:
         return (
