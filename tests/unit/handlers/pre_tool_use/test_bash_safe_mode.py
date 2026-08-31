@@ -13,12 +13,28 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.bash_safe_mode import BashSafeModeHandler
 
 
 def _bash(command: str) -> dict[str, Any]:
     return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """get_data_layer() is a process-wide singleton (Plan 00116, Decision G).
+
+    Without this, one test's ``mark_disclosed`` for a rule_id + transcript_path
+    leaks into a later test that reuses the same pair, turning a genuine
+    "first fire" into a stale "already disclosed".
+    """
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 @pytest.fixture
@@ -165,6 +181,75 @@ class TestHandleBlockMode:
         assert result.decision == Decision.DENY
         assert result.reason is not None
         assert "pipefail" in result.reason
+
+    def test_block_denies_leads_with_rule_id(self, handler: BashSafeModeHandler) -> None:
+        handler._mode = "block"
+        result = handler.handle(_bash("pytest tests/\ngit commit -m x"))
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{RuleID.BASH_SAFE_MODE_PRELUDE_MISSING}]")
+
+
+class TestBashSafeModeDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder, block mode only."""
+
+    @pytest.fixture
+    def handler(self) -> BashSafeModeHandler:
+        handler = BashSafeModeHandler()
+        handler._mode = "block"
+        return handler
+
+    def _hook_input(self, command: str, transcript_path: str | None = None) -> dict[str, Any]:
+        hook_input = _bash(command)
+        if transcript_path is not None:
+            hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    def test_first_fire_for_agent_is_verbose(self, handler: BashSafeModeHandler) -> None:
+        result = handler.handle(
+            self._hook_input("pytest tests/\ngit commit -m x", "/tmp/agent-a/transcript.jsonl")
+        )
+        assert result.reason is not None
+        assert "blind spots" in result.reason.lower()
+
+    def test_second_fire_for_same_agent_is_terse(self, handler: BashSafeModeHandler) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("pytest tests/\ngit commit -m x", transcript_path))
+        result = handler.handle(self._hook_input("ruff check .\ngit push", transcript_path))
+        assert result.reason is not None
+        assert "blind spots" not in result.reason.lower()
+        assert result.reason.startswith(f"BLOCKED [{RuleID.BASH_SAFE_MODE_PRELUDE_MISSING}]")
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(
+        self, handler: BashSafeModeHandler
+    ) -> None:
+        hook_input = self._hook_input("pytest tests/\ngit commit -m x")
+        first = handler.handle(hook_input)
+        second = handler.handle(hook_input)
+        assert first.reason is not None
+        assert second.reason is not None
+        assert "blind spots" in first.reason.lower()
+        assert "blind spots" in second.reason.lower()
+
+
+class TestBashSafeModeGetRules:
+    """get_rules() declares the single block-mode Rule (Plan 00116)."""
+
+    @pytest.fixture
+    def handler(self) -> BashSafeModeHandler:
+        return BashSafeModeHandler()
+
+    def test_returns_one_rule(self, handler: BashSafeModeHandler) -> None:
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert all(isinstance(rule, Rule) for rule in rules)
+
+    def test_rule_id_matches_constant(self, handler: BashSafeModeHandler) -> None:
+        rules = handler.get_rules()
+        assert rules[0].rule_id == RuleID.BASH_SAFE_MODE_PRELUDE_MISSING
+
+    def test_rule_has_non_empty_verbose(self, handler: BashSafeModeHandler) -> None:
+        rules = handler.get_rules()
+        assert rules[0].verbose
 
 
 class TestFalsePositiveShapesFrom00268:

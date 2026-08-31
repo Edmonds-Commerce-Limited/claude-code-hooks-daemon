@@ -36,9 +36,17 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, ToolName
-from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.bash_flags import (
     SPAN_SEPARATORS as _SPAN_SEPARATORS,
@@ -232,6 +240,30 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
         self._mode: str = _MODE_WARN
         self._extra_verifiers: Any = None
         self._extra_mutators: Any = None
+        # Single deny concept (Plan 00116): the block-mode path only. The
+        # warn-mode advisory (context/guidance) is UNCHANGED — Decision C
+        # rules apply to the deny path, and this handler's advisory content
+        # is already dynamic per-finding, matching pre-migration behaviour.
+        self._rule = Rule(
+            rule_id=RuleID.VERIFICATION_RESULT_NOT_CONSUMED,
+            blocked="a verifier followed by a mutator with nothing consuming the result",
+            why="The verifier can fail and the mutator would still run",
+            fix="Gate with `&&`, an explicit exit-code check, or `set -euo pipefail`",
+            verbose=(
+                "Note a NEWLINE separates commands exactly as `;` does — the two "
+                "halves being on different lines does not gate anything.\n\n"
+                "ANY of these consumes the result:\n"
+                "  verifier … && mutator …\n"
+                "  verifier … || { echo 'failed'; exit 1; }\n"
+                '  verifier …; rc=$?; if [ "$rc" -ne 0 ]; then exit 1; fi\n'
+                "  set -euo pipefail   # at the top of the invocation\n\n"
+                "This is NOT a rule about `;` versus `&&`. Chaining every command is "
+                "explicitly rejected — `grep -q` exits 1 on a legitimate no-match, and "
+                "a diagnostic sweep wants every section. Only this specific pair is "
+                "flagged."
+            ),
+        )
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Cheap pre-filter: a Bash command that could contain a mutator."""
@@ -242,15 +274,38 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
             return False
         return any(word in command for word in self._mutator_head_words())
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's block-mode deny path."""
+        return [self._rule]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Report a verifier whose result nothing consumed before a mutator."""
+        """Report a verifier whose result nothing consumed before a mutator.
+
+        The block-mode DENY path is verbose-first/terse-after per
+        (transcript_path, rule_id) via the shared DisclosureTracker
+        (Plan 00116, Decision G/C: rules apply to the deny path only). The
+        warn-mode advisory (context/guidance) is UNCHANGED.
+        """
         command = get_bash_command(hook_input)
         finding = self._find(command) if command else None
         if finding is None:
             return GatingResult(decision=Decision.ALLOW)
 
         if self._mode == _MODE_BLOCK:
-            return GatingResult(decision=Decision.DENY, reason=self._message(finding))
+            transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+            tracker = get_data_layer().disclosure
+            rule_id = RuleID.VERIFICATION_RESULT_NOT_CONSUMED
+
+            if transcript_path and tracker.was_disclosed(transcript_path, rule_id):
+                reason = (
+                    f"{self._formatter.terse(self._rule)}\n\n"
+                    f"`{finding.verifier}` → `{finding.mutator}`"
+                )
+            else:
+                if transcript_path:
+                    tracker.mark_disclosed(transcript_path, rule_id)
+                reason = self._block_message(finding)
+            return GatingResult(decision=Decision.DENY, reason=reason)
         return GatingResult(
             decision=Decision.ALLOW,
             context=[
@@ -337,6 +392,32 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
     def _message(finding: _Finding) -> str:
         return (
             f"VERIFICATION RESULT NOT CONSUMED: `{finding.verifier}` → `{finding.mutator}`\n\n"
+            f"`{finding.verifier}` can fail in this command and `{finding.mutator}` "
+            "would still run. A check whose outcome nothing acts on is not a check.\n\n"
+            "Note a NEWLINE separates commands exactly as `;` does — the two halves "
+            "being on different lines does not gate anything.\n\n"
+            "ANY of these consumes the result:\n"
+            f"  {finding.verifier} … && {finding.mutator} …\n"
+            f"  {finding.verifier} … || {{ echo 'failed'; exit 1; }}\n"
+            f'  {finding.verifier} …; rc=$?; if [ "$rc" -ne 0 ]; then exit 1; fi\n'
+            "  set -euo pipefail   # at the top of the invocation\n\n"
+            "This is NOT a rule about `;` versus `&&`. Chaining every command is "
+            "explicitly rejected — `grep -q` exits 1 on a legitimate no-match, and a "
+            "diagnostic sweep wants every section. Only this specific pair is flagged."
+        )
+
+    @staticmethod
+    def _block_message(finding: _Finding) -> str:
+        """First-fire (verbose) block-mode message, leading with the rule ID.
+
+        Reuses ``_message``'s rich, per-finding-specific prose (the verifier
+        and mutator names are dynamic per call, which a static
+        ``Rule.verbose`` cannot carry — Migration Pattern) with the rule_id
+        prefix the Plan 00116 parity contract requires.
+        """
+        return (
+            f"BLOCKED [{RuleID.VERIFICATION_RESULT_NOT_CONSUMED}]: "
+            f"`{finding.verifier}` → `{finding.mutator}`\n\n"
             f"`{finding.verifier}` can fail in this command and `{finding.mutator}` "
             "would still run. A check whose outcome nothing acts on is not a check.\n\n"
             "Note a NEWLINE separates commands exactly as `;` does — the two halves "

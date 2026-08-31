@@ -23,9 +23,17 @@ from __future__ import annotations
 import re
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, ToolName
-from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.handlers.pre_tool_use.verification_result_gate import (
     statements_contain_mutator,
@@ -109,6 +117,19 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         self._min_statements: Any = _DEFAULT_MIN_STATEMENTS
         self._only_with_mutator: Any = False
         self._exempt_patterns = []
+        # Single deny concept (Plan 00116): the block-mode path only. The
+        # warn-mode advisory (context/guidance) is UNCHANGED — Decision C
+        # rules apply to the deny path, and this handler's advisory content
+        # is already dynamic per-missing-flag, matching the pre-migration
+        # behaviour exactly.
+        self._rule = Rule(
+            rule_id=RuleID.BASH_SAFE_MODE_PRELUDE_MISSING,
+            blocked="a sequenced Bash invocation with no `set` safety prelude",
+            why="Errors in earlier statements can be silently ignored",
+            fix="Add `set -euo pipefail` at the top, or gate explicitly with `&&`/`|| exit 1`",
+            verbose=_BLIND_SPOTS,
+        )
+        self._formatter = RuleFormatter()
 
     @property
     def _exempt_patterns(self) -> list[re.Pattern[str]]:
@@ -180,15 +201,35 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
             return False
         return bool(self._missing_flags(command))
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's block-mode deny path."""
+        return [self._rule]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Warn about (or deny) a sequenced command with no safety prelude."""
+        """Warn about (or deny) a sequenced command with no safety prelude.
+
+        The block-mode DENY path is verbose-first/terse-after per
+        (transcript_path, rule_id) via the shared DisclosureTracker
+        (Plan 00116, Decision G/C: rules apply to the deny path only). The
+        warn-mode advisory (context/guidance) is UNCHANGED.
+        """
         command = get_bash_command(hook_input)
         missing = self._missing_flags(command) if command else ()
         if not missing:
             return GatingResult(decision=Decision.ALLOW)
 
         if self._mode == _MODE_BLOCK:
-            return GatingResult(decision=Decision.DENY, reason=self._message(missing))
+            transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+            tracker = get_data_layer().disclosure
+            rule_id = RuleID.BASH_SAFE_MODE_PRELUDE_MISSING
+
+            if transcript_path and tracker.was_disclosed(transcript_path, rule_id):
+                reason = f"{self._formatter.terse(self._rule)}\n\n{self._missing_detail(missing)}"
+            else:
+                if transcript_path:
+                    tracker.mark_disclosed(transcript_path, rule_id)
+                reason = self._block_message(missing)
+            return GatingResult(decision=Decision.DENY, reason=reason)
         return GatingResult(
             decision=Decision.ALLOW,
             context=[
@@ -198,6 +239,12 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
             ],
             guidance=self._message(missing),
         )
+
+    @staticmethod
+    def _missing_detail(missing: tuple[str, ...]) -> str:
+        """One-line naming of the missing flags and their remedy spelling."""
+        remedy = "; ".join(_FLAG_SPELLING[flag] for flag in missing)
+        return f"Missing: {', '.join(missing)}. Add: `{remedy}`."
 
     def _missing_flags(self, command: str) -> tuple[str, ...]:
         """Required flags the command does not declare, or () when out of scope."""
@@ -243,6 +290,32 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         return (
             "BASH SAFE MODE: this multi-statement invocation declares no "
             f"safety prelude for: {', '.join(missing)}.\n\n"
+            f"Add the prelude at the top of the invocation (e.g. `{remedy}`, "
+            "or the combined `set -euo pipefail`), or gate the statements "
+            "explicitly with `&&` / `|| { ...; exit 1; }`.\n\n"
+            f"{_BLIND_SPOTS}\n\n"
+            "If this command legitimately must run every statement regardless "
+            "of failures (a diagnostic sweep, an exit-code observer), declare "
+            "it in the command itself:\n"
+            f'  {_ESCAPE_HATCH}="explain why"; <command>\n\n'
+            "This handler is opt-in project policy (it ships disabled); its "
+            "sibling `verification_result_gate` already stands down when a "
+            "prelude is present, so the two never double-fire."
+        )
+
+    def _block_message(self, missing: tuple[str, ...]) -> str:
+        """First-fire (verbose) block-mode message, leading with the rule ID.
+
+        Reuses ``_message``'s rich, per-invocation-specific prose (the
+        missing-flag list and remedy spelling are dynamic per call, which a
+        static ``Rule.verbose`` cannot carry — Migration Pattern) with the
+        rule_id prefix the Plan 00116 parity contract requires.
+        """
+        remedy = "; ".join(_FLAG_SPELLING[flag] for flag in missing)
+        return (
+            f"BLOCKED [{RuleID.BASH_SAFE_MODE_PRELUDE_MISSING}]: this "
+            f"multi-statement invocation declares no safety prelude for: "
+            f"{', '.join(missing)}.\n\n"
             f"Add the prelude at the top of the invocation (e.g. `{remedy}`, "
             "or the combined `set -euo pipefail`), or gate the statements "
             "explicitly with `&&` / `|| { ...; exit 1; }`.\n\n"

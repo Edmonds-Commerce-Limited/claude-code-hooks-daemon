@@ -444,3 +444,17 @@ class RuleID:
 
     #: A content-revealing git/grep command shape over a configured flaggable path.
     FLAGGABLE_CONTENT_CHANNEL: str = "R-FLAGGABLE-CONTENT-CHANNEL"
+
+    # ------------------------------------------------------------------
+    # bash_safe_mode handler (ships disabled; block-mode deny path only)
+    # ------------------------------------------------------------------
+
+    #: A sequenced Bash invocation declares no required `set` safety prelude.
+    BASH_SAFE_MODE_PRELUDE_MISSING: str = "R-BASH-SAFE-MODE-PRELUDE-MISSING"
+
+    # ------------------------------------------------------------------
+    # verification_result_gate handler (warn by default; block-mode deny path only)
+    # ------------------------------------------------------------------
+
+    #: A verifier's result is never consumed before a mutator runs.
+    VERIFICATION_RESULT_NOT_CONSUMED: str = "R-VERIFICATION-RESULT-NOT-CONSUMED"
