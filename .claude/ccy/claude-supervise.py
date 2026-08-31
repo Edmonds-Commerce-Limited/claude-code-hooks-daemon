@@ -3450,11 +3450,14 @@ def decide_once(
         and machine.state is SupervisorState.MONITOR
         and machine.coupled_effort_pending is not None
     ):
-        if not can_inject:
-            if facts.idle and not facts.input_line_empty:
-                deferred_log = f"{_DEFERRED_LOG_PREFIX} (coupled effort pending)"
-            else:
-                noop_reason_log = f"{_NOOP_LOG_PREFIX}: coupled effort pending but session busy"
+        # Gate on an empty input box ONLY, not the full `can_inject` (which
+        # also requires idle): the correction must land on the first tick
+        # after the /model injection, or turns run the forced model at the
+        # pre-switch effort and burn allowance. Same rationale and rail as
+        # the manual model-switch branch below — never type into a box
+        # mid-composition, but never wait for idle either.
+        if not facts.input_line_empty:
+            deferred_log = f"{_DEFERRED_LOG_PREFIX} (coupled effort pending)"
         else:
             decision_value = Decision.WOULD_EFFORT.value
             confirm_enters = effort_confirm_enters

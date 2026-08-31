@@ -388,6 +388,31 @@ def test_coupled_effort_injection_sets_confirm_enters(tmp_path: Path) -> None:
     assert outcome.confirm_enters == _mod._DEFAULT_EFFORT_CONFIRM_ENTERS
 
 
+def test_coupled_effort_fires_even_when_session_not_idle(tmp_path: Path) -> None:
+    # The coupled correction must land on the first tick after the /model
+    # switch: gated on an empty input box ONLY, never on the idle floor —
+    # otherwise turns can run the forced model at the pre-switch effort.
+    sidecar_dir = tmp_path / "cs"
+    _write_sidecar(sidecar_dir)
+    machine = _machine()
+    machine.arm_coupled_effort(session=_SESSION, family="fable")
+    outcome = _decide(sidecar_dir, machine, facts=_facts(idle=False))
+    assert outcome.decision_value == "would-effort"
+    assert outcome.payload is not None
+
+
+def test_coupled_effort_still_deferred_while_input_box_not_empty(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    _write_sidecar(sidecar_dir)
+    machine = _machine()
+    machine.arm_coupled_effort(session=_SESSION, family="fable")
+    busy = _decide(
+        sidecar_dir, machine, facts=_facts(idle=False, input_line_empty=False)
+    )
+    assert busy.payload is None
+    assert machine.coupled_effort_pending is not None
+
+
 def test_effort_confirm_enters_env_parsing() -> None:
     assert _mod._parse_effort_confirm_enters("2") == 2
     assert _mod._parse_effort_confirm_enters("0") == 0
