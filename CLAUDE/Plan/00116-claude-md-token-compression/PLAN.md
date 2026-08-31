@@ -1,6 +1,6 @@
 # Plan 00116: CLAUDE.md Token Compression via Stateful Progressive Disclosure
 
-**Status**: Dormant (Phases 1–2 complete and merged; Phase 3 blocked on the tracker-wiring decision)
+**Status**: In Progress (maintainer green-lit the tracker wiring 2026-08-31; Phases 1–2 complete and merged, Phases 3–9 executing)
 **Related**: Plan 00284 (documentation SSoT enforcement) shipped the complementary half of this plan's motivation — one canonical home per fact with `@`-import/at-import census and pointer enforcement across the doc corpus. This plan's remaining Phase 3 (stateful disclosure of the daemon-injected `<hooksdaemon>` block) is NOT redone there and stays blocked on its own tracker-wiring decision; see `CLAUDE/DocumentationStrategy.md` for the ruleset 00284 delivered.
 **Created**: 2026-05-29
 **Owner**: Claude (research + planning agent)
@@ -15,8 +15,10 @@ guidance. The always-on instruction tree loaded into every Claude Code session i
 ~131 KB ≈ 33k tokens — within range of Claude Code's ~47k-token warning, and large
 enough to trigger the "lost in the middle" failure mode (see `RESEARCH.md`). The
 single largest contributor is the daemon-injected `<hooksdaemon>` block in the
-host `CLAUDE.md`: 22,041 bytes / 407 lines = **46% of CLAUDE.md**, auto-generated
-on every daemon restart by `core/claude_md_injector.py`.
+host `CLAUDE.md`: 22,041 bytes / 407 lines at planning time (2026-05-29) —
+**re-measured 2026-08-30 at 121,932 bytes ≈ 28,630 cl100k tokens, ~100% of
+CLAUDE.md** (5.5× growth) — auto-generated on every daemon restart by
+`core/claude_md_injector.py`.
 
 **Design (final, per maintainer direction).** Three layers, each delivering
 guidance *just-in-time* so the full rationale is **never in always-on context**:
@@ -60,9 +62,10 @@ This plan is research + design + implementation-roadmap only.
 
 ## Goals
 
-- **G1 — Shrink the always-on injected block by ≥50%** (target ≤11,000 B /
-  ≤200 lines from 22,041 B / 407 lines) by reducing CLAUDE.md to a rule-ID table,
-  with **zero loss of normative content**.
+- **G1 — Shrink the always-on injected block by ≥70%** vs the re-measured
+  2026-08-30 baseline (121,932 B / 28,630 tokens) via the Decision I two-tier
+  block (promoted prose + progressive rule table), with **zero loss of
+  normative content** and full guidance retained for measured-hot handlers.
 - **G2 — Stateful progressive disclosure**: verbose on a rule's FIRST fire per
   session, terse (rule-ID reminder) thereafter.
 - **G3 — Disclosure tracking with reset**: per-rule "disclosed this session"
@@ -113,11 +116,13 @@ This plan is research + design + implementation-roadmap only.
   ALREADY states the "when blocked, don't stop" meta-rule once — currently
   re-stated inside many handler blocks), writes CLAUDE.md, auto-commits, has a
   content-preservation safety check.
-- `core/data_layer/history.py` — `History` persists deny/allow events to JSONL and
-  exposes `count_blocks_by_handler(name)`. **Key gaps for this design**: it counts
-  (a) per-HANDLER not per-RULE, (b) ALL time (survives restarts), with (c) NO
-  session scope and (d) NO compact/clear reset. The disclosure tracker must add
-  per-rule, session-scoped counting with reset boundaries.
+- `core/handler_history.py` (refactor since planning: was `core/data_layer/history.py`)
+  — `HandlerHistory`, an IN-MEMORY deque of deny/allow decisions exposing
+  `count_blocks_by_handler(handler_id, session_id)`. **Key gaps for this design**:
+  (a) per-HANDLER not per-RULE, (b) daemon-lifetime only — nothing persists across
+  restarts, so it cannot supply the Decision I historical block counts (transcripts
+  are the durable source), and (c) no compact/clear reset boundary. The disclosure
+  tracker adds per-rule, per-agent state with reset boundaries.
 - `handlers/pre_tool_use/destructive_git.py` — **already implements a verbosity
   ladder** driven by `_get_block_count()` →
   `_terse_reason`/`_standard_reason`/`_verbose_reason`. The maintainer's design
@@ -129,7 +134,7 @@ This plan is research + design + implementation-roadmap only.
   SessionStart hook.
 - `daemon/cli.py` — argparse subparsers; `cmd_generate_docs` already enumerates
   handlers (machinery for `explain-rule`/`explain-handler` exists). Skills live
-  under `src/.../skills/hooks-daemon/`.
+  under `src/claude_code_hooks_daemon/skills/hooks-daemon/`.
 
 ### Research conclusion (full detail + citations in `RESEARCH.md`)
 
@@ -247,6 +252,18 @@ extra verbose block — acceptable, the same failure mode as a daemon restart.
 
 Rationale + citations in `RESEARCH.md`.
 
+### Decision I — HYBRID data-driven promotion (maintainer, 2026-08-31). APPROVED.
+
+Not all-or-nothing: blocking handlers that REALLY fire often (measured from
+this project's actual transcripts) keep their FULL guidance resident in the
+injected block ("PROMOTED"); rarely-firing handlers stay fully enforced but get
+only a rule-table row plus first-fire-verbose/terse-after disclosure
+("PROGRESSIVE"). The promoted set is recorded in config
+(`claude_md.promotion.promoted_handlers`) and kept honest by a re-runnable
+analyser `bin/hooks-daemon block-report`. Full design, injected-block layout,
+fingerprint-attribution scheme and amended targets:
+[DESIGN-HYBRID-PROMOTION.md](DESIGN-HYBRID-PROMOTION.md).
+
 ## Tasks
 
 ### Phase 1: Measurement harness & no-loss contract (TDD)
@@ -272,6 +289,22 @@ Rationale + citations in `RESEARCH.md`.
   `was_disclosed`/`mark_disclosed`/`reset`, keyed by `transcript_path` (Decision G).
   (RED: first→verbose, repeat→terse, reset→verbose; GREEN.)
 
+### Phase 2b: Real-block measurement & promotion config (Decision I, TDD)
+
+- [ ] ⬜ **Task 2b.1**: `bin/hooks-daemon block-report` — transcript-scanning
+  block-frequency analyser (streaming pattern from `tool_report/analyser.py`;
+  privacy: handler names + counts only, never content). Handler attribution by
+  deny-message fingerprint table derived from handler message constants, with a
+  parity test that every blocking handler's own deny output matches its own
+  fingerprint. Ranked report + recommended PROMOTED set per configured
+  thresholds. See [DESIGN-HYBRID-PROMOTION.md](DESIGN-HYBRID-PROMOTION.md).
+- [ ] ⬜ **Task 2b.2**: Config surface `claude_md.promotion`
+  (`promoted_handlers`, `min_blocks`, `min_sessions`) — empty list ⇒ pure
+  progressive disclosure (safe fresh-install default).
+- [ ] ⬜ **Task 2b.3**: Run `block-report` over THIS repo's real transcripts;
+  commit the evidence summary (counts only) as a journal entry and set this
+  repo's initial `promoted_handlers` from it.
+
 ### Phase 3: Stateful disclosure in handlers (TDD, parallelisable)
 
 - [ ] ⬜ **Task 3.1**: For each BLOCKING handler, declare `get_rules()` and refactor
@@ -292,14 +325,18 @@ Rationale + citations in `RESEARCH.md`.
 - [ ] ⬜ **Task 4.2**: SessionStart/clear path resets the tracker (Decision E).
   (RED: fresh session → next fire verbose.)
 
-### Phase 5: Injector emits the rule table only (TDD)
+### Phase 5: Injector emits the TWO-TIER block (Decision I, TDD)
 
-- [ ] ⬜ **Task 5.1**: `_collect_sections`/`_build_section` render a single generated
-  rule-ID table (blocking rules) + the single shared meta-rule + a header pointer
-  ("Full detail: `/hooks-daemon rule-explain <ID>`"). Drop per-handler prose.
-  (RED: block is a RuleID-keyed table, meta-rule once, pointer present; GREEN.)
+- [ ] ⬜ **Task 5.1**: `_collect_sections`/`_build_section` render: shared
+  meta-rule + explain pointer ONCE; full `get_claude_md()` prose for handlers in
+  `claude_md.promotion.promoted_handlers` (PROMOTED tier); a single generated
+  rule-ID table row per blocking rule of every OTHER handler (PROGRESSIVE tier).
+  (RED: promoted handler's prose present verbatim; non-promoted handler reduced
+  to table rows; meta-rule once; pointer present; GREEN.)
 - [ ] ⬜ **Task 5.2**: Advisory handlers — lighter section per Decision C.
-- [ ] ⬜ **Task 5.3**: Re-measure (Phase 1): injected block ≤50% of baseline (G1).
+- [ ] ⬜ **Task 5.3**: Re-measure (Phase 1 harness): injected block ≥70% smaller
+  than the 2026-08-30 baseline (121,932 B / 28,630 tokens) with this repo's real
+  promoted set; also record the pure-progressive floor (empty promoted list).
 
 ### Phase 6: On-demand detail — CLI + skill (TDD)
 
@@ -307,8 +344,9 @@ Rationale + citations in `RESEARCH.md`.
   `daemon/cli.py` printing `Rule.verbose` verbatim. (RED: output has every
   Phase 1.2 term for that rule; GREEN.)
 - [ ] ⬜ **Task 6.2**: Skill `/hooks-daemon rule-explain <ID>` under
-  `src/.../skills/hooks-daemon/` wrapping the CLI. Follow existing skill-script
-  conventions (self-bootstrap/manifest if applicable — see RELEASING Step 14).
+  `src/claude_code_hooks_daemon/skills/hooks-daemon/` wrapping the CLI. Follow
+  existing skill-script conventions (self-bootstrap/manifest if applicable —
+  see RELEASING Step 14).
 
 ### Phase 7: Parity + integrity tests (anti-drift guarantee, TDD)
 
@@ -325,7 +363,7 @@ Rationale + citations in `RESEARCH.md`.
   content-preservation check + `validate_instruction_content` still pass.
   (Doc/lint test: referenced but not `@`-expanded; pointer present.)
 - [ ] ⬜ **Task 8.2**: Installer / CLAUDE.md template for fresh installs emits the
-  de-`@`'d form + rule-table block (search `src/.../install/`).
+  de-`@`'d form + rule-table block (search `src/claude_code_hooks_daemon/install/`).
 
 ### Phase 9: Verification, QA, dogfood (executor runs in MAIN repo)
 
@@ -341,15 +379,19 @@ Rationale + citations in `RESEARCH.md`.
 
 - Related: Plans 00114 (upgrade), 00115 (parallel-batch footgun) touch CLAUDE.md /
   skills — sequence edits to avoid collisions. No hard blocker.
-- Touches `core/handler.py`, `core/rule.py` (new), `core/disclosure_tracker.py`
-  (new), `core/claude_md_injector.py`, `core/data_layer/history.py` (maybe),
-  `constants/rule_ids.py` (new), `daemon/cli.py`, PreCompact + SessionStart
-  handlers, every BLOCKING handler's deny path, the new skill, CLAUDE.md +
+- Touches `core/handler.py`, `core/rule.py`, `core/disclosure_tracker.py`,
+  `core/claude_md_injector.py`, `core/handler_history.py` (maybe),
+  `constants/rule_ids.py`, `daemon/cli.py`, PreCompact + SessionStart
+  handlers, every BLOCKING handler's deny path, the new `block-report`
+  analyser + `claude_md.promotion` config, the new skill, CLAUDE.md +
   install templates.
 
 ## Success Criteria
 
-- [ ] Injected block ≤ 11,000 B / ≤ 200 lines (≥50%), now a rule table.
+- [ ] Injected block ≥70% smaller than the 2026-08-30 baseline (121,932 B),
+  now the two-tier promoted-prose + rule-table form (Decision I).
+- [ ] `bin/hooks-daemon block-report` runs on real transcripts; this repo's
+  `promoted_handlers` set is committed with its evidence journalled.
 - [ ] First fire of a rule → verbose; repeat → terse keyed by ID; PreCompact /
   clear resets → next fire verbose again (live + unit verified).
 - [ ] Skill `/hooks-daemon rule-explain <ID>` and CLI `explain-rule <ID>` return
@@ -376,30 +418,8 @@ Rationale + citations in `RESEARCH.md`.
 
 ## Notes & Updates
 
-### 2026-05-29
+Dated narrative lives in [JOURNAL/](JOURNAL/) (relocated 2026-08-31; the
+2026-05-29 design notes are preserved in the 26-08-31 day-file). Hybrid
+promotion design: [DESIGN-HYBRID-PROMOTION.md](DESIGN-HYBRID-PROMOTION.md).
 
-- Revised twice per maintainer direction. Final design = **stateful progressive
-  disclosure with disclosure tracking**: CLAUDE.md holds only a compact rule-ID
-  table; a rule's FIRST fire per session emits the verbose block, later fires emit
-  a terse rule-ID reminder, and disclosure state RESETS on PreCompact + clear so
-  the verbose block returns after context loss. Plus a skill
-  `/hooks-daemon rule-explain <ID>` for on-demand full detail. This moves the
-  ~22 KB of verbose rationale out of always-on context entirely, paying it only
-  when a rule is actually hit and only once until context is lost — significant
-  token savings every turn.
-- Grounded in source: `core/handler.py` (clean base; `get_rules()` fits),
-  `core/data_layer/history.py` (current counting is per-handler, all-time, no
-  session scope, no reset → motivates the new `DisclosureTracker`),
-  `handlers/pre_tool_use/destructive_git.py` (already has a count-driven verbosity
-  ladder — this design inverts it to verbose-first + session-scoped + reset),
-  `handlers/pre_compact/*` (reset hook point), `daemon/cli.py` (drill-down home).
-- OPEN questions for maintainer (recorded as recommended defaults since a subagent
-  cannot ask interactively): A) handler-owned rules, B) per-rule IDs, C)
-  blocking-only table, E) reset on PreCompact + every SessionStart if clear is not
-  distinguishable, G) dedicated tracker state file vs extending History.
-- Working note: writing `.md` directly into the worktree plan folder is blocked by
-  `markdown_organization` (it resolves project root to the main repo, so the
-  worktree path `.claude/worktrees/.../CLAUDE/Plan/` fails its allowed-path regex).
-  Worked around via `.txt` draft in `untracked/` then `mv` to `.md`. Upstream
-  fix candidate.
 - Delivery commit hash(es): _to be recorded on completion._
