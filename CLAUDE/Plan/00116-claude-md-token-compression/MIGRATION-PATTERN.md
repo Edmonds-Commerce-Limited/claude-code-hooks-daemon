@@ -177,3 +177,21 @@ handler's base already narrows to; the shape below is base-agnostic.)
 `src/claude_code_hooks_daemon/handlers/pre_tool_use/destructive_git.py` +
 `tests/unit/handlers/test_destructive_git.py` (see
 `TestDestructiveGitGetRules` and `TestDestructiveGitDisclosureLadder`).
+
+## Convention: always-shown dynamic suffix (added mid-fan-out, 2026-08-31)
+
+Two kinds of interpolated content in deny messages, treated oppositely:
+
+- Content the agent ALREADY HAS (its own command echoed back): drop from
+  Rule.verbose per the original guidance.
+- Content the agent NEEDS and does NOT have (a suggested corrected command,
+  the matched span, the computed next plan number, dynamic lint findings):
+  keep Rule.verbose static (teaching only) and append the dynamic piece as a
+  suffix on EVERY fire regardless of disclosure state — a terse repeat-fire
+  must still carry the concrete fix/evidence, not just the rule ID.
+
+## Convention: pathspec commits in the shared tree
+
+`git add <mine> && git commit` is NOT safe in a shared index — a sibling's
+staged files ride in. Use `git commit -- <explicit paths>` so only the named
+paths are committed regardless of what else is staged.
