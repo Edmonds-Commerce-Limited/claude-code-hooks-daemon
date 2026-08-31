@@ -30,8 +30,10 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.strategies.comments.extractor import (
     CommentSpan,
@@ -127,6 +129,26 @@ _RETROSPECTIVE_PHRASE_PATTERN: Final[re.Pattern[str]] = re.compile(
 
 _MAX_SPANS_SHOWN: Final[int] = 5
 
+# Single rule (Plan 00116): both high-precision block signals ('Prior
+# <version>:' phrasing and a dated entry) are the same concept -- changelog
+# narrative accumulating in a comment.
+_COMMENT_CHANGELOG_RULE = Rule(
+    rule_id=RuleID.COMMENT_CHANGELOG,
+    blocked="changelog narrative in a code comment",
+    why="A comment describes CURRENT STATE; history belongs elsewhere",
+    fix="Move it to git, a changelog file, or the plan's JOURNAL/",
+    verbose=(
+        "Comments describe CURRENT STATE only. Move the history:\n"
+        "  - what changed and when  -> git (it is already there — the commit message)\n"
+        "  - release notes for humans -> the project's changelog file\n"
+        "  - in-flight narrative      -> the plan's JOURNAL/ day-file\n\n"
+        "Keep in the comment only what is true of the code as it stands now.\n\n"
+        "If this is RATIONALE (why the code looks the way it does, anchored to a "
+        "failure mode) rather than a changelog, rephrase without dated/versioned "
+        "entries — key it to the failure mode, not the release number."
+    ),
+)
+
 
 def _distinct_dated_or_versioned_entries(text: str) -> set[str]:
     """Return the set of distinct semver/date tokens referenced in ``text``."""
@@ -212,6 +234,7 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
         self._max_history_entries: int = _DEFAULT_MAX_HISTORY_ENTRIES
         self._mode: str = _MODE_BLOCK
         self._exclude_paths: list[str] | None = None
+        self._formatter = RuleFormatter()
 
     def _apply_language_filter(self) -> None:
         if self._languages_applied:
@@ -295,11 +318,27 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
 
         blocking = [(span, reasons) for span, reasons, _advisory in violations if reasons]
         if blocking and self._mode == _MODE_BLOCK:
-            return GatingResult(decision=Decision.DENY, reason=self._build_deny_reason(blocking))
+            return GatingResult(
+                decision=Decision.DENY, reason=self._build_deny_reason(hook_input, blocking)
+            )
 
         return GatingResult(decision=Decision.ALLOW, context=[self._build_advisory(violations)])
 
-    def _build_deny_reason(self, blocking: list[tuple[CommentSpan, list[str]]]) -> str:
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [_COMMENT_CHANGELOG_RULE]
+
+    def _build_deny_reason(
+        self, hook_input: dict[str, Any], blocking: list[tuple[CommentSpan, list[str]]]
+    ) -> str:
+        """Build the DENY reason.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The per-invocation
+        diagnostic (which comment spans, which signals matched) is dynamic
+        and always fully present -- only the surrounding "where history
+        belongs" teaching prose goes terse on repeat fires.
+        """
         lines: list[str] = []
         for span, reasons in blocking[:_MAX_SPANS_SHOWN]:
             preview = span.text if len(span.text) <= 120 else span.text[:117] + "..."
@@ -307,18 +346,20 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
             lines.append(f"  - {reasons_text}\n    {preview!r}")
         spans_text = "\n".join(lines)
 
-        return (
-            f"BLOCKED: changelog content in a code comment ({len(blocking)} comment(s)).\n\n"
-            f"{spans_text}\n\n"
-            "Comments describe CURRENT STATE only. Move the history:\n"
-            "  - what changed and when  -> git (it is already there — the commit message)\n"
-            "  - release notes for humans -> the project's changelog file\n"
-            "  - in-flight narrative      -> the plan's JOURNAL/ day-file\n\n"
-            "Keep in the comment only what is true of the code as it stands now.\n\n"
-            "If this is RATIONALE (why the code looks the way it does, anchored to a "
-            "failure mode) rather than a changelog, rephrase without dated/versioned "
-            "entries — key it to the failure mode, not the release number."
-        )
+        dynamic_detail = f"{len(blocking)} comment(s) carry changelog narrative:\n\n{spans_text}"
+
+        rule = _COMMENT_CHANGELOG_RULE
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
+            message = self._formatter.terse(rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, rule.rule_id)
+            message = self._formatter.verbose(rule)
+
+        return f"{message}\n\n{dynamic_detail}"
 
     def _build_advisory(self, violations: list[tuple[CommentSpan, list[str], list[str]]]) -> str:
         lines = ["ADVISORY: comment content resembles changelog narrative"]
