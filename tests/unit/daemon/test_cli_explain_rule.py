@@ -9,21 +9,30 @@ zero bespoke wiring for that handler.
 from __future__ import annotations
 
 import argparse
+import logging
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.cli import cmd_explain_handler, cmd_explain_rule
+
+# This test file lives at tests/unit/daemon/, three levels below the repo
+# root — used as a real project root (it carries a real .claude/hooks-daemon.yaml)
+# so ProjectContext-dependent handlers can be exercised for real rather than
+# skipped, without inventing a synthetic fixture project.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _rule_args(**overrides: Any) -> argparse.Namespace:
-    values: dict[str, Any] = {"rule_id": None, "list_rules": False}
+    values: dict[str, Any] = {"rule_id": None, "list_rules": False, "project_root": None}
     values.update(overrides)
     return argparse.Namespace(**values)
 
 
 def _handler_args(**overrides: Any) -> argparse.Namespace:
-    values: dict[str, Any] = {"name": None}
+    values: dict[str, Any] = {"name": None, "project_root": None}
     values.update(overrides)
     return argparse.Namespace(**values)
 
@@ -92,3 +101,32 @@ class TestCmdExplainHandler:
         assert exit_code == 1
         err = capsys.readouterr().err
         assert "destructive_git" in err
+
+
+class TestProjectContextInitialisation:
+    """explain-rule/explain-handler must not require a running daemon, but
+    they SHOULD initialise ProjectContext when a real project root is
+    available so handlers whose constructors read it are not silently
+    skipped (the gap DocsGenerator avoids via get_project_path())."""
+
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+
+    def test_explicit_project_root_initialises_project_context(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ProjectContext.reset()
+        with caplog.at_level(logging.ERROR):
+            exit_code = cmd_explain_rule(_rule_args(list_rules=True, project_root=str(_REPO_ROOT)))
+        assert exit_code == 0
+        assert "ProjectContext not initialized" not in caplog.text
+        assert ProjectContext.is_initialized()
+
+    def test_missing_project_root_degrades_gracefully(self) -> None:
+        """No project root resolvable (e.g. run outside any project) must
+        still answer known lookups rather than crash."""
+        ProjectContext.reset()
+        exit_code = cmd_explain_rule(
+            _rule_args(rule_id="R-GIT-RESET-HARD", project_root="/nonexistent-root-xyz")
+        )
+        assert exit_code == 0

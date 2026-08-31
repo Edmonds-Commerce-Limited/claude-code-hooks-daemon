@@ -4886,6 +4886,66 @@ _EXPLAIN_UNKNOWN_HANDLER_HINT = (
 )
 
 
+def _find_config_file_for_explain(args: argparse.Namespace) -> Path | None:
+    """Best-effort ``hooks-daemon.yaml`` lookup for rule/handler enumeration.
+
+    Deliberately NOT ``get_project_path``/``resolve_tree_root``: both can
+    print an error and ``sys.exit`` when no valid installation is found,
+    which would break the Task 6.1 robustness requirement that
+    ``explain-rule``/``explain-handler`` work without a running daemon (and,
+    by extension, without a fully validated installation). This returns
+    ``None`` instead so the caller can degrade to enumeration without
+    ``ProjectContext`` — some handlers are then skipped, exactly as
+    ``DocsGenerator`` already tolerates.
+
+    Args:
+        args: Parsed CLI arguments, optionally carrying ``project_root``.
+
+    Returns:
+        Path to an existing ``hooks-daemon.yaml``, or ``None``.
+    """
+    override = getattr(args, "project_root", None)
+    if override:
+        candidate = Path(override) / ".claude" / "hooks-daemon.yaml"
+        return candidate if candidate.exists() else None
+
+    current = Path.cwd()
+    while current != current.parent:
+        if not is_inside_daemon_directory(current):
+            candidate = current / ".claude" / "hooks-daemon.yaml"
+            if candidate.exists():
+                return candidate
+        current = current.parent
+    return None
+
+
+def _init_project_context_for_explain(args: argparse.Namespace) -> None:
+    """Initialise ``ProjectContext`` for rule/handler enumeration, if possible.
+
+    Handler constructors that read ``ProjectContext.project_root()`` (e.g.
+    ``markdown_organization``, ``npm_command``) raise otherwise, and are
+    silently skipped by ``collect_handler_rules`` — losing their rules from
+    ``explain-rule``. A no-op if already initialised (idempotent, safe to
+    call from both commands) or if no config file can be found.
+
+    Args:
+        args: Parsed CLI arguments, optionally carrying ``project_root``.
+    """
+    if ProjectContext.is_initialized():
+        return
+    config_file = _find_config_file_for_explain(args)
+    if config_file is None:
+        return
+    try:
+        ProjectContext.initialize(config_file)
+    except (ValueError, RuntimeError):
+        logger.debug(
+            "Could not initialise ProjectContext for rule lookup from %s",
+            config_file,
+            exc_info=True,
+        )
+
+
 def cmd_explain_rule(args: argparse.Namespace) -> int:
     """Print the full verbatim detail for a rule, or list every known rule ID.
 
@@ -4909,6 +4969,7 @@ def cmd_explain_rule(args: argparse.Namespace) -> int:
         near_rule_matches,
     )
 
+    _init_project_context_for_explain(args)
     handlers = discover_handler_rules()
 
     if getattr(args, "list_rules", False):
@@ -4962,6 +5023,7 @@ def cmd_explain_handler(args: argparse.Namespace) -> int:
         near_handler_matches,
     )
 
+    _init_project_context_for_explain(args)
     handlers = discover_handler_rules()
     name = getattr(args, "name", None) or ""
 
@@ -5849,6 +5911,13 @@ def main() -> int:
         action="store_true",
         help="List every known rule ID with its owning handler",
     )
+    parser_explain_rule.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected from cwd)",
+    )
     parser_explain_rule.set_defaults(func=cmd_explain_rule)
 
     parser_explain_handler = subparsers.add_parser(
@@ -5858,6 +5927,13 @@ def main() -> int:
     parser_explain_handler.add_argument(
         "name",
         help="Handler config key or class name, e.g. destructive_git (case-insensitive)",
+    )
+    parser_explain_handler.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected from cwd)",
     )
     parser_explain_handler.set_defaults(func=cmd_explain_handler)
 
