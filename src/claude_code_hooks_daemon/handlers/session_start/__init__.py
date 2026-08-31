@@ -3,6 +3,7 @@
 from . import secret_file_hygiene_checker as _secret_file_hygiene_checker_module
 from .ccy_supervisor_integrity import CcySupervisorIntegrityHandler
 from .contract_staleness import ContractStalenessHandler
+from .disclosure_reset_session_start import DisclosureResetSessionStartHandler
 from .git_filemode_checker import GitFilemodeCheckerHandler
 from .git_upstream_checker import GitUpstreamCheckerHandler
 from .gitignore_safety_checker import GitignoreSafetyCheckerHandler
@@ -23,6 +24,7 @@ SecretFileHygieneCheckerHandler = (
 __all__ = [
     "CcySupervisorIntegrityHandler",
     "ContractStalenessHandler",
+    "DisclosureResetSessionStartHandler",
     "GitFilemodeCheckerHandler",
     "GitUpstreamCheckerHandler",
     "GitignoreSafetyCheckerHandler",

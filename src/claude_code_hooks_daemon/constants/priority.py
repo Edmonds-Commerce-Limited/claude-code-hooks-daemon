@@ -51,6 +51,10 @@ class Priority:
     AUTO_APPROVE_READS = 10
     VALIDATE_ESLINT_ON_WRITE = 10
     COMPACTION_SIGNAL = 20  # PreCompact: drop compaction signal for the PTY supervisor
+    # Plan 00116 Phase 4: resets DisclosureTracker state (verbose-first/terse-after
+    # rule disclosure) for the firing agent. Runs before COMPACTION_SIGNAL so the
+    # tracker is clean before anything else on PreCompact runs.
+    DISCLOSURE_RESET_PRE_COMPACT = 15
 
     DAEMON_LOCATION_GUARD = 11
 
@@ -189,6 +193,11 @@ class Priority:
 
     NPM_COMMAND = 50
     VALIDATE_INSTRUCTION_CONTENT = 50
+
+    # Plan 00116 Phase 4: resets DisclosureTracker state for the firing agent on
+    # every SessionStart (Decision E). Runs ahead of the SessionStart advisory
+    # ladder below -- it is state hygiene, not an advisory.
+    DISCLOSURE_RESET_SESSION_START = 15
 
     WEB_SEARCH_YEAR = 55
     PROJECT_HANDLER_LOAD_CHECKER = 50

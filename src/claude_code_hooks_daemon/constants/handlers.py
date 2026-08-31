@@ -121,6 +121,14 @@ class HandlerID:
         config_key="compaction_signal",
         display_name="compaction-signal",
     )
+    # Plan 00116 Phase 4: resets DisclosureTracker state for the firing agent
+    # on PreCompact (verbose content the agent saw is about to be compacted
+    # away, so the next fire of a rule must be verbose again).
+    DISCLOSURE_RESET_PRE_COMPACT = HandlerIDMeta(
+        class_name="DisclosureResetPreCompactHandler",
+        config_key="disclosure_reset_pre_compact",
+        display_name="disclosure-reset-pre-compact",
+    )
     ABSOLUTE_PATH = HandlerIDMeta(
         class_name="AbsolutePathHandler",
         config_key="absolute_path",
@@ -529,6 +537,17 @@ class HandlerID:
         class_name="GitFilemodeCheckerHandler",
         config_key="git_filemode_checker",
         display_name="git-filemode-checker",
+    )
+
+    # Plan 00116 Phase 4: resets DisclosureTracker state for the firing agent
+    # on SessionStart (Decision E -- clear/new session has no memory of any
+    # verbose block already shown, so the next fire must be verbose again).
+    # Fires on every SessionStart, not only new sessions -- resetting an
+    # already-empty entry on a resume is a cheap no-op.
+    DISCLOSURE_RESET_SESSION_START = HandlerIDMeta(
+        class_name="DisclosureResetSessionStartHandler",
+        config_key="disclosure_reset_session_start",
+        display_name="disclosure-reset-session-start",
     )
 
     # Gitignore safety checker (SessionStart handler)
