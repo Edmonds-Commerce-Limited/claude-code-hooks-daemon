@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00297: supervisor drop anchor safety net](00297-supervisor-drop-anchor-safety-net/PLAN.md) - Not Started (read-back-verified hard stop whenever the session is observed running Fable above low effort)
+
 - [00296: monorepo workspace resolver](00296-monorepo-workspace-resolver/PLAN.md) - In Progress (one shared `Workspace.for_path()` resolver, so a multi-workspace monorepo stops silently degrading enforcement)
 
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
