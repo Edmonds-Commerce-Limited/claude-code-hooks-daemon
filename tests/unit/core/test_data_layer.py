@@ -9,6 +9,7 @@ from claude_code_hooks_daemon.core.data_layer import (
     get_data_layer,
     reset_data_layer,
 )
+from claude_code_hooks_daemon.core.disclosure_tracker import DisclosureTracker
 from claude_code_hooks_daemon.core.handler_history import HandlerHistory
 from claude_code_hooks_daemon.core.session_state import SessionState
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
@@ -32,6 +33,11 @@ class TestDaemonDataLayerInit:
         dl = DaemonDataLayer()
         assert isinstance(dl.history, HandlerHistory)
 
+    def test_disclosure_returns_disclosure_tracker(self) -> None:
+        """disclosure property should return a DisclosureTracker instance."""
+        dl = DaemonDataLayer()
+        assert isinstance(dl.disclosure, DisclosureTracker)
+
     def test_session_is_same_instance(self) -> None:
         """session should return the same instance on multiple accesses."""
         dl = DaemonDataLayer()
@@ -46,6 +52,11 @@ class TestDaemonDataLayerInit:
         """history should return the same instance on multiple accesses."""
         dl = DaemonDataLayer()
         assert dl.history is dl.history
+
+    def test_disclosure_is_same_instance(self) -> None:
+        """disclosure should return the same instance on multiple accesses."""
+        dl = DaemonDataLayer()
+        assert dl.disclosure is dl.disclosure
 
 
 class TestDaemonDataLayerReset:
@@ -75,6 +86,14 @@ class TestDaemonDataLayerReset:
         )
         dl.reset()
         assert dl.history.total_count == 0
+
+    def test_reset_clears_disclosure_tracker(self) -> None:
+        """reset() should clear disclosure tracker state for every agent."""
+        dl = DaemonDataLayer()
+        transcript_path = "/tmp/agent/transcript.jsonl"
+        dl.disclosure.mark_disclosed(transcript_path, "R-GIT-RESET-HARD")
+        dl.reset()
+        assert dl.disclosure.was_disclosed(transcript_path, "R-GIT-RESET-HARD") is False
 
 
 class TestGetDataLayer:

@@ -16,6 +16,7 @@ Usage:
 
 import logging
 
+from claude_code_hooks_daemon.core.disclosure_tracker import DisclosureTracker
 from claude_code_hooks_daemon.core.handler_history import HandlerHistory
 from claude_code_hooks_daemon.core.session_state import SessionState
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
@@ -30,13 +31,14 @@ class DaemonDataLayer:
     Each component is created once and reused for the session lifetime.
     """
 
-    __slots__ = ("_history", "_session", "_transcript")
+    __slots__ = ("_disclosure", "_history", "_session", "_transcript")
 
     def __init__(self) -> None:
         """Initialise with fresh component instances."""
         self._session = SessionState()
         self._transcript = TranscriptReader()
         self._history = HandlerHistory()
+        self._disclosure = DisclosureTracker()
 
     @property
     def session(self) -> SessionState:
@@ -65,6 +67,16 @@ class DaemonDataLayer:
         """
         return self._history
 
+    @property
+    def disclosure(self) -> DisclosureTracker:
+        """Access per-agent rule disclosure state (Plan 00116).
+
+        Returns:
+            DisclosureTracker for querying/recording whether a rule's verbose
+            block has already been delivered to a given agent this session.
+        """
+        return self._disclosure
+
     def reset(self) -> None:
         """Reset all data layer state.
 
@@ -73,6 +85,7 @@ class DaemonDataLayer:
         self._session.reset()
         self._history.reset()
         self._transcript = TranscriptReader()
+        self._disclosure = DisclosureTracker()
 
 
 # Global singleton instance
