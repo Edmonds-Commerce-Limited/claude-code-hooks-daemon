@@ -8,11 +8,24 @@ the path in flag position. No escape hatch (Decision 3).
 
 from typing import Any
 
+import pytest
+
 from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
     SecretFileGuardHandler,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 def _hook_input(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
@@ -239,3 +252,79 @@ class TestGuidance:
         assert tests
         for test in tests:
             assert "block-words" not in test.command
+
+
+class TestGetRules:
+    """get_rules() declares the 3 Rule objects backing this handler (Plan 00116)."""
+
+    def test_returns_three_rules(self) -> None:
+        rules = _handler().get_rules()
+        assert len(rules) == 3
+        assert all(isinstance(rule, Rule) for rule in rules)
+
+    def test_rule_ids_match_constants(self) -> None:
+        expected = {RuleID.SECRET_READ, RuleID.SECRET_BASH_MENTION, RuleID.SECRET_SCRIPT_AUTHOR}
+        actual = {rule.rule_id for rule in _handler().get_rules()}
+        assert actual == expected
+
+    def test_every_rule_has_non_empty_verbose(self) -> None:
+        for rule in _handler().get_rules():
+            assert rule.verbose, f"{rule.rule_id} has empty verbose content"
+
+
+class TestDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Decision G)."""
+
+    def _read_with_transcript(self, path: str, transcript_path: str) -> dict[str, Any]:
+        hook_input = _hook_input("Read", {"file_path": path})
+        hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    def test_first_fire_for_agent_is_verbose(self) -> None:
+        handler = _handler()
+        hook_input = self._read_with_transcript(
+            "/proj/.vault-pass", "/tmp/agent-a/transcript.jsonl"
+        )
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+        assert "secret-meta" in result.reason
+
+    def test_second_fire_for_same_agent_same_rule_is_terse(self) -> None:
+        handler = _handler()
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._read_with_transcript("/proj/.vault-pass", transcript_path))
+        result = handler.handle(
+            self._read_with_transcript("/proj/other.vault-password", transcript_path)
+        )
+
+        assert result.decision == Decision.DENY
+        assert "NO escape hatch" not in result.reason
+        assert "other.vault-password" not in result.reason  # only the glob is echoed
+
+    def test_terse_message_leads_with_rule_id(self) -> None:
+        handler = _handler()
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._read_with_transcript("/proj/.vault-pass", transcript_path))
+        result = handler.handle(self._read_with_transcript("/proj/.vault-pass", transcript_path))
+
+        assert result.reason.startswith(f"BLOCKED [{RuleID.SECRET_READ}]")
+
+    def test_different_route_same_agent_is_independently_verbose(self) -> None:
+        handler = _handler()
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._read_with_transcript("/proj/.vault-pass", transcript_path))
+        hook_input = _hook_input("Bash", {"command": "cat .vault-pass"})
+        hook_input["transcript_path"] = transcript_path
+        result = handler.handle(hook_input)
+
+        assert result.reason.startswith(f"BLOCKED [{RuleID.SECRET_BASH_MENTION}]")
+        assert "secret-meta" in result.reason
+
+    def test_missing_transcript_path_is_always_verbose(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
+        handler.handle(hook_input)
+        result = handler.handle(hook_input)
+
+        assert "secret-meta" in result.reason

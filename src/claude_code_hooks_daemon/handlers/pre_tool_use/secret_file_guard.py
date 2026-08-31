@@ -30,11 +30,61 @@ RESEARCH-read-routes.md for the class-(b)/(c)/(d) route classification.
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
+
+# One Rule per distinct deny ROUTE (Plan 00116, Decision B). The underlying
+# deny message is the same shape for all three -- only the "what was
+# inspected" framing differs -- so all three share one `why`/`fix` but are
+# distinct rule_ids since they are conceptually different disclosure paths
+# (a direct tool read, a Bash mention, and the write-then-execute route).
+_WHY: Final[str] = (
+    "The file's contents must NEVER be read into context by any route — "
+    "not Read, not Bash, not an interpreter one-liner, not a copy"
+)
+_FIX: Final[str] = "Use `bin/hooks-daemon secret-meta <path>` for metadata, or ask the user"
+_VERBOSE: Final[str] = (
+    "What you CAN do instead:\n"
+    "- Presence/metadata: `bin/hooks-daemon secret-meta <path>` returns "
+    "existence, bucketed size, mtime, permissions and a keyed digest — "
+    "never content.\n"
+    "- Trusted consumers keep working: pass the path in flag position, "
+    "e.g. `ansible-playbook --vault-password-file <path> ...` "
+    "(`ansible-vault view|decrypt` stay denied — they print secrets).\n\n"
+    "There is NO escape hatch and no self-declared-intent override. "
+    "Only a human may lift this, by editing "
+    "`handlers.pre_tool_use.secret_file_guard` in `.claude/hooks-daemon.yaml`. "
+    "Ask the user; do not hunt for another way to read the file."
+)
+
+_RULES_BY_ROUTE: Final[dict[str, Rule]] = {
+    "read": Rule(
+        rule_id=RuleID.SECRET_READ,
+        blocked="Read/Write/Edit/NotebookEdit/Grep targeting a protected path",
+        why=_WHY,
+        fix=_FIX,
+        verbose=_VERBOSE,
+    ),
+    "bash": Rule(
+        rule_id=RuleID.SECRET_BASH_MENTION,
+        blocked="a Bash command whose text mentions a protected path",
+        why=_WHY,
+        fix=_FIX,
+        verbose=_VERBOSE,
+    ),
+    "script": Rule(
+        rule_id=RuleID.SECRET_SCRIPT_AUTHOR,
+        blocked="a script authored via Write/Edit whose content references a protected path",
+        why=_WHY,
+        fix=_FIX,
+        verbose=_VERBOSE,
+    ),
+}
 
 _FIELD_FILE_PATH: Final[str] = "file_path"
 _FIELD_NOTEBOOK_PATH: Final[str] = "notebook_path"
@@ -107,10 +157,20 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         return sfm.merge_allowed_consumers(self._allowed_consumers)
 
     def _matched_pattern(self, hook_input: dict[str, Any]) -> str | None:
-        """The protected glob this tool call trips, or ``None``.
+        """The protected glob this tool call trips, or ``None``."""
+        matched = self._matched_pattern_and_route(hook_input)
+        return None if matched is None else matched[0]
+
+    def _matched_pattern_and_route(self, hook_input: dict[str, Any]) -> tuple[str, str] | None:
+        """``(pattern, route)`` for this tool call, or ``None``.
 
         The single dispatch point shared by ``matches()`` and ``handle()`` so
-        the two can never disagree about what was inspected.
+        the two can never disagree about what was inspected. ``route`` is one
+        of ``"read"`` (a direct Read/Write/Edit/NotebookEdit/Grep target, or a
+        Grep rooted at a directory containing a protected file), ``"bash"``
+        (a Bash command mentioning a protected path) or ``"script"`` (a
+        Write/Edit authoring a script whose content references one) — the
+        three Decision B rule granularities (Plan 00116).
         """
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
@@ -127,7 +187,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # project-configured pattern — all of them under mode: replace.
             if sfm.is_exempt_invocation(command, self._consumers(), patterns):
                 return None
-            return mention
+            return (mention, "bash")
 
         path_field = _PATH_FIELD_BY_TOOL.get(str(tool_name or ""))
         if path_field is None:
@@ -135,7 +195,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         path = str(tool_input.get(path_field, ""))
         for pattern in patterns:
             if sfm.path_is_protected(path, (pattern,)):
-                return pattern
+                return (pattern, "read")
 
         if tool_name == ToolName.GREP and path:
             # Partial enforcement for directory-rooted content search
@@ -143,10 +203,12 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # protected file reads its content without naming it. Bounded
             # walk — a tree over the cap is NOT fully checked, which the
             # guidance names as a residual limit.
-            return sfm.directory_contains_protected(path, patterns)
+            directory_mention = sfm.directory_contains_protected(path, patterns)
+            return None if directory_mention is None else (directory_mention, "read")
 
         if tool_name in (ToolName.WRITE, ToolName.EDIT):
-            return self._script_content_mention(path, tool_input, patterns)
+            script_mention = self._script_content_mention(path, tool_input, patterns)
+            return None if script_mention is None else (script_mention, "script")
         return None
 
     def _script_content_mention(
@@ -176,30 +238,38 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return self._matched_pattern(hook_input) is not None
 
+    def get_rules(self) -> list[Rule]:
+        """Return the 3 Rule objects backing this handler's blocking behaviour."""
+        return list(_RULES_BY_ROUTE.values())
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        pattern = self._matched_pattern(hook_input)
-        if pattern is None:
+        """Deny with a verbose-first/terse-after explanation.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The matched glob is
+        appended on every fire — it changes per invocation, so it is not
+        part of the static teaching content.
+        """
+        matched = self._matched_pattern_and_route(hook_input)
+        if matched is None:
             return GatingResult(decision=Decision.ALLOW)
-        return GatingResult(
-            decision=Decision.DENY,
-            reason=(
-                "SECRET FILE PROTECTED: this tool call would put the contents of a "
-                f"protected file into context (matched protected glob: `{pattern}`).\n\n"
-                "The file's contents must NEVER be read into context by any route — "
-                "not Read, not Bash, not an interpreter one-liner, not a copy.\n\n"
-                "What you CAN do instead:\n"
-                "- Presence/metadata: `bin/hooks-daemon secret-meta <path>` returns "
-                "existence, bucketed size, mtime, permissions and a keyed digest — "
-                "never content.\n"
-                "- Trusted consumers keep working: pass the path in flag position, "
-                "e.g. `ansible-playbook --vault-password-file <path> ...` "
-                "(`ansible-vault view|decrypt` stay denied — they print secrets).\n\n"
-                "There is NO escape hatch and no self-declared-intent override. "
-                "Only a human may lift this, by editing "
-                "`handlers.pre_tool_use.secret_file_guard` in `.claude/hooks-daemon.yaml`. "
-                "Ask the user; do not hunt for another way to read the file."
-            ),
-        )
+        pattern, route = matched
+        rule = _RULES_BY_ROUTE[route]
+
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        formatter = RuleFormatter()
+
+        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
+            message = formatter.terse(rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, rule.rule_id)
+            message = formatter.verbose(rule)
+
+        message += f"\n\nMatched protected glob: `{pattern}`"
+
+        return GatingResult(decision=Decision.DENY, reason=message)
 
     def get_default_enabled(self) -> bool:
         return True
