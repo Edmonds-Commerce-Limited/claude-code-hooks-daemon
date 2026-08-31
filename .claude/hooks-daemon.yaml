@@ -59,6 +59,32 @@ tool_policy:
     - tool: Artifact
       reason: "publishing leaves the repository; source-disabled via artifact_publish_blocker"
 
+# Plan 00116 Decision I: data-driven promotion. Handlers listed here keep FULL
+# guidance resident in the injected CLAUDE.md block; every other blocking
+# handler gets a rule-table row + first-fire-verbose progressive disclosure.
+# Evidence: bin/hooks-daemon block-report (2026-08-31 scan: 359 transcripts,
+# 12 sessions). Thresholds tightened from the 5/2 defaults because this repo's
+# dogfood sessions put 29/34 handlers over the default bar — 20/3 captures the
+# real hot set above the frequency cliff. auto_continue_stop is a judgement
+# add: stop-hook blocks are not tool_result denies, so the transcript scan
+# cannot count them, but they fire in nearly every session.
+claude_md:
+  promotion:
+    min_blocks: 20
+    min_sessions: 3
+    promoted_handlers:
+      - lsp_enforcement
+      - pipe_blocker
+      - sed_blocker
+      - qa_suppression
+      - plan_number_helper
+      - sensitive_content
+      - security_antipattern
+      - tdd_enforcement
+      - error_hiding_blocker
+      - comment_changelog
+      - auto_continue_stop
+
 # Built-in handler configuration
 # Handlers run in priority order (lower number = earlier execution)
 # Priority ranges: 5=test, 10-20=safety, 25-45=workflow, 50-60=tool usage
