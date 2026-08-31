@@ -17,10 +17,21 @@ def mock_project_context():
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import (
     MarkdownOrganizationHandler,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 class TestMarkdownOrganizationHandler:
@@ -2380,3 +2391,98 @@ class TestUntrackedClaudeMemoryPolicy:
         self, policy_handler: MarkdownOrganizationHandler
     ) -> None:
         assert policy_handler.matches(self._write("/tmp/test/src/invalid.md")) is True
+
+
+class TestMarkdownOrganizationGetRules:
+    """get_rules() declares the 3 Rule objects backing this handler (Plan 00116)."""
+
+    @pytest.fixture
+    def handler(self) -> MarkdownOrganizationHandler:
+        return MarkdownOrganizationHandler()
+
+    def test_returns_three_rules(self, handler: MarkdownOrganizationHandler) -> None:
+        rules = handler.get_rules()
+        assert len(rules) == 3
+        assert all(isinstance(rule, Rule) for rule in rules)
+
+    def test_rule_ids_match_constants(self, handler: MarkdownOrganizationHandler) -> None:
+        expected = {
+            RuleID.MARKDOWN_WRONG_LOCATION,
+            RuleID.MARKDOWN_UNTRACKED_MEMORY,
+            RuleID.MARKDOWN_PLAN_SYNC,
+        }
+        actual = {rule.rule_id for rule in handler.get_rules()}
+        assert actual == expected
+
+    def test_every_rule_has_non_empty_verbose(self, handler: MarkdownOrganizationHandler) -> None:
+        for rule in handler.get_rules():
+            assert rule.verbose, f"{rule.rule_id} has empty verbose content"
+
+
+class TestMarkdownOrganizationDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Decision G)."""
+
+    @pytest.fixture
+    def handler(self) -> MarkdownOrganizationHandler:
+        return MarkdownOrganizationHandler()
+
+    def _write(self, path: str, transcript_path: str) -> dict[str, Any]:
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": path, "content": "x"},
+            "transcript_path": transcript_path,
+        }
+
+    def test_wrong_location_first_fire_is_verbose(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        hook_input = self._write("src/invalid.md", "/tmp/agent-a/transcript.jsonl")
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+        assert "CHOOSE THE RIGHT LOCATION" in result.reason
+
+    def test_wrong_location_second_fire_is_terse(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._write("src/invalid.md", transcript_path))
+        result = handler.handle(self._write("src/other.md", transcript_path))
+
+        assert result.decision == Decision.DENY
+        assert "CHOOSE THE RIGHT LOCATION" not in result.reason
+        assert "src/other.md" in result.reason
+
+    def test_wrong_location_terse_leads_with_rule_id(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._write("src/invalid.md", transcript_path))
+        result = handler.handle(self._write("src/invalid.md", transcript_path))
+
+        assert result.reason.startswith(f"BLOCKED [{RuleID.MARKDOWN_WRONG_LOCATION}]")
+
+    def test_missing_transcript_path_is_always_verbose(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "src/invalid.md", "content": "x"},
+        }
+        handler.handle(hook_input)
+        result = handler.handle(hook_input)
+
+        assert "CHOOSE THE RIGHT LOCATION" in result.reason
+
+    def test_untracked_memory_disclosure_is_independent_of_wrong_location(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        handler._allow_untracked_claude_memory = False
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._write("src/invalid.md", transcript_path))
+
+        memory_path = "/root/.claude/projects/proj/memory/fact.md"
+        result = handler.handle(self._write(memory_path, transcript_path))
+
+        assert result.reason.startswith(f"BLOCKED [{RuleID.MARKDOWN_UNTRACKED_MEMORY}]")
+        assert "READING memory is still allowed" in result.reason

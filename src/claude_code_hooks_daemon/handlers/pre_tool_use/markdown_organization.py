@@ -13,8 +13,10 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import (
     get_bash_command,
     get_bash_write_targets,
@@ -27,6 +29,89 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Three Rules (Plan 00116, Decision B) for this handler's three distinct deny
+# concepts: a generic wrong-location write, the untracked-Claude-memory
+# policy, and a plansDirectory/daemon-config sync failure.
+_RULE_WRONG_LOCATION = Rule(
+    rule_id=RuleID.MARKDOWN_WRONG_LOCATION,
+    blocked="MARKDOWN FILE IN WRONG LOCATION — a new `.md` file written to an unrecognised location",
+    why="Markdown files must follow project organization rules",
+    fix="Move it into an allowed location, or configure `extra_allowed_markdown_paths`",
+    verbose=(
+        "This location is NOT allowed. Markdown files can only be written to:\n\n"
+        "1. ./CLAUDE/ - All LLM documentation and subdirectories\n"
+        "2. ./docs/ - Human-facing documentation\n"
+        "3. ./eslint-rules/ - ESLint rule documentation\n"
+        "4. ./untracked/ - Ad-hoc temporary docs\n"
+        "5. ./RELEASES/ - Release notes\n"
+        "6. ./.claude/commands/, ./.claude/agents/, ./.claude/rules/ - "
+        "Claude Code command/agent/rules definitions\n"
+        "7. ./vendor/, ./node_modules/ - Third-party dependencies\n"
+        "8. Standard repo-root files (exact root only): README.md, CHANGELOG.md,\n"
+        "   CONTRIBUTING.md, LICENSE.md, SECURITY.md, CODE_OF_CONDUCT.md,\n"
+        "   AUTHORS.md, NOTICE.md, MAINTAINERS.md\n\n"
+        "CHOOSE THE RIGHT LOCATION:\n"
+        "- Is this for LLMs/agents? -> CLAUDE/\n"
+        "- Is this for the current plan? -> CLAUDE/Plan/{plan-number}-*/\n"
+        "- Is this temporary/ad-hoc? -> untracked/\n"
+        "- Is this for humans? -> docs/\n"
+        "- Is this a release note? -> RELEASES/\n"
+        "- Is this a slash command? -> .claude/commands/\n"
+        "- Is this a Claude Code rules file? -> .claude/rules/\n\n"
+        "NEED A DIFFERENT LOCATION? Configure in .claude/hooks-daemon.yaml:\n"
+        "- allowed_markdown_paths: add regex patterns for extra allowed paths\n"
+        "- monorepo_subproject_patterns: for sub-projects with their own "
+        "docs/, CLAUDE/, etc."
+    ),
+)
+
+_RULE_UNTRACKED_MEMORY = Rule(
+    rule_id=RuleID.MARKDOWN_UNTRACKED_MEMORY,
+    blocked=(
+        "UNTRACKED CLAUDE MEMORY IS DISABLED FOR THIS PROJECT — a write to "
+        "`~/.claude/projects/*/memory/*.md`"
+    ),
+    why=(
+        "That knowledge is per-checkout, un-reviewed, and invisible to teammates — "
+        "it drifts from the repo and bypasses code review"
+    ),
+    fix="Document it in tracked project docs instead (CLAUDE.md, .claude/rules/*.md, docs/)",
+    verbose=(
+        "This project does not keep durable knowledge in untracked Claude memory "
+        "files (~/.claude/projects/*/memory/).\n\n"
+        "READING memory is still allowed — so you can migrate any existing memory "
+        "into tracked project docs.\n\n"
+        "DOCUMENT IT IN TRACKED PROJECT DOCS INSTEAD (progressive disclosure):\n"
+        "- Durable, always-relevant facts -> CLAUDE.md (keep it lean; it is\n"
+        "  resident context loaded every session)\n"
+        "- Contextual, path-specific guidance -> .claude/rules/*.md with `paths:`\n"
+        "  glob frontmatter (loaded on demand only when matching files are touched)\n"
+        "- Intent-triggered procedures -> a thin skill under .claude/skills/ that\n"
+        "  points at a single-source-of-truth doc body\n"
+        "- Reference material humans also read -> docs/\n"
+        "- Link between docs with plain markdown links (zero token cost until\n"
+        "  followed); AVOID @-imports (they re-inline eagerly rather than defer)\n\n"
+        "Keep ONE source of truth per fact and link to it. Put the knowledge where\n"
+        "the repo tracks it, not in untracked Claude meta files.\n\n"
+        "(Policy: `allow_untracked_claude_memory: false` under markdown_organization\n"
+        "in .claude/hooks-daemon.yaml. Set it true to restore default memory writes.)"
+    ),
+)
+
+_RULE_PLAN_SYNC = Rule(
+    rule_id=RuleID.MARKDOWN_PLAN_SYNC,
+    blocked=(
+        "a `.claude/settings.json` `plansDirectory` out of sync with the daemon's "
+        "plan_workflow config"
+    ),
+    why="Plan workflow requires plansDirectory to match daemon config to redirect writes correctly",
+    fix="Fix `.claude/settings.json`'s `plansDirectory` key, then restart your session",
+    verbose=(
+        "Plan workflow requires `plansDirectory` in `.claude/settings.json` to be "
+        "present and to match this daemon's `plan_workflow.directory` config."
+    ),
+)
 
 # Fallback directory-role truths, used only when no ProjectLayout facade was
 # injected (e.g. a handler constructed directly in a unit test rather than
@@ -468,8 +553,40 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         # Return highest numbered match (most recent)
         return sorted(matches_found, key=lambda p: p.name, reverse=True)[0]
 
-    def _check_claude_code_sync(self) -> GatingResult | None:
+    def _deny_plan_sync(self, detail: str, hook_input: dict[str, Any] | None) -> GatingResult:
+        """Deny a plansDirectory sync failure with a verbose-first/terse-after message.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). ``detail`` names the
+        SPECIFIC config problem (missing file, parse error, missing key, or
+        mismatch) and its fix -- it changes per invocation/scenario, so it is
+        appended rather than baked into the static ``Rule.verbose``.
+        """
+        formatter = RuleFormatter()
+        transcript_path = (
+            hook_input.get(HookInputField.TRANSCRIPT_PATH) if hook_input is not None else None
+        )
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, RuleID.MARKDOWN_PLAN_SYNC):
+            message = formatter.terse(_RULE_PLAN_SYNC)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.MARKDOWN_PLAN_SYNC)
+            message = formatter.verbose(_RULE_PLAN_SYNC)
+
+        return GatingResult.deny(reason=f"{message}\n\n{detail}")
+
+    def _check_claude_code_sync(
+        self, hook_input: dict[str, Any] | None = None
+    ) -> GatingResult | None:
         """Check if plansDirectory in .claude/settings.json matches plan_workflow.directory.
+
+        Args:
+            hook_input: The originating hook event, used only to key the
+                verbose-first/terse-after disclosure ladder by transcript_path.
+                Callers that check config state outside a tool-call context
+                (tests, tooling) may omit it -- the result is always verbose.
 
         Returns:
             GatingResult with DENY if out of sync, None if in sync or enforcement disabled
@@ -481,38 +598,34 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         expected_value = f"./{self._track_plans_in_project}"
 
         if not settings_path.exists():
-            return GatingResult.deny(
-                reason=(
-                    "BLOCKED: .claude/settings.json not found.\n\n"
-                    "Plan workflow requires plansDirectory to be configured.\n\n"
-                    "Fix: Create .claude/settings.json with:\n"
-                    f'  "plansDirectory": "{expected_value}"\n\n'
-                    "Then restart your session."
-                ),
+            return self._deny_plan_sync(
+                "settings.json not found.\n\n"
+                "Plan workflow requires plansDirectory to be configured.\n\n"
+                "Fix: Create .claude/settings.json with:\n"
+                f'  "plansDirectory": "{expected_value}"\n\n'
+                "Then restart your session.",
+                hook_input,
             )
 
         try:
             settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as e:
             logger.error(f"Failed to read .claude/settings.json: {e}")
-            return GatingResult.deny(
-                reason=(
-                    "BLOCKED: Cannot read .claude/settings.json.\n\n"
-                    f"Error: {e}\n\n"
-                    "Fix the file and restart your session."
-                ),
+            return self._deny_plan_sync(
+                f"Cannot read .claude/settings.json.\n\nError: {e}\n\n"
+                "Fix the file and restart your session.",
+                hook_input,
             )
 
         plans_directory = settings_data.get("plansDirectory")
         if plans_directory is None:
-            return GatingResult.deny(
-                reason=(
-                    "BLOCKED: plansDirectory not set in .claude/settings.json.\n\n"
-                    "Plan workflow requires plansDirectory to match daemon config.\n\n"
-                    "Fix: Add to .claude/settings.json:\n"
-                    f'  "plansDirectory": "{expected_value}"\n\n'
-                    "Then restart your session."
-                ),
+            return self._deny_plan_sync(
+                "plansDirectory not set in .claude/settings.json.\n\n"
+                "Plan workflow requires plansDirectory to match daemon config.\n\n"
+                "Fix: Add to .claude/settings.json:\n"
+                f'  "plansDirectory": "{expected_value}"\n\n'
+                "Then restart your session.",
+                hook_input,
             )
 
         # Normalise for comparison: strip leading "./" from both
@@ -520,16 +633,15 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         normalised_expected = self._track_plans_in_project.lstrip("./")
 
         if normalised_actual != normalised_expected:
-            return GatingResult.deny(
-                reason=(
-                    "BLOCKED: plansDirectory mismatch.\n\n"
-                    f'  .claude/settings.json: "{plans_directory}"\n'
-                    f'  hooks daemon config:   "{self._track_plans_in_project}"\n\n'
-                    "These must match for plan workflow to work correctly.\n\n"
-                    "Fix: Update .claude/settings.json:\n"
-                    f'  "plansDirectory": "{expected_value}"\n\n'
-                    "Then restart your session."
-                ),
+            return self._deny_plan_sync(
+                "plansDirectory mismatch.\n\n"
+                f'  .claude/settings.json: "{plans_directory}"\n'
+                f'  hooks daemon config:   "{self._track_plans_in_project}"\n\n'
+                "These must match for plan workflow to work correctly.\n\n"
+                "Fix: Update .claude/settings.json:\n"
+                f'  "plansDirectory": "{expected_value}"\n\n'
+                "Then restart your session.",
+                hook_input,
             )
 
         return None
@@ -557,7 +669,7 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
             return GatingResult(decision=Decision.ALLOW)
 
         # Enforce plansDirectory sync before processing plan writes
-        sync_result = self._check_claude_code_sync()
+        sync_result = self._check_claude_code_sync(hook_input)
         if sync_result is not None:
             return sync_result
 
@@ -1037,7 +1149,7 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         if not self._allow_untracked_claude_memory:
             memory_target = self._claude_memory_block_target(hook_input)
             if memory_target is not None:
-                return self._deny_untracked_memory(memory_target)
+                return self._deny_untracked_memory(memory_target, hook_input)
 
         file_path = get_file_path(hook_input)
         if not file_path:
@@ -1047,74 +1159,68 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         if self._track_plans_in_project and self.is_planning_mode_write(file_path):
             return self.handle_planning_mode_write(hook_input)
 
-        # Otherwise, deny with standard message
-        return GatingResult(
-            decision=Decision.DENY,
-            reason=(
-                "MARKDOWN FILE IN WRONG LOCATION\n\n"
-                "Markdown files must follow project organization rules.\n\n"
-                f"Attempted to write: {file_path}\n\n"
-                "This location is NOT allowed. Markdown files can only be written to:\n\n"
-                "1. ./CLAUDE/ - All LLM documentation and subdirectories\n"
-                "2. ./docs/ - Human-facing documentation\n"
-                "3. ./eslint-rules/ - ESLint rule documentation\n"
-                "4. ./untracked/ - Ad-hoc temporary docs\n"
-                "5. ./RELEASES/ - Release notes\n"
-                "6. ./.claude/commands/, ./.claude/agents/, ./.claude/rules/ - "
-                "Claude Code command/agent/rules definitions\n"
-                "7. ./vendor/, ./node_modules/ - Third-party dependencies\n"
-                "8. Standard repo-root files (exact root only): README.md, CHANGELOG.md,\n"
-                "   CONTRIBUTING.md, LICENSE.md, SECURITY.md, CODE_OF_CONDUCT.md,\n"
-                "   AUTHORS.md, NOTICE.md, MAINTAINERS.md\n\n"
-                "CHOOSE THE RIGHT LOCATION:\n"
-                "- Is this for LLMs/agents? -> CLAUDE/\n"
-                "- Is this for the current plan? -> CLAUDE/Plan/{plan-number}-*/\n"
-                "- Is this temporary/ad-hoc? -> untracked/\n"
-                "- Is this for humans? -> docs/\n"
-                "- Is this a release note? -> RELEASES/\n"
-                "- Is this a slash command? -> .claude/commands/\n"
-                "- Is this a Claude Code rules file? -> .claude/rules/\n\n"
-                "NEED A DIFFERENT LOCATION? Configure in .claude/hooks-daemon.yaml:\n"
-                "- allowed_markdown_paths: add regex patterns for extra allowed paths\n"
-                "- monorepo_subproject_patterns: for sub-projects with their own "
-                "docs/, CLAUDE/, etc."
-            ),
-        )
+        # Otherwise, deny with the generic wrong-location message.
+        return self._deny_wrong_location(file_path, hook_input)
 
-    def _deny_untracked_memory(self, target: str) -> GatingResult:
+    def get_rules(self) -> list[Rule]:
+        """Return the 3 Rule objects backing this handler's blocking behaviour."""
+        return [_RULE_WRONG_LOCATION, _RULE_UNTRACKED_MEMORY, _RULE_PLAN_SYNC]
+
+    def _deny_wrong_location(self, file_path: str, hook_input: dict[str, Any]) -> GatingResult:
+        """Deny a write to an unrecognised location, verbose-first/terse-after.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The attempted file path
+        is appended on every fire — it changes per invocation.
+        """
+        formatter = RuleFormatter()
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(
+            transcript_path, RuleID.MARKDOWN_WRONG_LOCATION
+        ):
+            message = formatter.terse(_RULE_WRONG_LOCATION)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.MARKDOWN_WRONG_LOCATION)
+            message = formatter.verbose(_RULE_WRONG_LOCATION)
+
+        message += f"\n\nAttempted to write: {file_path}"
+
+        return GatingResult(decision=Decision.DENY, reason=message)
+
+    def _deny_untracked_memory(
+        self, target: str, hook_input: dict[str, Any] | None = None
+    ) -> GatingResult:
         """Specialist DENY for the forbid-untracked-memory policy.
 
         Distinct from the generic wrong-location message: it explains the policy,
         confirms reads stay allowed (for migration), and routes durable knowledge
         into tracked project docs using progressive disclosure. Plan 00131.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The blocked target path
+        is appended on every fire — it changes per invocation.
         """
-        return GatingResult(
-            decision=Decision.DENY,
-            reason=(
-                "UNTRACKED CLAUDE MEMORY IS DISABLED FOR THIS PROJECT\n\n"
-                "This project does not keep durable knowledge in untracked Claude memory\n"
-                "files (~/.claude/projects/*/memory/). That knowledge is per-checkout,\n"
-                "un-reviewed, and invisible to teammates — it drifts from the repo and\n"
-                "bypasses code review.\n\n"
-                f"Blocked write: {target}\n\n"
-                "READING memory is still allowed — so you can migrate any existing memory\n"
-                "into tracked project docs.\n\n"
-                "DOCUMENT IT IN TRACKED PROJECT DOCS INSTEAD (progressive disclosure):\n"
-                "- Durable, always-relevant facts -> CLAUDE.md (keep it lean; it is\n"
-                "  resident context loaded every session)\n"
-                "- Contextual, path-specific guidance -> .claude/rules/*.md with `paths:`\n"
-                "  glob frontmatter (loaded on demand only when matching files are touched)\n"
-                "- Intent-triggered procedures -> a thin skill under .claude/skills/ that\n"
-                "  points at a single-source-of-truth doc body\n"
-                "- Reference material humans also read -> docs/\n"
-                "- Link between docs with plain markdown links (zero token cost until\n"
-                "  followed); AVOID @-imports (they re-inline eagerly rather than defer)\n\n"
-                "Keep ONE source of truth per fact and link to it. Put the knowledge where\n"
-                "the repo tracks it, not in untracked Claude meta files.\n\n"
-                "(Policy: `allow_untracked_claude_memory: false` under markdown_organization\n"
-                "in .claude/hooks-daemon.yaml. Set it true to restore default memory writes.)"
-            ),
+        formatter = RuleFormatter()
+        transcript_path = (
+            hook_input.get(HookInputField.TRANSCRIPT_PATH) if hook_input is not None else None
         )
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(
+            transcript_path, RuleID.MARKDOWN_UNTRACKED_MEMORY
+        ):
+            message = formatter.terse(_RULE_UNTRACKED_MEMORY)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.MARKDOWN_UNTRACKED_MEMORY)
+            message = formatter.verbose(_RULE_UNTRACKED_MEMORY)
+
+        message += f"\n\nBlocked write: {target}"
+
+        return GatingResult(decision=Decision.DENY, reason=message)
 
     def get_claude_md(self) -> str | None:
         if not self._allow_untracked_claude_memory:
