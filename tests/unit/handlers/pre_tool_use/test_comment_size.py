@@ -376,3 +376,66 @@ class TestGetAcceptanceTests:
     def test_returns_at_least_one_test(self) -> None:
         tests = CommentSizeHandler().get_acceptance_tests()
         assert len(tests) >= 1
+
+
+class TestCommentSizeGetRules:
+    """get_rules() (Plan 00116): one rule for both independent size limits."""
+
+    def test_get_rules_returns_one_rule(self) -> None:
+        assert len(CommentSizeHandler().get_rules()) == 1
+
+    def test_get_rules_rule_id_is_constant(self) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        assert CommentSizeHandler().get_rules()[0].rule_id == RuleID.COMMENT_SIZE
+
+    def test_get_rules_verbose_is_non_empty(self) -> None:
+        assert CommentSizeHandler().get_rules()[0].verbose
+
+
+class TestCommentSizeDisclosureLadder:
+    """Verbose-first/terse-after per (transcript_path, rule_id) (Plan 00116)."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_disclosure_tracker(self):
+        from claude_code_hooks_daemon.core import reset_data_layer
+
+        reset_data_layer()
+        yield
+        reset_data_layer()
+
+    @staticmethod
+    def _hook_input(transcript_path: str | None) -> dict[str, Any]:
+        content = "x = 1  # " + ("y" * 60) + "\n"
+        hook_input = _make_write_input("/workspace/src/mod.py", content)
+        if transcript_path is not None:
+            hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    def test_deny_reason_starts_with_rule_id_prefix(self, handler: CommentSizeHandler) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        result = handler.handle(self._hook_input("/tmp/transcript-cs-a.jsonl"))
+        assert result.reason.startswith(f"BLOCKED [{RuleID.COMMENT_SIZE}]")
+
+    def test_first_fire_is_verbose(self, handler: CommentSizeHandler) -> None:
+        result = handler.handle(self._hook_input("/tmp/transcript-cs-b.jsonl"))
+        assert "MUST_EXCEED_COMMENT_SIZE_BECAUSE" in result.reason
+
+    def test_second_fire_same_agent_is_terse(self, handler: CommentSizeHandler) -> None:
+        transcript = "/tmp/transcript-cs-c.jsonl"
+        handler.handle(self._hook_input(transcript))
+        second = handler.handle(self._hook_input(transcript))
+        assert "shrinking edits are never blocked" not in second.reason
+        assert "exceed the size limit" in second.reason
+
+    def test_different_agent_is_independently_verbose(self, handler: CommentSizeHandler) -> None:
+        handler.handle(self._hook_input("/tmp/transcript-cs-d.jsonl"))
+        other = handler.handle(self._hook_input("/tmp/transcript-cs-e.jsonl"))
+        assert "MUST_EXCEED_COMMENT_SIZE_BECAUSE" in other.reason
+
+    def test_missing_transcript_path_always_verbose(self, handler: CommentSizeHandler) -> None:
+        first = handler.handle(self._hook_input(None))
+        second = handler.handle(self._hook_input(None))
+        assert "MUST_EXCEED_COMMENT_SIZE_BECAUSE" in first.reason
+        assert "MUST_EXCEED_COMMENT_SIZE_BECAUSE" in second.reason

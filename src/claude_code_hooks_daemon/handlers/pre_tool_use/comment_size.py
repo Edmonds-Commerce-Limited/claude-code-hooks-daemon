@@ -31,8 +31,10 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.strategies.comments.extractor import (
     CommentSpan,
@@ -79,6 +81,22 @@ _PREVIEW_MAX_CHARS: Final[int] = 120
 # (e.g. plan-doc-size's MUST_EXCEED_PLAN_SIZE_BECAUSE).
 _ESCAPE_HATCH_RE: Final[re.Pattern[str]] = re.compile(
     r"MUST_EXCEED_COMMENT_SIZE_BECAUSE\s*[:=]\s*(?P<reason>.*)"
+)
+
+# Single rule (Plan 00116): both size limits (line length, block line-count)
+# are the same concept -- a comment growing past the configured cap.
+_COMMENT_SIZE_RULE = Rule(
+    rule_id=RuleID.COMMENT_SIZE,
+    blocked="a comment growing past its configured size limit",
+    why="Comments should describe current state, not accumulate",
+    fix="Shorten the comment, or declare MUST_EXCEED_COMMENT_SIZE_BECAUSE",
+    verbose=(
+        "Comments should describe current state, not accumulate. If this comment "
+        "is genuinely necessary at this size, declare why in the file:\n"
+        "  # MUST_EXCEED_COMMENT_SIZE_BECAUSE: <reason>\n\n"
+        "Otherwise, shorten it — shrinking edits are never blocked, so an "
+        "over-limit legacy comment can always be refactored down."
+    ),
 )
 
 
@@ -151,6 +169,7 @@ class CommentSizeHandler(PreToolUseHandlerBase):
         self._max_comment_block_lines: int = _DEFAULT_MAX_COMMENT_BLOCK_LINES
         self._mode: str = _MODE_BLOCK
         self._exclude_paths: list[str] | None = None
+        self._formatter = RuleFormatter()
 
     def _apply_language_filter(self) -> None:
         if self._languages_applied:
@@ -279,7 +298,13 @@ class CommentSizeHandler(PreToolUseHandlerBase):
                 decision=Decision.ALLOW, context=[self._build_advisory(breaching, grew=True)]
             )
 
-        return GatingResult(decision=Decision.DENY, reason=self._build_deny_reason(breaching))
+        return GatingResult(
+            decision=Decision.DENY, reason=self._build_deny_reason(hook_input, breaching)
+        )
+
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [_COMMENT_SIZE_RULE]
 
     def _describe(self, span: CommentSpan) -> str:
         parts: list[str] = []
@@ -295,21 +320,34 @@ class CommentSizeHandler(PreToolUseHandlerBase):
         text = span.text
         return text if len(text) <= _PREVIEW_MAX_CHARS else text[: _PREVIEW_MAX_CHARS - 3] + "..."
 
-    def _build_deny_reason(self, breaching: list[CommentSpan]) -> str:
+    def _build_deny_reason(self, hook_input: dict[str, Any], breaching: list[CommentSpan]) -> str:
+        """Build the DENY reason.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The per-invocation
+        diagnostic (which spans, how far over the limit) is dynamic and
+        always fully present -- only the surrounding "why/how to fix" prose
+        goes terse on repeat fires.
+        """
         lines = [
             f"  - {self._describe(span)}\n    {self._preview(span)!r}"
             for span in breaching[:_MAX_SPANS_SHOWN]
         ]
         spans_text = "\n".join(lines)
-        return (
-            f"BLOCKED: over-long comment ({len(breaching)} comment(s) exceed the size limit).\n\n"
-            f"{spans_text}\n\n"
-            "Comments should describe current state, not accumulate. If this comment "
-            "is genuinely necessary at this size, declare why in the file:\n"
-            "  # MUST_EXCEED_COMMENT_SIZE_BECAUSE: <reason>\n\n"
-            "Otherwise, shorten it — shrinking edits are never blocked, so an "
-            "over-limit legacy comment can always be refactored down."
-        )
+        dynamic_detail = f"{len(breaching)} comment(s) exceed the size limit:\n\n{spans_text}"
+
+        rule = _COMMENT_SIZE_RULE
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
+            message = self._formatter.terse(rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, rule.rule_id)
+            message = self._formatter.verbose(rule)
+
+        return f"{message}\n\n{dynamic_detail}"
 
     def _build_advisory(self, breaching: list[CommentSpan], *, grew: bool) -> str:
         prefix = (
