@@ -314,17 +314,21 @@ fingerprint-attribution scheme and amended targets:
   `RuleFormatter`. Preserve existing verbose content as `Rule.verbose`.
   *(One sub-agent per handler file, Edit tool only — never sed; never batch a
   mutating Edit with a blockable Bash call; verify each landed.)*
-- [ ] ⬜ **Task 3.2**: `destructive_git` first (invert its existing ladder into the
-  verbose-first/terse-after model — its `_get_block_count` logic becomes
-  `tracker.was_disclosed`), then `markdown_organization`, `tdd_enforcement`,
-  `git_stash`, `sed_blocker`, security/qa-suppression/lint strategy handlers.
+- [x] ✅ **Task 3.2**: `destructive_git` migrated (reference implementation) —
+  inverted its old `_get_block_count`-driven ladder into verbose-first/
+  terse-after via `get_rules()` (9 `Rule` objects) + `get_data_layer().disclosure`.
+  Recipe extracted to [MIGRATION-PATTERN.md](MIGRATION-PATTERN.md) for the
+  remaining Task 3.1 handlers (`markdown_organization`, `tdd_enforcement`,
+  `git_stash`, `sed_blocker`, security/qa-suppression/lint strategy handlers)
+  still to migrate.
 
 ### Phase 4: Reset wiring (TDD)
 
-- [ ] ⬜ **Task 4.1**: PreCompact handler calls `tracker.reset()`. (RED: disclosure
-  cleared after PreCompact; GREEN.) Co-locate with existing pre_compact handlers.
-- [ ] ⬜ **Task 4.2**: SessionStart/clear path resets the tracker (Decision E).
-  (RED: fresh session → next fire verbose.)
+- [x] ✅ **Task 4.1**: `DisclosureResetPreCompactHandler` calls
+  `get_data_layer().disclosure.reset(transcript_path)` for the firing agent on
+  PreCompact.
+- [x] ✅ **Task 4.2**: `DisclosureResetSessionStartHandler` resets the firing
+  agent's tracker entry on every SessionStart (Decision E).
 
 ### Phase 5: Injector emits the TWO-TIER block (Decision I, TDD)
 
