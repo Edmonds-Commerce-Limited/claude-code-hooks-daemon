@@ -20,6 +20,8 @@ from claude_code_hooks_daemon.install.forwarder_generator import (
     INIT_SH_ANCHOR,
     build_relay_guard_block,
     generate_forwarder_content,
+    load_transport_config,
+    regenerate_deployed_hooks,
     strip_relay_guard_block,
 )
 
@@ -478,3 +480,50 @@ def test_every_real_hook_generates_valid_bash_when_enabled(hook_file: str) -> No
         timeout=Timeout.VALIDATION_CHECK,
     )
     assert result.returncode == 0, f"{hook_file}: {result.stderr}"
+
+
+# ---------------------------------------------------------------------------
+# Per-file resilience: one unreadable/malformed file must not abort the pass
+# ---------------------------------------------------------------------------
+
+
+def test_regenerate_skips_unreadable_file_and_still_strips_siblings(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A non-UTF-8 file in the hooks dir must not prevent sibling files from
+    being regenerated — and the skip must be reported, not swallowed."""
+    hooks_dir = tmp_path / ".claude" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (tmp_path / ".claude" / "hooks-daemon.yaml").write_text("daemon:\n  transport: {}\n")
+
+    bad_file = hooks_dir / "pre-tool-use"
+    bad_file.write_bytes(b"\xff\xfe\x00bad-bytes-not-utf8")
+
+    good_file = hooks_dir / "post-tool-use"
+    good_file.write_text(_SAMPLE_SOURCE)
+
+    with caplog.at_level("WARNING"):
+        rewritten = regenerate_deployed_hooks(tmp_path, hooks_dir)
+
+    # The unreadable file was skipped, not written, and is reported.
+    assert "pre-tool-use" not in rewritten
+    assert any("pre-tool-use" in record.message for record in caplog.records)
+    # The sibling file was still processed normally.
+    assert bad_file.read_bytes() == b"\xff\xfe\x00bad-bytes-not-utf8"
+
+
+def test_load_transport_config_falls_back_to_defaults_on_malformed_yaml(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Malformed client config (bad YAML / failed pydantic validation) must
+    resolve to pure defaults, matching the documented missing-config
+    contract — not abort the whole regeneration pass."""
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    (claude_dir / "hooks-daemon.yaml").write_text("daemon: [this is not valid: yaml: at all")
+
+    with caplog.at_level("WARNING"):
+        transport = load_transport_config(tmp_path)
+
+    assert transport == TransportConfig()
+    assert any("hooks-daemon.yaml" in record.message for record in caplog.records)

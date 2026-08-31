@@ -302,6 +302,57 @@ class TestRunToggleAutoRevert:
         assert any("pre-tool-use-json" in failure for failure in state["failures"])
 
 
+class TestRunToggleRaisingRestartOrRegenerate:
+    """A raised exception between the config flip and verification must not
+    skip the revert — only a return-value-driven revert leaves a hung
+    restart or an unreadable forwarder file stranding the toggle."""
+
+    def test_restart_fn_raising_timeout_triggers_revert(self, project: Path) -> None:
+        import subprocess as subprocess_module
+
+        call_count = {"n": 0}
+
+        def restart() -> int:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise subprocess_module.TimeoutExpired(cmd=["restart"], timeout=120)
+            return 0
+
+        outcome = run_toggle(project, enable=True, restart_fn=restart, verify_fn=_passing_probes)
+
+        assert outcome.verified is False
+        assert outcome.reverted is True
+        assert any("timeout" in failure.lower() for failure in outcome.failures)
+        assert read_relay_enabled(_config_path(project)) is False
+
+    def test_regenerate_raising_oserror_triggers_revert(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.install.forwarder_generator import (
+            regenerate_deployed_hooks as real_regenerate,
+        )
+
+        call_count = {"n": 0}
+
+        def fake_regenerate(project_root: Path, hooks_dir: Path) -> list[str]:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise OSError("simulated unreadable forwarder file")
+            return real_regenerate(project_root, hooks_dir)
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.install.transport_toggle.regenerate_deployed_hooks",
+            fake_regenerate,
+        )
+
+        outcome = run_toggle(project, enable=True, restart_fn=lambda: 0, verify_fn=_passing_probes)
+
+        assert outcome.verified is False
+        assert outcome.reverted is True
+        assert any("simulated unreadable forwarder file" in failure for failure in outcome.failures)
+        assert read_relay_enabled(_config_path(project)) is False
+
+
 class TestSeedRelayEnabled:
     """D3 (canary run 4): a fresh client config has no ``relay_enabled:``
     line — seed it (comment-preserving) instead of refusing."""
