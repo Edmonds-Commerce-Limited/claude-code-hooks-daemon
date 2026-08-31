@@ -24,14 +24,49 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
+)
+
+# Two independent rules (Plan 00116, Decision B): the two sources have
+# genuinely different disclosure properties -- a public-pattern match is safe
+# to name in full, a secret-word-list match must NEVER echo the term or its
+# surrounding context. `Rule.verbose` for both is STATIC boilerplate only;
+# the actual diagnostic (subject, pattern name/matched text, or entry index)
+# is invocation-specific and is appended in `handle()`, never baked into a
+# Rule -- for the secret-term rule that append path is the ONLY place the
+# redaction contract is enforced, so it must never carry the raw term.
+_RULE_PUBLIC_PATTERN = Rule(
+    rule_id=RuleID.SENSITIVE_PUBLIC_PATTERN,
+    blocked="content matching a configured public pattern",
+    why="The pattern is a named, safe-to-disclose signal (a path, a placeholder, profanity, ...)",
+    fix="Remove or replace the matched text before retrying",
+    verbose=(
+        "Public patterns are named regexes declared in `.claude/hooks-daemon.yaml`, "
+        "safe to name in this reason -- the pattern name and the exact matched text "
+        "are shown below so the write is fixable."
+    ),
+)
+
+_RULE_SECRET_TERM = Rule(
+    rule_id=RuleID.SENSITIVE_SECRET_TERM,
+    blocked="content matching a configured blocked term",
+    why="A gitignored secret word list term was found in this write",
+    fix="Ask the user what the cited entry covers, then remove the matching text",
+    verbose=(
+        "The term is deliberately not shown, and the word list file "
+        f"(`{sr.DEFAULT_SECRET_WORD_LIST_PATH}`) is itself read-protected by "
+        "secret_file_guard — do not try to open it. Only an entry INDEX is cited "
+        "below, which is meaningless without the gitignored file itself."
+    ),
 )
 
 _FIELD_FILE_PATH: Final[str] = "file_path"
@@ -349,14 +384,19 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             # normal scanning rather than failing open on the whole check.
             return False
 
+    def get_rules(self) -> list[Rule]:
+        """Return the 2 Rule objects backing this handler's blocking behaviour."""
+        return [_RULE_PUBLIC_PATTERN, _RULE_SECRET_TERM]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         haystacks = self._haystacks_for(hook_input)
         subject = self._subject(hook_input)
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
 
         for text in haystacks:
             public_match = self._find_public_pattern_match(text)
             if public_match is not None:
-                return self._deny_public_pattern(subject, public_match)
+                return self._deny_public_pattern(transcript_path, subject, public_match)
 
         terms = self._secret_terms()
         for text in haystacks:
@@ -367,7 +407,9 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 # or a whole git command line. Printing it raw would put the
                 # term straight into the message the no-echo contract exists to
                 # keep it out of: moving the leak, not closing it.
-                return self._deny_secret_term(sr.redact_text(subject, terms), index, len(terms))
+                return self._deny_secret_term(
+                    transcript_path, sr.redact_text(subject, terms), index, len(terms)
+                )
 
         return GatingResult(decision=Decision.ALLOW)
 
@@ -384,35 +426,67 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         return str(tool_input.get(_FIELD_FILE_PATH, ""))
 
     @staticmethod
-    def _deny_public_pattern(subject: str, match: dict[str, str]) -> GatingResult:
+    def _deny_public_pattern(
+        transcript_path: str | None, subject: str, match: dict[str, str]
+    ) -> GatingResult:
+        """Deny a public-pattern match with a verbose-first/terse-after message.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The subject, pattern name
+        and matched text are all SAFE to disclose (public patterns are
+        declared safe-to-name), so they are appended on every fire — they
+        change per invocation and are the whole point of a fixable message.
+        """
         name = match.get(_PATTERN_KEY_NAME, "unnamed")
         description = match.get(_PATTERN_KEY_DESCRIPTION, "")
         matched_text = match.get("_matched", "")
-        return GatingResult(
-            decision=Decision.DENY,
-            reason=(
-                "SENSITIVE CONTENT BLOCKED: content matches a configured public pattern\n\n"
-                f"{_SUBJECT_LABEL}: {subject}\n"
-                f"Pattern: {name}" + (f" — {description}" if description else "") + "\n"
-                f"Matched: {matched_text}\n\n"
-                "Remove or replace the matched text before retrying."
-            ),
+
+        formatter = RuleFormatter()
+        tracker = get_data_layer().disclosure
+        if transcript_path and tracker.was_disclosed(
+            transcript_path, RuleID.SENSITIVE_PUBLIC_PATTERN
+        ):
+            message = formatter.terse(_RULE_PUBLIC_PATTERN)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.SENSITIVE_PUBLIC_PATTERN)
+            message = formatter.verbose(_RULE_PUBLIC_PATTERN)
+
+        message += (
+            f"\n\n{_SUBJECT_LABEL}: {subject}\n"
+            f"Pattern: {name}" + (f" — {description}" if description else "") + "\n"
+            f"Matched: {matched_text}"
         )
 
+        return GatingResult(decision=Decision.DENY, reason=message)
+
     @staticmethod
-    def _deny_secret_term(subject: str, index: int, total: int) -> GatingResult:
-        return GatingResult(
-            decision=Decision.DENY,
-            reason=(
-                "SENSITIVE CONTENT BLOCKED: content matches a configured blocked term "
-                f"(entry {index} of {total} in the secret word list).\n\n"
-                f"{_SUBJECT_LABEL}: {subject}\n\n"
-                "The term is deliberately not shown, and the word list file "
-                f"(`{sr.DEFAULT_SECRET_WORD_LIST_PATH}`) is itself read-protected "
-                "by secret_file_guard — do not try to open it. Ask the user what "
-                "entry N covers, then remove the matching text from the content."
-            ),
+    def _deny_secret_term(
+        transcript_path: str | None, subject: str, index: int, total: int
+    ) -> GatingResult:
+        """Deny a secret-word-list match with a verbose-first/terse-after message.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). ``subject`` is ALREADY
+        redacted by the caller — this method never sees the raw term, so the
+        no-echo security property holds regardless of verbosity. Only the
+        entry index/total are appended, never the term itself.
+        """
+        formatter = RuleFormatter()
+        tracker = get_data_layer().disclosure
+        if transcript_path and tracker.was_disclosed(transcript_path, RuleID.SENSITIVE_SECRET_TERM):
+            message = formatter.terse(_RULE_SECRET_TERM)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.SENSITIVE_SECRET_TERM)
+            message = formatter.verbose(_RULE_SECRET_TERM)
+
+        message += (
+            f"\n\nMatched: entry {index} of {total} in the secret word list.\n"
+            f"{_SUBJECT_LABEL}: {subject}"
         )
+
+        return GatingResult(decision=Decision.DENY, reason=message)
 
     def get_claude_md(self) -> str | None:
         return (

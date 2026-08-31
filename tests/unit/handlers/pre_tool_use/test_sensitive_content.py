@@ -12,11 +12,22 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
     SensitiveContentHandler,
 )
 from claude_code_hooks_daemon.utils import secret_redaction as sr
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker() -> None:
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 def _write_input(file_path: str, content: str) -> dict[str, Any]:
@@ -540,3 +551,99 @@ class TestAcceptanceTests:
     def test_defines_at_least_two_tests(self) -> None:
         handler = SensitiveContentHandler()
         assert len(handler.get_acceptance_tests()) >= 2
+
+
+class TestGetRules:
+    """get_rules() declares the 2 Rule objects backing this handler (Plan 00116)."""
+
+    def test_returns_two_rules(self) -> None:
+        rules = SensitiveContentHandler().get_rules()
+        assert len(rules) == 2
+        assert all(isinstance(rule, Rule) for rule in rules)
+
+    def test_rule_ids_match_constants(self) -> None:
+        expected = {RuleID.SENSITIVE_PUBLIC_PATTERN, RuleID.SENSITIVE_SECRET_TERM}
+        actual = {rule.rule_id for rule in SensitiveContentHandler().get_rules()}
+        assert actual == expected
+
+    def test_every_rule_has_non_empty_verbose(self) -> None:
+        for rule in SensitiveContentHandler().get_rules():
+            assert rule.verbose, f"{rule.rule_id} has empty verbose content"
+
+
+class TestDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Decision G)."""
+
+    def test_public_pattern_first_fire_is_verbose(self) -> None:
+        handler = _handler_with_public_patterns(
+            [{"name": "vhosts-path", "pattern": "/var/www/vhosts", "description": "server path"}]
+        )
+        hook_input = _write_input("/tmp/f.txt", "deploy to /var/www/vhosts/app")
+        hook_input["transcript_path"] = "/tmp/agent-a/transcript.jsonl"
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+        assert "safe to name in this reason" in (result.reason or "")
+        assert "vhosts-path" in (result.reason or "")
+
+    def test_public_pattern_second_fire_is_terse_but_still_names_the_match(self) -> None:
+        handler = _handler_with_public_patterns(
+            [
+                {"name": "vhosts-path", "pattern": "/var/www/vhosts", "description": "d"},
+                {"name": "etc-path", "pattern": "/etc/other", "description": "d"},
+            ]
+        )
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        first = _write_input("/tmp/f.txt", "deploy to /var/www/vhosts/app")
+        first["transcript_path"] = transcript_path
+        handler.handle(first)
+
+        second = _write_input("/tmp/g.txt", "other at /etc/other/x")
+        second["transcript_path"] = transcript_path
+        result = handler.handle(second)
+
+        assert result.decision == Decision.DENY
+        assert "safe to name in this reason" not in (result.reason or "")
+        assert "etc-path" in (result.reason or "")
+
+    def test_public_pattern_terse_leads_with_rule_id(self) -> None:
+        handler = _handler_with_public_patterns(
+            [{"name": "vhosts-path", "pattern": "/var/www/vhosts", "description": "d"}]
+        )
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        hook_input = _write_input("/tmp/f.txt", "deploy to /var/www/vhosts/app")
+        hook_input["transcript_path"] = transcript_path
+        handler.handle(hook_input)
+        result = handler.handle(hook_input)
+
+        assert result.reason.startswith(f"BLOCKED [{RuleID.SENSITIVE_PUBLIC_PATTERN}]")
+
+    def test_secret_term_never_leaks_regardless_of_disclosure_state(self, tmp_path: Path) -> None:
+        """The no-echo contract holds on BOTH the verbose and terse fire."""
+        wordlist_file = tmp_path / "wordlist.txt"
+        wordlist_file.write_text("zzqx-nonsense-term\n")
+        handler = _handler_with_secret_file(wordlist_file)
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+
+        first = _write_input("/tmp/f.txt", "contains zzqx-nonsense-term here")
+        first["transcript_path"] = transcript_path
+        verbose_result = handler.handle(first)
+        assert "zzqx-nonsense-term" not in (verbose_result.reason or "")
+        assert "entry 1 of 1" in (verbose_result.reason or "")
+
+        second = _write_input("/tmp/g.txt", "also has zzqx-nonsense-term inside")
+        second["transcript_path"] = transcript_path
+        terse_result = handler.handle(second)
+        assert "zzqx-nonsense-term" not in (terse_result.reason or "")
+        assert "entry 1 of 1" in (terse_result.reason or "")
+        assert terse_result.reason.startswith(f"BLOCKED [{RuleID.SENSITIVE_SECRET_TERM}]")
+
+    def test_missing_transcript_path_is_always_verbose(self) -> None:
+        handler = _handler_with_public_patterns(
+            [{"name": "vhosts-path", "pattern": "/var/www/vhosts", "description": "d"}]
+        )
+        hook_input = _write_input("/tmp/f.txt", "deploy to /var/www/vhosts/app")
+        handler.handle(hook_input)
+        result = handler.handle(hook_input)
+
+        assert "safe to name in this reason" in (result.reason or "")
