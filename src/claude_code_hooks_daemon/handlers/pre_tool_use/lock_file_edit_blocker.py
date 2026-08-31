@@ -11,11 +11,35 @@ language ecosystems (PHP, JavaScript, Python, Ruby, Rust, Go, .NET, Swift).
 
 from typing import Any, ClassVar
 
+from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+
+_RULE = Rule(
+    rule_id=RuleID.LOCK_FILE_EDIT,
+    blocked="Direct `Write`/`Edit` of a package manager lock file",
+    why="Lock files are generated artifacts; manual edits create checksum mismatches and broken dependency graphs",
+    fix="Use the package manager commands instead (e.g. `npm install`, `cargo update`)",
+    verbose=(
+        "WHY BLOCKED:\n"
+        "Lock files are generated artifacts that must ONLY be modified through\n"
+        "package manager commands. They contain dependency checksums and resolved\n"
+        "version constraints.\n\n"
+        "Direct editing causes:\n"
+        "  - Hash/checksum mismatches (packages won't install)\n"
+        "  - Broken dependency resolution (impossible version constraints)\n"
+        "  - Corrupted lock files (CI/CD failures)\n"
+        "  - Irreversible build breakage\n\n"
+        "These commands will update dependencies correctly, regenerate checksums,\n"
+        "resolve version constraints and maintain lock file integrity.\n\n"
+        "NEVER manually edit lock files with Write or Edit tools."
+    ),
+)
 
 
 class LockFileEditBlockerHandler(PreToolUseHandlerBase):
@@ -119,8 +143,17 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
         file_path_lower = file_path.lower()
         return any(file_path_lower.endswith(lock_file.lower()) for lock_file in self.LOCK_FILES)
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [_RULE]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block operation and explain why lock files must not be edited.
+        """Block operation with a verbose-first/terse-after explanation.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The matched file and its
+        package manager command are appended on every fire — they change per
+        invocation, so they are not part of the static teaching content.
 
         Args:
             hook_input: Hook input containing the operation to block
@@ -153,36 +186,22 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
         else:
             proper_commands = "appropriate package manager commands"
 
-        reason = f"""🚫 BLOCKED: Direct editing of lock file
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        formatter = RuleFormatter()
 
-FILE: {file_path}
+        if transcript_path and tracker.was_disclosed(transcript_path, RuleID.LOCK_FILE_EDIT):
+            message = formatter.terse(_RULE)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.LOCK_FILE_EDIT)
+            message = formatter.verbose(_RULE)
 
-WHY BLOCKED:
-Lock files are generated artifacts that must ONLY be modified through
-package manager commands. They contain dependency checksums and resolved
-version constraints.
-
-Direct editing causes:
-  • Hash/checksum mismatches (packages won't install)
-  • Broken dependency resolution (impossible version constraints)
-  • Corrupted lock files (CI/CD failures)
-  • Irreversible build breakage
-
-PROPER WAY TO UPDATE:
-Use the package manager commands:
-  {proper_commands}
-
-These commands will:
-  • Update dependencies correctly
-  • Regenerate checksums
-  • Resolve version constraints
-  • Maintain lock file integrity
-
-NEVER manually edit lock files with Write or Edit tools."""
+        message += f"\n\nFILE: {file_path}\nPROPER WAY TO UPDATE: {proper_commands}"
 
         return GatingResult(
             decision=Decision.DENY,
-            reason=reason,
+            reason=message,
             context=[],
             guidance=None,
         )
