@@ -372,3 +372,73 @@ class TestErrorHidingBlockerExcludePaths:
 
     def test_is_excluded_false_for_normal_source(self, handler: ErrorHidingBlockerHandler) -> None:
         assert handler._is_excluded("/proj/src/deploy.sh") is False
+
+
+class TestErrorHidingBlockerGetRules:
+    """get_rules() (Plan 00116): one rule, language dimension lives in verbose."""
+
+    def test_get_rules_returns_one_rule(self) -> None:
+        rules = ErrorHidingBlockerHandler().get_rules()
+        assert len(rules) == 1
+
+    def test_get_rules_rule_id_is_constant(self) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        rule = ErrorHidingBlockerHandler().get_rules()[0]
+        assert rule.rule_id == RuleID.ERROR_HIDING
+
+    def test_get_rules_verbose_is_non_empty(self) -> None:
+        rule = ErrorHidingBlockerHandler().get_rules()[0]
+        assert rule.verbose
+
+
+class TestErrorHidingBlockerDisclosureLadder:
+    """Verbose-first/terse-after per (transcript_path, rule_id) (Plan 00116)."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_disclosure_tracker(self):
+        from claude_code_hooks_daemon.core import reset_data_layer
+
+        reset_data_layer()
+        yield
+        reset_data_layer()
+
+    @staticmethod
+    def _hook_input(transcript_path: str | None) -> dict[str, Any]:
+        hook_input = make_write_input("/proj/src/deploy.sh", _SHELL_HIDE)
+        if transcript_path is not None:
+            hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    def test_deny_reason_starts_with_rule_id_prefix(self) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        handler = ErrorHidingBlockerHandler()
+        result = handler.handle(self._hook_input("/tmp/transcript-eh-a.jsonl"))
+        assert result.reason.startswith(f"BLOCKED [{RuleID.ERROR_HIDING}]")
+
+    def test_first_fire_is_verbose(self) -> None:
+        handler = ErrorHidingBlockerHandler()
+        result = handler.handle(self._hook_input("/tmp/transcript-eh-b.jsonl"))
+        assert "cardinal sin" in result.reason
+
+    def test_second_fire_same_agent_is_terse(self) -> None:
+        handler = ErrorHidingBlockerHandler()
+        transcript = "/tmp/transcript-eh-c.jsonl"
+        handler.handle(self._hook_input(transcript))
+        second = handler.handle(self._hook_input(transcript))
+        assert "cardinal sin" not in second.reason
+        assert "PATTERN:" in second.reason
+
+    def test_different_agent_is_independently_verbose(self) -> None:
+        handler = ErrorHidingBlockerHandler()
+        handler.handle(self._hook_input("/tmp/transcript-eh-d.jsonl"))
+        other = handler.handle(self._hook_input("/tmp/transcript-eh-e.jsonl"))
+        assert "cardinal sin" in other.reason
+
+    def test_missing_transcript_path_always_verbose(self) -> None:
+        handler = ErrorHidingBlockerHandler()
+        first = handler.handle(self._hook_input(None))
+        second = handler.handle(self._hook_input(None))
+        assert "cardinal sin" in first.reason
+        assert "cardinal sin" in second.reason

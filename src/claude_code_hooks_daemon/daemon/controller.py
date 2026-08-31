@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import (
+        ClaudeMdConfig,
         DaemonConfig,
         DocumentationConfig,
         PlanWorkflowConfig,
@@ -175,6 +176,7 @@ class DaemonController:
         documentation: "DocumentationConfig | None" = None,
         verdict_log: "VerdictLogConfig | None" = None,
         project_layout: "ProjectLayout | None" = None,
+        claude_md: "ClaudeMdConfig | None" = None,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -196,6 +198,10 @@ class DaemonController:
                 defaults (enabled).
             project_layout: Optional ProjectLayout facade (Plan 00288) injected
                 onto every handler instance
+            claude_md: Optional ClaudeMdConfig (Plan 00116 Decision I) carrying
+                ``promotion.promoted_handlers`` for the injected block's
+                two-tier layout. ``None`` behaves like an empty promoted list
+                (pure progressive disclosure).
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -277,7 +283,12 @@ class DaemonController:
         all_handlers = [h for chain in self._router._chains.values() for h in chain._handlers]
         if self._pseudo_dispatcher is not None:
             all_handlers.extend(self._pseudo_dispatcher.all_handlers())
-        ClaudeMdInjector(workspace_root=workspace_root, handlers=all_handlers).inject()
+        promoted_handlers = claude_md.promotion.promoted_handlers if claude_md else None
+        ClaudeMdInjector(
+            workspace_root=workspace_root,
+            handlers=all_handlers,
+            promoted_handlers=promoted_handlers,
+        ).inject()
 
         # Validate configuration at startup (fail-open: degraded mode on errors)
         self._validate_config(config_path)

@@ -2532,6 +2532,7 @@ def _build_initialised_controller(config: Config, project_path: Path) -> "Daemon
         documentation=config.documentation,
         verdict_log=config.daemon.verdict_log,
         project_layout=ProjectLayout.from_config(config),
+        claude_md=config.claude_md,
     )
     return controller
 

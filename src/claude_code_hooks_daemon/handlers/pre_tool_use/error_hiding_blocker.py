@@ -19,8 +19,10 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.strategies.error_hiding.protocol import (
     ErrorHidingPattern,
@@ -35,6 +37,21 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 
 # Config key hint shown in the denial message
 _CONFIG_HINT_HANDLER = "handlers.pre_tool_use.error_hiding_blocker"
+
+# Single rule (Plan 00116): every language's error-hiding pattern is the same
+# concept -- the language dimension lives in the strategy registry.
+_ERROR_HIDING_RULE = Rule(
+    rule_id=RuleID.ERROR_HIDING,
+    blocked="an error-hiding pattern (bare except, || true, empty catch, _ = err, ...)",
+    why="Silent failure makes bugs invisible, delays diagnosis, and corrupts state",
+    fix="Handle the error explicitly: log it, return it, or propagate it",
+    verbose=(
+        "WHY BLOCKED:\n"
+        "  Error hiding is a cardinal sin. Silent failure makes bugs invisible,\n"
+        "  delays diagnosis, and corrupts system state without warning.\n\n"
+        f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
+    ),
+)
 
 # Built-in default excludes so this handler matches its siblings' behaviour:
 # generated/vendored trees and test-fixture code (which legitimately contains
@@ -89,6 +106,7 @@ class ErrorHidingBlockerHandler(PreToolUseHandlerBase):
         # Client-configured exclude globs (Plan 00150); project-level default is
         # injected as _project_exclude_paths by the registry.
         self._exclude_paths: list[str] | None = None
+        self._formatter = RuleFormatter()
 
     # ------------------------------------------------------------------
     # Language filter (applied lazily on first use)
@@ -164,8 +182,12 @@ class ErrorHidingBlockerHandler(PreToolUseHandlerBase):
 
         return GatingResult(
             decision=Decision.DENY,
-            reason=self._format_reason(violation, strategy.language_name, file_path),
+            reason=self._format_reason(hook_input, violation, strategy.language_name, file_path),
         )
+
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [_ERROR_HIDING_RULE]
 
     def get_claude_md(self) -> str | None:
         return (
@@ -228,20 +250,41 @@ class ErrorHidingBlockerHandler(PreToolUseHandlerBase):
                 return pattern
         return None
 
-    def _format_reason(self, pattern: ErrorHidingPattern, language: str, file_path: str) -> str:
-        """Build a human-readable denial message for the matched pattern."""
+    def _format_reason(
+        self,
+        hook_input: dict[str, Any],
+        pattern: ErrorHidingPattern,
+        language: str,
+        file_path: str,
+    ) -> str:
+        """Build a human-readable denial message for the matched pattern.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The per-invocation
+        diagnostic (file, language, matched pattern, example, suggestion) is
+        dynamic and always fully present -- only the surrounding "why this
+        is blocked" teaching prose goes terse on repeat fires.
+        """
         filename = Path(file_path).name if file_path else "file"
-        return (
-            f"BLOCKED: Error-hiding pattern detected\n\n"
+        dynamic_detail = (
             f"FILE: {filename}\n"
             f"LANGUAGE: {language}\n"
             f"PATTERN: {pattern.name}\n\n"
             f"EXAMPLE OF BLOCKED CODE:\n"
             f"  {pattern.example}\n\n"
-            f"WHY BLOCKED:\n"
-            f"  Error hiding is a cardinal sin. Silent failure makes bugs invisible,\n"
-            f"  delays diagnosis, and corrupts system state without warning.\n\n"
             f"INSTEAD:\n"
-            f"  {pattern.suggestion}\n\n"
-            f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
+            f"  {pattern.suggestion}"
         )
+
+        rule = _ERROR_HIDING_RULE
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
+            message = self._formatter.terse(rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, rule.rule_id)
+            message = self._formatter.verbose(rule)
+
+        return f"{message}\n\n{dynamic_detail}"

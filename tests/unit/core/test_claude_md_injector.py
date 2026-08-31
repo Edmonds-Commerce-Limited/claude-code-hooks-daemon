@@ -61,15 +61,24 @@ def _init_git_repo(path: Path) -> None:
 class _StubHandler:
     """Minimal handler stub satisfying HasClaudeMd Protocol for injection tests."""
 
-    def __init__(self, name: str, claude_md: str | None) -> None:
+    def __init__(
+        self,
+        name: str,
+        claude_md: str | None,
+        rules: "list[Any] | None" = None,
+    ) -> None:
         self.name = name
         self._claude_md = claude_md
+        self._rules = rules if rules is not None else []
 
     def get_claude_md(self) -> str | None:
         return self._claude_md
 
     def get_acceptance_tests(self) -> list[Any]:
         return []
+
+    def get_rules(self) -> "list[Any]":
+        return self._rules
 
 
 class TestHandlerProvenanceMarkers:
@@ -1150,3 +1159,169 @@ class TestConcurrentEditIsNotDiscarded:
             f"EDIT NUMBER {len(counter)}" in final
         ), "the last writer's content must survive untouched"
         assert _OPEN_TAG not in final, "no block should be written from a stale snapshot"
+
+
+class TestTwoTierPromotedBlock:
+    """Plan 00116 Phase 5: PROMOTED prose + PROGRESSIVE rule table.
+
+    Decision I's hybrid layout: a handler named in ``promoted_handlers`` keeps
+    its full ``get_claude_md()`` prose resident; every other BLOCKING handler
+    that has migrated to ``get_rules()`` is reduced to table rows instead.
+    A handler that has declared no rules yet keeps its full prose too
+    (transition safety — Phase 3 migrations land in parallel and nothing may
+    lose guidance mid-rollout).
+    """
+
+    @staticmethod
+    def _rule(rule_id: str) -> Any:
+        from claude_code_hooks_daemon.core.rule import Rule
+
+        return Rule(
+            rule_id=rule_id,
+            blocked="`git reset --hard`",
+            why="destroys uncommitted changes permanently",
+            fix="ask the user / git stash first",
+            verbose="Full rationale for " + rule_id + ".",
+        )
+
+    def test_promoted_handler_prose_is_present_verbatim(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n")
+
+        promoted = _StubHandler(
+            "sed_blocker", "## sed_blocker\n\nVerbatim prose that must stay resident."
+        )
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path,
+            handlers=[promoted],
+            promoted_handlers=["sed_blocker"],
+        )
+        injector.inject()
+
+        content = claude_md.read_text()
+        assert "Verbatim prose that must stay resident." in content
+
+    def test_non_promoted_rules_declaring_handler_is_reduced_to_table_rows(
+        self, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n")
+
+        handler = _StubHandler(
+            "destructive_git",
+            "## destructive_git\n\nThis full prose must NOT appear resident.",
+            rules=[self._rule("R-GIT-RESET-HARD")],
+        )
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path,
+            handlers=[handler],
+            promoted_handlers=[],
+        )
+        injector.inject()
+
+        content = claude_md.read_text()
+        assert "This full prose must NOT appear resident." not in content
+        assert "R-GIT-RESET-HARD" in content
+        assert "`git reset --hard`" in content
+        assert "destroys uncommitted changes permanently" in content
+        assert "ask the user / git stash first" in content
+
+    def test_no_rules_blocking_handler_keeps_its_full_prose_as_fallback(
+        self, tmp_path: Path
+    ) -> None:
+        """Transition safety: a handler with no get_rules() yet must not lose guidance."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n")
+
+        not_yet_migrated = _StubHandler(
+            "markdown_organization",
+            "## markdown_organization\n\nFull legacy prose retained until migrated.",
+        )
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path,
+            handlers=[not_yet_migrated],
+            promoted_handlers=[],
+        )
+        injector.inject()
+
+        content = claude_md.read_text()
+        assert "Full legacy prose retained until migrated." in content
+
+    def test_meta_rule_and_explain_pointer_appear_exactly_once(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n")
+
+        handlers = [
+            _StubHandler("promoted_one", "## promoted_one\n\nProse.", rules=[self._rule("R-A")]),
+            _StubHandler(
+                "progressive_one", "## progressive_one\n\nProse.", rules=[self._rule("R-B")]
+            ),
+            _StubHandler("fallback_one", "## fallback_one\n\nProse."),
+        ]
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path,
+            handlers=handlers,
+            promoted_handlers=["promoted_one"],
+        )
+        injector.inject()
+
+        content = claude_md.read_text()
+        meta_rule_marker = "do not stop working"
+        assert content.count(meta_rule_marker) == 1
+        assert "explain-rule" in content
+
+    def test_empty_promoted_list_is_pure_progressive_disclosure(self, tmp_path: Path) -> None:
+        """Empty promoted_handlers -> every rules-bearing handler becomes a table row."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n")
+
+        handler = _StubHandler(
+            "sed_blocker",
+            "## sed_blocker\n\nThis prose must not be resident when nothing is promoted.",
+            rules=[self._rule("R-SED-EXEC")],
+        )
+        fallback = _StubHandler(
+            "some_advisory", "## some_advisory\n\nAdvisory prose stays as fallback."
+        )
+        injector = ClaudeMdInjector(
+            workspace_root=tmp_path,
+            handlers=[handler, fallback],
+            promoted_handlers=[],
+        )
+        injector.inject()
+
+        content = claude_md.read_text()
+        assert (
+            "This prose must not be resident when nothing is promoted." not in content
+        ), "empty promoted_handlers must still reduce rules-bearing handlers to table rows"
+        assert "R-SED-EXEC" in content
+        assert "Advisory prose stays as fallback." in content
+
+    def test_promoted_handlers_defaults_to_empty(self, tmp_path: Path) -> None:
+        """Omitting promoted_handlers entirely behaves like an empty list."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n")
+
+        handler = _StubHandler(
+            "sed_blocker",
+            "## sed_blocker\n\nMust not be resident with the default (no promotion arg).",
+            rules=[self._rule("R-SED-EXEC")],
+        )
+        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
+        injector.inject()
+
+        content = claude_md.read_text()
+        assert "Must not be resident with the default (no promotion arg)." not in content
+        assert "R-SED-EXEC" in content

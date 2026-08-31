@@ -13,10 +13,12 @@ Usage:
 import logging
 import re
 import subprocess  # nosec B404 - imported for the CompletedProcess type; git spawns live in utils.git_repo
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
@@ -72,13 +74,26 @@ _BASH_WRITE_BOUNDARY = (
     "pipes, permissions, `curl | sh` — are unaffected and still cover you."
 )
 
+# Explain-on-demand pointer (Plan 00116 Decision F), stated ONCE in the
+# shared intro alongside the meta-rule — never repeated per rule row, so the
+# progressive-disclosure table stays terse.
+_EXPLAIN_POINTER = "Full detail on any rule: `bin/hooks-daemon explain-rule <ID>`."
+
 _SECTION_INTRO = (
     "The handlers listed below are active in this project. "
     "Read this section to avoid triggering unnecessary blocks.\n\n"
     "**When a tool is blocked by a handler, do not stop working.** "
     "Read the block reason, modify your approach, and continue with your task.\n\n"
-    f"{_BASH_WRITE_BOUNDARY}"
+    f"{_BASH_WRITE_BOUNDARY}\n\n"
+    f"{_EXPLAIN_POINTER}"
 )
+
+# Tier headings (Plan 00116 Decision I — DESIGN-HYBRID-PROMOTION.md layout).
+_PROMOTED_TIER_HEADING = "## Frequently-triggered handler guidance\n"
+_PROGRESSIVE_TIER_HEADING = "## All other enforced rules\n"
+_FALLBACK_TIER_HEADING = "## Other active handler guidance (rules not yet migrated)\n"
+
+_RULE_TABLE_HEADER = "| ID | Blocked | Why | Fix |\n" "| --- | --- | --- | --- |"
 
 # Provenance marker emitted before each handler's guidance (DBF, Core
 # Standard 15). The injector holds `handler.name` while assembling the block;
@@ -151,6 +166,22 @@ class HasClaudeMd(Protocol):
         ...
 
 
+@dataclass(frozen=True, slots=True)
+class _CollectedTiers:
+    """Handler guidance sorted into the three Decision I injection tiers.
+
+    Attributes:
+        promoted: ``(handler_name, full_prose)`` pairs kept resident.
+        progressive: ``(handler_name, rules)`` pairs reduced to table rows.
+        fallback: ``(handler_name, full_prose)`` pairs for handlers that have
+            not yet declared ``get_rules()`` (transition safety).
+    """
+
+    promoted: list[tuple[str, str]]
+    progressive: list[tuple[str, list[Rule]]]
+    fallback: list[tuple[str, str]]
+
+
 class ClaudeMdInjector:
     """Injects active handler guidance into project CLAUDE.md.
 
@@ -179,15 +210,27 @@ class ClaudeMdInjector:
     # (the next restart fixes it) and a discarded user edit is not.
     _MAX_RECONCILE_ATTEMPTS = 3
 
-    def __init__(self, workspace_root: Path, handlers: list[Any]) -> None:
+    def __init__(
+        self,
+        workspace_root: Path,
+        handlers: list[Any],
+        promoted_handlers: list[str] | None = None,
+    ) -> None:
         """Initialise injector.
 
         Args:
             workspace_root: Project root containing CLAUDE.md
             handlers: All active handler instances
+            promoted_handlers: Handler config keys (``claude_md.promotion.
+                promoted_handlers``, Plan 00116 Decision I) whose full
+                ``get_claude_md()`` prose stays resident in the injected
+                block. ``None``/empty means pure progressive disclosure —
+                every handler with declared ``get_rules()`` is reduced to
+                rule-table rows.
         """
         self._workspace_root = workspace_root
         self._handlers = handlers
+        self._promoted_handlers = frozenset(promoted_handlers or [])
 
     def inject(self) -> None:
         """Collect handler guidance and update CLAUDE.md.
@@ -214,12 +257,12 @@ class ClaudeMdInjector:
 
     def _run_inject(self) -> None:
         """Execute injection — raises on errors for caller to handle."""
-        sections = self._collect_sections()
-        if not sections:
+        tiers = self._collect_tiers()
+        if not (tiers.promoted or tiers.progressive or tiers.fallback):
             logger.debug("ClaudeMdInjector: no handler guidance to inject — skipping")
             return
 
-        generated = self._build_section(sections)
+        generated = self._build_section(tiers.promoted, tiers.progressive, tiers.fallback)
         claude_md_path = self._workspace_root / "CLAUDE.md"
 
         if not self._workspace_root.exists():
@@ -237,9 +280,13 @@ class ClaudeMdInjector:
             claude_md_path.write_text(self._format_fail_safe(updated), encoding="utf-8")
 
         logger.info(
-            "ClaudeMdInjector: updated %s with guidance from %d handler(s)",
+            "ClaudeMdInjector: updated %s with guidance from %d handler(s) "
+            "(%d promoted, %d progressive, %d fallback)",
             claude_md_path,
-            len(sections),
+            len(tiers.promoted) + len(tiers.progressive) + len(tiers.fallback),
+            len(tiers.promoted),
+            len(tiers.progressive),
+            len(tiers.fallback),
         )
 
         ClaudeMdInjector._auto_commit_if_dirty(claude_md_path)
@@ -490,20 +537,55 @@ class ClaudeMdInjector:
         # Updated must contain the same user content (stripped)
         return updated_stripped == original_stripped
 
-    def _collect_sections(self) -> list[tuple[str, str]]:
-        """Return list of (handler_name, guidance) for handlers with content."""
-        result: list[tuple[str, str]] = []
+    def _collect_tiers(self) -> "_CollectedTiers":
+        """Sort active handlers' guidance into the three Decision I tiers.
+
+        - **PROMOTED**: handler's config key is in ``promoted_handlers`` and
+          it has ``get_claude_md()`` prose — kept resident, exactly as today.
+        - **PROGRESSIVE**: not promoted, but declares one or more ``Rule``
+          objects via ``get_rules()`` — reduced to rule-table rows.
+        - **FALLBACK** (transition safety): not promoted and declares no
+          rules yet, but still has ``get_claude_md()`` prose — kept resident
+          so a handler mid-``get_rules()``-migration never loses guidance.
+
+        A handler with neither prose nor rules contributes to no tier.
+        """
+        promoted: list[tuple[str, str]] = []
+        progressive: list[tuple[str, list[Rule]]] = []
+        fallback: list[tuple[str, str]] = []
+
         for handler in self._handlers:
             if not isinstance(handler, HasClaudeMd):
                 continue
             content = handler.get_claude_md()
-            if content is not None:
-                result.append((handler.name, content))
-        return result
+            rules = handler.get_rules() if hasattr(handler, "get_rules") else []
+
+            if handler.name in self._promoted_handlers:
+                if content is not None:
+                    promoted.append((handler.name, content))
+                continue
+
+            if rules:
+                progressive.append((handler.name, list(rules)))
+            elif content is not None:
+                fallback.append((handler.name, content))
+
+        return _CollectedTiers(promoted=promoted, progressive=progressive, fallback=fallback)
 
     @staticmethod
-    def _build_section(sections: list[tuple[str, str]]) -> str:
-        """Build the full <hooksdaemon>...</hooksdaemon> block."""
+    def _build_section(
+        promoted: list[tuple[str, str]],
+        progressive: list[tuple[str, list[Rule]]],
+        fallback: list[tuple[str, str]],
+    ) -> str:
+        """Build the full <hooksdaemon>...</hooksdaemon> block.
+
+        Layout (Plan 00116 Decision I, ``DESIGN-HYBRID-PROMOTION.md``): the
+        shared meta-rule + explain pointer are stated once in
+        ``_SECTION_INTRO``, then PROMOTED prose, then the PROGRESSIVE rule
+        table, then FALLBACK prose for handlers not yet migrated to
+        ``get_rules()``.
+        """
         parts = [
             _OPEN_TAG,
             _AUTO_COMMENT,
@@ -512,11 +594,33 @@ class ClaudeMdInjector:
             _SECTION_INTRO,
             "",
         ]
-        for name, content in sections:
-            parts.append(f"{_HANDLER_MARKER_PREFIX}{name}{_HANDLER_MARKER_SUFFIX}")
+
+        if promoted:
+            parts.append(_PROMOTED_TIER_HEADING)
+            for name, content in promoted:
+                parts.append(f"{_HANDLER_MARKER_PREFIX}{name}{_HANDLER_MARKER_SUFFIX}")
+                parts.append("")
+                parts.append(content.strip())
+                parts.append("")
+
+        if progressive:
+            parts.append(_PROGRESSIVE_TIER_HEADING)
+            parts.append(_RULE_TABLE_HEADER)
+            formatter = RuleFormatter()
+            for name, rules in progressive:
+                parts.append(f"{_HANDLER_MARKER_PREFIX}{name}{_HANDLER_MARKER_SUFFIX}")
+                for rule in rules:
+                    parts.append(formatter.table_row(rule))
             parts.append("")
-            parts.append(content.strip())
-            parts.append("")
+
+        if fallback:
+            parts.append(_FALLBACK_TIER_HEADING)
+            for name, content in fallback:
+                parts.append(f"{_HANDLER_MARKER_PREFIX}{name}{_HANDLER_MARKER_SUFFIX}")
+                parts.append("")
+                parts.append(content.strip())
+                parts.append("")
+
         parts.append(_CLOSE_TAG)
         return "\n".join(parts)
 

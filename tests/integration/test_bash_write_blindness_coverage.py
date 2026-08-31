@@ -519,7 +519,7 @@ class TestTheClassWideBoundaryIsStatedOnce:
     def _intro() -> str:
         from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 
-        return ClaudeMdInjector._build_section([])
+        return ClaudeMdInjector._build_section([], [], [])
 
     def test_the_intro_states_that_bash_writes_are_unchecked(self) -> None:
         intro = self._intro()
