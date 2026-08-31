@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00296: monorepo workspace resolver](00296-monorepo-workspace-resolver/PLAN.md) - Not Started (client field report: handlers assume a single-root repository, so multi-workspace monorepos get silent enforcement degradation; one shared `Workspace.for_path()` resolver routed through npm_command, lint_on_edit, validate_eslint_on_write, tdd_enforcement and markdown_organization, plus surfacing downgraded modes in `check`)
+
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
 
 - [00293: tool inventory disable and token savings](00293-tool-inventory-disable-and-token-savings/PLAN.md) - Not Started (disable-at-source for never-wanted tools instead of fighting them with hooks, transcript-scanning analyser for never-used tools, tools-vs-tokens report with the decision left to projects; dogfood here)
@@ -1291,7 +1293,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Completed**: 244 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 38 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
