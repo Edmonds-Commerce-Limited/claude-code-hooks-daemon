@@ -332,20 +332,6 @@ _DENY_WITHOUT_RULES_ALLOWLIST: dict[str, str] = {
         "guards against a non-read tool reaching handle() by a path matches() "
         "does not permit today — not a live blocking rule with a table entry."
     ),
-    "MarkdownOrganizationHandler": (
-        "Phase 3 fan-out target per MIGRATION-PATTERN.md and PLAN.md Task 3.1 — "
-        "its RuleIDs (R-MARKDOWN-WRONG-LOCATION, R-MARKDOWN-UNTRACKED-MEMORY, "
-        "R-MARKDOWN-PLAN-SYNC) are already declared in constants/rule_ids.py but "
-        "get_rules() has not landed yet at the time this allowlist was seeded. "
-        "Remove this entry once the migration lands."
-    ),
-    "ValidateEslintOnWriteHandler": (
-        "Phase 3 fan-out target per PLAN.md Task 3.1 — its RuleIDs "
-        "(R-ESLINT-ERRORS, R-ESLINT-TIMEOUT, R-ESLINT-RUN-FAILURE) are already "
-        "declared in constants/rule_ids.py but get_rules() has not landed yet at "
-        "the time this allowlist was seeded. Remove this entry once the "
-        "migration lands."
-    ),
 }
 
 

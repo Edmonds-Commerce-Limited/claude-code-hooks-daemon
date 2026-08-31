@@ -168,6 +168,19 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str, str], ...] = (
         "Prefix your stop message with STOPPING BECAUSE: <reason>, or keep working",
         _EXPLAIN_OR_CONTINUE_REASON,
     ),
+    (
+        RuleID.STOP_GOAL_LEDGER,
+        "Stopping while ledgered plan(s) are still In Progress",
+        "The daemon-side goal ledger owes a goal for EVERY In Progress plan, "
+        "not only the newest /goal condition",
+        "Continue the listed plan(s), or stop with STOPPING BECAUSE: naming "
+        "why each cannot proceed",
+        "The /goal slot holds ONE condition (last writer wins), so the daemon "
+        "keeps a ledger of every emitted goal. An unexplained stop is "
+        "challenged on behalf of EVERY ledgered plan still In Progress. The "
+        "challenge always names the live plan numbers at fire time; entries "
+        "retire when their plan reaches a terminal status or is archived.",
+    ),
 )
 
 # Plan 00276: goal-ledger Stop defence. Claude Code's /goal slot holds ONE

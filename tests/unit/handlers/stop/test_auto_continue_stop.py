@@ -2959,17 +2959,17 @@ class TestRhetoricalContinueHardBlock:
 
 
 class TestAutoContinueStopGetRules:
-    """get_rules() declares the 5 Rule objects backing this handler (Plan 00116)."""
+    """get_rules() declares the 6 Rule objects backing this handler (Plan 00116)."""
 
     @pytest.fixture
     def handler(self) -> AutoContinueStopHandler:
         return AutoContinueStopHandler()
 
-    def test_returns_five_rules(self, handler: AutoContinueStopHandler) -> None:
+    def test_returns_six_rules(self, handler: AutoContinueStopHandler) -> None:
         from claude_code_hooks_daemon.core.rule import Rule
 
         rules = handler.get_rules()
-        assert len(rules) == 5
+        assert len(rules) == 6
         assert all(isinstance(rule, Rule) for rule in rules)
 
     def test_rule_ids_match_constants(self, handler: AutoContinueStopHandler) -> None:
@@ -2979,6 +2979,7 @@ class TestAutoContinueStopGetRules:
             RuleID.STOP_AFTER_TOOL_ERROR,
             RuleID.STOP_CONFIRMATION_QUESTION,
             RuleID.STOP_NO_REASON,
+            RuleID.STOP_GOAL_LEDGER,
         }
         actual = {rule.rule_id for rule in handler.get_rules()}
         assert actual == expected
