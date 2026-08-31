@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00296: monorepo workspace resolver](00296-monorepo-workspace-resolver/PLAN.md) - Not Started (client field report: handlers assume a single-root repository, so multi-workspace monorepos get silent enforcement degradation; one shared `Workspace.for_path()` resolver routed through npm_command, lint_on_edit, validate_eslint_on_write, tdd_enforcement and markdown_organization, plus surfacing downgraded modes in `check`)
+- [00296: monorepo workspace resolver](00296-monorepo-workspace-resolver/PLAN.md) - In Progress (client field report: handlers assume a single-root repository, so multi-workspace monorepos get silent enforcement degradation; one shared `Workspace.for_path()` resolver routed through npm_command, lint_on_edit, validate_eslint_on_write, tdd_enforcement and markdown_organization, plus surfacing downgraded modes in `check`)
 
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
 

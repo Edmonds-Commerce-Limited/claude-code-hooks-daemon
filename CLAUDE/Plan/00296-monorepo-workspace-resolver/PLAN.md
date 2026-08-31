@@ -1,6 +1,6 @@
 # Plan 00296: monorepo workspace resolver
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-08-31
 **Owner**: joseph
 **Priority**: Medium
@@ -70,18 +70,22 @@ the affected handlers through it.
 
 ### Phase 1: Shared resolver
 
-- [ ] ⬜ **Task 1.1**: TDD `Workspace.for_path()` in core (manifest walk-up,
+- [x] ✅ **Task 1.1**: TDD `Workspace.for_path()` in core (manifest walk-up,
   git-root stop, git-root fallback, kind + bin_dirs per ecosystem).
-- [ ] ⬜ **Task 1.2**: Config surface review — decide whether any override
+- [x] ✅ **Task 1.2**: Config surface review — decide whether any override
   knob is needed at all given automatic resolution, and document the
-  resolver in the agent tree.
+  resolver in the agent tree. Decision: **no new override knob**;
+  `_MANIFEST_KINDS` is the sole extension point. Canonical doc:
+  [../../Code/WorkspaceResolution.md](../../Code/WorkspaceResolution.md).
 
 ### Phase 2: Route handlers through it
 
 - [ ] ⬜ **Task 2.1**: `has_llm_commands_in_package_json()` takes the
   workspace root; `npm_command` evaluates per invocation.
 - [ ] ⬜ **Task 2.2**: `lint_on_edit` working dir + executable resolution
-  via workspace bin dirs.
+  via workspace bin dirs. Must not regress Ansible: `ansible.cfg` is a
+  `_MODULE_ROOT_MARKERS` entry but not a manifest, so it needs either a
+  `_MANIFEST_KINDS` row or a supplementary lookup.
 - [ ] ⬜ **Task 2.3**: `validate_eslint_on_write` per-file workspace.
 - [ ] ⬜ **Task 2.4**: `tdd_enforcement` workspace-relative `test_path_map`
   and removal of the hardcoded `/workspace` fallback.

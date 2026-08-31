@@ -30,6 +30,7 @@ that owns the depth for every fact. The audience split (agent tree vs human
 | [Architecture/](Architecture/StatusLine.md)                            | Component deep-dives (status line)                                                  |
 | [Code/](Code/HooksSystem.md)                                           | Hooks system internals                                                              |
 | [Code/StrategyPattern.md](Code/StrategyPattern.md)                     | Language-aware handler Strategy Pattern archetype                                   |
+| [Code/WorkspaceResolution.md](Code/WorkspaceResolution.md)             | Resolving which sub-tree (and toolchain) a file belongs to in a monorepo            |
 | [CodeLifecycle/](CodeLifecycle/README.md)                              | Mandatory lifecycles: features, bugs, general changes                               |
 | [Performance/](Performance/README.md)                                  | Performance baselines and measurements                                              |
 | [Plan/](Plan/README.md)                                                | Numbered development plans (see [Plan/CLAUDE.md](Plan/CLAUDE.md) for lifecycle)     |

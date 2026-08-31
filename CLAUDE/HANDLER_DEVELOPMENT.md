@@ -456,6 +456,14 @@ old_string = tool_input.get("old_string")
 new_string = tool_input.get("new_string")
 ```
 
+### Finding the file's project
+
+Needing a manifest, a working directory or a tool binary is a question about
+the file's **workspace**, not about the git root — reaching for
+`ProjectContext.project_root()` for those silently degrades in a monorepo. Use
+`Workspace.for_path()`; depth is in
+[Code/WorkspaceResolution.md](Code/WorkspaceResolution.md).
+
 ## Priority Guide
 
 <!-- ssot-anchor: priority-guide -->
