@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (never-drop-a-finding ledger from the v3.57.0 Step 10 early code review: all non-blocking findings across the 00116/transport/docs-qa-layout review scopes, tiered HIGH/MEDIUM/LOW)
+- [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
 
 - [00293: tool inventory disable and token savings](00293-tool-inventory-disable-and-token-savings/PLAN.md) - Not Started (disable-at-source for never-wanted tools instead of fighting them with hooks, transcript-scanning analyser for never-used tools, tools-vs-tokens report with the decision left to projects; dogfood here)
 

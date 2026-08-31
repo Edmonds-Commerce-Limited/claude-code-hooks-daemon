@@ -17,6 +17,7 @@ import pytest
 
 from claude_code_hooks_daemon.install.forwarder_generator import INIT_SH_ANCHOR
 from claude_code_hooks_daemon.install.transport_toggle import (
+    _RESTART_TIMEOUT_SECONDS,
     ToggleOutcome,
     TransportToggleError,
     ensure_relay_binary,
@@ -315,7 +316,9 @@ class TestRunToggleRaisingRestartOrRegenerate:
         def restart() -> int:
             call_count["n"] += 1
             if call_count["n"] == 1:
-                raise subprocess_module.TimeoutExpired(cmd=["restart"], timeout=120)
+                raise subprocess_module.TimeoutExpired(
+                    cmd=["restart"], timeout=_RESTART_TIMEOUT_SECONDS
+                )
             return 0
 
         outcome = run_toggle(project, enable=True, restart_fn=restart, verify_fn=_passing_probes)
