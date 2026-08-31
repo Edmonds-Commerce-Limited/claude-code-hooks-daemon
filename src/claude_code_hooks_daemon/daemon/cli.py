@@ -4805,6 +4805,80 @@ def cmd_tool_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_block_report(args: argparse.Namespace) -> int:
+    """Produce the handler block-frequency report (Plan 00116 Task 2b.1).
+
+    Scans the project's Claude Code session transcripts for hook DENY
+    events, attributes each to a blocking handler by deny-message
+    fingerprint, and prints a ranked report plus a data-driven promotion
+    recommendation (Decision I). RECOMMENDS only — the committed
+    ``claude_md.promotion.promoted_handlers`` config list is the contract
+    the injector reads, not this report. Privacy: only handler names and
+    counts are read out of the transcripts; command text and file contents
+    never reach the report.
+
+    Args:
+        args: Parsed CLI arguments with optional ``project_root``,
+            ``transcripts_dir`` (override for tests/unusual layouts),
+            ``json_output`` and ``no_write``.
+
+    Returns:
+        0 on success (a project with no transcripts yet still reports),
+        2 on operational errors.
+    """
+    from claude_code_hooks_daemon.block_report.analyser import (
+        analyse_transcripts,
+        transcripts_root_for,
+    )
+    from claude_code_hooks_daemon.block_report.report import (
+        build_report,
+        render_markdown,
+        report_to_json,
+    )
+    from claude_code_hooks_daemon.config.models import Config
+
+    resolved_root = resolve_tree_root(args)
+    if resolved_root is None:
+        return 2
+    project_root = resolved_root
+    config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+    promotion = config.claude_md.promotion
+
+    override = getattr(args, "transcripts_dir", None)
+    transcripts_root = Path(override) if override else transcripts_root_for(project_root)
+
+    summary = analyse_transcripts(transcripts_root)
+    report = build_report(
+        summary,
+        promoted_handlers=promotion.promoted_handlers,
+        min_blocks=promotion.min_blocks,
+        min_sessions=promotion.min_sessions,
+    )
+    markdown = render_markdown(report)
+    payload = report_to_json(report)
+
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2))
+    else:
+        print(markdown)
+
+    if not getattr(args, "no_write", False):
+        reports_dir = _daemon_untracked_dir(project_root) / "reports"
+        try:
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            (reports_dir / "block-report.md").write_text(markdown, encoding="utf-8")
+            (reports_dir / "block-report.json").write_text(
+                json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            print(f"ERROR: cannot write report files: {exc}", file=sys.stderr)
+            return 2
+        if not getattr(args, "json_output", False):
+            print(f"Report written to {reports_dir}/block-report.{{md,json}}")
+
+    return 0
+
+
 _BUG_REPORT_LOG_LINES = 100
 _BUG_REPORT_DIR_NAME = "bug-reports"
 _BUG_REPORT_ENV_VARS = (
@@ -5604,6 +5678,42 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_tool_report.set_defaults(func=cmd_tool_report)
+
+    # block-report command (Plan 00116) — handler block-frequency report
+    parser_block_report = subparsers.add_parser(
+        "block-report",
+        help=(
+            "Report hook-deny frequency per handler from session transcripts "
+            "vs the claude_md.promotion config (recommends only)"
+        ),
+    )
+    parser_block_report.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Print the machine-readable report instead of markdown",
+    )
+    parser_block_report.add_argument(
+        "--no-write",
+        dest="no_write",
+        action="store_true",
+        help="Do not write report files under the daemon untracked/reports/ dir",
+    )
+    parser_block_report.add_argument(
+        "--transcripts-dir",
+        dest="transcripts_dir",
+        metavar="PATH",
+        default=None,
+        help="Transcripts directory override (default: ~/.claude/projects/<project-slug>)",
+    )
+    parser_block_report.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_block_report.set_defaults(func=cmd_block_report)
 
     # docs-qa command (Plan 00284) — sweep / single-file lint (staged: not
     # implemented in this slice)

@@ -1356,6 +1356,59 @@ class ToolPolicyConfig(BaseModel):
         return {entry.tool: entry.reason for entry in self.never_want}
 
 
+class PromotionConfig(BaseModel):
+    """Data-driven handler promotion policy (Plan 00116 Decision I).
+
+    Records which BLOCKING handlers keep their full ``get_claude_md()``
+    guidance resident in the injected ``<hooksdaemon>`` block, based on
+    real transcript block frequency, rather than every handler paying the
+    always-on token cost. Ships empty: a fresh install has no history yet,
+    so the safe default is pure progressive disclosure (every blocking
+    handler reduced to a rule-table row, verbose only on first fire).
+
+    ``bin/hooks-daemon block-report`` re-derives a RECOMMENDED promoted set
+    from this project's own transcripts using ``min_blocks``/
+    ``min_sessions`` as its threshold — the recommendation is advisory; the
+    committed ``promoted_handlers`` list is the contract the injector
+    actually reads.
+
+    Attributes:
+        promoted_handlers: Handler config keys whose guidance stays fully
+            resident in the injected block.
+        min_blocks: Total block count ``block-report`` uses as its
+            promotion-recommendation threshold.
+        min_sessions: Distinct-session count ``block-report`` uses as its
+            promotion-recommendation threshold.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    promoted_handlers: list[str] = Field(
+        default_factory=list,
+        description="Handler config keys whose guidance stays fully resident",
+    )
+    min_blocks: int = Field(
+        default=5, ge=0, description="Block-count threshold for the promotion recommendation"
+    )
+    min_sessions: int = Field(
+        default=2,
+        ge=0,
+        description="Distinct-session threshold for the promotion recommendation",
+    )
+
+
+class ClaudeMdConfig(BaseModel):
+    """Injected-``CLAUDE.md``-block configuration (Plan 00116).
+
+    Attributes:
+        promotion: Data-driven handler promotion policy (Decision I).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    promotion: PromotionConfig = Field(default_factory=PromotionConfig)
+
+
 class Config(BaseModel):
     """Root configuration model for hooks daemon.
 
@@ -1369,6 +1422,8 @@ class Config(BaseModel):
         layout: Project directory-layout truths with no other config home
             (Plan 00288); composed with other homes by the ``ProjectLayout``
             facade (``core/project_layout.py``)
+        claude_md: Injected ``<hooksdaemon>`` block configuration, currently
+            the handler-promotion policy (Plan 00116 Decision I)
     """
 
     model_config = ConfigDict(extra="allow")
@@ -1384,6 +1439,7 @@ class Config(BaseModel):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     ccy: CcyConfig = Field(default_factory=CcyConfig)
     tool_policy: ToolPolicyConfig = Field(default_factory=ToolPolicyConfig)
+    claude_md: ClaudeMdConfig = Field(default_factory=ClaudeMdConfig)
     pseudo_events: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description="Pseudo-event configurations keyed by pseudo-event name",
