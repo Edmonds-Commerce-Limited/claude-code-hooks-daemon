@@ -27,12 +27,33 @@ contract rather than inventing a new rule.
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+
+_RULE = Rule(
+    rule_id=RuleID.WRITE_CLOBBER,
+    blocked="`Write` to an existing file you have not read this session",
+    why="You cannot know what you are destroying, so you could not report the loss even afterwards",
+    fix="`Read` the file then retry, or use `Edit` for a targeted change",
+    verbose=(
+        "`Write` replaces a file's ENTIRE contents. You have not read this file in this\n"
+        "session, so you do not know what is in it — which means you could not report\n"
+        "what was lost even after losing it. This is not hypothetical: a Write destroyed\n"
+        "a tracked 58-line journal in this repository, and it was noticed only by luck.\n\n"
+        "DO INSTEAD (either is one call):\n"
+        "  - `Read` the file, then retry the Write if a full replacement is what you want\n"
+        "  - Use `Edit` for a targeted change — it replaces known text, not the whole file\n\n"
+        "NOTE: creating a NEW file is never blocked, and a file you wrote or read earlier\n"
+        "in this session is not blocked either."
+    ),
+)
 
 # The daemon is long-lived, so per-session state must be bounded or it grows for
 # the life of the process. These caps are generous for real sessions while
@@ -136,8 +157,17 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
 
         return not self._is_known(hook_input, path)
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [_RULE]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Record a Read, or deny a Write that would clobber unread content.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The file path and line
+        count at risk are appended on every fire — they change per
+        invocation, so they are not part of the static teaching content.
 
         Args:
             hook_input: Hook input for the Read or Write call.
@@ -161,27 +191,25 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
             return GatingResult(decision=Decision.ALLOW)
 
         line_count = self._count_lines(path)
-        reason = f"""🚫 BLOCKED: this Write would destroy a file you have not read
 
-FILE: {path}
-AT RISK: {line_count} lines, which would be replaced wholesale
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        formatter = RuleFormatter()
 
-WHY BLOCKED:
-`Write` replaces a file's ENTIRE contents. You have not read this file in this
-session, so you do not know what is in it — which means you could not report
-what was lost even after losing it. This is not hypothetical: a Write destroyed
-a tracked 58-line journal in this repository, and it was noticed only by luck.
+        if transcript_path and tracker.was_disclosed(transcript_path, RuleID.WRITE_CLOBBER):
+            message = formatter.terse(_RULE)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.WRITE_CLOBBER)
+            message = formatter.verbose(_RULE)
 
-DO INSTEAD (either is one call):
-  • `Read` the file, then retry the Write if a full replacement is what you want
-  • Use `Edit` for a targeted change — it replaces known text, not the whole file
+        message += (
+            f"\n\nFILE: {path}\n"
+            f"AT RISK: {line_count} lines, which would be replaced wholesale\n\n"
+            f"To disable: {_CONFIG_KEY_PATH}: false"
+        )
 
-NOTE: creating a NEW file is never blocked, and a file you wrote or read earlier
-in this session is not blocked either.
-
-To disable: {_CONFIG_KEY_PATH}: false"""
-
-        return GatingResult(decision=Decision.DENY, reason=reason, context=[], guidance=None)
+        return GatingResult(decision=Decision.DENY, reason=message, context=[], guidance=None)
 
     @staticmethod
     def _count_lines(path: str) -> int:

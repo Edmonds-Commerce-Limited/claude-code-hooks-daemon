@@ -21,12 +21,23 @@ import pytest
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.write_clobber_guard import (
     WriteClobberGuardHandler,
 )
 
 _SESSION = "session-abc"
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 def _read(path: str, session: str = _SESSION) -> dict[str, Any]:
@@ -182,3 +193,68 @@ class TestGuidanceAndAcceptanceTests:
         decisions = {t.expected_decision for t in handler.get_acceptance_tests()}
         assert Decision.DENY in decisions
         assert Decision.ALLOW in decisions
+
+
+class TestWriteClobberGuardGetRules:
+    """get_rules() declares the single Rule backing this handler (Plan 00116)."""
+
+    def test_returns_one_rule(self, handler: WriteClobberGuardHandler) -> None:
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+
+    def test_rule_id_matches_constant(self, handler: WriteClobberGuardHandler) -> None:
+        assert handler.get_rules()[0].rule_id == RuleID.WRITE_CLOBBER
+
+    def test_rule_has_non_empty_verbose(self, handler: WriteClobberGuardHandler) -> None:
+        assert handler.get_rules()[0].verbose
+
+
+class TestWriteClobberGuardDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Decision G)."""
+
+    def _write_with_transcript(self, path: str, transcript_path: str) -> dict[str, Any]:
+        hook_input = _write(path)
+        hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    def test_first_fire_for_agent_is_verbose(
+        self, handler: WriteClobberGuardHandler, existing_file: str
+    ) -> None:
+        hook_input = self._write_with_transcript(existing_file, "/tmp/agent-a/transcript.jsonl")
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+        assert "DO INSTEAD" in result.reason
+
+    def test_second_fire_for_same_agent_is_terse(
+        self, handler: WriteClobberGuardHandler, existing_file: str, tmp_path: Path
+    ) -> None:
+        other = tmp_path / "other.txt"
+        other.write_text("ORIGINAL\nline2\n")
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+
+        handler.handle(self._write_with_transcript(existing_file, transcript_path))
+        result = handler.handle(self._write_with_transcript(str(other), transcript_path))
+
+        assert result.decision == Decision.DENY
+        assert "DO INSTEAD" not in result.reason
+        assert str(other) in result.reason
+
+    def test_terse_message_leads_with_rule_id(
+        self, handler: WriteClobberGuardHandler, existing_file: str
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._write_with_transcript(existing_file, transcript_path))
+        result = handler.handle(self._write_with_transcript(existing_file, transcript_path))
+
+        assert result.reason.startswith(f"BLOCKED [{RuleID.WRITE_CLOBBER}]")
+
+    def test_missing_transcript_path_is_always_verbose(
+        self, handler: WriteClobberGuardHandler, existing_file: str
+    ) -> None:
+        hook_input = _write(existing_file)
+        handler.handle(hook_input)
+        result = handler.handle(hook_input)
+
+        assert "DO INSTEAD" in result.reason
