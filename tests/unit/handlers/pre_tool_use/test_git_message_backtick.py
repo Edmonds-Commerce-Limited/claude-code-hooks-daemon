@@ -24,7 +24,12 @@ cc7dddc0 has none for exactly that reason. So this rule would have fired on
 none of the 120, and blocking carries no measured false-positive cost.
 """
 
+import pytest
+
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.git_message_backtick import (
     GitMessageBacktickHandler,
 )
@@ -34,6 +39,67 @@ BACKTICK = "`"
 
 def _bash(command: str) -> dict[str, object]:
     return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test (Plan 00116)."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
+
+
+class TestGetRules:
+    def test_returns_one_rule(self) -> None:
+        rules = GitMessageBacktickHandler().get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+        assert rules[0].rule_id == RuleID.GIT_MESSAGE_BACKTICK
+        assert rules[0].verbose
+
+
+class TestDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Plan 00116)."""
+
+    def _hook_input(self, transcript_path: str) -> dict[str, object]:
+        command = f'git commit -m "see {BACKTICK}ls{BACKTICK}"'
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "transcript_path": transcript_path,
+        }
+
+    def test_deny_leads_with_rule_id(self) -> None:
+        handler = GitMessageBacktickHandler()
+        result = handler.handle(self._hook_input("/tmp/agent-a/transcript.jsonl"))
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_MESSAGE_BACKTICK}]")
+
+    def test_first_fire_is_verbose(self) -> None:
+        handler = GitMessageBacktickHandler()
+        result = handler.handle(self._hook_input("/tmp/agent-a/transcript.jsonl"))
+        assert "cc7dddc0" in result.reason
+
+    def test_second_fire_same_agent_is_terse(self) -> None:
+        handler = GitMessageBacktickHandler()
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input(transcript_path))
+        result = handler.handle(self._hook_input(transcript_path))
+        assert "cc7dddc0" not in result.reason
+        assert "Fix:" in result.reason
+
+    def test_different_agent_is_independently_verbose(self) -> None:
+        handler = GitMessageBacktickHandler()
+        handler.handle(self._hook_input("/tmp/agent-a/transcript.jsonl"))
+        result = handler.handle(self._hook_input("/tmp/agent-b/transcript.jsonl"))
+        assert "cc7dddc0" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(self) -> None:
+        handler = GitMessageBacktickHandler()
+        hook_input = _bash(f'git commit -m "see {BACKTICK}ls{BACKTICK}"')
+        first = handler.handle(hook_input)
+        second = handler.handle(hook_input)
+        assert "cc7dddc0" in first.reason
+        assert "cc7dddc0" in second.reason
 
 
 class TestDoubleQuotedBackticksAreBlocked:

@@ -35,9 +35,11 @@ handler was written, rather than assumed; see the plan's Task 1.1.
 import re
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
 
@@ -73,6 +75,22 @@ _UNESCAPED_BACKTICK_PATTERN = re.compile(r"(?<!\\)`")
 _REMEDY_SINGLE_QUOTE = "git commit -m 'text with `backticks` stays literal'"
 _REMEDY_MESSAGE_FILE = "git commit -F <file>"
 
+# Shared teaching content for the (only) deny path (Plan 00116, Task 3.2).
+_RULE_VERBOSE = (
+    "WHAT WOULD HAPPEN:\n"
+    "  • Bash performs command substitution inside double quotes\n"
+    "  • The backticked span runs, and its STDOUT replaces the text\n"
+    "  • The commit still SUCCEEDS, so the loss is silent — this is "
+    "how commit cc7dddc0 in this repo lost a phrase from its body\n\n"
+    "USE INSTEAD (either is fine):\n"
+    f"  {_REMEDY_SINGLE_QUOTE}\n"
+    f"  {_REMEDY_MESSAGE_FILE}\n\n"
+    "Single quotes suppress substitution entirely, so backticks stay "
+    "literal. A backslash-escaped \\` inside double quotes is also "
+    "safe and is not blocked.\n\n"
+    "To disable: handlers.pre_tool_use.git_message_backtick"
+)
+
 
 class GitMessageBacktickHandler(PreToolUseHandlerBase):
     """Block a double-quoted git message whose backticks would be executed.
@@ -87,6 +105,19 @@ class GitMessageBacktickHandler(PreToolUseHandlerBase):
             priority=Priority.GIT_MESSAGE_BACKTICK,
             tags=[HandlerTag.SAFETY, HandlerTag.GIT, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
+        self._rule = Rule(
+            rule_id=RuleID.GIT_MESSAGE_BACKTICK,
+            blocked="an unescaped backtick in a double-quoted git commit/tag message",
+            why="Bash performs command substitution inside double quotes -- the "
+            "span is EXECUTED, not quoted",
+            fix="Use single quotes, or git commit -F <file>",
+            verbose=_RULE_VERBOSE,
+        )
+        self._formatter = RuleFormatter()
+
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's deny path."""
+        return [self._rule]
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True when a git commit/tag carries a double-quoted message whose
@@ -102,26 +133,24 @@ class GitMessageBacktickHandler(PreToolUseHandlerBase):
         )
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Deny, naming the substitution and both concrete remedies."""
-        return GatingResult(
-            decision=Decision.DENY,
-            reason=(
-                "🚫 BLOCKED: backticks inside a double-quoted git message are "
-                "EXECUTED, not quoted\n\n"
-                "WHAT WOULD HAPPEN:\n"
-                "  • Bash performs command substitution inside double quotes\n"
-                "  • The backticked span runs, and its STDOUT replaces the text\n"
-                "  • The commit still SUCCEEDS, so the loss is silent — this is "
-                "how commit cc7dddc0 in this repo lost a phrase from its body\n\n"
-                "USE INSTEAD (either is fine):\n"
-                f"  {_REMEDY_SINGLE_QUOTE}\n"
-                f"  {_REMEDY_MESSAGE_FILE}\n\n"
-                "Single quotes suppress substitution entirely, so backticks stay "
-                "literal. A backslash-escaped \\` inside double quotes is also "
-                "safe and is not blocked.\n\n"
-                "To disable: handlers.pre_tool_use.git_message_backtick"
-            ),
-        )
+        """Deny, naming the substitution and both concrete remedies.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G): the first fire is
+        verbose; subsequent fires for the same agent are terse. A missing
+        transcript_path fails toward verbose every time.
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, self._rule.rule_id):
+            message = self._formatter.terse(self._rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, self._rule.rule_id)
+            message = self._formatter.verbose(self._rule)
+
+        return GatingResult(decision=Decision.DENY, reason=message)
 
     def get_claude_md(self) -> str:
         """Guidance injected into the project's resident CLAUDE.md."""
