@@ -24,11 +24,23 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision, TestType
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.staged_lint_gate import (
     StagedLintGateHandler,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
+
 
 _SAFE_PATH = "/srv/project"
 
@@ -218,6 +230,7 @@ class TestModes:
         assert result.decision == Decision.DENY
         assert result.reason
         assert "broken.py" in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.STAGED_LINT_FAILURE}]")
 
     def test_a_clean_commit_allows_silently_in_block_mode(
         self, handler: StagedLintGateHandler, repo: Path
@@ -295,3 +308,69 @@ class TestGuidance:
         for test in tests:
             assert test.test_type == TestType.ADVISORY
             assert test.requires_main_thread is False
+
+
+class TestGetRules:
+    def test_returns_one_rule(self, handler: StagedLintGateHandler) -> None:
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+
+    def test_rule_id_matches_constant(self, handler: StagedLintGateHandler) -> None:
+        assert handler.get_rules()[0].rule_id == RuleID.STAGED_LINT_FAILURE
+
+    def test_rule_has_non_empty_verbose(self, handler: StagedLintGateHandler) -> None:
+        assert handler.get_rules()[0].verbose
+
+
+class TestBlockModeDisclosureLadder:
+    """Verbose-first/terse-after teaching prose; findings stay fully present always."""
+
+    def test_first_fire_for_agent_is_verbose(
+        self, handler: StagedLintGateHandler, repo: Path
+    ) -> None:
+        handler._mode = "block"
+        _stage_file(repo, "broken.py", "def broken(\n")
+
+        with _patched_root(repo):
+            result = handler.handle(
+                _bash('git commit -m "x"') | {"transcript_path": "/tmp/agent-a/transcript.jsonl"}
+            )
+
+        assert "CHEAP syntax tier only" in result.reason
+
+    def test_second_fire_is_terse_but_findings_stay_full(
+        self, handler: StagedLintGateHandler, repo: Path
+    ) -> None:
+        handler._mode = "block"
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+
+        _stage_file(repo, "broken.py", "def broken(\n")
+        with _patched_root(repo):
+            handler.handle(_bash('git commit -m "x"') | {"transcript_path": transcript_path})
+
+        _stage_file(repo, "broken2.py", "def broken2(\n")
+        with _patched_root(repo):
+            result = handler.handle(
+                _bash('git commit -m "x"') | {"transcript_path": transcript_path}
+            )
+
+        assert "CHEAP syntax tier only" not in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.STAGED_LINT_FAILURE}]")
+        assert "Fix:" in result.reason
+        # Findings are dynamic content: always fully present, terse or not.
+        assert "broken.py" in result.reason
+        assert "broken2.py" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(
+        self, handler: StagedLintGateHandler, repo: Path
+    ) -> None:
+        handler._mode = "block"
+        _stage_file(repo, "broken.py", "def broken(\n")
+
+        with _patched_root(repo):
+            first = handler.handle(_bash('git commit -m "x"'))
+            second = handler.handle(_bash('git commit -m "x"'))
+
+        assert "CHEAP syntax tier only" in first.reason
+        assert "CHEAP syntax tier only" in second.reason

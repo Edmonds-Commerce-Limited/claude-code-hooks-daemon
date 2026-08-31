@@ -35,10 +35,19 @@ import sys
 from pathlib import Path
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, Timeout, ToolName
-from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    Timeout,
+    ToolName,
+)
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
@@ -119,6 +128,28 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         # Config options: set via setattr AFTER __init__.
         self._mode: str = _MODE_WARN
         self._max_files: Any = _DEFAULT_MAX_FILES
+        # Single source of truth for the one rule this handler's DENY path
+        # enforces (block mode only -- Plan 00116, gate-level granularity:
+        # one Rule per GATE, not per lint check module). The per-file
+        # findings are dynamic content and stay fully present in both
+        # verbose and terse forms; only the surrounding teaching prose
+        # about the gate itself goes terse-after-first-fire.
+        self._rule = Rule(
+            rule_id=RuleID.STAGED_LINT_FAILURE,
+            blocked="a staged file fails the cheap syntax check at commit time",
+            why=(
+                "lint_on_edit only ever runs at Write/Edit time, so a git add of "
+                "pre-existing content skips it entirely"
+            ),
+            fix="Fix the failing file(s) above and re-stage before committing",
+            verbose=(
+                "This is the CHEAP syntax tier only -- the same check `lint_on_edit` "
+                "would have run at Write/Edit time, run again here because a file can "
+                "reach the index by routes `lint_on_edit` never sees (a `git add` of "
+                "something written earlier, a merge, a commit of pre-existing changes)."
+            ),
+        )
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         if hook_input.get("tool_name") != ToolName.BASH:
@@ -158,10 +189,43 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         if not failures:
             return GatingResult(decision=Decision.ALLOW, context=[])
 
-        message = self._message(failures)
         if self._mode == _MODE_BLOCK:
-            return GatingResult(decision=Decision.DENY, reason=message)
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=self._blocking_message(failures, hook_input),
+            )
+        message = self._message(failures)
         return GatingResult(decision=Decision.ALLOW, context=[message])
+
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's block-mode denial."""
+        return [self._rule]
+
+    def _blocking_message(self, failures: list[tuple[str, str]], hook_input: dict[str, Any]) -> str:
+        """Build the block-mode deny message: verbose-first/terse-after teaching
+        prose (Plan 00116, Decision G), with the per-file findings ALWAYS fully
+        present -- they are dynamic content, not the static teaching text the
+        disclosure ladder governs.
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, RuleID.STAGED_LINT_FAILURE):
+            prose = self._formatter.terse(self._rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.STAGED_LINT_FAILURE)
+            prose = self._formatter.verbose(self._rule)
+
+        return f"{prose}\n\n{self._findings_block(failures)}"
+
+    @staticmethod
+    def _findings_block(failures: list[tuple[str, str]]) -> str:
+        """Render the per-file findings list -- always present in full."""
+        lines = [
+            f"- {Path(path).name}: {diagnosis.splitlines()[0]}" for path, diagnosis in failures
+        ]
+        return "\n".join(lines)
 
     def _lintable_files(
         self, project_root: Path, staged_stdout: str
