@@ -18,8 +18,10 @@ from claude_code_hooks_daemon.constants import (
     Timeout,
     ToolName,
 )
-from claude_code_hooks_daemon.core import BlockingResult, Decision
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import BlockingResult, Decision, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.strategies.lint.common import matches_skip_path
 from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
@@ -34,6 +36,28 @@ _FILE_PLACEHOLDER = "{file}"
 # ``sys.executable`` is the project venv's interpreter, and a venv's ``ruff`` /
 # ``black`` / ``mypy`` entry points sit beside it. Resolved once at import.
 _INTERPRETER_BIN_DIR: Final[Path] = Path(sys.executable).parent
+
+# Single rule (Plan 00116): the language dimension lives in the strategy
+# registry, not in a per-language RuleID -- every language's lint failure is
+# the same concept, "a written/authored file fails its language's lint check".
+# This is a POST-hoc failure report, not a rollback -- the dynamic lint tool
+# output itself must stay fully present in BOTH verbose and terse forms; only
+# the surrounding "the write already landed, fix with Edit" prose goes terse.
+_LINT_FAILURE_RULE = Rule(
+    rule_id=RuleID.LINT_FAILURE,
+    blocked="a written/authored file that fails its language's lint check",
+    why="The write has already landed on disk; this is a failure report, not a rollback",
+    fix="Fix the reported problems with Edit — do not re-Write the file from scratch",
+    verbose=(
+        "The write has ALREADY landed on disk. This is a failure report, not a "
+        "rollback — the file exists, with your content in it. Fix the reported "
+        "problems with Edit. Do NOT re-Write the file from scratch: that rewrites "
+        "content already on disk from memory, and loses anything you no longer "
+        "have in hand.\n\n"
+        "A denial also cancels every sibling tool call batched in the same turn, "
+        "so re-issue those separately."
+    ),
+)
 
 
 class LintOnEditHandler(PostToolUseHandlerBase):
@@ -87,6 +111,7 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         # safest-looking route was the unguarded one. Relocation (`cp`/`mv`/
         # `dd`) is never linted -- see `get_written_file_paths`.
         self._lint_bash_writes: bool = True
+        self._formatter = RuleFormatter()
 
     def _apply_language_filter(self) -> None:
         """Apply language filter to registry on first use (lazy)."""
@@ -158,13 +183,17 @@ class LintOnEditHandler(PostToolUseHandlerBase):
             return BlockingResult(decision=Decision.ALLOW, reason="No file path found")
 
         for file_path in paths:
-            result = self._lint_one(file_path)
+            result = self._lint_one(hook_input, file_path)
             if result is not None:
                 return result
 
         return BlockingResult(decision=Decision.ALLOW)
 
-    def _lint_one(self, file_path: str) -> BlockingResult | None:
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [_LINT_FAILURE_RULE]
+
+    def _lint_one(self, hook_input: dict[str, Any], file_path: str) -> BlockingResult | None:
         """Lint a single file; a BlockingResult means it failed, None means it passed."""
         strategy = self._registry.get_strategy(file_path)
         if strategy is None:
@@ -174,13 +203,17 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         default_cmd, extended_cmd = self._get_lint_commands(strategy)
 
         # Run default lint command
-        default_result = self._run_lint_command(default_cmd, file_path, strategy.language_name)
+        default_result = self._run_lint_command(
+            hook_input, default_cmd, file_path, strategy.language_name
+        )
         if default_result is not None:
             return default_result
 
         # Run extended lint command if configured and default passed
         if extended_cmd:
-            return self._run_lint_command(extended_cmd, file_path, strategy.language_name)
+            return self._run_lint_command(
+                hook_input, extended_cmd, file_path, strategy.language_name
+            )
 
         return None
 
@@ -264,7 +297,11 @@ class LintOnEditHandler(PostToolUseHandlerBase):
         return shutil.which(executable)
 
     def _run_lint_command(
-        self, command_template: str, file_path: str, language_name: str
+        self,
+        hook_input: dict[str, Any],
+        command_template: str,
+        file_path: str,
+        language_name: str,
     ) -> BlockingResult | None:
         """Run a lint command and return BlockingResult if it fails, None if it passes.
 
@@ -325,14 +362,14 @@ class LintOnEditHandler(PostToolUseHandlerBase):
                         error_output + "\n" + result.stderr if error_output else result.stderr
                     )
 
+                dynamic_detail = (
+                    f"{language_name} lint FAILED for {Path(file_path).name}\n\n"
+                    f"{error_output}\n\n"
+                    f"Command: {command}"
+                )
                 return BlockingResult(
                     decision=Decision.DENY,
-                    reason=(
-                        f"{language_name} lint FAILED for {Path(file_path).name}\n\n"
-                        f"{error_output}\n\n"
-                        f"Fix the lint errors before continuing.\n"
-                        f"Command: {command}"
-                    ),
+                    reason=self._deny_reason(hook_input, dynamic_detail),
                 )
 
         except FileNotFoundError:
@@ -353,6 +390,27 @@ class LintOnEditHandler(PostToolUseHandlerBase):
             )
 
         return None
+
+    def _deny_reason(self, hook_input: dict[str, Any], dynamic_detail: str) -> str:
+        """Build a DENY reason, verbose-first/terse-after per (transcript_path, rule_id).
+
+        Plan 00116, Decision G. The dynamic lint tool output is a POST-hoc
+        failure report -- it must stay fully present in BOTH the verbose and
+        terse forms; only the surrounding "write already landed, fix with
+        Edit" teaching prose goes terse on repeat fires.
+        """
+        rule = _LINT_FAILURE_RULE
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
+            message = self._formatter.terse(rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, rule.rule_id)
+            message = self._formatter.verbose(rule)
+
+        return f"{message}\n\n{dynamic_detail}"
 
     def get_claude_md(self) -> str | None:
         return """## lint_on_edit — source writes are linted, and a failure DENIES

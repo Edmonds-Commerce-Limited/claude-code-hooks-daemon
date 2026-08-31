@@ -111,6 +111,7 @@ class TestMissingToolIsAdvisoryNotBlocking:
         handler = LintOnEditHandler()
 
         result = handler._run_lint_command(
+            {},
             "definitely-not-a-real-linter-xyzzy check {file}",
             "/tmp/example.py",
             "Python",
