@@ -143,6 +143,19 @@ several are fail-open correctness gaps worth fixing promptly (marked HIGH).
 - [ ] ⬜ **Task 3.8**: `.claude/ccy/claude-supervise.py` pre-existing Pyright
   `int | None` fd-argument errors around lines 4498-4631 (surfaced when the
   release bump touched the file; not release-introduced).
+- [ ] ⬜ **Task 3.9**: acceptance-playbook drift from the v3.57.0 run: refresh
+  handlers' `expected_message_patterns` stale against the Rule-migration
+  `BLOCKED [R-...]` format and the terse repeat-fire short form (notably
+  security_antipattern's "SECURITY ANTIPATTERN BLOCKED", error_hiding's
+  "Error-hiding pattern detected", TDD's "TDD REQUIRED", sensitive_content's
+  "SENSITIVE CONTENT BLOCKED"); make the generator probe for eslint/llm:lint
+  availability like it probes rustc (test 110 emitted as runnable in a repo
+  with no package.json); fix test 87's `[[ ... ]]` wrapper defeating the
+  `-m`-module producer-naming assertion; give test 205's fixture a mutator
+  (only_with_mutator default); align Python TDD deny long-form with the other
+  ten languages' short form; fix gh_issue/pr_comments' naive
+  command+flag-concatenation remediation string; note tests 39/40 + 207/208
+  unreachable where Artifact/Grep are disabled at source.
 
 ## Success Criteria
 
