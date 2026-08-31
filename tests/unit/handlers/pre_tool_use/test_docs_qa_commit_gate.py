@@ -12,8 +12,13 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy, DocumentationQaPolicy
 from claude_code_hooks_daemon.handlers.pre_tool_use.docs_qa_commit_gate import (
     DocsQaCommitGateHandler,
@@ -21,6 +26,14 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.docs_qa_commit_gate import (
     _extract_commit_pathspecs,
     _tokenise,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -172,6 +185,7 @@ class TestHandle:
         with _patched_root(root):
             result = _handler(policy).handle(_bash_input("git commit -m 'x'", cwd=str(root)))
         assert result.decision == Decision.DENY
+        assert result.reason.startswith(f"BLOCKED [{RuleID.DOCS_QA_COMMIT}]")
         assert "pointer-resolves" in (result.reason or "")
 
     def test_missing_cwd_is_treated_as_same_repo(self, tmp_path: Path) -> None:
@@ -206,3 +220,68 @@ class TestClaudeMdAndAcceptanceTests:
     def test_get_acceptance_tests_returns_list(self) -> None:
         tests = DocsQaCommitGateHandler().get_acceptance_tests()
         assert len(tests) >= 1
+
+
+class TestGetRules:
+    def test_returns_one_rule(self) -> None:
+        rules = DocsQaCommitGateHandler().get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+
+    def test_rule_id_matches_constant(self) -> None:
+        assert DocsQaCommitGateHandler().get_rules()[0].rule_id == RuleID.DOCS_QA_COMMIT
+
+    def test_rule_has_non_empty_verbose(self) -> None:
+        assert DocsQaCommitGateHandler().get_rules()[0].verbose
+
+
+class TestBlockModeDisclosureLadder:
+    """Verbose-first/terse-after teaching prose; findings stay fully present always."""
+
+    def _repo_with_broken_link(self, tmp_path: Path, name: str) -> Path:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE").mkdir(exist_ok=True)
+        (root / "CLAUDE" / name).write_text("See [missing](Nope.md).\n")
+        _git(root, "add", "-A")
+        return root
+
+    def _deny(self, root: Path, transcript_path: str) -> Any:
+        policy = DocumentationPolicy(
+            enabled=True, qa=DocumentationQaPolicy(commit_gate_mode="block")
+        )
+        hook_input = _bash_input("git commit -m 'x'", cwd=str(root))
+        hook_input["transcript_path"] = transcript_path
+        with _patched_root(root):
+            return _handler(policy).handle(hook_input)
+
+    def test_first_fire_for_agent_is_verbose(self, tmp_path: Path) -> None:
+        root = self._repo_with_broken_link(tmp_path, "Foo.md")
+        result = self._deny(root, "/tmp/agent-a/transcript.jsonl")
+        assert "STAGED tree" in result.reason
+
+    def test_second_fire_is_terse_but_findings_stay_full(self, tmp_path: Path) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        root1 = self._repo_with_broken_link(tmp_path / "one", "Foo.md")
+        self._deny(root1, transcript_path)
+
+        root2 = self._repo_with_broken_link(tmp_path / "two", "Bar.md")
+        result = self._deny(root2, transcript_path)
+
+        assert "STAGED tree" not in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.DOCS_QA_COMMIT}]")
+        assert "Fix:" in result.reason
+        assert "pointer-resolves" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(self, tmp_path: Path) -> None:
+        root = self._repo_with_broken_link(tmp_path, "Foo.md")
+        policy = DocumentationPolicy(
+            enabled=True, qa=DocumentationQaPolicy(commit_gate_mode="block")
+        )
+        hook_input = _bash_input("git commit -m 'x'", cwd=str(root))
+        with _patched_root(root):
+            first = _handler(policy).handle(hook_input)
+            second = _handler(policy).handle(hook_input)
+
+        assert "STAGED tree" in first.reason
+        assert "STAGED tree" in second.reason

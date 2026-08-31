@@ -20,19 +20,39 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.docs_qa.context import staged_context
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.report import format_advisory, format_block_reason
 from claude_code_hooks_daemon.docs_qa.runner import run_stage
-from claude_code_hooks_daemon.docs_qa.types import CheckStage, Severity
+from claude_code_hooks_daemon.docs_qa.types import CheckStage, Finding, Severity
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
 
 _MODE_BLOCK: Final[str] = "block"
+
+# Single source of truth for the one rule this handler's DENY path enforces
+# (Plan 00116, gate-level granularity: one Rule per GATE, not one per docs QA
+# check). The per-check findings from format_block_reason() are dynamic
+# content and stay FULLY present in both verbose and terse forms; only the
+# surrounding teaching prose about the gate itself goes terse-after-first-fire.
+_RULE_WHY = (
+    "Most doc rot that matters at commit time is cross-file drift a single-file "
+    "edit hook cannot see"
+)
+_RULE_FIX = "Fix the content per each finding's remediation below and amend the commit"
+_RULE_VERBOSE = (
+    "Every `git commit` is checked against the STAGED tree's docs QA "
+    "invariants (currently `pointer-resolves` and `quote-drift`). Each "
+    "finding below names its own remediation -- fix the content accordingly "
+    "and amend the commit. Commits inside nested/vendor repos or foreign "
+    "worktrees are exempt."
+)
 
 _GIT_TOKEN: Final[str] = "git"
 _COMMIT_TOKEN: Final[str] = "commit"
@@ -142,6 +162,14 @@ class DocsQaCommitGateHandler(PreToolUseHandlerBase):
         )
         # Injected by the registry for DOCUMENTATION-tagged handlers.
         self._documentation: DocumentationPolicy | None = None
+        self._rule = Rule(
+            rule_id=RuleID.DOCS_QA_COMMIT,
+            blocked="a git commit violates a block-level docs QA staged-tree check",
+            why=_RULE_WHY,
+            fix=_RULE_FIX,
+            verbose=_RULE_VERBOSE,
+        )
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
@@ -181,8 +209,33 @@ class DocsQaCommitGateHandler(PreToolUseHandlerBase):
             == _MODE_BLOCK
         ]
         if blockers:
-            return GatingResult(decision=Decision.DENY, reason=format_block_reason(blockers))
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=self._blocking_message(blockers, hook_input),
+            )
         return GatingResult(decision=Decision.ALLOW, context=[format_advisory(findings)])
+
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's block-mode denial."""
+        return [self._rule]
+
+    def _blocking_message(self, blockers: list[Finding], hook_input: dict[str, Any]) -> str:
+        """Build the block-mode deny message: verbose-first/terse-after teaching
+        prose (Plan 00116, Decision G), with the per-check findings from
+        ``format_block_reason`` ALWAYS fully present -- they are dynamic
+        content, not the static teaching text the disclosure ladder governs.
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, RuleID.DOCS_QA_COMMIT):
+            prose = self._formatter.terse(self._rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.DOCS_QA_COMMIT)
+            prose = self._formatter.verbose(self._rule)
+
+        return f"{prose}\n\n{format_block_reason(blockers)}"
 
     @staticmethod
     def _is_foreign_repo(hook_input: dict[str, Any], project_root: Path) -> bool:
