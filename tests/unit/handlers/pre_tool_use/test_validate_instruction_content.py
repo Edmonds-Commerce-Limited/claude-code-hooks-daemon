@@ -4,9 +4,20 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.validate_instruction_content import (
     ValidateInstructionContentHandler,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 @pytest.fixture
@@ -660,3 +671,102 @@ class TestValidateInstructionContentUnhandledTool:
         result = handler.handle(hook_input)
         assert result.decision == "allow"
         assert "not handled" in result.reason.lower()
+
+
+class TestValidateInstructionContentGetRules:
+    """get_rules() declares the 8 Rule objects backing this handler (Plan 00116)."""
+
+    def test_returns_eight_rules(self, handler: ValidateInstructionContentHandler) -> None:
+        rules = handler.get_rules()
+        assert len(rules) == 8
+        assert all(isinstance(rule, Rule) for rule in rules)
+
+    def test_rule_ids_match_constants(self, handler: ValidateInstructionContentHandler) -> None:
+        expected = {
+            RuleID.INSTRUCTION_IMPLEMENTATION_LOG,
+            RuleID.INSTRUCTION_STATUS_INDICATOR,
+            RuleID.INSTRUCTION_TIMESTAMP,
+            RuleID.INSTRUCTION_LLM_SUMMARY,
+            RuleID.INSTRUCTION_TEST_OUTPUT,
+            RuleID.INSTRUCTION_FILE_LISTING,
+            RuleID.INSTRUCTION_CHANGE_SUMMARY,
+            RuleID.INSTRUCTION_COMPLETION_INDICATOR,
+        }
+        actual = {rule.rule_id for rule in handler.get_rules()}
+        assert actual == expected
+
+    def test_no_duplicate_rule_ids(self, handler: ValidateInstructionContentHandler) -> None:
+        rule_ids = [rule.rule_id for rule in handler.get_rules()]
+        assert len(rule_ids) == len(set(rule_ids))
+
+    def test_every_rule_has_non_empty_verbose(
+        self, handler: ValidateInstructionContentHandler
+    ) -> None:
+        for rule in handler.get_rules():
+            assert rule.verbose, f"{rule.rule_id} has empty verbose content"
+
+
+class TestValidateInstructionContentDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Decision G)."""
+
+    def _hook_input(self, content: str, transcript_path: str) -> dict[str, Any]:
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/some/path/CLAUDE.md", "content": content},
+            "transcript_path": transcript_path,
+        }
+
+    def test_first_fire_for_agent_is_verbose(
+        self, handler: ValidateInstructionContentHandler
+    ) -> None:
+        hook_input = self._hook_input(
+            "Created the file ProductService.php", "/tmp/agent-a/transcript.jsonl"
+        )
+        result = handler.handle(hook_input)
+
+        assert result.decision == "deny"
+        assert "commit message" in result.reason.lower()
+
+    def test_second_fire_for_same_agent_same_rule_is_terse(
+        self, handler: ValidateInstructionContentHandler
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("Created the file A.php", transcript_path))
+        result = handler.handle(self._hook_input("Added class Foo", transcript_path))
+
+        assert result.decision == "deny"
+        assert "commit message" not in result.reason.lower()
+
+    def test_terse_message_leads_with_rule_id(
+        self, handler: ValidateInstructionContentHandler
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("Created the file A.php", transcript_path))
+        result = handler.handle(self._hook_input("Added class Foo", transcript_path))
+
+        assert result.reason.startswith(f"BLOCKED [{RuleID.INSTRUCTION_IMPLEMENTATION_LOG}]")
+
+    def test_different_rule_same_agent_is_independently_verbose(
+        self, handler: ValidateInstructionContentHandler
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("Created the file A.php", transcript_path))
+        result = handler.handle(self._hook_input("ALL DONE!", transcript_path))
+
+        assert result.reason.startswith(f"BLOCKED [{RuleID.INSTRUCTION_COMPLETION_INDICATOR}]")
+        assert "turn-end narration" in result.reason.lower()
+
+    def test_missing_transcript_path_is_always_verbose(
+        self, handler: ValidateInstructionContentHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/some/path/CLAUDE.md",
+                "content": "Created the file A.php",
+            },
+        }
+        handler.handle(hook_input)
+        result = handler.handle(hook_input)
+
+        assert "commit message" in result.reason.lower()

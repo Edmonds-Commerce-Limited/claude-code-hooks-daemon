@@ -5,15 +5,108 @@ that should not be committed to permanent instruction files.
 """
 
 import re
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
+from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import GatingResult
+from claude_code_hooks_daemon.core import GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest, RecommendedModel, TestType
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+
+# SINGLE SOURCE OF TRUTH: (category name -- matches the keys _find_blocked_pattern
+# returns, rule_id, blocked, why, fix, verbose). One Rule per content category
+# (Plan 00116, Decision B) -- these are genuinely different concepts, not a
+# language/strategy fan-out sharing one rule.
+_RULE_DEFINITIONS: Final[tuple[tuple[str, str, str, str, str, str], ...]] = (
+    (
+        "implementation logs",
+        RuleID.INSTRUCTION_IMPLEMENTATION_LOG,
+        "implementation logs (e.g. 'created the file X', 'added the class Y')",
+        "Instruction files hold permanent instructions, not a log of past edits",
+        "Remove the log sentence; put implementation history in git or a plan JOURNAL/",
+        "Implementation logs describe WHAT WAS DONE, not what the instructions ARE. "
+        "That belongs in a commit message, a plan's JOURNAL/ day-file, or a changelog "
+        "-- never in CLAUDE.md/README.md, which are read fresh every session and must "
+        "stay a stable description of the project, not a diary of edits.",
+    ),
+    (
+        "status indicators",
+        RuleID.INSTRUCTION_STATUS_INDICATOR,
+        "status indicators (e.g. checkmark + 'Complete', 'Done', 'Success', 'Fixed')",
+        "A completion emoji records a moment in time, not a permanent fact",
+        "Remove the status marker; instruction files describe the project, not its history",
+        "A checkmark or status emoji followed by a completion word records that SOMETHING "
+        "finished at some point -- useful in a progress report, meaningless (and quickly "
+        "stale) in a file every session reads as ground truth.",
+    ),
+    (
+        "timestamps",
+        RuleID.INSTRUCTION_TIMESTAMP,
+        "timestamps (ISO dates such as 2024-03-15)",
+        "A dated entry is a log line, and instruction files are not a log",
+        "Remove the date; if it is genuinely load-bearing, put it in git history",
+        "An ISO-format date embedded in prose almost always means 'this happened on this "
+        "day' -- changelog narrative, not a stable instruction. Git already timestamps "
+        "every change; duplicating that inside CLAUDE.md/README.md just goes stale.",
+    ),
+    (
+        "llm summaries",
+        RuleID.INSTRUCTION_LLM_SUMMARY,
+        "LLM summaries (section headings such as '## Summary', '## Key Points', '## Overview')",
+        "A summary heading is the shape an LLM's own turn-report takes, not project documentation",
+        "Remove the heading and fold any durable content into the surrounding instructions",
+        "'## Summary'/'## Key Points'/'## Overview' at the top of a block is the exact "
+        "shape an assistant's own end-of-turn report takes. Pasting that report into "
+        "CLAUDE.md/README.md turns a one-off summary into permanent (and quickly "
+        "irrelevant) content.",
+    ),
+    (
+        "test output",
+        RuleID.INSTRUCTION_TEST_OUTPUT,
+        "test output counts (e.g. '42 tests passed', '1 test failed')",
+        "A test run's result is a point-in-time fact, not a stable instruction",
+        "Remove the count; CI already reports this on every run",
+        "Recording how many tests passed or failed is a snapshot of one run -- the next "
+        "commit invalidates it. CI output is where that fact belongs; an instruction "
+        "file that quotes it just goes stale the moment the count changes.",
+    ),
+    (
+        "file listings",
+        RuleID.INSTRUCTION_FILE_LISTING,
+        "changelog-style file listings (e.g. 'created src/Service/Foo.php')",
+        "A file path preceded by a past-tense action verb is changelog narrative",
+        "Remove the log line; a bare path reference used as documentation stays allowed",
+        "'created'/'modified'/'updated' followed by a source path is the shape of a "
+        "changelog entry, not documentation -- that belongs in git history or a plan's "
+        "JOURNAL/. A bare path reference in prose (e.g. 'see docs/foo.md for details') "
+        "is NOT blocked; only the action-verb + path combination is.",
+    ),
+    (
+        "change summaries",
+        RuleID.INSTRUCTION_CHANGE_SUMMARY,
+        "change summaries (e.g. 'Added 15 lines', 'Removed 8 lines')",
+        "A line-count delta describes one diff, not a stable instruction",
+        "Remove the summary; the diff itself is preserved in git",
+        "'Added/Removed/Changed N lines' is exactly the shape of a commit-message "
+        "one-liner. It is meaningful as history (git already has it) and meaningless "
+        "as a standing instruction, since it describes an edit rather than the project.",
+    ),
+    (
+        "completion indicators",
+        RuleID.INSTRUCTION_COMPLETION_INDICATOR,
+        "completion indicators (e.g. 'ALL DONE!', 'Task complete!', 'Finished task')",
+        "A completion phrase announces a session's end, not a fact about the project",
+        "Remove the phrase; instruction files should never celebrate finishing a task",
+        "'ALL DONE!'/'Task complete!'/'Finished task' is turn-end narration, not project "
+        "documentation. It is only ever true for the moment it was written, and every "
+        "later session reading the file has no idea what task it refers to.",
+    ),
+)
 
 
 class ValidateInstructionContentHandler(PreToolUseHandlerBase):
@@ -67,6 +160,17 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.VALIDATE_INSTRUCTION_CONTENT,
             priority=Priority.VALIDATE_INSTRUCTION_CONTENT,
         )
+        # One Rule per content category (Decision B: 8 rules), built once from
+        # the single source-of-truth _RULE_DEFINITIONS mapping.
+        self._rules: tuple[Rule, ...] = tuple(
+            Rule(rule_id=rule_id, blocked=blocked, why=why, fix=fix, verbose=verbose)
+            for _category, rule_id, blocked, why, fix, verbose in _RULE_DEFINITIONS
+        )
+        self._rule_by_category: dict[str, Rule] = {
+            category: Rule(rule_id=rule_id, blocked=blocked, why=why, fix=fix, verbose=verbose)
+            for category, rule_id, blocked, why, fix, verbose in _RULE_DEFINITIONS
+        }
+        self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this handler applies to the tool call.
@@ -83,11 +187,17 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
         # Check if file is CLAUDE.md or README.md (case-insensitive, any directory)
         return bool(file_path.upper().endswith(("CLAUDE.MD", "README.MD")))
 
+    def get_rules(self) -> list[Rule]:
+        """Return the 8 Rule objects backing this handler's blocking behaviour."""
+        return list(self._rules)
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Validate content being written to instruction files.
 
-        Returns DENY if blocked patterns are found outside code blocks.
-        Returns ALLOW if content is clean or patterns are only in code blocks.
+        Returns DENY if blocked patterns are found outside code blocks, with a
+        verbose-first/terse-after explanation (Plan 00116, Decision G) keyed
+        per (transcript_path, rule_id). Returns ALLOW if content is clean or
+        patterns are only in code blocks.
         """
         tool_input = hook_input.get("tool_input", {})
         tool_name = hook_input.get("tool_name", "")
@@ -107,24 +217,21 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
         blocked_category = self._find_blocked_pattern(content)
         if blocked_category:
             file_path = tool_input.get("file_path", "unknown")
-            return GatingResult(
-                decision=Decision.DENY,
-                reason=f"🚫 BLOCKED: Detected {blocked_category} in {file_path}",
-                guidance=(
-                    f"Instruction files (CLAUDE.md, README.md) should contain permanent instructions, "
-                    f"not ephemeral content like {blocked_category}.\n\n"
-                    f"Blocked content categories:\n"
-                    f"- Implementation logs (created file, added class, etc.)\n"
-                    f"- Status indicators (✓ Complete, ✅ Done, etc.)\n"
-                    f"- Timestamps (2024-03-15)\n"
-                    f"- LLM summaries (## Summary, ## Key Points, etc.)\n"
-                    f"- Test output (42 tests passed)\n"
-                    f"- File listings (src/Service/ProductService.php)\n"
-                    f"- Change summaries (Added 15 lines)\n"
-                    f"- Completion indicators (ALL DONE!, Task complete!)\n\n"
-                    f"Content inside markdown code blocks (```) is allowed."
-                ),
-            )
+            rule = self._rule_by_category[blocked_category]
+
+            transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+            tracker = get_data_layer().disclosure
+
+            if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
+                message = self._formatter.terse(rule)
+            else:
+                if transcript_path:
+                    tracker.mark_disclosed(transcript_path, rule.rule_id)
+                message = self._formatter.verbose(rule)
+
+            message += f"\n\nFILE: {file_path}"
+
+            return GatingResult(decision=Decision.DENY, reason=message)
 
         return GatingResult(
             decision=Decision.ALLOW,
