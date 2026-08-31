@@ -332,23 +332,26 @@ fingerprint-attribution scheme and amended targets:
 
 ### Phase 5: Injector emits the TWO-TIER block (Decision I, TDD)
 
-- [ ] ⬜ **Task 5.1**: `_collect_sections`/`_build_section` render: shared
+- [x] ✅ **Task 5.1**: `_collect_sections`/`_build_section` render: shared
   meta-rule + explain pointer ONCE; full `get_claude_md()` prose for handlers in
   `claude_md.promotion.promoted_handlers` (PROMOTED tier); a single generated
   rule-ID table row per blocking rule of every OTHER handler (PROGRESSIVE tier).
   (RED: promoted handler's prose present verbatim; non-promoted handler reduced
   to table rows; meta-rule once; pointer present; GREEN.)
-- [ ] ⬜ **Task 5.2**: Advisory handlers — lighter section per Decision C.
+- [x] ✅ **Task 5.2**: Advisory handlers — resolved via the no-loss FALLBACK tier
+  (no-rules handlers keep full prose; the rule table stays undiluted, which is
+  Decision C's real requirement — tag-based lighter rendering rejected as
+  unreliable, see journal).
 - [ ] ⬜ **Task 5.3**: Re-measure (Phase 1 harness): injected block ≥70% smaller
   than the 2026-08-30 baseline (121,932 B / 28,630 tokens) with this repo's real
   promoted set; also record the pure-progressive floor (empty promoted list).
 
 ### Phase 6: On-demand detail — CLI + skill (TDD)
 
-- [ ] ⬜ **Task 6.1**: `explain-rule <ID>` / `explain-handler <name>` subcommands in
+- [x] ✅ **Task 6.1**: `explain-rule <ID>` / `explain-handler <name>` subcommands in
   `daemon/cli.py` printing `Rule.verbose` verbatim. (RED: output has every
   Phase 1.2 term for that rule; GREEN.)
-- [ ] ⬜ **Task 6.2**: Skill `/hooks-daemon rule-explain <ID>` under
+- [x] ✅ **Task 6.2**: Skill `/hooks-daemon rule-explain <ID>` under
   `src/claude_code_hooks_daemon/skills/hooks-daemon/` wrapping the CLI. Follow
   existing skill-script conventions (self-bootstrap/manifest if applicable —
   see RELEASING Step 14).
