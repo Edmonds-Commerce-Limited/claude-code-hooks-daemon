@@ -39,13 +39,41 @@ import re
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+
+_RULE = Rule(
+    rule_id=RuleID.QUARANTINE_ARTEFACT_READ,
+    blocked="reading a quarantined `*-opus-security-DETAIL*` artefact into the coordinator",
+    why="A DETAIL artefact holds raw flaggable substance meant for a human or another quarantine agent only",
+    fix="Read the paired `*-opus-security-SUMMARY*` artefact instead",
+    verbose=(
+        "A `*-opus-security-DETAIL*` artefact holds the raw flaggable substance a "
+        "quarantine subagent examined on your behalf. It exists for a human or "
+        "another quarantine agent to open on purpose — the coordinator must NEVER "
+        "read it.\n\n"
+        "What you CAN do instead:\n"
+        "- Read the paired `*-opus-security-SUMMARY*` artefact — that is the ONLY "
+        "file the coordinator should read, and it is provably clean of "
+        "attack-mechanics content.\n"
+        "- Confirm the subagent's work by commit hash and CI status (green/red), "
+        "never by reading the DETAIL file's content.\n\n"
+        "Creating or editing the artefact from the SUBAGENT's own context (e.g. via "
+        "the Write tool) is unaffected by this guard — only reading it back into the "
+        "coordinator is denied.\n\n"
+        "There is NO escape hatch. Only a human may lift this, by editing "
+        "`handlers.pre_tool_use.quarantine_artefact_read_guard` in "
+        "`.claude/hooks-daemon.yaml`. Ask the user; do not hunt for another way to "
+        "read the file."
+    ),
+)
 
 # ── Config modes (command_hints' clobber-or-extend convention) ──────────────
 _MODE_ADDITIVE: Final[str] = "additive"
@@ -219,38 +247,40 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return self._matched_pattern(hook_input) is not None
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [_RULE]
+
     # ── Handling ────────────────────────────────────────────────────────────
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
+        """Deny with a verbose-first/terse-after explanation.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The matched glob is
+        appended on every fire — it changes per invocation, so it is not
+        part of the static teaching content.
+        """
         pattern = self._matched_pattern(hook_input)
         if pattern is None:
             return GatingResult(decision=Decision.ALLOW)
-        return GatingResult(
-            decision=Decision.DENY,
-            reason=(
-                "QUARANTINE ARTEFACT READ-BOUNDARY: this tool call would "
-                f"put the contents of a quarantined artefact into context "
-                f"(matched glob: `{pattern}`).\n\n"
-                "A `*-opus-security-DETAIL*` artefact holds the raw "
-                "flaggable substance a quarantine subagent examined on your "
-                "behalf. It exists for a human or another quarantine agent "
-                "to open on purpose — the coordinator must NEVER read it.\n\n"
-                "What you CAN do instead:\n"
-                "- Read the paired `*-opus-security-SUMMARY*` artefact — "
-                "that is the ONLY file the coordinator should read, and it "
-                "is provably clean of attack-mechanics content.\n"
-                "- Confirm the subagent's work by commit hash and CI status "
-                "(green/red), never by reading the DETAIL file's content.\n\n"
-                "Creating or editing the artefact from the SUBAGENT's own "
-                "context (e.g. via the Write tool) is unaffected by this "
-                "guard — only reading it back into the coordinator is "
-                "denied.\n\n"
-                "There is NO escape hatch. Only a human may lift this, by "
-                "editing `handlers.pre_tool_use.quarantine_artefact_read_guard` "
-                "in `.claude/hooks-daemon.yaml`. Ask the user; do not hunt "
-                "for another way to read the file."
-            ),
-        )
+
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        formatter = RuleFormatter()
+
+        if transcript_path and tracker.was_disclosed(
+            transcript_path, RuleID.QUARANTINE_ARTEFACT_READ
+        ):
+            message = formatter.terse(_RULE)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.QUARANTINE_ARTEFACT_READ)
+            message = formatter.verbose(_RULE)
+
+        message += f"\n\nMatched glob: `{pattern}`"
+
+        return GatingResult(decision=Decision.DENY, reason=message)
 
     # ── Guidance surfaces ───────────────────────────────────────────────────
 

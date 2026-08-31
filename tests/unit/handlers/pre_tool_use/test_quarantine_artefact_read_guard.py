@@ -16,10 +16,21 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.quarantine_artefact_read_guard import (
     QuarantineArtefactReadGuardHandler,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 def _hook_input(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
@@ -364,3 +375,71 @@ class TestEdgeBranches:
             "tool_input": "not-a-dict",
         }
         assert handler.matches(payload) is False
+
+
+class TestQuarantineArtefactReadGuardGetRules:
+    """get_rules() declares the single Rule backing this handler (Plan 00116)."""
+
+    def test_returns_one_rule(self, handler: QuarantineArtefactReadGuardHandler) -> None:
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+
+    def test_rule_id_matches_constant(self, handler: QuarantineArtefactReadGuardHandler) -> None:
+        assert handler.get_rules()[0].rule_id == RuleID.QUARANTINE_ARTEFACT_READ
+
+    def test_rule_has_non_empty_verbose(self, handler: QuarantineArtefactReadGuardHandler) -> None:
+        assert handler.get_rules()[0].verbose
+
+
+class TestQuarantineArtefactReadGuardDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Decision G)."""
+
+    def _hook_input(self, path: str, transcript_path: str) -> dict[str, Any]:
+        payload = _hook_input("Read", {"file_path": path})
+        payload["transcript_path"] = transcript_path
+        return payload
+
+    def test_first_fire_for_agent_is_verbose(
+        self, handler: QuarantineArtefactReadGuardHandler
+    ) -> None:
+        hook_input = self._hook_input(
+            "/p/topic-opus-security-DETAIL.md", "/tmp/agent-a/transcript.jsonl"
+        )
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+        assert "NO escape hatch" in result.reason
+
+    def test_second_fire_for_same_agent_is_terse(
+        self, handler: QuarantineArtefactReadGuardHandler
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("/p/topic-opus-security-DETAIL.md", transcript_path))
+        result = handler.handle(
+            self._hook_input("/p/other-opus-security-DETAIL.md", transcript_path)
+        )
+
+        assert result.decision == Decision.DENY
+        assert "NO escape hatch" not in result.reason
+        assert "opus-security-DETAIL" in result.reason
+
+    def test_terse_message_leads_with_rule_id(
+        self, handler: QuarantineArtefactReadGuardHandler
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("/p/topic-opus-security-DETAIL.md", transcript_path))
+        result = handler.handle(
+            self._hook_input("/p/topic-opus-security-DETAIL.md", transcript_path)
+        )
+
+        assert result.reason.startswith(f"BLOCKED [{RuleID.QUARANTINE_ARTEFACT_READ}]")
+
+    def test_missing_transcript_path_is_always_verbose(
+        self, handler: QuarantineArtefactReadGuardHandler
+    ) -> None:
+        hook_input = _hook_input("Read", {"file_path": "/p/topic-opus-security-DETAIL.md"})
+        handler.handle(hook_input)
+        result = handler.handle(hook_input)
+
+        assert "SUMMARY" in result.reason

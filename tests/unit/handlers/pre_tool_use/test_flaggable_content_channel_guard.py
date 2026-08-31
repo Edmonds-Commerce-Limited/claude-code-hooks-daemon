@@ -15,10 +15,21 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.flaggable_content_channel_guard import (
     FlaggableContentChannelGuardHandler,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 def _bash(command: str) -> dict[str, Any]:
@@ -247,3 +258,75 @@ class TestEdgeBranches:
         # Built-in "git diff" shape is still active alongside the extra one.
         assert instance.matches(_bash("git diff firewall/edge/rules.yml")) is True
         assert instance.matches(_bash("git blame firewall/edge/rules.yml")) is True
+
+
+class TestFlaggableContentChannelGuardGetRules:
+    """get_rules() declares the single Rule backing this handler (Plan 00116)."""
+
+    def test_returns_one_rule(self, handler: FlaggableContentChannelGuardHandler) -> None:
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+
+    def test_rule_id_matches_constant(self, handler: FlaggableContentChannelGuardHandler) -> None:
+        assert handler.get_rules()[0].rule_id == RuleID.FLAGGABLE_CONTENT_CHANNEL
+
+    def test_rule_has_non_empty_verbose(self, handler: FlaggableContentChannelGuardHandler) -> None:
+        assert handler.get_rules()[0].verbose
+
+
+class TestFlaggableContentChannelGuardDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Decision G)."""
+
+    def _bash_with_transcript(self, command: str, transcript_path: str) -> dict[str, Any]:
+        hook_input = _bash(command)
+        hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    def test_first_fire_for_agent_is_verbose(
+        self, handler: FlaggableContentChannelGuardHandler
+    ) -> None:
+        hook_input = self._bash_with_transcript(
+            "git diff firewall/edge/rules.yml", "/tmp/agent-a/transcript.jsonl"
+        )
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+        assert "NO escape hatch" in result.reason
+
+    def test_second_fire_for_same_agent_is_terse(
+        self, handler: FlaggableContentChannelGuardHandler
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(
+            self._bash_with_transcript("git diff firewall/edge/rules.yml", transcript_path)
+        )
+        result = handler.handle(
+            self._bash_with_transcript("grep drop firewall/edge/rules.yml", transcript_path)
+        )
+
+        assert result.decision == Decision.DENY
+        assert "NO escape hatch" not in result.reason
+        assert "firewall/**" in result.reason
+
+    def test_terse_message_leads_with_rule_id(
+        self, handler: FlaggableContentChannelGuardHandler
+    ) -> None:
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(
+            self._bash_with_transcript("git diff firewall/edge/rules.yml", transcript_path)
+        )
+        result = handler.handle(
+            self._bash_with_transcript("git diff firewall/edge/rules.yml", transcript_path)
+        )
+
+        assert result.reason.startswith(f"BLOCKED [{RuleID.FLAGGABLE_CONTENT_CHANNEL}]")
+
+    def test_missing_transcript_path_is_always_verbose(
+        self, handler: FlaggableContentChannelGuardHandler
+    ) -> None:
+        hook_input = _bash("git diff firewall/edge/rules.yml")
+        handler.handle(hook_input)
+        result = handler.handle(hook_input)
+
+        assert "NO escape hatch" in result.reason

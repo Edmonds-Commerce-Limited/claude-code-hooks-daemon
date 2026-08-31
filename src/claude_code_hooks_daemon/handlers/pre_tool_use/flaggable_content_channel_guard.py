@@ -31,14 +31,37 @@ import re
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+
+_RULE = Rule(
+    rule_id=RuleID.FLAGGABLE_CONTENT_CHANNEL,
+    blocked="a content-revealing git/grep command shape over a flaggable path",
+    why="It would reveal flaggable content inside routine command output, with no deliberate Read at all",
+    fix="Delegate the WHOLE review to the quarantine subagent instead",
+    verbose=(
+        "Reading or producing attack-mechanics content in THIS context can "
+        "silently downgrade the session's model. Delegate the WHOLE review of "
+        "this file to the quarantine subagent instead:\n"
+        '  Agent(subagent_type: "hooks-daemon-opus-security", '
+        "prompt: <goal + files, not a narration>)\n\n"
+        "The quarantine subagent owns the entire git cycle for flaggable files "
+        "— it stages, commits and pushes them itself. Confirm CI by status "
+        "(green/red), never by diffing the content yourself.\n\n"
+        "There is NO escape hatch. Only a human may lift this, by editing "
+        "`handlers.pre_tool_use.flaggable_content_channel_guard` in "
+        "`.claude/hooks-daemon.yaml`. Ask the user; do not hunt for another way "
+        "to reveal the content."
+    ),
+)
 
 # ── Config modes (command_hints' clobber-or-extend convention) ──────────────
 _MODE_ADDITIVE: Final[str] = "additive"
@@ -195,36 +218,42 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
                         return (label, mention)
         return None
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [_RULE]
+
     # ── Handling ────────────────────────────────────────────────────────────
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
+        """Deny with a verbose-first/terse-after explanation.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The matched shape label
+        and glob are appended on every fire — they change per invocation, so
+        they are not part of the static teaching content.
+        """
         matched = self._matched_reason(hook_input)
         if matched is None:
             return GatingResult(decision=Decision.ALLOW)
 
         shape_label, glob = matched
-        return GatingResult(
-            decision=Decision.DENY,
-            reason=(
-                "FLAGGABLE CONTENT CHANNEL: this command's shape "
-                f"(`{shape_label}`) would reveal the content of a path matching "
-                f"the configured flaggable glob `{glob}` inside routine command "
-                "output, with no deliberate Read at all.\n\n"
-                "Reading or producing attack-mechanics content in THIS context "
-                "can silently downgrade the session's model. Delegate the WHOLE "
-                "review of this file to the quarantine subagent instead:\n"
-                '  Agent(subagent_type: "hooks-daemon-opus-security", '
-                "prompt: <goal + files, not a narration>)\n\n"
-                "The quarantine subagent owns the entire git cycle for "
-                "flaggable files — it stages, commits and pushes them itself. "
-                "Confirm CI by status (green/red), never by diffing the "
-                "content yourself.\n\n"
-                "There is NO escape hatch. Only a human may lift this, by "
-                "editing `handlers.pre_tool_use.flaggable_content_channel_guard` "
-                "in `.claude/hooks-daemon.yaml`. Ask the user; do not hunt for "
-                "another way to reveal the content."
-            ),
-        )
+
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        formatter = RuleFormatter()
+
+        if transcript_path and tracker.was_disclosed(
+            transcript_path, RuleID.FLAGGABLE_CONTENT_CHANNEL
+        ):
+            message = formatter.terse(_RULE)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.FLAGGABLE_CONTENT_CHANNEL)
+            message = formatter.verbose(_RULE)
+
+        message += f"\n\nMatched shape: `{shape_label}`, matched glob: `{glob}`"
+
+        return GatingResult(decision=Decision.DENY, reason=message)
 
     # ── Guidance surfaces ───────────────────────────────────────────────────
 
