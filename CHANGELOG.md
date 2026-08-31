@@ -5,6 +5,128 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.57.0] - 2026-08-31
+
+### Added
+
+- **Two-tier progressive-disclosure `CLAUDE.md` injection (Plan 00116).** The
+  injected handler-guidance block is now data-driven: a small set of
+  frequently-triggered handlers (~46, migrated via a `Rule`/`DisclosureTracker`
+  pair) get full promoted prose, every other enforced rule collapses into a
+  compact ID/trigger/why/fix table, and purely advisory handlers collapse
+  further into a one-line-each list — each pointing to
+  `bin/hooks-daemon explain-rule <ID>` / `explain-handler <name>` for full
+  detail on demand. Measured 63.6% shrink in the injected block versus the
+  prior always-verbose form. New `bin/hooks-daemon block-report`,
+  `explain-rule`, and `explain-handler` CLI commands, plus a
+  `/hooks-daemon rule-explain` skill and `claude_md.promotion` config for
+  tuning which handlers stay promoted. `DisclosureReset` PreCompact/
+  SessionStart handlers keep the tracker's per-session promotion state
+  correct across compaction and restarts.
+- **Documentation-SSoT enforcement system (Plan 00284) — opt-in via
+  `documentation.enabled`, ships false.** Three surfaces share one check
+  catalogue against `CLAUDE/DocumentationStrategy.md`'s one-canonical-home-
+  per-fact ruleset: a PreToolUse edit-time lint (`docs_qa_edit`), a
+  git-commit gate (`docs_qa_commit_gate`), and a SessionStart drift sweep
+  (`docs_qa_sweep`) — covering dead pointers, SSoT-quote drift, pointer-only
+  rules-file shape, hand-edited generated docs, at-import census, module-doc
+  budgets, and advisory duplicate-block detection. The `hooks-daemon docs-qa`
+  CLI (`--sweep`/`--lint`/`--check-staged`) always works regardless of the
+  switch. A companion opt-in `hooks-daemon-docs-qa` agent
+  (`agents.docs_qa.enabled`) and `docs-qa` skill hunt the semantic drift the
+  deterministic checks cannot see — conflicting truths, paraphrase
+  duplicates, stale derived facts — and report findings without editing.
+- **Project-layout config SSoT (Plan 00288).** New top-level `layout` config
+  block (`source_dirs`, `test_dirs`, `config_dirs`, `vendor_dirs`,
+  `mode: additive|replace`) composed by a new `ProjectLayout` runtime facade
+  with the existing `documentation.trees`/`plan_workflow.directory` config
+  homes into one handler-facing API, adopted by `markdown_organization`,
+  `goal_injection`, `recovery_cron_advisor`, `plan_workflow`,
+  `plan_number_helper`, `worktree_file_copy`, `same_commit_plan_doc`,
+  `path_existence`, `tdd_enforcement`, and `british_english` in place of each
+  handler's own hardcoded literal. Five previously-independent
+  vendored/build-directory name sets are unified onto one reviewed
+  `CORE_VENDORED_BUILD_DIR_NAMES` constant, and `validate_eslint_on_write`'s
+  unsafe bare-substring skip matcher is replaced with the same slash-bounded
+  containment matcher `strategies.lint.common` already used. On the first
+  restart after upgrading, 7 new `.claude/rules/` directory-role pointer
+  files are deployed (source/test/doc-tree/skills/agents/plan-directory),
+  each scoped to the project's own configured layout and left alone forever
+  once hand-edited.
+- **Opt-in Rust socket relay transport + safe toggle (Plans 00290, 00294) —
+  ships off (`daemon.transport.relay_enabled: false`).** A std-only static
+  Rust relay binary (`relay/hooks_relay.rs`, zero crates, `rustc`-only build)
+  execs directly against a per-event Unix socket as a faster alternative to
+  the permanent bash+python3 transport, falling back to it on any failure.
+  `daemon.transport` governs the fallback ladder (relay binary → `nc -U` →
+  bash+python3) and provisioning (`relay_source: build|download`, a
+  sha256-digest-verified GitHub release asset for `download`). New
+  `bin/hooks-daemon transport on|off|status` performs config flip →
+  forwarder regeneration → daemon restart → verification (real socket
+  payload shapes per event type) as one command, auto-reverting end-to-end
+  on any verification failure.
+- **Tool inventory/disable story (Plan 00293).** New top-level `tool_policy`
+  config block (`never_want`, `low_use_max_calls`) and `bin/hooks-daemon tool-report` CLI, which scans a project's session transcripts (tool names
+  and counts only, never content) and ranks tools into never-want/
+  never-used/low-use/keep tiers. `artifact_publish_blocker` gained an opt-in
+  `source_disable` option that keeps a project's `.claude/settings.json` at
+  `"enableArtifact": false` (additive, idempotent, one-shot-backed) to strip
+  the Artifact tool's schema from new sessions entirely, and a new opt-in
+  `tool_disable_advisor` SessionStart handler checks declared
+  `tool_policy.never_want` tools against project settings and names the
+  exact missing change.
+- **Standing-authorisation cadence tunables + supervisor-typed channel (Plan
+  00283).** `standing_authorisations` no longer injects its short-form
+  reminder on every prompt: it delivers the full text once per session, then
+  reinforces only on whichever comes first of `prompt_interval` (default 5
+  human prompts) or `interval_minutes` (default 15) since the last delivery,
+  ignoring automated turns (cron ticks, goal-injection lines) entirely. New
+  opt-in `supervisor_channel_enabled` (ships false) routes a due
+  reinforcement through the ccy PTY supervisor as a real user-role typed
+  line (via a `<session>.standing-auth-intent` signal, fail-closed against
+  forged signals) instead of folded hook-additional-context, when a
+  supervisor is armed and live for the project — failing open to the
+  existing channel on any failure or when disabled.
+- **`archived-status-coherence` plan-QA check (Plan 00286)** — block severity
+  at the commit stage, enabled by default with plan QA. Reads the *staged*
+  blob rather than the worktree, catching a `git mv` of a plan into an
+  archive directory whose terminal status header was fixed on disk but never
+  re-`git add`ed.
+- **`documentation.qa.scope_exclude_globs` (Plan 00289)** — new option,
+  default `[]`, excluding matched files from the documentation corpus
+  entirely (not merely capped at ADVISE severity like
+  `grandfather_allowlist`), for frozen historical records such as versioned
+  upgrade guides.
+
+### Changed
+
+- **CLAUDE.md advisory-tier handlers now collapse to one line each** (Plan
+  00116\) — see Added, above.
+- **`standing_authorisations`'s injection cadence changed from every prompt
+  to bounded reinforcement** (Plan 00283) — see Added, above; the old
+  every-prompt behaviour is intentionally gone.
+- **Vendored/build-directory exclusion sets unified across five consumers**
+  (Plan 00288) — see Added, above. No behaviour change for this repository;
+  a client project with a `.next/`, `third_party/`, `.build/`, `venv/` or
+  `coverage/` directory now has it consistently skipped everywhere it
+  previously was skipped only in some places.
+
+### Fixed
+
+- **Legacy bash+python3 transport failed with `ENXIO` on `/dev/stdin` under
+  real hook events (Plan 00290 follow-up, 810ab582).**
+- **Per-event socket listener registration used the wrong wire name,
+  silently breaking the status line (Plan 00290 follow-up, f19b772f).**
+- **Relay guard path leak and deep-client-path socket-dir event drop (Plan
+  00290 pre-release punch list findings F1-F4).**
+- **`skill-bootstrap` resolved a sibling source tree's venv instead of its
+  own (Plan 00285).**
+- **Quarantine guard produced a false positive on an unexpanded glob (Plan
+  00278 follow-up, 2644764a).**
+- **`validate_eslint_on_write`'s skip-path matcher used unsafe bare-substring
+  containment** (Plan 00288) — see Added, above; fixed as a precondition of
+  the vendored-directory-set unification.
+
 ## [3.56.0] - 2026-08-27
 
 ### Added

@@ -125,6 +125,24 @@ truth_changes:
       `docs/guides/HANDLER_REFERENCE.md#transport-daemontransport` and
       DESIGN-socket-relay.md §6.4.
   - was: >
+      The injected `<hooksdaemon>` block in a project's CLAUDE.md carried
+      every handler's FULL guidance prose up front, so "the CLAUDE.md block
+      documents every handler's complete behaviour" was a true statement a
+      project's own docs could safely assert, at a measured cost of roughly
+      28,000 tokens per session in this repository.
+    now: >
+      Plan 00116's two-tier progressive disclosure changes the block's shape
+      on the first daemon restart after upgrading, with no config change:
+      only handlers listed in `claude_md.promotion.promoted_handlers` (empty
+      by default) keep full up-front prose; every other enforced rule is one
+      row in a compact `| ID | Blocked | Why | Fix |` table and every
+      advisory handler is a one-line pointer. Full detail is on demand via
+      `bin/hooks-daemon explain-rule <ID>` / `explain-handler <name>`, and a
+      handler's first deny in a session is verbose, terse on repeats. Any
+      client doc asserting the block carries complete guidance up front is
+      now false — it carries complete COVERAGE (every rule still has a row)
+      but summarised depth.
+  - was: >
       A tool the project never wanted (Artifact being the poster child) could
       only be fought at CALL time: artifact_publish_blocker denied each
       publish attempt, but the tool's schema — measured at ~6,000 tokens for

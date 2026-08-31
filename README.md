@@ -1,13 +1,13 @@
 # Claude Code Hooks Daemon
 
-![Version](https://img.shields.io/badge/version-3.56.0-blue)
+![Version](https://img.shields.io/badge/version-3.57.0-blue)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-14000%2B%20passing-success)
+![Tests](https://img.shields.io/badge/tests-16000%2B%20passing-success)
 ![Coverage](https://img.shields.io/badge/coverage-95%25%20required-success)
 
-*~80,000 lines of source, ~180,000 lines of tests — the test tree is 2.2× the size of the thing it tests.*
+*~100,000 lines of source, ~209,000 lines of tests — the test tree is 2.1× the size of the thing it tests.*
 
 Maintained by [Edmonds Commerce](https://github.com/Edmonds-Commerce-Limited).
 
@@ -114,7 +114,7 @@ Restarting the daemon takes under a second. Your Claude Code session continues u
 
 **Test-Driven Development for hooks**
 
-Because handlers are Python classes with proper type annotations, you can write real unit tests. This project ships with 14,000+ tests and a 95% coverage requirement — the same standard applies to handlers you write for your own project. Catch regressions before restarting, not after.
+Because handlers are Python classes with proper type annotations, you can write real unit tests. This project ships with 16,000+ tests and a 95% coverage requirement — the same standard applies to handlers you write for your own project. Catch regressions before restarting, not after.
 
 **Run many handlers without overhead**
 

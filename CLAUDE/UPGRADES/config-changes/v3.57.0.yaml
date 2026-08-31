@@ -1,5 +1,5 @@
 version: "3.57.0"
-date: "UNRELEASED"
+date: "2026-08-31"
 breaking: false
 config_changes:
   added:
@@ -227,3 +227,38 @@ config_changes:
       migration_note: >-
         Enable only after declaring `tool_policy.never_want` entries — with
         none declared the handler never fires.
+    - key: claude_md.promotion
+      recommended: false
+      dormant: false
+      description: >-
+        NEW top-level config block (Plan 00116) tuning the two-tier
+        progressive-disclosure CLAUDE.md injection: `promoted_handlers` (list
+        of handler config keys that keep full up-front prose; everything else
+        collapses to a rule-table row or an advisory one-liner),
+        `min_blocks` and `min_sessions` (thresholds `bin/hooks-daemon
+        block-report` uses when recommending promotions from a project's own
+        transcript block counts). The committed `promoted_handlers` list is
+        the contract; block-report only recommends.
+      migration_note: >-
+        No action needed — an empty/default block gives pure progressive
+        disclosure, which is the biggest token saving. Run `bin/hooks-daemon
+        block-report` after some sessions and paste its recommended
+        promotions if you want frequently-triggered handlers verbose again.
+    - key: handlers.session_start.disclosure_reset_session_start
+      recommended: false
+      dormant: false
+      description: >-
+        NEW handler (Plan 00116), ships enabled. Resets the in-memory
+        per-agent rule-disclosure tracker at SessionStart so the
+        first-fire-verbose/terse-after ladder starts fresh each session
+        instead of inheriting state across daemon-visible session boundaries.
+      migration_note: No action needed.
+    - key: handlers.pre_compact.disclosure_reset_pre_compact
+      recommended: false
+      dormant: false
+      description: >-
+        NEW handler (Plan 00116), ships enabled. Resets the same disclosure
+        tracker on PreCompact, because a compaction discards the agent's
+        memory of previously-shown verbose guidance — the next fire after a
+        compaction is verbose again by design.
+      migration_note: No action needed.
