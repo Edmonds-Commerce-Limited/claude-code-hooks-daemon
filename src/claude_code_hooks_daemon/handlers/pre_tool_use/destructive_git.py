@@ -3,9 +3,11 @@
 import re
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
@@ -105,6 +107,102 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
     ),
 )
 
+# Parallel, index-aligned RuleID for each entry in _DESTRUCTIVE_PATTERN_REASONS
+# (Plan 00116, Decision B: per-rule granularity). The bare `git checkout .` and
+# `git checkout -- file` patterns (indices 2 and 3) share one rule -- both are
+# "discards local changes"; every other pattern maps 1:1 to its own rule.
+_PATTERN_RULE_IDS: tuple[str, ...] = (
+    RuleID.GIT_RESET_HARD,
+    RuleID.GIT_CLEAN_FORCE,
+    RuleID.GIT_CHECKOUT_DISCARD,
+    RuleID.GIT_CHECKOUT_DISCARD,
+    RuleID.GIT_RESTORE,
+    RuleID.GIT_STASH_DROP,
+    RuleID.GIT_STASH_CLEAR,
+    RuleID.GIT_PUSH_FORCE,
+    RuleID.GIT_BRANCH_FORCE_DELETE,
+    RuleID.GIT_COMMIT_AMEND,
+)
+
+# Shared teaching content appended after the rule-specific "why" in every
+# verbose block (Plan 00116, Task 3.2: preserves the boilerplate previously
+# emitted by the old count-driven `_verbose_reason` ladder).
+_SAFE_ALTERNATIVES_BLOCK = (
+    "This command PERMANENTLY DESTROYS data with NO recovery possible.\n\n"
+    "If this operation is truly necessary, you must ask the human user to run it manually.\n\n"
+    "SAFE alternatives:\n"
+    "  - git stash        (save changes, can recover later)\n"
+    "  - git diff         (review changes first)\n"
+    "  - git status       (see what would be affected)\n"
+    "  - git commit       (save changes permanently first)\n\n"
+    "The LLM is NOT ALLOWED to run destructive git commands. Ask the user to do it."
+)
+
+
+def _verbose_content(why: str) -> str:
+    """Build the full first-fire teaching content for a rule from its "why"."""
+    return f"{why}.\n\n{_SAFE_ALTERNATIVES_BLOCK}"
+
+
+# SINGLE SOURCE OF TRUTH for get_rules(): (rule_id, blocked, why, fix). One
+# entry per unique RuleID in _PATTERN_RULE_IDS (9 rules, Decision B).
+_RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
+    (
+        RuleID.GIT_RESET_HARD,
+        "`git reset --hard`",
+        "Permanently destroys all uncommitted changes",
+        "Ask the user to run it manually",
+    ),
+    (
+        RuleID.GIT_CLEAN_FORCE,
+        "`git clean -f`",
+        "Permanently deletes untracked files",
+        "Ask the user to run it manually",
+    ),
+    (
+        RuleID.GIT_CHECKOUT_DISCARD,
+        "`git checkout -- <file>` / `git checkout .`",
+        "Discards local changes to file(s) permanently",
+        "Ask the user to run it manually",
+    ),
+    (
+        RuleID.GIT_RESTORE,
+        "`git restore <file>`",
+        "Discards local changes to files permanently (`--staged`/`-S` is allowed)",
+        "Ask the user to run it manually",
+    ),
+    (
+        RuleID.GIT_STASH_DROP,
+        "`git stash drop`",
+        "Permanently destroys a stashed change",
+        "Ask the user to run it manually",
+    ),
+    (
+        RuleID.GIT_STASH_CLEAR,
+        "`git stash clear`",
+        "Permanently destroys all stashed changes",
+        "Ask the user to run it manually",
+    ),
+    (
+        RuleID.GIT_PUSH_FORCE,
+        "`git push --force`",
+        "Can overwrite remote history and destroy team members' work",
+        "Ask the user to run it manually, or coordinate and use `--force-with-lease`",
+    ),
+    (
+        RuleID.GIT_BRANCH_FORCE_DELETE,
+        "`git branch -D`",
+        "Force-deletes a branch without checking if it has been merged",
+        "Use `git branch -d` first (refuses unmerged branches); ask the user for -D",
+    ),
+    (
+        RuleID.GIT_COMMIT_AMEND,
+        "`git commit --amend`",
+        "Rewrites the previous commit, creating messy history and potential data loss",
+        "Create a new commit instead",
+    ),
+)
+
 
 class DestructiveGitHandler(PreToolUseHandlerBase):
     """Block destructive git commands that permanently destroy data."""
@@ -120,6 +218,27 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             (re.compile(pattern, re.IGNORECASE), reason)
             for pattern, reason in _DESTRUCTIVE_PATTERN_REASONS
         )
+        # Index-aligned rule_id per pattern (Decision B), compiled once alongside it.
+        self._pattern_rule_ids: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+            (pattern, rule_id)
+            for (pattern, _reason), rule_id in zip(
+                self._pattern_reasons, _PATTERN_RULE_IDS, strict=True
+            )
+        )
+        # One Rule per unique rule_id (Decision B: 9 rules), built once from the
+        # single source-of-truth _RULE_DEFINITIONS mapping.
+        self._rules: tuple[Rule, ...] = tuple(
+            Rule(
+                rule_id=rule_id,
+                blocked=blocked,
+                why=why,
+                fix=fix,
+                verbose=_verbose_content(why),
+            )
+            for rule_id, blocked, why, fix in _RULE_DEFINITIONS
+        )
+        self._rules_by_id: dict[str, Rule] = {rule.rule_id: rule for rule in self._rules}
+        self._formatter = RuleFormatter()
 
     @property
     def destructive_patterns(self) -> tuple[re.Pattern[str], ...]:
@@ -133,6 +252,17 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                 return reason
         return None
 
+    def _match_rule_id(self, command: str) -> str | None:
+        """Return the RuleID for the first matching destructive pattern, or None.
+
+        Mirrors ``_match_reason`` exactly (same ordered pattern list), so the
+        two can never disagree about which pattern matched first.
+        """
+        for pattern, rule_id in self._pattern_rule_ids:
+            if pattern.search(command):
+                return rule_id
+        return None
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a destructive git command."""
         command = get_bash_command(hook_input)
@@ -141,74 +271,52 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
 
         return self._match_reason(command) is not None
 
-    def _get_block_count(self) -> int:
-        """Get number of previous blocks by this handler.
-
-        Falls back to 0 only when the data layer / history is not available
-        (AttributeError). Any other error propagates (FAIL FAST) rather than being
-        silently swallowed.
-        """
-        try:
-            return get_data_layer().history.count_blocks_by_handler(self.name)
-        except AttributeError:
-            return 0
-
-    def _terse_reason(self, reason: str, command: str) -> str:
-        """Generate terse reason message (first block)."""
-        return f"BLOCKED: {reason}. Ask the user to run manually."
-
-    def _standard_reason(self, reason: str, command: str) -> str:
-        """Generate standard reason message (blocks 2-3)."""
-        return (
-            f"BLOCKED: {reason}\n\n"
-            f"Command: {command}\n\n"
-            "SAFE alternatives:\n"
-            "  - git stash        (save changes, can recover later)\n"
-            "  - git diff         (review changes first)\n"
-            "  - git status       (see what would be affected)\n"
-            "  - git commit       (save changes permanently first)\n\n"
-            "Ask the user to run this manually if needed."
-        )
-
-    def _verbose_reason(self, reason: str, command: str) -> str:
-        """Generate verbose reason message (blocks 4+)."""
-        return (
-            f"BLOCKED: Destructive git command detected\n\n"
-            f"Reason: {reason}\n\n"
-            f"Command: {command}\n\n"
-            "This command PERMANENTLY DESTROYS uncommitted changes with NO recovery possible.\n\n"
-            "If this operation is truly necessary, you must ask the human user to run it manually.\n\n"
-            "SAFE alternatives:\n"
-            "  - git stash        (save changes, can recover later)\n"
-            "  - git diff         (review changes first)\n"
-            "  - git status       (see what would be affected)\n"
-            "  - git commit       (save changes permanently first)\n\n"
-            "The LLM is NOT ALLOWED to run destructive git commands. Ask the user to do it."
-        )
+    def get_rules(self) -> list[Rule]:
+        """Return the 9 Rule objects backing this handler's blocking behaviour."""
+        return list(self._rules)
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block the destructive command with explanation."""
+        """Block the destructive command with a verbose-first/terse-after explanation.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G): the first fire of a rule
+        for a given agent is verbose (full teaching content); subsequent
+        fires of the SAME rule for the SAME agent are terse. An event with no
+        transcript_path fails toward verbose every time (unknown disclosure
+        state -> more info, per the plan's risk table) since there is no key
+        to track against.
+        """
         command = get_bash_command(hook_input)
         if not command:
             return GatingResult(decision=Decision.ALLOW)
 
-        # Determine which pattern matched and provide its reason. Both matches() and
-        # handle() consume the same ordered mapping, so they can never drift.
-        specific_reason = self._match_reason(command) or _GENERIC_DESTRUCTIVE_REASON
+        # Both matches() and handle() consume the same ordered mapping, so they
+        # can never drift on which pattern matched first.
+        rule_id = self._match_rule_id(command)
+        if rule_id is None:
+            # Defensive only: handle() is normally invoked exclusively after
+            # matches() returned True, so this path is unreachable via the
+            # daemon's dispatch. Kept for callers that invoke handle() directly
+            # with a command none of the 10 patterns matches.
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=f"BLOCKED: {_GENERIC_DESTRUCTIVE_REASON}",
+            )
+        rule = self._rules_by_id[rule_id]
 
-        # Get block count and determine verbosity level
-        block_count = self._get_block_count()
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
 
-        if block_count == 0:
-            reason = self._terse_reason(specific_reason, command)
-        elif block_count <= 2:
-            reason = self._standard_reason(specific_reason, command)
+        if transcript_path and tracker.was_disclosed(transcript_path, rule_id):
+            message = self._formatter.terse(rule)
         else:
-            reason = self._verbose_reason(specific_reason, command)
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, rule_id)
+            message = self._formatter.verbose(rule)
 
         return GatingResult(
             decision=Decision.DENY,
-            reason=reason,
+            reason=message,
         )
 
     def get_claude_md(self) -> str | None:

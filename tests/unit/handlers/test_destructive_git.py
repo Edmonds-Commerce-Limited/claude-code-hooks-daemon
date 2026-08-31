@@ -4,7 +4,26 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.disclosure_tracker import DisclosureTracker
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import DestructiveGitHandler
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module.
+
+    get_data_layer() is a process-wide singleton (Plan 00116, Decision G: the
+    DisclosureTracker it carries persists in-memory for the daemon's lifetime).
+    Without this, one test's ``mark_disclosed`` for a rule_id + transcript_path
+    combination leaks into a later test that reuses the same pair, turning a
+    genuine "first fire" into a stale "already disclosed" terse reminder.
+    """
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 class TestDestructiveGitHandler:
@@ -385,240 +404,106 @@ class TestDestructiveGitHandler:
         # This is acceptable behavior - better safe than sorry
         assert handler.matches(hook_input) is True
 
-    # handle() Tests - Specific reasons for each pattern
-    def test_handle_git_reset_hard_reason(self, handler):
-        """handle() should provide specific reason for git reset --hard."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    # handle() Tests - Every deny leads with its rule ID (Plan 00116, Task 3.2)
+    # A fresh transcript_path is used per test so each fire is a genuine first
+    # fire (verbose) unless the test explicitly wants to exercise the terse
+    # (already-disclosed) branch.
+    def _hook_input(self, command: str, transcript_path: str = "/tmp/agent/transcript.jsonl"):
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "transcript_path": transcript_path,
+        }
+
+    def test_handle_git_reset_hard_leads_with_rule_id(self, handler):
+        """handle() deny message leads with R-GIT-RESET-HARD."""
+        result = handler.handle(self._hook_input("git reset --hard"))
         assert result.decision == "deny"
-        assert "git reset --hard destroys all uncommitted changes permanently" in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_RESET_HARD}]")
 
-    def test_handle_git_clean_f_reason(self, handler):
-        """handle() should provide specific reason for git clean -f."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git clean -f"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_handle_git_clean_f_leads_with_rule_id(self, handler):
+        """handle() deny message leads with R-GIT-CLEAN-FORCE."""
+        result = handler.handle(self._hook_input("git clean -f"))
         assert result.decision == "deny"
-        assert "git clean -f permanently deletes untracked files" in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_CLEAN_FORCE}]")
 
-    def test_handle_git_stash_drop_reason(self, handler):
-        """handle() should provide specific reason for git stash drop."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash drop"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_handle_git_stash_drop_leads_with_rule_id(self, handler):
+        """handle() deny message leads with R-GIT-STASH-DROP."""
+        result = handler.handle(self._hook_input("git stash drop"))
         assert result.decision == "deny"
-        assert "git stash drop permanently destroys stashed changes" in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_STASH_DROP}]")
 
-    def test_handle_git_stash_clear_reason(self, handler):
-        """handle() should provide specific reason for git stash clear."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash clear"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_handle_git_stash_clear_leads_with_rule_id(self, handler):
+        """handle() deny message leads with R-GIT-STASH-CLEAR."""
+        result = handler.handle(self._hook_input("git stash clear"))
         assert result.decision == "deny"
-        assert "git stash clear permanently destroys all stashed changes" in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_STASH_CLEAR}]")
 
-    def test_handle_git_checkout_dash_dash_reason(self, handler):
-        """handle() should provide specific reason for git checkout -- file."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git checkout -- file.txt"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_handle_git_checkout_dash_dash_leads_with_rule_id(self, handler):
+        """handle() deny message leads with R-GIT-CHECKOUT-DISCARD."""
+        result = handler.handle(self._hook_input("git checkout -- file.txt"))
         assert result.decision == "deny"
-        assert (
-            "git checkout [REF] -- file discards all local changes to that file permanently"
-            in result.reason
-        )
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_CHECKOUT_DISCARD}]")
 
-    def test_handle_git_restore_reason(self, handler):
-        """handle() should provide specific reason for git restore."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git restore file.txt"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_handle_git_restore_leads_with_rule_id(self, handler):
+        """handle() deny message leads with R-GIT-RESTORE."""
+        result = handler.handle(self._hook_input("git restore file.txt"))
         assert result.decision == "deny"
-        assert "git restore discards all local changes to files permanently" in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_RESTORE}]")
 
-    def test_handle_git_branch_force_delete_reason(self, handler):
-        """handle() should provide specific reason for git branch -D."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git branch -D feature"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_handle_git_branch_force_delete_leads_with_rule_id(self, handler):
+        """handle() deny message leads with R-GIT-BRANCH-FORCE-DELETE."""
+        result = handler.handle(self._hook_input("git branch -D feature"))
         assert result.decision == "deny"
-        assert "git branch -D force-deletes a branch" in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_BRANCH_FORCE_DELETE}]")
 
-    def test_handle_git_commit_amend_reason(self, handler):
-        """handle() should provide specific reason for git commit --amend."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git commit --amend"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_handle_git_commit_amend_leads_with_rule_id(self, handler):
+        """handle() deny message leads with R-GIT-COMMIT-AMEND."""
+        result = handler.handle(self._hook_input("git commit --amend"))
         assert result.decision == "deny"
-        assert "amend" in result.reason.lower()
-        assert "previous commit" in result.reason.lower()
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_COMMIT_AMEND}]")
 
-    def test_handle_generic_destructive_reason(self, handler):
-        """handle() should provide generic reason for other patterns."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git checkout ."}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_handle_generic_checkout_dot_also_uses_checkout_discard_rule(self, handler):
+        """Bare 'git checkout .' shares R-GIT-CHECKOUT-DISCARD with the -- form."""
+        result = handler.handle(self._hook_input("git checkout ."))
         assert result.decision == "deny"
-        assert "This git command destroys uncommitted changes permanently" in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_CHECKOUT_DISCARD}]")
 
-    # handle() Tests - Message structure
-    def test_handle_reason_contains_blocked_indicator(self, handler):
-        """handle() reason should indicate operation is blocked."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        assert "BLOCKED" in result.reason
-
-    def test_handle_reason_contains_command(self, handler):
-        """handle() reason should include the blocked command."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD~3"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        assert "git reset --hard HEAD~3" in result.reason
-
-    def test_handle_reason_provides_safe_alternatives(self, handler):
-        """handle() reason should provide safe alternatives."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git clean -fd"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    # handle() Tests - Message structure (first fire = verbose)
+    def test_handle_first_fire_reason_provides_safe_alternatives(self, handler):
+        """First fire (verbose) should provide safe alternatives."""
+        result = handler.handle(self._hook_input("git clean -fd"))
         assert "SAFE alternatives" in result.reason
         assert "git stash" in result.reason
         assert "git diff" in result.reason
         assert "git status" in result.reason
         assert "git commit" in result.reason
 
-    def test_handle_reason_warns_no_recovery(self, handler):
-        """handle() reason should warn about no recovery."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 3
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_handle_first_fire_warns_no_recovery(self, handler):
+        """First fire (verbose) should warn about no recovery."""
+        result = handler.handle(self._hook_input("git reset --hard"))
+        assert "PERMANENTLY DESTROYS" in result.reason
         assert "NO recovery possible" in result.reason
 
-    def test_handle_reason_instructs_ask_human(self, handler):
-        """handle() reason should instruct to ask human."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git clean -f"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        assert "Ask the user to run manually" in result.reason
-
-    def test_handle_reason_explains_llm_not_allowed(self, handler):
-        """handle() reason should explain LLM is not allowed."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 3
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash drop"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_handle_first_fire_explains_llm_not_allowed(self, handler):
+        """First fire (verbose) should explain LLM is not allowed."""
+        result = handler.handle(self._hook_input("git stash drop"))
         assert "LLM is NOT ALLOWED" in result.reason
 
     # handle() Tests - Return values
     def test_handle_returns_deny_decision(self, handler):
         """handle() should always return deny decision."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        result = handler.handle(self._hook_input("git reset --hard"))
         assert result.decision == "deny"
 
     def test_handle_context_is_none(self, handler):
         """handle() context should be None (not used)."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        result = handler.handle(self._hook_input("git reset --hard"))
         assert result.context == []
 
     def test_handle_guidance_is_none(self, handler):
         """handle() guidance should be None (not used)."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git clean -f"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        result = handler.handle(self._hook_input("git clean -f"))
         assert result.guidance is None
 
     def test_handle_empty_command_returns_allow(self, handler):
@@ -676,124 +561,143 @@ class TestDestructiveGitHandler:
             assert handler.matches(hook_input) is False, f"Should allow: {cmd}"
 
 
-class TestDestructiveGitProgressiveVerbosity:
-    """Test progressive verbosity based on block count."""
+class TestDestructiveGitGetRules:
+    """get_rules() declares the 9 Rule objects (Decision A/B/D, Task 3.2)."""
 
     @pytest.fixture
     def handler(self):
         """Create handler instance."""
         return DestructiveGitHandler()
 
-    def test_terse_reason_on_first_block(self, handler):
-        """First block should produce terse message."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_returns_nine_rules(self, handler):
+        """get_rules() returns exactly 9 Rule objects (Decision B)."""
+        rules = handler.get_rules()
+        assert len(rules) == 9
+        assert all(isinstance(rule, Rule) for rule in rules)
 
-        assert result.decision == "deny"
-        assert len(result.reason) < 200
-        assert "BLOCKED" in result.reason
-        assert "Ask the user" in result.reason
-        assert "PERMANENTLY DESTROYS" not in result.reason
-        assert "Command:" not in result.reason
+    def test_rule_ids_match_constants(self, handler):
+        """Every declared rule_id is one of the 9 destructive_git RuleID constants."""
+        expected = {
+            RuleID.GIT_RESET_HARD,
+            RuleID.GIT_CLEAN_FORCE,
+            RuleID.GIT_CHECKOUT_DISCARD,
+            RuleID.GIT_RESTORE,
+            RuleID.GIT_STASH_DROP,
+            RuleID.GIT_STASH_CLEAR,
+            RuleID.GIT_PUSH_FORCE,
+            RuleID.GIT_BRANCH_FORCE_DELETE,
+            RuleID.GIT_COMMIT_AMEND,
+        }
+        actual = {rule.rule_id for rule in handler.get_rules()}
+        assert actual == expected
 
-    def test_standard_reason_on_second_block(self, handler):
-        """Second block should produce standard message."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_no_duplicate_rule_ids(self, handler):
+        """No two declared rules share a rule_id."""
+        rule_ids = [rule.rule_id for rule in handler.get_rules()]
+        assert len(rule_ids) == len(set(rule_ids))
 
-        assert result.decision == "deny"
-        assert "Command:" in result.reason
-        assert "SAFE alternatives" in result.reason
-        assert "PERMANENTLY DESTROYS" not in result.reason
-        assert "LLM is NOT ALLOWED" not in result.reason
+    def test_every_rule_has_non_empty_verbose(self, handler):
+        """Every rule's verbose teaching content is non-empty (contract on Rule.verbose)."""
+        for rule in handler.get_rules():
+            assert rule.verbose, f"{rule.rule_id} has empty verbose content"
 
-    def test_standard_reason_on_third_block(self, handler):
-        """Third block should still produce standard message."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 2
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git clean -f"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_every_rule_blocked_literal_is_backticked(self, handler):
+        """Every rule's blocked literal names the offending git invocation."""
+        for rule in handler.get_rules():
+            assert "git" in rule.blocked.lower(), f"{rule.rule_id}.blocked missing 'git'"
 
-        assert result.decision == "deny"
-        assert "Command:" in result.reason
-        assert "SAFE alternatives" in result.reason
-        assert "PERMANENTLY DESTROYS" not in result.reason
-        assert "LLM is NOT ALLOWED" not in result.reason
 
-    def test_verbose_reason_on_fourth_block(self, handler):
-        """Fourth block should produce verbose message."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 3
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash drop"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+class TestDestructiveGitDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Task 3.2, Decision G).
 
-        assert result.decision == "deny"
-        assert "PERMANENTLY DESTROYS" in result.reason
-        assert "LLM is NOT ALLOWED" in result.reason
-        assert "Command:" in result.reason
-        assert "SAFE alternatives" in result.reason
+    Replaces the old block-count-driven ladder: verbosity is now keyed by
+    (transcript_path, rule_id) via DisclosureTracker, not by a running total
+    of previous blocks from HandlerHistory.
+    """
 
-    def test_verbose_reason_on_many_blocks(self, handler):
-        """Many blocks should still produce verbose message."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 10
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git checkout -- file.txt"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    @pytest.fixture
+    def handler(self):
+        """Create handler instance."""
+        return DestructiveGitHandler()
+
+    def _hook_input(self, command: str, transcript_path):
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "transcript_path": transcript_path,
+        }
+
+    def test_first_fire_for_agent_is_verbose(self, handler):
+        """The first time a rule fires for a given agent, the block is verbose."""
+        hook_input = self._hook_input("git reset --hard", "/tmp/agent-a/transcript.jsonl")
+        result = handler.handle(hook_input)
 
         assert result.decision == "deny"
         assert "PERMANENTLY DESTROYS" in result.reason
+        assert "SAFE alternatives" in result.reason
         assert "LLM is NOT ALLOWED" in result.reason
 
-    def test_data_layer_unavailable_falls_back_to_terse(self, handler):
-        """If data layer/history is unavailable (AttributeError), fall back to terse."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.side_effect = AttributeError("no history")
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git restore file.txt"}}
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_second_fire_for_same_agent_same_rule_is_terse(self, handler):
+        """A repeat fire of the SAME rule for the SAME agent is terse."""
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("git reset --hard", transcript_path))
+        result = handler.handle(self._hook_input("git reset --hard HEAD~1", transcript_path))
 
         assert result.decision == "deny"
-        # Should fall back to count=0 (terse)
-        assert len(result.reason) < 200
-        assert "BLOCKED" in result.reason
+        assert "PERMANENTLY DESTROYS" not in result.reason
+        assert "SAFE alternatives" not in result.reason
+        assert "LLM is NOT ALLOWED" not in result.reason
 
-    def test_block_count_does_not_swallow_unexpected_errors(self, handler):
-        """Unexpected errors from the data layer must propagate (FAIL FAST)."""
+    def test_terse_message_still_leads_with_rule_id_and_names_fix(self, handler):
+        """The terse reminder still leads with the rule ID and names the fix."""
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("git clean -f", transcript_path))
+        result = handler.handle(self._hook_input("git clean -fd", transcript_path))
+
+        assert result.reason.startswith(f"BLOCKED [{RuleID.GIT_CLEAN_FORCE}]")
+        assert "Fix:" in result.reason
+
+    def test_different_rule_same_agent_is_independently_verbose(self, handler):
+        """A DIFFERENT rule for the same agent gets its own first-fire verbose block."""
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("git reset --hard", transcript_path))
+        result = handler.handle(self._hook_input("git stash drop", transcript_path))
+
+        assert "PERMANENTLY DESTROYS" in result.reason
+
+    def test_same_rule_different_agent_is_independently_verbose(self, handler):
+        """A sub-agent (different transcript_path) never inherits another agent's disclosure."""
+        handler.handle(self._hook_input("git reset --hard", "/tmp/agent-a/transcript.jsonl"))
+        result = handler.handle(
+            self._hook_input("git reset --hard", "/tmp/agent-b/transcript.jsonl")
+        )
+
+        assert "PERMANENTLY DESTROYS" in result.reason
+
+    def test_missing_transcript_path_fails_toward_verbose_every_time(self, handler):
+        """No transcript_path in the payload -> always verbose (unknown state -> more info)."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
+
+        first = handler.handle(hook_input)
+        second = handler.handle(hook_input)
+
+        assert "PERMANENTLY DESTROYS" in first.reason
+        assert "PERMANENTLY DESTROYS" in second.reason
+
+    def test_uses_the_shared_daemon_disclosure_tracker(self, handler):
+        """handle() consults get_data_layer().disclosure, not a handler-local tracker."""
+        mock_tracker = DisclosureTracker()
         mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.side_effect = RuntimeError("unexpected")
+        mock_dl.disclosure = mock_tracker
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+
         with patch(
             "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
             return_value=mock_dl,
         ):
-            with pytest.raises(RuntimeError):
-                handler._get_block_count()
+            handler.handle(self._hook_input("git reset --hard", transcript_path))
+
+        assert mock_tracker.was_disclosed(transcript_path, RuleID.GIT_RESET_HARD) is True
 
 
 class TestDestructiveGitRestoreStagedShortFlag:
