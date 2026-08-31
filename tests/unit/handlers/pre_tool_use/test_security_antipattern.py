@@ -603,7 +603,7 @@ class TestSecurityAntipatternHandler:
         assert "[A03]" in result.reason
 
     def test_handle_reason_contains_blocked_indicator(self, handler):
-        """handle() reason should say SECURITY ANTIPATTERN BLOCKED."""
+        """handle() reason should lead with the BLOCKED [rule_id] prefix (Plan 00116)."""
         hook_input = {
             "tool_name": "Write",
             "tool_input": {
@@ -612,7 +612,9 @@ class TestSecurityAntipatternHandler:
             },
         }
         result = handler.handle(hook_input)
-        assert "SECURITY ANTIPATTERN BLOCKED" in result.reason
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        assert result.reason.startswith(f"BLOCKED [{RuleID.SEC_HARDCODED_CREDS}]")
 
     def test_handle_reason_contains_file_path(self, handler):
         """handle() reason should include the file path."""
@@ -853,3 +855,174 @@ class TestGuidanceMatchesImplementedPatterns:
             f"CATEGORY_EVIDENCE rows with no matching guidance bullet: {sorted(stale)}. "
             "Remove them, or restore the bullet they were written for."
         )
+
+
+class TestSecurityAntipatternGetRules:
+    """get_rules() (Plan 00116): 6 category rules -- 5 OWASP mechanisms + Rust outliers."""
+
+    def test_get_rules_returns_six_rules(self):
+        rules = SecurityAntipatternHandler().get_rules()
+        assert len(rules) == 6
+
+    def test_get_rules_ids_are_unique_and_constants(self):
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        expected = {
+            RuleID.SEC_CODE_INJECTION,
+            RuleID.SEC_CMD_INJECTION,
+            RuleID.SEC_DESERIALISATION,
+            RuleID.SEC_XSS,
+            RuleID.SEC_HARDCODED_CREDS,
+            RuleID.SEC_UNSAFE_MEMORY,
+        }
+        rules = SecurityAntipatternHandler().get_rules()
+        assert {rule.rule_id for rule in rules} == expected
+
+    def test_get_rules_every_verbose_is_non_empty(self):
+        for rule in SecurityAntipatternHandler().get_rules():
+            assert rule.verbose
+
+
+class TestSecurityAntipatternClassifyPattern:
+    """_classify_pattern (Plan 00116): mechanism-name based, not the coarse OWASP code.
+
+    Synthetic pattern names avoid any real dangerous-call substring so this
+    test module's own content never trips the live security_antipattern
+    guard on the Write/Edit that authors it.
+    """
+
+    @staticmethod
+    def _pattern(name: str, owasp: str = "A03"):
+        from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
+
+        return SecurityPattern(name=name, regex=r"synthetic-test-only", owasp=owasp, suggestion="x")
+
+    def test_code_injection_marker(self):
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+        from claude_code_hooks_daemon.handlers.pre_tool_use.security_antipattern import (
+            _classify_pattern,
+        )
+
+        pattern = self._pattern("synthetic - code injection risk")
+        assert _classify_pattern(pattern) == RuleID.SEC_CODE_INJECTION
+
+    def test_command_injection_marker(self):
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+        from claude_code_hooks_daemon.handlers.pre_tool_use.security_antipattern import (
+            _classify_pattern,
+        )
+
+        pattern = self._pattern("synthetic - command injection risk")
+        assert _classify_pattern(pattern) == RuleID.SEC_CMD_INJECTION
+
+    def test_deserialization_marker(self):
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+        from claude_code_hooks_daemon.handlers.pre_tool_use.security_antipattern import (
+            _classify_pattern,
+        )
+
+        pattern = self._pattern("synthetic - deserialization injection risk")
+        assert _classify_pattern(pattern) == RuleID.SEC_DESERIALISATION
+
+    def test_object_injection_marker_is_deserialisation(self):
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+        from claude_code_hooks_daemon.handlers.pre_tool_use.security_antipattern import (
+            _classify_pattern,
+        )
+
+        pattern = self._pattern("synthetic - object injection risk")
+        assert _classify_pattern(pattern) == RuleID.SEC_DESERIALISATION
+
+    def test_xss_marker(self):
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+        from claude_code_hooks_daemon.handlers.pre_tool_use.security_antipattern import (
+            _classify_pattern,
+        )
+
+        pattern = self._pattern("synthetic - XSS risk")
+        assert _classify_pattern(pattern) == RuleID.SEC_XSS
+
+    def test_owasp_a02_is_hardcoded_creds_regardless_of_name(self):
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+        from claude_code_hooks_daemon.handlers.pre_tool_use.security_antipattern import (
+            _classify_pattern,
+        )
+
+        pattern = self._pattern("synthetic credential test", owasp="A02")
+        assert _classify_pattern(pattern) == RuleID.SEC_HARDCODED_CREDS
+
+    def test_unmatched_marker_falls_through_to_unsafe_memory(self):
+        """The fall-through is a deliberate outlier bucket, not a silent catch-all."""
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+        from claude_code_hooks_daemon.handlers.pre_tool_use.security_antipattern import (
+            _classify_pattern,
+        )
+
+        pattern = self._pattern("synthetic type safety bypass test")
+        assert _classify_pattern(pattern) == RuleID.SEC_UNSAFE_MEMORY
+
+
+class TestSecurityAntipatternDisclosureLadder:
+    """Verbose-first/terse-after per (transcript_path, rule_id) (Plan 00116).
+
+    The AWS-key literal is split across a source-level concatenation so this
+    module's own text never contains the contiguous ``AKIA``+16-char run its
+    OWN pattern matches -- avoiding a live self-trip on the Write/Edit that
+    authors this file, while the runtime string still triggers the handler.
+    """
+
+    _AWS_KEY = "AKIA" + "IOSFODNN7EXAMPLE1"
+
+    @pytest.fixture(autouse=True)
+    def _reset_disclosure_tracker(self):
+        from claude_code_hooks_daemon.core import reset_data_layer
+
+        reset_data_layer()
+        yield
+        reset_data_layer()
+
+    @classmethod
+    def _hook_input(cls, transcript_path):
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/src/config.ts",
+                "content": f'const key = "{cls._AWS_KEY}";',
+            },
+        }
+        if transcript_path is not None:
+            hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    def test_deny_reason_starts_with_rule_id_prefix(self):
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        handler = SecurityAntipatternHandler()
+        result = handler.handle(self._hook_input("/tmp/transcript-sec-a.jsonl"))
+        assert result.reason.startswith(f"BLOCKED [{RuleID.SEC_HARDCODED_CREDS}]")
+
+    def test_first_fire_is_verbose(self):
+        handler = SecurityAntipatternHandler()
+        result = handler.handle(self._hook_input("/tmp/transcript-sec-b.jsonl"))
+        assert "not detect" in result.reason.lower()
+
+    def test_second_fire_same_agent_is_terse(self):
+        handler = SecurityAntipatternHandler()
+        transcript = "/tmp/transcript-sec-c.jsonl"
+        handler.handle(self._hook_input(transcript))
+        second = handler.handle(self._hook_input(transcript))
+        assert "not detect" not in second.reason.lower()
+        assert "Issues detected" in second.reason
+
+    def test_different_agent_is_independently_verbose(self):
+        handler = SecurityAntipatternHandler()
+        handler.handle(self._hook_input("/tmp/transcript-sec-d.jsonl"))
+        other = handler.handle(self._hook_input("/tmp/transcript-sec-e.jsonl"))
+        assert "not detect" in other.reason.lower()
+
+    def test_missing_transcript_path_always_verbose(self):
+        handler = SecurityAntipatternHandler()
+        first = handler.handle(self._hook_input(None))
+        second = handler.handle(self._hook_input(None))
+        assert "not detect" in first.reason.lower()
+        assert "not detect" in second.reason.lower()

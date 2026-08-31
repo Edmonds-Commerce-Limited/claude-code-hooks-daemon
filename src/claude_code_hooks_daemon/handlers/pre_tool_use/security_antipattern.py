@@ -19,8 +19,10 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.strategies.security.common import should_skip
 from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
@@ -33,6 +35,106 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 
 # Config key hint shown in the denial message
 _CONFIG_HINT_HANDLER = "handlers.pre_tool_use.security_antipattern"
+
+# OWASP category used by the universal secret-detection strategy -- the ONE
+# clean signal that separates hardcoded credentials from everything else
+# (every other strategy tags its patterns "A03").
+_OWASP_CREDENTIALS = "A02"
+
+# Real category structure (Plan 00116): every strategy's ``SecurityPattern.name``
+# ends with a mechanism suffix ("code injection", "command injection",
+# "(XML) deserialization"/"object injection", "XSS"), which is a cleaner and
+# more precise signal than the coarse two-value OWASP code every strategy
+# carries. Checked in this order because "object injection" (deserialisation)
+# would otherwise also read as a kind of injection.
+_XSS_MARKERS: tuple[str, ...] = ("xss",)
+_DESERIALISATION_MARKERS: tuple[str, ...] = ("deserialization", "object injection")
+_CMD_INJECTION_MARKERS: tuple[str, ...] = ("command injection",)
+_CODE_INJECTION_MARKERS: tuple[str, ...] = (
+    "code injection",
+    "dynamic import injection",
+    "code execution",
+    "dynamic script execution",
+)
+
+
+def _classify_pattern(pattern: SecurityPattern) -> str:
+    """Map a SecurityPattern to its Plan 00116 category RuleID.
+
+    Rust's ``from_raw_parts``/``transmute`` fit none of the five OWASP-named
+    mechanisms below (they are memory/type-safety bypasses, not injection,
+    deserialisation, XSS or a credential) -- SEC_UNSAFE_MEMORY is the
+    fall-through for exactly that outlier pair, not a catch-all.
+    """
+    if pattern.owasp == _OWASP_CREDENTIALS:
+        return RuleID.SEC_HARDCODED_CREDS
+    name_lower = pattern.name.lower()
+    if any(marker in name_lower for marker in _XSS_MARKERS):
+        return RuleID.SEC_XSS
+    if any(marker in name_lower for marker in _DESERIALISATION_MARKERS):
+        return RuleID.SEC_DESERIALISATION
+    if any(marker in name_lower for marker in _CMD_INJECTION_MARKERS):
+        return RuleID.SEC_CMD_INJECTION
+    if any(marker in name_lower for marker in _CODE_INJECTION_MARKERS):
+        return RuleID.SEC_CODE_INJECTION
+    return RuleID.SEC_UNSAFE_MEMORY
+
+
+_RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
+    (
+        RuleID.SEC_CODE_INJECTION,
+        "`eval`, `exec`, `new Function`, `__import__`, `instance_eval`, `yaml.load`",
+        "Dynamic execution of a string as code",
+        "Avoid dynamic code execution; use safe parsing/import alternatives",
+    ),
+    (
+        RuleID.SEC_CMD_INJECTION,
+        "`os.system`, `subprocess(..., shell=True)`, `shell_exec`, `proc_open`, "
+        "`Runtime.exec`, `Process.Start`, `IO.popen`",
+        "Shell command construction from untrusted input enables command injection",
+        "Use argument-list APIs (no shell=True) instead of shell string concatenation",
+    ),
+    (
+        RuleID.SEC_DESERIALISATION,
+        "`pickle.load`, `Marshal.load`, `unserialize`, `ObjectInputStream`, "
+        "`XMLDecoder`, `BinaryFormatter`",
+        "Deserialising untrusted data can execute arbitrary code",
+        "Use a safe serialisation format (e.g. JSON) instead",
+    ),
+    (
+        RuleID.SEC_XSS,
+        "`innerHTML`, `dangerouslySetInnerHTML`, `document.write`, "
+        "`template.HTML`/`JS`/`URL`",
+        "Injects unescaped content into the DOM/output, enabling XSS",
+        "Use the framework's safe templating/escaping APIs",
+    ),
+    (
+        RuleID.SEC_HARDCODED_CREDS,
+        "AWS access keys, GitHub tokens, Stripe keys, private key blocks",
+        "Hardcoded credentials leak via source control history and code review",
+        "Use environment variables, never hardcode credentials",
+    ),
+    (
+        RuleID.SEC_UNSAFE_MEMORY,
+        "Rust `from_raw_parts`, `transmute`",
+        "Bypasses Rust's memory/type safety guarantees",
+        "Use safe conversions (`as`, `From`/`Into`) or validated slice operations",
+    ),
+)
+
+
+def _verbose_content(why: str) -> str:
+    """Build the full first-fire teaching content for a rule from its "why"."""
+    return (
+        f"{why}.\n\n"
+        "This is pattern matching on known-dangerous constructs, not analysis -- "
+        "it does NOT detect SQL injection, weak hashing, or path traversal (those "
+        "are properties of how a value FLOWS, which a regex cannot see). Do not "
+        "read a passing write as 'this code is secure'.\n\n"
+        "If this is test fixture code, place it in tests/fixtures/ or tests/assets/.\n"
+        "If this is rule documentation, place it in docs/ or eslint-rules/.\n\n"
+        f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
+    )
 
 
 class SecurityAntipatternHandler(PreToolUseHandlerBase):
@@ -67,6 +169,18 @@ class SecurityAntipatternHandler(PreToolUseHandlerBase):
         # Client-configured exclude globs (Plan 00150), layered on top of the
         # built-in should_skip() defaults; project default injected by registry.
         self._exclude_paths: list[str] | None = None
+        self._rules: tuple[Rule, ...] = tuple(
+            Rule(
+                rule_id=rule_id,
+                blocked=blocked,
+                why=why,
+                fix=fix,
+                verbose=_verbose_content(why),
+            )
+            for rule_id, blocked, why, fix in _RULE_DEFINITIONS
+        )
+        self._rules_by_id: dict[str, Rule] = {rule.rule_id: rule for rule in self._rules}
+        self._formatter = RuleFormatter()
 
     # ------------------------------------------------------------------
     # Language filter (applied lazily on first use)
@@ -127,8 +241,12 @@ class SecurityAntipatternHandler(PreToolUseHandlerBase):
 
         return GatingResult(
             decision=Decision.DENY,
-            reason=self._format_reason(issues, file_path),
+            reason=self._format_reason(hook_input, issues, file_path),
         )
+
+    def get_rules(self) -> list[Rule]:
+        """Return the 6 Rule objects backing this handler's blocking behaviour."""
+        return list(self._rules)
 
     def get_claude_md(self) -> str | None:
         return (
@@ -214,8 +332,20 @@ class SecurityAntipatternHandler(PreToolUseHandlerBase):
             project_patterns=self._project_exclude_paths,
         )
 
-    def _format_reason(self, issues: list[SecurityPattern], file_path: str) -> str:
-        """Build a human-readable denial message for matched patterns."""
+    def _format_reason(
+        self, hook_input: dict[str, Any], issues: list[SecurityPattern], file_path: str
+    ) -> str:
+        """Build a human-readable denial message for matched patterns.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G), keyed on the FIRST
+        matched issue's category -- mirroring destructive_git's first-hit
+        semantics when multiple categories match in one write. The
+        per-invocation diagnostic (file, every matched issue, every
+        suggestion) is dynamic and always fully present -- only the
+        surrounding category-specific teaching prose goes terse on repeat
+        fires.
+        """
         issues_text = "\n".join(f"  - [{issue.owasp}] {issue.name}" for issue in issues)
 
         # Collect unique suggestions
@@ -227,15 +357,23 @@ class SecurityAntipatternHandler(PreToolUseHandlerBase):
                 suggestions.append(f"  - {issue.suggestion}")
         suggestions_text = "\n".join(suggestions)
 
-        return (
-            f"SECURITY ANTIPATTERN BLOCKED\n\n"
+        dynamic_detail = (
             f"File: {file_path}\n\n"
             f"Issues detected ({len(issues)}):\n"
             f"{issues_text}\n\n"
-            "These patterns indicate security vulnerabilities (OWASP A02/A03).\n\n"
             f"CORRECT APPROACH:\n"
-            f"{suggestions_text}\n\n"
-            "If this is test fixture code, place it in tests/fixtures/ or tests/assets/.\n"
-            "If this is rule documentation, place it in docs/ or eslint-rules/.\n\n"
-            f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
+            f"{suggestions_text}"
         )
+
+        rule = self._rules_by_id[_classify_pattern(issues[0])]
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
+            message = self._formatter.terse(rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, rule.rule_id)
+            message = self._formatter.verbose(rule)
+
+        return f"{message}\n\n{dynamic_detail}"
