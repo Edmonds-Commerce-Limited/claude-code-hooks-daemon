@@ -1790,3 +1790,91 @@ class TestDeclaredTestPathMap:
         candidates = handler._get_test_file_paths(str(rule), strategy)
         assert candidates[0] == tmp_path / "apps/admin/qaConfig/Tests" / candidates[0].name
         assert candidates[1] == tmp_path.joinpath(*self._TEST_REL)
+
+
+class TestTddEnforcementGetRules:
+    """get_rules() (Plan 00116): one rule, language dimension lives in verbose."""
+
+    def test_get_rules_returns_one_rule(self) -> None:
+        handler = TddEnforcementHandler()
+        rules = handler.get_rules()
+        assert len(rules) == 1
+
+    def test_get_rules_rule_id_is_constant(self) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        handler = TddEnforcementHandler()
+        rule = handler.get_rules()[0]
+        assert rule.rule_id == RuleID.TDD_TEST_FIRST
+
+    def test_get_rules_verbose_is_non_empty(self) -> None:
+        handler = TddEnforcementHandler()
+        rule = handler.get_rules()[0]
+        assert rule.verbose
+
+
+class TestTddEnforcementDisclosureLadder:
+    """Verbose-first/terse-after per (transcript_path, rule_id) (Plan 00116)."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_disclosure_tracker(self):
+        from claude_code_hooks_daemon.core import reset_data_layer
+
+        reset_data_layer()
+        yield
+        reset_data_layer()
+
+    def _hook_input(self, transcript_path: str | None) -> dict:
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/controller/src/handlers/pre_tool_use/my_handler.py"
+            },
+        }
+        if transcript_path is not None:
+            hook_input["transcript_path"] = transcript_path
+        return hook_input
+
+    @patch("pathlib.Path.exists")
+    def test_deny_reason_starts_with_rule_id_prefix(self, mock_exists) -> None:
+        from claude_code_hooks_daemon.constants.rule_ids import RuleID
+
+        mock_exists.return_value = False
+        handler = TddEnforcementHandler()
+        result = handler.handle(self._hook_input("/tmp/transcript-a.jsonl"))
+        assert result.reason.startswith(f"BLOCKED [{RuleID.TDD_TEST_FIRST}]")
+
+    @patch("pathlib.Path.exists")
+    def test_first_fire_is_verbose(self, mock_exists) -> None:
+        mock_exists.return_value = False
+        handler = TddEnforcementHandler()
+        result = handler.handle(self._hook_input("/tmp/transcript-b.jsonl"))
+        assert "PHILOSOPHY" in result.reason
+
+    @patch("pathlib.Path.exists")
+    def test_second_fire_same_agent_is_terse(self, mock_exists) -> None:
+        mock_exists.return_value = False
+        handler = TddEnforcementHandler()
+        transcript = "/tmp/transcript-c.jsonl"
+        handler.handle(self._hook_input(transcript))
+        second = handler.handle(self._hook_input(transcript))
+        assert "PHILOSOPHY" not in second.reason
+        # Dynamic diagnostic detail always stays present, even when terse.
+        assert "Searched locations:" in second.reason
+
+    @patch("pathlib.Path.exists")
+    def test_different_agent_is_independently_verbose(self, mock_exists) -> None:
+        mock_exists.return_value = False
+        handler = TddEnforcementHandler()
+        handler.handle(self._hook_input("/tmp/transcript-d.jsonl"))
+        other = handler.handle(self._hook_input("/tmp/transcript-e.jsonl"))
+        assert "PHILOSOPHY" in other.reason
+
+    @patch("pathlib.Path.exists")
+    def test_missing_transcript_path_always_verbose(self, mock_exists) -> None:
+        mock_exists.return_value = False
+        handler = TddEnforcementHandler()
+        first = handler.handle(self._hook_input(None))
+        second = handler.handle(self._hook_input(None))
+        assert "PHILOSOPHY" in first.reason
+        assert "PHILOSOPHY" in second.reason

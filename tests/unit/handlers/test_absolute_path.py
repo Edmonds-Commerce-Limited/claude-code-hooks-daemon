@@ -2,7 +2,18 @@
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.absolute_path import AbsolutePathHandler
+
+
+@pytest.fixture(autouse=True)
+def _reset_disclosure_tracker():
+    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    reset_data_layer()
+    yield
+    reset_data_layer()
 
 
 class TestAbsolutePathHandler:
@@ -292,3 +303,75 @@ class TestAbsolutePathHandler:
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == "deny"
+
+
+class TestAbsolutePathGetRules:
+    """get_rules() declares the single Rule backing this handler (Plan 00116)."""
+
+    @pytest.fixture
+    def handler(self):
+        return AbsolutePathHandler()
+
+    def test_returns_one_rule(self, handler):
+        rules = handler.get_rules()
+        assert len(rules) == 1
+        assert isinstance(rules[0], Rule)
+
+    def test_rule_id_matches_constant(self, handler):
+        assert handler.get_rules()[0].rule_id == RuleID.ABSOLUTE_PATH_REQUIRED
+
+    def test_rule_has_non_empty_verbose(self, handler):
+        assert handler.get_rules()[0].verbose
+
+
+class TestAbsolutePathDisclosureLadder:
+    """Verbose-first / terse-after per-agent disclosure ladder (Decision G)."""
+
+    @pytest.fixture
+    def handler(self):
+        return AbsolutePathHandler()
+
+    def _hook_input(self, file_path: str, transcript_path):
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": file_path, "content": "x"},
+            "transcript_path": transcript_path,
+        }
+
+    def test_first_fire_for_agent_is_verbose(self, handler):
+        hook_input = self._hook_input("test.py", "/tmp/agent-a/transcript.jsonl")
+        result = handler.handle(hook_input)
+
+        assert result.decision == "deny"
+        assert "REQUIRED ACTION" in result.reason
+        assert "Eliminates ambiguity" in result.reason
+
+    def test_second_fire_for_same_agent_is_terse(self, handler):
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("test.py", transcript_path))
+        result = handler.handle(self._hook_input("other.py", transcript_path))
+
+        assert result.decision == "deny"
+        assert "REQUIRED ACTION" not in result.reason
+        assert "Eliminates ambiguity" not in result.reason
+        assert "other.py" in result.reason
+
+    def test_terse_message_leads_with_rule_id(self, handler):
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        handler.handle(self._hook_input("test.py", transcript_path))
+        result = handler.handle(self._hook_input("other.py", transcript_path))
+
+        assert result.reason.startswith(f"BLOCKED [{RuleID.ABSOLUTE_PATH_REQUIRED}]")
+
+    def test_different_agent_is_independently_verbose(self, handler):
+        handler.handle(self._hook_input("test.py", "/tmp/agent-a/transcript.jsonl"))
+        result = handler.handle(self._hook_input("test.py", "/tmp/agent-b/transcript.jsonl"))
+
+        assert "REQUIRED ACTION" in result.reason
+
+    def test_missing_transcript_path_is_always_verbose(self, handler):
+        hook_input = {"tool_name": "Write", "tool_input": {"file_path": "test.py", "content": "x"}}
+        handler.handle(hook_input)
+        result = handler.handle(hook_input)
+
+        assert "REQUIRED ACTION" in result.reason

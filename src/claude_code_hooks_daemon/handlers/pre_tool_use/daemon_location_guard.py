@@ -3,13 +3,29 @@
 import re
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
+)
+
+_RULE = Rule(
+    rule_id=RuleID.DAEMON_DIR_CD,
+    blocked="`cd` into `.claude/hooks-daemon/`",
+    why="Daemon CLI commands must be run from PROJECT ROOT, causing path confusion otherwise",
+    fix="Run daemon commands from project root, e.g. `bin/hooks-daemon status`",
+    verbose=(
+        "WHY BLOCKED:\n"
+        "  - Daemon CLI commands must be run from PROJECT ROOT, not from "
+        ".claude/hooks-daemon/\n"
+        "  - Running commands from hooks-daemon directory causes path confusion\n"
+        "  - All daemon operations expect to be run from project root"
+    ),
 )
 
 # Match a `cd` whose TARGET is the .claude/hooks-daemon/ directory (or a path
@@ -60,18 +76,31 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
 
         return bool(_CD_INTO_DAEMON_DIR.search(command))
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [_RULE]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block cd into hooks-daemon with helpful guidance."""
+        """Block cd into hooks-daemon with a verbose-first/terse-after explanation.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The command text is
+        appended after the formatted message on every fire — the agent
+        already has the command it just ran, but echoing it keeps the
+        message unambiguous about what was blocked.
+        """
         command = hook_input.get("tool_input", {}).get("command", "")
 
-        reason = (
-            f"🚫 BLOCKED: Attempting to cd into .claude/hooks-daemon/\n\n"
-            f"COMMAND: {command}\n\n"
-            f"WHY BLOCKED:\n"
-            f"  • Daemon CLI commands must be run from PROJECT ROOT, not from .claude/hooks-daemon/\n"
-            f"  • Running commands from hooks-daemon directory causes path confusion\n"
-            f"  • All daemon operations expect to be run from project root\n"
-        )
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        formatter = RuleFormatter()
+
+        if transcript_path and tracker.was_disclosed(transcript_path, RuleID.DAEMON_DIR_CD):
+            reason = formatter.terse(_RULE) + f"\n\nCOMMAND: {command}"
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.DAEMON_DIR_CD)
+            reason = formatter.verbose(_RULE) + f"\n\nCOMMAND: {command}"
 
         guidance = (
             "✅ CORRECT USAGE:\n"

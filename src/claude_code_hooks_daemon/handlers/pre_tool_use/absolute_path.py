@@ -9,9 +9,28 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+
+_RULE = Rule(
+    rule_id=RuleID.ABSOLUTE_PATH_REQUIRED,
+    blocked="`Read`/`Write`/`Edit` file_path requires absolute path",
+    why="Ambiguous about the current working directory and can target the wrong file",
+    fix="Use an absolute path starting with /",
+    verbose=(
+        "Why absolute paths are required:\n"
+        "  - Eliminates ambiguity about current working directory\n"
+        "  - Prevents accidental operations on wrong files\n"
+        "  - Makes file operations explicit and traceable\n\n"
+        "REQUIRED ACTION:\n"
+        "  Use absolute path starting with /\n\n"
+        "Note: Claude Code's Read tool documentation states:\n"
+        "'The file_path parameter must be an absolute path, not a relative path'"
+    ),
+)
 
 
 def _absolute_example(file_path: str) -> str:
@@ -67,28 +86,42 @@ class AbsolutePathHandler(PreToolUseHandlerBase):
         # Check if path is relative (doesn't start with /)
         return not file_path.startswith("/")
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [_RULE]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Block relative paths with explanation."""
+        """Block relative paths with a verbose-first/terse-after explanation.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The invocation-specific
+        tool name, relative path and worked example are appended to the first
+        (verbose) fire only — an agent that has already seen the teaching
+        content still gets those details, since they change per call, but
+        the surrounding prose is not repeated.
+        """
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         file_path = tool_input.get("file_path", "")
 
-        return GatingResult(
-            decision=Decision.DENY,
-            reason=(
-                f"BLOCKED: {tool_name} tool requires absolute path\n\n"
-                f"Relative path provided: {file_path}\n\n"
-                "Why absolute paths are required:\n"
-                "  - Eliminates ambiguity about current working directory\n"
-                "  - Prevents accidental operations on wrong files\n"
-                "  - Makes file operations explicit and traceable\n\n"
-                "REQUIRED ACTION:\n"
-                "  Use absolute path starting with /\n"
-                f"{_absolute_example(file_path)}\n"
-                "Note: Claude Code's Read tool documentation states:\n"
-                "'The file_path parameter must be an absolute path, not a relative path'"
-            ),
-        )
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        formatter = RuleFormatter()
+
+        if transcript_path and tracker.was_disclosed(
+            transcript_path, RuleID.ABSOLUTE_PATH_REQUIRED
+        ):
+            message = formatter.terse(_RULE) + f"\nRelative path provided: {file_path}"
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, RuleID.ABSOLUTE_PATH_REQUIRED)
+            message = (
+                formatter.verbose(_RULE) + f"\n\nTool: {tool_name}\n"
+                f"Relative path provided: {file_path}\n"
+                f"{_absolute_example(file_path)}"
+            )
+
+        return GatingResult(decision=Decision.DENY, reason=message)
 
     def get_claude_md(self) -> str | None:
         return (

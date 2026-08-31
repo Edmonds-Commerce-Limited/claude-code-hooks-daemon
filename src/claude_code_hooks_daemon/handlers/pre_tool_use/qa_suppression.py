@@ -17,8 +17,10 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.strategies.qa_suppression import (
     QaSuppressionStrategyRegistry,
@@ -32,6 +34,31 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 
 # Maximum number of issues to show in error message
 _MAX_ISSUES_SHOWN = 5
+
+# Single rule (Plan 00116): every language's suppression directive is the
+# same concept, "QA suppression" -- the language dimension lives in the
+# strategy registry, not in a per-language RuleID.
+_QA_SUPPRESSION_RULE = Rule(
+    rule_id=RuleID.QA_SUPPRESSION,
+    blocked="a QA suppression directive (noqa, type: ignore, eslint-disable, ...)",
+    why="Suppression comments hide real problems and create technical debt",
+    fix="Fix the underlying issue; do not suppress the warning",
+    verbose=(
+        "WHY: Suppression comments hide real problems and create technical debt.\n"
+        "Type errors, style violations, and complexity warnings exist for good reason.\n\n"
+        "CORRECT APPROACH:\n"
+        "  1. Fix the underlying issue (don't suppress)\n"
+        "  2. Add proper type annotations instead of suppressing type errors\n"
+        "  3. Refactor code to meet quality standards\n"
+        "  4. If rule is genuinely wrong, update project config\n"
+        "  5. For test-specific code, ensure file is in tests/ directory\n"
+        "  6. For legacy code requiring suppression:\n"
+        "     - Add detailed comment explaining WHY suppression is needed\n"
+        "     - Create ticket to fix properly\n"
+        "     - Link ticket in comment\n\n"
+        "Quality tools exist to prevent bugs. Fix the code, don't silence the tool."
+    ),
+)
 
 
 class QaSuppressionHandler(PreToolUseHandlerBase):
@@ -71,6 +98,7 @@ class QaSuppressionHandler(PreToolUseHandlerBase):
         # Client-configured exclude globs (Plan 00150), layered on top of the
         # per-language skip_directories; project default injected by registry.
         self._exclude_paths: list[str] | None = None
+        self._formatter = RuleFormatter()
 
     def _apply_language_filter(self) -> None:
         """Apply language filter to registry on first use (lazy).
@@ -173,15 +201,27 @@ class QaSuppressionHandler(PreToolUseHandlerBase):
         if not issues:
             return GatingResult(decision=Decision.ALLOW)
 
-        return self._build_deny_result(file_path, strategy, issues)
+        return self._build_deny_result(hook_input, file_path, strategy, issues)
 
-    @staticmethod
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [_QA_SUPPRESSION_RULE]
+
     def _build_deny_result(
+        self,
+        hook_input: dict[str, Any],
         file_path: str,
         strategy: QaSuppressionStrategy,
         issues: list[str],
     ) -> GatingResult:
-        """Build a DENY result with language-appropriate error message."""
+        """Build a DENY result with language-appropriate error message.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The per-invocation
+        diagnostic (file, matched suppression comments, tool resources) is
+        dynamic and always fully present -- only the surrounding "why this
+        is blocked" teaching prose goes terse on repeat fires.
+        """
         # Build resources section from strategy
         resources_text = "\n".join(
             f"  - {tool}: {url}"
@@ -190,30 +230,26 @@ class QaSuppressionHandler(PreToolUseHandlerBase):
 
         issues_text = "\n".join(f"  - {issue}" for issue in issues[:_MAX_ISSUES_SHOWN])
 
-        return GatingResult(
-            decision=Decision.DENY,
-            reason=(
-                f"QA SUPPRESSION BLOCKED: {strategy.language_name} QA suppression "
-                f"comments are not allowed\n\n"
-                f"File: {file_path}\n\n"
-                f"Found {len(issues)} suppression comment(s):\n"
-                f"{issues_text}\n\n"
-                "WHY: Suppression comments hide real problems and create technical debt.\n"
-                "Type errors, style violations, and complexity warnings exist for good reason.\n\n"
-                "CORRECT APPROACH:\n"
-                "  1. Fix the underlying issue (don't suppress)\n"
-                "  2. Add proper type annotations instead of suppressing type errors\n"
-                "  3. Refactor code to meet quality standards\n"
-                "  4. If rule is genuinely wrong, update project config\n"
-                "  5. For test-specific code, ensure file is in tests/ directory\n"
-                "  6. For legacy code requiring suppression:\n"
-                "     - Add detailed comment explaining WHY suppression is needed\n"
-                "     - Create ticket to fix properly\n"
-                "     - Link ticket in comment\n\n"
-                "Quality tools exist to prevent bugs. Fix the code, don't silence the tool.\n\n"
-                f"Resources:\n{resources_text}"
-            ),
+        dynamic_detail = (
+            f"{strategy.language_name} QA suppression comments are not allowed\n\n"
+            f"File: {file_path}\n\n"
+            f"Found {len(issues)} suppression comment(s):\n"
+            f"{issues_text}\n\n"
+            f"Resources:\n{resources_text}"
         )
+
+        rule = _QA_SUPPRESSION_RULE
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
+            message = self._formatter.terse(rule)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, rule.rule_id)
+            message = self._formatter.verbose(rule)
+
+        return GatingResult(decision=Decision.DENY, reason=f"{message}\n\n{dynamic_detail}")
 
     def get_claude_md(self) -> str | None:
         return (

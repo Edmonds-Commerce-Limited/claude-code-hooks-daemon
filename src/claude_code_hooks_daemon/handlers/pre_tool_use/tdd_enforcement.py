@@ -16,8 +16,10 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, GatingResult
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
@@ -47,6 +49,36 @@ _DEFAULT_TEST_LOCATIONS = frozenset(
 # `test_path_map` option keys (Plan 00251 Phase 3)
 _KEY_SOURCE_GLOB = "source_glob"
 _KEY_TEST_DIR = "test_dir"
+
+# Single rule (Plan 00116): the language dimension lives in the strategy
+# registry, not in a per-language RuleID -- every language's missing-test
+# violation is the same concept, "TDD test-first".
+_TDD_RULE = Rule(
+    rule_id=RuleID.TDD_TEST_FIRST,
+    blocked="creating a production source file without its test file",
+    why="TDD requires the test file to exist before the source file",
+    fix="Create the test file first (RED), then the source file (GREEN)",
+    verbose=(
+        "PHILOSOPHY: Test-Driven Development\n"
+        "In TDD, we write the test first, then implement the code.\n"
+        "This ensures:\n"
+        "  - Clear requirements before coding\n"
+        "  - 100% test coverage from the start\n"
+        "  - Design-focused implementation\n"
+        "  - Prevents untested code in production\n\n"
+        "REQUIRED ACTION:\n"
+        "1. Create the test file first, at the primary candidate location "
+        "shown below\n"
+        "2. Write comprehensive tests for the module\n"
+        "   - Test public API with various inputs\n"
+        "   - Test edge cases and error conditions\n\n"
+        "3. Run tests (they should fail - red)\n\n"
+        "4. THEN create the source file\n\n"
+        "5. Run tests again (they should pass - green)\n\n"
+        "REFERENCE:\n"
+        "  See existing test files in tests/ for examples"
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -173,6 +205,7 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         # same kind of lie Phase 1 removed from `core/handler.py`.
         self._test_path_map: Any = None
         self._resolved_test_path_map: list[DeclaredTestDir] | None = None
+        self._formatter = RuleFormatter()
 
     def _apply_language_filter(self) -> None:
         """Apply language filter to registry on first use (lazy).
@@ -264,8 +297,19 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
 
         return strategy.is_production_source(file_path)
 
+    def get_rules(self) -> list[Rule]:
+        """Return the single Rule backing this handler's blocking behaviour."""
+        return [_TDD_RULE]
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Check if test file exists in ANY valid location, deny if not."""
+        """Check if test file exists in ANY valid location, deny if not.
+
+        Verbosity is decided per (transcript_path, rule_id) via the shared
+        DisclosureTracker (Plan 00116, Decision G). The per-invocation
+        diagnostic (which file, which locations were searched) is dynamic
+        and always fully present, in both the verbose and terse forms --
+        only the surrounding TDD teaching prose goes terse on repeat fires.
+        """
         source_path = get_file_path(hook_input)
         if not source_path:
             return GatingResult(decision=Decision.ALLOW)
@@ -286,37 +330,24 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         source_filename = Path(source_path).name
         test_filename = candidate_paths[0].name  # Show primary candidate
 
-        return GatingResult(
-            decision=Decision.DENY,
-            reason=(
-                f"TDD REQUIRED: Cannot create {strategy.language_name} source file "
-                f"without test file\n\n"
-                f"Source file: {source_filename}\n"
-                f"Missing test: {test_filename}\n\n"
-                f"Searched locations:\n"
-                + "\n".join(f"  - {path}" for path in candidate_paths)
-                + "\n\n"
-                f"PHILOSOPHY: Test-Driven Development\n"
-                f"In TDD, we write the test first, then implement the code.\n"
-                f"This ensures:\n"
-                f"  - Clear requirements before coding\n"
-                f"  - 100% test coverage from the start\n"
-                f"  - Design-focused implementation\n"
-                f"  - Prevents untested code in production\n\n"
-                f"REQUIRED ACTION:\n"
-                f"1. Create the test file first at one of these locations:\n"
-                f"   {candidate_paths[0]}\n\n"
-                f"2. Write comprehensive tests for the module\n"
-                f"   - Test public API with various inputs\n"
-                f"   - Test edge cases and error conditions\n\n"
-                f"3. Run tests (they should fail - red)\n\n"
-                f"4. THEN create the source file:\n"
-                f"   {source_path}\n\n"
-                f"5. Run tests again (they should pass - green)\n\n"
-                f"REFERENCE:\n"
-                f"  See existing test files in tests/ for examples"
-            ),
+        dynamic_detail = (
+            f"Cannot create {strategy.language_name} source file without test file\n\n"
+            f"Source file: {source_filename}\n"
+            f"Missing test: {test_filename}\n\n"
+            f"Searched locations:\n" + "\n".join(f"  - {path}" for path in candidate_paths)
         )
+
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+
+        if transcript_path and tracker.was_disclosed(transcript_path, _TDD_RULE.rule_id):
+            message = self._formatter.terse(_TDD_RULE)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, _TDD_RULE.rule_id)
+            message = self._formatter.verbose(_TDD_RULE)
+
+        return GatingResult(decision=Decision.DENY, reason=f"{message}\n\n{dynamic_detail}")
 
     def _get_test_file_paths(self, source_path: str, strategy: TddStrategy) -> list[Path]:
         """Get ordered list of candidate test file paths for a source file.
