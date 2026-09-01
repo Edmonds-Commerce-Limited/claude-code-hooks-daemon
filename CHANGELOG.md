@@ -38,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Subagent-dispatch handlers now match the `Agent` tool name.**
+  Current Claude Code builds (>= 2.1.x) dispatch subagents under
+  `tool_name: "Agent"` rather than the legacy `"Task"`, which left
+  `dispatch_declaration` and `agent_isolation_advisor` silently inert —
+  found live by this release's acceptance run. Both handlers now match
+  either name via the shared `SUBAGENT_DISPATCH_TOOL_NAMES` constant.
 - **`secret_file_guard` Bash-mention false positive and hygiene fixes
   (Plan 00306).** `git rm --cached` on a protected path is now exempted
   from the Bash-mention block; registry roots are iterated for secret

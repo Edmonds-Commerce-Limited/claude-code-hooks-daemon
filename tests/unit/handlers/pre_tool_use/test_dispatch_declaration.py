@@ -63,6 +63,15 @@ class TestMatching:
     def test_matches_task_dispatch_with_prompt(self, handler: DispatchDeclarationHandler) -> None:
         assert handler.matches(_task_input("do some work")) is True
 
+    def test_matches_agent_tool_dispatch_with_prompt(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        # Claude Code >= 2.1.x dispatches subagents under tool_name "Agent"
+        # (verified live in the v3.59.0 acceptance run); the handler must
+        # match both the legacy "Task" name and "Agent".
+        hook_input = {"tool_name": "Agent", "tool_input": {"prompt": "do some work"}}
+        assert handler.matches(hook_input) is True
+
     def test_does_not_match_non_task_tool(self, handler: DispatchDeclarationHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "ls"}}
         assert handler.matches(hook_input) is False
@@ -138,3 +147,25 @@ class TestStrictMode:
         result = strict_handler.handle(_task_input(prompt))
 
         assert result.decision == Decision.ALLOW
+
+    def test_string_false_strict_option_is_not_treated_as_strict(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """N3 code-review fix: a YAML author writing ``strict: "false"`` (a
+        string, e.g. from an env-var-substituted config) must not be coerced
+        truthy by bare Python truthiness -- that would silently deny every
+        undeclared dispatch despite the config saying not-strict."""
+        handler._strict = "false"
+
+        result = handler.handle(_task_input("refactor the config loader"))
+
+        assert result.decision == Decision.ALLOW
+
+    def test_string_true_strict_option_is_treated_as_strict(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        handler._strict = "true"
+
+        result = handler.handle(_task_input("refactor the config loader"))
+
+        assert result.decision == Decision.DENY

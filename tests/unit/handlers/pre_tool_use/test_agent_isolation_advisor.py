@@ -100,6 +100,13 @@ class TestMatching:
         with _with_live_threads(4):
             assert handler.matches({"tool_name": "Bash", "tool_input": {"command": "ls"}}) is False
 
+    def test_matches_agent_tool_name_dispatch(self, handler: AgentIsolationAdvisorHandler) -> None:
+        # Claude Code >= 2.1.x dispatches subagents as tool_name "Agent"
+        # (verified live in the v3.59.0 acceptance run).
+        with _with_live_threads(4):
+            hook_input = {"tool_name": "Agent", "tool_input": {"prompt": "work"}}
+            assert handler.matches(hook_input) is True
+
     def test_ignores_a_task_call_without_a_prompt(
         self, handler: AgentIsolationAdvisorHandler
     ) -> None:

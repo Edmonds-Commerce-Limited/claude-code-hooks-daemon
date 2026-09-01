@@ -28,11 +28,11 @@ import re
 from typing import Any
 
 from claude_code_hooks_daemon.constants import (
+    SUBAGENT_DISPATCH_TOOL_NAMES,
     HandlerID,
     HandlerTag,
     HookInputField,
     Priority,
-    ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
@@ -89,12 +89,18 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         )
         # Config flags, declared here so mypy can verify them and a typo in a
         # config setter surfaces as a normal attribute (fail-fast).
-        self._strict: bool = False
+        # `Any`, not `bool`: options arrive by blind setattr from YAML, so a
+        # string value is a real runtime possibility `_is_strict()` guards
+        # against (peer precedent: bash_safe_mode's `_min_statements: Any`
+        # for the identical reason, and subagent_report_size_blocker's
+        # `_threshold_chars: Any`, added for the same mypy redundant-expr
+        # concern).
+        self._strict: Any = False
         self._fallback_report_dir: str = _DEFAULT_FALLBACK_REPORT_DIR
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """True for a Task dispatch carrying a non-empty prompt."""
-        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.TASK:
+        """True for a subagent dispatch (Task/Agent) carrying a non-empty prompt."""
+        if hook_input.get(HookInputField.TOOL_NAME) not in SUBAGENT_DISPATCH_TOOL_NAMES:
             return False
 
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
@@ -127,6 +133,24 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
             "channel that silently elides an oversized inline report."
         )
 
+    def _is_strict(self) -> bool:
+        """Coerced ``strict`` option.
+
+        Options arrive by blind ``setattr`` from YAML, so the type is not
+        trusted: a YAML author writing ``strict: "false"`` (a string) would
+        otherwise be silently treated as truthy Python and get an unwanted
+        DENY. A real ``bool`` is used as-is; a string is matched
+        case-insensitively against ``"true"``/``"false"``; anything else
+        (including a genuinely malformed value) degrades to the advisory
+        default rather than surprising the caller with strict enforcement.
+        """
+        value = self._strict
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() == "true"
+        return False
+
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Silent when declared; otherwise advise (default) or deny (strict)."""
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
@@ -135,7 +159,7 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         if self._has_declaration(prompt):
             return GatingResult(decision=Decision.ALLOW)
 
-        if self._strict:
+        if self._is_strict():
             return GatingResult(decision=Decision.DENY, reason=self._contract_text())
 
         return GatingResult(decision=Decision.ALLOW, context=[self._contract_text()])

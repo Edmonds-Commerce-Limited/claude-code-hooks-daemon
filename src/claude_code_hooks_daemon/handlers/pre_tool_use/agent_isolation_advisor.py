@@ -28,11 +28,11 @@ import time
 from typing import Any
 
 from claude_code_hooks_daemon.constants import (
+    SUBAGENT_DISPATCH_TOOL_NAMES,
     HandlerID,
     HandlerTag,
     HookInputField,
     Priority,
-    ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, GatingResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
@@ -91,8 +91,8 @@ class AgentIsolationAdvisorHandler(PreToolUseHandlerBase):
             return 0
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """True when a Task spawn would join an already-shared checkout."""
-        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.TASK:
+        """True when a subagent spawn (Task/Agent) would join a shared checkout."""
+        if hook_input.get(HookInputField.TOOL_NAME) not in SUBAGENT_DISPATCH_TOOL_NAMES:
             return False
 
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})

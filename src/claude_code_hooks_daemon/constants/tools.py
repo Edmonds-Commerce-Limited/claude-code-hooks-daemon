@@ -53,8 +53,11 @@ class ToolName:
     WEB_SEARCH = "WebSearch"
     WEB_FETCH = "WebFetch"
 
-    # Task management
+    # Task management. Subagent dispatch arrives as "Task" in older Claude
+    # Code builds and as "Agent" in current ones (>= 2.1.x) — handlers that
+    # gate dispatch must match SUBAGENT_DISPATCH_TOOL_NAMES, not one literal.
     TASK = "Task"
+    AGENT = "Agent"
     TASK_CREATE = "TaskCreate"
     TASK_UPDATE = "TaskUpdate"
     TASK_GET = "TaskGet"
@@ -93,6 +96,7 @@ ToolNameLiteral = Literal[
     "WebSearch",
     "WebFetch",
     "Task",
+    "Agent",
     "TaskCreate",
     "TaskUpdate",
     "TaskGet",
@@ -109,4 +113,8 @@ ToolNameLiteral = Literal[
 ]
 
 
-__all__ = ["ToolName", "ToolNameLiteral"]
+# Both names a subagent dispatch can arrive under (see ToolName.TASK note).
+SUBAGENT_DISPATCH_TOOL_NAMES: frozenset[str] = frozenset({ToolName.TASK, ToolName.AGENT})
+
+
+__all__ = ["SUBAGENT_DISPATCH_TOOL_NAMES", "ToolName", "ToolNameLiteral"]

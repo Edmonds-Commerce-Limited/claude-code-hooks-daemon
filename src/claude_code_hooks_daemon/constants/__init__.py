@@ -62,12 +62,17 @@ from claude_code_hooks_daemon.constants.protocol import (
 )
 from claude_code_hooks_daemon.constants.tags import HandlerTag, TagLiteral
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.constants.tools import ToolName, ToolNameLiteral
+from claude_code_hooks_daemon.constants.tools import (
+    SUBAGENT_DISPATCH_TOOL_NAMES,
+    ToolName,
+    ToolNameLiteral,
+)
 from claude_code_hooks_daemon.constants.validation import ValidationLimit
 
 __all__ = [
     "CORE_VENDORED_BUILD_DIR_NAMES",
     "RETIRED_HANDLERS",
+    "SUBAGENT_DISPATCH_TOOL_NAMES",
     # Config key constants
     "ConfigKey",
     # Mode constants
