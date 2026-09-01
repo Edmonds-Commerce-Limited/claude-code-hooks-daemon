@@ -229,6 +229,16 @@ class TestBashMentionsProtectedPath:
         ``*.secret*``. Observed live: ``grep secret*.py dir`` was denied."""
         assert self._match("ls src/secret*.py") is None
 
+    def test_posix_literal_bracket_first_class_is_glob_shaped(self) -> None:
+        """Plan 00306 Task 2.3: the POSIX "literal ``]`` first" character
+        class shape (``x[]]``, matching a literal ``]``) must be recognised
+        as a COMPLETE bracket expression, same as an ordinary
+        ``[A-Za-z]`` class -- the leading ``]`` right after ``[`` (optionally
+        after a ``!`` negation) is a member of the class, not its closer."""
+        assert sfm._is_glob_shaped("x[]]") is True
+        assert sfm._has_trailing_wildcard("x[]]") is True
+        assert sfm._is_glob_shaped("x[!]]") is True
+
     def test_bracket_subscript_adjacent_code_is_not_matched(self) -> None:
         """Regression (peer-reported): a code token like ``words[0].rsplit``
         strips its ``[0]`` bracket expression to residue ``words.rsplit``,
@@ -265,6 +275,37 @@ class TestBashMentionsProtectedPath:
         stem-fnmatch counts as a genuine truncation."""
         assert self._match('_RE = re.compile(r"<a>.*?</a>")') is None
         assert self._match(r'grep -oP "(?<=x).*?(?=y)" file.py') is None
+
+    def test_both_edges_wildcard_plain_word_is_not_matched(self) -> None:
+        """Plan 00306 false positive: a ``*word*`` "contains" glob token
+        (both edges wildcard) is not a truncation of any specific real
+        filename — the leading-wildcard reverse-overlap direction is only a
+        plausible truncation model for a token with an arbitrary prefix but
+        an ANCHORED, fixed suffix (``*passXXX``). When the trailing edge is
+        ALSO a wildcard the token asserts nothing about what follows its
+        residue either, so a residue that merely starts with a plain English
+        word sharing a short edge with a stem (``secret_file`` vs the
+        ``.secret`` stem's ``secret`` suffix) must not be treated as
+        evidence of a real protected name. Observed live: ``find . -iname
+        "*secret_file*matching*"`` (a plain source-file name search) was
+        denied as a ``*.secret*`` mention."""
+        assert self._match('find . -iname "*secret_file*matching*"') is None
+
+    def test_both_edges_wildcard_generic_word_search_is_not_matched(self) -> None:
+        assert self._match("grep -l secretary_report *.txt") is None
+
+    def test_both_edges_wildcard_prose_asterisk_word_is_not_matched(self) -> None:
+        """Plan 00306 follow-up: the PRE-EXISTING (untouched-by-the-overlap-
+        fix) substring+fnmatch branch has the identical both-edges-wildcard
+        flaw -- ``fnmatch(stem, "*word*")`` succeeds whenever the residue
+        occurs ANYWHERE inside the stem, not just as a real prefix/suffix
+        truncation, so an ordinary emphasised prose word like ``*word*``
+        coincidentally matches ``*.vault-password`` purely because
+        ``.vault-password`` happens to end in ``...s-s-w-o-r-d``. Observed
+        live: a commit message describing this very fix, containing the
+        literal text ``a "*word*" contains-search``, was denied as a
+        ``*.vault-password`` mention."""
+        assert self._match('echo a "*word*" contains-search') is None
 
     def test_no_echo_exemption(self) -> None:
         """Decision 9(c): unlike sed_blocker, echo buys no exemption."""
@@ -333,6 +374,34 @@ class TestExemptions:
         patterns = ("*.mysecretfile",)
         cmd = "ansible-playbook --vault-password-file /x/prod.mysecretfile site.yml"
         assert sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS, patterns)
+
+    def test_git_rm_cached_protected_path_is_exempt(self) -> None:
+        """Plan 00306 Task 1.3: ``secret_file_hygiene_checker`` recommends
+        ``git rm --cached <protected-path>`` to untrack a protected file —
+        that command reads no content, it only stops tracking the file, so
+        it must be runnable verbatim rather than denied by the very guard
+        whose hygiene it improves."""
+        cmd = "git rm --cached .claude/block-words.secret"
+        assert sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_git_rm_cached_glob_pathspec_is_exempt(self) -> None:
+        cmd = "git rm --cached '.claude/block-words.*'"
+        assert sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_git_rm_without_cached_is_never_exempt(self) -> None:
+        """``git rm`` (no ``--cached``) deletes the working-tree file too —
+        that is a different, more destructive operation and stays denied."""
+        cmd = "git rm .claude/block-words.secret"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_git_rm_cached_compound_command_is_not_exempt(self) -> None:
+        cmd = "git rm --cached .claude/block-words.secret && cat .claude/block-words.secret"
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    def test_cat_of_protected_path_stays_denied_alongside_git_rm_exemption(self) -> None:
+        assert not sfm.is_exempt_invocation(
+            "cat .claude/block-words.secret", sfm.DEFAULT_ALLOWED_CONSUMERS
+        )
 
     def test_project_extends_consumers_via_config_shape(self) -> None:
         consumers = sfm.merge_allowed_consumers(

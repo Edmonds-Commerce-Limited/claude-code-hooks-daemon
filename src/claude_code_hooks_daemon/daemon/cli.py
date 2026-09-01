@@ -1837,28 +1837,58 @@ def _collect_secret_redaction_status_lines(project_path: Path) -> list[str]:
     the redaction module reads at runtime and reports the same degrade
     through its own describe-degradation helper.
 
-    Best-effort: config-load failure here must not break `check`, which is
-    also used to diagnose a broken config -- any error reports nothing
-    rather than raising.
+    Iterates the same `ProjectRegistry` roots as
+    `_collect_enforcement_status_lines` (Plan 00306 Task 2.1): a
+    `projects:`-declared sub-root can carry its OWN
+    `.claude/hooks-daemon.yaml` with its own `secret_word_list_path`, and
+    reading only the primary root's config left that degrade silently
+    unreported -- `check` printed OK while a sub-project's secret-term
+    blocking was inert.
+
+    Best-effort: config-load failure at any single root here must not break
+    `check`, which is also used to diagnose a broken config -- a failing
+    root reports nothing rather than raising, and other roots are still
+    checked.
 
     Returns:
-        Advisory lines, or an empty list when nothing is configured or the
-        configured value is unproblematic.
+        Advisory lines (order-preserving, de-duplicated), or an empty list
+        when nothing is configured or every configured value is
+        unproblematic at every evaluated root.
     """
+    from claude_code_hooks_daemon.core.workspace import ProjectRegistry
     from claude_code_hooks_daemon.utils import secret_redaction
 
     config_file = project_path / ".claude" / "hooks-daemon.yaml"
+    registry: ProjectRegistry
     try:
         config_dict = ConfigLoader.load(config_file) if config_file.exists() else {}
         config = Config.model_validate(config_dict)
+        registry = ProjectRegistry.from_config(config, project_path)
     except (PydanticValidationError, OSError, ValueError):
-        return []
+        registry = ProjectRegistry.single_project(project_path)
 
-    handler_cfg = config.handlers.pre_tool_use.get("sensitive_content")
-    options = getattr(handler_cfg, "options", None)
-    configured = options.get("secret_word_list_path") if isinstance(options, dict) else None
-    message = secret_redaction.describe_secret_word_list_degradation(configured)
-    return [message] if message else []
+    roots = [registry.project_root, *(project.root for project in registry.projects)]
+
+    messages: list[str] = []
+    seen: set[str] = set()
+    for root in roots:
+        root_config_file = root / ".claude" / "hooks-daemon.yaml"
+        try:
+            root_config_dict = (
+                ConfigLoader.load(root_config_file) if root_config_file.exists() else {}
+            )
+            root_config = Config.model_validate(root_config_dict)
+        except (PydanticValidationError, OSError, ValueError):
+            continue
+
+        handler_cfg = root_config.handlers.pre_tool_use.get("sensitive_content")
+        options = getattr(handler_cfg, "options", None)
+        configured = options.get("secret_word_list_path") if isinstance(options, dict) else None
+        message = secret_redaction.describe_secret_word_list_degradation(configured)
+        if message and message not in seen:
+            seen.add(message)
+            messages.append(message)
+    return messages
 
 
 def _format_project_handler_health_lines(

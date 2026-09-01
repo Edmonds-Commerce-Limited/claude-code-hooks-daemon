@@ -89,6 +89,16 @@ _GLOB_CHARS: Final[tuple[str, ...]] = ("*", "?", "[")
 _HELPER_EXECUTABLE: Final[str] = "hooks-daemon"
 SECRET_META_SUBCOMMAND: Final[str] = "secret-meta"
 
+# `git rm --cached <path>` reads no content -- it only stops tracking a file
+# (the exact hygiene `secret_file_hygiene_checker` recommends for a
+# git-tracked protected path), so it is exempt the same way the secret-meta
+# helper is (Plan 00306 Task 1.3). Plain `git rm` (no `--cached`) also
+# deletes the working-tree file and stays denied -- it is a different,
+# more destructive operation this exemption must not cover.
+_GIT_EXECUTABLE: Final[str] = "git"
+_GIT_RM_SUBCOMMAND: Final[str] = "rm"
+_GIT_RM_CACHED_FLAG: Final[str] = "--cached"
+
 _CONSUMER_KEY_COMMAND: Final[str] = "command"
 _CONSUMER_KEY_PATH_FLAGS: Final[str] = "path_flags"
 _CONSUMER_KEY_DENIED_SUBCOMMANDS: Final[str] = "denied_subcommands"
@@ -294,7 +304,12 @@ def _pattern_literal_stems(patterns: tuple[str, ...]) -> list[tuple[str, str]]:
     return pairs
 
 
-_BRACKET_EXPRESSION_RE: Final[re.Pattern[str]] = re.compile(r"\[[^\]]*\]")
+# `!?\]?` (Plan 00306 Task 2.3): the POSIX "literal `]` first" character
+# class shape (`x[]]`, matching a literal `]`, optionally negated `x[!]]`) —
+# a `]` immediately after `[` (or after `[!]`) is a MEMBER of the class, not
+# its closer, so without this the regex closed on that first `]` and treated
+# the expression as ending one character early.
+_BRACKET_EXPRESSION_RE: Final[re.Pattern[str]] = re.compile(r"\[!?\]?[^\]]*\]")
 
 # Plan 00272 live-probe gap (class-(c) glob truncation, G2): the minimum
 # character overlap required at the boundary between a glob token's literal
@@ -348,8 +363,10 @@ def _has_leading_wildcard(basename: str) -> bool:
     """True when ``basename``'s LEFT edge is open to an arbitrary prefix."""
     if basename[:1] in ("*", "?"):
         return True
-    match = _BRACKET_EXPRESSION_RE.match(basename)
-    return match is not None and match.start() == 0
+    # `.match()` is already anchored at position 0 -- `match.start() == 0`
+    # can never be False when `match` is not None, so it was dead code
+    # (Plan 00306 Task 2.2).
+    return _BRACKET_EXPRESSION_RE.match(basename) is not None
 
 
 def _has_trailing_wildcard(basename: str) -> bool:
@@ -420,7 +437,21 @@ def _glob_token_overlaps_stem(
     A token whose wildcard sits INTERNALLY (``assert.*x``, ``secret*.py``) has
     neither edge open, so neither direction applies. Gated at
     ``_MIN_GLOB_OVERLAP_CHARS`` — see its docstring.
+
+    A token with a wildcard at BOTH edges (``*secret_file*matching*``) is
+    excluded entirely (Plan 00306): that shape asserts nothing about either
+    a fixed prefix or a fixed suffix of a real filename — it is a bare
+    "contains this text" search, not a truncation of one specific protected
+    name. Treating it as a truncation let an ordinary plain-English residue
+    (``secret_file``) trip the reverse-overlap direction purely because it
+    happens to start with the same letters as a short stem's (``.secret``)
+    suffix — observed live: ``find . -iname "*secret_file*matching*"``
+    (an ordinary filename search) was denied as a ``*.secret*`` mention. A
+    truncation with only ONE open edge still has a genuinely anchored other
+    edge, so those keep using the overlap test as before.
     """
+    if leading_wildcard and trailing_wildcard:
+        return False
     if (
         trailing_wildcard
         and _suffix_prefix_overlap_length(residue, stem_basename) >= _MIN_GLOB_OVERLAP_CHARS
@@ -484,9 +515,20 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
                     # concept: how many literal characters are needed
                     # before a partial glob match is trusted as a genuine
                     # truncation rather than coincidence.
+                    # Gated to NOT-both-edges-wildcard (Plan 00306 follow-up,
+                    # same reasoning as `_glob_token_overlaps_stem`'s gate):
+                    # with a wildcard on BOTH sides, `fnmatch(stem, basename)`
+                    # succeeds whenever the residue occurs ANYWHERE inside
+                    # the stem, not just as a real prefix/suffix truncation
+                    # -- an ordinary "*word*" contains-glob (or prose
+                    # emphasis) coincidentally matching a stem that merely
+                    # contains that substring elsewhere (e.g. ``*word*``
+                    # against ``.vault-password``, which ends "...s-s-w-o-r-
+                    # d") is not evidence of a real protected filename.
                     if (
                         len(residue) >= _MIN_GLOB_OVERLAP_CHARS
                         and residue in stem_basename
+                        and not (has_leading_wildcard and has_trailing_wildcard)
                         and fnmatch.fnmatch(stem_basename, basename)
                     ):
                         return pattern
@@ -698,6 +740,9 @@ def is_exempt_invocation(
     if head_base == _HELPER_EXECUTABLE:
         return len(words) > 1 and words[1] == SECRET_META_SUBCOMMAND
 
+    if head_base == _GIT_EXECUTABLE and _is_git_rm_cached(words):
+        return True
+
     for consumer in consumers:
         if head_base != consumer.command:
             continue
@@ -705,6 +750,18 @@ def is_exempt_invocation(
             return False
         return _paths_only_in_flag_position(words, consumer, patterns)
     return False
+
+
+def _is_git_rm_cached(words: list[str]) -> bool:
+    """True when ``words`` is ``git rm ... --cached ...`` -- untrack only.
+
+    Requires the ``rm`` subcommand as the second word and ``--cached``
+    present anywhere after it. No ``--cached`` (or no ``rm``) means the
+    command can delete the working-tree file too, so it is not exempt.
+    """
+    if len(words) < 3 or words[1] != _GIT_RM_SUBCOMMAND:
+        return False
+    return any(word.strip("\"'") == _GIT_RM_CACHED_FLAG for word in words[2:])
 
 
 def _denied_subcommand_used(words: list[str], consumer: ConsumerSpec) -> bool:

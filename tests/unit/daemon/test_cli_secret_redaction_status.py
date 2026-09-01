@@ -51,6 +51,34 @@ class TestCollectSecretRedactionStatusLines:
         assert len(lines) == 1
         assert "/etc/wordlist" in lines[0]
 
+    def test_declared_subproject_absolute_path_is_reported(self, tmp_path: Path) -> None:
+        """Plan 00306 Task 2.1: a `projects:`-declared sub-root's OWN
+        `.claude/hooks-daemon.yaml` can configure an absolute
+        `secret_word_list_path` that degrades silently -- this must be
+        surfaced too, not just the primary root's config (mirrors
+        `_collect_enforcement_status_lines`'s registry-wide iteration)."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\nprojects:\n  - name: sub\n    root: sub-app\n",
+            encoding="utf-8",
+        )
+        sub_root = tmp_path / "sub-app"
+        sub_claude_dir = sub_root / ".claude"
+        sub_claude_dir.mkdir(parents=True)
+        (sub_claude_dir / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\n"
+            "handlers:\n"
+            "  pre_tool_use:\n"
+            "    sensitive_content:\n"
+            "      options:\n"
+            "        secret_word_list_path: /etc/sub-wordlist\n",
+            encoding="utf-8",
+        )
+        lines = _collect_secret_redaction_status_lines(tmp_path)
+        assert len(lines) == 1
+        assert "/etc/sub-wordlist" in lines[0]
+
     def test_malformed_config_reports_nothing_rather_than_raising(self, tmp_path: Path) -> None:
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()

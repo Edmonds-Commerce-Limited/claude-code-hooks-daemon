@@ -115,7 +115,13 @@ class TestProseFalseTriggerGetsNoRemediationTemplate:
         assert len(result.reason) < 800
 
     def test_reason_still_explains_why_it_was_blocked(self) -> None:
-        """A short reason must still be an ACCURATE one, not just terse."""
+        """A short reason must still be an ACCURATE one, not just terse.
+
+        The config-path disable hint is injected once by the router
+        (`inject_config_key_footer`), not duplicated here by the handler
+        (Plan 00306 Task 2.4) -- this raw `handle()` reason carries the
+        WHY-BLOCKED explanation only.
+        """
         handler = PipeBlockerHandler()
         hook_input = {
             "tool_name": "Bash",
@@ -123,7 +129,6 @@ class TestProseFalseTriggerGetsNoRemediationTemplate:
         }
         result = handler.handle(hook_input)
         assert "BLOCKED" in result.reason
-        assert "handlers.pre_tool_use.pipe_blocker" in result.reason
 
 
 class TestProseIsDetectedEvenWhenItStartsWithACommandName:

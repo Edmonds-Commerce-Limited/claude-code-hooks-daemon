@@ -318,11 +318,14 @@ class TestBlacklistedTerseMessage:
         """Terse blacklisted message includes the blocked command."""
         assert "COMMAND:" in self._second_fire(handler, blacklisted_input)
 
-    def test_terse_blacklisted_contains_disable_hint(
+    def test_terse_blacklisted_does_not_duplicate_disable_hint(
         self, handler: PipeBlockerHandler, blacklisted_input: dict
     ) -> None:
-        """Terse blacklisted message includes disable hint."""
-        assert "pipe_blocker" in self._second_fire(handler, blacklisted_input)
+        """Plan 00306 Task 2.4: the 'To disable:' footer is injected once by
+        the router (`inject_config_key_footer`) -- the handler's own raw
+        `handle()` output must not carry its own copy, or the two combine
+        into a duplicate line once routed."""
+        assert "To disable:" not in self._second_fire(handler, blacklisted_input)
 
     def test_terse_blacklisted_leads_with_rule_id(
         self, handler: PipeBlockerHandler, blacklisted_input: dict

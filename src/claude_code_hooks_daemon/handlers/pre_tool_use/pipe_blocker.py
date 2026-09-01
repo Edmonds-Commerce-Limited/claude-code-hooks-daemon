@@ -38,7 +38,6 @@ logger = logging.getLogger(__name__)
 
 # Config key hints shown in unknown-command message
 _CONFIG_HINT_EXTRA_WHITELIST = "extra_whitelist"
-_CONFIG_HINT_HANDLER = "handlers.pre_tool_use.pipe_blocker"
 _CONFIG_YAML_KEY = "pipe_blocker"
 
 # Default preview line count suggested in the echd-capture recommendation.
@@ -904,8 +903,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             "IF THIS WAS PROSE (e.g. a heredoc describing a pipe pattern): no "
             "action needed beyond retrying — the false trigger is now handled; "
             "for a permanent fix use the `Write` tool instead of a `cat <<EOF` "
-            "heredoc for prose content\n\n"
-            f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
+            "heredoc for prose content"
         )
 
     def _blacklisted_reason(self, rule_id: str, source_segment: str, command: str) -> str:
@@ -919,8 +917,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             f"  • If needed data isn't in those N truncated lines, the ENTIRE\n"
             f"    expensive command must be re-run\n"
             f"  • This wastes time and resources\n\n"
-            f"{self._echd_capture_recommendation(source_segment)}\n"
-            f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
+            f"{self._echd_capture_recommendation(source_segment)}"
         )
 
     def _blacklisted_terse_reason(self, rule_id: str, source_segment: str, command: str) -> str:
@@ -929,8 +926,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         return (
             f"BLOCKED [{rule_id}]: Pipe to tail/head — {source_name} is expensive\n\n"
             f"COMMAND: {self._truncate_command(command)}\n\n"
-            f"{self._echd_capture_terse(source_segment)}\n"
-            f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
+            f"{self._echd_capture_terse(source_segment)}"
         )
 
     def _unknown_reason(self, rule_id: str, source_segment: str, command: str) -> str:
@@ -950,8 +946,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             f"{self._echd_capture_recommendation(source_segment)}\n"
             f"INFO: WHITELISTED COMMANDS (piping is OK):\n"
             f"  Commands that already filter output: grep, rg, awk, sed, jq, ls, cat, etc.\n\n"
-            f"  Example: grep error /var/log/syslog | tail -n 20  (allowed)\n\n"
-            f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
+            f"  Example: grep error /var/log/syslog | tail -n 20  (allowed)"
         )
 
     def _unknown_terse_reason(self, rule_id: str, source_segment: str, command: str) -> str:
@@ -964,8 +959,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             f"  {_CONFIG_YAML_KEY}:\n"
             f"    {_CONFIG_HINT_EXTRA_WHITELIST}:\n"
             f'      - "^{source_name}\\\\b"\n\n'
-            f"{self._echd_capture_terse(source_segment)}\n"
-            f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
+            f"{self._echd_capture_terse(source_segment)}"
         )
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:

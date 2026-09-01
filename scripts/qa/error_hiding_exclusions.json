@@ -941,6 +941,18 @@
       "function": "_candidate_folders",
       "rule": "return-none-on-error",
       "reason": "Plan 00299: _candidate_folders resolves a ledgered plan number to its folder; a folder that vanished mid-read (archived/renamed by a concurrent agent) yields no candidates rather than raising, so the combined goal view renders the remaining live plans. The stale entry is retired by the ledger's displacement logic, not this read path."
+    },
+    {
+      "file": "daemon/cli.py",
+      "function": "_collect_secret_redaction_status_lines",
+      "rule": "silent-fallback",
+      "reason": "Plan 00306 Task 2.1: same shape and same precedent as this file's own _collect_enforcement_status_lines entry above -- this helper also backs `check`, which is also the tool used to diagnose a broken config, so a primary-root config-load failure here must not itself break `check` and falls back to a single-project registry (repository root only) rather than raising. Config validation elsewhere in `check` already reports the underlying error."
+    },
+    {
+      "file": "daemon/cli.py",
+      "function": "_collect_secret_redaction_status_lines",
+      "rule": "silent-continue",
+      "reason": "Plan 00306 Task 2.1: per-root loop over the ProjectRegistry roots -- a single declared sub-project's own .claude/hooks-daemon.yaml being unreadable or malformed must not stop the advisory sweep of every OTHER root, so that root is skipped and the loop continues. Mirrors _collect_enforcement_status_lines's per-root best-effort contract (this file); the primary root's config is already validated (and any error reported) by the outer try/except this function starts with."
     }
   ]
 }

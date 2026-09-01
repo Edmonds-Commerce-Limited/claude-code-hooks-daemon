@@ -41,6 +41,44 @@ class TestPipeBlockerIntegration:
         assert len(result.handlers_matched) > 0, "Should have matched handlers"
         assert HandlerID.PIPE_BLOCKER.display_name in result.handlers_matched
 
+    def test_blacklisted_deny_has_single_disable_footer(self) -> None:
+        """Plan 00306 Task 2.4: the handler's own manual 'To disable:' line
+        must not duplicate the framework's automatic footer
+        (`inject_config_key_footer`, router.py) -- observed live: every deny
+        shape printed the line twice."""
+        router = EventRouter()
+        handler = PipeBlockerHandler()
+        router.register(EventType.PRE_TOOL_USE, handler)
+
+        hook_input = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": "pytest tests/ | tail -20"},
+            "session_id": "test-session",
+        }
+
+        result = router.route(EventType.PRE_TOOL_USE, hook_input)
+
+        assert result.result.decision == "deny"
+        assert result.result.reason.count("To disable:") == 1
+
+    def test_unknown_deny_has_single_disable_footer(self) -> None:
+        router = EventRouter()
+        handler = PipeBlockerHandler()
+        router.register(EventType.PRE_TOOL_USE, handler)
+
+        hook_input = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": "docker ps -a | tail -10"},
+            "session_id": "test-session",
+        }
+
+        result = router.route(EventType.PRE_TOOL_USE, hook_input)
+
+        assert result.result.decision == "deny"
+        assert result.result.reason.count("To disable:") == 1
+
     def test_docker_ps_pipe_tail_blocks_as_unknown_through_router(self) -> None:
         """Test docker ps | tail is blocked as unknown command through full pipeline."""
         router = EventRouter()
