@@ -269,11 +269,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 312 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 313 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 257 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 40 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
