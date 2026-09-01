@@ -1164,6 +1164,18 @@ def cmd_check(args: argparse.Namespace) -> int:
     for line in _format_project_handler_health_lines(_read_project_handler_health(project_path)):
         print(line)
 
+    # 6. Downgraded handler enforcement (Plan 00296 T4.1): a handler whose
+    # strictness depends on what it finds on disk (llm: scripts, a resolvable
+    # linter) can quietly drop to advisory-only with nothing saying so outside
+    # its own source. Surface that here instead.
+    print("\nHandler enforcement status:")
+    enforcement_lines = _collect_enforcement_status_lines(project_path)
+    if not enforcement_lines:
+        print("  OK — no downgraded enforcement detected")
+    else:
+        for line in enforcement_lines:
+            print(f"  ⚠️  {line}")
+
     return 0
 
 
@@ -1667,6 +1679,82 @@ def _load_project_handlers(config: "Config", project_path: Path) -> list[Any]:
 
     discovered = ProjectHandlerLoader.discover_handlers(handlers_path)
     return [handler for _event_type, handler in discovered]
+
+
+def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
+    """Surface downgraded handler enforcement at `check` time (Plan 00296 T4.1).
+
+    Some handlers decide their strictness from what they find on disk (an
+    `llm:` script in `package.json`, a resolvable linter binary) — when that
+    probe comes up empty, enforcement quietly drops to advisory-only with
+    nothing saying so outside the handler's own source. `Handler.get_
+    enforcement_status()` lets a handler declare that posture; this collects
+    it from the built-in handlers known to have one, evaluated at the
+    repository root and every `projects:`-declared root.
+
+    Deliberately narrow rather than iterating every registered handler: most
+    handlers have no such probe (the base default is `[]`), and instantiating
+    the full handler set here — bypassing the registry, config filtering and
+    daemon lifecycle — would be the wrong tool for a `handlers`-wide sweep.
+    This targets the three handlers the design identified as degrading
+    silently; a fourth would be added the same way.
+
+    Best-effort: config-load failure here must not break `check`, which is
+    also used to diagnose a broken config — so any error falls back to
+    single-project (repository root only).
+
+    Returns:
+        Advisory lines, or an empty list when every probed handler is nominal
+        at every evaluated root.
+    """
+    from unittest.mock import patch
+
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+    from claude_code_hooks_daemon.core.workspace import ProjectRegistry
+    from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler
+    from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write import (
+        ValidateEslintOnWriteHandler,
+    )
+    from claude_code_hooks_daemon.handlers.pre_tool_use.npm_command import NpmCommandHandler
+
+    config_file = project_path / ".claude" / "hooks-daemon.yaml"
+    registry: ProjectRegistry
+    try:
+        config_dict = ConfigLoader.load(config_file) if config_file.exists() else {}
+        config = Config.model_validate(config_dict)
+        registry = ProjectRegistry.from_config(config, project_path)
+    except (PydanticValidationError, OSError, ValueError):
+        registry = ProjectRegistry.single_project(project_path)
+
+    roots = [registry.project_root, *(project.root for project in registry.projects)]
+
+    # Construction alone probes ProjectContext.project_root() (npm_command,
+    # validate_eslint_on_write) for state this function never reads -- their
+    # posture is decided per-root below via get_enforcement_status(), not from
+    # that constructor default. A daemon-driven `check` may run with no live
+    # ProjectContext (that singleton is initialised at daemon startup, and
+    # this CLI command talks to config files directly), so it is patched for
+    # the duration of construction only, exactly as the handlers' own test
+    # suites already do (see e.g. test_validate_eslint_on_write.py's
+    # mock_project_context fixture).
+    with patch.object(ProjectContext, "project_root", return_value=project_path):
+        handlers: list[Any] = [
+            NpmCommandHandler(),
+            LintOnEditHandler(),
+            ValidateEslintOnWriteHandler(),
+        ]
+    for handler in handlers:
+        handler._project_registry = registry
+
+    statuses: list[str] = []
+    seen: set[str] = set()
+    for handler in handlers:
+        for root in roots:
+            for status in handler.get_enforcement_status(root):
+                if status not in seen:
+                    seen.add(status)
+                    statuses.append(status)
+    return statuses
 
 
 def _format_project_handler_health_lines(

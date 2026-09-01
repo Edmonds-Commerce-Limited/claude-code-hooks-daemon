@@ -737,6 +737,43 @@ class TestLintOnEditGetRules:
         assert handler.get_rules()[0].verbose
 
 
+class TestLintOnEditEnforcementStatus:
+    """get_enforcement_status() (Plan 00296 T4.1): degraded-mode visibility.
+
+    Only the EXTENDED linter is probed -- the built-in default command is
+    always available, so its absence is not a degradation worth reporting.
+    """
+
+    def test_nominal_when_every_extended_linter_resolves(
+        self, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        with patch.object(handler, "_resolve_executable", side_effect=lambda name, *_: name):
+            assert handler.get_enforcement_status(tmp_path) == []
+
+    def test_reports_unresolvable_extended_linters(
+        self, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        with patch.object(handler, "_resolve_executable", return_value=None):
+            statuses = handler.get_enforcement_status(tmp_path)
+        # Every registered strategy with an extended command is unresolved.
+        extended_language_count = sum(
+            1 for s in handler._registry.strategies() if s.extended_lint_command
+        )
+        assert extended_language_count > 0
+        assert len(statuses) == extended_language_count
+        for status in statuses:
+            assert "lint_on_edit" in status
+            assert "extended linter" in status
+            assert str(tmp_path) in status
+
+    def test_respects_language_filter(self, handler: LintOnEditHandler, tmp_path: Path) -> None:
+        """A `languages` restriction narrows which strategies are probed."""
+        handler._languages = ["Python"]
+        with patch.object(handler, "_resolve_executable", return_value=None):
+            statuses = handler.get_enforcement_status(tmp_path)
+        assert all("Python" in status for status in statuses)
+
+
 class TestLintOnEditDisclosureLadder:
     """Verbose-first/terse-after per (transcript_path, rule_id) (Plan 00116).
 

@@ -1,5 +1,7 @@
 """Comprehensive tests for Handler base class."""
 
+from pathlib import Path
+
 import pytest
 
 from claude_code_hooks_daemon.constants import Priority, ToolName
@@ -1006,3 +1008,44 @@ class TestHandlerGetClaudeMd:
         handler = ConcreteHandler(name="test-handler")
         result = handler.get_claude_md()
         assert result is None or isinstance(result, str)
+
+
+class TestHandlerGetEnforcementStatus:
+    """Tests for Handler.get_enforcement_status() (Plan 00296 T4.1).
+
+    Concrete with a "nothing to report" default: most handlers have no
+    on-disk-dependent posture, so requiring an override would force every
+    handler to implement a method it has nothing to say through.
+    """
+
+    def test_default_is_empty_list(self, tmp_path: Path) -> None:
+        handler = ConcreteHandler(name="test-handler")
+        assert handler.get_enforcement_status(tmp_path) == []
+
+    def test_subclass_can_override_to_report_degradation(self, tmp_path: Path) -> None:
+        class DegradedHandler(ConcreteHandler):
+            def get_enforcement_status(self, project_root: Path) -> list[str]:
+                return [f"degraded at {project_root}"]
+
+        handler = DegradedHandler(name="degraded-handler")
+        statuses = handler.get_enforcement_status(tmp_path)
+        assert statuses == [f"degraded at {tmp_path}"]
+
+    def test_not_overriding_never_forces_implementation(self) -> None:
+        """Unlike get_claude_md/matches/handle, omitting this is not a TypeError."""
+
+        class NoStatusHandler(Handler):
+            def matches(self, hook_input: dict) -> bool:
+                return True
+
+            def handle(self, hook_input: dict) -> HookResult:
+                return HookResult(decision=Decision.ALLOW)
+
+            def get_claude_md(self) -> str | None:
+                return None
+
+            def get_acceptance_tests(self) -> list:
+                return []
+
+        # Must not raise -- get_enforcement_status is concrete, not abstract.
+        NoStatusHandler(name="no-status-handler")

@@ -25,6 +25,7 @@ _FILEMODE_MODULE = (
 _CONTAINER_MODULE = "claude_code_hooks_daemon.utils.container_detection"
 _REGISTRATION = "claude_code_hooks_daemon.daemon.cli.check_hook_registration_warnings"
 _HEALTH = "claude_code_hooks_daemon.daemon.cli._read_project_handler_health"
+_ENFORCEMENT = "claude_code_hooks_daemon.daemon.cli._collect_enforcement_status_lines"
 
 
 def _check(name: str, passed: bool) -> dict[str, Any]:
@@ -52,6 +53,7 @@ def _patches(
     filemode: str | None = "true",
     warnings: list[str] | None = None,
     health: Any = None,
+    enforcement: list[str] | None = None,
 ) -> Any:
     """Patch every external probe cmd_check relies on, for determinism."""
     from claude_code_hooks_daemon.daemon.project_handler_health import (
@@ -61,6 +63,7 @@ def _patches(
     checks = checks if checks is not None else [_check("Agent Teams", True)]
     warnings = warnings if warnings is not None else []
     health = health if health is not None else ProjectHandlerHealthState()
+    enforcement = enforcement if enforcement is not None else []
     return (
         patch(_OPT_MODULE, return_value=checks),
         patch(_FILEMODE_MODULE, return_value=filemode),
@@ -68,6 +71,7 @@ def _patches(
         patch(f"{_CONTAINER_MODULE}.in_container", return_value=in_container),
         patch(_REGISTRATION, return_value=warnings),
         patch(_HEALTH, return_value=health),
+        patch(_ENFORCEMENT, return_value=enforcement),
     )
 
 
@@ -168,6 +172,28 @@ class TestCmdCheck:
             cmd_check(_args())
         out = capsys.readouterr().out
         assert "Project handler" in out
+
+    def test_reports_enforcement_ok_when_nominal(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """No downgraded handler enforcement reads as a clean OK line."""
+        with self._enter(_patches(enforcement=[])):
+            cmd_check(_args())
+        out = capsys.readouterr().out
+        assert "Handler enforcement status" in out
+        assert "OK — no downgraded enforcement detected" in out
+
+    def test_reports_downgraded_enforcement(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A handler-declared degradation is surfaced verbatim in check output."""
+        message = (
+            "npm_command: llm-wrapper enforcement inactive at /repo/web "
+            "(no llm: scripts found in package.json) — raw npm run/npx commands "
+            "get an advisory only, not a DENY."
+        )
+        with self._enter(_patches(enforcement=[message])):
+            cmd_check(_args())
+        out = capsys.readouterr().out
+        assert "Handler enforcement status" in out
+        assert message in out
+        assert "OK — no downgraded enforcement detected" not in out
 
     @staticmethod
     def _enter(patches: Any) -> Any:

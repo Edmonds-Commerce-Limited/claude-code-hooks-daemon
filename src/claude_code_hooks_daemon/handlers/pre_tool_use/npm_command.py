@@ -302,6 +302,20 @@ class NpmCommandHandler(PreToolUseHandlerBase):
 
         return f"{message}\n\n{dynamic_detail}"
 
+    def get_enforcement_status(self, project_root: Path) -> list[str]:
+        """Advisory when ``project_root`` has no ``llm:`` scripts (Plan 00296 T4.1).
+
+        Cheap: one ``package.json`` read via ``has_llm_commands_in_package_json``,
+        the same probe ``handle()`` already runs per invocation — no extra cost.
+        """
+        if has_llm_commands_in_package_json(project_root):
+            return []
+        return [
+            f"npm_command: llm-wrapper enforcement inactive at {project_root} "
+            "(no llm: scripts found in package.json) — raw npm run/npx commands "
+            "get an advisory only, not a DENY."
+        ]
+
     def get_claude_md(self) -> str | None:
         return (
             "## npm_command — use llm: prefixed npm commands\n\n"

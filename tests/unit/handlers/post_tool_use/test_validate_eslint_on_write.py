@@ -795,6 +795,40 @@ class TestValidateEslintOnWriteGetRules:
             assert rule.verbose
 
 
+class TestValidateEslintOnWriteEnforcementStatus:
+    """get_enforcement_status() (Plan 00296 T4.1): degraded-mode visibility."""
+
+    def test_nominal_when_llm_commands_present(
+        self, tmp_path: Path, mock_llm_commands_detection: MagicMock
+    ) -> None:
+        mock_llm_commands_detection.return_value = True
+        handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+        assert handler.get_enforcement_status(tmp_path) == []
+
+    def test_advisory_when_no_llm_commands(
+        self, tmp_path: Path, mock_llm_commands_detection: MagicMock
+    ) -> None:
+        mock_llm_commands_detection.return_value = False
+        handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+        statuses = handler.get_enforcement_status(tmp_path)
+        assert len(statuses) == 1
+        assert "validate_eslint_on_write" in statuses[0]
+        assert "ESLint validation is skipped" in statuses[0]
+
+    def test_pinned_workspace_root_wins_over_passed_root(
+        self, tmp_path: Path, mock_llm_commands_detection: MagicMock
+    ) -> None:
+        """A pinned root (the test seam) is the one actually probed."""
+        pinned = tmp_path / "pinned"
+        pinned.mkdir()
+        other = tmp_path / "other"
+        other.mkdir()
+        mock_llm_commands_detection.return_value = False
+        handler = ValidateEslintOnWriteHandler(workspace_root=pinned)
+        handler.get_enforcement_status(other)
+        mock_llm_commands_detection.assert_called_with(pinned)
+
+
 class TestValidateEslintOnWriteDisclosureLadder:
     """Verbose-first/terse-after per (transcript_path, rule_id) (Plan 00116).
 
