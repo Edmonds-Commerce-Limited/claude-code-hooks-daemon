@@ -51,6 +51,9 @@ handlers:                # Handler configuration by event type
 
 plugins:                 # Custom project-specific handlers
   # ...
+
+projects:                # Monorepo sub-tree declarations (optional)
+  # ...
 ```
 
 ---
@@ -115,6 +118,52 @@ supervisor path from `ccy.env`'s own directory at source time, so one line works
 for both the podman `/workspace` mount and an arbitrary LXC project dir. Arming
 is idempotent and respects the user: an existing `CCY_CLAUDE_WRAPPER` in
 `ccy.env` (set OR commented out to disable) is left untouched.
+
+---
+
+## Projects (monorepo boundaries)
+
+The top-level `projects:` block declares a monorepo's sub-trees so
+workspace-aware handlers (e.g. `npm_command`, `lint_on_edit`,
+`tdd_enforcement`) resolve config, linters and test dirs against the right
+project instead of the repo root. Full design and rationale:
+[../../CLAUDE/Code/WorkspaceResolution.md](../../CLAUDE/Code/WorkspaceResolution.md)
+— this section covers only the config shape.
+
+**Omitted entirely (the default)**: one project at the repo root,
+byte-identical to today's behaviour.
+
+```yaml
+projects:
+  - name: web
+    root: web
+  - name: service
+    root: service
+  - name: infra
+    root: infra
+    kind: ansible          # no manifest at this root — declaration is the only way
+    bin_dirs: [.venv/bin]
+```
+
+| Field      | Required | Description                                                                           |
+| ---------- | -------- | ------------------------------------------------------------------------------------- |
+| `name`     | yes      | Unique identifier within the block; used in advisory/diagnostic output.               |
+| `root`     | yes      | Repository-relative project directory. `.` declares the repo root itself.             |
+| `kind`     | no       | Ecosystem name. Unset infers from the manifest found at `root`.                       |
+| `bin_dirs` | no       | Root-relative tool bin dirs. Unset infers from `kind`; `[]` explicitly declares none. |
+
+**Every path is repository-root-relative — zero absolute paths.** `root` and
+each `bin_dirs` entry reject absolute paths, `~`, and `..` escapes. `name`
+values must be unique within the block; duplicates are rejected at load. A
+declared project need not contain a manifest — `infra/` above is exactly the
+case declaration exists for.
+
+The `monorepo_detector` session-start handler is advisory only: when it sees
+an unconfigured monorepo shape, it prints a paste-ready `projects:` block, but
+never changes enforcement itself.
+
+`markdown_organization`'s `monorepo_subproject_patterns` option is a
+**deprecated alias** for a `projects:` entry — declare projects here instead.
 
 ---
 

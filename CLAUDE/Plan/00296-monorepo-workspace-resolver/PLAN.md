@@ -140,7 +140,7 @@ consumes: this changes where a `Workspace` COMES FROM, not what consumes it.
 - [x] ✅ **Task 3.5**: `markdown_organization`'s `monorepo_subproject_patterns`
   re-expressed as `projects:` entries, keeping the option working as a
   deprecated alias rather than a parallel mechanism.
-- [ ] ⬜ **Task 3.6**: Document `projects:` in the config reference and
+- [x] ✅ **Task 3.6**: Document `projects:` in the config reference and
   rewrite [../../Code/WorkspaceResolution.md](../../Code/WorkspaceResolution.md)
   around declared-or-root, with the manifest walk described as detection.
 
