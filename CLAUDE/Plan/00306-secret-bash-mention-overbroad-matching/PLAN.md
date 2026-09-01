@@ -1,6 +1,6 @@
 # Plan 00306: secret bash mention overbroad matching
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-01
 **Owner**: joseph
 **Priority**: Medium
@@ -42,10 +42,25 @@ without weakening genuine protected-path detection.
   journal context (grep/utility commands whose text contained plain words
   with "secret") and pin it with a failing unit test against the
   Bash-mention matching path.
+
 - [ ] ⬜ **Task 1.2**: Tighten the matching (likely the same
   complete-bracket/glob-shape discipline applied in
   `utils/secret_file_matching.py` for Task 2.5) so the pinned test passes
   with the full existing secret_file_guard suite green.
+
+- [ ] ⬜ **Task 1.3**: The daemon contradicts itself on secret-file
+  untracking: `secret_file_hygiene_checker` instructs the agent to run
+  `git rm --cached <path>` on a git-tracked protected path, but
+  `R-SECRET-BASH-MENTION` denies ANY Bash command whose text mentions that
+  path — so the daemon's own recommended remediation is un-runnable
+  verbatim (observed live: untracking `.claude/block-words.secret.example`
+  required a `git rm --cached '.claude/block-words.*'` pathspec-glob
+  workaround). `git rm --cached` never reads file content; it only
+  improves the exact hygiene the checker polices. Fix: exempt
+  `git rm --cached <protected-path>` in the secret_file_guard Bash-mention
+  path (same trusted-consumer discipline as the existing flag-position
+  exemptions), pinned by a TDD test, so the hygiene checker's instruction
+  works as printed. Keep every content-reading command denied.
 
 ### Phase 2: v3.58.1 code-review non-blocking findings (same subsystem)
 

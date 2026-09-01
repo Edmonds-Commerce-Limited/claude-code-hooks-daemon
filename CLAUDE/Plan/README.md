@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00306: secret bash mention overbroad matching](00306-secret-bash-mention-overbroad-matching/PLAN.md) - Not Started (R-SECRET-BASH-MENTION false-fires on plain words containing "secret" with no protected path named; same defect class as the Edit-path fix in Plan 00305 Task 2.5, Bash-mention path)
+- [00306: secret bash mention overbroad matching](00306-secret-bash-mention-overbroad-matching/PLAN.md) - In Progress (R-SECRET-BASH-MENTION false-fires on plain words containing "secret" with no protected path named; same defect class as the Edit-path fix in Plan 00305 Task 2.5, Bash-mention path; now also ledgers the hygiene-checker-vs-guard contradiction on `git rm --cached` of a protected path, found live during housekeeping)
 
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
 
