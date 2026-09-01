@@ -240,6 +240,10 @@ class Priority:
     # Plan 00296 Task 3.4: monorepo detector advisory -- next free SessionStart
     # priority after tool_disable_advisor (65), so ADVISORY_MAX widens by one.
     MONOREPO_DETECTOR = 66
+    # Plan 00308: post-upgrade config-optimisation reminder -- next free
+    # SessionStart priority after monorepo_detector (66), so ADVISORY_MAX
+    # widens by one again.
+    CONFIG_OPTIMISATION_REMINDER = 67
 
     # Advisory handlers (Priority: 55-65)
     CRITICAL_THINKING_ADVISORY = 55
@@ -290,8 +294,9 @@ class PriorityRange:
     # Widened from 60 for skill_opportunity_detector (Plan 00274): 56-60 was
     # fully occupied by the SessionStart advisory ladder ending at
     # contract_staleness (60). Widened again to 66 for monorepo_detector
-    # (Plan 00296 Task 3.4). Documented in root CLAUDE.md's Priority Ranges.
-    ADVISORY_MAX = 66
+    # (Plan 00296 Task 3.4), and to 67 for config_optimisation_reminder
+    # (Plan 00308). Documented in root CLAUDE.md's Priority Ranges.
+    ADVISORY_MAX = 67
 
     LOGGING_MIN = 100
     LOGGING_MAX = 199

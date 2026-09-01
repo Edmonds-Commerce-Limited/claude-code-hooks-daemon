@@ -1,16 +1,25 @@
 ---
 name: optimise
-description: Analyse hooks daemon configuration and recommend improvements across Safety, Stop Quality, Plan Workflow, Code Quality, and Daemon Settings
+description: Analyse hooks daemon configuration and recommend improvements across Safety, Stop Quality, Plan Workflow, Code Quality, and Daemon Settings — the canonical config-optimisation step
 argument-hint: ""
 ---
 
-# /optimise - Configuration Optimiser Skill
+# /optimise - Configuration Optimiser Skill (canonical config-optimisation step)
 
 ## Description
 
+This is the formalised "enable all relevant handlers and ensure optimal configuration"
+step (Plan 00308) — the same step whether run manually, automatically at the end of
+`/hooks-daemon upgrade`, or as the closing step of LLM-INSTALL.md/LLM-UPDATE.md. There
+is no separate `config-optimisation` command; `/optimise` IS it.
+
 Analyse the current hooks daemon configuration against the project's profile (languages,
-tests, CI, plans) and produce a scored report across five key areas. Recommends specific
-handler changes and can apply them automatically.
+tests, CI, plans) and produce a scored report across five key areas. Also compares the
+project's config against `CLAUDE/UPGRADES/config-changes/` manifests to surface
+capabilities introduced since the last recorded run, and can apply recommendations
+automatically. Every run (report-only or apply) records itself via
+`bin/hooks-daemon record-config-optimisation-run`, which silences the
+`config_optimisation_reminder` SessionStart advisory until the next upgrade.
 
 ## Usage
 

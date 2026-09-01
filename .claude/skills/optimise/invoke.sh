@@ -31,13 +31,48 @@ echo ""
 # The rest of the instructions are static — quoted heredoc suppresses variable expansion
 # and shellcheck parsing of the instruction body
 cat <<'SKILL_INSTRUCTIONS'
-# Hooks Daemon Configuration Optimiser
+# Hooks Daemon Configuration Optimiser (the canonical config-optimisation step)
 
 You are now running the /optimise skill. Follow these instructions precisely and completely.
+
+This IS "config-optimisation": the formalised, repeatable answer to "enable all
+relevant handlers and ensure optimal configuration for this project" (Plan 00308).
+It is the same step whether invoked manually, at the end of `/hooks-daemon upgrade`,
+or from LLM-INSTALL.md/LLM-UPDATE.md's closing step — there is no separate command.
 
 The environment values (daemon CLI path, config path, project root) are printed
 above. Use those exact values throughout these instructions wherever DAEMON_CLI,
 CONFIG, and PROJECT_ROOT are referenced.
+
+---
+
+## Step 0: What's new since the last review
+
+Before profiling, check whether this project's config has fallen behind the
+installed daemon version's capabilities:
+
+1. Read the daemon's own version: `PROJECT_ROOT/src/claude_code_hooks_daemon/version.py`
+   in self-install mode, otherwise treat the CLI wrapper as authoritative — running
+   `DAEMON_CLI status` prints it.
+2. Read the last recorded config-optimisation run version, if any:
+   `PROJECT_ROOT/untracked/config_optimisation_state.json` (self-install) or
+   `PROJECT_ROOT/.claude/hooks-daemon/untracked/config_optimisation_state.json`
+   (normal install). Missing file = never reviewed; treat every manifest as new.
+3. List the manifests under `CLAUDE/UPGRADES/config-changes/v*.yaml` whose `version`
+   is greater than the last recorded run version (or all of them, if never reviewed).
+4. For each such manifest, read its `config_changes.added` and `config_changes.changed`
+   entries — each has a `key`, `description`, and `migration_note`. These are NEW
+   capabilities/behaviour this project has not yet been reviewed against.
+5. Fold each `added` entry whose `key` names a `handlers.<event>.<name>` path into the
+   Step 5 recommendations list below (even if Step 3's five-area scan does not cover
+   that specific handler) — tag it "New since v<manifest version>" so it reads as an
+   upgrade-driven recommendation, not a stale one. `changed`/`removed` entries are
+   informational only — surface them in the report but do not turn them into
+   enable/disable recommendations, since they describe existing config, not a new
+   disabled-by-default handler.
+
+If `CLAUDE/UPGRADES/config-changes/` does not exist in this project, skip this step
+silently — not every project vendors that manifest tree.
 
 ---
 
@@ -322,6 +357,23 @@ If the daemon fails to restart, output:
   WARNING: Daemon failed to restart after changes.
   Check logs: DAEMON_CLI logs
   The config changes were saved but may have a syntax error.
+
+---
+
+## Step 7: Record This Run
+
+Regardless of whether the user chose "apply", "apply N,M", or "skip" — a review
+happened, so record it. Run:
+
+  DAEMON_CLI record-config-optimisation-run
+
+(Replace DAEMON_CLI with the actual wrapper path printed at the top.) This writes the
+daemon's own version to untracked state, which the `config_optimisation_reminder`
+SessionStart handler compares against on future sessions — recording the run here is
+what silences that reminder until the next upgrade. Do this even for a report-only
+"skip" run: the review itself is what the reminder is tracking, not whether changes
+were applied. If the command fails, note it in the output but do not treat it as a
+failure of the review itself.
 
 ---
 

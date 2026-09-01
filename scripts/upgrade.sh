@@ -27,9 +27,17 @@ set -euo pipefail
 
 PROJECT_ROOT=""
 TARGET_VERSION=""
+# Plan 00308: forwarded to Layer 2 (upgrade_version.sh) via UPGRADE_FLAGS,
+# which already checks it — opts out of the mandatory post-upgrade
+# config-optimisation review reminder.
+UPGRADE_FLAGS=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --skip-config-optimisation)
+            UPGRADE_FLAGS="$UPGRADE_FLAGS --skip-config-optimisation"
+            shift
+            ;;
         --project-root)
             [ -n "${2:-}" ] || { echo "ERR --project-root requires a path argument" >&2; exit 1; }
             PROJECT_ROOT="$2"
@@ -38,8 +46,9 @@ while [ $# -gt 0 ]; do
         --help|-h)
             echo "Usage: upgrade.sh --project-root PATH [VERSION]"
             echo ""
-            echo "  --project-root PATH  Project root directory (REQUIRED)"
-            echo "  VERSION              Git tag to upgrade to (default: latest)"
+            echo "  --project-root PATH        Project root directory (REQUIRED)"
+            echo "  --skip-config-optimisation Opt out of the mandatory post-upgrade /optimise reminder"
+            echo "  VERSION                    Git tag to upgrade to (default: latest)"
             exit 0
             ;;
         --already-bootstrapped)
@@ -444,6 +453,7 @@ fi
 _info "Delegating to version-specific upgrader..."
 # Invoke Layer 2 inside an `if` so set -e does not abort on its (potentially
 # nonzero) exit. Non-zero = abort without emitting metadata.
+export UPGRADE_FLAGS
 if ! bash "$LAYER2_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION"; then
     LAYER2_EXIT=$?
     exit "$LAYER2_EXIT"

@@ -363,6 +363,12 @@
       "reason": "Skill-scan TTL state (Plan 00274): log-and-continue on state write failure, the version_check cache pattern. The scan is advisory; a failed state write means the advisory refires next session, which fails toward a suggestion rather than silence."
     },
     {
+      "file": "config_optimisation/state.py",
+      "function": "record_run",
+      "rule": "log-and-continue",
+      "reason": "Config-optimisation last-run state (Plan 00308): same log-and-continue pattern as skill_scan/state.py's _write_state. A failed state write means the config_optimisation_reminder advisory refires next session (fails toward reminding, never toward silence)."
+    },
+    {
       "file": "skill_scan/extraction.py",
       "function": "extract_prompts",
       "rule": "log-and-continue",
@@ -768,7 +774,7 @@
     {
       "file": "scripts/upgrade.sh",
       "lines": [
-        373
+        382
       ],
       "rule": "shell-&>/dev/null",
       "reason": "Plan 00200 Task 5.4: `git rev-parse \"$TARGET_VERSION\" &>/dev/null || _fail \"Version $TARGET_VERSION not found\"` -- explicit failure handling via `_fail`, output suppressed only because git's own \"unknown revision\" noise is not the diagnostic (the _fail message is). Module-level, hence line-based match."

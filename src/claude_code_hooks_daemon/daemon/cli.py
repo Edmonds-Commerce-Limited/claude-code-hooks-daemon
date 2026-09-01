@@ -4234,6 +4234,34 @@ def cmd_secret_meta(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_record_config_optimisation_run(args: argparse.Namespace) -> int:
+    """Record that the config-optimisation review (``/optimise``) ran (Plan 00308).
+
+    Writes the daemon version + timestamp to the same untracked state
+    directory ``version_check`` caches in, so the
+    ``config_optimisation_reminder`` SessionStart handler can compare a
+    project's next-session installed version against it and remind the
+    agent when they drift. The ``/optimise`` skill calls this at the end of
+    every run (report-only or apply) — it is the one thing that skill needs
+    to do beyond editing the config, and belongs in the CLI rather than a
+    bare file write from the skill's bash prelude so the state schema has a
+    single source of truth.
+
+    Returns:
+        0 always — a failure to persist state degrades to "reminder still
+        fires next session", never to an error the skill has to handle.
+    """
+    from claude_code_hooks_daemon.config_optimisation.state import STATE_FILE_NAME, record_run
+    from claude_code_hooks_daemon.version import __version__
+
+    override = getattr(args, "project_root", None)
+    project_root = Path(override) if override else Path(get_project_path(None))
+    state_path = _daemon_untracked_dir(project_root) / STATE_FILE_NAME
+    record_run(state_path, version=__version__)
+    print(f"Recorded config-optimisation run at v{__version__} ({state_path})")
+    return 0
+
+
 def cmd_transport_probe(args: argparse.Namespace) -> int:
     """Report Plan 00290 transport rung availability (read-only, cheap).
 
@@ -6520,6 +6548,20 @@ def main() -> int:
         help="Project root for config + key resolution (trusted as-is; auto-detected by default)",
     )
     parser_secret_meta.set_defaults(func=cmd_secret_meta)
+
+    # record-config-optimisation-run (Plan 00308) — /optimise records its own runs
+    parser_record_config_optimisation_run = subparsers.add_parser(
+        "record-config-optimisation-run",
+        help="Record that the config-optimisation review (/optimise) ran against this version",
+    )
+    parser_record_config_optimisation_run.add_argument(
+        "--project-root",
+        type=Path,
+        help="Project root for state resolution (trusted as-is; auto-detected by default)",
+    )
+    parser_record_config_optimisation_run.set_defaults(
+        func=cmd_record_config_optimisation_run
+    )
 
     # transport-probe (Plan 00290) — relay/nc rung availability, read-only
     parser_transport_probe = subparsers.add_parser(
