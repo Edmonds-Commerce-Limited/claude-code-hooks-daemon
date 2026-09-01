@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.daemon.paths import (
+    project_path_slug,
     python_venv_fingerprint,
     resolve_existing_venv_python,
 )
@@ -195,6 +196,72 @@ class TestPrecedenceInteraction:
 
         result = resolve_existing_venv_python(tmp_path)
         assert result == scan_target
+
+
+class TestScanFallbackSlugEligibility:
+    """Plan 00313: a slug-carrying venv-* dir is only scan-eligible when its
+    embedded slug matches ``project_path_slug(daemon_dir)`` — otherwise a
+    host invocation can reuse a container-built venv (or vice versa) whose
+    fingerprint tail happens to still resolve on this host, but whose
+    editable-install .pth points at a path that doesn't exist here."""
+
+    def test_slug_mismatched_venv_is_skipped_by_scan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Field shape: venv dir named for slug 'workspace' while daemon_dir
+        resolves to a different root — the scan must not return it."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        current_slug = project_path_slug(tmp_path)
+        assert current_slug != "workspace"
+        _make_fake_venv(tmp_path / "untracked" / "venv-workspace-py311-81c29529")
+
+        result = resolve_existing_venv_python(tmp_path)
+        # No eligible candidate — falls through to the legacy path.
+        assert result == tmp_path / "untracked" / "venv" / "bin" / "python"
+
+    def test_slug_matched_venv_is_resolved_by_scan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        current_slug = project_path_slug(tmp_path)
+        expected = _make_fake_venv(tmp_path / "untracked" / f"venv-{current_slug}-py999-aaaaaaaa")
+
+        result = resolve_existing_venv_python(tmp_path)
+        assert result == expected
+
+    def test_legacy_unslugged_venv_still_resolved_by_scan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A legacy un-slugged name (venv-py311-<hex>) has no slug to check
+        and remains scan-eligible regardless of the current root's slug."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        expected = _make_fake_venv(tmp_path / "untracked" / "venv-py311-deadbeef")
+
+        result = resolve_existing_venv_python(tmp_path)
+        assert result == expected
+
+    def test_hostname_suffixed_slug_mismatch_is_skipped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        current_slug = project_path_slug(tmp_path)
+        assert current_slug != "workspace"
+        _make_fake_venv(tmp_path / "untracked" / "venv-workspace-py311-81c29529-somehost")
+
+        result = resolve_existing_venv_python(tmp_path)
+        assert result == tmp_path / "untracked" / "venv" / "bin" / "python"
+
+    def test_hostname_suffixed_slug_match_is_resolved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        current_slug = project_path_slug(tmp_path)
+        expected = _make_fake_venv(
+            tmp_path / "untracked" / f"venv-{current_slug}-py999-aaaaaaaa-somehost"
+        )
+
+        result = resolve_existing_venv_python(tmp_path)
+        assert result == expected
 
 
 class TestStringArgumentAccepted:

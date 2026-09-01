@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.59.0] - 2026-09-01
 
 ### Added
 
@@ -42,6 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Plan 00306).** `git rm --cached` on a protected path is now exempted
   from the Bash-mention block; registry roots are iterated for secret
   redaction status; dead code and POSIX bracket-handling bugs fixed.
+- **Venv resolver cross-view reuse (Plan 00313).** A host-level Claude Code
+  invocation in a repo folder also mounted by the ccy container could reuse
+  the container-built venv — its editable-install `.pth` pointing at a path
+  that does not exist on the host, leaving the daemon unimportable. The
+  resolver's metadata step (lock_hash alone, identical across host/container
+  views of the same repo) and scan fallback (first executable `venv-*`,
+  regardless of embedded project-root slug) both defeated the
+  `project_path_slug()` disambiguation the venv naming scheme already
+  carries. A slug-carrying venv (`venv-<slug>-py{MM}-{hex}[-<hostname>]`) is
+  now eligible for resolution only when its slug matches the current root's
+  slug; legacy un-slugged names are unaffected. Diagnostics now name the
+  skip reason.
 
 ### Changed
 

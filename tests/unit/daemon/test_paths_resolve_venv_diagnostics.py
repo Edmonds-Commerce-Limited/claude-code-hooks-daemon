@@ -18,6 +18,7 @@ import pytest
 from claude_code_hooks_daemon.daemon.paths import (
     _cli_resolve_venv,
     main,
+    project_path_slug,
     python_venv_fingerprint,
     resolve_existing_venv_python_with_diagnostics,
 )
@@ -675,6 +676,122 @@ class TestLegacyStampMigration:
 
         resolved, _ = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved == py_fresh, "metadata-bearing venv must win even when legacy exists"
+
+
+class TestSlugEligibility:
+    """Plan 00313: a slug-carrying venv-* dir is eligible for metadata (step
+    2) and scan-fallback (step 4) resolution only when its embedded slug
+    matches ``project_path_slug(daemon_dir)`` — a lock_hash match alone is
+    identical for a host and container view of the same repo, so it cannot
+    disambiguate on its own."""
+
+    def test_metadata_step_skips_slug_mismatched_venv_even_with_valid_python_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        lock_hash = _compute_test_lock_hash(daemon_dir)
+        current_slug = project_path_slug(daemon_dir)
+        assert current_slug != "workspace"
+
+        venv = daemon_dir / "untracked" / "venv-workspace-py311-81c29529"
+        py = _make_fake_venv(venv)
+        _write_metadata(venv, python_path=str(py), lock_hash=lock_hash)
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved is None, (
+            "a lock_hash match alone must not resolve a slug-mismatched venv "
+            "(host/container cross-view reuse defect)"
+        )
+        skip_step = next((s for s in steps if s.startswith("step 2") and "slug" in s.lower()), None)
+        assert skip_step is not None, f"expected step 2 slug-skip diagnostic; got: {steps}"
+        assert "workspace" in skip_step
+        assert current_slug in skip_step
+
+    def test_metadata_step_resolves_slug_matched_venv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        lock_hash = _compute_test_lock_hash(daemon_dir)
+        current_slug = project_path_slug(daemon_dir)
+
+        venv = daemon_dir / "untracked" / f"venv-{current_slug}-py311-81c29529"
+        py = _make_fake_venv(venv)
+        _write_metadata(venv, python_path=str(py), lock_hash=lock_hash)
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py
+        assert any("step 2" in s and "OK" in s for s in steps)
+
+    def test_scan_fallback_skips_slug_mismatched_venv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        current_slug = project_path_slug(daemon_dir)
+        assert current_slug != "workspace"
+        _make_fake_venv(daemon_dir / "untracked" / "venv-workspace-py311-81c29529")
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved is None
+        skip_step = next((s for s in steps if s.startswith("step 4") and "slug" in s.lower()), None)
+        assert skip_step is not None, f"expected step 4 slug-skip diagnostic; got: {steps}"
+
+    def test_scan_fallback_resolves_slug_matched_venv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        current_slug = project_path_slug(daemon_dir)
+        py = _make_fake_venv(daemon_dir / "untracked" / f"venv-{current_slug}-py999-aaaaaaaa")
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py
+        assert any(s.startswith("step 4") and "scan-fallback hit" in s for s in steps)
+
+    def test_scan_fallback_still_resolves_legacy_unslugged_venv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        py = _make_fake_venv(daemon_dir / "untracked" / "venv-py311-deadbeef")
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py
+        assert any(s.startswith("step 4") and "scan-fallback hit" in s for s in steps)
+
+    def test_scan_fallback_skips_hostname_suffixed_slug_mismatch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        current_slug = project_path_slug(daemon_dir)
+        assert current_slug != "workspace"
+        _make_fake_venv(daemon_dir / "untracked" / "venv-workspace-py311-81c29529-somehost")
+
+        resolved, _ = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved is None
+
+    def test_scan_fallback_resolves_hostname_suffixed_slug_match(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        current_slug = project_path_slug(daemon_dir)
+        py = _make_fake_venv(
+            daemon_dir / "untracked" / f"venv-{current_slug}-py999-aaaaaaaa-somehost"
+        )
+
+        resolved, _ = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py
 
 
 class TestMissingPersistedPythonRecovery:

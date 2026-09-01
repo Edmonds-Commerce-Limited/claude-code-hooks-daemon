@@ -123,6 +123,15 @@ _SLUG_TRUNCATED_HASH_LEN = 4
 # disambiguate without operator input.
 _HOSTNAME_SUFFIX_VENV_PATTERN = re.compile(r"^venv-(?:.+-)?py\d+-[a-f0-9]+-(.+)$")
 
+# Plan 00313: parses a venv-* directory NAME (not path) into its embedded
+# project-root slug, matching the ``venv-<slug>-py{MM}-{hex}[-<hostname>]``
+# convention produced by :func:`python_venv_fingerprint`/:func:`get_venv_path`.
+# The slug group is greedy so backtracking finds the RIGHTMOST occurrence of
+# the ``-py\d+-[hex]`` tail — required because the slug itself may contain
+# hyphens (see :func:`project_path_slug`). A legacy un-slugged name
+# (``venv-py311-<hex>``) matches with an empty/absent slug group.
+_VENV_NAME_SLUG_PATTERN = re.compile(r"^venv-(?:(?P<slug>.+)-)?py\d+-[a-f0-9]+(?:-(?P<host>.+))?$")
+
 
 def project_path_slug(root: str | Path) -> str:
     """Return a filesystem-safe slug derived from the project root path.
@@ -198,6 +207,52 @@ def python_venv_fingerprint(root: str | Path | None = None) -> str:
     if root is None:
         return py_fp
     return f"{project_path_slug(root)}-{py_fp}"
+
+
+def _parse_venv_dir_slug(venv_dir_name: str) -> str | None:
+    """Return the project-root slug embedded in a ``venv-*`` directory name.
+
+    Returns:
+        - The slug string for a slug-carrying name
+          (``venv-<slug>-py{MM}-{hex}``, with an optional trailing
+          ``-<hostname>`` suffix).
+        - ``None`` when the name carries no slug — either a legacy
+          un-slugged name (``venv-py311-<hex>``) or a name that does not
+          match the ``venv-*`` fingerprint convention at all.
+
+    Parses from the RIGHT via :data:`_VENV_NAME_SLUG_PATTERN`: the
+    interpreter-fingerprint tail (``-py\\d+-[0-9a-f]+``) anchors the match,
+    because the slug itself may legitimately contain hyphens (see
+    :func:`project_path_slug`).
+    """
+    match = _VENV_NAME_SLUG_PATTERN.match(venv_dir_name)
+    if match is None:
+        return None
+    return match.group("slug")
+
+
+def _venv_slug_eligible(venv_dir: Path, current_slug: str) -> tuple[bool, str | None]:
+    """Return ``(eligible, skip_reason)`` for a scanned/metadata ``venv-*`` candidate.
+
+    Plan 00313: a slug-carrying venv (``venv-<slug>-py{MM}-{hex}[-<host>]``)
+    is eligible for reuse ONLY when its embedded slug equals
+    ``project_path_slug`` of the root currently resolving it — otherwise a
+    host-level invocation can reuse a container-built venv (or vice versa)
+    whose Python fingerprint tail happens to still resolve on this view, but
+    whose editable-install ``.pth`` points at a path that does not exist
+    here. A legacy un-slugged name has no slug to check and is always
+    eligible on this axis.
+
+    ``skip_reason`` is ``None`` when eligible, otherwise a diagnostic line
+    naming the mismatch for the caller to log.
+    """
+    slug = _parse_venv_dir_slug(venv_dir.name)
+    if slug is None or slug == current_slug:
+        return True, None
+    return (
+        False,
+        f"skipped {venv_dir.name}: slug '{slug}' does not match current root slug '{current_slug}'",
+    )
 
 
 # ----------------------------------------------------------------------
@@ -687,9 +742,7 @@ def can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision:
                 else:
                     if candidate_version < min_version:
                         missing.append(_BOOTSTRAP_MISSING_PYTHON)
-                        reasons.append(
-                            f"{candidate} does not satisfy " f"requires-python={requires!r}"
-                        )
+                        reasons.append(f"{candidate} does not satisfy requires-python={requires!r}")
 
     untracked = daemon_dir / _UNTRACKED_SUBDIR_NAME
     if untracked.is_dir():
@@ -778,7 +831,11 @@ def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
         return keyed
 
     if untracked.is_dir():
+        current_slug = project_path_slug(daemon_path)
         for candidate_dir in sorted(untracked.glob("venv-*")):
+            eligible, _skip_reason = _venv_slug_eligible(candidate_dir, current_slug)
+            if not eligible:
+                continue
             candidate = candidate_dir / "bin" / "python"
             if candidate.is_file() and os.access(candidate, os.X_OK):
                 return candidate
@@ -878,9 +935,16 @@ def resolve_existing_venv_python_with_diagnostics(
     else:
         metadata_candidates: list[Path] = sorted(untracked.glob("venv-*"))
         stale_reports: list[str] = []
+        slug_skipped: list[str] = []
         no_metadata_count = 0
         matched = False
+        current_slug = project_path_slug(daemon_path)
         for candidate_dir in metadata_candidates:
+            eligible, slug_skip_reason = _venv_slug_eligible(candidate_dir, current_slug)
+            if not eligible:
+                assert slug_skip_reason is not None
+                slug_skipped.append(slug_skip_reason)
+                continue
             metadata = _read_venv_metadata_stdlib(candidate_dir)
             if metadata is None:
                 no_metadata_count += 1
@@ -931,13 +995,15 @@ def resolve_existing_venv_python_with_diagnostics(
             matched = True
             break
         if not matched:
+            if slug_skipped:
+                steps.append(f"step 2: {'; '.join(slug_skipped)}")
             if stale_reports:
                 steps.append(
                     f"step 2: metadata stale — lock_hash mismatch in: {', '.join(stale_reports)}"
                 )
             elif metadata_candidates and no_metadata_count == len(metadata_candidates):
                 steps.append(
-                    f"step 2: no venv-*/ under {untracked} has a readable " ".daemon-metadata.json"
+                    f"step 2: no venv-*/ under {untracked} has a readable .daemon-metadata.json"
                 )
             else:
                 steps.append(f"step 2: no venv-*/ found under {untracked}")
@@ -963,9 +1029,16 @@ def resolve_existing_venv_python_with_diagnostics(
 
     scanned: list[str] = []
     legacy_skipped: list[str] = []
+    slug_skipped_scan: list[str] = []
     if untracked.is_dir():
+        scan_current_slug = project_path_slug(daemon_path)
         for candidate_dir in sorted(untracked.glob("venv-*")):
             scanned.append(str(candidate_dir / "bin" / "python"))
+            eligible, slug_skip_reason = _venv_slug_eligible(candidate_dir, scan_current_slug)
+            if not eligible:
+                assert slug_skip_reason is not None
+                slug_skipped_scan.append(slug_skip_reason)
+                continue
             candidate_py = _pick_interpreter(candidate_dir)
             if candidate_py is None:
                 continue
@@ -974,6 +1047,8 @@ def resolve_existing_venv_python_with_diagnostics(
                 continue
             steps.append(f"step 4: scan-fallback hit — using {candidate_py}")
             return candidate_py, steps
+        if slug_skipped_scan:
+            steps.append(f"step 4: {'; '.join(slug_skipped_scan)}")
         if legacy_skipped:
             steps.append(
                 f"step 4: skipping legacy-stamped venv(s) {legacy_skipped} "

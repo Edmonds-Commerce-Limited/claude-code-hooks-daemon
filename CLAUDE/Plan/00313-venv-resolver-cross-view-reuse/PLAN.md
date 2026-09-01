@@ -55,7 +55,7 @@ resolver's fallback steps defeat the slug:
 
 ### Phase 1: TDD fix
 
-- [ ] ⬜ **Task 1.1**: RED — unit tests (extend
+- [x] ✅ **Task 1.1**: RED — unit tests (extend
   `tests/unit/daemon/test_paths_resolve_existing_venv.py` and
   `tests/unit/daemon/test_paths_resolve_venv_diagnostics.py`) proving a
   slug-mismatched venv is skipped by (a) the scan fallback in
@@ -63,15 +63,15 @@ resolver's fallback steps defeat the slug:
   `resolve_existing_venv_python_with_diagnostics`, with a slug-MATCHED and
   a legacy un-slugged venv still resolved. Include the field shape: venv
   dir named for slug `workspace` while `daemon_dir` resolves elsewhere.
-- [ ] ⬜ **Task 1.2**: GREEN — implement a shared slug-eligibility helper in
+- [x] ✅ **Task 1.2**: GREEN — implement a shared slug-eligibility helper in
   `daemon/paths.py`; apply at every resolution step that touches a
   `venv-*` candidate. Add a diagnostics step line naming the skip reason.
-- [ ] ⬜ **Task 1.3**: Bash parity — apply the same slug check to
+- [x] ✅ **Task 1.3**: Bash parity — apply the same slug check to
   `scripts/lib/resolve_venv.sh` and
   `src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/_resolve-venv.sh`
   if their scan logic is independent of the Python SSOT; if they shell out
   to the SSOT, verify and document that no separate fix is needed.
-- [ ] ⬜ **Task 1.4**: Full QA green; fold into the v3.59.0 release
+- [x] ✅ **Task 1.4**: Full QA green; fold into the v3.59.0 release
   (CHANGELOG entry + release notes line).
 
 ## Success Criteria
