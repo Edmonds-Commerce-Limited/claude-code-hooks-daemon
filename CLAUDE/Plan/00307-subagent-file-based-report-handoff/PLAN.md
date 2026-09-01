@@ -83,6 +83,15 @@ threshold/steering design thinking where it fits.
   message is summary + path. Fallback location for genuinely plan-less
   work: configurable, default `untracked/agent-reports/`. Enable in this
   repo (dogfood).
+- [ ] ⬜ **Task 2.2** (owner-ruled): standardise WHERE and WHAT NAME.
+  Reports live in a standard `subagent-reports/` subfolder of the declared
+  plan folder (created on demand; plan-less work uses the fallback
+  directory), with a standard filename `{yymmdd}-{agent-name}-{model}.md`
+  (e.g. `260901-explore-surface-check-haiku.md`). The Task 2.1 handler's
+  injected guidance states the exact expected path for THIS dispatch;
+  document the convention in the plan-workflow docs (PlanWorkflow.md /
+  DirectoryRoles.md) and teach plan QA to treat `subagent-reports/` as a
+  recognised plan-folder member.
 
 ### Phase 3: Enforcement at return (SubagentStop)
 
