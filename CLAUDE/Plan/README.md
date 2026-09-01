@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00308: post upgrade config optimisation autorun](00308-post-upgrade-config-optimisation-autorun/PLAN.md) - Not Started (formalise "enable all relevant handlers and optimise config" as a first-class step and autorun it after every daemon upgrade, with session-start reinforcement when skipped)
+
 - [00307: subagent file based report handoff](00307-subagent-file-based-report-handoff/PLAN.md) - Not Started (field report: subagent final reports truncated by the harness tool-result cap; establish and enforce "large data travels by file, the message is summary + path" — measure first, then PreToolUse dispatch-contract injection + SubagentStop oversized-return blocking, dogfooded here)
 
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
@@ -1307,11 +1309,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 306 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 308 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 253 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 38 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
