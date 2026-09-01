@@ -4,6 +4,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00312: supervisor ctrl c double press guard](00312-supervisor-ctrl-c-double-press-guard/PLAN.md) - Not Started (a single accidental ^C kills background agents; the supervisor's PTY position lets it swallow a lone 0x03 and forward on rapid double-press — escape hatch always wins, visibly hinted, dogfooded here)
+
+- [00311: v3.59.0 release review followups](00311-v3590-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.59.0 code review: dispatch_declaration's hardcoded plan path, the secret_file_matching glob-heuristic maintenance surface, and the git rm --cached looseness verification)
+
 - [00295: v3.57.0 release review followups](00295-v3570-release-review-followups/PLAN.md) - Not Started (non-blocking findings ledger from the v3.57.0 code review gate, tiered HIGH/MEDIUM/LOW)
 
 - [00293: tool inventory disable and token savings](00293-tool-inventory-disable-and-token-savings/PLAN.md) - Not Started (disable-at-source for never-wanted tools instead of fighting them with hooks, transcript-scanning analyser for never-used tools, tools-vs-tokens report with the decision left to projects; dogfood here)
@@ -263,11 +267,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 310 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 312 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 257 (includes 1 reduced-scope plan and 5 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 37 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 39 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 
