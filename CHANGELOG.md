@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.58.1] - 2026-09-01
+
+### Fixed
+
+- **`npm_command` / `validate_eslint_on_write` now probe `package.json` at
+  the pinned workspace root (Plan 00305 Task 1.1).** Previously the probe
+  fell back to the bare `ProjectContext` default, which could resolve the
+  wrong root in multi-workspace setups; the handlers now accept an explicit
+  `project_root` and the CLI no longer patches `ProjectContext` process-wide.
+- **`secret_file_guard` false positive on incomplete bracket expressions
+  (Plan 00305).** Content containing an incomplete bracket expression — e.g.
+  the Python list literal `[pass_result, fail_result]` — was matching
+  protected-path globs such as `*vault_pass*` and denying legitimate edits.
+  Glob-shape detection now requires a complete bracket expression before
+  treating a span as glob-like.
+- **`pipe_blocker` producer attribution for quoted-argument pipes
+  (Plan 00305).** A pipe inside a quoted argument (e.g.
+  `[[ "python -m pytest ... | tail -5" ]]`) is now attributed to its real
+  producer, with a runnable remediation, instead of a misleading command
+  name.
+- **Security observability: absolute `secret_word_list_path` now visible on
+  status (Plan 00305).** An absolute `secret_word_list_path` previously
+  disabled secret-term blocking silently, with only a log warning; it now
+  also surfaces as a degraded-status line on `hooks-daemon status`/`check`.
+
+### Changed
+
+- **`{REPO_ROOT}` misplacement is a named config validation error
+  (Plan 00305).** A misplaced `{REPO_ROOT}` token in a plugin or
+  project-handler path now fails config validation with a clear, named
+  error instead of a startup traceback.
+
 ## [3.58.0] - 2026-09-01
 
 ### Added

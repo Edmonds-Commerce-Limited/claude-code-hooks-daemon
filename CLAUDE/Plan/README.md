@@ -240,7 +240,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00263: an escaped quote made the bash tokeniser invent a write target](Completed/00263-bash-tokeniser-escaped-quote-phantom-targets/PLAN.md) - Complete at `0e99b260` (non-POSIX `shlex` left escaped quotes unprocessed, exposing quoted text as live shell; fixed with `posix=True`)
 
-- [00257: the protected ref nobody qualified, and a QA gate that fails during releases](Completed/00257-delete-branch-protected-ref-ambiguity-and-release-qa-deadlock/PLAN.md) - Complete at the commit that archives it (protected ref now resolved once before any proof; the release abort deadlock closed by NAMING the abort route rather than widening `matches()`; a `list(CONST)` argv shape was hiding a real unbounded git spawn from the guard)
+- [00257: the protected ref nobody qualified, and a QA gate that fails during releases](Completed/00257-delete-branch-protected-ref-ambiguity-and-release-qa-deadlock/PLAN.md) - Complete (protected ref resolved once before any proof; release-abort deadlock closed by naming the abort route)
 
 - [00262: QA runs are not isolated from each other](Completed/00262-qa-runs-are-not-isolated-from-each-other/PLAN.md) - Complete at the commit that archives it (both QA entry points now share one `flock` and refuse a second run rather than race; a contended run made a GATING verdict unreliable in both directions)
 
@@ -260,7 +260,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00251: tdd_enforcement needs an exclusion escape and a declarable test root](Completed/00251-tdd-enforcement-exclude-paths-and-test-roots/PLAN.md) - Complete at `35b9d4e4` + the commit that archives it (field report, one finding of three misdiagnosed; `exclude_paths` on the two handlers Plan 00150 deferred, plus `test_path_map` so a project declares a test root instead of exempting it)
 
-- [00249: delete-branch crashes on a branch merged into main but ahead of its own upstream](Completed/00249-delete-branch-merged-but-unpushed/PLAN.md) - Complete at `a74b0489` (field report: `git branch -d` measures a branch against its own UPSTREAM, a different predicate from the daemon's ancestry proof, so the dry run and the real run disagreed; fixed with a distinct `merged-unpushed` tier rather than by widening `merged` to force-delete)
+- [00249: delete-branch crashes on a branch merged into main but ahead of its own upstream](Completed/00249-delete-branch-merged-but-unpushed/PLAN.md) - Complete at `a74b0489` (`git branch -d` measures against the branch's own upstream, not main ancestry; fixed with a distinct `merged-unpushed` tier)
 
 - [00248: Plan 00246 review findings](Completed/00248-plan-00246-review-findings/PLAN.md) - Complete at `a74b0489` (six verified defects in the shipped `run_git` migration, two of them regressions it introduced — the centralisation imposed a 5s hook budget on `branch_safety`'s object walks, and `run_git`'s "never raises" contract was false)
 
@@ -332,7 +332,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00215: readme repositioning guardrails not hook tooling](Completed/00215-readme-repositioning-guardrails-not-hook-tooling/PLAN.md) - Complete (README leads with "why guardrails?"; every figure re-measured — three of the request's own were wrong; origin story left blank until the maintainer supplied facts)
 
-- [00214: magic number scanner blindness](Completed/00214-magic-number-scanner-blindness/PLAN.md) - Complete (DBF: Core Standard 9 bans magic strings **and numbers**, but `check_magic_values.py` implemented only string-shaped rules, so `magic_values: 0 violations` had always meant "half the standard was checked". Identity/index numerics measured at 61% of literals and left unenforced, with the standard reworded rather than overclaiming.)
+- [00214: magic number scanner blindness](Completed/00214-magic-number-scanner-blindness/PLAN.md) - Complete (DBF: `check_magic_values.py` only implemented string-shaped rules; numeric enforcement measured and the standard reworded rather than overclaiming)
 
 - [00207: ban squash merge to preserve ancestry](Completed/00207-ban-squash-merge-preserve-ancestry/PLAN.md) - Complete (widened to "mandate ancestry-preserving merges" — rebase merges sever ancestry identically; 10/10 spellings verified through the production forwarder)
 

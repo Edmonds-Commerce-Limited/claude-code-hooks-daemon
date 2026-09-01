@@ -47,6 +47,29 @@ without weakening genuine protected-path detection.
   `utils/secret_file_matching.py` for Task 2.5) so the pinned test passes
   with the full existing secret_file_guard suite green.
 
+### Phase 2: v3.58.1 code-review non-blocking findings (same subsystem)
+
+- [ ] ⬜ **Task 2.1**: `daemon/cli.py` `_collect_secret_redaction_status_lines`
+  reads only the primary root's `.claude/hooks-daemon.yaml`, while its sibling
+  `_collect_enforcement_status_lines` iterates all `ProjectRegistry` roots —
+  in a monorepo a sub-project with an absolute `secret_word_list_path`
+  degrades silently and `check` prints OK. Iterate the same registry roots
+  (or soften the `secret_redaction.py` docstring claim).
+
+- [ ] ⬜ **Task 2.2**: `utils/secret_file_matching.py`
+  `_has_leading_wildcard` — `_BRACKET_EXPRESSION_RE.match()` is anchored, so
+  the `match.start() == 0` comparison is dead; return `match is not None`.
+
+- [ ] ⬜ **Task 2.3**: `utils/secret_file_matching.py`
+  `_has_trailing_wildcard` — the POSIX "literal `]` first" form `x[]]` is no
+  longer reported as trailing-wildcard (still caught by the literal
+  `path_matches_globs` pass, so not release-relevant). For exactness, allow
+  an optional leading `]` in the character class: `\[!?\]?[^\]]*\]`.
+
+- [ ] ⬜ **Task 2.4** (cosmetic): every pipe_blocker deny prints the
+  "To disable: handlers.pre_tool_use.pipe_blocker" line twice (observed
+  across all deny shapes in the v3.58.1 acceptance run). De-duplicate.
+
 ## Success Criteria
 
 - [ ] False positive pinned and fixed with TDD; full QA green; daemon
