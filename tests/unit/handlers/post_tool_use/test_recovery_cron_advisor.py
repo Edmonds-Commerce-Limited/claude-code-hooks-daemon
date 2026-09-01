@@ -11,16 +11,27 @@ import pytest
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
+    _CANONICAL_CRON_PROMPT,
     _CREATION_GUIDANCE,
     _MAX_TRACKED_PLANS,
     _PROGRESS_ADVISE_INTERVAL,
     _PROGRESS_GUIDANCE,
+    CANONICAL_CRON_PROMPT_MARKER,
     LifecyclePhase,
     RecoveryCronAdvisorHandler,
     _detect_lifecycle_phase,
 )
 
 _RETIRED_SECTION = "Notes & Updates"
+
+
+class TestCanonicalCronPromptMarker:
+    """Plan 00298: the marker other handlers key on is a genuine substring
+    of the verbatim canonical prompt this module authors -- not a second,
+    independently-drifting copy of the text."""
+
+    def test_marker_is_substring_of_canonical_prompt(self) -> None:
+        assert CANONICAL_CRON_PROMPT_MARKER in _CANONICAL_CRON_PROMPT
 
 
 class TestCronIdDestinationIsJournal:

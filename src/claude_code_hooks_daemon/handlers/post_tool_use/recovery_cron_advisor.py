@@ -146,6 +146,13 @@ _MKPLAN_SENTINEL_KEY: Final[str] = "__mkplan__"
 
 # ─── Canonical recovery-cron prompt ──────────────────────────────────────────
 
+# Stable substring identifying a delivered canonical-cron-prompt tick, shared
+# with any handler that needs to recognise one without matching the whole
+# verbatim text (Plan 00298: failsafe_cron_blockage_suppressor). This module
+# authors _CANONICAL_CRON_PROMPT, so it is the single source of truth for the
+# marker too -- a test pins that the marker is genuinely a substring of it.
+CANONICAL_CRON_PROMPT_MARKER: Final[str] = "FAILSAFE RECOVERY CHECK"
+
 # Verbatim from PLAN.md "Canonical recovery-cron prompt" section.
 _CANONICAL_CRON_PROMPT: Final[str] = (
     "**FAILSAFE RECOVERY CHECK (automated hourly safety net — NOT a heartbeat).**\n"

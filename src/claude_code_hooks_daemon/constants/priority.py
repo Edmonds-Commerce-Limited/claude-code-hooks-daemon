@@ -164,6 +164,14 @@ class Priority:
     # before the generic prelude advisory.
     BASH_SAFE_MODE = 36
 
+    # Plan 00298: must run early in the workflow band -- it BLOCKS a
+    # delivered failsafe-cron tick before the model ever sees it, so it needs
+    # to decide ahead of the advisory handlers (idle_housekeeping_advisory,
+    # standing_authorisations) that also key off the same canonical prompt.
+    # A non-terminal DENY survives later handlers regardless of ordering
+    # (core/router.py), so this priority is about clarity, not correctness.
+    FAILSAFE_CRON_BLOCKAGE_SUPPRESSOR = 37
+
     # LSP enforcement (Priority: 38)
     LSP_ENFORCEMENT = 38
 
